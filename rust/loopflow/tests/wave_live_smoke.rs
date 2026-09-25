@@ -70,7 +70,7 @@ async fn wave_two_process_live_smoke() {
 
     // The listener; it spawns the resident itself (keeper spawns tenant).
     let mut listener = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wave", "demo"])
+        .args(["wave", "serve", "demo"])
         .current_dir(&repo)
         // A private registry so the smoke never touches the machine's ~/.lf.
         .env("LF_DB_PATH", tmp.path().join("loopflow.db"))

@@ -10,6 +10,7 @@ use crate::profile::{
 };
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
+mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
@@ -1379,6 +1380,171 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn chapter_transfer_preserves_worker_pr_and_rejects_stale_parent_updates() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let predecessor = make_project(&wave);
+        store.create_project(&predecessor).await.unwrap();
+        let task = make_task(&wave, &predecessor);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let position = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "code", 3, "review", None, false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 2,
+                    iteration: 4,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        store
+            .claim_task_worker(
+                &task.id,
+                position.version,
+                &owner,
+                OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+        let claimed = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        assert!(!store.retire_chapter_backlog(&task.id).await.unwrap());
+        let mut successor = make_project(&wave);
+        successor.plan.id = LinearProjectId::new("next-chapter").unwrap();
+        store.create_project(&successor).await.unwrap();
+        store
+            .move_chapter_task(&task.id, &successor.id)
+            .await
+            .unwrap();
+        store.update_task(&task).await.unwrap(); // stale worker snapshot
+        let moved = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(moved.project_id, successor.id);
+        assert_eq!(moved.worktree, task.worktree);
+        assert_eq!(moved.plan, task.plan);
+        assert_eq!(
+            store.flow_position(&task.id).await.unwrap().unwrap(),
+            claimed
+        );
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::Failed {
+                    error: "review needed".into(),
+                    resumable: true,
+                },
+            )
+            .await
+            .unwrap();
+        let pending = store
+            .pending_observations(&crate::child::ObservationRecipient::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap();
+        assert!(!pending.is_empty());
+        assert!(store
+            .pending_observations(&crate::child::ObservationRecipient::Project {
+                project_id: predecessor.id
+            })
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn chapter_retirement_fences_a_prepared_task_before_its_first_claim() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let position = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "code", 3, "review", None, false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 0,
+                    iteration: 1,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        assert!(store.retire_chapter_backlog(&task.id).await.unwrap());
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        assert!(store
+            .claim_task_worker(
+                &task.id,
+                position.version,
+                &owner,
+                OffsetDateTime::now_utc()
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            store
+                .work_status(&WorkRef::Task(task.id.clone()))
+                .await
+                .unwrap(),
+            crate::durable::WorkStatus::Abandoned
+        );
+        assert_eq!(
+            store.get_task(&task.id).await.unwrap().unwrap().worktree,
+            task.worktree
+        );
+    }
+
+    #[tokio::test]
     async fn steers_are_one_ordered_work_input_stream() {
         let directory = tempfile::tempdir().unwrap();
         let database_path = directory.path().join("registry.db");
@@ -1840,7 +2006,9 @@ mod tests {
             .await
             .unwrap();
         let observations = store
-            .pending_project_observations(&project.id)
+            .pending_observations(&crate::child::ObservationRecipient::Wave {
+                wave_id: wave.id().clone(),
+            })
             .await
             .unwrap();
         assert_eq!(observations.len(), 1);
@@ -1848,19 +2016,22 @@ mod tests {
             .append_task_event(
                 &sibling.id,
                 &TaskEventKind::Failed {
-                    error: "arrived during the Project pass".to_string(),
+                    error: "arrived during the Wave pass".to_string(),
                     resumable: true,
                 },
             )
             .await
             .unwrap();
-        let completed = store
-            .complete_project_operation(&project.id, &observations)
-            .await
-            .unwrap();
-        assert_eq!(completed.iteration, 1);
+        for observation in observations {
+            store
+                .mark_observation_delivered(observation.id)
+                .await
+                .unwrap();
+        }
         let pending = store
-            .pending_project_observations(&project.id)
+            .pending_observations(&crate::child::ObservationRecipient::Wave {
+                wave_id: wave.id().clone(),
+            })
             .await
             .unwrap();
         assert_eq!(pending.len(), 1);
@@ -1868,7 +2039,7 @@ mod tests {
             &pending[0].payload,
             crate::work::project::ChildEventPayload::Task {
                 event: TaskEventKind::Failed { error, resumable: true }
-            } if error == "arrived during the Project pass"
+            } if error == "arrived during the Wave pass"
         ));
 
         assert_eq!(
@@ -1955,11 +2126,9 @@ mod tests {
         let unchanged = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(unchanged, saved_position);
         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), saved_task);
-        assert!(store
-            .task_events_after(&task.id, 0)
-            .await
-            .unwrap()
-            .is_empty());
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
 
         store
             .settle_task_worker(&task, &claim, &next, Some("advanced atomically"))

@@ -301,7 +301,10 @@ uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after p
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
 review them before gate. For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
-finish the upgrade and verify the current schema.
+finish the upgrade and verify the current schema. When chapter triggers change,
+include Task controller consumers: worker claims now leave Started history even
+after a provider failure. See [chapter CI proof](.lf/skills/ci-proof.md) for the
+associated ownership-map and documentation checks.
 
 Fresh-store coverage exercises the live SQLite schema. Populated historical
 fixtures exercise the migration chain and verify retained facts. A fresh-store

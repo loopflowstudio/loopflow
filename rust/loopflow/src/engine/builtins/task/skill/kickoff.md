@@ -39,7 +39,7 @@ re-derive what these already record.
 
 2. **De-risk.** Before designing anything, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
 
-   **Start with what's already flagged.** If the ingested item, wave `GOAL.md`, `MEMORY.md`, or Linear Project definition/KRs call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
+   **Start with what's already flagged.** If the ingested item, wave `GOAL.md`, `MEMORY.md`, or current chapter KRs/metric targets call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
 
    **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
 
@@ -149,10 +149,10 @@ that still violate the target architecture.>
 If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
 
 - **Intent** — design must serve the wave's north star, stated in GOAL.md.
-- **Evidence** — derive "Done when" from Project KRs and user behavior. Use a
-  Project-owned signal when the direction names one. Leave room for feature work
+- **Evidence** — derive "Done when" from chapter KRs and user behavior. Use a
+  Wave-owned signal when the direction names one. Leave room for feature work
   to reveal a better metric proposal; a substantial new UI performance path is
-  a strong reason to capture one for Project sponsorship.
+  a strong reason to capture one for Wave sponsorship.
 - **Memory** — check `MEMORY.md` for known risks and prior decisions. If this design introduces a new risk, name it.
 - Scope must exclude what GOAL.md marks as out of scope.
 

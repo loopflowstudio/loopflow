@@ -6,7 +6,6 @@
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
     "active_tasks": 1,
-    "active_projects": 1,
     "live": true,
     "paused": false,
     "enabled": true,
@@ -24,184 +23,6 @@
     }
   },
   "loop_state": "idle",
-  "projects": [
-    {
-      "project": {
-        "id": "project-1",
-        "slug": "release-feedback",
-        "name": "Release feedback",
-        "summary": "Failures become focused work.",
-        "definition": "Close the release feedback loop.",
-        "flows": {
-          "recommended": "task-design"
-        },
-        "krs": [
-          {
-            "text": "Every failed run has an owner",
-            "holds": false
-          }
-        ]
-      },
-      "runtime": {
-        "work_id": "ps_11111111111111111111111111111111",
-        "status": "ready",
-        "reason": "ready",
-        "updated_at": "2026-07-13T18:00:00Z",
-        "iteration": 2,
-        "pending_observations": 0,
-        "provider": "codex",
-        "last_failure": {
-          "message": "project runner failed: credential is missing",
-          "occurred_at": "2026-07-12T18:00:00Z"
-        }
-      },
-      "directive": {
-        "version": 1,
-        "kind": "initial",
-        "text": "Own release feedback and supervise failures.",
-        "applied_at": "2026-07-13T17:55:00Z",
-        "incorporated_at": "2026-07-13T17:56:00Z",
-        "incorporated_summary": "Failure ownership is the active priority."
-      },
-      "next_move": {
-        "owner": "project",
-        "reason": "supervised Tasks are active"
-      },
-      "tasks": [
-        {
-          "task": {
-            "id": "issue-1",
-            "identifier": "INF-123",
-            "name": "Surface nightly failures",
-            "description": "Surface one focused failure.",
-            "rank": 1,
-            "completed": false,
-            "assignee": "user-1"
-          },
-          "reference": {
-            "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
-            "workspace": {
-              "slug": "infrastructure-task",
-              "branch": "jack/infrastructure.task.20260713_1200",
-              "worktree": "/src/loopflow.infrastructure.task"
-            }
-          },
-          "runtime": {
-            "work_id": "ts_22222222222222222222222222222222",
-            "project_id": "ps_11111111111111111111111111111111",
-            "status": "ready",
-            "reason": "ready",
-            "updated_at": "2026-07-13T19:00:00Z",
-            "provider": "codex"
-          },
-          "directive": {
-            "version": 2,
-            "kind": "replacement",
-            "text": "Surface verification failures before publish failures.",
-            "applied_at": "2026-07-13T18:30:00Z",
-            "incorporated_at": "2026-07-13T18:31:00Z",
-            "incorporated_summary": "Verification failures are now first."
-          },
-          "next_move": {
-            "owner": "user",
-            "reason": "merge pull request head 333333333333 on GitHub"
-          },
-          "prs": [
-            {
-              "id": "pr_33333333333333333333333333333333",
-              "sequence": 1,
-              "slug": "infrastructure-task",
-              "branch": "jack/infrastructure.task.20260713_1200",
-              "base_commit": "1111111111111111111111111111111111111111",
-              "phase": "open",
-              "empty": false,
-              "publication": {
-                "requested_at": "2026-07-13T18:45:00Z",
-                "presentation": {
-                  "title": "Ship infrastructure task",
-                  "body": "Explains the intent and proof for this head.",
-                  "head_sha": "3333333333333333333333333333333333333333"
-                },
-                "github": {
-                  "number": 912,
-                  "url": "https://github.com/loopflowstudio/loopflow/pull/912"
-                },
-                "merge": {
-                  "mode": "user",
-                  "requested_at": "2026-07-13T18:46:00Z",
-                  "head_sha": "3333333333333333333333333333333333333333",
-                  "after_merge": "complete_task",
-                  "next_slug": null
-                }
-              },
-              "merge_commit": null,
-              "abandoned_at": null
-            }
-          ],
-          "active_pr": "pr_33333333333333333333333333333333",
-          "actions": {
-            "recommended": "open_pr",
-            "reason": "merge head 333333333333 on GitHub"
-          },
-          "condition": {
-            "state": "waiting",
-            "reason": "merge pull request head 333333333333 on GitHub",
-            "observed_at": "2026-07-13T21:00:00Z",
-            "evidence_age_secs": 7200,
-            "local_progress": {
-              "state": "observed",
-              "unsettled": true,
-              "dirty": false,
-              "authored_commits": true,
-              "recovery_required": false,
-              "reason": null
-            }
-          }
-        },
-        {
-          "task": {
-            "id": "issue-2",
-            "identifier": "INF-124",
-            "name": "Classify publish failures",
-            "description": "",
-            "rank": 2,
-            "completed": false,
-            "assignee": null
-          },
-          "reference": {
-            "issue_url": null,
-            "workspace": null
-          },
-          "runtime": null,
-          "directive": null,
-          "next_move": {
-            "owner": "project",
-            "reason": "Task is ready to start"
-          },
-          "prs": [],
-          "active_pr": null,
-          "actions": {
-            "recommended": null,
-            "reason": "Task is ready to start"
-          },
-          "condition": {
-            "state": "clear",
-            "reason": "Task is ready to start",
-            "observed_at": "2026-07-13T21:00:00Z",
-            "evidence_age_secs": null,
-            "local_progress": {
-              "state": "not_applicable",
-              "unsettled": false,
-              "dirty": null,
-              "authored_commits": null,
-              "recovery_required": null,
-              "reason": null
-            }
-          }
-        }
-      ]
-    }
-  ],
   "metric_portfolio": {
     "metrics": [
       {
@@ -212,7 +33,6 @@
         "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "name": "Task loops earn trust",
         "description": "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.",
-        "project_id": "project-1",
         "stage": "graduated",
         "instrumented": true,
         "instrument": "lifecycle-scorecard",
@@ -238,28 +58,6 @@
     ],
     "contract_issues": []
   },
-  "unavailable_projects": [
-    {
-      "work_id": "proj_e972b70272fbb5e91c096ebe657f9f9b",
-      "project_id": "f56c583c-c360-4dc4-ba12-4b5a02268623",
-      "project_slug": "technical-architecture",
-      "status": "abandoned",
-      "owner": "wave",
-      "reason": "Project is absent from the current PM snapshot",
-      "recovery": "Settle the listed Tasks; Project Work is already abandoned",
-      "tasks": [
-        {
-          "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
-          "task_id": "linear-task-w2-127",
-          "task_identifier": "W2-127",
-          "status": "ready",
-          "owner": "wave",
-          "reason": "Task's owning Project is absent from the current PM snapshot",
-          "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
-        }
-      ]
-    }
-  ],
   "runs": {
     "state": "ok",
     "truncated": false,
@@ -318,5 +116,178 @@
       "kind": "attach",
       "endpoint": "127.0.0.1:7777"
     }
-  }
+  },
+  "chapter": {
+    "id": "current",
+    "source_project_id": "project-1",
+    "flows": {
+      "recommended": "task-design"
+    },
+    "krs": [
+      {
+        "text": "Every failed run has an owner",
+        "holds": false
+      }
+    ],
+    "phase": "complete",
+    "error": null,
+    "source_project_slug": "release-feedback",
+    "source_work_id": null,
+    "metric_targets": [
+      {
+        "metric_id": "task-loop-trust",
+        "target": {
+          "kind": "at_least",
+          "value": 1.0
+        }
+      }
+    ]
+  },
+  "tasks": {
+    "state": "ok",
+    "items": [
+      {
+        "task": {
+          "id": "issue-1",
+          "identifier": "INF-123",
+          "name": "Surface nightly failures",
+          "description": "Surface one focused failure.",
+          "rank": 1,
+          "completed": false,
+          "assignee": "user-1"
+        },
+        "reference": {
+          "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
+          "workspace": {
+            "slug": "infrastructure-task",
+            "branch": "jack/infrastructure.task.20260713_1200",
+            "worktree": "/src/loopflow.infrastructure.task"
+          }
+        },
+        "runtime": {
+          "work_id": "ts_22222222222222222222222222222222",
+          "status": "ready",
+          "reason": "ready",
+          "updated_at": "2026-07-13T19:00:00Z",
+          "provider": "codex"
+        },
+        "directive": {
+          "version": 2,
+          "kind": "replacement",
+          "text": "Surface verification failures before publish failures.",
+          "applied_at": "2026-07-13T18:30:00Z",
+          "incorporated_at": "2026-07-13T18:31:00Z",
+          "incorporated_summary": "Verification failures are now first."
+        },
+        "next_move": {
+          "owner": "user",
+          "reason": "merge pull request head 333333333333 on GitHub"
+        },
+        "prs": [
+          {
+            "id": "pr_33333333333333333333333333333333",
+            "sequence": 1,
+            "slug": "infrastructure-task",
+            "branch": "jack/infrastructure.task.20260713_1200",
+            "base_commit": "1111111111111111111111111111111111111111",
+            "phase": "open",
+            "empty": false,
+            "publication": {
+              "requested_at": "2026-07-13T18:45:00Z",
+              "presentation": {
+                "title": "Ship infrastructure task",
+                "body": "Explains the intent and proof for this head.",
+                "head_sha": "3333333333333333333333333333333333333333"
+              },
+              "github": {
+                "number": 912,
+                "url": "https://github.com/loopflowstudio/loopflow/pull/912"
+              },
+              "merge": {
+                "mode": "user",
+                "requested_at": "2026-07-13T18:46:00Z",
+                "head_sha": "3333333333333333333333333333333333333333",
+                "after_merge": "complete_task",
+                "next_slug": null
+              }
+            },
+            "merge_commit": null,
+            "abandoned_at": null
+          }
+        ],
+        "active_pr": "pr_33333333333333333333333333333333",
+        "actions": {
+          "recommended": "open_pr",
+          "reason": "merge head 333333333333 on GitHub"
+        },
+        "condition": {
+          "state": "waiting",
+          "reason": "merge pull request head 333333333333 on GitHub",
+          "observed_at": "2026-07-13T21:00:00Z",
+          "evidence_age_secs": 7200,
+          "local_progress": {
+            "state": "observed",
+            "unsettled": true,
+            "dirty": false,
+            "authored_commits": true,
+            "recovery_required": false,
+            "reason": null
+          }
+        }
+      },
+      {
+        "task": {
+          "id": "issue-2",
+          "identifier": "INF-124",
+          "name": "Classify publish failures",
+          "description": "",
+          "rank": 2,
+          "completed": false,
+          "assignee": null
+        },
+        "reference": {
+          "issue_url": null,
+          "workspace": null
+        },
+        "runtime": null,
+        "directive": null,
+        "next_move": {
+          "owner": "wave",
+          "reason": "Task is ready to start"
+        },
+        "prs": [],
+        "active_pr": null,
+        "actions": {
+          "recommended": null,
+          "reason": "Task is ready to start"
+        },
+        "condition": {
+          "state": "clear",
+          "reason": "Task is ready to start",
+          "observed_at": "2026-07-13T21:00:00Z",
+          "evidence_age_secs": null,
+          "local_progress": {
+            "state": "not_applicable",
+            "unsettled": false,
+            "dirty": null,
+            "authored_commits": null,
+            "recovery_required": null,
+            "reason": null
+          }
+        }
+      }
+    ],
+    "truncated": false
+  },
+  "unavailable_tasks": [
+    {
+      "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
+      "task_id": "linear-task-w2-127",
+      "task_identifier": "W2-127",
+      "status": "ready",
+      "owner": "wave",
+      "reason": "Task's owning Project is absent from the current PM snapshot",
+      "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
+    }
+  ]
 }

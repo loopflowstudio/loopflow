@@ -255,9 +255,7 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::controller::wave::metrics::{
-        MetricContractDefinition, MetricDuration, MetricStage, MetricTarget,
-    };
+    use crate::controller::wave::metrics::{MetricContractDefinition, MetricDuration, MetricStage};
     use crate::id::WaveId;
     use crate::work::wave::Wave;
 
@@ -267,11 +265,10 @@ mod tests {
         MetricContract::new(MetricContractDefinition {
             identity,
             name: "Task loops earn trust".to_string(),
-            project_id: "project-1".to_string(),
             stage: MetricStage::Installed,
             instrument: "lifecycle-scorecard".to_string(),
             unit: "ratio".to_string(),
-            target: MetricTarget::AtLeast { value: 1.0 },
+
             window: MetricDuration::parse("7d").unwrap(),
             freshness_policy: MetricDuration::parse("6h").unwrap(),
             body: "Count settled Task loops.".to_string(),

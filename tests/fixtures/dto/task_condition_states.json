@@ -15,7 +15,7 @@
     },
     "runtime": null,
     "next_move": {
-      "owner": "project",
+      "owner": "wave",
       "reason": "Task is ready to start"
     },
     "active_pr": null,
@@ -59,14 +59,13 @@
     },
     "runtime": {
       "work_id": "ts_completed",
-      "project_id": "ps_1",
       "status": "done",
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex"
     },
     "next_move": {
-      "owner": "project",
+      "owner": "wave",
       "reason": "Linear Task is complete"
     },
     "active_pr": null,
@@ -110,7 +109,6 @@
     },
     "runtime": {
       "work_id": "ts_stale",
-      "project_id": "ps_1",
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
@@ -161,7 +159,6 @@
     },
     "runtime": {
       "work_id": "ts_unavailable",
-      "project_id": "ps_1",
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
@@ -212,7 +209,6 @@
     },
     "runtime": {
       "work_id": "task-user",
-      "project_id": "ps_1",
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
@@ -263,7 +259,6 @@
     },
     "runtime": {
       "work_id": "ts_dirty",
-      "project_id": "ps_1",
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
@@ -314,7 +309,6 @@
     },
     "runtime": {
       "work_id": "ts_commits",
-      "project_id": "ps_1",
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",

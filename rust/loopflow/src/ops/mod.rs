@@ -1,4 +1,5 @@
 mod abandon;
+pub mod chapter;
 pub mod checkout;
 pub(crate) mod child;
 mod commit;

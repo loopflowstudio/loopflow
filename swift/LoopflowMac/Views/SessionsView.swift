@@ -91,7 +91,7 @@ enum SessionScope: Hashable, Sendable {
         case .repo:
             true
         case .wave(_, let id):
-            record.work?.kind == .wave && record.work?.id == id
+            record.waveId == id || (record.work?.kind == .wave && record.work?.id == id)
         case .project(_, let id):
             record.work?.kind == .project && record.work?.id == id
         case .task(_, let id):
@@ -525,7 +525,6 @@ struct SessionsView: View {
 
     private struct SessionContext: Equatable {
         let wave: String
-        let project: String
         let identifier: String
         let workName: String
     }
@@ -533,35 +532,15 @@ struct SessionsView: View {
     /// Resolve every bound Session to its Wave/Project/Task via the roadmap.
     private func _loadHierarchy() async {
         guard let snapshot = try? await query.roadmap() else { return }
-        var index: [String: SessionContext] = [:]
+        var index = hierarchy
         for wave in snapshot.waves {
-            index[wave.wave.id] = SessionContext(
-                wave: wave.wave.name,
-                project: "Wave",
-                identifier: wave.wave.name,
-                workName: wave.wave.name
-            )
-            for project in wave.projects.items {
-                let projectContext = SessionContext(
-                    wave: wave.wave.name,
-                    project: project.project.name,
-                    identifier: project.project.slug,
-                    workName: project.project.name
-                )
-                index[project.project.id] = projectContext
-                if let workId = project.runtime?.workId { index[workId] = projectContext }
-                for task in project.tasks {
-                    let context = SessionContext(
-                        wave: wave.wave.name,
-                        project: project.project.name,
-                        identifier: task.task.identifier,
-                        workName: task.task.name
-                    )
-                    // A session's work id is the DURABLE id (`task_…`), which the
-                    // roadmap carries on `runtime.work_id` — not `task.id` (a UUID).
-                    if let workId = task.runtime?.workId { index[workId] = context }
-                    index[task.task.id] = context
-                }
+            let context = SessionContext(wave: wave.wave.name, identifier: wave.wave.name, workName: wave.wave.name)
+            index[wave.wave.id] = context
+            if let chapter = wave.chapter { index[chapter.sourceProjectId] = context }
+            for task in wave.tasks.items {
+                let context = SessionContext(wave: wave.wave.name, identifier: task.task.identifier, workName: task.task.name)
+                if let workId = task.runtime?.workId { index[workId] = context }
+                index[task.task.id] = context
             }
         }
         if !index.isEmpty { hierarchy = index }
@@ -627,9 +606,8 @@ struct SessionsView: View {
     // visible under Other.
     private struct SessionGroup: Identifiable {
         let wave: String
-        let project: String
         let items: [SessionRowItem]
-        var id: String { "\(wave)/\(project)" }
+        var id: String { wave }
     }
 
     private struct SessionRowItem: Identifiable {
@@ -640,21 +618,20 @@ struct SessionsView: View {
 
     private func _groupedSessions() -> [SessionGroup] {
         var order: [String] = []
-        var buckets: [String: (wave: String, project: String, items: [SessionRowItem])] = [:]
+        var buckets: [String: (wave: String, items: [SessionRowItem])] = [:]
         for item in store.sessions {
-            let context = item.work.flatMap { hierarchy[$0.id] }
+            let context = item.work.flatMap { hierarchy[$0.id] } ?? item.record.waveId.flatMap { hierarchy[$0] }
             let row = SessionRowItem(item: item, context: context)
             let wave = context?.wave ?? "—"
-            let project = context?.project ?? "Other"
-            let key = "\(wave)/\(project)"
+            let key = wave
             if buckets[key] == nil {
-                buckets[key] = (wave, project, [])
+                buckets[key] = (wave, [])
                 order.append(key)
             }
             buckets[key]?.items.append(row)
         }
         return order.compactMap { key in
-            buckets[key].map { SessionGroup(wave: $0.wave, project: $0.project, items: $0.items) }
+            buckets[key].map { SessionGroup(wave: $0.wave, items: $0.items) }
         }
     }
 
@@ -665,7 +642,7 @@ struct SessionsView: View {
                     _emptyState
                 } else {
                     ForEach(_groupedSessions()) { group in
-                        _groupHeader(group.wave, project: group.project)
+                        _groupHeader(group.wave)
                         ForEach(group.items) { row in
                             _sessionRow(row)
                         }
@@ -676,31 +653,13 @@ struct SessionsView: View {
         }
     }
 
-    private func _groupHeader(_ wave: String, project: String) -> some View {
-        HStack(spacing: Spacing.xxs) {
-            if wave == "—" {
-                Text(project)
-                    .font(Typography.caption(9).weight(.bold))
-                    .foregroundStyle(palette.textSecondary)
-            } else {
-                Text(wave)
-                    .font(Typography.caption(9).weight(.bold))
-                    .foregroundStyle(Color.loopflowBurgundy)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 6, weight: .bold))
-                    .foregroundStyle(palette.textSecondary.opacity(0.5))
-                Text(project)
-                    .font(Typography.caption(9).weight(.semibold))
-                    .foregroundStyle(palette.textSecondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, Spacing.sm)
-        .padding(.top, Spacing.sm)
-        .padding(.bottom, Spacing.xxs)
+    private func _groupHeader(_ wave: String) -> some View {
+        Text(wave == "—" ? "Other" : wave)
+            .font(Typography.caption(9).weight(.bold))
+            .foregroundStyle(Color.loopflowBurgundy)
+            .padding(.top, Spacing.sm)
     }
 
-    @ViewBuilder
     private var _emptyState: some View {
         if let pollError = store.pollError {
             ContentUnavailableView(

@@ -44,7 +44,7 @@ a separate design.
 For problem-first work:
 
 ```bash
-lf task start <project> "<desired experience>" --flow <chosen-flow> <<'BRIEF'
+lf task start --wave <wave> "<desired experience>" --flow <chosen-flow> <<'BRIEF'
 <short user-problem brief>
 BRIEF
 ```
@@ -58,19 +58,23 @@ lf task run <existing-issue> --flow <chosen-flow>
 Stdin becomes the durable Task description; `--directive` supplies worker
 direction and does not replace that brief.
 
-Use an explicit human-selected `--flow`; otherwise use the Project's current
+Use an explicit human-selected `--flow`; otherwise use the Wave chapter's current
 recommendation. Read the actual Flow before describing its review gates. Do not
 infer policy from obsolete fix/feature flags or first/loop/finally settings.
+
+Chapter planning edits use `lf wave update-plan`; chapter replacement uses
+`lf wave new-chapter` with its preview and resumable receipt. Select the Wave;
+its current internal Project is resolved automatically.
 
 ## Existing-design handoff
 
 When the human asks to file a Task and run a Flow from an existing design,
 keep the design separate. Reuse the Task if it is the same work; otherwise file
-a short user-problem brief under the selected Project, with a design reference,
+a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
 
 ```bash
-lf pm task create --project <project> --title "<desired experience>" --notes "<brief; design reference and maturity>"
+lf pm task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf task prepare <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue> --flow <chosen-flow>
@@ -90,7 +94,7 @@ needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
 Use the human-selected Flow and inspect its contents when explaining where it
-begins; otherwise use the Project recommendation. Continue the design already
+begins; otherwise use the Wave chapter recommendation. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Flow, and observed launch result. Verify
 supplied context separately from worker startup.

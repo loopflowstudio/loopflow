@@ -1280,11 +1280,9 @@ mod planning_tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("provider stream ended"));
-        assert!(store
-            .task_events_after(&task.id, 0)
-            .await
-            .unwrap()
-            .is_empty());
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
         assert!(harness.stopped);
         let position = store.flow_position(&task.id).await.unwrap().unwrap();
         assert!(position.claim.is_none());
@@ -1379,11 +1377,9 @@ mod planning_tests {
         )
         .await;
 
-        assert!(store
-            .recent_task_events(&task.id, 10)
-            .await
-            .unwrap()
-            .is_empty());
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
         let position = store.flow_position(&task.id).await.unwrap().unwrap();
         assert!(position.claim.is_none());
         assert!(position.failure.is_none());
@@ -2007,7 +2003,7 @@ mod planning_tests {
     }
 
     #[test]
-    fn task_seed_uses_the_current_parent_project_definition() {
+    fn task_seed_uses_the_current_chapter_plan() {
         let now = time::OffsetDateTime::UNIX_EPOCH;
         let task = Task {
             id: TaskId::new(),
@@ -2059,7 +2055,7 @@ mod planning_tests {
         assert!(seed.contains("Current project name"));
         assert!(seed.contains("Current project definition"));
         assert!(seed.contains("Task directive snapshot synced at: 11"));
-        assert!(seed.contains("Project definition snapshot synced at: 22"));
+        assert!(seed.contains("Chapter plan snapshot synced at: 22"));
         assert!(!seed.contains("metric-portfolio"));
         assert!(!seed.contains("project-owned-metrics"));
     }

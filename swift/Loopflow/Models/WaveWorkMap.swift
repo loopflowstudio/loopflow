@@ -2,26 +2,33 @@ import Foundation
 
 public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
-    public let projects: [WaveProjectWork]
+    public let chapter: ChapterSummary?
+    public let tasks: WorkEvidence<WaveTaskWork>
 
-    public init(objective: String, projects: [WaveProjectWork]) {
+    public init(objective: String, chapter: ChapterSummary?, tasks: WorkEvidence<WaveTaskWork>) {
         self.objective = objective
-        self.projects = projects
+        self.chapter = chapter
+        self.tasks = tasks
     }
 }
 
-public struct WaveProjectWork: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { project.id }
-
-    public let project: ProjectPlanningSnapshot
-    public let runtime: ProjectRuntimeSnapshot?
-    public let directive: WorkDirectiveSnapshot?
-    public let nextMove: WorkNextMove
-    public let tasks: [WaveTaskWork]
+public struct ChapterSummary: Decodable, Sendable, Hashable {
+    public let id: String
+    public let sourceProjectId: String
+    public let sourceWorkId: String?
+    public let sourceProjectSlug: String?
+    public let metricTargets: [ChapterMetricTarget]
+    public let flows: ProjectFlowPlanSnapshot
+    public let krs: [PlanningKeyResult]
+    public let phase: String
+    public let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case project, runtime, directive, tasks
-        case nextMove = "next_move"
+        case id, flows, krs, phase, error
+        case metricTargets = "metric_targets"
+        case sourceProjectId = "source_project_id"
+        case sourceWorkId = "source_work_id"
+        case sourceProjectSlug = "source_project_slug"
     }
 }
 
@@ -45,16 +52,6 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let id: String
-    public let slug: String
-    public let name: String
-    public let summary: String
-    public let definition: String
-    public let flows: ProjectFlowPlanSnapshot
-    public let krs: [PlanningKeyResult]
-}
-
 public struct ProjectFlowPlanSnapshot: Decodable, Sendable, Hashable {
     public let recommended: String?
 }
@@ -76,38 +73,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 }
 
-public struct HistoricalFailure: Codable, Sendable, Hashable {
-    public let message: String
-    public let occurredAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case message
-        case occurredAt = "occurred_at"
-    }
-}
-
-public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
-    public let workId: String
-    public let status: WorkStatus
-    public let reason: String
-    public let updatedAt: String
-    public let iteration: UInt32
-    public let pendingObservations: UInt32
-    public let provider: String
-    public let lastFailure: HistoricalFailure?
-
-    enum CodingKeys: String, CodingKey {
-        case status, reason, iteration, provider
-        case workId = "work_id"
-        case updatedAt = "updated_at"
-        case pendingObservations = "pending_observations"
-        case lastFailure = "last_failure"
-    }
-}
-
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
-    public let projectId: String
     public let status: WorkStatus
     public let reason: String
     public let updatedAt: String
@@ -116,7 +83,6 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case status, reason, provider
         case workId = "work_id"
-        case projectId = "project_id"
         case updatedAt = "updated_at"
     }
 }
@@ -145,21 +111,6 @@ public enum RoadmapSection: String, Decodable, Sendable, Hashable {
     case waiting
     case available
     case later
-}
-
-public struct RoadmapProject: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { project.id }
-
-    public let project: ProjectPlanningSnapshot
-    public let runtime: ProjectRuntimeSnapshot?
-    public let nextMove: WorkNextMove
-    public let section: RoadmapSection
-    public let tasks: [RoadmapTask]
-
-    enum CodingKeys: String, CodingKey {
-        case project, runtime, section, tasks
-        case nextMove = "next_move"
-    }
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
@@ -206,7 +157,6 @@ public enum WorkDirectiveKind: String, Decodable, Sendable, Hashable {
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
     case user
     case wave
-    case project
     case task
     case ci
     case external

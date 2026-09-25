@@ -7,23 +7,27 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
-    @Test("PM snapshot fixture preserves repository Team and Project ownership")
-    func pmShowFixturePreservesOwnership() async throws {
-        let data = try loadFixtureData("pm_show.json")
-        let json = String(decoding: data, as: UTF8.self)
+    @Test("Wave plan uses the same chapter as status")
+    func planUsesChapterSnapshot() async throws {
+        let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            #expect(args == ["pm", "show", "--wave", "survival/infrastructure", "--json", "--no-sync"])
+            #expect(args == ["status", "infrastructure", "--json"])
             return json
         }
+        let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
+        #expect(plan.chapter?.flows.recommended == "task-design")
+        #expect(plan.chapter?.krs.count == 1)
+    }
 
-        let plan = try await query.plan(
-            wave: "survival/infrastructure",
-            objective: "Keep mail flowing.",
-            cwd: "/fixture"
-        )
-        #expect(plan.projects.map(\.id) == ["gmail"])
-        #expect(plan.projects[0].title == "Gmail")
-        #expect(plan.projects[0].krs[0].proof == .holds)
+    @Test("Chapter history retains dated evidence for a moved Task")
+    func chapterHistoryRetainsBoundaryEvidence() throws {
+        let snapshot = try JSONDecoder().decode(ChapterSnapshot.self, from: loadFixtureData("chapter_snapshot.json"))
+        let history = try JSONDecoder().decode([ChapterHistoryEntry].self, from: loadFixtureData("chapter_history.json"))
+        #expect(snapshot.closedAt == snapshot.observedAt)
+        #expect(snapshot.tasks[0].disposition == "move")
+        #expect(!snapshot.tasks[0].task.completed)
+        #expect(history[0].id == snapshot.id)
+        #expect(history[1].closedAt == nil)
     }
 
     @Test("Activity fixture preserves exact OS-live process state")
@@ -86,45 +90,34 @@ struct DTOFixtureTests {
         // The Home runtime evidence carries the state and the one contextual action.
         #expect(detail.homeRuntime.state == .running)
         #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))
-        #expect(detail.projects[0].project.slug == "release-feedback")
-        #expect(detail.projects[0].project.flows.recommended == "task-design")
-        #expect(detail.unavailableProjects[0].workId == "proj_e972b70272fbb5e91c096ebe657f9f9b")
-        #expect(detail.unavailableProjects[0].projectId == "f56c583c-c360-4dc4-ba12-4b5a02268623")
-        #expect(detail.unavailableProjects[0].projectSlug == "technical-architecture")
-        #expect(detail.unavailableProjects[0].status == .abandoned)
-        #expect(detail.unavailableProjects[0].owner == .wave)
-        #expect(detail.unavailableProjects[0].tasks[0].taskIdentifier == "W2-127")
-        #expect(detail.unavailableProjects[0].tasks[0].status == .ready)
-        #expect(detail.unavailableProjects[0].tasks[0].owner == .wave)
-        #expect(detail.projects[0].tasks.map(\.task.identifier) == ["INF-123", "INF-124"])
-        #expect(detail.projects[0].tasks[0].prs.compactMap(\.publication?.github?.number) == [912])
-        #expect(detail.projects[0].tasks[0].activePr == "pr_33333333333333333333333333333333")
-        #expect(detail.projects[0].tasks[0].prs[0].publication?.merge?.afterMerge == .completeTask)
-        #expect(detail.projects[0].directive?.version == 1)
-        #expect(detail.projects[0].tasks[0].directive?.version == 2)
-        #expect(detail.projects[0].tasks[0].directive?.incorporatedAt != nil)
-        #expect(detail.projects[0].tasks[0].reference.workspace?.slug == "infrastructure-task")
-        #expect(detail.projects[0].tasks[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
-        #expect(detail.projects[0].tasks[0].reference.issueUrl?.host == "linear.app")
+        #expect(detail.chapter?.flows.recommended == "task-design")
+        #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
+        #expect(detail.unavailableTasks[0].status == .ready)
+        #expect(detail.unavailableTasks[0].owner == .wave)
+        #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
+        #expect(detail.tasks.items[0].prs.compactMap(\.publication?.github?.number) == [912])
+        #expect(detail.tasks.items[0].activePr == "pr_33333333333333333333333333333333")
+        #expect(detail.tasks.items[0].prs[0].publication?.merge?.afterMerge == .completeTask)
+        #expect(detail.tasks.items[0].directive?.version == 2)
+        #expect(detail.tasks.items[0].directive?.incorporatedAt != nil)
+        #expect(detail.tasks.items[0].reference.workspace?.slug == "infrastructure-task")
+        #expect(detail.tasks.items[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
+        #expect(detail.tasks.items[0].reference.issueUrl?.host == "linear.app")
         // Ready is durable Work status. Historical failure evidence stays
         // visible without replacing that present-tense state.
-        #expect(detail.projects[0].tasks[0].runtime?.status == .ready)
-        #expect(detail.projects[0].tasks[0].runtime?.reason == "ready")
-        #expect(detail.projects[0].runtime?.status == .ready)
-        #expect(detail.projects[0].runtime?.reason == "ready")
-        #expect(detail.projects[0].runtime?.lastFailure?.message.contains("credential") == true)
-        #expect(detail.projects[0].tasks[1].runtime == nil)
-        #expect(detail.projects[0].tasks[1].reference.issueUrl == nil)
-        #expect(detail.projects[0].tasks[1].reference.workspace == nil)
+        #expect(detail.tasks.items[0].runtime?.status == .ready)
+        #expect(detail.tasks.items[0].runtime?.reason == "ready")
+        #expect(detail.tasks.items[1].runtime == nil)
+        #expect(detail.tasks.items[1].reference.issueUrl == nil)
+        #expect(detail.tasks.items[1].reference.workspace == nil)
         #expect(detail.runs.items[0].id == "run_00000000000000000000000000000001")
         #expect(detail.runs.items[0].skill == "task/pursue")
         #expect(detail.runs.items[0].usage.inputTokens == 12000)
         #expect(detail.runs.items[0].outcome == "completed")
-        #expect(detail.projects[0].tasks[0].condition.state == .waiting)
-        #expect(detail.projects[0].tasks[0].condition.reason == "merge pull request head 333333333333 on GitHub")
-        #expect(detail.projects[0].tasks[0].actions.recommended == .openPr)
+        #expect(detail.tasks.items[0].condition.state == .waiting)
+        #expect(detail.tasks.items[0].condition.reason == "merge pull request head 333333333333 on GitHub")
+        #expect(detail.tasks.items[0].actions.recommended == .openPr)
         #expect(detail.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
-        #expect(detail.metricPortfolio.metrics[0].projectId == detail.projects[0].project.id)
         #expect(detail.metricPortfolio.metrics[0].evidence == .met(
             value: 1,
             sourceWindowStart: "2026-08-13T18:00:00Z",
@@ -159,25 +152,21 @@ struct DTOFixtureTests {
         #expect(roadmap.waves.count == 2)
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
-        #expect(product.projects.items[0].project.flows.recommended == nil)
+        #expect(product.chapter?.flows.recommended == nil)
         #expect(product.wave.paused)
         #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
-        #expect(product.metricPortfolio.metrics[0].projectId == product.projects.items[0].project.id)
         #expect(product.wave.enabled)
-        #expect(product.unavailableProjects[0].workId == "proj_e972b70272fbb5e91c096ebe657f9f9b")
-        #expect(product.unavailableProjects[0].projectSlug == "technical-architecture")
-        #expect(product.unavailableProjects[0].status == .abandoned)
-        #expect(product.unavailableProjects[0].tasks[0].taskIdentifier == "W2-127")
-        #expect(product.unavailableProjects[0].tasks[0].status == .ready)
-        #expect(product.unavailableProjects[0].tasks[0].recovery.contains("lf work abandon task task_40fbeea"))
-        let project = try #require(product.projects.items.first)
-        #expect(project.tasks.map(\.section) == [.now, .waiting, .available, .later])
-        #expect(project.tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
-        #expect(project.tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
-        #expect(project.tasks[2].reference.workspace == nil)
-        #expect(project.tasks[2].reference.issueUrl == nil)
-        #expect(project.tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
-        #expect(roadmap.waves[1].projects.unavailableReason?.contains("lf pm sync") == true)
+        #expect(product.unavailableTasks[0].taskIdentifier == "W2-127")
+        #expect(product.unavailableTasks[0].status == .ready)
+        #expect(product.unavailableTasks[0].recovery.contains("lf work abandon task task_40fbeea"))
+        let tasks = product.tasks.items
+        #expect(tasks.map(\.section) == [.now, .waiting, .available, .later])
+        #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
+        #expect(tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
+        #expect(tasks[2].reference.workspace == nil)
+        #expect(tasks[2].reference.issueUrl == nil)
+        #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
+        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf pm sync") == true)
         #expect(!roadmap.waves[1].wave.enabled)
     }
 
@@ -186,8 +175,8 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("metric_portfolio.json")
         let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: data)
 
-        #expect(portfolio.metrics.count == 9)
-        #expect(portfolio.contractIssues.count == 4)
+        #expect(portfolio.metrics.count == 10)
+        #expect(portfolio.contractIssues.count == 5)
         #expect(
             portfolio.metrics[0].description
                 == "Fraction of qualifying events that settled successfully."

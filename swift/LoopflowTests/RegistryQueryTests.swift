@@ -11,8 +11,46 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"ready","goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"paused":true,"enabled":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"paused":false,"enabled":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
+          {
+            "id": "goals",
+            "name": "goals",
+            "status": "ready",
+            "goal": "ship the roadmap",
+            "repo": "/tmp/repo-a",
+            "active_tasks": 1,
+            "live": true,
+            "paused": true,
+            "enabled": true,
+            "endpoint": "127.0.0.1:5678",
+            "created_at": null,
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            }
+          },
+          {
+            "id": "other",
+            "name": "other",
+            "status": "ready",
+            "goal": "g",
+            "repo": "/tmp/repo-b",
+            "active_tasks": 0,
+            "live": false,
+            "paused": false,
+            "enabled": false,
+            "endpoint": null,
+            "created_at": null,
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            }
+          }
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -32,8 +70,46 @@ struct RegistryQueryTests {
     func allWavesDecode() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"ready","goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"paused":true,"enabled":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"paused":false,"enabled":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
+          {
+            "id": "goals",
+            "name": "goals",
+            "status": "ready",
+            "goal": "ship the roadmap",
+            "repo": "/tmp/repo-a",
+            "active_tasks": 1,
+            "live": true,
+            "paused": true,
+            "enabled": true,
+            "endpoint": "127.0.0.1:5678",
+            "created_at": null,
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            }
+          },
+          {
+            "id": "other",
+            "name": "other",
+            "status": "ready",
+            "goal": "g",
+            "repo": "/tmp/repo-b",
+            "active_tasks": 0,
+            "live": false,
+            "paused": false,
+            "enabled": false,
+            "endpoint": null,
+            "created_at": null,
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            }
+          }
         ]
         """
         let counter = CallCounter()
@@ -54,29 +130,165 @@ struct RegistryQueryTests {
     func statusMapsWork() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"paused":false,"enabled":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          "loop_state":"turning",
-          "projects":[{
-            "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","flows":{"recommended": "task-design"},"krs":[{"text":"Fast loops","holds":false}]},
-            "runtime":{"work_id":"project-1","status":"ready","reason":"ready","updated_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","last_failure":null},
-            "directive":null,
-            "next_move":{"owner":"project","reason":"supervised Tasks are active"},
-            "tasks":[{
-              "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
-              "reference":{"issue_url":"https://linear.app/loopflow/issue/INF-123/wire-it","workspace":{"slug":"wire-it","branch":"jack/inf-123","worktree":"/task-wt"}},
-              "runtime":{"work_id":"issue-1","project_id":"project-1","status":"ready","reason":"ready","updated_at":"2026-07-06T00:00:00Z","provider":"codex"},
-              "directive":null,
-              "next_move":{"owner":"task","reason":"ready"},
-              "condition":{"state":"clear","reason":"ready","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null}},
-              "actions":{"recommended":"resume","reason":"resume the parked Task"},
-              "prs":[],
-              "active_pr":null
-            }]
-          }],
-          "unavailable_projects":[],
-          "runs":{"state":"ok","truncated":false,"items":[{"id":"run_00000000000000000000000000000001","parent_run_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","subjects":[{"selector":"wave:goals","source":"declared"},{"selector":"task:INF-123","source":"declared"}],"skill":"task/pursue","outcome":"completed","started":100,"ended":110,"usage":{"streams":1,"final_streams":1,"gaps":0,"input_tokens":1000,"output_tokens":200,"total_input_tokens":1000,"peak_input_tokens":900,"context_window_tokens":200000,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25},"evidence_gaps":0,"harness":"claude","model":"opus","surface":"headless"}]},
-          "metric_portfolio":{"metrics":[],"contract_issues":[]},
-          "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
+          "wave": {
+            "id": "goals",
+            "name": "goals",
+            "status": "ready",
+            "goal": "g",
+            "repo": "/tmp/repo-a",
+            "active_tasks": 1,
+            "live": false,
+            "paused": false,
+            "enabled": true,
+            "endpoint": null,
+            "created_at": null,
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            }
+          },
+          "loop_state": "turning",
+          "runs": {
+            "state": "ok",
+            "truncated": false,
+            "items": [
+              {
+                "id": "run_00000000000000000000000000000001",
+                "parent_run_id": null,
+                "repo": "/src/loopflow",
+                "worktree": "/src/loopflow.task",
+                "subjects": [
+                  {
+                    "selector": "wave:goals",
+                    "source": "declared"
+                  },
+                  {
+                    "selector": "task:INF-123",
+                    "source": "declared"
+                  }
+                ],
+                "skill": "task/pursue",
+                "outcome": "completed",
+                "started": 100,
+                "ended": 110,
+                "usage": {
+                  "streams": 1,
+                  "final_streams": 1,
+                  "gaps": 0,
+                  "input_tokens": 1000,
+                  "output_tokens": 200,
+                  "total_input_tokens": 1000,
+                  "peak_input_tokens": 900,
+                  "context_window_tokens": 200000,
+                  "reasoning_tokens": null,
+                  "cache_read_tokens": 800,
+                  "cache_write_tokens": null,
+                  "cost_usd": 0.25
+                },
+                "evidence_gaps": 0,
+                "harness": "claude",
+                "model": "opus",
+                "surface": "headless"
+              }
+            ]
+          },
+          "metric_portfolio": {
+            "metrics": [],
+            "contract_issues": []
+          },
+          "home_runtime": {
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            },
+            "state": "stopped",
+            "reason": "no resident is serving",
+            "endpoint": null,
+            "action": {
+              "kind": "start",
+              "home_id": "home_00000000000000000000000000000001"
+            }
+          },
+          "chapter": {
+            "id": "current",
+            "source_project_id": "project-1",
+          "source_project_slug": "release-feedback",
+            "metric_targets": [],
+            "flows": {
+              "recommended": "task-design"
+            },
+            "krs": [
+              {
+                "text": "Fast loops",
+                "holds": false
+              }
+            ],
+            "phase": "complete",
+            "error": null
+          },
+          "tasks": {
+            "state": "ok",
+            "items": [
+              {
+                "task": {
+                  "id": "issue-1",
+                  "identifier": "INF-123",
+                  "name": "Wire it",
+                  "description": "",
+                  "rank": 1,
+                  "completed": false,
+                  "assignee": null
+                },
+                "reference": {
+                  "issue_url": "https://linear.app/loopflow/issue/INF-123/wire-it",
+                  "workspace": {
+                    "slug": "wire-it",
+                    "branch": "jack/inf-123",
+                    "worktree": "/task-wt"
+                  }
+                },
+                "runtime": {
+                  "work_id": "issue-1",
+                  "status": "ready",
+                  "reason": "ready",
+                  "updated_at": "2026-07-06T00:00:00Z",
+                  "provider": "codex"
+                },
+                "directive": null,
+                "next_move": {
+                  "owner": "task",
+                  "reason": "ready"
+                },
+                "condition": {
+                  "state": "clear",
+                  "reason": "ready",
+                  "observed_at": "2026-07-06T00:01:00Z",
+                  "evidence_age_secs": 60,
+                  "local_progress": {
+                    "state": "observed",
+                    "unsettled": false,
+                    "dirty": false,
+                    "authored_commits": false,
+                    "recovery_required": false,
+                    "reason": null
+                  }
+                },
+                "actions": {
+                  "recommended": "resume",
+                  "reason": "resume the parked Task"
+                },
+                "prs": [],
+                "active_pr": null
+              }
+            ],
+            "truncated": false
+          },
+          "unavailable_tasks": []
         }
         """
         let query = RegistryQuery { args, _ in
@@ -90,19 +302,16 @@ struct RegistryQueryTests {
         #expect(result.homeRuntime.state == .stopped)
         #expect(result.homeRuntime.action == .start(homeId: "home_00000000000000000000000000000001"))
         #expect(result.loopState == "turning")
-        #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
-        #expect(result.workMap.projects[0].project.flows.recommended == "task-design")
-        #expect(result.workMap.projects[0].runtime?.status == .ready)
-        #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
-        #expect(result.workMap.projects[0].tasks[0].runtime?.projectId == "project-1")
-        #expect(result.workMap.projects[0].tasks[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
-        #expect(result.workMap.projects[0].tasks[0].reference.workspace?.slug == "wire-it")
-        #expect(result.workMap.projects[0].tasks[0].reference.workspace?.worktree == "/task-wt")
-        #expect(result.workMap.projects[0].tasks[0].reference.workspace?.branch == "jack/inf-123")
+        #expect(result.workMap.chapter?.flows.recommended == "task-design")
+        #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
+        #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
+        #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")
+        #expect(result.workMap.tasks.items[0].reference.workspace?.worktree == "/task-wt")
+        #expect(result.workMap.tasks.items[0].reference.workspace?.branch == "jack/inf-123")
         #expect(result.runs.items[0].skill == "task/pursue")
         #expect(result.runs.items[0].usage.inputTokens == 1000)
-        #expect(result.workMap.projects[0].tasks[0].condition.state == .clear)
-        #expect(result.workMap.projects[0].tasks[0].actions.recommended == .resume)
+        #expect(result.workMap.tasks.items[0].condition.state == .clear)
+        #expect(result.workMap.tasks.items[0].actions.recommended == .resume)
     }
 
     @Test("lf roadmap is one optionally scoped machine query")
@@ -174,9 +383,21 @@ struct RegistryQueryTests {
     @Test("lf home probe decodes the state and the one contextual action")
     func homeProbeDecodesStateAndAction() async throws {
         let json = #"""
-        {"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},
-         "state":"stopped","reason":"reachable, no resident","endpoint":null,
-         "action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
+        {
+          "home": {
+            "id": "home_00000000000000000000000000000001",
+            "route": "local",
+            "created_at": "1970-01-01T00:00:00Z",
+            "observed_at": "1970-01-01T00:00:00Z"
+          },
+          "state": "stopped",
+          "reason": "reachable, no resident",
+          "endpoint": null,
+          "action": {
+            "kind": "start",
+            "home_id": "home_00000000000000000000000000000001"
+          }
+        }
         """#
         let query = RegistryQuery { args, cwd in
             #expect(args == ["home", "probe", "product", "--json"])
@@ -193,12 +414,28 @@ struct RegistryQueryTests {
     @Test("lf start returns the existing Wave status contract")
     func startReturnsWaveStatus() async throws {
         let json = #"""
-        [{"id":"wave-1","name":"product","status":"ready","goal":"Ship product",
-          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":true,"paused":false,"enabled":true,
-          "endpoint":"127.0.0.1:7777","created_at":"2026-07-17T00:00:00Z",
-          "parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001",
-          "route":"local","created_at":"2026-07-17T00:00:00Z",
-          "observed_at":"2026-07-17T00:00:00Z"}}]
+        [
+          {
+            "id": "wave-1",
+            "name": "product",
+            "status": "ready",
+            "goal": "Ship product",
+            "repo": "/tmp/repo",
+            "active_tasks": 1,
+            "live": true,
+            "paused": false,
+            "enabled": true,
+            "endpoint": "127.0.0.1:7777",
+            "created_at": "2026-07-17T00:00:00Z",
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "2026-07-17T00:00:00Z",
+              "observed_at": "2026-07-17T00:00:00Z"
+            }
+          }
+        ]
         """#
         let query = RegistryQuery { args, cwd in
             #expect(args == ["start", "product", "--json"])
@@ -215,11 +452,28 @@ struct RegistryQueryTests {
     @Test("lf start rejects a non-live receipt")
     func startRejectsNonLiveReceipt() async {
         let json = #"""
-        [{"id":"wave-1","name":"product","status":"ready","goal":"Ship product",
-          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":false,"paused":false,"enabled":true,
-          "endpoint":null,"created_at":"2026-07-17T00:00:00Z","parent_wave_id":null,
-          "home":{"id":"home_00000000000000000000000000000001","route":"local",
-          "created_at":"2026-07-17T00:00:00Z","observed_at":"2026-07-17T00:00:00Z"}}]
+        [
+          {
+            "id": "wave-1",
+            "name": "product",
+            "status": "ready",
+            "goal": "Ship product",
+            "repo": "/tmp/repo",
+            "active_tasks": 1,
+            "live": false,
+            "paused": false,
+            "enabled": true,
+            "endpoint": null,
+            "created_at": "2026-07-17T00:00:00Z",
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "2026-07-17T00:00:00Z",
+              "observed_at": "2026-07-17T00:00:00Z"
+            }
+          }
+        ]
         """#
         let query = RegistryQuery { _, _ in json }
 
@@ -278,13 +532,57 @@ struct RegistryQueryTests {
     func statusKeepsUnavailableEvidence() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"paused":false,"enabled":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          "loop_state":null,
-          "projects":[],
-          "unavailable_projects":[],
-          "runs":{"state":"unavailable","reason":"run ledger unavailable: disk is gone"},
-          "metric_portfolio":{"metrics":[],"contract_issues":[]},
-          "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
+          "wave": {
+            "id": "goals",
+            "name": "goals",
+            "status": "ready",
+            "goal": "g",
+            "repo": "/tmp/repo-a",
+            "active_tasks": 0,
+            "live": false,
+            "paused": false,
+            "enabled": true,
+            "endpoint": null,
+            "created_at": null,
+            "parent_wave_id": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            }
+          },
+          "loop_state": null,
+          "runs": {
+            "state": "unavailable",
+            "reason": "run ledger unavailable: disk is gone"
+          },
+          "metric_portfolio": {
+            "metrics": [],
+            "contract_issues": []
+          },
+          "home_runtime": {
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "local",
+              "created_at": "1970-01-01T00:00:00Z",
+              "observed_at": "1970-01-01T00:00:00Z"
+            },
+            "state": "stopped",
+            "reason": "no resident is serving",
+            "endpoint": null,
+            "action": {
+              "kind": "start",
+              "home_id": "home_00000000000000000000000000000001"
+            }
+          },
+          "chapter": null,
+          "tasks": {
+            "state": "ok",
+            "items": [],
+            "truncated": false
+          },
+          "unavailable_tasks": []
         }
         """
         let query = RegistryQuery { _, _ in json }
@@ -419,7 +717,42 @@ struct RegistryQueryTests {
     @Test("lf usage preserves direct Run evidence through a Work drill")
     func usageDecodes() async throws {
         let json = """
-        [{"id":"run_00000000000000000000000000000001","parent_run_id":null,"repo":"/src/loopflow","worktree":null,"subjects":[{"selector":"task:LOO-265","source":"declared"}],"skill":"implement","outcome":"completed","started":100,"ended":110,"usage":{"streams":2,"final_streams":1,"gaps":1,"input_tokens":120,"output_tokens":null,"total_input_tokens":120,"peak_input_tokens":100,"context_window_tokens":200000,"reasoning_tokens":null,"cache_read_tokens":80,"cache_write_tokens":null,"cost_usd":0.25},"evidence_gaps":1,"harness":"codex","model":"gpt","surface":"headless"}]
+        [
+          {
+            "id": "run_00000000000000000000000000000001",
+            "parent_run_id": null,
+            "repo": "/src/loopflow",
+            "worktree": null,
+            "subjects": [
+              {
+                "selector": "task:LOO-265",
+                "source": "declared"
+              }
+            ],
+            "skill": "implement",
+            "outcome": "completed",
+            "started": 100,
+            "ended": 110,
+            "usage": {
+              "streams": 2,
+              "final_streams": 1,
+              "gaps": 1,
+              "input_tokens": 120,
+              "output_tokens": null,
+              "total_input_tokens": 120,
+              "peak_input_tokens": 100,
+              "context_window_tokens": 200000,
+              "reasoning_tokens": null,
+              "cache_read_tokens": 80,
+              "cache_write_tokens": null,
+              "cost_usd": 0.25
+            },
+            "evidence_gaps": 1,
+            "harness": "codex",
+            "model": "gpt",
+            "surface": "headless"
+          }
+        ]
         """
         let query = RegistryQuery { args, _ in
             #expect(args == [
@@ -444,7 +777,16 @@ struct RegistryQueryTests {
     @Test("lf doctor decodes every check")
     func doctorDecodes() async throws {
         let json = """
-        {"rows":2,"checks":[{"name":"lineage","status":"ok","detail":"every parent process resolves"}]}
+        {
+          "rows": 2,
+          "checks": [
+            {
+              "name": "lineage",
+              "status": "ok",
+              "detail": "every parent process resolves"
+            }
+          ]
+        }
         """
         let query = RegistryQuery { args, _ in
             #expect(args == ["doctor", "--json"])
@@ -457,42 +799,21 @@ struct RegistryQueryTests {
         #expect(report.checks[0].status == "ok")
     }
 
-    @Test("PM snapshot maps projects and KR proof into the wave plan")
-    func planDecodesProjects() async throws {
-        let json = """
-        {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[
-          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"recommended": null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"],"team_ids":["team-loo"]}
-        ],"items":[{"id":"issue-1","identifier":"LOO-1","url":null,"name":"Wire runtime","description":"","rank":1,"completed":false,"project_id":"project-1","project":"runtime","team_id":"team-loo","assignee":null}]}
-        """
+    @Test("Refreshing a plan reads the shared Wave chapter after sync")
+    func planRefreshReadsChapter() async throws {
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/wave_detail.json")
+        let json = try String(contentsOf: fixture, encoding: .utf8)
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["pm", "show", "--wave", "goals", "--json", "--no-sync"])
             #expect(cwd == "/tmp/repo")
+            if args == ["pm", "sync", "--wave", "infrastructure"] { return "" }
+            #expect(args == ["status", "infrastructure", "--json"])
             return json
         }
-
-        let plan = try await query.plan(wave: "goals", objective: "Ship it.", cwd: "/tmp/repo")
+        let plan = try await query.plan(wave: "infrastructure", objective: "Ship it.", cwd: "/tmp/repo", sync: true)
         #expect(plan.objective == "Ship it.")
-        #expect(plan.projects[0].id == "runtime")
-        #expect(plan.projects[0].definition == "Run reliably.")
-        #expect(plan.projects[0].krs[0].proof == .holds)
-    }
-
-    @Test("Task invocation refreshes the Wave plan before invocation")
-    func planCanSyncProjects() async throws {
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["pm", "show", "--wave", "goals", "--json", "--sync"])
-            #expect(cwd == "/tmp/repo")
-            return """
-            {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[],"items":[]}
-            """
-        }
-
-        _ = try await query.plan(
-            wave: "goals",
-            objective: "",
-            cwd: "/tmp/repo",
-            sync: true
-        )
+        #expect(plan.chapter?.krs.count == 1)
     }
 
     @Test("a failed lf query surfaces as an error")

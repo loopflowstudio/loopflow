@@ -819,7 +819,7 @@ pub(crate) fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<W
     }
 }
 
-fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
+pub(super) fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     match work_status_in(conn, work)? {
         WorkStatus::Ready => Ok(()),
         status => Err(StoreError::InvalidAuthority(format!(
@@ -832,12 +832,31 @@ fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
 
 fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     require_ready_work(conn, work)?;
+    require_current_task_chapter(conn, work)?;
     if !placement_in(conn, work)?.enabled {
         return Err(StoreError::InvalidAuthority(format!(
             "{} {} is paused",
             work.kind(),
             work.id()
         )));
+    }
+    Ok(())
+}
+
+pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
+    let WorkRef::Task(task) = work else {
+        return Ok(());
+    };
+    let expired: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
+         JOIN wave_chapters c ON c.wave_id=p.wave_id AND c.current=1
+         WHERE t.id=?1 AND c.project_id != p.external_project_id
+         AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=t.id AND json_extract(kind_json,'$.kind')='started')
+         AND NOT EXISTS(SELECT 1 FROM task_flow_positions WHERE task_id=t.id AND worker_generation>0))",
+        [task.as_str()], |row| row.get(0),
+    )?;
+    if expired {
+        return Err(StoreError::InvalidAuthority("this Task belongs to chapter history; resume the chapter transition before starting work".into()));
     }
     Ok(())
 }
@@ -933,6 +952,7 @@ pub(super) fn set_flow_position_in(
     position: &FlowPosition,
 ) -> StoreResult<FlowPosition> {
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    require_current_task_chapter(conn, &WorkRef::Task(task_id.clone()))?;
     validate_flow_position(task_id, position)?;
     if position.claim.is_some() {
         return Err(StoreError::InvalidAuthority(
@@ -1601,9 +1621,10 @@ mod durable_store_tests {
             .settle_task_worker(&task, &bound, &next, Some("advanced"))
             .is_err());
         let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
         assert!(matches!(
-            &events[0].kind,
+            &events[1].kind,
             TaskEventKind::Progress { summary } if summary == "advanced"
         ));
     }
@@ -1642,9 +1663,10 @@ mod durable_store_tests {
             .finish_task_flow(&task, &bound, Some("finished"))
             .is_err());
         let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
         assert!(matches!(
-            &events[0].kind,
+            &events[1].kind,
             TaskEventKind::Progress { summary } if summary == "finished"
         ));
     }
@@ -1689,9 +1711,10 @@ mod durable_store_tests {
         assert_eq!(failed.failure.as_ref(), Some(&failure));
         assert!(store.block_task_flow(&work, &first, &failure).is_err());
         let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
         assert!(matches!(
-            &events[0].kind,
+            &events[1].kind,
             TaskEventKind::Failed { error, resumable: true } if error == &failure.reason
         ));
 

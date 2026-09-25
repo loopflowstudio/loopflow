@@ -76,6 +76,7 @@ pub struct SessionRecord {
     pub id: String,
     pub kind: SessionKind,
     pub work: Option<WorkRef>,
+    pub wave_id: Option<crate::id::WaveId>,
     pub title: String,
     pub detail: String,
     pub cwd: String,
@@ -196,6 +197,16 @@ pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     sessions.extend(list_ask_sessions().await?);
     let boundary_runs = boundary_run_ids(store).await?;
     sessions.extend(list_interactive_sessions(&boundary_runs)?);
+    for session in &mut sessions {
+        session.wave_id = match &session.work {
+            Some(WorkRef::Wave(id)) => Some(id.clone()),
+            Some(WorkRef::Task(id)) => store.get_task(id).await?.map(|task| task.wave_id),
+            Some(WorkRef::Project(id)) => {
+                store.get_project(id).await?.map(|project| project.wave_id)
+            }
+            None => None,
+        };
+    }
     sessions.sort_by(|left, right| left.title.cmp(&right.title).then(left.id.cmp(&right.id)));
     Ok(sessions)
 }
@@ -749,6 +760,7 @@ fn interactive_surface(dir: &Path, manifest: &RunManifest) -> Result<SessionReco
     Ok(SessionRecord {
         id: manifest.run_id.to_string(),
         kind: SessionKind::Interactive,
+        wave_id: None,
         work: attributed_work(manifest),
         title: session_title(dir, manifest),
         detail: match &manifest.model {
@@ -1072,6 +1084,7 @@ async fn flow_surface(
     Ok(SessionRecord {
         id,
         kind: SessionKind::Flow,
+        wave_id: Some(task.wave_id.clone()),
         work: Some(position.work()),
         title: task.plan.title.clone(),
         detail: step.step,
@@ -1091,6 +1104,7 @@ fn ask_surface(record: &AskSessionRecord) -> Result<SessionRecord> {
     Ok(SessionRecord {
         id: record.id.clone(),
         kind: SessionKind::Ask,
+        wave_id: None,
         work: record.work.clone(),
         title: record.title.clone(),
         detail: record.detail.clone(),

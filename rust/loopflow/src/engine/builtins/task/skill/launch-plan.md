@@ -9,7 +9,7 @@ exist. Do not create a manifest, receipt, marker, or new planning state.
 ## Orientation
 
 Read the design, Task directive, current Work state, and repo guide. Consult
-Wave and Project state only when the seed identifies them.
+Wave chapter state only when the seed identifies it.
 
 ## Decide what stays here
 
@@ -25,7 +25,7 @@ For each remaining independently shippable outcome, choose one of two actions:
 - If it can safely start against the current contract, create and launch it now
   when no local artifact needs staging:
   ```bash
-  lf task start <project> "<desired experience>" --flow <chosen-flow> <<'BRIEF'
+  lf task start --wave <wave> "<desired experience>" --flow <chosen-flow> <<'BRIEF'
   <short user-problem brief; durable design reference>
   BRIEF
   ```
@@ -62,7 +62,7 @@ Use known URLs and preserve cited decisions and evidence somewhere that survives
 In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
 
 For already designed work, select a Flow that continues that design. An
-explicit human Flow selection governs; otherwise use the Project recommendation.
+explicit human Flow selection governs; otherwise use the Wave chapter recommendation.
 Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
@@ -73,11 +73,11 @@ follow-ups intentionally deferred.
 
 When the human asks to file a Task and run a Flow from an existing design,
 keep the design separate. Reuse the Task if it is the same work; otherwise file
-a short user-problem brief under the selected Project, with a design reference,
+a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
 
 ```bash
-lf pm task create --project <project> --title "<desired experience>" --notes "<brief; design reference and maturity>"
+lf pm task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf task prepare <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue> --flow <chosen-flow>
@@ -97,7 +97,7 @@ needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
 Use the human-selected Flow and inspect its contents when explaining where it
-begins; otherwise use the Project recommendation. Continue the design already
+begins; otherwise use the Wave chapter recommendation. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Flow, and observed launch result. Verify
 supplied context separately from worker startup.

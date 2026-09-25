@@ -706,8 +706,8 @@ pub enum TaskEventKind {
 }
 
 impl TaskEventKind {
-    /// Whether the event crosses the required Task → Project boundary.
-    pub fn is_project_observable(&self) -> bool {
+    /// Whether the event should wake the owning Wave.
+    pub fn is_wave_observable(&self) -> bool {
         !matches!(
             self,
             Self::WorktreeInitializing { .. }
@@ -716,13 +716,6 @@ impl TaskEventKind {
                 | Self::Steer { .. }
                 | Self::Interrupt
         )
-    }
-
-    /// Whether a Project-observable Task event also belongs in the root Wave.
-    /// This currently mirrors the Project boundary; the server-topology design
-    /// must decide whether the duplicate delivery remains necessary.
-    pub fn is_root_wave_observable(&self) -> bool {
-        self.is_project_observable()
     }
 }
 

@@ -146,14 +146,14 @@ Are the items in a wave pulling in the same direction, or has the wave
 become a dumping ground?
 
 Gather:
-- Read the PM snapshot's Projects, KRs, and tasks for the wave
+- Read the Wave's current chapter, KRs, and Tasks for the wave
 - Read the wave `GOAL.md` and `MEMORY.md`
-- Check area overlap between projects within the same wave
+- Check whether the chapter outcomes and Tasks fit the Wave mandate
 
 Interpret:
-- Projects and tasks should serve the wave's stated objective. A task in the `pm` wave
+- Chapter outcomes and Tasks should serve the Wave's stated objective. A task in the `pm` wave
   that's really about Loopflow UI belongs in `macos`.
-- Projects at the same priority tier should be independent enough to work
+- Tasks at the same priority tier should be independent enough to work
   in parallel. If item 2a blocks item 2b, that's a sequencing issue the
   report should surface.
 - A wave with items spanning 4 different subsystems may need to be split.

@@ -95,7 +95,7 @@ Make the change easy to review.
    - Not every PR has metrics — but when they exist, capture them now. The reviewer shouldn't have to reproduce your setup to see the impact.
    - For substantial UI work, state which production performance signal covers
      the new path. If none does, capture a concrete metric proposal for the
-     Project. A local benchmark supports it but is not live coverage by itself.
+     Wave. A local benchmark supports it but is not live coverage by itself.
 
 3. **Write PR copy for ops handoff**
 
@@ -150,7 +150,7 @@ Make the change easy to review.
 
 6. **Wave alignment** (if running in a wave context)
    - Does the shipped code advance the wave's Goals?
-   - Were any known risks from `GOAL.md`, `MEMORY.md`, or the Linear Project definition/KRs introduced or ignored?
+   - Were any known risks from `GOAL.md`, `MEMORY.md`, or the current chapter KRs/metric targets introduced or ignored?
    - Are there observable project KRs or measures to note in the review doc?
 
 ## Scope

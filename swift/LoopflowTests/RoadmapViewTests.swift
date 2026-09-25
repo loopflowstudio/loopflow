@@ -9,8 +9,8 @@ struct RoadmapViewTests {
     @Test("Task actions come from the shared legal-action model")
     func taskActionsFollowTheActionModel() throws {
         let snapshot = try loadRoadmapFixture()
-        let project = try #require(snapshot.waves.first?.projects.items.first)
-        let tasks = project.tasks
+        let wave = try #require(snapshot.waves.first)
+        let tasks = wave.tasks.items
 
         // No exact process evidence means planning offers Resume, never an
         // inferred attach or interrupt action.
@@ -29,8 +29,8 @@ struct RoadmapViewTests {
     @Test("The recommended action explains itself")
     func recommendedActionCarriesItsReason() throws {
         let snapshot = try loadRoadmapFixture()
-        let project = try #require(snapshot.waves.first?.projects.items.first)
-        let openingPR = project.tasks[1].actions
+        let wave = try #require(snapshot.waves.first)
+        let openingPR = wave.tasks.items[1].actions
 
         #expect(openingPR.recommended == .openPr)
         #expect(openingPR.reason == "merge head abc1234 on GitHub")

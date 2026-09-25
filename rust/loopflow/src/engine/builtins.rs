@@ -212,10 +212,10 @@ mod tests {
     }
 
     #[test]
-    fn wave_goal_authoring_keeps_live_metrics_project_owned() {
+    fn wave_goal_authoring_keeps_live_metrics_wave_owned() {
         let prompt = get_builtin_skill("prompt").expect("prompt skill");
 
-        assert!(prompt.contains("Project-owned metrics"));
+        assert!(prompt.contains("Wave-owned metrics"));
         assert!(prompt.contains("never copy them"));
         assert!(prompt.contains("into the Wave body"));
         assert!(!prompt.contains("Readable measures"));
@@ -225,7 +225,7 @@ mod tests {
     fn project_guidance_sponsors_metrics_and_task_workers_propose_them() {
         let normalize = |prompt: &str| prompt.split_whitespace().collect::<Vec<_>>().join(" ");
 
-        let project = normalize(get_builtin_skill("project/operate").expect("project operate"));
+        let project = normalize(get_builtin_skill("wave/operate").expect("project operate"));
         assert!(project.contains("For each sponsored metric that moved"));
         assert!(project.contains("A Met frontier may keep a worker"));
         assert!(project.contains("a Met guardrail stays quiet until its alarm"));
@@ -233,7 +233,7 @@ mod tests {
 
         let task = normalize(get_builtin_skill("task/pursue").expect("task pursue"));
         assert!(task.contains("While building feature work, notice signals"));
-        assert!(task.contains("otherwise leave the proposal for Project sponsorship"));
+        assert!(task.contains("otherwise leave the proposal for Wave sponsorship"));
         assert!(task.contains("Metric proposals are discoveries, not a completion quota"));
     }
 
@@ -363,7 +363,7 @@ mod tests {
         assert!(wave.contains("lf task status"));
         assert!(wave.contains("Always launch work"));
 
-        let project = get_builtin_skill("project/operate").expect("project operate");
+        let project = get_builtin_skill("wave/operate").expect("project operate");
         assert!(project.contains("lf task run <issue-id>"));
         assert!(!project.contains("lf loop"));
 
@@ -374,11 +374,9 @@ mod tests {
         assert!(!task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
 
-        for (flow, step) in [("wave", "wave/operate"), ("project", "project/operate")] {
-            let flow = get_builtin_flow(flow).expect("tier flow");
-            assert!(flow.contains(&format!("- {step}")));
-            assert!(!flow.contains("loop:"));
-        }
+        let flow = get_builtin_flow("wave").expect("Wave flow");
+        assert!(flow.contains("- wave/operate"));
+        assert!(!flow.contains("loop:"));
 
         assert!(get_builtin_flow("task").is_none());
         assert!(get_builtin_flow("task-design")
@@ -466,13 +464,7 @@ mod tests {
             assert!(clarify.contains(requirement));
         }
 
-        for name in [
-            "wave/operate",
-            "project/operate",
-            "scan",
-            "assess",
-            "wave-report",
-        ] {
+        for name in ["wave/operate", "scan", "assess", "wave-report"] {
             let skill = get_builtin_skill(name).expect("multi-Task output skill");
             assert!(skill.contains("lf roadmap"));
             assert!(skill.contains("lf status"));
@@ -544,8 +536,6 @@ mod tests {
             "review-chapter",
             "wave/start-chapter",
             "wave/review-chapter",
-            "project/start-chapter",
-            "project/review-chapter",
         ] {
             assert!(get_builtin_skill(name).is_some(), "{name}");
             assert!(
@@ -566,17 +556,5 @@ mod tests {
     #[test]
     fn retired_export_memory_skill_is_not_registered() {
         assert!(get_builtin_skill("export-memory").is_none());
-    }
-
-    #[test]
-    fn project_promotion_is_an_authored_flow() {
-        let flow = get_builtin_flow("project-promote").expect("promotion flow");
-        let skill = get_builtin_skill("project-promote").expect("promotion skill");
-
-        assert!(flow.contains("- project-promote"));
-        assert!(skill.contains("lf pm show --wave <parent> --project <slug> --json"));
-        assert!(skill.contains("parent_wave_id"));
-        assert!(skill.contains("lf pm show"));
-        assert!(skill.contains("typed Wave and Project relationship"));
     }
 }

@@ -22,7 +22,7 @@ re-derive what these already record.
 ## Scope
 
 The chord-wave's area lists member wave directories. Each directory contains a
-`GOAL.md` and `MEMORY.md`; Project definitions, KRs, and tasks come from its PM
+`GOAL.md` and `MEMORY.md`; Chapter definition, KRs, and Tasks come from its PM
 snapshot. This step reads all of it, plus the living state around it.
 
 Member wave names come from those directory names. If the chord-wave area
@@ -34,16 +34,14 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 1. **Read wave configs.** For each member wave directory in the area:
    - `GOAL.md` — objective, cadence, policy, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
-   - `lf pm show --wave <wave> --json` — measured bets, KRs, and tasks from SQLite
-   - `lf status <wave> --json` — the Project-owned live metric portfolio
+   - `lf pm show --wave <wave> --json` — current chapter, KRs, and Tasks from SQLite
+   - `lf status <wave> --json` — the Wave-owned live metric portfolio
 
    Linear is the source of truth; there are no local Project or Task lists.
 
 2. **Read runtime state.** For each member wave:
-   - `lf status <wave-name> --json` — Wave presence, resident state, Project
-     Project Work, Tasks, next owners, worktrees, PRs, and conditions
-   - `lf task status <issue-id> --json` or
-     `lf project status <project-id> --json` only when the Wave snapshot needs
+   - `lf status <wave-name> --json` — Wave presence, resident state, current chapter, Tasks, next owners, worktrees, PRs, and conditions
+   - `lf task status <issue-id> --json` only when the Wave snapshot needs
      deeper inspection
 
    Do not infer product state from tmux names or branch naming.
@@ -112,13 +110,13 @@ Write `scratch/garden-scan.md`:
 <objective, cadence, policy, PM binding>
 
 ### Runtime
-<Wave presence and resident state, active Project/Tasks, conditions>
+<Wave presence and resident state, active Tasks, conditions>
 
 ### Progress
 <what shipped recently, what's in flight>
 
-### Projects
-<Project KRs, Project state, next owner>
+### Chapter
+<Current KRs, dated evidence, next owner>
 
 ### Tasks
 <[identifier · Task title](provider URL) — status; next action/owner,
@@ -150,5 +148,5 @@ evaluate quality. That's assess's job.
 **Staleness.** Run the commands. Don't rely on memory or cached state. The scan must
 reflect the repo as it is right now.
 
-**Partial reads.** Read every Project and Task in each Wave's PM/status snapshot.
+**Partial reads.** Read the full chapter plan and every Task in each Wave's PM/status snapshot.
 Skipping filed or running work means the assessment will miss things.

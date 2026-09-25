@@ -8,8 +8,8 @@ run the same local operation on another Home.
 | You are | Start with | Deep dive |
 |---|---|---|
 | A human running prompts | [Basic Usage](#basic-usage), [Context Flags](#context-flags) | [Get Started](getting-started.md) |
-| A human operating waves | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
-| An agent driving other agents | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks) | [The Agent API](agent-api.md) |
+| A human operating waves | [Running Waves and Tasks](#running-waves-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
+| An agent driving other agents | [Running Waves and Tasks](#running-waves-and-tasks) | [The Agent API](agent-api.md) |
 | Watching the whole machine | [Reading This Home](#reading-this-home) | [Conducting](conducting.md) |
 
 Every read surface takes `--json`; that JSON is the same wire the Mac app
@@ -40,23 +40,21 @@ lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
 lf task prepare DES-123           # tracked Work + worktree, no execution
-lf project prepare runtime-model  # tracked Project Work, no execution
 lf --task DES-123 research \
   "Map runtime behavior; write scratch/research-runtime.md"
-lf --project context project/operate \
+lf --wave context wave/operate \
   "Reconcile the KRs with current evidence"
 lf task restart DES-123 "Reconcile the completed research"
 lf task run DES-123 --directive "fix the flaky test" # keep one Task through merge
 lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
 
-`--task`, `--project`, and `--wave` run one named skill about existing Work
+`--task` and `--wave` run one named skill about existing Work
 without advancing its Flow position. The most specific selector is the
-Run subject: Task implies Project and Wave; Project implies Wave. Broader
+Run subject: a Task implies its Wave. Broader
 selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
-Markdown snapshot. Project and Wave binding use the owning Wave repository
-because Projects do not own worktrees. Several Runs may concern the same Work
+Markdown snapshot. Wave binding uses its repository. Several Runs may concern the same Work
 concurrently; each keeps a distinct Run id and none reserves the Work. Bound
 direct skills leave edits uncommitted; give parallel contributions distinct
 paths, reconcile the shared tree, then checkpoint one coherent result with `lf
@@ -83,7 +81,7 @@ Names resolve in this order:
 1. `.lf/skills/<skill>.md` or `.lf/skills/<ns>/<skill>.md` — repo-local (also overrides builtins)
 2. `.claude/commands/<skill>.md` — Claude Code compatible
 3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
-4. Core built-in skills, grouped by Task, Project, Wave, and Ops (`lf list` shows the live catalog)
+4. Core built-in skills, grouped by Task, Wave, and Ops (`lf list` shows the live catalog)
 5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
 Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
@@ -129,13 +127,11 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `refine` | Refine existing work |
 | `task/clarify` / `task/pursue` / `task/mutate` | Clarify, implement, and judge one durable Task |
 
-Project skills — shape and pursue measured bets inside a Wave:
+Planning skills — shape and pursue the current chapter:
 
 | Skill | What it does |
 |------|--------------|
-| `project/operate` | Judge KR evidence and launch the next useful Task in one turn |
-| `project/start-chapter` / `project/review-chapter` | One bet's chapter: propose definition, KRs, and Task dispositions / verdict every KR on dated evidence |
-| `project-promote` | Promote a Project into a resident child Wave |
+| `wave/operate` | Judge KR evidence and launch the next useful Task in one turn |
 | `expand` / `reduce` / `polish` | Find higher leverage, simplifications, and finish quality |
 | `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
 
@@ -151,7 +147,7 @@ Wave skills — maintain the durable operating context and its portfolio:
 | `wave/operate` | Read, decide, and take the one or two useful Wave moves in one turn |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 | `update-wave` / `split-wave` | Maintain Wave structure and memory |
-| `wave/start-chapter` / `wave/review-chapter` | One Wave's chapter: propose its Project portfolio / report every KR verdict |
+| `wave/start-chapter` / `wave/review-chapter` | One Wave's chapter: propose its fresh plan / report every KR verdict |
 | `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
 | `s3-scan` / `s3-assess` | Control: live health, velocity, CI, retries, worker-pool size |
 | `s4-scan` / `s4-assess` | Intelligence: dependencies, advisories, upstream APIs, what they imply |
@@ -199,8 +195,7 @@ level stays there. Put `--` before literal arguments that look like flags.
 | Flag | Description |
 |------|-------------|
 | `--docs PATH[,PATH...]` | Prefetch docs into context—files, globs, or dirs (default: none) |
-| `-w, --wave NAME` | Select Wave Work, or qualify selected Project or Task Work. |
-| `--project SELECTOR` | Select Project Work, or qualify selected Task Work. |
+| `-w, --wave NAME` | Select Wave Work, or qualify selected Task Work. |
 | `--task ISSUE` | Select Task Work. |
 | `--diff-files / --no-diff-files` | Include files touched by branch (default: off) |
 | `--diff / --no-diff` | Include raw `git diff` output |
@@ -296,24 +291,22 @@ work.
 Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 [Authoring](authoring.md).
 
-## Running Waves, Projects, and Tasks
+## Running Waves and Tasks
 
 ```bash
 lf start designer                                  # serve it on this machine
-lf wave designer                                   # foreground development mode
+lf wave serve designer                                   # foreground development mode
 lf pause designer                                  # keep listening; queue new turn starts
 lf resume designer                                 # enable queued and future turns
 lf stop designer                                   # stop it; leave the Home keeper running
-lf project run <linear-project-id>                  # durable Project Work
-lf project prepare <linear-project-id>              # Project Work, no execution
 lf task prepare DES-123                             # Task Work + worktree, no execution
-lf task start <linear-project-id> "fix the flaky chord-timeout test"
-pbpaste | lf task start incident-management
+lf task start --wave <wave> "fix the flaky chord-timeout test"
+pbpaste | lf task start --wave incidents
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --flow incident
 lf task status DES-123
-lf --as project:proj_... : "Which KR owns this?"      # ordinary agent perspective
+lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
 lf ask "Review this proof with me"                    # block on a human session
 lf session list --json                                # unresolved human Sessions
 lf session open task_...:flow:node:0 --json           # exact native provider resume
@@ -331,7 +324,6 @@ lf work interrupt task task_...                      # refuses without exact pro
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
 lf work relocate wave wave_... --name platform       # rename a stopped Wave
 lf work relocate wave wave_... --repo ../moved-repo  # repair or move its repository
-lf work disable project project_...                  # exclude it from Wave selection
 lf work enable task task_...                         # restore Task eligibility
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
@@ -342,12 +334,10 @@ and never follows a remote placement record.
 Bare `lf start` is the automatic form: it starts only repo Waves whose optional
 `owner` and `home` fields in `GOAL.md` match this machine and whose recorded
 placement is local and enabled. The named form is the explicit override.
-`lf wave <name>` runs that Wave listener and resident in the foreground for
-development. `lf project run` launches one finite `project/operate` Run without
-a Project worktree or resident process. It starts with stored Project context
-and reads the available planning evidence during the operation. A failed PM
-read does not prevent the skill from continuing with its known KRs.
-Project and Task Work have stable identities and small state:
+`lf wave serve <name>` runs the Wave listener in the foreground for development.
+`lf --wave <wave> wave/operate` makes one finite planning pass over the chapter
+and Tasks. A Wave has exactly one current chapter, resolved internally.
+Task Work has stable identities and small state:
 `ready`, `done`, or `abandoned`. Process liveness, Task condition, Sessions,
 PR state, Flow position, and Run evidence stay separate. `task prepare` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
@@ -360,8 +350,7 @@ while starting a fresh worker.
 `steer` posts a Linear Task comment and never starts a worker. Direct Linear
 comments enter the same delivery path. Only Task advancers consume steering;
 independent `--task` or `--as` Runs do not. `task run` selects the Flow when
-execution should begin. Project and Wave guidance is extra input to their
-operate skills.
+execution should begin. Wave guidance is extra input to `wave/operate`.
 Wave names are repository-scoped. Relocation requires the UUID because the
 repository and name may both change; it preserves authored Wave files, journal,
 PM binding, Work state, and Home placement. Home-local Run records remain on
@@ -371,7 +360,7 @@ old-name alias. UUID-addressed `lf work` reads and mutations also verify that
 the selected Work belongs to the invoking repository; a UUID from another
 repository is not a capability.
 
-A Linear Project may recommend one Task Flow. `lf task run --flow <name>`
+The Wave's current chapter may recommend one Task Flow. `lf task run --flow <name>`
 overrides that recommendation when it selects the next worker's Flow. The
 selected Flow definition is persisted immutably for that invocation, so edits
 to repository Flow YAML cannot change a Task already in progress. When the
@@ -409,7 +398,7 @@ surviving unclaimed provider PID has no mutation or signal authority.
 A skill that needs another Work's perspective launches an ordinary Run directly:
 
 ```bash
-lf --batch --as project:<id> : "Which proof matters?"
+lf --batch --as wave:<name> : "Which proof matters?"
 ```
 
 A headless Run that needs human judgment runs `lf ask "<request>"`. Loopflow
@@ -495,7 +484,7 @@ accounts; durable processes scrub forwarded authority before detaching.
 ## Speaking to Waves
 
 The **thread** is the human surface: durable, replayed, and owned by a running
-Wave. Typed Work observations carry Project and Task progress to their parent.
+Wave. Typed Work observations carry Task progress directly to the Wave.
 
 ```bash
 lf chat "ship the button audit first"       # post into the current wave's thread
@@ -1054,7 +1043,7 @@ and host-drift observation windows share one evidence surface.
 ## lf pm
 
 Read and edit a wave's Linear planning state. Each wave is backed by one
-Linear Initiative, projects are Linear Projects, tasks are Issues. `sync`
+Linear Initiative, its one current chapter uses an internal Linear Project, and Tasks are Issues. `sync`
 refreshes the local SQLite read model used by every other read surface.
 
 ```bash
@@ -1064,16 +1053,14 @@ lf pm sync --wave designer                  # refresh SQLite from Linear
 lf pm sync --plan                           # report drift without writing
 lf pm show --wave designer                  # read; refresh when stale
 lf pm show --wave designer --no-sync        # cache-only agent/app read
-lf pm show --wave designer --project ui     # filter to one project
-lf pm project create --wave designer --title "..." --definition "..." \
-  --first task-design --loop slice --finally ship-demo --kr "..."
-lf pm project update --wave designer --project ui --first incident \
-  --loop ship-5whys --finally ship-demo
-lf pm project archive --wave designer --project retired-bet
-lf pm task create --wave designer --project ui --title "Dark mode"
+lf wave update-plan --wave designer --plan plan.json
+lf wave new-chapter --wave designer --chapter 2026-09 --plan plan.json --dry-run --json
+lf wave new-chapter --wave designer --chapter 2026-09 --plan plan.json --json
+lf wave history --wave designer --json
+lf status designer --chapter 2026-08 --json
+lf pm task create --wave designer --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
-lf pm task move --id 1207... --wave designer --project api
 lf pm rename --wave designer --title "Designer"   # rename the Initiative
 lf pm reteam                            # dry-run the repository-wide Team migration
 lf pm reteam --apply                    # migrate when no Task Run can write old ids

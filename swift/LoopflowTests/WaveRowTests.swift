@@ -13,8 +13,7 @@ struct WaveRowViewTests {
         name: String = "swift-falcon",
         status: WorkStatus = .ready,
         live: Bool = false,
-        activeTasks: Int = 0,
-        activeProjects: Int = 0
+        activeTasks: Int = 0
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -23,8 +22,7 @@ struct WaveRowViewTests {
                 repo: "/tmp/repo",
                 status: status,
                 live: live,
-                activeTasks: activeTasks,
-                activeProjects: activeProjects
+                activeTasks: activeTasks
             )
         )
     }

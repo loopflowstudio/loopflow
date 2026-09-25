@@ -16,6 +16,11 @@ struct WaveDetailReading {
     private(set) var snapshot: WaveDetailSnapshot?
     private(set) var errorMessage: String?
 
+    func plan(cached: WavePlan) -> WavePlan {
+        guard let snapshot else { return cached }
+        return WavePlan(objective: snapshot.workMap.objective, chapter: snapshot.workMap.chapter)
+    }
+
     mutating func update(_ snapshot: WaveDetailSnapshot) {
         self.snapshot = snapshot
         errorMessage = nil
@@ -32,7 +37,7 @@ struct WaveDetailReading {
     }
 }
 
-/// One Wave surface: current Project/Task state beside the durable conversation.
+/// One Wave surface: chapter plan and Tasks beside the durable conversation.
 /// `lf status` supplies the work map; the Wave listener streams ordered chat and
 /// child activity from its journal.
 struct WaveDetailPane: View {
@@ -42,6 +47,8 @@ struct WaveDetailPane: View {
 
     @Environment(\.palette) private var palette
     @State private var selection: WaveWorkSelection?
+    @State private var showHistory = false
+    @State private var historyReference: String?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
     // A shared singleton is externally owned, so it observes as an @ObservedObject.
@@ -53,6 +60,7 @@ struct WaveDetailPane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            Button("Chapter history") { showHistory = true }.padding(.bottom, 8)
             Divider()
             HSplitView {
                 WavePlanView(
@@ -70,17 +78,26 @@ struct WaveDetailPane: View {
                     repoPath: repoPath,
                     waveName: wave.name,
                     prefill: prefill,
-                    onSelectChild: { selection = $0 },
+                    onSelectChild: { reference in
+                        if reference.kind == .project {
+                            historyReference = reference.id
+                            if wave.plan?.chapter?.sourceProjectId != reference.id && wave.plan?.chapter?.sourceProjectSlug != reference.id && wave.plan?.chapter?.sourceWorkId != reference.id { showHistory = true }
+                            selection = nil
+                        } else { selection = reference }
+                    },
                     onChildActivity: { workRefresh &+= 1 }
                 )
                     .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .sheet(isPresented: $showHistory) {
+            ChapterHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
+        }
     }
 
     private func tellWave(_ selection: WaveWorkSelection) {
         self.selection = selection
-        let noun = selection.kind == .project ? "Project" : "Task"
+        let noun = "Task"
         prefill = WaveComposerPrefill(
             id: UUID(),
             text: "Regarding \(noun) \(selection.id): "
@@ -124,8 +141,7 @@ private struct WavePlanView: View {
     @Environment(\.palette) private var palette
     @State private var reading = WaveDetailReading()
     // True until the first live read resolves. It gates the loading affordance,
-    // so an empty projects area during the pre-snapshot window reads as
-    // "loading" rather than "no projects".
+    // so an empty plan during the pre-snapshot window reads as loading.
     @State private var isAwaitingDetail = true
 
     private var identity: String { "\(repoPath)|\(wave.id)" }
@@ -136,15 +152,12 @@ private struct WavePlanView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
+                chapterAndTasks
                 if let portfolio = reading.snapshot?.metricPortfolio {
                     WaveMetricPortfolioView(
-                        portfolio: portfolio,
-                        projectNames: Dictionary(uniqueKeysWithValues:
-                            (workMap?.projects ?? []).map { ($0.project.id, $0.project.name) }
-                        )
+                        portfolio: portfolio
                     )
                 }
-                projects
                 if let selection, let workMap {
                     WaveWorkInspector(
                         selection: selection,
@@ -168,7 +181,8 @@ private struct WavePlanView: View {
         }
     }
 
-    private var objectiveText: String { workMap?.objective ?? plan.objective }
+    private var displayedPlan: WavePlan { reading.plan(cached: plan) }
+    private var objectiveText: String { displayedPlan.objective }
 
     /// Lead with one sentence, prominent. The full objective is disclosure, not
     /// clipped prose — and the lead is a deterministic excerpt, never a
@@ -222,56 +236,25 @@ private struct WavePlanView: View {
         return result.trimmingCharacters(in: .whitespaces)
     }
 
-    private var projects: some View {
-        let projectCount = workMap?.projects.count ?? plan.projects.count
-        return VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(spacing: Spacing.sm) {
-                Text("Projects")
-                    .font(Typography.caption(10))
-                    .fontWeight(.medium)
-                    .foregroundStyle(palette.textSecondary)
-
-                Text("\(projectCount)")
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                    .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, Spacing.xxs)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+    private var chapterAndTasks: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            if let chapter = displayedPlan.chapter { WaveChapterView(chapter: chapter) }
+            Text("Tasks").font(Typography.sectionTitle(17))
+            if isAwaitingDetail {
+                ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
+            } else if let workMap {
+                switch workMap.tasks {
+                case .unavailable(let reason): Text(reason).foregroundStyle(Color.statusWarning)
+                case .available(let tasks, _):
+                    if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
+                    ForEach(tasks) { task in WaveTaskWorkView(task: task, selection: $selection) }
+                }
+            } else { Text("Task status unavailable.").foregroundStyle(palette.textSecondary) }
+            ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
+                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
+                    .foregroundStyle(Color.statusWarning)
             }
-
-            if let workMap, !workMap.projects.isEmpty {
-                LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                    ForEach(workMap.projects) { project in
-                        WaveProjectWorkView(
-                            project: project,
-                            selection: $selection
-                        )
-                    }
-                }
-            } else if plan.projects.isEmpty {
-                if isAwaitingDetail {
-                    HStack(spacing: Spacing.sm) {
-                        ProgressView().controlSize(.small)
-                        Text("Loading live detail…")
-                            .font(Typography.caption())
-                            .foregroundStyle(palette.textSecondary)
-                    }
-                    .accessibilityIdentifier("wave-detail-loading")
-                } else {
-                    Text("No projects yet.")
-                        .font(Typography.caption())
-                        .foregroundStyle(palette.textSecondary)
-                }
-            } else {
-                LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                    ForEach(plan.projects) { project in
-                        WaveProjectView(project: project)
-                    }
-                }
-            }
-        }
-        .accessibilityIdentifier("wave-projects")
+        }.accessibilityIdentifier("wave-tasks")
     }
 
     /// Live-status failures are operational detail, not primary hierarchy: a
@@ -336,7 +319,6 @@ private struct WavePlanView: View {
 
 struct WaveMetricPortfolioView: View {
     let portfolio: MetricPortfolio
-    let projectNames: [String: String]
 
     @Environment(\.palette) private var palette
 
@@ -514,28 +496,7 @@ struct WaveMetricPortfolioView: View {
 
     @ViewBuilder
     private func metricGroups(_ metrics: [MetricReading]) -> some View {
-        let projectIds = Array(Set(metrics.map(\.projectId))).sorted {
-            (projectNames[$0] ?? $0) < (projectNames[$1] ?? $1)
-        }
-        ForEach(projectIds, id: \.self) { projectId in
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack(spacing: Spacing.sm) {
-                    Rectangle()
-                        .fill(palette.accent)
-                        .frame(width: 12, height: 2)
-                    Text(projectNames[projectId] ?? projectId)
-                        .font(Typography.body(11))
-                        .fontWeight(.semibold)
-                        .foregroundStyle(palette.text)
-                }
-                ForEach(metrics.filter { $0.projectId == projectId }) { metric in
-                    WaveMetricCard(
-                        metric: metric,
-                        owner: projectNames[projectId] ?? projectId
-                    )
-                }
-            }
-        }
+        ForEach(metrics) { metric in WaveMetricCard(metric: metric, owner: "Wave") }
     }
 }
 
@@ -543,20 +504,29 @@ struct WaveMetricPortfolioPresentation: Equatable {
     let officialCount: Int
     let candidateCount: Int
     let holdingCount: Int
+    let targetedCount: Int
     let requiresWorkCount: Int
     let contractIssueCount: Int
+    let chapterUnavailable: Bool
 
     init(portfolio: MetricPortfolio) {
         let official = portfolio.metrics.filter { $0.stage == .graduated }
         officialCount = official.count
         candidateCount = portfolio.metrics.count - official.count
-        holdingCount = official.count { $0.evidence.isHealthy }
-        requiresWorkCount = official.count - holdingCount
+        targetedCount = official.count { $0.target != nil }
+        holdingCount = official.count { $0.target != nil && $0.evidence.isHealthy }
+        requiresWorkCount = targetedCount - holdingCount
         contractIssueCount = portfolio.contractIssues.count
+        chapterUnavailable = portfolio.metrics.isEmpty && portfolio.contractIssues.contains {
+            if case .chapterUnavailable = $0 { return true }
+            return false
+        }
     }
 
     var headline: String {
-        switch (officialCount, holdingCount) {
+        if chapterUnavailable { return "Chapter targets unavailable." }
+        if officialCount > 0 && targetedCount == 0 { return "No targets set for this chapter." }
+        switch (targetedCount, holdingCount) {
         case (0, _):
             return "No official measures yet. Candidates remain visible while their evidence matures."
         case (1, 1):
@@ -564,7 +534,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
         case (1, 0):
             return "The official measure needs work."
         default:
-            return "\(holdingCount) of \(officialCount) official measures currently hold."
+            return "\(holdingCount) of \(targetedCount) chapter targets currently hold."
         }
     }
 }
@@ -588,7 +558,7 @@ struct WaveMetricRowPresentation: Equatable {
         self.owner = owner
         instrumentState = metric.instrumented ? "Instrumented" : "Awaiting instrument"
         value = metric.evidence.value.map { metric.format($0) } ?? "—"
-        target = metric.target.display(unit: metric.unit)
+        target = metric.target?.display(unit: metric.unit) ?? "unset for this chapter"
         window = metric.window
         freshness = metric.freshness.summary
         reason = metric.evidence.reason
@@ -723,7 +693,7 @@ private extension MetricEvidence {
         switch self {
         case .met: return .statusSuccess
         case .missed: return .statusError
-        case .unknown: return .statusNeutral
+        case .unknown, .untargeted: return .statusNeutral
         case .unavailable: return .statusWarning
         }
     }
@@ -731,13 +701,14 @@ private extension MetricEvidence {
     var displayPriority: Int {
         switch self {
         case .missed, .unavailable: return 0
-        case .unknown: return 1
+        case .unknown, .untargeted: return 1
         case .met: return 2
         }
     }
 
     var label: String {
         switch self {
+        case .untargeted: return "No target"
         case .met: return "Met"
         case .missed: return "Missed"
         case .unknown: return "Unknown"
@@ -752,7 +723,7 @@ private extension MetricEvidence {
 
     var value: Double? {
         switch self {
-        case let .met(value, _, _), let .missed(value, _, _): return value
+        case let .untargeted(value, _, _), let .met(value, _, _), let .missed(value, _, _): return value
         case let .unknown(cause): return cause.value
         case .unavailable: return nil
         }
@@ -760,7 +731,7 @@ private extension MetricEvidence {
 
     var reason: String? {
         switch self {
-        case .met, .missed: return nil
+        case .met, .missed, .untargeted: return nil
         case let .unknown(cause): return cause.summary
         case let .unavailable(reason, sourceAsOf): return "\(reason) · source time \(sourceAsOf)"
         }
@@ -794,153 +765,14 @@ private extension MetricUnknownCause {
 private extension MetricContractIssue {
     var summary: String {
         switch self {
+        case let .chapterUnavailable(waveId, reason): return "\(waveId): chapter targets unavailable: \(reason)"
+        case let .unresolvedTarget(waveId, metricId): return "\(waveId)/\(metricId): chapter target has no readable instrument contract"
         case let .malformedContract(path, message): return "\(path): \(message)"
-        case let .unresolvedOwner(waveId, metricId, projectId):
-            return "\(waveId)/\(metricId) names unknown Project \(projectId)."
         case let .instrumentMismatch(waveId, metricId, contractInstrument, registeredInstrument):
             return "\(waveId)/\(metricId) declares \(contractInstrument), but \(registeredInstrument) is registered."
         case let .invalidGraduation(waveId, metricId, _, reason):
             return "\(waveId)/\(metricId) cannot graduate: \(reason)."
         }
-    }
-}
-
-private struct WaveProjectWorkView: View {
-    let project: WaveProjectWork
-    @Binding var selection: WaveWorkSelection?
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                WaveLensView(lens: projectLens, diameter: 10, accessibilityId: "project-lens")
-                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
-
-                Text(project.project.name)
-                    .font(Typography.sectionTitle(17))
-                    .foregroundStyle(palette.text)
-
-                Text(openTaskLabel)
-                    .font(Typography.caption(10))
-                    .fontWeight(.medium)
-                    .foregroundStyle(palette.textSecondary)
-                    .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, Spacing.xxs)
-                    .background(palette.surfaceMuted)
-                    .clipShape(Capsule())
-                    .accessibilityIdentifier("project-open-tasks")
-
-                Spacer()
-
-                if let status = project.runtime?.status.label {
-                    Text(status)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                }
-            }
-
-            if !project.project.definition.isEmpty {
-                Text(project.project.definition)
-                    .font(Typography.body(13))
-                    .foregroundStyle(palette.textSecondary)
-                    .lineSpacing(2)
-                    .textSelection(.enabled)
-            }
-
-            if !project.project.krs.isEmpty {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(project.project.krs) { kr in
-                        proofRow(text: kr.text, holds: kr.holds)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                ForEach(project.tasks) { task in
-                    WaveTaskWorkView(
-                        task: task,
-                        selection: $selection
-                    )
-                }
-            }
-
-            if let failure = project.runtime?.lastFailure {
-                ProjectFailureHistoryView(failure: failure)
-            }
-
-            Text("Next: \(project.nextMove.owner.rawValue) · \(project.nextMove.reason)")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-            if let directive = project.directive {
-                directiveStatus(directive)
-            }
-        }
-        .padding(Spacing.md)
-        .background(palette.surfaceMuted.opacity(0.65))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .stroke(isSelected ? palette.accent : Color.clear, lineWidth: 1)
-        }
-        .contentShape(Rectangle())
-        .accessibilityIdentifier("wave-project")
-        .onTapGesture {
-            selection = WaveWorkSelection(kind: .project, id: project.project.slug)
-        }
-    }
-
-    private var isSelected: Bool {
-        selection == WaveWorkSelection(kind: .project, id: project.project.slug)
-    }
-
-    /// The Project's lens, derived from its shared runtime and its Tasks'
-    /// conditions — the same grammar the Wave and Task rows use.
-    private var projectLens: WaveLens {
-        WaveLens.forProject(tasks: project.tasks)
-    }
-
-    private var openTaskLabel: String {
-        let open = project.tasks.filter { !$0.task.completed }.count
-        return open == 1 ? "1 open task" : "\(open) open tasks"
-    }
-
-    private func directiveStatus(_ directive: WorkDirectiveSnapshot) -> some View {
-        Text("Direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending incorporation" : "incorporated")")
-            .font(Typography.caption(10))
-            .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
-    }
-
-    private func proofRow(text: String, holds: Bool) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: holds ? "checkmark.circle.fill" : "circle")
-                .font(Typography.caption(11))
-                .foregroundStyle(holds ? palette.accent : palette.textSecondary)
-                .frame(width: 14)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(Typography.caption(12))
-                .foregroundStyle(palette.text)
-                .lineSpacing(2)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(text)
-        .accessibilityValue(holds ? "Holds" : "Open")
-        .accessibilityIdentifier("project-key-result")
-    }
-}
-
-struct ProjectFailureHistoryView: View {
-    let failure: HistoricalFailure
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        Text("Last failure at \(failure.occurredAt): \(failure.message)")
-            .font(Typography.caption(10))
-            .foregroundStyle(palette.textSecondary)
-            .textSelection(.enabled)
-            .accessibilityIdentifier("project-last-failure")
     }
 }
 
@@ -1019,19 +851,7 @@ private struct WaveWorkInspector: View {
                     .buttonStyle(.borderless)
                     .font(Typography.caption(10))
             }
-            if let project {
-                Text(project.project.name)
-                    .font(Typography.sectionTitle(15))
-                    .foregroundStyle(palette.text)
-                details(
-                    directive: project.directive,
-                    status: project.runtime?.status.label ?? "unstarted",
-                    reason: project.nextMove.reason,
-                    provider: project.runtime?.provider,
-                    location: nil,
-                    prs: []
-                )
-            } else if let task {
+            if let task {
                 Text("\(task.task.identifier) · \(task.task.name)")
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
@@ -1067,15 +887,9 @@ private struct WaveWorkInspector: View {
         }
     }
 
-    private var project: WaveProjectWork? {
-        guard selection.kind == .project else { return nil }
-        return workMap.projects.first { $0.project.slug == selection.id || $0.project.id == selection.id }
-    }
-
     private var task: WaveTaskWork? {
         guard selection.kind == .task else { return nil }
-        return workMap.projects
-            .flatMap(\.tasks)
+        return workMap.tasks.items
             .first { $0.task.identifier == selection.id || $0.task.id == selection.id }
     }
 
@@ -1146,52 +960,24 @@ private struct PrLink: View {
     }
 }
 
-private struct WaveProjectView: View {
-    let project: WaveProject
-
+struct WaveChapterView: View {
+    let chapter: ChapterSummary
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(project.title)
-                .font(Typography.sectionTitle(17))
-                .foregroundStyle(palette.text)
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Text("Chapter \(chapter.id)").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
 
-            if let definition = project.definition {
-                Text(definition)
-                    .font(Typography.body(13))
-                    .foregroundStyle(palette.textSecondary)
-                    .lineSpacing(2)
-                    .textSelection(.enabled)
+            ForEach(chapter.krs) { kr in
+                Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
+                    .font(Typography.body(12)).textSelection(.enabled)
+                    .accessibilityValue(kr.holds ? "Holds" : "Open")
             }
-
-            if !project.krs.isEmpty {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(project.krs) { kr in
-                        HStack(alignment: .top, spacing: Spacing.sm) {
-                            Image(systemName: kr.proof == .holds ? "checkmark.circle.fill" : "circle")
-                                .font(Typography.caption(11))
-                                .foregroundStyle(kr.proof == .holds ? palette.accent : palette.textSecondary)
-                                .frame(width: 14)
-                                .accessibilityHidden(true)
-
-                            Text(kr.text)
-                                .font(Typography.caption(12))
-                                .foregroundStyle(palette.text)
-                                .lineSpacing(2)
-                                .textSelection(.enabled)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(kr.text)
-                        .accessibilityValue(kr.proof == .holds ? "Holds" : "Open")
-                    }
-                }
-                .padding(.top, Spacing.xs)
+            if chapter.phase != "complete" {
+                Text("Chapter transition in progress").foregroundStyle(Color.statusWarning)
             }
-        }
-        .padding(Spacing.md)
-        .background(palette.surfaceMuted.opacity(0.65))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            if let error = chapter.error { Text(error).foregroundStyle(Color.statusWarning).textSelection(.enabled) }
+        }.accessibilityIdentifier("wave-chapter")
     }
 }
 

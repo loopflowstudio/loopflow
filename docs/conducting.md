@@ -141,7 +141,7 @@ second database, no machine-wide service. What the CLI reads, it renders:
 
 ## tmux
 
-Detached Wave, Project, and Task processes run as named tmux sessions — that
+Detached Wave and Task processes run as named tmux sessions — that
 is process lifetime and inspection, not the steering protocol:
 
 ```bash

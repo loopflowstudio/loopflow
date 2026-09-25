@@ -100,8 +100,7 @@ class LinearHandler(BaseHTTPRequestHandler):
                                             "id": "project-1",
                                             "name": "Product — Reliability",
                                             "description": "",
-                                            "content": "## Definition\n\nFresh definition.\n\n"
-                                            "## KRs\n\n- [ ] Fresh proof",
+                                            "content": "## KRs\n\n- [ ] Fresh proof",
                                             "initiatives": {"nodes": [{"id": "initiative-1"}]},
                                             "teams": {"nodes": [{"id": "team-1"}]},
                                         }
@@ -224,6 +223,29 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?,?,?,?)",
             (wave_id, "product", str(repo), int(time.time())),
         )
+        chapter = {
+            "id": "fixture",
+            "wave_id": wave_id,
+            "wave": "product",
+            "project_id": "project-1",
+            "content": {
+                "metric_targets": [],
+                "flows": {"recommended": None},
+                "krs": [],
+            },
+            "predecessors": [],
+            "predecessor_metrics": [],
+            "tasks": [],
+            "phase": "complete",
+            "created_at": 1,
+            "activated_at": 1,
+            "completed_at": 1,
+            "error": None,
+        }
+        db.execute(
+            "INSERT INTO wave_chapters VALUES(?,?,?,?,?)",
+            (wave_id, chapter["id"], chapter["project_id"], 1, json.dumps(chapter)),
+        )
         db.commit()
         wave_before = db.execute("SELECT * FROM waves WHERE id=?", (wave_id,)).fetchone()
         receipts = []
@@ -278,14 +300,20 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
             if mode == "recover":
                 assert result.returncode == 0, result.stderr
                 shown = json.loads(result.stdout)
-                assert shown["projects"][0]["definition"] == "Fresh definition."
-                assert shown["projects"][0]["krs"][0]["text"] == "Fresh proof"
+                assert shown["wave"]["goal"].strip() == "Keep working."
+                assert shown["chapter"]["id"] == "fixture"
+                assert shown["chapter"]["krs"][0]["text"] == "Fresh proof"
+                assert "projects" not in shown
                 snapshot = json.loads(
                     db.execute(
                         "SELECT payload FROM pm_snapshots WHERE wave_id=?", (wave_id,)
                     ).fetchone()[0]
                 )
-                assert snapshot["projects"] == shown["projects"]
+                current_plan = next(
+                    project for project in snapshot["projects"] if project["id"] == "project-1"
+                )
+                assert current_plan["krs"] == shown["chapter"]["krs"]
+                assert current_plan["metric_targets"] == shown["chapter"]["metric_targets"]
                 assert current[8] == 1
                 assert _decrypt(key, current[1]) == "synthetic-A2"
                 assert _decrypt(key, current[2]) == "synthetic-R2"

@@ -24,7 +24,7 @@ An external harness opened by a person is a Loopflow **User**, the same caller
 kind as the Mac app. It may inspect status and use `lf chat` when the person
 asks it to converse with a Wave.
 
-A Loopflow-launched Wave, Project, or Task agent is an internal participant.
+A Loopflow-launched Wave or Task agent is an internal participant.
 It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
 while `lf ask` parks the Run at a durable human session in its own checkout.
 
@@ -41,7 +41,7 @@ lf task wait INF-123 --until terminal                # block until it settles
 
 ## The nouns
 
-Tracked Work follows **Wave → Project → Task**. These are stable planning
+Tracked Work follows **Wave → Task**. These are stable planning
 records, not a process hierarchy. A Wave coordinates and remembers; a Project
 pursues measurable KRs; only Task Work owns a worktree, and every file-writing
 change happens there on its one active remote branch and PR to `main`. Work is `ready`,
@@ -55,8 +55,8 @@ process signal-safe. Tasks are Linear issues, so durable delegated work starts
 from an existing issue and the roadmap remains the queue.
 
 Only Task Work persists a selected Flow and advances it one exact boundary at a
-time. Project operation is a finite `project/operate` Run over current facts.
-An agent may also compose `lf task prepare`, a `--task`/`--project`/`--wave`
+time. Project operation is a finite `wave/operate` Run over current facts.
+An agent may also compose `lf task prepare`, a `--task`/`--wave`
 skill Run, Work input, and delivery commands itself. Attribution grants context,
 not permission to move a Task's Flow position.
 
@@ -65,10 +65,9 @@ not permission to move a Task's Flow position.
 ```bash
 lf task prepare INF-123                      # ensure Work and worktree only
 lf task run INF-123                          # run an existing Linear issue
-lf task start <project-id> "add passkeys"    # create the issue, then run it
-pbpaste | lf task start <project-id>         # report from stdin; first line is the title
+lf task start --wave <wave> "add passkeys"    # create the issue, then run it
+pbpaste | lf task start --wave <wave>         # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123       # dependent work before the parent PR merges
-lf project run <project-id>                  # run one finite Project operation
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -85,7 +84,7 @@ merge, then replays only child-authored commits onto `main`.
 
 ```bash
 lf task steer INF-123 "keep the public API"          # post a Linear Task comment
-lf --project <project> project/operate "prioritize the parser"
+lf --wave <wave> wave/operate "prioritize the parser"
 lf --wave <wave> wave/operate "reassess Project priorities"
 ```
 

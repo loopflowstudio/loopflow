@@ -20,7 +20,7 @@ Three reviewed surfaces author a wave:
 |------|-------|
 | **`wave/<name>/GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — curated through reviewed file edits |
-| **`wave/<name>/metrics/*.md`** | Project-owned live metric contracts — meaning, target, window, and freshness |
+| **`wave/<name>/metrics/*.md`** | Wave-owned live metric contracts — meaning, window, and freshness |
 
 Waves live in **Loopflow** (macOS): open the repository and select the Wave to
 put its conversation beside its work map. The same controls exist from the
@@ -29,38 +29,46 @@ CLI:
 ```bash
 lf start shipper                       # explicitly start the Wave on this machine
 lf --wave <wave> wave/operate "invoices first"
-lf status shipper                      # its Project → Task hierarchy
+lf status shipper                      # its current chapter and Tasks
 lf pause shipper                       # refuse new turns; keep listening and queueing
 lf resume shipper                      # start the next queued turn
 lf stop shipper                        # stop this Wave; sibling Waves keep running
 ```
 
-(`lf wave shipper` runs one Wave listener in the foreground until Ctrl-C. Use
+(`lf wave serve shipper` runs one Wave listener in the foreground until Ctrl-C. Use
 it while developing a goal; `lf start` normally asks the Home's shared keeper
 to serve the Wave.)
 
 ## The planning model
 
-Three nouns, kept distinct by kind rather than size:
+Open a Wave to see its enduring objective and current KRs, targets, and Tasks directly. Waves are
+durable responsibilities with memory, cadence, chat, and metrics. Each has one
+current chapter plan, stored in an internal Linear Project.
 
-| Noun | What it means | What it owns |
-|------|---------------|--------------|
-| **Wave** | Durable operating context | Memory, cadence, chat, and project selection |
-| **Project** | Measured bet inside exactly one wave | Definition, KRs, and closure criteria |
-| **Task** | Concrete work that advances a project | One implementation step, investigation, doc, or shipped change |
+At a chapter boundary that Project is replaced. Its metric targets, KRs, and Flow
+recommendation start fresh. Started unfinished Tasks move with the same issue,
+worktree, PR, and Flow. Untouched backlog is canceled; completed Tasks stay in
+history. Missing evidence never authorizes abandonment.
 
-Keep the hierarchy shallow. Every project belongs to one wave; projects don't
-contain projects and don't own memory or cadence. If a project seems to need
-subprojects, split it into siblings, promote the durable context into a wave,
-or demote the pieces into tasks.
-
-```text
-Product wave
-  Loopflow API project
-    Linear tasks
-  Wave Chat project
-    Linear tasks
-```
+Retry an interrupted rotation with the same chapter ID. Before activation,
+preview rereads predecessor plans and Tasks, including newly filed work,
+without changing the saved receipt. After activation, the recorded boundary
+stays fixed and retries reconcile its pending operations. Refreshed completion
+remains historical even after local backlog retirement; conflicting start
+evidence leaves the transition unresolved instead of canceling the Task again.
+Retry previews include pending recovery of moves and cancellations whose
+provider responses were lost, using the same dispositions as application.
+If someone reassigns a Task outside the recorded chapter transition, preview
+and retry report a membership conflict. Reconcile its parent before retrying;
+rotation leaves that Task's provider state unchanged.
+If a known Task is missing from the provider's list, rotation reads it by issue
+identity. Unavailable evidence stops cutover; it never silently drops the Task.
+If the current chapter itself is missing from the portfolio list, PM reads
+recover its content and Tasks using the recorded chapter identity. An unreadable
+chapter stops rotation before provider changes; historical chapters stay closed.
+Rotation archives each recorded predecessor by identity. A missing portfolio
+row is not proof of archival; retries recognize an archive that succeeded
+before its response was lost.
 
 ## The Goal
 
@@ -110,7 +118,7 @@ Builtin goals resolve by name, so the five Viable System Model charters ship
 as `s1`…`s5`:
 
 ```bash
-lf wave s3            # the s3 (control) charter
+lf wave serve s3            # the s3 (control) charter
 ```
 
 Writing a goal well — the weight of each section, frontmatter fields, KR
@@ -122,12 +130,9 @@ craft — is covered in [Authoring → Goals](authoring.md#goals).
 ---
 schema: 1
 id: task-loop-trust
-project_id: d19956b2-9955-437d-aea6-d91766231c77
 stage: installed
 instrument: lifecycle-scorecard
 unit: ratio
-target:
-  at_least: 1
 window: 7d
 freshness: 30h
 ---
@@ -141,10 +146,25 @@ manual Git repair inside the Task fails the metric.
 ```
 
 Save this as `wave/<name>/metrics/task-loop-trust.md`. The filename and `id`
-must match; `project_id` is the stable Project id from `lf pm show --json`.
+must match. The enclosing Wave owns the metric across chapter boundaries.
 Contracts define no command, query, schedule, secret, or KR copy. Product code
 registered as the named instrument pushes pre-aggregated, revision-bound
 observations into the local store.
+
+Set targets in the chapter plan, not the instrument contract:
+
+```json
+{"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"flows":{"recommended":null},"krs":[]}
+```
+
+Apply it with `lf wave new-chapter --wave <wave> --chapter <id> --plan plan.json`.
+Change the current plan with `lf wave update-plan --wave <wave> --plan plan.json`.
+An omitted metric has no target in that chapter; its observations remain visible
+without a pass/fail verdict. Changing a target preserves instrument identity,
+revision, and measurement history. Rotation freezes the previous targets and
+dated readings for `lf status <wave> --chapter <id> --json`. The Wave objective
+stays in `GOAL.md`; chapter plans have no second objective.
+
 
 ```bash
 lf status <wave>            # owner, value, target, window, freshness, reason
@@ -157,7 +177,7 @@ lf roadmap --json           # the same DTO on every Wave row
 for the exact window. Graduation certifies collection, not success: a Missed
 metric can graduate. Later silence becomes Unknown, a current failed source
 read becomes Unavailable, and stale evidence never remains green. Metrics
-inform Project KR judgment but never check a KR automatically.
+inform chapter KR judgment but never check a KR automatically.
 
 ### Discord chat
 
@@ -200,7 +220,7 @@ inherit it. Reload the service after changing or rotating the token. For a
 foreground listener without `lfd`, inject the same secret for that process:
 
 ```bash
-doppler run -- lf wave product
+doppler run -- lf wave serve product
 ```
 
 The bot needs **View Channel**, **Read Message History**, **Send Messages**, and
@@ -355,29 +375,27 @@ silently replicate or aggregate Run records.
 See [Get Started → Go Remote](getting-started.md#go-remote) and
 [Security → Account authority over SSH](security.md#understand-account-authority-over-ssh).
 
-## Projects and KRs
-
-A project is a measured bet inside a wave. Its definition and KRs live in
-Linear Project content — not in a repo file, a status table, or its own memory.
+## Chapter plans and KRs
 
 ```bash
-lf pm project create --wave infra --title "Technical Architecture" \
-  --definition "Loopflow's architecture is legible from the top down." \
-  --first task-design --loop slice --finally ship-demo \
-  --kr "Top-down architecture documentation is complete and published."
+lf status infra --json
+lf wave update-plan --wave infra --plan plan.json
 ```
 
-Start the Project definition with who benefits and what improves in their real
-use of Loopflow. KRs should then read as **proof under duration**: observable
-end states causally connected to that improvement and demonstrated on real
-work over a stated window, not capability checkboxes that pass once on a demo.
-[Authoring → Writing KRs](authoring.md#writing-krs) carries the craft and
-examples.
+`plan.json` contains the complete current plan:
+
+```json
+{"metric_targets":[],"flows":{"recommended":"task-design"},"krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
+```
+
+The Wave objective names who benefits and what improves. Chapter KRs prove observable outcomes
+across a stated window. Update the current plan explicitly; a new chapter never
+copies the previous content or checked KRs.
 
 ## Linear
 
 Tasks live in Linear; there are no local task lists. A wave maps to an
-Initiative, each project to a Linear Project, each task to an Issue. Connect
+Initiative, each chapter to an internal Linear Project, each task to an Issue. Connect
 once — `lf pm init` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
@@ -387,7 +405,7 @@ lf pm init --wave infra --team-key LOO     # first Wave establishes the repo Tea
 lf pm init --all                           # all nested Waves reuse it
 lf pm sync --wave infra                    # refresh the local SQLite snapshot
 lf pm show --wave infra --no-sync          # deterministic cache-only read
-lf pm task create --wave infra --project stability --title "Daemon data integrity"
+lf pm task create --wave infra --title "Daemon data integrity"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 ```
 
@@ -402,8 +420,8 @@ Every concrete file-writing change begins with a Linear task and runs as a
 durable Task Work in its own stable sibling worktree:
 
 ```bash
-lf task start <linear-project-id> "add retry to token refresh"
-pbpaste | lf task start incident-management
+lf task start --wave <wave> "add retry to token refresh"
+pbpaste | lf task start --wave incidents
 lf task prepare INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
 lf task run INF-123
@@ -411,13 +429,13 @@ lf task run INF-124 --stack-on INF-123     # dependent work before the parent me
 lf task run INF-125 --flow incident
 ```
 
-Task Work advances through one active remote branch and PR to `main`. Its Project
+Task Work advances through one active remote branch and PR to `main`. Its chapter
 may recommend one Flow; `--flow` overrides it for this Task worker. Launch pins
 the complete Flow definition and exact position until it completes or parks at
 a human boundary. Completion clears that Flow state and leaves the Task open
 for a later worker or explicit delivery command. After a merge or abandonment,
 Loopflow rotates the worktree onto the next branch. The Task inherits the
-wave's `GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
+wave's `GOAL.md` and `MEMORY.md` plus its current chapter KRs and metric targets.
 
 Each Task PR keeps its own benefit-focused title. After the opening summary,
 Loopflow adds the canonical Task name, Linear link, and merge consequence.
@@ -437,90 +455,20 @@ lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
 PRs, but it still needs one concrete finish line.
 
-## Evidence Portfolios
+## Independent evidence
 
-There are two different portfolios in the hierarchy:
+A Wave can launch independent Tasks to test competing mechanisms for an
+uncertain chapter KR. Each Task returns evidence, an artifact, an exact gap,
+or a counterexample. The Wave compares the findings and directs the next work.
+Keep these Tasks in the one current chapter; no additional Project is needed.
 
-- The Wave's **bet portfolio** is its set of Projects. It allocates attention
-  according to each Project's KR evidence and fit with the Wave objective.
-- A Project's optional **approach portfolio** is a set of independent Tasks
-  testing different mechanisms for one uncertain KR.
-
-An approach portfolio is useful when a premature architecture choice would be
-expensive and several safe probes can run independently. Each Task should name
-its mechanism and return evidence, an artifact, an exact gap, or a
-counterexample. Keep routes independent long enough to expose their own failure
-modes; then let the Project Work synthesize and redirect them.
-
-Do not represent competing approaches as duplicate Projects, launch multiple
-Tasks with the same favored brief, or count activity as evidence. Block a route
-whose missing dependency is as hard as the original question, and reopen it
-only when a materially new mechanism appears. The Wave judges whether the
-Project still earns attention; it does not micromanage the individual probes.
-
-The distinction is the operating rule: Waves choose among bets; Projects may
-compare independent approaches; Tasks do the concrete work.
-
-## Crons
-
-Crons schedule supplementary flows on a wave. They live in `GOAL.md`
-frontmatter and are read by the resident loop: when a schedule comes due while
-the loop is idle, it opens a system pass and dispatches the flow with
-judgment. Edits land without a restart.
-
-```markdown
-<!-- wave/shipper/GOAL.md -->
----
-crons:
-  - flow: sync
-    schedule: "0 0 0 1 * * *"
----
-```
-
-Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due
-mid-turn fires at the next turn boundary; occurrences older than 24 hours are
-missed, not replayed.
-
-## Chapters
-
-A chapter is a dated planning interval. Reviews close its evidence record;
-starts let the plan expire while keeping shipped code:
-
-```bash
-lf -b --task LOO-123 review-chapter             # review every Wave and Project KR
-lf -i --task LOO-123 start-chapter              # shape the next Wave portfolio
-lf -b --wave product wave/review-chapter        # inspect one Wave
-lf -i --wave product wave/start-chapter         # shape one Wave's portfolio
-```
-
-Use a Task worktree for repository chapter work. The repository Run collects
-scoped reports and keeps the tracked evidence record under
-`.lf/chapters/<chapter-id>/` — start ledger, per-Wave and per-Project reports —
-so a cold checkout can reconstruct what the chapter claimed after the Task PR
-lands. A standalone scoped review returns its report without writing to the
-Wave's main checkout. Review gives each ledger KR one verdict
-— holds, does not hold, or unknown — from dated evidence; missing evidence is
-an honest unknown, never a pass or fail, and incomplete enumeration says so.
-
-Start has two human gates: direction is accepted before any scoped session
-launches, and the reconciled plan is accepted before any planning mutation.
-Scoped Wave and Project Runs are proposal-only and can challenge the
-brief. Every old Project and open Task gets an explicit carry, rewrite,
-complete, or retire disposition. Product code and Git history remain; active
-Task work changes only through an accepted disposition.
-
-## Drafting wave content
-
-Draft with `lf design` or write the files by hand — see
-[Authoring → Drafting](authoring.md#drafting). Once `wave/<name>/` exists,
-the Mac app picks it up, and `lf start <name>` starts it from the CLI.
 To remove a wave, stop it, then delete `wave/<name>/`.
 
 ## Worked example
 
 A `wave/billing/` directory for a billing rewrite. `GOAL.md` sets the intent —
-"replace the legacy billing system with a metered usage model." Linear Projects
-hold the proof claims. Reviewed contracts under `wave/billing/metrics/` define
+"replace the legacy billing system with a metered usage model." The current chapter
+holds the proof claims. Reviewed contracts under `wave/billing/metrics/` define
 live evidence such as usage-event latency and invoice correctness; the Wave
 re-judges strategy from their current readings each iteration.
 
@@ -534,8 +482,8 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave reads Projects and Tasks with `lf pm show --no-sync`, directs the
-highest-priority Project, and starts Task Work for every independent
+The Wave reads its chapter and Tasks with `lf pm show --no-sync`, judges the
+KR evidence, and starts Task Work for every independent
 file-writing change. Each shipped PR folds into memory and closes its task.
 
 ## Next

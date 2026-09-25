@@ -38,13 +38,12 @@ struct MockWaveFixtureTests {
         let workMap = detail.workMap
 
         #expect(workMap.objective == "Make releases boring.")
-        let project = try #require(workMap.projects.first)
-        #expect(project.project.krs.count == 1)
-        #expect(project.tasks.filter { !$0.task.completed }.count == 2)
-        #expect(project.runtime?.lastFailure?.message.contains("credential") == true)
+        let chapter = try #require(workMap.chapter)
+        let tasks = workMap.tasks.items
+        #expect(chapter.krs.count == 1)
+        #expect(tasks.filter { !$0.task.completed }.count == 2)
         let metric = try #require(detail.metricPortfolio.metrics.first)
         #expect(metric.name == "Task loops earn trust")
-        #expect(metric.projectId == project.project.id)
         #expect(metric.evidence == .met(
             value: 1,
             sourceWindowStart: "2026-08-13T18:00:00Z",
@@ -56,10 +55,10 @@ struct MockWaveFixtureTests {
         #expect(detail.metricPortfolio.contractIssues.count == 1)
 
         // Project row lens folds Task conditions: waiting outranks clear.
-        #expect(WaveLens.forProject(tasks: project.tasks).color == .blue)
+        #expect(WaveLens.forTasks(tasks: tasks).color == .blue)
 
         // Task rows: the shared condition verbatim.
-        let byId = Dictionary(uniqueKeysWithValues: project.tasks.map { ($0.task.identifier, $0) })
+        let byId = Dictionary(uniqueKeysWithValues: tasks.map { ($0.task.identifier, $0) })
         #expect(WaveLens.forTask(try #require(byId["INF-123"]).condition).color == .blue)
         #expect(WaveLens.forTask(try #require(byId["INF-124"]).condition).color == .black)
     }

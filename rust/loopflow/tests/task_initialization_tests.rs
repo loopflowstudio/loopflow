@@ -1,3 +1,5 @@
+#[path = "support/chapter.rs"]
+mod chapter;
 mod support;
 
 use std::process::Command;
@@ -42,13 +44,23 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .block_on(task.store.get_project(&task.task.project_id))
         .expect("read owning Project")
         .expect("owning Project exists");
+    runtime
+        .block_on(task.store.save_chapter(
+            &chapter::current_chapter(
+                &task.task.wave_id,
+                "task-pr-tests",
+                project.plan.id.as_str(),
+            ),
+            true,
+        ))
+        .expect("bind current chapter");
     let payload = serde_json::json!({
         "projects": [{
             "id": project.plan.id.as_str(),
             "slug": project.plan.slug,
             "name": project.plan.name,
             "summary": project.plan.prompt_context,
-            "definition": project.plan.prompt_context,
+            "metric_targets": [],
             "flows": {"recommended": null},
             "krs": [],
             "initiative_ids": ["initialization-initiative"],
@@ -119,8 +131,8 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let roadmap: serde_json::Value = serde_json::from_slice(&roadmap.stdout).expect("roadmap JSON");
     let wave = &roadmap["waves"][0];
-    assert_eq!(wave["projects"]["state"], "ok", "roadmap wave: {wave:#}");
-    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
+    assert_eq!(wave["tasks"]["state"], "ok", "roadmap wave: {wave:#}");
+    let roadmap_task = &wave["tasks"]["items"][0];
     assert_eq!(roadmap_task["task"]["identifier"], "INF-123");
     assert_eq!(roadmap_task["actions"]["recommended"], "no_action");
     assert!(roadmap_task["condition"]["reason"]
@@ -160,8 +172,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale_roadmap: serde_json::Value =
         serde_json::from_slice(&stale_roadmap.stdout).expect("stale roadmap JSON");
-    let stale_condition =
-        &stale_roadmap["waves"][0]["projects"]["items"][0]["tasks"][0]["condition"];
+    let stale_condition = &stale_roadmap["waves"][0]["tasks"]["items"][0]["condition"];
     assert_eq!(stale_condition["state"], "blocked");
     assert!(stale_condition["reason"]
         .as_str()

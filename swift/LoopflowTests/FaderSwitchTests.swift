@@ -46,8 +46,7 @@ struct FaderSwitchTests {
         let fixture = try ConsoleFixture.load()
         let tasks = Dictionary(
             uniqueKeysWithValues: fixture.roadmap.waves
-                .flatMap(\.projects.items)
-                .flatMap(\.tasks)
+                .flatMap(\.tasks.items)
                 .map { ($0.id, $0) }
         )
 

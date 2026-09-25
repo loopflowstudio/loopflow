@@ -946,60 +946,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn complete_project_operation(
-        &self,
-        project_id: &ProjectId,
-        observations: &[ObservationOutboxRow],
-    ) -> StoreResult<Project> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut project = transaction
-            .query_row(
-                PROJECT_SELECT,
-                params![project_id.as_str()],
-                map_project_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        project.iteration += 1;
-        project.updated_at = OffsetDateTime::now_utc();
-        update_project_progression_in(&transaction, &project)?;
-        consume_project_observations_in(&transaction, &project, observations)?;
-        insert_project_event_in(
-            &transaction,
-            &project,
-            &ProjectEventKind::IterationCompleted {
-                iteration: project.iteration,
-                summary: "project/operate completed".to_string(),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(project)
-    }
-
-    pub fn fail_project_operation(&self, project_id: &ProjectId, error: &str) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let project = transaction
-            .query_row(
-                PROJECT_SELECT,
-                params![project_id.as_str()],
-                map_project_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        insert_project_event_in(
-            &transaction,
-            &project,
-            &ProjectEventKind::Failed {
-                error: error.to_string(),
-                resumable: true,
-            },
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -1191,74 +1137,6 @@ impl SqliteStore {
     }
 }
 
-fn consume_project_observations_in(
-    conn: &Connection,
-    project: &Project,
-    observations: &[ObservationOutboxRow],
-) -> StoreResult<()> {
-    for observation in observations {
-        consume_task_observation_for_project_in(conn, project, observation)?;
-    }
-    Ok(())
-}
-
-fn consume_task_observation_for_project_in(
-    conn: &Connection,
-    project: &Project,
-    observation: &ObservationOutboxRow,
-) -> StoreResult<bool> {
-    let (
-        ObservationRecipient::Project {
-            project_id: recipient_id,
-        },
-        ChildRef::Task(task_id),
-        ChildEventPayload::Task { event },
-    ) = (
-        &observation.recipient,
-        &observation.source,
-        &observation.payload,
-    )
-    else {
-        return Err(StoreError::InvalidData(
-            "Project can consume only supervised Task observations".to_string(),
-        ));
-    };
-    if recipient_id != &project.id {
-        return Err(StoreError::InvalidData(format!(
-            "observation {} belongs to Project {recipient_id}, not {}",
-            observation.id, project.id
-        )));
-    }
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM project_events
-            WHERE project_id=?1
-              AND json_extract(kind_json, '$.kind')='task_observed'
-              AND json_extract(kind_json, '$.task_id')=?2
-              AND json_extract(kind_json, '$.task_event_id')=?3
-         )",
-        params![project.id.as_str(), task_id.as_str(), observation.event_id],
-        |row| row.get(0),
-    )?;
-    if !exists {
-        insert_project_event_in(
-            conn,
-            project,
-            &ProjectEventKind::TaskObserved {
-                task_id: task_id.clone(),
-                task_event_id: observation.event_id,
-                event: Box::new(event.clone()),
-            },
-        )?;
-    }
-    conn.execute(
-        "UPDATE observation_outbox SET delivered_at=?1
-         WHERE id=?2 AND delivered_at IS NULL",
-        params![now_unix(), observation.id],
-    )?;
-    Ok(!exists)
-}
-
 fn validate_task(task: &Task) -> StoreResult<()> {
     task.validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
@@ -1371,6 +1249,17 @@ fn insert_initial_task(
     validate_task(task)?;
     validate_initial_task_pr(task, pr)?;
     validate_task_project(conn, task)?;
+    let expired: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM projects p JOIN wave_chapters c ON c.wave_id=p.wave_id AND c.current=1
+         WHERE p.id=?1 AND p.external_project_id != c.project_id)",
+        [task.project_id.as_str()], |row| row.get(0),
+    )?;
+    if expired {
+        return Err(StoreError::InvalidData(
+            "cannot prepare a new Task in chapter history; refresh the Wave".into(),
+        ));
+    }
+
     let parameters = task_params(task);
     conn.execute(
         TASK_INSERT,
@@ -1426,18 +1315,6 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
-fn update_project_progression_in(conn: &Connection, project: &Project) -> StoreResult<()> {
-    let parameters = project_progression_params(project);
-    if conn.execute(
-        PROJECT_PROGRESSION_UPDATE,
-        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-    )? != 1
-    {
-        return Err(StoreError::NotFound);
-    }
-    Ok(())
-}
-
 const TASK_INSERT: &str = "INSERT INTO tasks (
     id, project_id, external_issue_id, issue_identifier, issue_title,
     issue_description, pm_snapshot_synced_at, pm_writeback_json,
@@ -1459,7 +1336,7 @@ pub(super) const TASK_SELECT: &str = "SELECT
     t.project_id, t.abandon_requested_at, t.abandon_reason
     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1";
 const TASK_UPDATE: &str = "UPDATE tasks SET
-    project_id=?2, external_issue_id=?3, issue_identifier=?4,
+    external_issue_id=?3, issue_identifier=?4,
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10,
     abandon_requested_at=?11, abandon_reason=?12, created_at=?13, updated_at=?14
@@ -2104,9 +1981,6 @@ const PROJECT_FACT_UPDATE: &str = "UPDATE projects SET
     abandon_requested_at=?8, abandon_reason=?9,
     created_at=?10, updated_at=?11
     WHERE id=?1";
-const PROJECT_PROGRESSION_UPDATE: &str = "UPDATE projects SET
-    updated_at=?2, iteration=?3
-    WHERE id=?1";
 fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(project.id.as_str().to_string()),
@@ -2136,14 +2010,6 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
 
 fn project_fact_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     project_params(project).into_iter().take(11).collect()
-}
-
-fn project_progression_params(project: &Project) -> Vec<Box<dyn ToSql>> {
-    vec![
-        Box::new(project.id.as_str().to_string()),
-        Box::new(project.updated_at.unix_timestamp()),
-        Box::new(project.iteration),
-    ]
 }
 
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
@@ -2212,11 +2078,11 @@ pub(super) fn insert_task_event_in(
         params![task.id.as_str(), serde_json::to_string(kind)?, created_at],
     )?;
     let event_id = conn.last_insert_rowid();
-    if kind.is_project_observable() {
+    if kind.is_wave_observable() {
         insert_observation(
             conn,
-            &ObservationRecipient::Project {
-                project_id: task.project_id.clone(),
+            &ObservationRecipient::Wave {
+                wave_id: task.wave_id.clone(),
             },
             &ChildRef::Task(task.id.clone()),
             event_id,
@@ -2225,20 +2091,6 @@ pub(super) fn insert_task_event_in(
             },
             created_at,
         )?;
-        if kind.is_root_wave_observable() {
-            insert_observation(
-                conn,
-                &ObservationRecipient::Wave {
-                    wave_id: task.wave_id.clone(),
-                },
-                &ChildRef::Task(task.id.clone()),
-                event_id,
-                &ChildEventPayload::Task {
-                    event: kind.clone(),
-                },
-                created_at,
-            )?;
-        }
     }
     Ok(TaskEvent {
         id: event_id,

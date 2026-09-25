@@ -83,7 +83,7 @@ lf : "add type hints to utils.py"
 Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf task start <linear-project-id> "add OAuth login"
+lf task start --wave <wave> "add OAuth login"
 lf task status <issue-id>
 lf task steer <issue-id> "support passkeys too"
 lf task wait <issue-id> --until terminal
@@ -122,7 +122,7 @@ lf ship                                  # final Task gate → learnings → lan
 
 Flows automate skills within one bounded pass. Their YAML owns ordering and
 human gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
-belongs to Wave, Project, and Task runtimes.
+belongs to Wave and Task execution.
 
 ### Custom skills
 
@@ -198,7 +198,7 @@ shown in the [Sessions lifecycle](../README.md#sessions).
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.
-Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
+Once `wave/` files exist, `lf wave serve <name>` runs them and Loopflow picks them up.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
 

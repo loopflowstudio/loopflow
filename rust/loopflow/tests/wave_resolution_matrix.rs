@@ -4,12 +4,6 @@
 //! ambient environments in one table-driven harness. All commands in the same
 //! environment classify the same way. A completeness guard walks the clap tree
 //! and fails CI when a new `--wave`-bearing command is not registered.
-//!
-//! The remaining divergences W2-151 left behind (`lf home probe`, `lf roadmap`,
-//! `lf project start`, `lf project promote`) were
-//! fixed on main before this test shipped. The matrix is the proof they stay
-//! fixed: any command that silently drops a stale UUID or invents its own
-//! resolution rule fails a cell.
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -173,6 +167,14 @@ const COMMANDS: &[Cmd] = &[
             ..Special::NONE
         },
     },
+    Cmd {
+        id: "wave history",
+        path: &["wave", "history"],
+        base_args: &["wave", "history", "--json"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
     // ── Mutations ────────────────────────────────────────────────────────
     // `chat post` uses stdin for text: its `trailing_var_arg` would swallow
     // `--wave` if text were on the command line.
@@ -218,7 +220,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd {
         id: "pm task create",
         path: &["pm", "task", "create"],
-        base_args: &["pm", "task", "create", "--project", "test", "--title", "T"],
+        base_args: &["pm", "task", "create", "--title", "T"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special::NONE,
@@ -240,58 +242,6 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
-        id: "pm task move",
-        path: &["pm", "task", "move"],
-        base_args: &["pm", "task", "move", "--id", "W2-999", "--project", "test"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm project create",
-        path: &["pm", "project", "create"],
-        base_args: &[
-            "pm",
-            "project",
-            "create",
-            "--title",
-            "T",
-            "--definition",
-            "D",
-            "--kr",
-            "K",
-        ],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm project update",
-        path: &["pm", "project", "update"],
-        base_args: &[
-            "pm",
-            "project",
-            "update",
-            "--project",
-            "test",
-            "--definition",
-            "D",
-            "--kr",
-            "K",
-        ],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm project archive",
-        path: &["pm", "project", "archive"],
-        base_args: &["pm", "project", "archive", "--project", "test"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "cron add",
         path: &["cron", "add"],
         base_args: &[
@@ -307,17 +257,25 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
-        id: "project start",
-        path: &["project", "start"],
-        base_args: &["project", "start", "Test Project"],
+        id: "task start",
+        path: &["task", "start"],
+        base_args: &["task", "start", "Fixture task"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special::NONE,
     },
     Cmd {
-        id: "project promote",
-        path: &["project", "promote"],
-        base_args: &["project", "promote", "test-slug"],
+        id: "wave new-chapter",
+        path: &["wave", "new-chapter"],
+        base_args: &["wave", "new-chapter", "--chapter", "next", "--dry-run"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "wave update-plan",
+        path: &["wave", "update-plan"],
+        base_args: &["wave", "update-plan", "--plan", "plan.json"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special::NONE,
@@ -401,7 +359,7 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // Creation flows may name the Wave being registered.
-    if env.id == "explicit-unknown" && cmd.id == "pm init" {
+    if env.id == "explicit-unknown" && matches!(cmd.id, "pm init" | "wave new-chapter") {
         return Outcome::Resolved;
     }
 
@@ -472,8 +430,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
 
-    // `project promote` reaches an authored agent flow after successful Wave
-    // resolution. Keep this resolution test hermetic instead of invoking the
+    // Task start may reach an authored flow after successful Wave resolution. Keep this resolution test hermetic instead of invoking the
     // developer's real provider CLI.
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -482,8 +439,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755))
         .expect("fake codex permissions");
 
-    // Git repo on a clean main — `lf project start` requires this before
-    // reaching wave resolution.
+    // Task start requires a clean repository before reaching Wave resolution.
     let git = |args: &[&str]| {
         std::process::Command::new("git")
             .args(args)
@@ -516,6 +472,13 @@ fn seed(home: &Path, repo: &Path) -> Wave {
 
     // Commit everything so the repo is clean.
     git(&["add", "."]);
+    std::fs::write(
+        repo.join("plan.json"),
+        serde_json::to_vec(&loopflow::ops::chapter::empty_plan()).unwrap(),
+    )
+    .unwrap();
+    git(&["add", "plan.json"]);
+
     let commit = git(&["commit", "-m", "seed", "--allow-empty"]);
     assert!(
         commit.status.success() || commit.status.code() == Some(1),

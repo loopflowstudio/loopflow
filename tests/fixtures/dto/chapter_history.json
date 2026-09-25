@@ -1,0 +1,18 @@
+[
+  {
+    "id": "one",
+    "source_project_id": "old-plan",
+    "source_project_slug": "chapter-one",
+    "closed_at": 100,
+    "phase": "complete",
+    "source_work_id": null
+  },
+  {
+    "id": "two",
+    "source_project_id": "current-plan",
+    "source_project_slug": "",
+    "closed_at": null,
+    "phase": "complete",
+    "source_work_id": null
+  }
+]

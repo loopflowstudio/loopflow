@@ -1,0 +1,121 @@
+{
+  "id": "one",
+  "wave": "product",
+  "source_project_id": "old-plan",
+  "source_project_slug": "chapter-one",
+  "content": {
+    "flows": {
+      "recommended": null
+    },
+    "krs": [
+      {
+        "text": "First proof",
+        "holds": false
+      }
+    ],
+    "metric_targets": [
+      {
+        "metric_id": "met",
+        "target": {
+          "kind": "at_least",
+          "value": 1.0
+        }
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "task": {
+        "id": "active",
+        "identifier": "FIX-1",
+        "url": null,
+        "name": "Started delivery",
+        "description": "",
+        "rank": 1,
+        "completed": false,
+        "state": "started",
+        "project_id": "old-plan",
+        "project": "chapter-one",
+        "team_id": "team-1",
+        "assignee": null
+      },
+      "disposition": "move",
+      "reason": "work has started; retain its identity and execution",
+      "applied": true,
+      "observed_at": 100,
+      "at_boundary": true
+    }
+  ],
+  "observed_at": 100,
+  "closed_at": 100,
+  "transition": {
+    "id": "one",
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "wave": "product",
+    "project_id": "old-plan",
+    "content": {
+      "flows": {
+        "recommended": null
+      },
+      "krs": [
+        {
+          "text": "First proof",
+          "holds": false
+        }
+      ],
+      "metric_targets": [
+        {
+          "metric_id": "met",
+          "target": {
+            "kind": "at_least",
+            "value": 1.0
+          }
+        }
+      ]
+    },
+    "predecessors": [],
+    "tasks": [],
+    "phase": "complete",
+    "created_at": 1,
+    "activated_at": 2,
+    "completed_at": 3,
+    "error": null,
+    "predecessor_metrics": []
+  },
+  "metrics": {
+    "metrics": [
+      {
+        "identity": {
+          "wave_id": "wave-1",
+          "metric_id": "met"
+        },
+        "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "name": "Met signal",
+        "description": "Fraction of qualifying events that settled successfully.",
+        "stage": "graduated",
+        "instrumented": true,
+        "instrument": "fixture",
+        "unit": "ratio",
+        "target": {
+          "kind": "at_least",
+          "value": 1.0
+        },
+        "window": "7d",
+        "freshness_policy": "6h",
+        "freshness": {
+          "kind": "fresh",
+          "source_time": "2026-08-20T18:00:00Z",
+          "expires_at": "2026-08-21T00:00:00Z"
+        },
+        "evidence": {
+          "kind": "met",
+          "value": 1.0,
+          "source_window_start": "2026-08-13T18:00:00Z",
+          "source_window_end": "2026-08-20T18:00:00Z"
+        }
+      }
+    ],
+    "contract_issues": []
+  },
+  "metrics_evaluated_at": 100
+}

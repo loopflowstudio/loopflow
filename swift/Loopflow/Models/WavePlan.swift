@@ -17,26 +17,12 @@ public struct WaveKeyResult: Sendable, Identifiable, Hashable {
     }
 }
 
-public struct WaveProject: Sendable, Identifiable, Hashable {
-    public let id: String
-    public var title: String
-    public var definition: String?
-    public var krs: [WaveKeyResult]
-
-    public init(id: String, title: String, definition: String? = nil, krs: [WaveKeyResult] = []) {
-        self.id = id
-        self.title = title
-        self.definition = definition
-        self.krs = krs
-    }
-}
-
 public struct WavePlan: Sendable, Hashable {
     public var objective: String
-    public var projects: [WaveProject]
+    public var chapter: ChapterSummary?
 
-    public init(objective: String, projects: [WaveProject] = []) {
+    public init(objective: String, chapter: ChapterSummary? = nil) {
         self.objective = objective
-        self.projects = projects
+        self.chapter = chapter
     }
 }

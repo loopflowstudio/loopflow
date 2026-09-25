@@ -19,6 +19,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let kind: SessionKind
     public let work: WorkReference?
+    public let waveId: String?
     public let title: String
     public let detail: String
     public let cwd: String
@@ -28,6 +29,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, kind, work, title, detail, cwd, state
+        case waveId = "wave_id"
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
     }

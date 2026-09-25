@@ -438,39 +438,14 @@ impl Store {
         kind: &TaskEventKind,
         event: &TaskEvent,
     ) -> StoreResult<()> {
-        if kind.is_project_observable() {
+        if kind.is_wave_observable() {
             if let Some(task) = self.get_task(task_id).await? {
-                if let Err(error) = crate::ops::project::wake_task_project_route(self, &task).await
-                {
-                    tracing::debug!(
-                        %error,
-                        %task_id,
-                        project_id = %task.project_id,
-                        event_id = event.id,
-                        "Task observation wake failed; Project lifecycle touch will retry"
-                    );
-                }
-                if kind.is_root_wave_observable() {
-                    match self.get_wave(&task.wave_id).await? {
-                        Some(wave) => {
-                            if let Err(error) =
-                                crate::lf::commands::chat::nudge_child_observations(wave.name())
-                                    .await
-                            {
-                                tracing::debug!(
-                                    %error,
-                                    %task_id,
-                                    event_id = event.id,
-                                    "live Task observation delivery failed; Wave observer will retry"
-                                );
-                            }
-                        }
-                        None => tracing::error!(
-                            wave_id = %task.wave_id,
-                            %task_id,
-                            event_id = event.id,
-                            "Task observation cannot nudge its missing owning Wave"
-                        ),
+                if let Some(wave) = self.get_wave(&task.wave_id).await? {
+                    if let Err(error) =
+                        crate::lf::commands::chat::nudge_child_observations(wave.name()).await
+                    {
+                        tracing::debug!(%error, %task_id, event_id = event.id,
+                            "Task delivery failed; the Wave observer will retry its durable outbox");
                     }
                 }
             }
@@ -515,32 +490,6 @@ impl Store {
     pub async fn update_project(&self, project: &Project) -> StoreResult<()> {
         let project = project.clone();
         run_sqlite(&self.sqlite, move |store| store.update_project(&project)).await
-    }
-
-    pub async fn complete_project_operation(
-        &self,
-        project_id: &ProjectId,
-        observations: &[ObservationOutboxRow],
-    ) -> StoreResult<Project> {
-        let project_id = project_id.clone();
-        let observations = observations.to_vec();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_project_operation(&project_id, &observations)
-        })
-        .await
-    }
-
-    pub async fn fail_project_operation(
-        &self,
-        project_id: &ProjectId,
-        error: &str,
-    ) -> StoreResult<()> {
-        let project_id = project_id.clone();
-        let error = error.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.fail_project_operation(&project_id, &error)
-        })
-        .await
     }
 
     pub async fn get_project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {

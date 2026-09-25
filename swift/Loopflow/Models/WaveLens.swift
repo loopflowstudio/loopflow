@@ -62,7 +62,7 @@ public struct WaveLens: Sendable, Hashable {
     /// Project lens: derived only from its Tasks' shared condition evidence. The
     /// most demanding evidence wins (blocked > waiting > unknown > clear),
     /// so unreadable Task evidence surfaces as unknown, not a silent black.
-    public static func forProject(tasks: [WaveTaskWork]) -> WaveLens {
+    public static func forTasks(tasks: [WaveTaskWork]) -> WaveLens {
         let folded = fold(tasks.map(\.condition))
         if let folded { return folded }
         return WaveLens(color: .black, reason: "Off · no active work")
@@ -84,8 +84,7 @@ public struct WaveLens: Sendable, Hashable {
         live: Bool,
         paused: Bool = false,
         enabled: Bool = true,
-        activeTasks: Int,
-        activeProjects: Int
+        activeTasks: Int
     ) -> WaveLens {
         if !enabled {
             return live
@@ -103,7 +102,7 @@ public struct WaveLens: Sendable, Hashable {
         if live {
             return WaveLens(color: .green, reason: "Listening · Wave listener answered")
         }
-        let outstanding = activeTasks + activeProjects
+        let outstanding = activeTasks
         if outstanding > 0 {
             let noun = outstanding == 1 ? "item" : "items"
             return WaveLens(

@@ -88,7 +88,7 @@ one Skill run
 | Area | What it adds | Start here |
 | --- | --- | --- |
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
-| Planning | Flow composition, Wave/Project/Task Work, Steer, questions, human FlowSteps, resident loops | [Planning](architecture/planning.md) |
+| Planning | Flow composition, Wave/Task Work, Steer, questions, human FlowSteps, resident loops | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
 | Homes | Placement, `lfd`, Wave listeners, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
@@ -103,7 +103,7 @@ wave/{mod,config,context,      wave/{runner,resident,server,
 project                       task/mod
 task                          Task worker
 
-ops/project.rs                finite Project operations
+ops/chapter.rs                deterministic chapter rotation
 
 execution kernel: engine/ + harness/ + Run records
 composition surfaces: lf/ + bin/
@@ -149,7 +149,7 @@ human / agent --> lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Wave -> Project -> Task
+  Skills / Flows /       Wave -> Task (one internal chapter plan)
   goals / memory                  |
           |                       +---------> Task delivery
           |                       |                ^
@@ -180,9 +180,9 @@ ledger.
 
 ```text
 Wave
-  `-- Project
-        `-- Task
-              `-- one active remote branch and PR
+  |-- current chapter (internal Project)
+  `-- Task
+        `-- one active remote branch and PR
 
 Flow = ordered Skill | Op | Xor | human boundaries
 Run  = evidence for one mediated harness launch
@@ -196,8 +196,8 @@ WorkStatus = Ready | Done | Abandoned
 | Skill | Reusable instructions plus declared context needs | Repository override, builtin, or installed Markdown |
 | Flow | Ordered Skill and mechanical nodes, Xor routing, human boundaries | Repository or builtin YAML plus a caller-owned playhead |
 | Run | Evidence from one mediated provider launch | One immutable Home-local record |
-| Wave | Durable operating context with goal, memory, cadence, chat, and project selection | Repository Wave files, local identity, Linear Initiative membership |
-| Project | One measured bet inside exactly one Wave | Linear Project plus bounded local Work state |
+| Wave | Durable operating context with goal, memory, cadence, chat, and chapter planning | Repository Wave files, local identity, Linear Initiative membership |
+| Project | One internal chapter plan inside exactly one Wave | Linear Project plus bounded local Work state |
 | Task | One concrete change, investigation, or document | Linear Issue, local delivery state, Git, GitHub |
 | Work | Shared durable planning state for one Wave, Project, or Task | Rows keyed directly by stable Work identity |
 | Steer | Ordered authored correction to Work | Append-only Work input |
@@ -249,14 +249,13 @@ Task worker, piecemeal helper Runs, or another system.
 ```bash
 lf start product
 lf task run INF-123
-lf project run billing
 lf --wave <wave> wave/operate "ship invoices first"
 lf status product
 ```
 
-The Home keeper may start the placed Wave listener and resident. Project and
-Task motion does not depend on either: Project commands launch finite attributed
-operations, while Task commands claim an exact Flow boundary for one worker.
+The Home keeper may start the placed Wave listener and resident. Task motion
+does not depend on either: Task commands claim an exact Flow boundary for one
+worker. Chapter rotation is a deterministic Wave-scoped operation.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
 A Task human FlowStep starts the persisted Skill as a provider Run and remains
@@ -281,7 +280,7 @@ the behavior.
 | If you are changing… | Read |
 | --- | --- |
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
-| Flow semantics, Work state, Steer, questions, human FlowSteps, Project/Task loops | [Planning](architecture/planning.md) |
+| Flow semantics, Work state, Steer, questions, human FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
 | daemons, remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |

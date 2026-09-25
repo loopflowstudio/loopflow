@@ -44,12 +44,6 @@ contents must arrive intact, including nested and untracked Markdown. A path
 in a summary alone is insufficient. Fresh Runs receive launch-time snapshots;
 decision agents must reread files that may have changed since assembly.
 
-Human feedback and proposed next work live in self-contained, topic-named
-scratch notes, useful outside the producing conversation or any particular
-next skill. Ready summaries carry exact paths plus a takeaway. Loop-decide
-starts there, reconciles the current design and other evidence, and cites those
-paths in its own direction. No scratch filename grants navigation authority.
-
 ## Continuation proof
 
 When changing Task continuation, prove the controller driver as well as its

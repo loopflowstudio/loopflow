@@ -1,0 +1,23 @@
+{
+  "base": "5bcc40fdff810c39885a31b3fbfd6557f49fde93",
+  "source_hashes": {
+    "rust/loopflow/src/controller/task/mod.rs": "e94c82350f82455b4502f434695d7fc53fcbf20b0013b91d2ed792304f21094f",
+    "rust/loopflow/src/engine/flow.rs": "4e51173f5a9ff8c5752867f3576a13f8351da5378a7416ee6884d04fa482ec6a",
+    "rust/loopflow/src/ops/human_session.rs": "323caaacbbf69158c471edbd6e2ab8d58485c36a754790691e216fe0644b4b07",
+    "rust/loopflow/src/ops/pr_landing.rs": "a2047e57d3b3c769339afd88111c75a6ed7bda1e3fb1c95c7b8f6e5811adcce4",
+    "rust/loopflow/src/lf/commands/util.rs": "24abc91d2e23683bdf2d871d92739038219f46b448d6040c75b561a6595f770b",
+    "swift/LoopflowMac/Views/SessionsView.swift": "12157104910ccabac44da817e5361f87215b1113e89d99f3e8e4f9294c342b88",
+    "swift/Loopflow/Services/RegistryQuery.swift": "031163deb79856defc21ec60dd7eb96c5165aa09d6f40da702441e0c2faab2bd",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "a075983461afab641411cee051b8301f7fc9617b1bf16faa2ff716e0a78574f3",
+    "tests/fixtures/dto/task_flow.json": "ba9ede61b0e4e10caa8236fee556fa1894cf77f6528f837ae547aedc48df40e1"
+  },
+  "logs": {
+    "/tmp/loo291-post1283-rust-final2.log": "adfdff8b29195b1c000e612cc506dcbc6001b9b49eabccf2aef509093db0bfb8",
+    "/tmp/loo291-post1283-flow.log": "e0bafe56ec4ddd38474176ebe86e68313643708c7cfb2e34fd25a1de4d7d14dc",
+    "/tmp/loo291-post1283-cli.log": "5695969406356ed78cc8548bf034c72842113954efd15320fa25b57fb7caecb7",
+    "/tmp/loo291-post1283-clippy.log": "c70f75303adc5b032bf432b4aa25d6792c930341b76f2956812fe6068057daa4",
+    "/tmp/loo291-post1283-swift.log": "ed792dff7f1371cf2ca1910593e380fbe69f8944fcc4187b0dee72b34762a16c",
+    "/tmp/loo291-post1283-golden.log": "79908fe51b130efafe494ba8e5722edca009990bbf9d7c6ae657f32db4879245"
+  },
+  "prototype_files_unchanged": 16
+}

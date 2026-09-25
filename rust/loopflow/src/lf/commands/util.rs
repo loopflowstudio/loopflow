@@ -1201,6 +1201,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();

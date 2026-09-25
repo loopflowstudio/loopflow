@@ -1443,6 +1443,7 @@ mod planning_tests {
                             worktree: None,
                             skill: Some("loop-decide".into()),
                             subjects: vec![],
+                            flow: crate::run_record::RunFlowMembership::Independent,
                         },
                     )
                     .unwrap();
@@ -1576,6 +1577,7 @@ mod planning_tests {
                         harness: "proof".into(), model: None, surface: "headless".into(),
                         cwd: task.worktree.clone(), repo: None, worktree: None,
                         skill: Some("loop-decide".into()), subjects: vec![],
+                        flow: crate::run_record::RunFlowMembership::Independent,
                     },
                 ).unwrap();
                 let run = capture.run_id();

@@ -55,19 +55,23 @@ Flow persistence retain their existing authority.
 
 ## Remaining release and review work
 
-- Migration history check fails because origin/main contains
-  `0.12.21.001_release.sql`, missing from this branch. `lf rebase --plan`
-  reports protected/direct_rebase, seven unique commits and 82 changed files.
-  No rebase was applied during the shared human review. Integrate upstream
-  before treating migration validation or CI as passing.
-- Old unresolved XOR definitions fail decoding instead of silently loading
-  changed sources. Define and prove their recoverable disposition before
-  installing this over existing state. Task XOR was previously rejected;
-  ordinary/Wave saved definitions still require attention. Do not claim
-  retention of branch content that was never captured.
-- NestedCursor still duplicates the selected body's captured steps. The
-  concept-review identifies removing that copy as a bounded simplification,
-  contingent on preserving or explicitly disposing of old saved bodies.
+- Upstream integration is complete: `lf rebase --manual` applied cleanly and
+  the migration check passes with 52 shipped migrations unchanged. No installed
+  binary or production Home was changed.
+- Historical unresolved Wave XOR records now use the existing non-executable
+  definition/restart disposition. Journal bytes and later messages survive;
+  explicit restart captures a new invocation and retains queued Flow intent.
+  An unreadable ordinary position leaves other Sessions usable and reports its
+  exact file and new-invocation recovery. Source bytes that were never captured
+  are not presented as recoverable execution. See saved-xor-recovery.md.
+- NestedCursor no longer copies branch steps. The captured parent owns the
+  definition; old redundant child copies are ignored only in favor of that
+  parent, and missing parents/paths stop traversal. See cursor-dedup.md.
+- Ask recovery fixes preserve completion before teardown, serialize reopen
+  resets with completion, and remove failed Runs' blocker authority. Focused
+  proof passes. The development binary/Home mismatch is also repaired and the
+  real CLI reopen regression passes; see ask-protocol-audit.md and
+  saved-xor-recovery.md.
 - Exercise native provider/Ask handoff and human approval through the real
   configured path. Full CI and hosted UI evidence remain outstanding.
 - Wave interpreter deletion has a concrete boundary in

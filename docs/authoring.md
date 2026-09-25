@@ -235,10 +235,17 @@ agents edit the same reviewed file through the ordinary repository workflow;
 
 ## Adaptation
 
-When an agent learns something repo-specific, the durable home for that
-learning is `.lf/`: adapt the skill or set config — and
-commit it with the work so the change stays reviewable. Prompts that live in
-the repo improve the way code does: by diff.
+Curate durable lessons and decisions in the owning Wave's
+`wave/<name>/MEMORY.md`. Identify the owner from the work's context and Wave
+objectives. A repository with no Waves gets one named for the repository, with
+a repo-wide GOAL grounded in its purpose and a MEMORY for durable lessons.
+This local setup needs no PM binding or running Wave. If existing Waves leave
+ownership unclear, ask the human and keep the question in scratch until resolved.
+
+Put executable changes where they apply: task instructions in the relevant
+skill, repo conventions in the agent guide, and configuration in
+`.lf/config.yaml`. Do not create standalone learning or memory files in `.lf/`.
+Commit these changes with the work so they stay reviewable.
 
 ## See Also
 

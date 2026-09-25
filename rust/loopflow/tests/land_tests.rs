@@ -174,21 +174,6 @@ fn initialize_landing_store(path: &std::path::Path) {
             ))
             .unwrap(),
     );
-    let connection = rusqlite::Connection::open(path).unwrap();
-    let migrated = connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_landings')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .unwrap();
-    if !migrated {
-        connection
-            .execute_batch(&loopflow::store::migrations::migration_sql_for_test(
-                "pr_landings",
-            ))
-            .unwrap();
-    }
 }
 
 fn gh_existing_pr_script(log_path: &str) -> String {
@@ -206,7 +191,11 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ] || [ -f "$queue_state" ]; then echo 'true'; else echo 'false'; fi
+  case "$*" in
+    *dequeuePullRequest*) rm -f "$queue_state"; exit 0 ;;
+  esac
+  if [ -f "$queue_state" ]; then echo 'queued:PR_fixture';
+  elif [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -214,7 +203,7 @@ if [ "$1 $2" = "pr view" ]; then
   exit 0
 fi
 if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
-  rm -f "$auto_state" "$queue_state"
+  rm -f "$auto_state"
   exit 0
 fi
 if [ "$1 $2" = "pr merge" ]; then
@@ -1236,8 +1225,8 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
     fs::write(
         &hook,
         format!(
-            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
-            log_path.display()
+            "#!/bin/sh\nif [ -f '{}.queued' ]; then echo 'branch is queued' >&2; exit 1; fi\necho git-push >> '{}'\ncat >/dev/null\n",
+            log_path.display(), log_path.display()
         ),
     )
     .expect("write remote push hook");
@@ -1265,18 +1254,19 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
     )
     .expect("non-Task land");
 
-    let log = fs::read_to_string(&log_path).expect("read gh log");
-    let disable = log
-        .find("pr merge 912 --disable-auto")
-        .expect("queued Auto is revoked");
-    let push = log.find("git-push").expect("prepared head is pushed");
-    let arm = log
-        .rfind("pr merge 912 --squash --auto --match-head-commit")
-        .expect("prepared head is re-armed");
-    assert!(
-        disable < push && push < arm,
-        "unexpected settlement order:\n{log}"
+    assert!(!log_path.with_extension("log.queued").exists());
+    let published = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["rev-parse", &format!("refs/heads/{branch}")])
+        .output()
+        .unwrap();
+    assert!(published.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&published.stdout).trim(),
+        repo.head_sha()
     );
+    assert!(log_path.with_extension("log.auto").exists());
 }
 
 #[test]

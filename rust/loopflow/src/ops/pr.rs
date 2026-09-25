@@ -590,7 +590,17 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
 }
 
 pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
-    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
+    Ok(observe_merge_request(repo, number)?.is_some())
+}
+
+#[derive(Debug)]
+enum MergeRequest {
+    Auto,
+    Queued(String),
+}
+
+fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
+    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
     let observation = Command::new("gh")
         .args([
             "api",
@@ -604,7 +614,7 @@ pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
             "-f",
             &format!("query={query}"),
             "--jq",
-            ".data.repository.pullRequest | (.autoMergeRequest != null) or (.mergeQueueEntry != null)",
+            ".data.repository.pullRequest | if .mergeQueueEntry != null then (\"queued:\" + .id) else (.autoMergeRequest != null) end",
         ])
         .current_dir(repo)
         .output()?;
@@ -614,30 +624,51 @@ pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
             stderr: stderr_from_output(&observation),
         });
     }
-    match String::from_utf8_lossy(&observation.stdout).trim() {
-        "false" => Ok(false),
-        "true" => Ok(true),
+    let output = String::from_utf8_lossy(&observation.stdout);
+    let value = output.trim();
+    if let Some(id) = value.strip_prefix("queued:") {
+        return Ok(Some(MergeRequest::Queued(id.to_string())));
+    }
+    match value {
+        "false" => Ok(None),
+        "true" => Ok(Some(MergeRequest::Auto)),
         value => Err(OpsError::Message(format!(
             "could not determine whether pull request #{number} has auto-merge enabled: {value:?}"
         ))),
     }
 }
 
-/// Revoke GitHub auto-merge for one PR before a stored request can be cleared.
+/// Revoke GitHub auto-merge or queue membership before a stored request is cleared.
 /// The read makes replay idempotent after a prior disable succeeded.
 pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
-    if !auto_merge_enabled(repo, u64::from(number))? {
+    let Some(request) = observe_merge_request(repo, u64::from(number))? else {
         return Ok(());
-    }
-    let output = Command::new("gh")
-        .args(["pr", "merge", &number.to_string(), "--disable-auto"])
-        .current_dir(repo)
-        .output()?;
+    };
+    let mut command = Command::new("gh");
+    let description = match request {
+        MergeRequest::Auto => {
+            command.args(["pr", "merge", &number.to_string(), "--disable-auto"]);
+            format!("gh pr merge {number} --disable-auto")
+        }
+        MergeRequest::Queued(id) => {
+            // gh pr merge returns success without acting on an already queued PR.
+            command.args([
+                "api",
+                "graphql",
+                "-f",
+                "query=mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}",
+                "-f",
+                &format!("id={id}"),
+            ]);
+            format!("gh api graphql [dequeue pull request #{number}]")
+        }
+    };
+    let output = command.current_dir(repo).output()?;
     if output.status.success() {
         return Ok(());
     }
     Err(OpsError::CommandFailed {
-        command: format!("gh pr merge {number} --disable-auto"),
+        command: description,
         stderr: stderr_from_output(&output),
     })
 }

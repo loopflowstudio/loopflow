@@ -306,8 +306,9 @@ struct WorkspaceNavigationTests {
         let task = try #require(model.task(id: "issue-review"))
         let view = WorkSurfaceView(model: model)
         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
-        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+        model.select(.wave(id: task.wave.wave.id))
+        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.wave.goal) }
     }
 
     @Test("Inspection distinguishes no Sessions from an unavailable reading", arguments: [true, false])

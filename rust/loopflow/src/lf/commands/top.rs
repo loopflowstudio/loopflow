@@ -199,7 +199,7 @@ pub(crate) fn live_exec_providers(
     let receipts = snapshot
         .receipts
         .iter()
-        .filter(|receipt| receipt_matches_live_lf(receipt, &by_pid))
+        .filter(|receipt| receipt_matches_live_process(receipt, &by_pid))
         .collect::<Vec<_>>();
     let owners = receipts
         .iter()

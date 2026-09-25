@@ -310,7 +310,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
             .as_array()
             .unwrap()
             .iter()
-            .any(|subject| subject["selector"] == format!("task:{}", task.task.id)));
+            .any(|subject| subject["selector"] == format!("task:{}", task.task.plan.identifier)));
         assert_eq!(run["outcome"], "completed");
     }
     for invocation in [

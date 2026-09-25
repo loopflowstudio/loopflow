@@ -125,15 +125,7 @@ struct TaskMonitorProofTests {
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
         var chapter = try #require(waves[0]["chapter"] as? [String: Any])
-        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
-        var items = try #require(tasks["items"] as? [[String: Any]])
-        for index in items.indices {
-            if var runtime = items[index]["runtime"] as? [String: Any] {
-                runtime["project_id"] = "successor-work"
-                items[index]["runtime"] = runtime
-            }
-        }
-        tasks["items"] = items
+        let tasks = try #require(waves[0]["tasks"] as? [String: Any])
         chapter["id"] = "next-chapter"
         chapter["source_project_id"] = "successor-project"
         chapter["source_work_id"] = "successor-work"
@@ -148,7 +140,7 @@ struct TaskMonitorProofTests {
             try await settle(window)
             #expect(model.selection == .task(id: "issue-review"))
             #expect(model.task(id: "issue-review")?.task.runtime?.workId == taskWork)
-            if !transferring { #expect(model.task(id: "issue-review")?.task.runtime?.projectId == "successor-work") }
+            if !transferring { #expect(model.task(id: "issue-review")?.wave.chapter?.sourceWorkId == "successor-work") }
             #expect(model.sessions.value?.first?.runId == sessionRun)
             #expect(multiplexer.focusedPaneId == monitorPane)
             #expect(terminals[0].surface == surfaces[0])

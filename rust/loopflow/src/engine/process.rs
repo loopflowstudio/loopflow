@@ -347,10 +347,6 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
-pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_lf_session_with_env(session, cwd, argv, &[]).await
-}
-
 /// Start a machine-Home process through the current installed/dev control pair,
 /// ignoring a historical body's `LF_CONTROL_*` pins.
 pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {

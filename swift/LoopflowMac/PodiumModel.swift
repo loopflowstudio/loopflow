@@ -44,6 +44,9 @@ struct WaveSummary: Equatable {
 final class PodiumModel {
     var repoPath: String?
     var selection: WorkReference?
+    var historyWave: WaveSnapshot?
+    var historyReference: String?
+    private var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
     private(set) var waves: PodiumReading<[Wave]> = .loading
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
@@ -227,9 +230,30 @@ final class PodiumModel {
         await refresh()
     }
 
-    func select(_ selection: WorkReference?) {
+    func select(_ requested: WorkReference?) {
+        let selection: WorkReference?
+        if let requested, requested.kind == .project {
+            if let current = waveForChapter(projectId: requested.id) {
+                selection = .wave(id: current.wave.id)
+            } else {
+                Task { await openHistoricalReference(requested.id) }
+                return
+            }
+        } else { selection = requested }
         setSelection(selection)
         clearSelectionIfOutsideScope()
+    }
+
+    private func openHistoricalReference(_ reference: String) async {
+        for wave in visibleRoadmaps {
+            guard let entries = try? await query.chapterHistory(wave: wave.wave.name, cwd: wave.wave.repo) else { continue }
+            if entries.contains(where: { $0.sourceProjectId == reference || $0.sourceProjectSlug == reference || $0.sourceWorkId == reference }) {
+                select(.wave(id: wave.wave.id))
+                historyReference = reference
+                historyWave = wave.wave
+                return
+            }
+        }
     }
 
     func refreshWorkActivity() async {
@@ -273,26 +297,18 @@ final class PodiumModel {
         visibleWaves.first { $0.id == id }
     }
 
-    func project(id: String) -> (wave: WaveRoadmap, project: RoadmapProject)? {
-        for wave in roadmap.value?.waves ?? [] {
-            if let project = wave.projects.items.first(where: { $0.id == id }) {
-                return (wave, project)
-            }
-        }
-        return nil
+    func waveForChapter(projectId: String) -> WaveRoadmap? {
+        roadmap.value?.waves.first { $0.chapter?.sourceProjectId == projectId || $0.chapter?.sourceProjectSlug == projectId || $0.chapter?.sourceWorkId == projectId }
     }
 
-    func task(id: String) -> (
-        wave: WaveRoadmap,
-        project: RoadmapProject,
-        task: RoadmapTask
-    )? {
+    func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
         for wave in roadmap.value?.waves ?? [] {
-            for project in wave.projects.items {
-                if let task = project.tasks.first(where: { $0.id == id }) {
-                    return (wave, project, task)
-                }
-            }
+            if let task = wave.tasks.items.first(where: { $0.id == id }) { return (wave, task) }
+        }
+        if let previous = selectedTaskEvidence, previous.task.id == id,
+           let current = wave(id: previous.wave.wave.id),
+           current.tasks.unavailableReason != nil || current.chapter?.phase != "complete" {
+            return (current, previous.task)
         }
         return nil
     }
@@ -302,7 +318,7 @@ final class PodiumModel {
         case .wave:
             work.id
         case .project:
-            project(id: work.id)?.wave.wave.id
+            waveForChapter(projectId: work.id)?.wave.id
         case .task:
             task(id: work.id)?.wave.wave.id
         }
@@ -320,9 +336,7 @@ final class PodiumModel {
         case .wave:
             break
         case .project:
-            if project(id: selection.id) == nil {
-                setSelection(.wave(id: waveId))
-            }
+            setSelection(.wave(id: waveId))
         case .task:
             if task(id: selection.id) == nil {
                 setSelection(.wave(id: waveId))
@@ -394,17 +408,13 @@ final class PodiumModel {
                 task: nil
             )
         case .project:
-            guard let selected = project(id: selection.id) else { return nil }
-            return WorkActivityScope(
-                wave: selected.wave.wave.name,
-                project: selected.project.project.slug,
-                task: nil
-            )
+            guard let wave = waveForChapter(projectId: selection.id) else { return nil }
+            return WorkActivityScope(wave: wave.wave.name, project: nil, task: nil)
         case .task:
             guard let selected = task(id: selection.id) else { return nil }
             return WorkActivityScope(
                 wave: selected.wave.wave.name,
-                project: selected.project.project.slug,
+                project: nil,
                 task: selected.task.task.identifier
             )
         }
@@ -413,6 +423,7 @@ final class PodiumModel {
     private func setSelection(_ selection: WorkReference?) {
         guard self.selection != selection else { return }
         workActivityGeneration &+= 1
+        selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         self.selection = selection
         if !usesFixedFixture { workActivity = .loading }
     }

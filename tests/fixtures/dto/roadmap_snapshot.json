@@ -9,7 +9,6 @@
         "goal": "Conduct goal-authored work everywhere.",
         "repo": "/src/loopflow",
         "active_tasks": 2,
-        "active_projects": 1,
         "live": true,
         "paused": true,
         "enabled": true,
@@ -36,7 +35,6 @@
             "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "name": "Task loops earn trust",
             "description": "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.",
-            "project_id": "project-1",
             "stage": "graduated",
             "instrumented": true,
             "instrument": "lifecycle-scorecard",
@@ -62,289 +60,266 @@
         ],
         "contract_issues": []
       },
-      "projects": {
-        "state": "ok",
-        "truncated": false,
-        "items": [
+      "chapter": {
+        "id": "current",
+        "source_project_id": "project-1",
+        "flows": {
+          "recommended": null
+        },
+        "krs": [
           {
-            "project": {
-              "id": "project-1",
-              "slug": "loopflow-api",
-              "name": "Loopflow API",
-              "summary": "One coherent model everywhere.",
-              "definition": "The product contract for goal-authored computation.",
-              "flows": {
-                "recommended": null
-              },
-              "krs": [
-                {
-                  "text": "A parallel concept anywhere is a failure event",
-                  "holds": false
-                }
-              ]
-            },
-            "runtime": {
-              "work_id": "ps_11111111111111111111111111111111",
-              "status": "ready",
-              "reason": "ready",
-              "updated_at": "2026-07-14T20:00:00Z",
-              "iteration": 2,
-              "pending_observations": 0,
-              "provider": "codex",
-              "last_failure": null
-            },
-            "next_move": {
-              "owner": "project",
-              "reason": "supervised Tasks are active"
-            },
-            "section": "now",
-            "tasks": [
-              {
-                "task": {
-                  "id": "issue-now",
-                  "identifier": "W2-144",
-                  "name": "Make lf roadmap the machine-wide view",
-                  "description": "Envelope over the per-wave join.",
-                  "rank": 4,
-                  "completed": false,
-                  "assignee": null
-                },
-                "reference": {
-                  "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
-                  "workspace": {
-                    "slug": "make-lf-work-the-machine",
-                    "branch": "jack-heart/make-lf-work-the-machine",
-                    "worktree": "/src/loopflow.make-lf-work-the-machine"
-                  }
-                },
-                "runtime": {
-                  "work_id": "ts_now00000000000000000000000000000",
-                  "project_id": "ps_11111111111111111111111111111111",
-                  "status": "ready",
-                  "reason": "ready",
-                  "updated_at": "2026-07-14T23:44:00Z",
-                  "provider": "claude"
-                },
-                "next_move": {
-                  "owner": "task",
-                  "reason": "ready"
-                },
-                "active_pr": null,
-                "section": "now",
-                "actions": {
-                  "recommended": "resume",
-                  "reason": "resume the parked Task"
-                },
-                "condition": {
-                  "state": "clear",
-                  "reason": "ready",
-                  "observed_at": "2026-07-15T00:00:00Z",
-                  "evidence_age_secs": 960,
-                  "local_progress": {
-                    "state": "observed",
-                    "unsettled": false,
-                    "dirty": false,
-                    "authored_commits": false,
-                    "recovery_required": false,
-                    "reason": null
-                  }
-                }
-              },
-              {
-                "task": {
-                  "id": "issue-review",
-                  "identifier": "W2-131",
-                  "name": "Show the all-wave roadmap and launch or attach",
-                  "description": "Consume the shared roadmap DTO.",
-                  "rank": 1,
-                  "completed": false,
-                  "assignee": null
-                },
-                "reference": {
-                  "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
-                  "workspace": {
-                    "slug": "all-wave-roadmap",
-                    "branch": "jack-heart/all-wave-roadmap",
-                    "worktree": "/src/loopflow.all-wave-roadmap"
-                  }
-                },
-                "runtime": {
-                  "work_id": "ts_review00000000000000000000000000",
-                  "project_id": "ps_11111111111111111111111111111111",
-                  "status": "ready",
-                  "reason": "ready",
-                  "updated_at": "2026-07-14T22:00:00Z",
-                  "provider": "claude"
-                },
-                "next_move": {
-                  "owner": "user",
-                  "reason": "merge pull request head abc1234 on GitHub"
-                },
-                "active_pr": {
-                  "id": "pr-review",
-                  "sequence": 1,
-                  "slug": "all-wave-roadmap",
-                  "branch": "jack-heart/all-wave-roadmap",
-                  "base_commit": "abc1234",
-                  "phase": "open",
-                  "empty": null,
-                  "publication": {
-                    "requested_at": "2026-07-14T22:05:00Z",
-                    "presentation": {
-                      "title": "Show the all-wave roadmap",
-                      "body": "Explains the intent and proof for this head.",
-                      "head_sha": "abc1234"
-                    },
-                    "github": {
-                      "number": 899,
-                      "url": "https://github.com/loopflow/loopflow/pull/899"
-                    },
-                    "merge": {
-                      "mode": "user",
-                      "requested_at": "2026-07-14T22:06:00Z",
-                      "head_sha": "abc1234",
-                      "after_merge": "continue_task",
-                      "next_slug": null
-                    }
-                  },
-                  "merge_commit": null,
-                  "abandoned_at": null
-                },
-                "section": "waiting",
-                "actions": {
-                  "recommended": "open_pr",
-                  "reason": "merge head abc1234 on GitHub"
-                },
-                "condition": {
-                  "state": "waiting",
-                  "reason": "merge pull request head abc1234 on GitHub",
-                  "observed_at": "2026-07-15T00:00:00Z",
-                  "evidence_age_secs": 7200,
-                  "local_progress": {
-                    "state": "observed",
-                    "unsettled": true,
-                    "dirty": false,
-                    "authored_commits": true,
-                    "recovery_required": false,
-                    "reason": null
-                  }
-                }
-              },
-              {
-                "task": {
-                  "id": "issue-available",
-                  "identifier": "W2-156",
-                  "name": "Wave Chat consumes the roadmap snapshot",
-                  "description": "Derive Now/Available from one read.",
-                  "rank": 6,
-                  "completed": false,
-                  "assignee": null
-                },
-                "reference": {
-                  "issue_url": null,
-                  "workspace": null
-                },
-                "runtime": null,
-                "next_move": {
-                  "owner": "project",
-                  "reason": "Task is ready to start"
-                },
-                "active_pr": null,
-                "section": "available",
-                "actions": {
-                  "recommended": null,
-                  "reason": "Task is ready to start"
-                },
-                "condition": {
-                  "state": "clear",
-                  "reason": "Task is ready to start",
-                  "observed_at": "2026-07-15T00:00:00Z",
-                  "evidence_age_secs": null,
-                  "local_progress": {
-                    "state": "not_applicable",
-                    "unsettled": false,
-                    "dirty": null,
-                    "authored_commits": null,
-                    "recovery_required": null,
-                    "reason": null
-                  }
-                }
-              },
-              {
-                "task": {
-                  "id": "issue-later",
-                  "identifier": "W2-141",
-                  "name": "Now + Available work views — research",
-                  "description": "Research delivered in merged PR.",
-                  "rank": 0,
-                  "completed": true,
-                  "assignee": null
-                },
-                "reference": {
-                  "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
-                  "workspace": {
-                    "slug": "now-available-research",
-                    "branch": "jack-heart/now-available-research",
-                    "worktree": "/src/loopflow.now-available-research"
-                  }
-                },
-                "runtime": {
-                  "work_id": "ts_later000000000000000000000000000",
-                  "project_id": "ps_11111111111111111111111111111111",
-                  "status": "done",
-                  "reason": "done",
-                  "updated_at": "2026-07-14T21:00:00Z",
-                  "provider": "claude"
-                },
-                "next_move": {
-                  "owner": "project",
-                  "reason": "Linear Task is complete"
-                },
-                "active_pr": null,
-                "section": "later",
-                "actions": {
-                  "recommended": "no_action",
-                  "reason": "Task is completed"
-                },
-                "condition": {
-                  "state": "clear",
-                  "reason": "Linear Task is complete",
-                  "observed_at": "2026-07-15T00:00:00Z",
-                  "evidence_age_secs": 10800,
-                  "local_progress": {
-                    "state": "observed",
-                    "unsettled": false,
-                    "dirty": false,
-                    "authored_commits": false,
-                    "recovery_required": false,
-                    "reason": null
-                  }
-                }
-              }
-            ]
+            "text": "A parallel concept anywhere is a failure event",
+            "holds": false
+          }
+        ],
+        "phase": "complete",
+        "error": null,
+        "source_project_slug": "loopflow-api",
+        "source_work_id": "proj-chapter-current",
+        "metric_targets": [
+          {
+            "metric_id": "task-loop-trust",
+            "target": {
+              "kind": "at_least",
+              "value": 1.0
+            }
           }
         ]
       },
-      "unavailable_projects": [
-        {
-          "work_id": "proj_e972b70272fbb5e91c096ebe657f9f9b",
-          "project_id": "f56c583c-c360-4dc4-ba12-4b5a02268623",
-          "project_slug": "technical-architecture",
-          "status": "abandoned",
-          "owner": "wave",
-          "reason": "Project is absent from the current PM snapshot",
-          "recovery": "Settle the listed Tasks; Project Work is already abandoned",
-          "tasks": [
-            {
-              "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
-              "task_id": "linear-task-w2-127",
-              "task_identifier": "W2-127",
+      "tasks": {
+        "state": "ok",
+        "items": [
+          {
+            "task": {
+              "id": "issue-now",
+              "identifier": "W2-144",
+              "name": "Make lf roadmap the machine-wide view",
+              "description": "Envelope over the per-wave join.",
+              "rank": 4,
+              "completed": false,
+              "assignee": null
+            },
+            "reference": {
+              "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
+              "workspace": {
+                "slug": "make-lf-work-the-machine",
+                "branch": "jack-heart/make-lf-work-the-machine",
+                "worktree": "/src/loopflow.make-lf-work-the-machine"
+              }
+            },
+            "runtime": {
+              "work_id": "ts_now00000000000000000000000000000",
               "status": "ready",
-              "owner": "wave",
-              "reason": "Task's owning Project is absent from the current PM snapshot",
-              "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
+              "reason": "ready",
+              "updated_at": "2026-07-14T23:44:00Z",
+              "provider": "claude"
+            },
+            "next_move": {
+              "owner": "task",
+              "reason": "ready"
+            },
+            "active_pr": null,
+            "section": "now",
+            "actions": {
+              "recommended": "resume",
+              "reason": "resume the parked Task"
+            },
+            "condition": {
+              "state": "clear",
+              "reason": "ready",
+              "observed_at": "2026-07-15T00:00:00Z",
+              "evidence_age_secs": 960,
+              "local_progress": {
+                "state": "observed",
+                "unsettled": false,
+                "dirty": false,
+                "authored_commits": false,
+                "recovery_required": false,
+                "reason": null
+              }
             }
-          ]
+          },
+          {
+            "task": {
+              "id": "issue-review",
+              "identifier": "W2-131",
+              "name": "Show the all-wave roadmap and launch or attach",
+              "description": "Consume the shared roadmap DTO.",
+              "rank": 1,
+              "completed": false,
+              "assignee": null
+            },
+            "reference": {
+              "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
+              "workspace": {
+                "slug": "all-wave-roadmap",
+                "branch": "jack-heart/all-wave-roadmap",
+                "worktree": "/src/loopflow.all-wave-roadmap"
+              }
+            },
+            "runtime": {
+              "work_id": "ts_review00000000000000000000000000",
+              "status": "ready",
+              "reason": "ready",
+              "updated_at": "2026-07-14T22:00:00Z",
+              "provider": "claude"
+            },
+            "next_move": {
+              "owner": "user",
+              "reason": "merge pull request head abc1234 on GitHub"
+            },
+            "active_pr": {
+              "id": "pr-review",
+              "sequence": 1,
+              "slug": "all-wave-roadmap",
+              "branch": "jack-heart/all-wave-roadmap",
+              "base_commit": "abc1234",
+              "phase": "open",
+              "empty": null,
+              "publication": {
+                "requested_at": "2026-07-14T22:05:00Z",
+                "presentation": {
+                  "title": "Show the all-wave roadmap",
+                  "body": "Explains the intent and proof for this head.",
+                  "head_sha": "abc1234"
+                },
+                "github": {
+                  "number": 899,
+                  "url": "https://github.com/loopflow/loopflow/pull/899"
+                },
+                "merge": {
+                  "mode": "user",
+                  "requested_at": "2026-07-14T22:06:00Z",
+                  "head_sha": "abc1234",
+                  "after_merge": "continue_task",
+                  "next_slug": null
+                }
+              },
+              "merge_commit": null,
+              "abandoned_at": null
+            },
+            "section": "waiting",
+            "actions": {
+              "recommended": "open_pr",
+              "reason": "merge head abc1234 on GitHub"
+            },
+            "condition": {
+              "state": "waiting",
+              "reason": "merge pull request head abc1234 on GitHub",
+              "observed_at": "2026-07-15T00:00:00Z",
+              "evidence_age_secs": 7200,
+              "local_progress": {
+                "state": "observed",
+                "unsettled": true,
+                "dirty": false,
+                "authored_commits": true,
+                "recovery_required": false,
+                "reason": null
+              }
+            }
+          },
+          {
+            "task": {
+              "id": "issue-available",
+              "identifier": "W2-156",
+              "name": "Wave Chat consumes the roadmap snapshot",
+              "description": "Derive Now/Available from one read.",
+              "rank": 6,
+              "completed": false,
+              "assignee": null
+            },
+            "reference": {
+              "issue_url": null,
+              "workspace": null
+            },
+            "runtime": null,
+            "next_move": {
+              "owner": "wave",
+              "reason": "Task is ready to start"
+            },
+            "active_pr": null,
+            "section": "available",
+            "actions": {
+              "recommended": null,
+              "reason": "Task is ready to start"
+            },
+            "condition": {
+              "state": "clear",
+              "reason": "Task is ready to start",
+              "observed_at": "2026-07-15T00:00:00Z",
+              "evidence_age_secs": null,
+              "local_progress": {
+                "state": "not_applicable",
+                "unsettled": false,
+                "dirty": null,
+                "authored_commits": null,
+                "recovery_required": null,
+                "reason": null
+              }
+            }
+          },
+          {
+            "task": {
+              "id": "issue-later",
+              "identifier": "W2-141",
+              "name": "Now + Available work views \u2014 research",
+              "description": "Research delivered in merged PR.",
+              "rank": 0,
+              "completed": true,
+              "assignee": null
+            },
+            "reference": {
+              "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
+              "workspace": {
+                "slug": "now-available-research",
+                "branch": "jack-heart/now-available-research",
+                "worktree": "/src/loopflow.now-available-research"
+              }
+            },
+            "runtime": {
+              "work_id": "ts_later000000000000000000000000000",
+              "status": "done",
+              "reason": "done",
+              "updated_at": "2026-07-14T21:00:00Z",
+              "provider": "claude"
+            },
+            "next_move": {
+              "owner": "wave",
+              "reason": "Linear Task is complete"
+            },
+            "active_pr": null,
+            "section": "later",
+            "actions": {
+              "recommended": "no_action",
+              "reason": "Task is completed"
+            },
+            "condition": {
+              "state": "clear",
+              "reason": "Linear Task is complete",
+              "observed_at": "2026-07-15T00:00:00Z",
+              "evidence_age_secs": 10800,
+              "local_progress": {
+                "state": "observed",
+                "unsettled": false,
+                "dirty": false,
+                "authored_commits": false,
+                "recovery_required": false,
+                "reason": null
+              }
+            }
+          }
+        ],
+        "truncated": false
+      },
+      "unavailable_tasks": [
+        {
+          "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
+          "task_id": "linear-task-w2-127",
+          "task_identifier": "W2-127",
+          "status": "ready",
+          "owner": "wave",
+          "reason": "Task's owning Project is absent from the current PM snapshot",
+          "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
         }
       ]
     },
@@ -356,7 +331,6 @@
         "goal": "context",
         "repo": "/src/context",
         "active_tasks": 0,
-        "active_projects": 0,
         "live": false,
         "paused": false,
         "enabled": false,
@@ -377,11 +351,12 @@
         "metrics": [],
         "contract_issues": []
       },
-      "projects": {
+      "chapter": null,
+      "tasks": {
         "state": "unavailable",
         "reason": "no local PM snapshot for wave/context; run `lf pm sync`"
       },
-      "unavailable_projects": []
+      "unavailable_tasks": []
     }
   ]
 }

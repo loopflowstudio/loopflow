@@ -19,6 +19,7 @@ use crate::store::{
 };
 use crate::work::wave::{Wave, WaveLocator};
 
+mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;

@@ -2,7 +2,7 @@
 requires: wave/<wave>/GOAL.md
 produces: wave/<child>/ directories
 ---
-Decompose a wave into smaller, independent waves. The original wave is replaced entirely.
+Decompose a wave into smaller, independent waves. Move future responsibility into the children; retain the parent's history and any active delivery until it settles.
 
 ## Orientation
 
@@ -20,15 +20,15 @@ re-derive what these already record.
 
 ## Goal
 
-Wave mitosis. The parent wave ceases to exist — its identity, projects, and tasks are distributed across N new waves.
+Wave mitosis. The parent's durable responsibility is distributed across N new Waves. Historical chapters remain inspectable.
 
 The numeric argument controls how many children to create (default 2).
 
-Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` needs rewriting, not slicing:
+Assign new work to one child. Existing active Tasks keep their owning Wave and delivery identity until they settle. Rewrite each child’s GOAL rather than slicing prose:
 
 - **Intent**: written fresh for each child. Must be internally coherent, not a fragment of the parent's.
 - **Metrics**: move each reviewed contract to exactly one child with its owning
-  Project. Cross-Wave consumption is explicit routing, never a duplicated
+  Wave. Cross-Wave consumption is explicit routing, never a duplicated
   metric identity or observation stream.
 - **Memory**: carry forward the decisions in `MEMORY.md` that each child still needs.
 
@@ -49,18 +49,19 @@ Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` n
 4. Create the new waves
    - `wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
    - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
-   - `wave/<child>/metrics/*.md` — contracts whose owning Projects move to that child
+   - `wave/<child>/metrics/*.md` — contracts allocated to that child
    - `lf pm init --wave <child>` — create each child's Linear Initiative
-   - recreate its allocated measured bets with `lf pm project create`
-   - Move allocated tasks with `lf pm task move --id <task> --wave <child> --project <project>`. Archive the parent Projects after every task moved. Use `lf pm task done --id <task>` only for shipped work.
+   - `lf wave update-plan --wave <child> --plan <plan.json>` — author its one chapter plan
+   - File new Tasks with `lf pm task create --wave <child> --title "…"`.
+   - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
-5. Remove the parent
-   - Delete `wave/<parent>/`
-   - Commit: `split-wave: <parent> → <child-a>, <child-b>`
+5. Retire the parent's future planning
+   - Use `lf wave new-chapter --wave <parent> --chapter <id> --dry-run --json` to account for every active Task and untouched backlog.
+   - Apply only the accepted preview. Keep the parent available while carried work finishes; never delete its history.
 
 6. Verify
    - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear Initiative
-   - Every metric contract resolves to exactly one Project under exactly one child
+   - Every metric contract belongs to exactly one child Wave
    - No content from the parent is unaccounted for
 
 ## Guardrails

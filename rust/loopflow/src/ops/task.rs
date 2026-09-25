@@ -531,13 +531,7 @@ fn prepare_task(
         }
     };
     plan.base_ref = base_ref.clone();
-    let project = crate::ops::project::ensure_project_for_task(
-        &main_repo,
-        crate::ops::task_pm::ResolvedProject {
-            snapshot: resolved.snapshot.clone(),
-            project: resolved.project.clone(),
-        },
-    )?;
+    let project = crate::ops::project::ensure_project_for_task(&main_repo, &resolved)?;
     let project_id = project.id.clone();
     let wave_id = project.wave_id.clone();
 
@@ -688,13 +682,16 @@ fn prepare_task(
 }
 
 pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
-    let mut context = format!("Definition:\n{}", project.definition.trim());
+    let mut context = format!(
+        "Chapter metric targets:\n{}",
+        serde_json::to_string(&project.metric_targets).expect("metric targets serialize")
+    );
     if let Some(flows) = project
         .flows
         .as_ref()
         .filter(|flows| **flows != crate::pm::ProjectFlowPlan::empty())
     {
-        context.push_str("\n\nProject Task flow:");
+        context.push_str("\n\nChapter Task flow:");
         if let Some(recommended) = &flows.recommended {
             context.push_str(&format!("\n- recommended: {recommended}"));
         }
@@ -711,7 +708,7 @@ pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
 
 pub fn task_start(
     repo: &Path,
-    project_id: &str,
+    wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
     options: TaskLaunchOptions,
@@ -720,22 +717,23 @@ pub fn task_start(
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
     let project =
-        crate::ops::task_pm::resolve_project(&main, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    crate::ops::project::require_registered_wave(&main, &project.snapshot.wave)
-        .map_err(|error| task_error(error.to_string()))?;
+        crate::ops::task_pm::resolve_current_project(&main, wave, crate::ops::pm::PmRefresh::Auto)?;
     select_task_worker_flow_from_project(&main, &project.project, options.flow.as_deref())?;
     let config = load_config_or_default(Some(&main));
     block_on_task(preflight_task_execution(&main, config.agent()))?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
-            format!("{}\0{}\0{}", project.project.id, input.title, input.report).as_bytes()
+            format!(
+                "{}\0{}\0{}",
+                project.snapshot.wave, input.title, input.report
+            )
+            .as_bytes()
         ))
     );
     let created = crate::ops::task_pm::create_and_load_task(
         &main,
         &project.snapshot.wave,
-        &project.project.slug,
         &input.title,
         &input.report,
         &marker,
@@ -4428,7 +4426,7 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
         .map_err(|error| task_error(format!("failed to resolve refreshed Project: {error}")))?
         .ok_or_else(|| {
             task_error(format!(
-                "refreshed Task {} belongs to unregistered Project {}; run that Project before restarting",
+                "refreshed Task {} has unresolved chapter ownership ({}); resume `lf wave new-chapter` with the pending chapter id before restarting",
                 resolved.item.identifier, resolved.project.slug
             ))
         })?;
@@ -5112,7 +5110,8 @@ mod tests {
             slug: "runtime".to_string(),
             name: "Runtime".to_string(),
             summary: String::new(),
-            definition: "Keep Tasks moving.".to_string(),
+
+            metric_targets: Vec::new(),
             flows: Some(ProjectFlowPlan {
                 recommended: Some("task-design".to_string()),
             }),

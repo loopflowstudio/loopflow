@@ -39,15 +39,12 @@ final class PodiumStateTests: XCTestCase {
             XCTAssertTrue(wave.waitForExistence(timeout: 8))
             wave.click()
 
-            let project = app.descendants(matching: .any)["podium-console-project-project-1"]
-            XCTAssertTrue(project.waitForExistence(timeout: 8))
-            project.click()
             XCTAssertEqual(
                 app.descendants(matching: .any)["podium-activity-scope"].label,
-                "Project · Loopflow API"
+                "Wave · product"
             )
 
-            // The Project detail lists its Tasks flat; selecting one from the
+            // The Wave lists its Tasks directly; selecting one from the
             // open drawer commits and retracts.
             let task = app.descendants(matching: .any)["podium-console-task-issue-available"]
             XCTAssertTrue(task.waitForExistence(timeout: 8))
@@ -71,11 +68,6 @@ final class PodiumStateTests: XCTestCase {
             XCTAssertTrue(String(describing: wave.value).contains("tokens per second"))
 
             wave.click()
-            let project = app.descendants(matching: .any)["podium-console-project-project-1"]
-            XCTAssertTrue(project.waitForExistence(timeout: 8))
-            XCTAssertTrue(String(describing: project.value).contains("tokens per second"))
-
-            project.click()
             let task = app.descendants(matching: .any)["podium-console-task-issue-now"]
             XCTAssertTrue(task.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: task.value).contains("tokens per second"))
@@ -90,7 +82,7 @@ final class PodiumStateTests: XCTestCase {
     }
 
     @MainActor
-    func testWaveProjectAndTaskSelectionsZoomTheWorkPane() {
+    func testWaveAndTaskSelectionsZoomTheWorkPane() {
         forEachWidth { app in
             app.descendants(matching: .any)["podium-path-root"].click()
             let wave = app.descendants(matching: .any)["podium-console-wave-wave-1"]
@@ -99,17 +91,12 @@ final class PodiumStateTests: XCTestCase {
             XCTAssertTrue(waitFor(app, id: "podium-detail-wave"))
             XCTAssertFalse(exists(app, id: "work-now"))
 
-            let project = app.descendants(matching: .any)["podium-console-project-project-1"]
-            XCTAssertTrue(project.waitForExistence(timeout: 8))
-            project.click()
-            XCTAssertTrue(waitFor(app, id: "podium-detail-project"))
-            XCTAssertFalse(exists(app, id: "podium-detail-wave"))
 
             let task = app.descendants(matching: .any)["podium-console-task-issue-now"]
             XCTAssertTrue(task.waitForExistence(timeout: 8))
             task.click()
             XCTAssertTrue(waitFor(app, id: "podium-detail-task"))
-            XCTAssertFalse(exists(app, id: "podium-detail-project"))
+            XCTAssertFalse(exists(app, id: "podium-detail-wave"))
         }
     }
 

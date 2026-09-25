@@ -284,9 +284,9 @@ def _print_run_debug_checklist() -> None:
     """Print the manual review path for Wave Chat and work supervision."""
     print("Review checklist:")
     print("  1. Select a Wave: its conversation and work map should agree on identity.")
-    print("  2. Send while idle: Wave Chat should launch or reconnect to `lf wave`.")
+    print("  2. Send while idle: Wave Chat should launch or reconnect to `lf wave serve`.")
     print("  3. Send while turning: the composer should expose Steer and Interrupt & Send.")
-    print("  4. Verify Projects, Tasks, decisions, and PR delivery refresh from `lf status`.")
+    print("  4. Verify Wave KRs, Tasks, decisions, and PR delivery refresh from `lf status`.")
     print("  5. Switch Waves: each conversation should retain its own endpoint and playhead.")
 
 

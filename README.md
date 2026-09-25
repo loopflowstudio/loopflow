@@ -14,7 +14,7 @@ Home-local Run record. The Run records what happened; it does not reserve the
 repository, control a Wave, or become planning state.
 
 The same building block runs **Waves**: persistent agents that coordinate
-Linear-backed Projects and Tasks, remember what they learn, and stay steerable.
+chapter plans and Tasks, remember what they learn, and stay steerable.
 There is no Loopflow server at the center. Repo files hold authored behavior;
 Linear and GitHub hold shared coordination and delivery facts; each Home keeps
 its local execution records. `lf ssh` runs the same local commands on another
@@ -64,8 +64,8 @@ Author a Wave in the repo and run it:
 <!-- wave/designer/GOAL.md -->
 ## Objective
 
-Keep the design system coherent. Each wake: read the Linear Projects and
-Tasks, direct the Project with the highest-leverage open KR, start a concrete
+Keep the design system coherent. Each wake: read the chapter plan and
+Tasks, pursue the highest-leverage open KR, start a concrete
 Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
@@ -85,7 +85,6 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
 lf task prepare INF-123                               # durable Task Work + worktree, no controller
-lf project prepare runtime-model                      # durable Project Work, no controller
 lf task run INF-123                                   # start end-to-end Task automation
 lf task steer INF-123 "take the smaller approach"     # post a Linear comment for the Task advancer
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
@@ -112,7 +111,7 @@ Watch this repository and the current Home:
 lf ls                  # every durable Wave and its Home/runtime evidence
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
-lf status designer     # one wave's live Project → Task hierarchy
+lf status designer     # one Wave's current chapter and Tasks
 lf activity            # durable Work changes with exact Run, PR, and Steer proof
 lf runs                # recent Home-local Run records
 lf runs --parent run_ab12 --json # every direct child Run, uncapped
@@ -154,8 +153,8 @@ In Loopflow.app, switching Sessions or closing a pane keeps its terminal live.
 |------|--------------|----------------|
 | **Skill** | Runs a prompt with assembled context | `.lf/skills/*.md` |
 | **Flow** | Chains skills together | `.lf/flows/*.yaml` |
-| **Wave** | Durable operating context: memory, cadence, chat, project selection | `wave/<name>/` |
-| **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
+| **Wave** | Durable operating context: memory, cadence, chat, metrics | `wave/<name>/` |
+| **Chapter** | Fresh plan and KRs for one interval | Internal Linear Project, via `lf wave` |
 | **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf pm` |
 | **Run** | Append-only evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
 | **Home** | Stable machine identity; its SSH route may move | local SQLite |

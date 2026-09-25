@@ -15,9 +15,7 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, discover_target, Target};
 use crate::lf::output::{column_width, Colors};
-use crate::lf::{
-    CronCommand, PmCommand, PmProjectCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand,
-};
+use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
@@ -736,7 +734,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
         }
         PmCommand::Show {
             wave,
-            project,
             json,
             sync,
             no_sync,
@@ -750,7 +747,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             };
             let options = crate::ops::pm::PmShowOptions {
                 wave: ambient_wave(wave.as_deref())?,
-                project: project.clone(),
+                project: None,
                 refresh,
             };
             let result = if *json {
@@ -758,11 +755,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             } else {
                 crate::ops::pm::pm_show(&repo_root, &options, progress)?
             };
-            if *json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else {
-                print_pm_show_result(&result);
-            }
+            crate::lf::commands::waves::status(Some(&result.wave), *json)?;
         }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
@@ -780,9 +773,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                         "{}: Linear Initiative `{}` ({}) — {} open / {} total",
                         wave.wave, wave.initiative_name, wave.initiative, wave.open, wave.total
                     );
-                    for (project, open) in wave.open_by_project {
-                        println!("  {project:<28} {open} open");
-                    }
                 }
             }
         }
@@ -801,17 +791,11 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             );
         }
         PmCommand::Task { cmd } => match cmd {
-            PmTaskCommand::Create {
-                wave,
-                project,
-                title,
-                notes,
-            } => {
+            PmTaskCommand::Create { wave, title, notes } => {
                 let result = crate::ops::pm::pm_update(
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: ambient_wave(wave.as_deref())?,
-                        project: Some(project.clone()),
                         id: None,
                         title: Some(title.clone()),
                         notes: notes.clone(),
@@ -820,15 +804,11 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     },
                     progress,
                 )?;
-                println!(
-                    "{}: created task {} in project:{}",
-                    result.wave, result.id, project
-                );
+                println!("{}: created task {}", result.wave, result.id);
             }
             PmTaskCommand::Update {
                 id,
                 wave,
-                project,
                 title,
                 notes,
             } => {
@@ -836,7 +816,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: ambient_wave(wave.as_deref())?,
-                        project: project.clone(),
                         id: Some(id.clone()),
                         title: title.clone(),
                         notes: notes.clone(),
@@ -852,7 +831,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: ambient_wave(wave.as_deref())?,
-                        project: None,
                         id: Some(id.clone()),
                         title: None,
                         notes: None,
@@ -867,87 +845,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 };
                 println!("{}: closed task {}{linked}", result.wave, result.id);
             }
-            PmTaskCommand::Move { id, wave, project } => {
-                let result = crate::ops::pm::pm_task_move(
-                    &repo_root,
-                    &crate::ops::pm::PmTaskMoveOptions {
-                        id: id.clone(),
-                        wave: ambient_wave(wave.as_deref())?,
-                        project: project.clone(),
-                    },
-                    progress,
-                )?;
-                println!(
-                    "{}: moved task {} to project:{}",
-                    result.wave, result.id, result.project
-                );
-            }
         },
-        PmCommand::Project { cmd } => {
-            let (wave, project, title, definition, krs, recommended) = match cmd {
-                PmProjectCommand::Create {
-                    wave,
-                    title,
-                    definition,
-                    krs,
-                    recommended,
-                } => (
-                    wave.clone(),
-                    None,
-                    Some(title.clone()),
-                    Some(definition.clone()),
-                    krs.clone(),
-                    recommended.clone(),
-                ),
-                PmProjectCommand::Update {
-                    wave,
-                    project,
-                    title,
-                    definition,
-                    krs,
-                    recommended,
-                } => (
-                    wave.clone(),
-                    Some(project.clone()),
-                    title.clone(),
-                    definition.clone(),
-                    krs.clone(),
-                    recommended.clone(),
-                ),
-                PmProjectCommand::Archive { wave, project } => {
-                    let result = crate::ops::pm::pm_project_archive(
-                        &repo_root,
-                        &crate::ops::pm::PmProjectArchiveOptions {
-                            wave: ambient_wave(wave.as_deref())?,
-                            project: project.clone(),
-                        },
-                        progress,
-                    )?;
-                    println!(
-                        "{}: archived project:{} ({})",
-                        result.wave, result.slug, result.id
-                    );
-                    return Ok(());
-                }
-            };
-            let result = crate::ops::pm::pm_project_write(
-                &repo_root,
-                &crate::ops::pm::PmProjectWriteOptions {
-                    wave: ambient_wave(wave.as_deref())?,
-                    project,
-                    title,
-                    definition,
-                    krs,
-                    recommended,
-                },
-                progress,
-            )?;
-            let verb = if result.created { "created" } else { "updated" };
-            println!(
-                "{}: {verb} project:{} ({})",
-                result.wave, result.slug, result.id
-            );
-        }
         PmCommand::Doctor => {
             let result = crate::ops::pm::pm_sync(
                 &repo_root,
@@ -1076,133 +974,6 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     }
     if result.already > 0 {
         println!("  already in repository Team: {} (skipped)", result.already);
-    }
-}
-
-fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
-    if result.items.is_empty() {
-        let suffix = result
-            .project
-            .as_deref()
-            .map(|project| format!(" project:{project}"))
-            .unwrap_or_default();
-        println!("{}{}: no Linear tasks", result.wave, suffix);
-        print_pm_snapshot_age(result);
-        return;
-    }
-
-    let colors = Colors::default();
-    for (index, line) in format_pm_task_table(&result.items).iter().enumerate() {
-        if index == 0 {
-            println!("{}{}{}", colors.bold, line, colors.reset);
-        } else {
-            println!("{line}");
-        }
-    }
-    print_pm_snapshot_age(result);
-}
-
-fn print_pm_snapshot_age(result: &crate::ops::pm::PmShowResult) {
-    let age = time::OffsetDateTime::now_utc().unix_timestamp() - result.synced_at;
-    let colors = Colors::default();
-    let phrase = if age < 60 {
-        "just now".to_string()
-    } else {
-        format!("{} ago", crate::ops::pm::format_age(age))
-    };
-    println!("{}snapshot synced {}{}", colors.dim, phrase, colors.reset);
-}
-
-#[derive(Debug)]
-struct PmTaskRow {
-    status: &'static str,
-    title: String,
-    project: String,
-    assignee: String,
-    id: String,
-    completed: bool,
-    rank: u32,
-}
-
-fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
-    let mut rows: Vec<_> = items
-        .iter()
-        .map(|item| PmTaskRow {
-            status: if item.completed { "done" } else { "open" },
-            title: item.name.split_whitespace().collect::<Vec<_>>().join(" "),
-            project: item.project.clone(),
-            assignee: item.assignee.clone().unwrap_or_else(|| "-".to_string()),
-            id: item.id.clone(),
-            completed: item.completed,
-            rank: item.rank,
-        })
-        .collect();
-    rows.sort_by_key(|row| (row.completed, row.rank));
-
-    let status_width = column_width("STATUS", rows.iter().map(|row| row.status));
-    let title_width = column_width("TITLE", rows.iter().map(|row| row.title.as_str()));
-    let project_width = column_width("PROJECT", rows.iter().map(|row| row.project.as_str()));
-    let assignee_width = column_width("ASSIGNEE", rows.iter().map(|row| row.assignee.as_str()));
-
-    let mut lines = Vec::with_capacity(rows.len() + 1);
-    lines.push(format!(
-        "{:<status_width$}  {:<title_width$}  {:<project_width$}  {:<assignee_width$}  ID",
-        "STATUS", "TITLE", "PROJECT", "ASSIGNEE"
-    ));
-    lines.extend(rows.into_iter().map(|row| {
-        format!(
-            "{:<status_width$}  {:<title_width$}  {:<project_width$}  {:<assignee_width$}  {}",
-            row.status, row.title, row.project, row.assignee, row.id
-        )
-    }));
-    lines
-}
-
-#[cfg(test)]
-mod pm_output_tests {
-    use super::format_pm_task_table;
-    use crate::pm::PmItem;
-
-    #[test]
-    fn task_table_is_aligned_complete_and_open_first() {
-        let lines = format_pm_task_table(&[
-            PmItem {
-                id: "done-1".to_string(),
-                identifier: "INF-1".to_string(),
-                url: None,
-                name: "Done task".to_string(),
-                description: String::new(),
-                rank: 0,
-                completed: true,
-                project_id: "project-done".to_string(),
-                project: "-".to_string(),
-                team_id: "team-loo".to_string(),
-                assignee: None,
-            },
-            PmItem {
-                id: "open-1".to_string(),
-                identifier: "INF-2".to_string(),
-                url: None,
-                name: "Longer\ntitle".to_string(),
-                description: String::new(),
-                rank: 1,
-                completed: false,
-                project_id: "project-chat".to_string(),
-                project: "wave-chat".to_string(),
-                team_id: "team-loo".to_string(),
-                assignee: Some("me".to_string()),
-            },
-        ]);
-
-        assert_eq!(
-            lines,
-            vec![
-                "STATUS  TITLE         PROJECT    ASSIGNEE  ID",
-                "open    Longer title  wave-chat  me        open-1",
-                "done    Done task     -          -         done-1",
-            ]
-        );
-        assert!(lines.iter().all(|line| line.lines().count() == 1));
     }
 }
 

@@ -21,7 +21,7 @@ Flow. Launching a draft does not approve it.
 ## Orientation
 
 - Read `scratch/` and the repo agent guide. Continue an existing design instead of re-deriving it.
-- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf pm show --wave <wave>` only when its Project state is material; never infer a Wave or repair PM access as a prerequisite.
+- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf pm show --wave <wave>` only when its chapter state is material; never infer a Wave or repair PM access as a prerequisite.
 - Write the design to `scratch/<workspace-slug>.md`. Put unresolved assumptions in `scratch/questions.md`.
 
 ## Surface
@@ -54,12 +54,12 @@ A design beyond roughly 1,000 words or an implementation beyond roughly 1,000 li
 
 ### 4. Place
 
-Choose exactly one Wave by matching its objective and bounds. Choose one existing Project when the available evidence supports it; if none fits or PM state is unavailable, record that exact ambiguity instead of inventing ownership.
+Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits or its state is unavailable, record that exact ambiguity instead of inventing ownership.
 
 Tighten the artifact to:
 
 - **What to build** — one sentence describing the new end state.
-- **Placement** — Wave and Project, or the recorded unresolved placement.
+- **Placement** — Wave, or the recorded unresolved placement.
 - **The demo** — the real action and observable result.
 - **Data structures** — core domain values.
 - **Key functions** — signatures and intent.
@@ -79,11 +79,11 @@ For an additive series, describe the keystone fully and list the intended follow
 
 When the human asks to file a Task and run a Flow from an existing design,
 keep the design separate. Reuse the Task if it is the same work; otherwise file
-a short user-problem brief under the selected Project, with a design reference,
+a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
 
 ```bash
-lf pm task create --project <project> --title "<desired experience>" --notes "<brief; design reference and maturity>"
+lf pm task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf task prepare <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue> --flow <chosen-flow>
@@ -103,7 +103,7 @@ needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
 Use the human-selected Flow and inspect its contents when explaining where it
-begins; otherwise use the Project recommendation. Continue the design already
+begins; otherwise use the Wave chapter recommendation. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Flow, and observed launch result. Verify
 supplied context separately from worker startup.

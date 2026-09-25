@@ -1,47 +1,37 @@
 # Planning
 
-Tracked Work preserves purpose across provider processes. A Wave contains
-Projects; a Project defines a measured bet; a Task carries one concrete change
-and its delivery identity. This layer is useful without a long-lived agent.
-Finite Project operations and claimed Task workers act on it when invoked.
-
 ```bash
 lf start product
-lf project run <project-id>
-lf task run INF-123
 lf task prepare INF-124
 lf --task INF-124 research "write scratch/runtime.md"
-lf project prepare <project-id>
+lf task run INF-124
+lf wave new-chapter --wave product --chapter 2026-09 --plan plan.json --dry-run --json
 ```
 
 ## The planning model
 
-```text
-Wave
-  |-- goal, memory, cadence, chat
-  `-- Project
-        |-- definition, KRs, closure criteria
-        `-- Task
-              `-- concrete work and delivery
-```
+Wave → Task is the public hierarchy. The Wave owns durable purpose, memory,
+conversation, cadence, placement, and metric instruments. One internal Project
+holds its current chapter KRs, metric targets, Flow recommendation, and Task
+membership. The Wave owns the sole objective.
+A Task owns its concrete change, worktree, active remote branch, and serial PRs.
+Only Tasks persist a selected Flow position and worker claim.
 
-| Model | Owns | Does not own |
-| --- | --- | --- |
-| Wave | durable context, memory, cadence, conversation, project selection | project KRs or Task worktrees |
-| Project | one measured bet, definition, KRs, closure judgment | memory, cadence, nested Projects |
-| Task | one implementation, investigation, document, or shipped change; one active remote branch, worktree, and PR | another simultaneously active delivery branch |
-| Work | durable status and inputs for one Wave/Project/Task; Task-only Flow position and claim | provider-process liveness |
-| Run | one provider-launch record | current Work state or control capability |
+`wave_chapters` owns the current binding and transition receipts. A unique
+index permits one current chapter and one incomplete transition per Wave.
+Rotation locks against Task filing, prepares a provider UUID before creation,
+and recovers ambiguous replies by reading that identity. Task retirement and
+worker claims share SQLite transactions; first execution survives Flow resets
+as a Task event. Local transfer updates only the parent; stale worker saves
+cannot restore it.
 
-Every Project belongs to exactly one Wave. Projects do not contain Projects.
-Only a Task owns a delivery worktree.
-
-The shared durable types live in
-[`durable.rs`](../../rust/loopflow/src/durable.rs): `WorkRef`, `WorkStatus`,
-`FlowPosition`, `Steer`, `Home`, and `Placement`. Wave, Project, and Task
-domain models add their own facts under [`wave/`](../../rust/loopflow/src/wave/),
-[`project/`](../../rust/loopflow/src/project/), and
-[`task/`](../../rust/loopflow/src/task/).
+Started unfinished Tasks move, untouched backlog is canceled, and terminal work
+stays historical. Uncertain evidence remains unresolved. Archived content and
+membership are read from the frozen boundary receipt, not today's moved Tasks.
+Task observations go directly to the Wave; its single operation judges KRs and
+selects work. Status and roadmap join current chapter planning directly to Tasks.
+Both retain stranded Tasks when the chapter plan is unavailable; historical
+Project operator state remains in diagnostics.
 
 ## Compose Skills with a Flow
 
@@ -108,15 +98,14 @@ Task execution is deliberately boundary-based:
 
 A crash loses in-memory judgment. It does not lose Work identity, accepted
 inputs, Task Flow position, worktree, or provider observations. The next Task
-worker resumes from those facts and launches a fresh Run when needed. Project
-operations instead reread current Project facts on every invocation.
+worker resumes from those facts and launches a fresh Run when needed. Wave operations reread current chapter facts on every invocation.
 
 ## Workers and operations
 
 The Task worker lives under
 [`controller/task/`](../../rust/loopflow/src/controller/task/) and exits after
-one claimed boundary. Finite Project launch and bookkeeping lives in
-[`ops/project.rs`](../../rust/loopflow/src/ops/project.rs). Wave listener,
+one claimed boundary. Deterministic chapter rotation lives in
+[`ops/chapter.rs`](../../rust/loopflow/src/ops/chapter.rs). Wave listener,
 runtime, and optional service behavior lives under
 [`controller/wave/`](../../rust/loopflow/src/controller/wave/).
 
@@ -153,13 +142,13 @@ Local event rows and comment-id deduplication are a delivery cache; Linear owns
 the authored direction. Publication, seed inclusion, and provider transport
 acceptance are separate evidence, none proving application by the model.
 
-Project and Wave guidance is extra input to `project/operate` or `wave/operate`.
+Wave guidance is extra input to `wave/operate`.
 Wave chat sends ordinary channel messages.
 
 ## Questions and human sessions
 
 ```bash
-lf --as wave:product : "which Project owns this?"
+lf --as wave:product : "which Task should start?"
 lf ask "review which migration should survive"
 lf session list --json
 lf session open <session-id> --json
@@ -187,17 +176,17 @@ Task CLI
   `-- exact Task Flow-position claim
         `-- one Task worker boundary Run
 
-Project CLI
-  `-- one finite project/operate Run
+Wave operation
+  `-- one finite wave/operate Run
 
 lfd
   `-- Wave listener / resident
 ```
 
-The Wave listener and resident are not prerequisites for Project or Task
+The Wave listener and resident are not prerequisites for Task
 motion. The exact Task-position claim admits one worker. Other agent
 perspectives remain ordinary attributed Runs, and human sessions reuse either
-their originating Run or the Task's persisted playhead. Each Project operation
+their originating Run or the Task's persisted playhead. Each Wave operation
 refreshes its definition, KRs, metrics, and Tasks before deciding. Each Task
 worker executes one saved boundary, settles its claim, and launches the next
 worker when another autonomous boundary remains. A human boundary parks the
@@ -207,7 +196,7 @@ Flow; completion removes its position without selecting another Flow.
 
 - Stable Work identity is the join point for planning input and progress.
 - Provider processes are replaceable; Work survives them.
-- Every Task boundary and Project operation rebuilds from current durable facts.
+- Every Task boundary and Wave operation rebuilds from current durable facts.
 - A Flow playhead advances only from the required boundary result.
 - Steer is durable correction; another agent perspective is an ordinary Run.
 - An unresolved Session is either an interactive Run, a Task's persisted human

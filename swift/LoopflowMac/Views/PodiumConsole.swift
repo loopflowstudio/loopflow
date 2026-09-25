@@ -23,12 +23,10 @@ struct PodiumConsole<Content: View>: View {
     @Bindable var model: PodiumModel
     @ViewBuilder let content: Content
 
-    /// How many drawer columns are out: 0 closed, 1 waves, 2 +projects,
-    /// 3 +tasks. Explored ids are the cascade's own path and may diverge from
+    /// Drawer depth: 0 closed, 1 Waves, 2 Tasks. Explored ids are the cascade's own path and may diverge from
     /// the committed selection while the user walks the tree.
     @State private var openDepth = 0
     @State private var exploredWaveId: String?
-    @State private var exploredProjectId: String?
     @State private var activeControlId: String?
     @State private var controlError: String?
 
@@ -111,15 +109,14 @@ struct PodiumConsole<Content: View>: View {
             kicker: node.kicker,
             title: node.title,
             shade: node.shade,
-            isOpen: openDepth == depth + 1 && depth < 3,
+            isOpen: openDepth == depth + 1 && depth < 2,
             leadingPad: segmentTip + Spacing.md,
             fader: node.fader,
             accessibilityId: "podium-path-\(node.kicker.lowercased())"
         ) {
             // A segment opens the drawer for choosing among its own siblings:
-            // the wave segment drops the waves column, the project segment the
-            // projects column. The task segment re-opens the full cascade.
-            toggleDrawers(to: min(depth, 3))
+            // the Wave segment opens Waves; the Task segment opens its Wave’s Tasks.
+            toggleDrawers(to: min(depth, 2))
         }
     }
 
@@ -197,14 +194,8 @@ struct PodiumConsole<Content: View>: View {
                 .frame(width: 210)
                 .background(ConsoleShade.wave)
             if openDepth >= 2, let entry = exploredWave {
-                projectColumn(entry)
-                    .frame(width: 210)
-                    .background(ConsoleShade.project)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-            if openDepth >= 3, let entry = exploredWave, let project = exploredProject(in: entry) {
-                taskColumn(project, wave: entry)
-                    .frame(width: 250)
+                taskColumn(entry)
+                    .frame(width: 300)
                     .background(ConsoleShade.task)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
@@ -231,7 +222,6 @@ struct PodiumConsole<Content: View>: View {
                         accessibilityLabel: "Wave: \(entry.vm.displayName)"
                     ) {
                         exploredWaveId = entry.vm.id
-                        exploredProjectId = nil
                         openDepth = 2
                         model.select(.wave(id: entry.vm.id))
                     }
@@ -244,60 +234,24 @@ struct PodiumConsole<Content: View>: View {
         .accessibilityIdentifier("podium-drawer-waves")
     }
 
-    private func projectColumn(_ entry: WaveEntry) -> some View {
+    private func taskColumn(_ entry: WaveEntry) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
-                columnLip("\(entry.vm.displayName.uppercased()) · \(projects(of: entry).count) PROJECTS")
-                if projects(of: entry).isEmpty {
-                    Text(projectsEmptyReason(entry))
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.6))
-                        .padding(Spacing.md)
-                        .accessibilityIdentifier("podium-drawer-projects-empty")
-                } else {
-                    ForEach(projects(of: entry)) { project in
-                        consoleRow(
-                            title: project.project.name,
-                            subtitle: nil,
-                            titleFont: Typography.body(12.5).weight(.medium),
-                            isCurrent: exploredProjectId == project.id && openDepth >= 3,
-                            currentShade: ConsoleShade.task,
-                            fader: projectFader(project, wave: entry),
-                            accessibilityId: "podium-console-project-\(project.id)",
-                            accessibilityLabel: "Project: \(project.project.name)"
-                        ) {
-                            exploredProjectId = project.id
-                            openDepth = 3
-                            model.select(.project(id: project.id))
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, Spacing.xs)
-            .padding(.bottom, Spacing.sm)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("podium-drawer-projects")
-    }
-
-    private func taskColumn(_ project: RoadmapProject, wave entry: WaveEntry) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 1) {
-                columnLip("\(project.project.name.uppercased()) · \(project.tasks.count) TASKS")
-                if project.tasks.isEmpty {
-                    Text(project.nextMove.reason)
+                columnLip("\(entry.vm.displayName.uppercased()) · \(tasks(of: entry).count) TASKS")
+                if tasks(of: entry).isEmpty {
+                    Text(tasksEmptyReason(entry))
                         .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.6))
                         .padding(Spacing.md)
                 } else {
-                    ForEach(project.tasks) { task in
+                    ForEach(tasks(of: entry)) { task in
                         consoleRow(
                             title: task.task.name,
                             subtitle: "\(task.task.identifier) · \(task.condition.reason)",
                             titleFont: Typography.body(12),
                             isCurrent: model.selection == .task(id: task.id),
                             currentShade: Color.white.opacity(0.14),
-                            fader: taskFader(task, wave: entry, project: project),
+                            fader: taskFader(task, wave: entry),
                             accessibilityId: "podium-console-task-\(task.id)",
                             accessibilityLabel: "Task: \(task.task.name)"
                         ) {
@@ -416,27 +370,9 @@ struct PodiumConsole<Content: View>: View {
         )
     }
 
-    private func projectFader(_ project: RoadmapProject, wave entry: WaveEntry) -> FaderModel {
-        let phase = ConsoleSignal.phase(
-            humanStop: project.tasks.contains { $0.condition.state == .blocked },
-            agentRunning: false,
-            signal: signal([])
-        )
-        // No exact process ownership exists below the Wave level.
-        return FaderModel(
-            phase: phase,
-            verb: nil,
-            controlId: "project:\(project.id)",
-            accessibilityId: "podium-fader-project-\(project.id)",
-            accessibilityLabel: "\(project.project.name) status",
-            action: nil
-        )
-    }
-
     private func taskFader(
         _ task: RoadmapTask,
-        wave entry: WaveEntry,
-        project: RoadmapProject
+        wave entry: WaveEntry
     ) -> FaderModel {
         let phase = ConsoleSignal.phase(
             humanStop: task.condition.state == .blocked,
@@ -537,8 +473,7 @@ struct PodiumConsole<Content: View>: View {
         visibleWaves.map { vm in
             let roadmap = roadmap(for: vm)
             let nodes = providerNodes(wave: vm)
-            let hasRedTask = (roadmap?.projects.items ?? [])
-                .flatMap(\.tasks)
+            let hasRedTask = (roadmap?.tasks.items ?? [])
                 .contains { $0.condition.state == .blocked }
             return WaveEntry(
                 vm: vm,
@@ -560,25 +495,15 @@ struct PodiumConsole<Content: View>: View {
         return waveEntries.first { $0.vm.id == exploredWaveId }
     }
 
-    private func exploredProject(in entry: WaveEntry) -> RoadmapProject? {
-        guard let exploredProjectId else { return nil }
-        return projects(of: entry).first { $0.id == exploredProjectId }
+    private func tasks(of entry: WaveEntry) -> [RoadmapTask] {
+        entry.roadmap?.tasks.items ?? []
     }
 
-    private func projects(of entry: WaveEntry) -> [RoadmapProject] {
-        entry.roadmap?.projects.items ?? []
-    }
-
-    /// The empty column tells the truth: an unavailable plan read shows its
-    /// reason (e.g. "run `lf pm sync`"), never a false "no Projects".
-    private func projectsEmptyReason(_ entry: WaveEntry) -> String {
-        switch entry.roadmap?.projects {
-        case .unavailable(let reason):
-            return reason
+    private func tasksEmptyReason(_ entry: WaveEntry) -> String {
+        switch entry.roadmap?.tasks {
+        case .unavailable(let reason): return reason
         case .available, .none:
-            return entry.roadmap == nil
-                ? "Wave has no readable plan yet."
-                : "No Projects in the plan."
+            return entry.roadmap == nil ? "Wave has no readable plan yet." : "No Tasks in this chapter."
         }
     }
 
@@ -622,21 +547,18 @@ struct PodiumConsole<Content: View>: View {
         guard let selection = model.selection else { return [] }
         var nodes: [PathNode] = []
         var waveEntry: WaveEntry?
-        var projectNode: RoadmapProject?
         var taskNode: RoadmapTask?
 
         switch selection.kind {
         case .wave:
             waveEntry = waveEntries.first { $0.vm.id == selection.id }
         case .project:
-            if let found = model.project(id: selection.id) {
-                waveEntry = waveEntries.first { $0.roadmap?.wave.id == found.wave.wave.id }
-                projectNode = found.project
+            if let wave = model.waveForChapter(projectId: selection.id) {
+                waveEntry = waveEntries.first { $0.roadmap?.wave.id == wave.wave.id }
             }
         case .task:
             if let found = model.task(id: selection.id) {
                 waveEntry = waveEntries.first { $0.roadmap?.wave.id == found.wave.wave.id }
-                projectNode = found.project
                 taskNode = found.task
             }
         }
@@ -649,23 +571,12 @@ struct PodiumConsole<Content: View>: View {
                 shade: ConsoleShade.wave,
                 fader: waveFader(waveEntry)
             ))
-            if let projectNode {
+            if let taskNode {
                 nodes.append(PathNode(
-                    id: "project-\(projectNode.id)",
-                    kicker: "PROJECT",
-                    title: projectNode.project.name,
-                    shade: ConsoleShade.project,
-                    fader: projectFader(projectNode, wave: waveEntry)
+                    id: "task-\(taskNode.id)", kicker: "TASK",
+                    title: "\(taskNode.task.identifier) · \(taskNode.task.name)",
+                    shade: ConsoleShade.task, fader: taskFader(taskNode, wave: waveEntry)
                 ))
-                if let taskNode {
-                    nodes.append(PathNode(
-                        id: "task-\(taskNode.id)",
-                        kicker: "TASK",
-                        title: "\(taskNode.task.identifier) · \(taskNode.task.name)",
-                        shade: ConsoleShade.task,
-                        fader: taskFader(taskNode, wave: waveEntry, project: projectNode)
-                    ))
-                }
             }
         }
         return nodes
@@ -694,14 +605,10 @@ struct PodiumConsole<Content: View>: View {
         case .wave:
             exploredWaveId = selection.id
         case .project:
-            if let found = model.project(id: selection.id) {
-                exploredWaveId = waveEntries.first { $0.roadmap?.wave.id == found.wave.wave.id }?.vm.id
-                exploredProjectId = found.project.id
-            }
+            exploredWaveId = model.waveForChapter(projectId: selection.id)?.wave.id
         case .task:
             if let found = model.task(id: selection.id) {
                 exploredWaveId = waveEntries.first { $0.roadmap?.wave.id == found.wave.wave.id }?.vm.id
-                exploredProjectId = found.project.id
             }
         }
     }

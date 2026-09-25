@@ -4,7 +4,7 @@ produces: connected Loopflow path and an evidence-backed next command
 Connect this repository to Loopflow's distributed control system.
 
 Loopflow is not primarily a prompt launcher. It is the shared control surface
-for durable Waves, Linear-backed Projects and Tasks, GitHub delivery, stable
+for durable Waves, chapter plans and Linear-backed Tasks, GitHub delivery, stable
 execution Homes, and the agents that do the work. Establish that system first.
 Skills, flows, models, and launch preferences are secondary configuration.
 
@@ -164,13 +164,15 @@ wave/<name>/GOAL.md
 ```
 
 Write the goal as a durable operating contract: objective, observable success,
-project-selection judgment, boundaries, and when to stop or escalate. Do not
+chapter priorities, boundaries, and when to stop or escalate. Do not
 create or edit `MEMORY.md`; the Wave runtime owns compiled memory. Runtime
 learnings arrive through `lf memory add` and `lf memory update`. Do not create
 Projects or Tasks in the goal body.
 
-Then offer Linear binding as above. Every Project belongs to exactly one Wave;
-Projects carry definitions and KRs, while Tasks carry concrete work.
+Then offer Linear binding as above. Initialization provisions one internal
+Project for the first chapter. Subsequent chapters replace it through
+`lf wave new-chapter`; the Wave retains purpose, memory, and conversation.
+Tasks belong to the current chapter automatically.
 
 ### Existing Linear Task
 
@@ -256,7 +258,7 @@ Home agents  Codex + Claude installed
 Repo policy  inherited defaults
 Accounts     GitHub + Linear connected
 Wave         designer stopped on home_...
-Planning     Linear bound; 2 open Projects / 7 open Tasks
+Planning     Linear bound; 1 current chapter / 7 open Tasks
 
 Next         lf start designer
 Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
@@ -274,5 +276,5 @@ selected path is proved. Do not launch it automatically.
 - Lead with the observed topology, not configuration trivia.
 - Ask one consequential question at a time.
 - Prefer a working durable path over exhaustive optional setup.
-- Keep Wave, Project, Task, Home, account, and skill distinct.
+- Expose Wave and Task; keep the chapter Project internal. Keep Home, account, and skill distinct.
 - Stop when the chosen path is proved and the next command is obvious.

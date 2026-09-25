@@ -15,7 +15,7 @@ Inspect the worktree, focused verification, diff, PR, CI, and review state.
 - Report a consequential measured impact or important blind spot exposed by the
   work. When feature implementation reveals a promising metric, propose its
   outcome, measure, decision value, and cheapest credible producer to the
-  Project. A benchmark or passing test can support the proposal; neither becomes
+  Wave. A benchmark or passing test can support the proposal; neither becomes
   a KR or sponsored live metric by itself.
 - Treat an open or approved PR as submitted, never complete. Do not land or
   complete from this loop; the pinned final flow owns that decision.

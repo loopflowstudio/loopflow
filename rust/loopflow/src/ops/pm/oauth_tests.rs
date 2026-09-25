@@ -267,7 +267,7 @@ async fn pm_read_linear_oauth_recovers() {
     let result = scoped(fixture.context(&graphql), &oauth, forced_read(&repo))
         .await
         .unwrap();
-    assert_eq!(result.projects[0].definition, "Fresh definition.");
+    assert!(result.projects[0].metric_targets.is_empty());
     assert_eq!(result.projects[0].krs[0].text, "Fresh proof");
     let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
     let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();

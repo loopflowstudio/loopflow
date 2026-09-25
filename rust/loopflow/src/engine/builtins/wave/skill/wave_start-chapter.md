@@ -1,97 +1,94 @@
 ---
-requires: a bound Wave or a proposed new Wave in the launch prompt
-produces: a scoped proposal in final Run output, agree or challenge upward
+requires: a bound Wave or a proposed new Wave in the accepted direction
+produces: one fresh chapter plan, deterministic preview, agree or challenge upward
 ---
-Open one Wave's chapter: check the parent brief against this Wave's reality, gather scoped human direction, and propose the Project portfolio.
+Shape this Wave's next chapter from accepted human direction and dated evidence.
+The Wave is durable; its one internal Project is replaced every chapter. Users
+choose Waves and Tasks. Never propose a Project portfolio or delegate to a
+Project planning tier.
 
-A chapter is a dated planning interval. The parent brief — when this Run was
-launched by a repository `start-chapter` — is provisional direction, not a
-plan to execute. During repository orchestration this skill is
-**proposal-only**: it returns its portfolio and its verdict on the parent
-boundary; the root applies the plan once, after final human acceptance.
+## Ground the proposal
 
-## Ground in evidence
+Read this exact Wave's GOAL.md, MEMORY.md, chapter review, and current
+`lf status <wave> --json`. The mandate and memory endure; chapter metric targets,
+KRs, Flow recommendations, and unopened backlog do not inherit authority.
+Use the parent's accepted direction when supplied. Return a material challenge
+to that parent instead of opening another human session. With a human present,
+ask in the conversation. Standalone headless work without accepted direction
+uses `lf ask` for judgment before settling the proposal.
 
-For an existing Wave, read its `GOAL.md` and `MEMORY.md`, PM snapshot
-(`lf pm show --wave <name> --json`), live state
-(`lf status <name> --json`), and actual code and in-flight work in its area.
-Read the parent brief and scoped chapter report carried in the launch prompt;
-the parent's Task worktree is separate from this checkout. For a proposed new
-Wave, use the exact name, repository, and boundary in the parent brief and
-inspect adjacent Waves and code; do not invent current GOAL, PM, or Work state.
-Verify the brief against the territory. For a standalone existing Wave, use a
-locally available report; if none exists, run `wave/review-chapter` and use
-its final output.
+Name the beneficiary and what improves in their experience. Keep the objective on the Wave. Author fresh metric targets and proof-shaped KRs: observable conditions, including the full
+window and denominator where applicable. Multiple outcomes can belong to one
+Wave chapter. Implementation steps belong in Tasks. Do not copy old checkmarks,
+metric targets, backlog, or Flow recommendations.
 
-## Direction
+Produce a JSON plan with this exact shape:
 
-Gather scoped human direction before settling anything: which bets feel done,
-which expired, what pressure the code itself is applying, what the parent
-brief missed. When an orchestrating parent supplies direction accepted in its
-live human conversation, use that record and return any new material question
-or challenge to the parent; do not open a second human session merely to reach
-the same person. On a standalone headless surface with no accepted parent
-direction, open a durable `lf ask "<exact request>"` session for the material
-choices; provider exit, silence, or a ready session does not count as
-acceptance.
+```json
+{"metric_targets":[{"metric_id":"example-metric","target":{"kind":"at_least","value":0.95}}],"flows":{"recommended":null},"krs":[{"text":"Observable proof","holds":false}]}
+```
 
-Where this Wave's evidence contradicts the parent brief — wrong boundary,
-stale purpose, a tension the brief papered over — challenge it. The return
-value is explicit: `agree` or `challenge` against the parent boundary, with
-reasons, open tensions, and evidence. A challenge is first-class output for
-the parent to reconcile. Do not silently comply and do not silently diverge.
+## Preview the fixed boundary
 
-## Propose the portfolio
+For an existing Wave, write the proposed plan to a temporary file outside the repository and run:
 
-Choose the Project portfolio for the new chapter. Good Projects are
-completable behavioral improvements or standing quality frontiers. Each names
-its beneficiary and the real experience it will improve before naming the
-mechanism, then carries KRs that credibly prove that improvement — observable
-end states, not backlog bullets or implementation receipts. Internal Projects
-may serve maintainers or agents, but a mechanism with no explicit downstream
-experience is not yet a shaped bet. Every old Project and open Task receives
-an explicit carry, rewrite, complete, or retire disposition; none inherits
-priority merely by existing.
+```bash
+lf wave new-chapter --wave <wave> --chapter <id> --plan <plan.json> --dry-run --json
+```
 
-For each existing Project whose definition or KRs need real shaping, launch
-`lf -b --wave <name> --project <project-id> project/start-chapter
-"<chapter id, its slice of direction, review findings, and exact starting
-KR/Task ledger>"`. For a new bet without a Project id, launch
-`lf -b --wave <name> project/start-chapter "<new bet brief and Wave direction>"`;
-it proposes a Project and does not create one before final acceptance.
-Its proposal may challenge this Wave's framing the same way
-this Wave challenges the parent's; preserve and reconcile before returning.
-Include every complete Project proposal and Run id in final output so the
-repository parent can archive them. A trivial disposition (complete a
-finished Project, retire a dead one) is proposed directly.
+Return its exact receipt with the proposal. The API owns classification:
+started unfinished Tasks move with the same identity, worktree, PR and Flow;
+untouched backlog is abandoned/canceled; completed work stays historical;
+missing evidence stays unresolved. Preparing a Task alone is not execution.
+These are fixed lifecycle rules, not recommendations the proposal may override.
+New Tasks are freshly authored against the Wave objective and new KRs. Account for inherited
+active work without carrying old KR verdicts forward.
 
-Return the scoped proposal in final output: the proposed purpose and
-boundaries, the exact proposed Project definitions and KR ledger, every
-disposition, the next review date, child Run ids, and the agree/challenge
-verdict with its reasons. The repository parent archives this output in its
-Task worktree; do not write a chapter file in the Wave checkout.
+For a new uninitialized Wave, report that the deterministic preview requires
+initialization. Do not invent a receipt or create live planning before acceptance.
 
-## Standalone invocation
+## Return, do not apply
 
-Without a parent orchestration, follow the same briefing and human direction
-contract, then return an accepted scoped proposal in final output. Application
-belongs to a repository `start-chapter` in a Task worktree, after the full
-portfolio has been reconciled and accepted. Do not invent a repository
-decision or modify parent boundaries.
+Return `agree` or `challenge` against the accepted Wave boundary, with reasons,
+exact JSON content, the preview receipt, proposed new Tasks, next review date,
+and evidence gaps. Repository start-chapter archives and applies accepted plans.
+A standalone invocation returns the same scoped proposal; it does not rotate
+chapters, close Tasks, create Projects, or edit the parent mandate itself.
 
-## What to avoid
+The Wave owns the enduring objective and measurement instruments. The chapter
+owns KRs, Tasks, and targets referring to those instruments by metric_id.
+Never author a separate chapter objective or a target in a Wave instrument.
+An omitted target is unset; it is not copied from the previous chapter.
+Review closed chapters using their frozen metric readings and
+metrics_evaluated_at, not today's readings or newly edited instrument files.
 
-**Executing the parent's plan.** The brief is provisional. A Wave that never
-checks it against its own code and human direction launders the parent's
-guess into a commitment.
+## Task briefs
 
-**Mutating during orchestration.** Proposal-only means no `lf pm` writes, no
-charter edits, no Task closures. Application belongs to the root after final
-acceptance.
+Write the Task from the user's perspective. Explain what they're trying to do, what
+gets in their way, and why it matters. Give it a title naming the problem or desired
+experience. Show what success would look like in a concrete moment of their work.
+Preserve the user's own language when it anchors intent.
 
-**Portfolio by inertia.** Carrying every existing Project forward because
-deleting feels destructive. Expired bets lose planning authority; the code
-they shipped stays.
+Ground the Task in observations, real constraints, and examples of success. Possible
+solutions can help explain the idea; mark what remains uncertain. The design doc develops
+the architecture, APIs, implementation sequence, and verification. A Task is ready for
+design when the problem is clear, even if the solution isn't. Link accepted decisions
+and keep them binding.
 
-**KRs as task lists.** A KR states an observable condition a reviewer can
-verify. Implementation steps belong in Tasks.
+Keep the Task useful to someone choosing what to work on now. As understanding changes,
+update the problem and desired experience. Keep blockers and decisions that affect that
+choice visible, with links to evidence.
+
+Preserve earlier reasoning in durable records without making readers replay every
+checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+Give follow-up Tasks independently useful outcomes, rather than implementation layers.
+
+Link related work where you explain its relevance. In prose and PR bodies, use
+`[Title · Task ID or PR number](known URL)` on first mention; shorten later references
+when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
+Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
+In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
+
+Apply these rules within the chapter’s existing proposal and acceptance boundaries.
+Preserve the accepted brief when applying it; record application history in the
+chapter record instead of prepending it to the Task.

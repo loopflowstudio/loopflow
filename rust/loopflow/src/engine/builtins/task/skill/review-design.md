@@ -90,7 +90,7 @@ The human reshapes the design through conversation. Follow their lead.
 
 Read before the session starts:
 - `scratch/<slug>.md` — the kickoff output
-- Wave `GOAL.md`, `MEMORY.md`, and the PM snapshot's Project definition, KRs,
+- Wave `GOAL.md`, `MEMORY.md`, and the Wave's current chapter KRs, metric targets,
   and tasks — for context on where this fits
 - Surrounding code in the area — so you can speak concretely about integration points
 - Existing patterns and conventions — so proposals fit the codebase

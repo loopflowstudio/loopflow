@@ -14,7 +14,7 @@ Home-local Run record. The Run records what happened; it does not reserve the
 repository, control a Wave, or become planning state.
 
 The same building block runs **Waves**: persistent agents that coordinate
-Linear-backed Projects and Tasks, remember what they learn, and stay steerable.
+chapter plans and Tasks, remember what they learn, and stay steerable.
 There is no Loopflow server at the center. Repo files hold authored behavior;
 Linear and GitHub hold shared coordination and delivery facts; each Home keeps
 its local execution records. `lf ssh` runs the same local commands on another

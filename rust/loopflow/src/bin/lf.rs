@@ -8,7 +8,12 @@ use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{Cli, Commands, InstallCommand, ProjectCommand, TaskCommand};
+use loopflow::lf::{Cli, Commands, InstallCommand, TaskCommand, WaveCommand};
+
+use loopflow::ops::chapter::{
+    chapter_history, empty_plan, new_chapter, update_plan, NewChapterRequest,
+};
+use loopflow::work::chapter::{ChapterId, ChapterPhase};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -587,9 +592,6 @@ fn run_bound_target_in_repo(
             "Work selectors support one named skill invocation, not multi-step flow {name:?}"
         ),
     };
-    if name == "project/operate" {
-        loopflow::ops::project::record_project_operation(binding, result.as_ref().err())?;
-    }
     result
 }
 
@@ -611,7 +613,6 @@ fn prepare_work_binding(selector: &str, repo: &Path) -> anyhow::Result<loopflow:
 
 fn prepare_hierarchical_work_binding(
     task: Option<&str>,
-    project: Option<&str>,
     wave: Option<&str>,
     repo: &Path,
 ) -> anyhow::Result<loopflow::ops::WorkBinding> {
@@ -627,11 +628,7 @@ fn prepare_hierarchical_work_binding(
         loopflow::ops::resolve_work_selection(
             &store,
             repo,
-            loopflow::ops::WorkSelection {
-                task,
-                project,
-                wave,
-            },
+            loopflow::ops::WorkSelection { task, wave },
         )
         .await
         .map_err(anyhow::Error::from)
@@ -640,12 +637,10 @@ fn prepare_hierarchical_work_binding(
 
 fn validate_work_selector(selector: &str) -> anyhow::Result<()> {
     let (kind, value) = selector.split_once(':').ok_or_else(|| {
-        anyhow::anyhow!(
-            "invalid --as {selector:?}; use task:<selector>, project:<selector>, or wave:<selector>"
-        )
+        anyhow::anyhow!("invalid --as {selector:?}; use task:<selector> or wave:<selector>")
     })?;
-    if !matches!(kind, "task" | "project" | "wave") {
-        anyhow::bail!("invalid --as kind {kind:?}; expected task, project, or wave");
+    if !matches!(kind, "task" | "wave") {
+        anyhow::bail!("invalid --as kind {kind:?}; expected task or wave");
     }
     if value.trim().is_empty() {
         anyhow::bail!("{kind} selector cannot be empty");
@@ -889,90 +884,73 @@ fn print_task_control(
     Ok(())
 }
 
-fn print_project(project: &loopflow::work::project::Project, json: bool) -> anyhow::Result<()> {
-    let snapshot = loopflow::ops::project::project_snapshot(project)?;
+fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
+    let (receipt, json, dry_run) = match command {
+        WaveCommand::Serve {
+            name,
+            force,
+            restart_flow,
+        } => {
+            return loopflow::controller::wave::run(name, *force, *restart_flow);
+        }
+        WaveCommand::NewChapter {
+            wave,
+            chapter,
+            plan,
+            dry_run,
+            json,
+        } => {
+            let content = match plan {
+                Some(path) => serde_json::from_slice(&std::fs::read(path)?)?,
+                None => empty_plan(),
+            };
+            let request = NewChapterRequest {
+                wave: wave.clone(),
+                chapter: ChapterId::parse(chapter).map_err(anyhow::Error::msg)?,
+                content,
+            };
+            (new_chapter(repo, &request, *dry_run)?, *json, *dry_run)
+        }
+        WaveCommand::History { wave, json } => {
+            let history = chapter_history(repo, wave.as_deref())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&history)?);
+            } else {
+                for chapter in history {
+                    println!("{}  {:?}", chapter.id.as_str(), chapter.phase);
+                }
+            }
+            return Ok(());
+        }
+        WaveCommand::UpdatePlan { wave, plan } => {
+            let content = serde_json::from_slice(&std::fs::read(plan)?)?;
+            update_plan(repo, wave.as_deref(), &content)?;
+            return Ok(());
+        }
+    };
     if json {
-        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
     } else {
-        let body = format!("agent {}, provider {}", snapshot.agent, snapshot.provider);
         println!(
-            "{}  {}\n  project: {}\n  body: {}\n  iteration: {}\n  reason: {}",
-            project.plan.slug,
-            snapshot.status,
-            project.id,
-            body,
-            snapshot.iteration,
-            snapshot.reason,
+            "{} · chapter {} · {:?}",
+            receipt.wave,
+            receipt.id.as_str(),
+            receipt.phase
         );
-        if let Some(failure) = &snapshot.last_failure {
+        for task in &receipt.tasks {
             println!(
-                "  last failure at {}: {}",
-                failure.occurred_at, failure.message
+                "  {}  {:?}  {}",
+                task.task.identifier, task.disposition, task.reason
             );
         }
+        if let Some(error) = &receipt.error {
+            println!("  pending: {error}");
+        }
+    }
+    if !dry_run && receipt.phase != ChapterPhase::Complete {
+        anyhow::bail!("chapter transition is incomplete; retry the same chapter id");
     }
     Ok(())
-}
-
-fn print_project_control(
-    result: &loopflow::ops::project::ProjectControlResult,
-    json: bool,
-) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(result)?);
-    } else {
-        println!(
-            "{} → {} ({})",
-            result.receipt_id, result.external_project_id, result.action,
-        );
-    }
-    Ok(())
-}
-
-fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
-    match command {
-        ProjectCommand::Prepare { project_id, json } => {
-            let project = loopflow::ops::project::project_prepare(repo, project_id)?;
-            print_project(&project, *json)
-        }
-        ProjectCommand::Run {
-            project_id,
-            directive,
-            json,
-        } => {
-            let project = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
-            print_project(&project, *json)
-        }
-        ProjectCommand::Start {
-            title,
-            wave,
-            directive,
-            json,
-        } => {
-            let project = loopflow::ops::project::project_start(
-                repo,
-                title,
-                wave.as_deref(),
-                directive.clone(),
-            )?;
-            print_project(&project, *json)
-        }
-        ProjectCommand::Status { project_id, json } => {
-            let project = loopflow::ops::project::project_status(project_id)?;
-            print_project(&project, *json)
-        }
-        ProjectCommand::Abandon {
-            project_id,
-            reason,
-            json,
-        } => {
-            let result = loopflow::ops::project::project_abandon(project_id, reason.clone())?;
-            print_project_control(&result, *json)
-        }
-        ProjectCommand::Promote { .. } => {
-            anyhow::bail!("project promote is handled by the authored promotion flow")
-        }
-    }
 }
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
@@ -1019,7 +997,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             print_task(&task, *json)
         }
         TaskCommand::Start {
-            project_id,
+            wave,
             title,
             name,
             flow,
@@ -1029,7 +1007,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         } => {
             let task = loopflow::ops::task::task_start(
                 repo,
-                project_id,
+                wave.as_deref(),
                 title.clone(),
                 piped_task_report()?,
                 loopflow::ops::task::TaskLaunchOptions {
@@ -1364,7 +1342,6 @@ fn main() -> anyhow::Result<()> {
     let mut _bound_cwd = None;
     let selects_direct_work = cli.as_work.is_some()
         || cli.task.is_some()
-        || cli.project.is_some()
         || (cli.wave.is_some()
             && matches!(
                 &cli.command,
@@ -1376,12 +1353,7 @@ fn main() -> anyhow::Result<()> {
             validate_work_selector(selector)?;
             prepare_work_binding(selector, &repo)?
         } else {
-            prepare_hierarchical_work_binding(
-                cli.task.as_deref(),
-                cli.project.as_deref(),
-                cli.wave.as_deref(),
-                &repo,
-            )?
+            prepare_hierarchical_work_binding(cli.task.as_deref(), cli.wave.as_deref(), &repo)?
         };
         if let Some(cwd) = cli.bound_cwd.clone() {
             binding.cwd = cwd;
@@ -1485,13 +1457,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
-            Some(Commands::Wave {
-                name,
-                force,
-                restart_flow,
-            }) => in_repo_runtime(&args, |_| {
-                loopflow::controller::wave::run(name, *force, *restart_flow)
-            }),
+            Some(Commands::Wave { cmd }) => {
+                in_repo_runtime(&args, |repo| run_wave_command(repo, cmd))
+            }
             Some(Commands::Start {
                 waves,
                 wave_ids,
@@ -1514,34 +1482,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
             }),
-            Some(Commands::Project {
-                cmd: ProjectCommand::Promote { slug, wave },
-            }) => in_repo_runtime(&args, |repo| {
-                let parent = loopflow::work::wave::context::resolve_managed_wave_sync(
-                    Some(repo),
-                    wave.as_deref(),
-                )
-                .map(|wave| wave.name().to_string())
-                .map_err(|err| match err {
-                    loopflow::work::wave::context::WaveResolveError::NoContext => {
-                        anyhow::anyhow!("cannot determine parent wave; pass --wave <name>")
-                    }
-                    other => anyhow::Error::from(other),
-                })?;
-                let message = format!(
-                    "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
-                );
-                loopflow::ops::project::prepare_promotion(repo, &parent, slug)
-                    .map_err(anyhow::Error::from)?;
-                run_target("project-promote", Some(&message), &cli, &args)?;
-                let residency = loopflow::ops::project::complete_promotion(repo, &parent, slug)
-                    .map_err(anyhow::Error::from)?;
-                println!("promoted {slug} from {parent}; residency: {residency}");
-                Ok(())
-            }),
-            Some(Commands::Project { cmd }) => {
-                in_repo_runtime(&args, |repo| run_project_command(repo, cmd))
-            }
             Some(Commands::Task {
                 cmd: TaskCommand::Worker { task_id },
             }) => in_repo_runtime(&args, |_| {
@@ -1596,8 +1536,48 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
             Some(Commands::List) => loopflow::lf::commands::list::show_all(),
             Some(Commands::Ls { json, all }) => loopflow::lf::commands::waves::ls(*json, *all),
-            Some(Commands::Status { wave, json }) => {
-                loopflow::lf::commands::waves::status(wave.as_deref(), *json)
+            Some(Commands::Status {
+                wave,
+                chapter,
+                json,
+            }) => {
+                if let Some(chapter) = chapter {
+                    let id = loopflow::work::chapter::ChapterId::parse(chapter)
+                        .map_err(anyhow::Error::msg)?;
+                    let repo = loopflow::repo::find_repo_root()?;
+                    let snapshot = loopflow::ops::chapter::chapter_snapshot(
+                        &repo,
+                        wave.as_deref(),
+                        Some(&id),
+                    )?;
+                    if *json {
+                        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+                    } else {
+                        println!(
+                            "{} · chapter {} · observed {}",
+                            snapshot.wave,
+                            snapshot.id.as_str(),
+                            snapshot.observed_at
+                        );
+                        for kr in &snapshot.content.krs {
+                            println!("[{}] {}", if kr.holds { "x" } else { " " }, kr.text);
+                        }
+                        println!("Metrics evaluated at {}", snapshot.metrics_evaluated_at);
+                        print!(
+                            "{}",
+                            loopflow::lf::commands::waves::metric_portfolio_text(&snapshot.metrics)
+                        );
+                        for task in snapshot.tasks {
+                            println!(
+                                "{}  {:?}  {}",
+                                task.task.identifier, task.disposition, task.reason
+                            );
+                        }
+                    }
+                    Ok(())
+                } else {
+                    loopflow::lf::commands::waves::status(wave.as_deref(), *json)
+                }
             }
             Some(Commands::Roadmap { wave, json, all }) => {
                 loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json, *all)
@@ -1624,8 +1604,8 @@ fn main() -> anyhow::Result<()> {
                 final_answer,
                 resume,
                 task,
-                project,
                 wave,
+                project,
                 json,
             }) => match run {
                 Some(run) if *resume => loopflow::lf::commands::runs::resume_run(run),
@@ -1759,7 +1739,7 @@ mod tests {
     };
 
     use clap::Parser;
-    use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
+    use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand, WaveCommand};
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     #[test]
@@ -1863,7 +1843,6 @@ mod tests {
             "release",
             "pm",
             "task",
-            "project",
             "flow",
             "skill",
             "chat",
@@ -1886,7 +1865,6 @@ mod tests {
             "-w",
             "-W",
             "--wave",
-            "--project",
             "--task",
         ] {
             assert!(tables.top_level.value.contains(flag), "value flag {flag}");
@@ -1941,19 +1919,12 @@ mod tests {
             "implement".to_string(),
             "--task".to_string(),
             "LOO-123".to_string(),
-            "--project".to_string(),
+            "--wave".to_string(),
             "context".to_string(),
         ];
         assert_eq!(
             reorder_args(args),
-            vec![
-                "lf",
-                "--task",
-                "LOO-123",
-                "--project",
-                "context",
-                "implement"
-            ]
+            vec!["lf", "--task", "LOO-123", "--wave", "context", "implement"]
         );
     }
 
@@ -2007,20 +1978,20 @@ mod tests {
     /// environment can turn one of these into the other.
     #[test]
     fn wave_and_resident_are_distinct_entrypoints() {
-        let served = Cli::try_parse_from(["lf", "wave", "goals"]).unwrap();
+        let served = Cli::try_parse_from(["lf", "wave", "serve", "goals"]).unwrap();
         assert!(matches!(
             served.command,
-            Some(Commands::Wave {
-                name,
-                force: false,
-                restart_flow: false,
-            }) if name == "goals"
+            Some(Commands::Wave { cmd: WaveCommand::Serve {
+                name, force: false, restart_flow: false,
+            } }) if name == "goals"
         ));
 
-        let forced = Cli::try_parse_from(["lf", "wave", "goals", "--force"]).unwrap();
+        let forced = Cli::try_parse_from(["lf", "wave", "serve", "goals", "--force"]).unwrap();
         assert!(matches!(
             forced.command,
-            Some(Commands::Wave { force: true, .. })
+            Some(Commands::Wave {
+                cmd: WaveCommand::Serve { force: true, .. }
+            })
         ));
 
         let stopped = Cli::try_parse_from(["lf", "stop", "goals"]).unwrap();
@@ -2113,7 +2084,7 @@ mod tests {
             "`serve` survives only as an external verb, not a built-in"
         );
         assert!(matches!(
-            Cli::try_parse_from(["lf", "wave", "goals"])
+            Cli::try_parse_from(["lf", "wave", "serve", "goals"])
                 .expect("the replacement")
                 .command,
             Some(Commands::Wave { .. })
@@ -2361,34 +2332,14 @@ mod tests {
         ));
 
         let args: Vec<String> = [
-            "lf",
-            "pm",
-            "task",
-            "--wave",
-            "systems",
-            "create",
-            "--project",
-            "wave-chat",
-            "--title",
-            "file it",
+            "lf", "pm", "task", "--wave", "systems", "create", "--title", "file it",
         ]
         .map(String::from)
         .to_vec();
         let reordered = reorder_args(args);
         assert_eq!(
             reordered,
-            vec![
-                "lf",
-                "pm",
-                "task",
-                "create",
-                "--wave",
-                "systems",
-                "--project",
-                "wave-chat",
-                "--title",
-                "file it"
-            ]
+            vec!["lf", "pm", "task", "create", "--wave", "systems", "--title", "file it"]
         );
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,

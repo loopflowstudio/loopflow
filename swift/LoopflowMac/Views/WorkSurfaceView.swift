@@ -1,6 +1,6 @@
 // The Podium's work surface: everything below the console belongs to the
 // selected node. No selection shows the flat, cross-wave NOW triage; selecting
-// a Wave, Project, or Task swaps in that node's own detail. The tree itself is
+// a Wave or Task swaps in that node's own detail. The tree itself is
 // never drawn here — the console's drawer columns own the hierarchy.
 
 #if os(macOS)
@@ -40,6 +40,9 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
+        .sheet(item: $model.historyWave) { wave in
+            ChapterHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
+        }
         .sheet(item: $workspaceSelection) { selection in
             TaskWorkspaceView(
                 task: selection.task.task,
@@ -81,7 +84,7 @@ struct WorkSurfaceView: View {
             case .wave:
                 waveDetail
             case .project:
-                projectDetail
+                waveDetail
             case .task:
                 taskDetail
             }
@@ -163,88 +166,40 @@ struct WorkSurfaceView: View {
                     )
                 }
 
-                WaveMetricPortfolioView(
-                    portfolio: roadmap.metricPortfolio,
-                    projectNames: Dictionary(uniqueKeysWithValues:
-                        roadmap.projects.items.map { ($0.project.id, $0.project.name) }
-                    )
-                )
-
-                let sections = nowSections(from: [roadmap])
-                if sections.isEmpty {
-                    Text("Nothing in this Wave can move right now.")
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                } else {
-                    ForEach(sections) { section in
-                        NowSectionView(
-                            section: section,
-                            selection: model.selection,
-                            activeControlId: activeControlId,
-                            onSelect: { row in model.select(.task(id: row.task.id)) },
-                            onTaskAction: { row, action in
-                                perform(action, on: WorkTaskSelection(wave: row.wave, task: row.task))
-                            },
+                if let chapter = roadmap.chapter {
+                    WaveChapterView(chapter: chapter)
+                }
+                Button("Chapter history") {
+                    model.historyReference = nil
+                    model.historyWave = roadmap.wave
+                }
+                switch roadmap.tasks {
+                case .unavailable(let reason):
+                    Text(reason).foregroundStyle(Color.statusWarning)
+                case .available(let tasks, _):
+                    if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
+                    ForEach(tasks) { task in
+                        RoadmapTaskRow(
+                            task: task, isSelected: false, activeControlId: activeControlId,
+                            onSelect: { model.select(.task(id: task.id)) },
+                            onAction: { action in perform(action, on: WorkTaskSelection(wave: roadmap.wave, task: task)) },
                             onOpenWorktree: openWorktree
                         )
                     }
+                }
+                WaveMetricPortfolioView(portfolio: roadmap.metricPortfolio)
+                ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
+                    Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
+                        .foregroundStyle(Color.statusWarning)
                 }
             }
         } else if let selection = model.selection, let roster = model.rosterWave(id: selection.id) {
             // Authored but never served: there is no roadmap to show yet.
             scrollingDetail(identifier: "podium-detail-wave") {
                 surfaceHeader(roster.displayName, subtitle: "Authored — not yet served")
-                Text("Press the Wave's fader in the console to start `lf wave \(roster.api.name)`.")
+                Text("Press the Wave's fader in the console to start `lf start \(roster.api.name)`.")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
-            }
-        } else {
-            missingSelection
-        }
-    }
-
-    // MARK: - Project detail
-
-    @ViewBuilder
-    private var projectDetail: some View {
-        if let selection = model.selection, let found = model.project(id: selection.id) {
-            scrollingDetail(identifier: "podium-detail-project") {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                        surfaceHeader(
-                            found.project.project.name,
-                            subtitle: "\(found.wave.wave.name) · \(found.project.nextMove.owner.rawValue)"
-                        )
-                        sectionBadge(found.project.section)
-                    }
-                    if !found.project.project.definition.isEmpty {
-                        Text(found.project.project.definition)
-                            .font(Typography.body(13))
-                            .foregroundStyle(palette.textSecondary)
-                    }
-                    Text(found.project.nextMove.reason)
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                }
-
-                if found.project.tasks.isEmpty {
-                    Text("No Tasks filed under this Project yet.")
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                } else {
-                    ForEach(found.project.tasks) { task in
-                        RoadmapTaskRow(
-                            task: task,
-                            isSelected: false,
-                            activeControlId: activeControlId,
-                            onSelect: { model.select(.task(id: task.id)) },
-                            onAction: { action in
-                                perform(action, on: WorkTaskSelection(wave: found.wave.wave, task: task))
-                            },
-                            onOpenWorktree: openWorktree
-                        )
-                    }
-                }
             }
         } else {
             missingSelection
@@ -259,7 +214,7 @@ struct WorkSurfaceView: View {
             let task = found.task
             scrollingDetail(identifier: "podium-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("\(found.wave.wave.name) · \(found.project.project.name)")
+                    Text(found.wave.wave.name)
                         .font(Typography.caption(10).weight(.semibold))
                         .tracking(0.8)
                         .textCase(.uppercase)

@@ -1,7 +1,7 @@
-//! Project-owned live metric contracts, observations, and derived readings.
+//! Wave-owned live metric contracts, observations, and derived readings.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -34,7 +34,7 @@ pub enum MetricTarget {
 }
 
 impl MetricTarget {
-    fn value(&self) -> f64 {
+    pub fn value(&self) -> f64 {
         match self {
             Self::AtLeast { value } | Self::AtMost { value } => *value,
         }
@@ -96,11 +96,9 @@ impl MetricDuration {
 pub struct MetricContractDefinition {
     pub identity: MetricIdentity,
     pub name: String,
-    pub project_id: String,
     pub stage: MetricStage,
     pub instrument: String,
     pub unit: String,
-    pub target: MetricTarget,
     pub window: MetricDuration,
     pub freshness_policy: MetricDuration,
     pub body: String,
@@ -112,27 +110,21 @@ pub struct MetricContract {
     pub contract_revision: String,
     pub name: String,
     pub description: String,
-    pub project_id: String,
     pub stage: MetricStage,
     pub instrument: String,
     pub unit: String,
-    pub target: MetricTarget,
     pub window: MetricDuration,
     pub freshness_policy: MetricDuration,
 }
 
 impl MetricContract {
     pub fn new(definition: MetricContractDefinition) -> Result<Self, MetricError> {
-        if !definition.target.value().is_finite() {
-            return Err(MetricError::NonFiniteTarget);
-        }
         let description = normalize_body(&definition.body);
         let revision = ContractRevisionContent {
             schema: CONTRACT_SCHEMA,
             id: &definition.identity.metric_id,
             instrument: &definition.instrument,
             unit: &definition.unit,
-            target: &definition.target,
             window: definition.window.as_str(),
             freshness: definition.freshness_policy.as_str(),
             body: &description,
@@ -145,11 +137,9 @@ impl MetricContract {
             contract_revision,
             name: definition.name,
             description,
-            project_id: definition.project_id,
             stage: definition.stage,
             instrument: definition.instrument,
             unit: definition.unit,
-            target: definition.target,
             window: definition.window,
             freshness_policy: definition.freshness_policy,
         })
@@ -179,7 +169,6 @@ pub struct MetricContractDiscovery {
 pub fn discover_metric_contracts(
     metrics_dir: &Path,
     wave_id: &str,
-    project_ids: &BTreeSet<String>,
 ) -> Result<MetricContractDiscovery, MetricError> {
     let metadata = match fs::symlink_metadata(metrics_dir) {
         Ok(metadata) => metadata,
@@ -259,18 +248,7 @@ pub fn discover_metric_contracts(
         }
     }
 
-    let mut contracts = Vec::new();
-    for source in sources {
-        if !project_ids.contains(&source.contract.project_id) {
-            contract_issues.push(MetricContractIssueDto::UnresolvedOwner {
-                wave_id: source.contract.identity.wave_id.clone(),
-                metric_id: source.contract.identity.metric_id.clone(),
-                project_id: source.contract.project_id.clone(),
-            });
-            continue;
-        }
-        contracts.push(source);
-    }
+    let contracts = sources;
 
     contract_issues.sort_by_key(contract_issue_sort_key);
     Ok(MetricContractDiscovery {
@@ -329,7 +307,6 @@ pub fn load_metric_contract(path: &Path, wave_id: &str) -> Result<MetricContract
         return Err(MetricError::EmptyWaveId);
     }
     require_contract_field("id", &frontmatter.id)?;
-    require_contract_field("project_id", &frontmatter.project_id)?;
     require_contract_field("instrument", &frontmatter.instrument)?;
     require_contract_field("unit", &frontmatter.unit)?;
 
@@ -351,11 +328,9 @@ pub fn load_metric_contract(path: &Path, wave_id: &str) -> Result<MetricContract
             metric_id: frontmatter.id,
         },
         name,
-        project_id: frontmatter.project_id,
         stage: frontmatter.stage,
         instrument: frontmatter.instrument,
         unit: frontmatter.unit,
-        target: frontmatter.target.into_target(),
         window: MetricDuration::parse(&frontmatter.window)?,
         freshness_policy: MetricDuration::parse(&frontmatter.freshness)?,
         body,
@@ -411,10 +386,13 @@ fn parse_metric_markdown(markdown: &str) -> Result<(String, String), MetricError
 
 fn contract_issue_sort_key(issue: &MetricContractIssueDto) -> (u8, String, String) {
     match issue {
+        MetricContractIssueDto::ChapterUnavailable { wave_id, reason } => {
+            (5, wave_id.clone(), reason.clone())
+        }
+        MetricContractIssueDto::UnresolvedTarget { wave_id, metric_id } => {
+            (4, wave_id.clone(), metric_id.clone())
+        }
         MetricContractIssueDto::MalformedContract { path, .. } => (0, path.clone(), String::new()),
-        MetricContractIssueDto::UnresolvedOwner {
-            wave_id, metric_id, ..
-        } => (1, wave_id.clone(), metric_id.clone()),
         MetricContractIssueDto::InstrumentMismatch {
             wave_id, metric_id, ..
         } => (2, wave_id.clone(), metric_id.clone()),
@@ -429,45 +407,11 @@ fn contract_issue_sort_key(issue: &MetricContractIssueDto) -> (u8, String, Strin
 struct MetricContractFrontmatter {
     schema: u8,
     id: String,
-    project_id: String,
     stage: MetricStage,
     instrument: String,
     unit: String,
-    target: MetricTargetFrontmatter,
     window: String,
     freshness: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum MetricTargetFrontmatter {
-    AtLeast(AtLeastTargetFrontmatter),
-    AtMost(AtMostTargetFrontmatter),
-}
-
-impl MetricTargetFrontmatter {
-    fn into_target(self) -> MetricTarget {
-        match self {
-            Self::AtLeast(target) => MetricTarget::AtLeast {
-                value: target.at_least,
-            },
-            Self::AtMost(target) => MetricTarget::AtMost {
-                value: target.at_most,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AtLeastTargetFrontmatter {
-    at_least: f64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AtMostTargetFrontmatter {
-    at_most: f64,
 }
 
 #[derive(Serialize)]
@@ -476,7 +420,6 @@ struct ContractRevisionContent<'a> {
     id: &'a str,
     instrument: &'a str,
     unit: &'a str,
-    target: &'a MetricTarget,
     window: &'a str,
     freshness: &'a str,
     body: &'a str,
@@ -737,32 +680,31 @@ impl MetricObservationEvidence {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricPortfolioDto {
     pub metrics: Vec<MetricReadingDto>,
     pub contract_issues: Vec<MetricContractIssueDto>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricReadingDto {
+    pub target: Option<MetricTarget>,
     pub identity: MetricIdentity,
     pub contract_revision: String,
     pub name: String,
     pub description: String,
-    pub project_id: String,
     pub stage: MetricStage,
     /// Whether any accepted observation measured this exact contract revision.
     pub instrumented: bool,
     pub instrument: String,
     pub unit: String,
-    pub target: MetricTarget,
     pub window: String,
     pub freshness_policy: String,
     pub freshness: MetricFreshnessDto,
     pub evidence: MetricEvidenceDto,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricFreshnessDto {
     Never,
@@ -780,9 +722,16 @@ pub enum MetricFreshnessDto {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricEvidenceDto {
+    Untargeted {
+        value: f64,
+        #[serde(with = "time::serde::rfc3339")]
+        source_window_start: OffsetDateTime,
+        #[serde(with = "time::serde::rfc3339")]
+        source_window_end: OffsetDateTime,
+    },
     Met {
         value: f64,
         #[serde(with = "time::serde::rfc3339")]
@@ -807,7 +756,7 @@ pub enum MetricEvidenceDto {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricUnknownCauseDto {
     Never,
@@ -845,17 +794,20 @@ pub enum MetricUnknownCauseDto {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricContractIssueDto {
+    ChapterUnavailable {
+        wave_id: String,
+        reason: String,
+    },
+    UnresolvedTarget {
+        wave_id: String,
+        metric_id: String,
+    },
     MalformedContract {
         path: String,
         message: String,
-    },
-    UnresolvedOwner {
-        wave_id: String,
-        metric_id: String,
-        project_id: String,
     },
     InstrumentMismatch {
         wave_id: String,
@@ -874,15 +826,17 @@ pub enum MetricContractIssueDto {
 pub fn derive_metric_reading(
     contract: &MetricContract,
     observations: &[MetricObservation],
+    target: Option<&MetricTarget>,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricReadingDto, MetricError> {
     let persisted = MetricObservationEvidence::from_history(contract, observations)?;
-    derive_metric_reading_from_evidence(contract, &persisted, evaluation_time)
+    derive_metric_reading_from_evidence(contract, &persisted, target, evaluation_time)
 }
 
 fn derive_metric_reading_from_evidence(
     contract: &MetricContract,
     persisted: &MetricObservationEvidence,
+    target: Option<&MetricTarget>,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricReadingDto, MetricError> {
     let (freshness, evidence) = match persisted.current.as_ref() {
@@ -892,19 +846,18 @@ fn derive_metric_reading_from_evidence(
                 cause: MetricUnknownCauseDto::Never,
             },
         ),
-        Some(observation) => derive_evidence(contract, observation, evaluation_time)?,
+        Some(observation) => derive_evidence(contract, observation, target, evaluation_time)?,
     };
     Ok(MetricReadingDto {
         identity: contract.identity.clone(),
         contract_revision: contract.contract_revision.clone(),
         name: contract.name.clone(),
         description: contract.description.clone(),
-        project_id: contract.project_id.clone(),
         stage: contract.stage,
         instrumented: persisted.instrumented,
         instrument: contract.instrument.clone(),
         unit: contract.unit.clone(),
-        target: contract.target.clone(),
+        target: target.cloned(),
         window: contract.window.as_str().to_string(),
         freshness_policy: contract.freshness_policy.as_str().to_string(),
         freshness,
@@ -914,13 +867,19 @@ fn derive_metric_reading_from_evidence(
 
 pub fn derive_metric_portfolio(
     entries: &[(&MetricContract, &[MetricObservation])],
+    targets: &[crate::pm::ChapterMetricTarget],
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto, MetricError> {
     let mut metrics = Vec::new();
     let mut contract_issues = Vec::new();
     for (contract, observations) in entries {
         let persisted = MetricObservationEvidence::from_history(contract, observations)?;
-        let reading = derive_metric_reading_from_evidence(contract, &persisted, evaluation_time)?;
+        let target = targets
+            .iter()
+            .find(|target| target.metric_id == contract.identity.metric_id)
+            .map(|target| &target.target);
+        let reading =
+            derive_metric_reading_from_evidence(contract, &persisted, target, evaluation_time)?;
         if contract.stage == MetricStage::Graduated && !persisted.graduation_qualified {
             contract_issues.push(MetricContractIssueDto::InvalidGraduation {
                 wave_id: contract.identity.wave_id.clone(),
@@ -944,6 +903,7 @@ pub fn compose_metric_portfolio(
     discovery: MetricContractDiscovery,
     registered_instruments: &BTreeMap<MetricIdentity, String>,
     observations: &BTreeMap<MetricIdentity, MetricObservationEvidence>,
+    targets: &[crate::pm::ChapterMetricTarget],
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto, MetricError> {
     let mut metrics = Vec::new();
@@ -965,7 +925,12 @@ pub fn compose_metric_portfolio(
             .get(&contract.identity)
             .cloned()
             .unwrap_or_default();
-        let reading = derive_metric_reading_from_evidence(&contract, &persisted, evaluation_time)?;
+        let target = targets
+            .iter()
+            .find(|target| target.metric_id == contract.identity.metric_id)
+            .map(|target| &target.target);
+        let reading =
+            derive_metric_reading_from_evidence(&contract, &persisted, target, evaluation_time)?;
         if contract.stage == MetricStage::Graduated && !persisted.graduation_qualified {
             contract_issues.push(MetricContractIssueDto::InvalidGraduation {
                 wave_id: contract.identity.wave_id.clone(),
@@ -1012,6 +977,7 @@ fn select_current<'a>(
 fn derive_evidence(
     contract: &MetricContract,
     observation: &MetricObservation,
+    target: Option<&MetricTarget>,
     evaluation_time: OffsetDateTime,
 ) -> Result<(MetricFreshnessDto, MetricEvidenceDto), MetricError> {
     let source_time = observation.source_time();
@@ -1088,9 +1054,19 @@ fn derive_evidence(
             value,
             source_window_start,
             source_window_end,
+            ..
+        } if target.is_none() => MetricEvidenceDto::Untargeted {
+            value: *value,
+            source_window_start: *source_window_start,
+            source_window_end: *source_window_end,
+        },
+        MetricObservation::Observed {
+            value,
+            source_window_start,
+            source_window_end,
             complete: true,
             ..
-        } if contract.target.is_met(*value) => MetricEvidenceDto::Met {
+        } if target.is_some_and(|target| target.is_met(*value)) => MetricEvidenceDto::Met {
             value: *value,
             source_window_start: *source_window_start,
             source_window_end: *source_window_end,
@@ -1166,8 +1142,6 @@ pub enum MetricError {
     EmptyMetricName,
     #[error("invalid metric duration {0:?}; use a positive number followed by m, h, or d")]
     InvalidDuration(String),
-    #[error("metric target must be finite")]
-    NonFiniteTarget,
     #[error("metric observation value must be finite")]
     NonFiniteObservation,
     #[error("metric observation window starts after it ends: {start} > {end}")]
@@ -1214,11 +1188,10 @@ mod tests {
                 metric_id: "task-loop-trust".to_string(),
             },
             name: "Task loops earn trust".to_string(),
-            project_id: "project-a".to_string(),
             stage: MetricStage::Installed,
             instrument: "lifecycle-scorecard".to_string(),
             unit: "ratio".to_string(),
-            target: MetricTarget::AtLeast { value: 1.0 },
+
             window: MetricDuration::parse("7d").unwrap(),
             freshness_policy: MetricDuration::parse("6h").unwrap(),
             body: "Count only settled review loops.\n".to_string(),
@@ -1229,9 +1202,9 @@ mod tests {
         MetricContract::new(definition()).unwrap()
     }
 
-    fn contract_markdown(id: &str, project_id: &str, instrument: &str) -> String {
+    fn contract_markdown(id: &str, instrument: &str) -> String {
         format!(
-            "---\nschema: 1\nid: {id}\nproject_id: {project_id}\nstage: installed\ninstrument: {instrument}\nunit: ratio\ntarget:\n  at_least: 1\nwindow: 7d\nfreshness: 6h\n---\n\n# Task loops earn trust\n\nCount only settled review loops.\n"
+            "---\nschema: 1\nid: {id}\nstage: installed\ninstrument: {instrument}\nunit: ratio\nwindow: 7d\nfreshness: 6h\n---\n\n# Task loops earn trust\n\nCount only settled review loops.\n"
         )
     }
 
@@ -1280,19 +1253,9 @@ mod tests {
         let original = contract();
         let mut moved = definition();
         moved.name = "Renamed metric".to_string();
-        moved.project_id = "project-b".to_string();
         moved.stage = MetricStage::Graduated;
         assert_eq!(
             MetricContract::new(moved).unwrap().contract_revision,
-            original.contract_revision
-        );
-
-        let mut changed_target = definition();
-        changed_target.target = MetricTarget::AtLeast { value: 0.9 };
-        assert_ne!(
-            MetricContract::new(changed_target)
-                .unwrap()
-                .contract_revision,
             original.contract_revision
         );
 
@@ -1333,6 +1296,7 @@ mod tests {
         let fresh = derive_metric_reading(
             &contract,
             std::slice::from_ref(&evidence),
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
             at(206) - Duration::SECOND,
         )
         .unwrap();
@@ -1340,7 +1304,13 @@ mod tests {
         assert!(matches!(fresh.freshness, MetricFreshnessDto::Fresh { .. }));
         assert!(matches!(fresh.evidence, MetricEvidenceDto::Met { .. }));
 
-        let stale = derive_metric_reading(&contract, &[evidence], at(206)).unwrap();
+        let stale = derive_metric_reading(
+            &contract,
+            &[evidence],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(206),
+        )
+        .unwrap();
         assert!(matches!(stale.freshness, MetricFreshnessDto::Stale { .. }));
         assert!(matches!(
             stale.evidence,
@@ -1362,7 +1332,13 @@ mod tests {
         };
         *contract_revision = "0".repeat(64);
         recompute_observation_id(&mut prior);
-        let reading = derive_metric_reading(&contract, &[prior], at(201)).unwrap();
+        let reading = derive_metric_reading(
+            &contract,
+            &[prior],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(201),
+        )
+        .unwrap();
         assert!(matches!(
             reading.evidence,
             MetricEvidenceDto::Unknown {
@@ -1375,7 +1351,13 @@ mod tests {
         prior_definition.freshness_policy = MetricDuration::parse("1h").unwrap();
         let prior_contract = MetricContract::new(prior_definition).unwrap();
         let prior = observed(&prior_contract, 1.0, at(200));
-        let reading = derive_metric_reading(&contract, &[prior], at(206)).unwrap();
+        let reading = derive_metric_reading(
+            &contract,
+            &[prior],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(206),
+        )
+        .unwrap();
         assert!(matches!(reading.freshness, MetricFreshnessDto::Never));
         assert!(matches!(
             reading.evidence,
@@ -1394,7 +1376,13 @@ mod tests {
         };
         *source_window_start = at(200) - Duration::days(6);
         recompute_observation_id(&mut wrong_window);
-        let reading = derive_metric_reading(&contract, &[wrong_window], at(201)).unwrap();
+        let reading = derive_metric_reading(
+            &contract,
+            &[wrong_window],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(201),
+        )
+        .unwrap();
         assert!(matches!(
             reading.evidence,
             MetricEvidenceDto::Unknown {
@@ -1453,9 +1441,20 @@ mod tests {
         } else {
             1.0
         };
-        let forward =
-            derive_metric_reading(&contract, &[missed.clone(), met.clone()], at(201)).unwrap();
-        let reverse = derive_metric_reading(&contract, &[met, missed], at(201)).unwrap();
+        let forward = derive_metric_reading(
+            &contract,
+            &[missed.clone(), met.clone()],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(201),
+        )
+        .unwrap();
+        let reverse = derive_metric_reading(
+            &contract,
+            &[met, missed],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(201),
+        )
+        .unwrap();
         for reading in [forward, reverse] {
             let value = match reading.evidence {
                 MetricEvidenceDto::Met { value, .. } | MetricEvidenceDto::Missed { value, .. } => {
@@ -1477,7 +1476,13 @@ mod tests {
         identity.metric_id = "other-metric".to_string();
         recompute_observation_id(&mut other_metric);
 
-        let reading = derive_metric_reading(&contract, &[other_metric], at(201)).unwrap();
+        let reading = derive_metric_reading(
+            &contract,
+            &[other_metric],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(201),
+        )
+        .unwrap();
         assert!(!reading.instrumented);
         assert!(matches!(
             reading.evidence,
@@ -1492,7 +1497,7 @@ mod tests {
         let mut definition = definition();
         definition.stage = MetricStage::Graduated;
         let contract = MetricContract::new(definition).unwrap();
-        let portfolio = derive_metric_portfolio(&[(&contract, &[])], at(200)).unwrap();
+        let portfolio = derive_metric_portfolio(&[(&contract, &[])], &[], at(200)).unwrap();
         assert!(portfolio.metrics.is_empty());
         assert!(matches!(
             portfolio.contract_issues.as_slice(),
@@ -1507,7 +1512,7 @@ mod tests {
         let contract = MetricContract::new(definition).unwrap();
         let evidence = observed(&contract, 1.0, at(200));
 
-        let portfolio = derive_metric_portfolio(&[(&contract, &[evidence])], at(206)).unwrap();
+        let portfolio = derive_metric_portfolio(&[(&contract, &[evidence])], &[], at(206)).unwrap();
 
         assert!(portfolio.contract_issues.is_empty());
         assert!(matches!(
@@ -1532,7 +1537,8 @@ mod tests {
             unavailable(&contract, at(201)),
         ];
 
-        let portfolio = derive_metric_portfolio(&[(&contract, &observations)], at(202)).unwrap();
+        let portfolio =
+            derive_metric_portfolio(&[(&contract, &observations)], &[], at(202)).unwrap();
 
         assert!(portfolio.contract_issues.is_empty());
         assert!(matches!(
@@ -1547,9 +1553,13 @@ mod tests {
     #[test]
     fn wire_uses_kind_discriminators_and_requires_variant_fields() {
         let contract = contract();
-        let reading =
-            derive_metric_reading(&contract, &[observed(&contract, 1.0, at(200))], at(201))
-                .unwrap();
+        let reading = derive_metric_reading(
+            &contract,
+            &[observed(&contract, 1.0, at(200))],
+            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            at(201),
+        )
+        .unwrap();
         let json = serde_json::to_value(reading).unwrap();
         assert_eq!(json["description"], "Count only settled review loops.");
         assert_eq!(json["target"]["kind"], "at_least");
@@ -1575,12 +1585,11 @@ mod tests {
         fs::create_dir(&metrics_dir).unwrap();
         fs::write(
             metrics_dir.join("task-loop-trust.md"),
-            contract_markdown("task-loop-trust", "project-a", "lifecycle-scorecard"),
+            contract_markdown("task-loop-trust", "lifecycle-scorecard"),
         )
         .unwrap();
 
-        let projects = BTreeSet::from(["project-a".to_string()]);
-        let discovery = discover_metric_contracts(&metrics_dir, "product", &projects).unwrap();
+        let discovery = discover_metric_contracts(&metrics_dir, "product").unwrap();
 
         assert!(discovery.contract_issues.is_empty());
         assert_eq!(discovery.contracts.len(), 1);
@@ -1588,18 +1597,16 @@ mod tests {
         assert_eq!(contract.identity.wave_id, "product");
         assert_eq!(contract.identity.metric_id, "task-loop-trust");
         assert_eq!(contract.name, "Task loops earn trust");
-        assert_eq!(contract.project_id, "project-a");
     }
 
     #[test]
     fn fenced_examples_do_not_create_metric_headings() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("task-loop-trust.md");
-        let markdown = contract_markdown("task-loop-trust", "project-a", "lifecycle-scorecard")
-            .replace(
-                "Count only settled review loops.",
-                "Count only settled review loops.\n\n```sh\n# example output\n```",
-            );
+        let markdown = contract_markdown("task-loop-trust", "lifecycle-scorecard").replace(
+            "Count only settled review loops.",
+            "Count only settled review loops.\n\n```sh\n# example output\n```",
+        );
         fs::write(&path, markdown).unwrap();
 
         let contract = load_metric_contract(&path, "product").unwrap();
@@ -1614,29 +1621,25 @@ mod tests {
         fs::create_dir_all(&metrics_dir).unwrap();
         fs::write(
             metrics_dir.join("task-loop-trust.md"),
-            contract_markdown("task-loop-trust", "project-a", "lifecycle-scorecard"),
+            contract_markdown("task-loop-trust", "lifecycle-scorecard"),
         )
         .unwrap();
         fs::write(
             metrics_dir.join("wrong-name.md"),
-            contract_markdown("different-id", "project-a", "lifecycle-scorecard"),
+            contract_markdown("different-id", "lifecycle-scorecard"),
         )
         .unwrap();
         fs::write(
             metrics_dir.join("unowned.md"),
-            contract_markdown("unowned", "missing-project", "lifecycle-scorecard"),
+            contract_markdown("unowned", "lifecycle-scorecard"),
         )
         .unwrap();
 
-        let projects = BTreeSet::from(["project-a".to_string()]);
-        let discovery = discover_metric_contracts(&metrics_dir, "product", &projects).unwrap();
+        let discovery = discover_metric_contracts(&metrics_dir, "product").unwrap();
 
-        assert_eq!(discovery.contracts.len(), 1);
+        assert_eq!(discovery.contracts.len(), 2);
         assert!(discovery.contract_issues.iter().any(|issue| {
             matches!(issue, MetricContractIssueDto::MalformedContract { path, .. } if path == "wave/product/metrics/wrong-name.md")
-        }));
-        assert!(discovery.contract_issues.iter().any(|issue| {
-            matches!(issue, MetricContractIssueDto::UnresolvedOwner { metric_id, project_id, .. } if metric_id == "unowned" && project_id == "missing-project")
         }));
     }
 
@@ -1649,13 +1652,12 @@ mod tests {
         let external_contract = directory.path().join("external.md");
         fs::write(
             &external_contract,
-            contract_markdown("external", "project-a", "lifecycle-scorecard"),
+            contract_markdown("external", "lifecycle-scorecard"),
         )
         .unwrap();
         std::os::unix::fs::symlink(&external_contract, metrics_dir.join("external.md")).unwrap();
 
-        let projects = BTreeSet::from(["project-a".to_string()]);
-        let discovery = discover_metric_contracts(&metrics_dir, "product", &projects).unwrap();
+        let discovery = discover_metric_contracts(&metrics_dir, "product").unwrap();
 
         assert!(discovery.contracts.is_empty());
         assert!(matches!(
@@ -1676,18 +1678,13 @@ mod tests {
         fs::create_dir(&external_metrics).unwrap();
         fs::write(
             external_metrics.join("task-loop-trust.md"),
-            contract_markdown("task-loop-trust", "project-a", "lifecycle-scorecard"),
+            contract_markdown("task-loop-trust", "lifecycle-scorecard"),
         )
         .unwrap();
         let metrics_dir = metrics_parent.join("metrics");
         std::os::unix::fs::symlink(&external_metrics, &metrics_dir).unwrap();
 
-        let error = discover_metric_contracts(
-            &metrics_dir,
-            "product",
-            &BTreeSet::from(["project-a".to_string()]),
-        )
-        .unwrap_err();
+        let error = discover_metric_contracts(&metrics_dir, "product").unwrap_err();
 
         assert!(matches!(error, MetricError::SymlinkedContractDirectory(_)));
     }
@@ -1703,12 +1700,7 @@ mod tests {
         std::os::unix::fs::symlink(&external_wave, repo.join("wave")).unwrap();
         let metrics_dir = repo.join("wave/product/metrics");
 
-        let error = discover_metric_contracts(
-            &metrics_dir,
-            "product",
-            &BTreeSet::from(["project-a".to_string()]),
-        )
-        .unwrap_err();
+        let error = discover_metric_contracts(&metrics_dir, "product").unwrap_err();
 
         assert!(matches!(
             error,

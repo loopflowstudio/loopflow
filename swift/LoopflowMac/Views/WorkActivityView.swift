@@ -123,7 +123,7 @@ struct WorkActivityView: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text("\(entry.work.kind.rawValue.uppercased()) · \(entry.subject)")
+                    Text("\((entry.work.kind == .project ? "CHAPTER" : entry.work.kind.rawValue.uppercased())) · \(entry.subject)")
                         .font(Typography.caption(8).weight(.bold))
                         .tracking(0.6)
                         .foregroundStyle(palette.textSecondary)
@@ -134,7 +134,7 @@ struct WorkActivityView: View {
                         .foregroundStyle(palette.textSecondary)
                         .help(exactTime(entry.recordedAt))
                 }
-                Text(entry.summary)
+                Text(entry.work.kind == .project && entry.fact == .workCreated ? "Chapter plan recorded" : entry.summary)
                     .font(Typography.body(11).weight(.semibold))
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
@@ -171,7 +171,7 @@ struct WorkActivityView: View {
             case .wave:
                 "Wave · \(waveName(work.id))"
             case .project:
-                "Project · \(model.project(id: work.id)?.project.project.name ?? work.id)"
+                "Wave · \(model.waveForChapter(projectId: work.id)?.wave.name ?? work.id)"
             case .task:
                 "Task · \(model.task(id: work.id)?.task.task.identifier ?? work.id)"
             }
@@ -187,7 +187,7 @@ struct WorkActivityView: View {
             case .wave:
                 model.wave(id: work.id)?.wave.goal
             case .project:
-                model.project(id: work.id)?.project.project.definition
+                model.waveForChapter(projectId: work.id)?.wave.goal
             case .task:
                 model.task(id: work.id)?.task.condition.reason
             }

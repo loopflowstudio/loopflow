@@ -41,6 +41,29 @@ struct WaveDetailReadingTests {
         #expect(reading.snapshot?.wave.id == "wave-1")
     }
 
+    @Test("a readable status with no chapter does not revive cached KRs")
+    func missingCurrentChapterReplacesCachedPlan() throws {
+        let data = try loadFixtureData("wave_detail.json")
+        let cachedDetail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
+        let cached = WavePlan(objective: "Earlier objective", chapter: cachedDetail.workMap.chapter)
+        #expect(cached.chapter?.krs.isEmpty == false)
+
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        wire["chapter"] = NSNull()
+        let current = try JSONDecoder().decode(
+            WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: wire)
+        )
+        var reading = WaveDetailReading()
+        reading.update(current)
+
+        #expect(reading.plan(cached: cached).chapter == nil)
+        #expect(reading.plan(cached: cached).objective == current.workMap.objective)
+
+        reading.recordFailure(RegistryQueryError("registry unavailable"))
+        #expect(reading.plan(cached: cached) == cached)
+        #expect(reading.errorMessage != nil)
+    }
+
     @Test("Mac metric rows render the shared DTO fields without recomputing evidence")
     func metricRowPresentationUsesSharedEvidence() throws {
         let detail = try JSONDecoder().decode(
@@ -88,21 +111,44 @@ struct WaveDetailReadingTests {
 
         let presentation = WaveMetricPortfolioPresentation(portfolio: portfolio)
 
-        #expect(presentation.officialCount == 3)
+        #expect(presentation.officialCount == 4)
         #expect(presentation.candidateCount == 6)
         #expect(presentation.holdingCount == 1)
         #expect(presentation.requiresWorkCount == 2)
-        #expect(presentation.contractIssueCount == 4)
-        #expect(presentation.headline == "1 of 3 official measures currently hold.")
+        #expect(presentation.contractIssueCount == 5)
+        #expect(presentation.headline == "1 of 3 chapter targets currently hold.")
+    }
+
+    @Test("an unset chapter target preserves the reading without failing the measure")
+    func untargetedMetricIsNeutral() throws {
+        let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: loadFixtureData("metric_portfolio.json"))
+        let metric = try #require(portfolio.metrics.first { $0.target == nil })
+        let row = WaveMetricRowPresentation(metric: metric, owner: "Wave")
+        #expect(row.state == "No target")
+        #expect(row.target == "unset for this chapter")
+        #expect(row.value != "—")
+        let presentation = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(metrics: [metric], contractIssues: []))
+        #expect(presentation.requiresWorkCount == 0)
+        #expect(presentation.holdingCount == 0)
+        #expect(presentation.headline == "No targets set for this chapter.")
+    }
+
+    @Test("unavailable chapter content is not presented as an empty plan")
+    func unavailableChapterIsExplicit() {
+        let presentation = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(
+            metrics: [], contractIssues: [.chapterUnavailable(waveId: "wave", reason: "PM snapshot unavailable")]
+        ))
+        #expect(presentation.headline == "Chapter targets unavailable.")
+        #expect(presentation.requiresWorkCount == 0)
     }
 
     // The populated detail-pane hierarchy can't be driven live in every
     // environment (a Wave whose registry carries W2-123 lens data needs a
     // schema-current `lf` + populated store). This walks the real populated
     // `lf status --json` fixture through the exact projections the detail-pane
-    // Project and Task rows render (`WaveLens.forProject` / `.forTask`,
+    // Project and Task rows render (`WaveLens.forTasks` / `.forTask`,
     // open-task count, KR list) — the mockup hierarchy proven at the data layer.
-    @Test("the populated detail hierarchy renders objective, projects, KRs, and shared lenses")
+    @Test("the populated detail hierarchy renders objective, chapter KRs, Tasks, and shared lenses")
     func populatedDetailHierarchyProjectsThroughLensGrammar() throws {
         let detail = try JSONDecoder().decode(
             WaveDetailSnapshot.self,
@@ -110,29 +156,30 @@ struct WaveDetailReadingTests {
         )
         let workMap = detail.workMap
 
-        // Objective leads the pane, and Projects stay persistently visible.
+        // The Wave objective leads the pane; chapter KRs and Tasks share its scope.
         #expect(!workMap.objective.trimmingCharacters(in: .whitespaces).isEmpty)
-        #expect(workMap.projects.count == 1)
+        #expect(workMap.chapter != nil)
 
-        let project = try #require(workMap.projects.first)
+        let chapter = try #require(workMap.chapter)
+        let tasks = workMap.tasks.items
 
         // KR list is a Project's strongest quality — it must be present.
-        #expect(project.project.krs.count == 1)
-        #expect(project.project.krs.allSatisfy { !$0.text.isEmpty })
+        #expect(chapter.krs.count == 1)
+        #expect(chapter.krs.allSatisfy { !$0.text.isEmpty })
 
         // Open-task count is the other headline quality (both fixture tasks open).
-        let openTasks = project.tasks.filter { !$0.task.completed }.count
+        let openTasks = tasks.filter { !$0.task.completed }.count
         #expect(openTasks == 2)
 
         // Project row lens: derived from Task condition only. A waiting Task
         // (INF-123) outranks the clear one (INF-124).
-        let projectLens = WaveLens.forProject(tasks: project.tasks)
+        let projectLens = WaveLens.forTasks(tasks: tasks)
         #expect(projectLens.color == .blue)
         #expect(projectLens.reason == "merge pull request head 333333333333 on GitHub")
 
         // Task rows: the shared condition and reason, verbatim — Swift
         // never reconstructs the level from status or process flags.
-        let byId = Dictionary(uniqueKeysWithValues: project.tasks.map { ($0.task.identifier, $0) })
+        let byId = Dictionary(uniqueKeysWithValues: tasks.map { ($0.task.identifier, $0) })
         let inf123 = try #require(byId["INF-123"])
         let inf124 = try #require(byId["INF-124"])
 

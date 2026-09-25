@@ -94,7 +94,7 @@ can finish independently; never hand the whole seed to another agent, and never
 delegate the one blocker between you and completion. Resolve that blocker
 inline.
 
-`lf task`, `lf wave`, `lf project`, and `lf pm` are orchestration tools. Use
+`lf task`, `lf wave`, and `lf pm` are orchestration tools. Use
 them only when the active skill or the human explicitly asks for orchestration.
 Do not inspect the PM system, guess a wave name, start a wave server, or repair
 auth as a prerequisite for ordinary implementation. If explicitly requested
@@ -154,7 +154,7 @@ lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
 
-Use `--as task:...`, `--as project:...`, or `--as wave:...` with one named
+Use `--as task:...`, `--as wave:...` with one named
 Skill or `: "question"` for an inline prompt. In a plain terminal it starts a fresh Run at that
 Work's placement. Inside a Run it is an exact identity assertion; a mismatch
 fails. It never binds a multi-step flow.
@@ -167,28 +167,27 @@ on their machine.
 
 ## Work Directly On Behalf Of Existing Work
 
-Run one bounded skill with an existing Task, Project, or Wave as its subject:
+Run one bounded skill with an existing Task or Wave as its subject:
 
 ```bash
 lf task prepare LOO-267
-lf project prepare runtime-model
 lf --task LOO-267 research \
   "Research the runtime model; write scratch/research-runtime-model.md"
 lf --task LOO-267 research \
   "Research design handoff; write scratch/research-design-handoff.md"
-lf --project context project/operate \
+lf --wave context wave/operate \
   "Reconcile the KRs with the current evidence"
 ```
 
 `lf task prepare` ensures tracked Task Work, its one worktree, and serial PR
 identity without starting Task execution. `--task`,
-`--project`, and `--wave` start one supervised skill Run about the most specific
-selected Work. A Task implies its Project and Wave; a Project implies its Wave.
+and `--wave` start one supervised skill Run about the most specific
+selected Work. A Task implies its Wave and resolves the current chapter internally.
 Broader selectors may be supplied as qualifiers and must match. These commands
 never bind or advance the Work's Flow, resume a provider session,
 or grant exclusive ownership. Task binding supplies the Task seed and uses its
-existing worktree as cwd. Project and Wave binding use the owning Wave
-repository; Projects do not own worktrees, so repository changes still belong
+existing worktree as cwd. Wave binding use the owning Wave
+repository; repository changes still belong
 in a Task. Zero, one, or many generic Runs may concern the same Work. Each has
 its own Run id; Work attribution is provenance, never a reservation or mutation
 lease.
@@ -201,8 +200,8 @@ dirty files merely because it finished first. After the bounded Runs finish,
 inspect the shared tree. When the complete set is one coherent checkpoint, use
 the ordinary `lf commit`/PR workflow to share it.
 
-Use Task, Project, or Wave pursuit commands when Loopflow should choose and run
-subsequent work. Use `--task`, `--project`, or `--wave`
+Use Task or Wave pursuit commands when Loopflow should choose and run
+subsequent work. Use `--task` or `--wave`
 with a skill when a human or parent already knows the one bounded contribution
 to make.
 
@@ -213,7 +212,7 @@ ids remain provenance; they never become Task planning leases.
 
 When accumulated research or changed Task direction invalidates the current
 attempt, update the Task definition, wait for the exact contributions you need,
-then start the Project's currently recommended Flow in a fresh Task worker:
+then start the Wave chapter's currently recommended Flow in a fresh Task worker:
 
 ```bash
 lf task restart LOO-267 "Reconcile the new runtime evidence"
@@ -221,7 +220,7 @@ lf task restart LOO-267 "Reconcile the new runtime evidence"
 
 Restart force-refreshes the Task, checkpoints and pushes its complete current
 worktree, preserves its identity/worktree/PR history, clears any active Flow,
-and selects the Project's current recommendation in a fresh provider Run. Existing scratch may be an older poor design;
+and selects the Wave chapter's current recommendation in a fresh provider Run. Existing scratch may be an older poor design;
 reconcile all of it as evidence instead of treating it as approved direction.
 If an exact Task worker is live, restart interrupts it before starting the new
 Flow. If it is absent, restart launches one. Generic Runs
@@ -250,8 +249,7 @@ end-of-work memory curation; no live Wave is required.
 
 `lf chat` is the User conversation surface. `lf task steer` posts a Linear Task
 comment; direct Linear comments also reach the advancing worker. Steering does
-not start idle work or inject into independent `--as` Runs. Guide Projects and
-Waves through their operate skills with extra instructions.
+not start idle work or inject into independent `--as` Runs. Guide Waves through `wave/operate` with extra instructions.
 
 ## Secrets And Auth
 

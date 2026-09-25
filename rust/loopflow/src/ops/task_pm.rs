@@ -4,14 +4,14 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmUpdateOptions};
 use crate::pm::{PmItem, PmPortfolioValidator, PmProject};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTask {
     pub snapshot: PmShowResult,
     pub project: PmProject,
     pub item: PmItem,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedProject {
     pub snapshot: PmShowResult,
     pub project: PmProject,
@@ -88,7 +88,7 @@ pub(crate) async fn resolve_task_async(
                 "task {issue:?} disappeared from wave/{wave}; run `lf pm sync --wave {wave}`"
             ))
         })?;
-    if item.completed {
+    if item.completed || matches!(item.state.as_deref(), Some("canceled" | "duplicate")) {
         return Err(OpsError::Message(format!(
             "task {} is already complete and cannot start a Task",
             item.identifier
@@ -102,67 +102,21 @@ pub(crate) async fn resolve_task_async(
     })
 }
 
-pub fn resolve_project(
+pub fn resolve_current_project(
     repo: &Path,
-    project_id: &str,
+    wave: Option<&str>,
     refresh: PmRefresh,
 ) -> OpsResult<ResolvedProject> {
-    let team_id = crate::ops::pm::repository_team_id(repo)?;
-    let mut matches = Vec::new();
-    for snapshot in repository_snapshots(repo, &team_id)? {
-        if snapshot
-            .projects
-            .iter()
-            .any(|project| project.id == project_id || project.slug == project_id)
-        {
-            matches.push(snapshot.wave);
-        }
-    }
-    let wave = match matches.len() {
-        0 => {
-            return Err(OpsError::Message(format!(
-                "Linear Project {project_id:?} is absent from local PM snapshots"
-            )))
-        }
-        1 => matches.pop().expect("one project match"),
-        count => {
-            return Err(OpsError::Message(format!(
-                "Linear Project {project_id:?} belongs to {count} Wave snapshots"
-            )))
-        }
-    };
-    let snapshot = load_wave(repo, &wave, refresh)?;
-    let project = snapshot
-        .projects
-        .iter()
-        .find(|project| project.id == project_id || project.slug == project_id)
-        .cloned()
-        .ok_or_else(|| OpsError::Message(format!("Linear Project {project_id:?} disappeared")))?;
-    validate_project_ownership(&snapshot, &project, &team_id)?;
+    let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let snapshot = load_wave(repo, wave.name(), refresh)?;
+    let project = tokio::runtime::Runtime::new()
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .block_on(async {
+            let store = crate::ops::pm::pm_store().await?;
+            crate::ops::chapter::current_project(&store, &wave).await
+        })?;
     Ok(ResolvedProject { snapshot, project })
-}
-
-fn repository_snapshots(repo: &Path, team_id: &str) -> OpsResult<Vec<PmShowResult>> {
-    let mut snapshots = Vec::new();
-    let mut ownership = PmPortfolioValidator::default();
-    for wave in crate::ops::pm::list_pm_waves(repo)? {
-        let snapshot = match load_wave(repo, &wave, PmRefresh::Never) {
-            Ok(snapshot) => snapshot,
-            Err(error) if error.to_string().contains("has no local PM snapshot") => continue,
-            Err(error) => return Err(error),
-        };
-        ownership
-            .validate(
-                &snapshot.wave,
-                &snapshot.initiative,
-                Some(team_id),
-                &snapshot.projects,
-                &snapshot.items,
-            )
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        snapshots.push(snapshot);
-    }
-    Ok(snapshots)
 }
 
 async fn repository_snapshots_async(repo: &Path, team_id: &str) -> OpsResult<Vec<PmShowResult>> {
@@ -191,7 +145,6 @@ async fn repository_snapshots_async(repo: &Path, team_id: &str) -> OpsResult<Vec
 pub fn create_and_load_task(
     repo: &Path,
     wave: &str,
-    project: &str,
     title: &str,
     report: &str,
     marker: &str,
@@ -199,7 +152,6 @@ pub fn create_and_load_task(
     let result = crate::ops::pm::pm_create_task_idempotent(
         repo,
         wave,
-        project,
         title,
         report,
         marker,
@@ -227,7 +179,6 @@ pub async fn complete_task(
         repo,
         &PmUpdateOptions {
             wave: Some(wave.to_string()),
-            project: None,
             id: Some(item_id.to_string()),
             title: None,
             notes: None,
@@ -256,7 +207,7 @@ pub async fn retry_complete_task(
                 "completed task {item_id} is absent from refreshed wave/{wave} snapshot"
             ))
         })?;
-    if item.completed {
+    if item.completed || matches!(item.state.as_deref(), Some("canceled" | "duplicate")) {
         return Ok(());
     }
     complete_task(repo, wave, item_id, pr).await

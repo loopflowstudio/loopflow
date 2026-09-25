@@ -33,7 +33,6 @@ public func taskConditionAccessibilityLabel(_ task: RoadmapTask) -> String {
 /// Project only as context, plus the group it landed in.
 public struct NowRow: Identifiable, Sendable, Hashable {
     public let wave: WaveSnapshot
-    public let projectName: String
     public let task: RoadmapTask
     public let group: TaskConditionState
 
@@ -41,12 +40,10 @@ public struct NowRow: Identifiable, Sendable, Hashable {
 
     public init(
         wave: WaveSnapshot,
-        projectName: String,
         task: RoadmapTask,
         group: TaskConditionState
     ) {
         self.wave = wave
-        self.projectName = projectName
         self.task = task
         self.group = group
     }
@@ -71,18 +68,9 @@ public struct NowSection: Identifiable, Sendable, Hashable {
 public func nowSections(from waves: [WaveRoadmap]) -> [NowSection] {
     var rowsByGroup: [TaskConditionState: [NowRow]] = [:]
     for wave in waves {
-        for project in wave.projects.items {
-            for task in project.tasks {
-                guard let group = nowGroup(for: task) else { continue }
-                rowsByGroup[group, default: []].append(
-                    NowRow(
-                        wave: wave.wave,
-                        projectName: project.project.name,
-                        task: task,
-                        group: group
-                    )
-                )
-            }
+        for task in wave.tasks.items {
+            guard let group = nowGroup(for: task) else { continue }
+            rowsByGroup[group, default: []].append(NowRow(wave: wave.wave, task: task, group: group))
         }
     }
     return [TaskConditionState.blocked, .waiting, .unknown].compactMap { group in

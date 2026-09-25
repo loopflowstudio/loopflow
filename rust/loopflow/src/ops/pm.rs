@@ -1,9 +1,9 @@
 //! `lf pm` — read and write a wave's PM tasks directly in a provider.
 //!
-//! Linear is authoritative for the wave's project inventory, project specs, and
-//! tasks. `lf pm sync` projects that state into SQLite; reads serve that
-//! snapshot and only reach Linear through a bounded staleness policy (see
-//! `load_show_snapshot`).
+//! Linear owns authored chapter content and Tasks; the durable chapter binding
+//! identifies the current Project. `lf pm sync` projects provider state into
+//! SQLite; reads serve that snapshot and only reach Linear through a bounded
+//! staleness policy (see `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -18,8 +18,8 @@ use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmPortfolioValidator, PmProject,
-    PmProviderKind, PmSnapshot, PmWave, ProjectContent, ProjectFlowPlan,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmPortfolioValidator, PmProject, PmProviderKind,
+    PmSnapshot, PmWave, ProjectContent,
 };
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
@@ -74,7 +74,7 @@ pub enum PmRefresh {
     Never,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PmShowResult {
     pub wave: String,
     pub provider: PmProviderKind,
@@ -88,7 +88,6 @@ pub struct PmShowResult {
 #[derive(Debug, Clone)]
 pub struct PmUpdateOptions {
     pub wave: Option<String>,
-    pub project: Option<String>,
     pub id: Option<String>,
     pub title: Option<String>,
     pub notes: Option<String>,
@@ -199,149 +198,12 @@ pub struct PmRenameResult {
     pub title: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct PmTaskMoveOptions {
-    pub id: String,
-    pub wave: Option<String>,
-    pub project: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmTaskMoveResult {
-    pub wave: String,
-    pub id: String,
-    pub project: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct PmProjectWriteOptions {
-    pub wave: Option<String>,
-    pub project: Option<String>,
-    pub title: Option<String>,
-    pub definition: Option<String>,
-    pub krs: Vec<String>,
-    pub recommended: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmProjectWriteResult {
-    pub wave: String,
-    pub id: String,
-    pub slug: String,
-    pub created: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct PmProjectArchiveOptions {
-    pub wave: Option<String>,
-    pub project: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmProjectArchiveResult {
-    pub wave: String,
-    pub id: String,
-    pub slug: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PmResolvedTask {
     pub wave: String,
     pub initiative_id: String,
     pub project: PmProject,
     pub item: PmItem,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmResolvedProject {
-    pub wave: String,
-    pub initiative_id: String,
-    pub project: PmProject,
-}
-
-pub fn pm_create_project(
-    repo: &Path,
-    wave: Option<&str>,
-    title: &str,
-) -> OpsResult<PmResolvedProject> {
-    block_on_pm(pm_create_project_async(repo, wave, title))
-}
-
-async fn pm_create_project_async(
-    repo: &Path,
-    wave: Option<&str>,
-    title: &str,
-) -> OpsResult<PmResolvedProject> {
-    let wave = resolve_wave(wave)?;
-    let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    if let Some(project) = projects
-        .into_iter()
-        .find(|project| project.name.eq_ignore_ascii_case(title))
-    {
-        return Ok(PmResolvedProject {
-            wave,
-            initiative_id: ctx.initiative,
-            project,
-        });
-    }
-    let seed = LocalProject {
-        slug: crate::pm::project_slug(title),
-        name: title.to_string(),
-        summary: title.to_string(),
-        definition: title.to_string(),
-        flows: ProjectFlowPlan::empty(),
-        krs: Vec::new(),
-    };
-    let linear_name = linear_project_name(repo, &wave, &seed.name).await?;
-    let id = match ctx
-        .client
-        .create_project(
-            &ctx.initiative,
-            &linear_name,
-            &ProjectContent {
-                definition: seed.definition.clone(),
-                flows: seed.flows.clone(),
-                krs: seed.krs.clone(),
-            },
-        )
-        .await
-    {
-        Ok(id) => id,
-        Err(create_error) => checked_projects(repo, &ctx, &wave)
-            .await?
-            .into_iter()
-            .find(|project| project.name.eq_ignore_ascii_case(title))
-            .map(|project| project.id)
-            .ok_or_else(|| pm_to_ops(create_error))?,
-    };
-    Ok(PmResolvedProject {
-        wave,
-        initiative_id: ctx.initiative.clone(),
-        project: PmProject {
-            id,
-            slug: seed.slug,
-            name: seed.name,
-            summary: seed.summary,
-            definition: seed.definition,
-            flows: Some(seed.flows),
-            krs: seed.krs,
-            initiative_ids: vec![ctx.initiative.clone()],
-            // The create result is transient — the next sync resolves the
-            // authoritative teams from Linear.
-            team_ids: vec![ctx.team_id.clone()],
-        },
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LocalProject {
-    slug: String,
-    name: String,
-    summary: String,
-    definition: String,
-    flows: ProjectFlowPlan,
-    krs: Vec<PmKr>,
 }
 
 // ── Client + Linear project resolution ──────────────────────────────
@@ -372,7 +234,7 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
-fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
+pub(crate) fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
     wave.and_then(normalize_wave_name)
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
@@ -535,7 +397,7 @@ pub(crate) async fn issue_client(repo: &Path) -> OpsResult<LinearClient> {
     build_client(repo, resolve_provider(repo)?, None).await
 }
 
-async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
+pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let repository = resolve_repository_context(repo).await?;
     let provider = repository.provider;
     let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {
@@ -752,7 +614,7 @@ fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
         .map_err(|err| OpsError::Message(format!("failed to resolve credential store: {err}")))
 }
 
-async fn pm_store() -> OpsResult<Store> {
+pub(crate) async fn pm_store() -> OpsResult<Store> {
     open_pm_store(&storage_config_from_env()?).await
 }
 
@@ -951,7 +813,11 @@ async fn load_show_snapshot(
     }
 }
 
-async fn fetch_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
+pub(crate) async fn fetch_pm_snapshot(
+    repo: &Path,
+    wave: &str,
+    ctx: &PmContext,
+) -> OpsResult<PmSnapshot> {
     let store = pm_store().await?;
     fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await
 }
@@ -1026,7 +892,11 @@ async fn store_pm_snapshot_with_store(
         .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))
 }
 
-async fn refresh_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
+pub(crate) async fn refresh_pm_snapshot(
+    repo: &Path,
+    wave: &str,
+    ctx: &PmContext,
+) -> OpsResult<PmSnapshot> {
     let snapshot = fetch_pm_snapshot(repo, wave, ctx).await?;
     store_pm_snapshot(repo, wave, ctx, &snapshot).await?;
     Ok(snapshot)
@@ -1136,6 +1006,35 @@ async fn pm_init_async(
         )?;
     }
 
+    let store = pm_store().await?;
+    let registered = crate::controller::wave::registry::ensure_wave_row(&store, repo, &wave)
+        .await
+        .map_err(|cause| OpsError::Message(cause.to_string()))?;
+    if store
+        .chapter(registered.id(), None)
+        .await
+        .map_err(|cause| OpsError::Message(cause.to_string()))?
+        .is_none()
+    {
+        let ctx = resolve_context(repo, &wave).await?;
+        if !checked_projects(repo, &ctx, &wave).await?.is_empty() {
+            return Err(OpsError::Message(format!("Wave {wave} has an existing plan; preview its migration with `lf wave new-chapter --wave {wave} --chapter <id> --dry-run`")));
+        }
+        let receipt = super::chapter::rotate(
+            repo,
+            &super::chapter::NewChapterRequest {
+                wave: Some(wave.clone()),
+                chapter: crate::work::chapter::ChapterId::parse("initial")
+                    .map_err(OpsError::Message)?,
+                content: super::chapter::empty_plan(),
+            },
+            false,
+        )
+        .await?;
+        if let Some(error) = receipt.error {
+            return Err(OpsError::Message(error));
+        }
+    }
     Ok(PmInitResult {
         wave,
         initiative_id,
@@ -1201,7 +1100,6 @@ pub fn pm_update(
 pub fn pm_create_task_idempotent(
     repo: &Path,
     wave: &str,
-    project_slug: &str,
     title: &str,
     description: &str,
     marker: &str,
@@ -1210,7 +1108,6 @@ pub fn pm_create_task_idempotent(
     block_on_pm(pm_create_task_idempotent_async(
         repo,
         wave,
-        project_slug,
         title,
         description,
         marker,
@@ -1221,15 +1118,24 @@ pub fn pm_create_task_idempotent(
 async fn pm_create_task_idempotent_async(
     repo: &Path,
     wave: &str,
-    project_slug: &str,
     title: &str,
     description: &str,
     marker: &str,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
+    let store = pm_store().await?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let registered = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
+    super::chapter::require_chapter_home(&store, &registered).await?;
+    let _lock = super::chapter::rotation_lock(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
-    let projects = checked_projects(repo, &ctx, wave).await?;
-    let project = find_project(&projects, wave, project_slug)?;
+    refresh_pm_snapshot(repo, wave, &ctx).await?;
+    let project = super::chapter::current_project(&store, &registered).await?;
     let find_existing = |items: Vec<PmItem>| {
         items
             .into_iter()
@@ -1251,7 +1157,7 @@ async fn pm_create_task_idempotent_async(
     }
 
     progress.status(&format!(
-        "creating idempotent {} task in Linear Project {} for wave/{wave}",
+        "creating idempotent {} task in the current chapter {} for wave/{wave}",
         ctx.provider, project.id
     ));
     let item = PmItemCreate {
@@ -1309,16 +1215,7 @@ pub(crate) async fn pm_update_async(
         }
     }
     let store = pm_store().await?;
-    let result = apply_update(
-        repo,
-        &wave,
-        options.project.as_deref(),
-        &ctx,
-        options,
-        progress,
-        &store,
-    )
-    .await?;
+    let result = apply_update(repo, &wave, &ctx, options, progress, &store).await?;
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
     refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(result)
@@ -1327,17 +1224,54 @@ pub(crate) async fn pm_update_async(
 async fn apply_update(
     repo: &Path,
     wave: &str,
-    project_slug: Option<&str>,
     ctx: &PmContext,
     options: &PmUpdateOptions,
     progress: &impl Progress,
     store: &Store,
 ) -> OpsResult<PmUpdateResult> {
     let mark_done = parse_done_status(options.status.as_deref())?;
+    let registered = if options.id.is_none() {
+        let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        Some(
+            store
+                .get_wave_at(&locator)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?,
+        )
+    } else {
+        None
+    };
+    let _lock = if let Some(registered) = &registered {
+        super::chapter::require_chapter_home(store, registered).await?;
+        Some(super::chapter::rotation_lock(registered).await?)
+    } else {
+        None
+    };
     let projects = checked_projects_with_store(repo, ctx, wave, store).await?;
-    let project = project_slug
-        .map(|slug| find_project(&projects, wave, slug))
-        .transpose()?;
+    let current = if let Some(registered) = &registered {
+        let chapter = store
+            .chapter(registered.id(), None)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| {
+                OpsError::Message("the Wave has no chapter; run `lf wave new-chapter`".into())
+            })?;
+        Some(
+            projects
+                .iter()
+                .find(|project| project.id == chapter.project_id)
+                .ok_or_else(|| {
+                    OpsError::Message(
+                        "current chapter is unavailable; resume its transition".into(),
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
+    let project = current;
 
     let (id, created) = match options.id.as_ref() {
         Some(id) => {
@@ -1368,11 +1302,11 @@ async fn apply_update(
             };
             let Some(project) = project else {
                 return Err(OpsError::Message(
-                    "`lf pm task create --project <slug>` is required".to_string(),
+                    "the Wave has no current chapter; run `lf wave new-chapter`".to_string(),
                 ));
             };
             progress.status(&format!(
-                "creating {} task in Linear Project {} for wave/{wave}",
+                "creating {} task in the current chapter {} for wave/{wave}",
                 ctx.provider, project.id
             ));
             let id = ctx
@@ -1680,30 +1614,6 @@ async fn resolve_owned_issue(
     let wave = wave_for_initiative(repo, &initiative_id)?;
     validate_project_ownership(&project, &wave, &initiative_id, &repository.team_id)?;
     Ok((wave, initiative_id, item, project))
-}
-
-pub fn pm_resolve_project(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
-    block_on_pm(pm_resolve_project_async(repo, project_id))
-}
-
-async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
-    let repository = resolve_repository_context(repo).await?;
-    let mut project = repository
-        .client
-        .project_ownership(project_id)
-        .await
-        .map_err(pm_to_ops)?;
-    let initiative_id = singular_project_initiative(&project)?;
-    let wave = wave_for_initiative(repo, &initiative_id)?;
-    validate_project_ownership(&project, &wave, &initiative_id, &repository.team_id)?;
-    let title_path = canonical_wave_title_path_async(repo, &wave).await?;
-    project.name = canonical_project_name(&title_path, &wave, &project.name)?;
-    project.slug = crate::pm::project_slug(&project.name);
-    Ok(PmResolvedProject {
-        wave,
-        initiative_id,
-        project,
-    })
 }
 
 fn singular_project_initiative(project: &PmProject) -> OpsResult<String> {
@@ -2081,7 +1991,7 @@ async fn apply_or_plan_repository_reteam(
                         &state.project.id,
                         &state.target_name,
                         &ProjectContent {
-                            definition: state.project.definition.clone(),
+                            metric_targets: state.project.metric_targets.clone(),
                             flows,
                             krs: state.project.krs.clone(),
                         },
@@ -2400,7 +2310,7 @@ async fn pm_sync_async(
                             &project.id,
                             &expected_name,
                             &ProjectContent {
-                                definition: project.definition.clone(),
+                                metric_targets: project.metric_targets.clone(),
                                 flows: project.flows.clone().expect("preflight required flows"),
                                 krs: project.krs.clone(),
                             },
@@ -2431,158 +2341,6 @@ async fn pm_sync_async(
 
 // ── explicit mutations ─────────────────────────────────────────────
 
-pub fn pm_project_write(
-    repo: &Path,
-    options: &PmProjectWriteOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectWriteResult> {
-    block_on_pm(pm_project_write_async(repo, options, progress))
-}
-
-pub fn pm_project_archive(
-    repo: &Path,
-    options: &PmProjectArchiveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectArchiveResult> {
-    block_on_pm(pm_project_archive_async(repo, options, progress))
-}
-
-async fn pm_project_archive_async(
-    repo: &Path,
-    options: &PmProjectArchiveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectArchiveResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    let project = find_project(&projects, &wave, &options.project)?;
-    progress.status(&format!("archiving Linear Project `{}`", project.name));
-    ctx.client
-        .archive_project(&project.id)
-        .await
-        .map_err(pm_to_ops)?;
-    let result = PmProjectArchiveResult {
-        wave: wave.clone(),
-        id: project.id.clone(),
-        slug: project.slug.clone(),
-    };
-    refresh_pm_snapshot(repo, &wave, &ctx).await?;
-    Ok(result)
-}
-
-async fn pm_project_write_async(
-    repo: &Path,
-    options: &PmProjectWriteOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectWriteResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    // Creating a Project (no `--project` slug to update) must bind an explicit
-    // team; updating an existing Project does not move it between teams.
-    let ctx = resolve_context(repo, &wave).await?;
-    let requested_krs = options
-        .krs
-        .iter()
-        .map(|value| {
-            let value = value.trim();
-            let (holds, text) = value
-                .strip_prefix("[x] ")
-                .or_else(|| value.strip_prefix("[X] "))
-                .map(|text| (true, text))
-                .or_else(|| value.strip_prefix("[ ] ").map(|text| (false, text)))
-                .unwrap_or((false, value));
-            PmKr {
-                text: text.trim().to_string(),
-                holds,
-            }
-        })
-        .filter(|kr| !kr.text.is_empty())
-        .collect::<Vec<_>>();
-    if options.project.is_none() && requested_krs.is_empty() {
-        return Err(OpsError::Message(
-            "at least one `--kr` is required".to_string(),
-        ));
-    }
-
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    let (id, slug, created) = if let Some(slug) = options.project.as_deref() {
-        let project = find_project(&projects, &wave, slug)?;
-        let name = options
-            .title
-            .clone()
-            .unwrap_or_else(|| project.name.clone());
-        let new_slug = crate::pm::project_slug(&name);
-        if projects
-            .iter()
-            .any(|candidate| candidate.id != project.id && candidate.slug == new_slug)
-        {
-            return Err(OpsError::Message(format!(
-                "wave/{wave} already has a Linear Project with slug `{new_slug}`"
-            )));
-        }
-        progress.status(&format!("updating Linear Project `{}`", project.name));
-        let linear_name = linear_project_name(repo, &wave, &name).await?;
-        let content = ProjectContent {
-            definition: options
-                .definition
-                .clone()
-                .unwrap_or_else(|| project.definition.clone()),
-            flows: ProjectFlowPlan {
-                recommended: options.recommended.clone().or_else(|| {
-                    project
-                        .flows
-                        .as_ref()
-                        .and_then(|flows| flows.recommended.clone())
-                }),
-            },
-            krs: if options.krs.is_empty() {
-                project.krs.clone()
-            } else {
-                requested_krs.clone()
-            },
-        };
-        ctx.client
-            .update_project(&project.id, &linear_name, &content)
-            .await
-            .map_err(pm_to_ops)?;
-        (project.id.clone(), new_slug, false)
-    } else {
-        let name = options.title.clone().ok_or_else(|| {
-            OpsError::Message("`lf pm project create --title` is required".to_string())
-        })?;
-        let slug = crate::pm::project_slug(&name);
-        if projects.iter().any(|project| project.slug == slug) {
-            return Err(OpsError::Message(format!(
-                "wave/{wave} already has a Linear Project with slug `{slug}`; use `lf pm project update`"
-            )));
-        }
-        progress.status(&format!("creating Linear Project `{name}`"));
-        let linear_name = linear_project_name(repo, &wave, &name).await?;
-        let content = ProjectContent {
-            definition: options.definition.clone().ok_or_else(|| {
-                OpsError::Message("`lf pm project create --definition` is required".to_string())
-            })?,
-            flows: ProjectFlowPlan {
-                recommended: options.recommended.clone(),
-            },
-            krs: requested_krs.clone(),
-        };
-        let id = ctx
-            .client
-            .create_project(&ctx.initiative, &linear_name, &content)
-            .await
-            .map_err(pm_to_ops)?;
-        (id, slug, true)
-    };
-
-    refresh_pm_snapshot(repo, &wave, &ctx).await?;
-    Ok(PmProjectWriteResult {
-        wave,
-        id,
-        slug,
-        created,
-    })
-}
-
 pub fn pm_rename(
     repo: &Path,
     options: &PmRenameOptions,
@@ -2612,41 +2370,6 @@ async fn pm_rename_async(
         wave,
         initiative: ctx.initiative,
         title: options.title.clone(),
-    })
-}
-
-pub fn pm_task_move(
-    repo: &Path,
-    options: &PmTaskMoveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmTaskMoveResult> {
-    block_on_pm(pm_task_move_async(repo, options, progress))
-}
-
-async fn pm_task_move_async(
-    repo: &Path,
-    options: &PmTaskMoveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmTaskMoveResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    let project = find_project(&projects, &wave, &options.project)?;
-    resolve_owned_issue(repo, &ctx.repository, &options.id).await?;
-    progress.status(&format!(
-        "moving {} task {} to wave/{wave} Linear Project {}",
-        ctx.provider, options.id, project.id
-    ));
-    ctx.client
-        .move_item_to_project(&options.id, &project.id)
-        .await
-        .map_err(pm_to_ops)?;
-    progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
-    refresh_pm_snapshot(repo, &wave, &ctx).await?;
-    Ok(PmTaskMoveResult {
-        wave,
-        id: options.id.clone(),
-        project: options.project.clone(),
     })
 }
 
@@ -2873,7 +2596,11 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
 }
 
 /// List a Wave's Projects and enforce repository Team + singular Initiative ownership.
-async fn checked_projects(repo: &Path, ctx: &PmContext, wave: &str) -> OpsResult<Vec<PmProject>> {
+pub(crate) async fn checked_projects(
+    repo: &Path,
+    ctx: &PmContext,
+    wave: &str,
+) -> OpsResult<Vec<PmProject>> {
     let store = pm_store().await?;
     checked_projects_with_store(repo, ctx, wave, &store).await
 }
@@ -2890,6 +2617,40 @@ async fn checked_projects_with_store(
         .list_projects(&ctx.initiative)
         .await
         .map_err(pm_to_ops)?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if let Some(registered) = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(format!("failed to read Wave registry: {error}")))?
+    {
+        if let Some(chapter) = store
+            .chapter(registered.id(), None)
+            .await
+            .map_err(|error| {
+                OpsError::Message(format!("failed to read current chapter: {error}"))
+            })?
+        {
+            if !projects
+                .iter()
+                .any(|project| project.id == chapter.project_id)
+            {
+                // The binding owns identity; a portfolio omission cannot erase its content.
+                projects.push(
+                    ctx.client
+                        .project_ownership(&chapter.project_id)
+                        .await
+                        .map_err(|error| {
+                            OpsError::Message(format!(
+                                "current chapter {} ({}) evidence unavailable: {error}",
+                                chapter.id.as_str(),
+                                chapter.project_id
+                            ))
+                        })?,
+                );
+            }
+        }
+    }
     for project in &mut projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
         project.name = canonical_project_name(&title_path, wave, &project.name)?;
@@ -2942,7 +2703,11 @@ fn title_case(slug: &str) -> String {
         .join(" ")
 }
 
-async fn linear_project_name(repo: &Path, wave: &str, canonical_name: &str) -> OpsResult<String> {
+pub(crate) async fn linear_project_name(
+    repo: &Path,
+    wave: &str,
+    canonical_name: &str,
+) -> OpsResult<String> {
     Ok(format!(
         "{} — {}",
         canonical_wave_title_path_async(repo, wave).await?,
@@ -2965,7 +2730,7 @@ fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> Op
     if linear_name.contains(" — ") {
         return Err(OpsError::Message(format!(
             "Linear Project title {linear_name:?} has an unrecognized Wave prefix; \
-             run `lf pm project update --wave {wave} --project <slug> --title <name>` explicitly"
+             inspect `lf pm doctor` and correct the provider title before retrying"
         )));
     }
     Ok(linear_name.trim().to_string())
@@ -3056,6 +2821,7 @@ mod tests {
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
+    use crate::pm::{PmKr, ProjectFlowPlan};
     use crate::work::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
@@ -3100,12 +2866,11 @@ mod tests {
     async fn isolated_apply_update(
         repo: &Path,
         wave: &str,
-        project: Option<&str>,
         ctx: &PmContext,
         options: &PmUpdateOptions,
     ) -> OpsResult<PmUpdateResult> {
         let store = isolated_pm_store(repo).await;
-        apply_update(repo, wave, project, ctx, options, &NullProgress, &store).await
+        apply_update(repo, wave, ctx, options, &NullProgress, &store).await
     }
 
     fn write_goal(repo: &Path, wave: &str, frontmatter: &str) {
@@ -3597,7 +3362,8 @@ mod tests {
             slug: crate::pm::project_slug(name),
             name: name.to_string(),
             summary: String::new(),
-            definition: String::new(),
+
+            metric_targets: Vec::new(),
             flows: Some(ProjectFlowPlan::empty()),
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
@@ -3623,7 +3389,8 @@ mod tests {
                 slug: "wave-chat".to_string(),
                 name: "Wave Chat".to_string(),
                 summary: "Stay in flow.".to_string(),
-                definition: "Conversation stays in flow.".to_string(),
+
+                metric_targets: Vec::new(),
                 flows: Some(ProjectFlowPlan {
                     recommended: Some("task-design".to_string()),
                 }),
@@ -3641,9 +3408,10 @@ mod tests {
         assert_eq!(value["synced_at"], 42);
         assert_eq!(value["projects"][0]["team_ids"][0], "team-prd");
         assert_eq!(
-            value["projects"][0]["definition"],
-            "Conversation stays in flow."
+            value["projects"][0]["metric_targets"],
+            serde_json::json!([])
         );
+        assert!(value["projects"][0].get("definition").is_none());
         assert_eq!(value["projects"][0]["flows"]["recommended"], "task-design");
         assert_eq!(value["projects"][0]["krs"][0]["holds"], true);
         assert_eq!(value["items"], serde_json::json!([]));
@@ -3706,66 +3474,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_update_requires_a_project_when_creating() {
-        let (base_url, _requests) = test_server::spawn(vec![projects_response(json!([]))]).await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-        let repo = tempfile::tempdir().unwrap();
-        let options = PmUpdateOptions {
-            wave: None,
-            project: None,
-            id: None,
-            title: Some("New task".to_string()),
-            notes: Some("details".to_string()),
-            status: None,
-            pr: None,
-        };
-
-        let error = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
-            .await
-            .expect_err("project is required");
-        assert!(error.to_string().contains("--project <slug>"));
-    }
-
-    #[tokio::test]
-    async fn apply_update_creates_task_in_native_project() {
-        let (base_url, requests) = test_server::spawn(vec![
-            projects_response(json!([project_node("project-chat", "Wave Chat")])),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-todo", "position": 1.0 }] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueCreate": { "issue": { "id": "new-task" } } } }),
-            ),
-        ])
-        .await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-        let repo = tempfile::tempdir().unwrap();
-        let options = PmUpdateOptions {
-            wave: None,
-            project: Some("wave-chat".to_string()),
-            id: None,
-            title: Some("New task".to_string()),
-            notes: None,
-            status: None,
-            pr: None,
-        };
-
-        let result =
-            isolated_apply_update(repo.path(), "product", Some("wave-chat"), &ctx, &options)
-                .await
-                .expect("update succeeds");
-
-        assert!(result.created);
-        let requests = requests.lock().await;
-        let create_body: serde_json::Value =
-            serde_json::from_str(&requests[2].body).expect("create body is json");
-        assert_eq!(create_body["variables"]["projectId"], "project-chat");
-        assert!(create_body["variables"].get("labelIds").is_none());
-    }
-
-    #[tokio::test]
     async fn apply_update_completes_when_status_done() {
         let (base_url, _requests) = test_server::spawn(vec![
             projects_response(json!([])),
@@ -3789,7 +3497,6 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
-            project: None,
             id: Some("task-9".to_string()),
             title: None,
             notes: None,
@@ -3797,7 +3504,7 @@ mod tests {
             pr: None,
         };
 
-        let result = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
+        let result = isolated_apply_update(repo.path(), "goals", &ctx, &options)
             .await
             .expect("update succeeds");
         assert!(!result.created);
@@ -3840,7 +3547,6 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
-            project: None,
             id: Some("task-9".to_string()),
             title: Some("Existing".to_string()),
             notes: None,
@@ -3848,7 +3554,7 @@ mod tests {
             pr: Some("https://github.com/acme/repo/pull/42".to_string()),
         };
 
-        let result = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
+        let result = isolated_apply_update(repo.path(), "goals", &ctx, &options)
             .await
             .expect("update succeeds");
         assert!(result.completed);

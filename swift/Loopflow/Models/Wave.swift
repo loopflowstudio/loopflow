@@ -15,7 +15,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let paused: Bool
     public let enabled: Bool
     public let activeTasks: Int
-    public let activeProjects: Int
     public let parentWaveId: String?
     public let retiredAt: String?
     public let supersededByWaveId: String?
@@ -30,7 +29,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         paused: Bool = false,
         enabled: Bool = true,
         activeTasks: Int = 0,
-        activeProjects: Int = 0,
         parentWaveId: String? = nil,
         retiredAt: String? = nil,
         supersededByWaveId: String? = nil,
@@ -44,7 +42,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.paused = paused
         self.enabled = enabled
         self.activeTasks = activeTasks
-        self.activeProjects = activeProjects
         self.parentWaveId = parentWaveId
         self.retiredAt = retiredAt
         self.supersededByWaveId = supersededByWaveId

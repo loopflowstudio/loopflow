@@ -2046,7 +2046,7 @@ operations available to helpers without becoming resident Work identities.</p>
 </tr>
 <tr>
 <td>Planning</td>
-<td>Flow composition, Wave/Project/Task Work, Steer, questions, human FlowSteps, resident loops</td>
+<td>Flow composition, Wave/Task Work, Steer, questions, human FlowSteps, resident loops</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>
@@ -2078,7 +2078,7 @@ wave/{mod,config,context,      wave/{runner,resident,server,
 project                       task/mod
 task                          Task worker
 
-ops/project.rs                finite Project operations
+ops/chapter.rs                deterministic chapter rotation
 
 execution kernel: engine/ + harness/ + Run records
 composition surfaces: lf/ + bin/
@@ -2115,7 +2115,7 @@ human / agent --&gt; lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Wave -&gt; Project -&gt; Task
+  Skills / Flows /       Wave -&gt; Task (one internal chapter plan)
   goals / memory                  |
           |                       +---------&gt; Task delivery
           |                       |                ^
@@ -2142,9 +2142,9 @@ truth. Readers join those sources; they do not replace them with a universal
 ledger.</p>
 <h2 id="core-models">Core models<a class="anchor-link" href="#core-models" title="Link to this section">#</a></h2>
 <pre tabindex="0"><code class="language-text">Wave
-  `-- Project
-        `-- Task
-              `-- one active remote branch and PR
+  |-- current chapter (internal Project)
+  `-- Task
+        `-- one active remote branch and PR
 
 Flow = ordered Skill | Op | Xor | human boundaries
 Run  = evidence for one mediated harness launch
@@ -2178,12 +2178,12 @@ WorkStatus = Ready | Done | Abandoned
 </tr>
 <tr>
 <td>Wave</td>
-<td>Durable operating context with goal, memory, cadence, chat, and project selection</td>
+<td>Durable operating context with goal, memory, cadence, chat, and chapter planning</td>
 <td>Repository Wave files, local identity, Linear Initiative membership</td>
 </tr>
 <tr>
 <td>Project</td>
-<td>One measured bet inside exactly one Wave</td>
+<td>One internal chapter plan inside exactly one Wave</td>
 <td>Linear Project plus bounded local Work state</td>
 </tr>
 <tr>
@@ -2249,13 +2249,12 @@ Task worker, piecemeal helper Runs, or another system.</p>
 <h3 id="bounded-task-advancement">Bounded Task advancement<a class="anchor-link" href="#bounded-task-advancement" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf start product
 lf task run INF-123
-lf project run billing
 lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
 lf status product
 </code></pre>
-<p>The Home keeper may start the placed Wave listener and resident. Project and
-Task motion does not depend on either: Project commands launch finite attributed
-operations, while Task commands claim an exact Flow boundary for one worker.
+<p>The Home keeper may start the placed Wave listener and resident. Task motion
+does not depend on either: Task commands claim an exact Flow boundary for one
+worker. Chapter rotation is a deterministic Wave-scoped operation.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
 A Task human FlowStep starts the persisted Skill as a provider Run and remains
@@ -2283,7 +2282,7 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
 </tr>
 <tr>
-<td>Flow semantics, Work state, Steer, questions, human FlowSteps, Project/Task loops</td>
+<td>Flow semantics, Work state, Steer, questions, human FlowSteps, chapter rotation and Task advancement</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>

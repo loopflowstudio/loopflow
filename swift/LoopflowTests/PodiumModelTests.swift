@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -59,6 +60,61 @@ struct PodiumModelTests {
 
         model.select(.task(id: "missing"))
         #expect(model.selection == nil)
+    }
+
+    @Test("Current chapter source references navigate directly to the Wave")
+    func chapterReferencesSelectWave() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let model = PodiumModel(query: fixture.query)
+        await model.refresh()
+        let wave = try #require(fixture.roadmap.waves.first)
+        let chapter = try #require(wave.chapter)
+        for reference in [chapter.sourceProjectId, chapter.sourceProjectSlug, chapter.sourceWorkId].compactMap({ $0 }) {
+            model.select(.project(id: reference))
+            #expect(model.selection == .wave(id: wave.wave.id))
+        }
+    }
+
+    @Test("Selected Task survives a chapter transfer with temporarily absent membership")
+    func selectedTaskSurvivesChapterTransfer() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let model = PodiumModel(query: fixture.query)
+        await model.refresh()
+        model.select(.task(id: "issue-now"))
+        var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
+        var waves = try #require(wire["waves"] as? [[String: Any]])
+        var chapter = try #require(waves[0]["chapter"] as? [String: Any])
+        chapter["id"] = "next"
+        chapter["phase"] = "transferring"
+        waves[0]["chapter"] = chapter
+        waves[0]["tasks"] = ["state": "ok", "items": [], "truncated": false]
+        wire["waves"] = waves
+        let transferring = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
+        model.applyFixture(roadmap: .available(transferring), waves: .available(fixture.waves),
+            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+        #expect(model.selection == .task(id: "issue-now"))
+        #expect(model.task(id: "issue-now")?.task.task.identifier == "W2-144")
+        #expect(model.task(id: "issue-now")?.wave.chapter?.id == "next")
+    }
+
+    @Test("Chapter history remains reachable when the current plan is unavailable")
+    func historyOpensWithoutCurrentChapter() throws {
+        let fixture = try PodiumTestFixture.load()
+        var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
+        var waves = try #require(wire["waves"] as? [[String: Any]])
+        waves[0]["chapter"] = NSNull()
+        wire["waves"] = waves
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
+        let model = PodiumModel(query: fixture.query)
+        model.applyFixture(roadmap: .available(roadmap), waves: .available(fixture.waves),
+            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+        model.select(.wave(id: "wave-1"))
+
+        let view = WorkSurfaceView(model: model)
+        try view.inspect().find(button: "Chapter history").tap()
+
+        #expect(model.historyWave?.id == "wave-1")
+        #expect(model.selection == .wave(id: "wave-1"))
     }
 
     @Test("Refresh failure preserves last-good evidence and exposes the reason")
@@ -300,14 +356,14 @@ struct PodiumModelTests {
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
             "activity", "--since", "7d", "--limit", "50",
-            "--wave", "product", "--project", "loopflow-api", "--json",
+            "--wave", "product", "--json",
         ])
 
         model.select(.task(id: "issue-now"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
             "activity", "--since", "7d", "--limit", "50",
-            "--wave", "product", "--project", "loopflow-api",
+            "--wave", "product",
             "--task", "W2-144", "--json",
         ])
     }

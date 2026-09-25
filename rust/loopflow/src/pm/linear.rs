@@ -103,8 +103,8 @@ const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($in
   }
 }"#;
 
-const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $content: String!, $teamId: String!) {
-  projectCreate(input: { name: $name, description: $description, content: $content, teamIds: [$teamId] }) {
+const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($id: String, $name: String!, $description: String!, $content: String!, $teamId: String!) {
+  projectCreate(input: { id: $id, name: $name, description: $description, content: $content, teamIds: [$teamId] }) {
     project {
       id
     }
@@ -212,6 +212,7 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
   project(id: $id) {
     id
     name
+    archivedAt
     description
     content
     initiatives(first: 50) { nodes { id } }
@@ -267,6 +268,12 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
     nodes {
       id
     }
+  }
+}"#;
+
+const LIST_CANCELED_WORKFLOW_STATES_QUERY: &str = r#"query CanceledWorkflowStates($teamId: ID!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
+    nodes { id }
   }
 }"#;
 
@@ -736,12 +743,14 @@ impl LinearClient {
         initiative_id: &str,
         name: &str,
         content: &ProjectContent,
+        id: Option<&str>,
     ) -> PmResult<String> {
         let team_id = self.require_team_id()?;
         let response: ProjectCreateData = self
             .graphql(
                 CREATE_PROJECT_MUTATION,
                 json!({
+                    "id": id,
                     "name": name,
                     "description": project_description(content),
                     "content": render_project_content(content),
@@ -750,6 +759,11 @@ impl LinearClient {
             )
             .await?;
         let project_id = response.project_create.project.id;
+        self.attach_project(initiative_id, &project_id).await?;
+        Ok(project_id)
+    }
+
+    pub async fn attach_project(&self, initiative_id: &str, project_id: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(
                 ATTACH_PROJECT_MUTATION,
@@ -759,7 +773,7 @@ impl LinearClient {
                 }),
             )
             .await?;
-        Ok(project_id)
+        Ok(())
     }
 
     pub async fn update_project(
@@ -783,6 +797,9 @@ impl LinearClient {
     }
 
     pub async fn archive_project(&self, project_id: &str) -> PmResult<()> {
+        if self.project_node(project_id).await?.archived_at.is_some() {
+            return Ok(());
+        }
         let response: ProjectArchiveData = self
             .graphql(
                 ARCHIVE_PROJECT_MUTATION,
@@ -814,7 +831,12 @@ impl LinearClient {
                 )
                 .await?;
             let page = response.initiative.projects;
-            projects.extend(page.nodes.into_iter().map(ProjectNode::into_pm_project));
+            projects.extend(
+                page.nodes
+                    .into_iter()
+                    .map(ProjectNode::into_pm_project)
+                    .collect::<PmResult<Vec<_>>>()?,
+            );
             if !page.page_info.has_next_page {
                 return Ok(projects);
             }
@@ -975,13 +997,41 @@ impl LinearClient {
     }
 
     pub async fn project_ownership(&self, project_id: &str) -> PmResult<PmProject> {
+        self.project_node(project_id).await?.into_pm_project()
+    }
+
+    async fn project_node(&self, project_id: &str) -> PmResult<ProjectNode> {
         let response: ProjectOwnershipData = self
             .graphql(PROJECT_OWNERSHIP_QUERY, json!({ "id": project_id }))
             .await?;
         response
             .project
-            .map(ProjectNode::into_pm_project)
             .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
+    }
+
+    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
+        let team_id = self.item_team_id(item_id).await?;
+        let states: WorkflowStatesData = self
+            .graphql(
+                LIST_CANCELED_WORKFLOW_STATES_QUERY,
+                json!({ "teamId": team_id }),
+            )
+            .await?;
+        let state = states
+            .workflow_states
+            .nodes
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                PmError::Message(format!("no canceled workflow state for team {team_id}"))
+            })?;
+        let _: Value = self
+            .graphql(
+                SET_ITEM_STATE_MUTATION,
+                json!({ "id": item_id, "stateId": state.id }),
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
@@ -1457,6 +1507,7 @@ impl IssueNode {
             description: self.description.unwrap_or_default(),
             rank,
             completed,
+            state: self.state.map(|state| state.r#type),
             project_id: project.id,
             project: project_slug(&project.name),
             team_id: team.id,
@@ -1522,7 +1573,7 @@ impl OwnedIssueNode {
             team: self.team,
         }
         .into_pm_item(0)?;
-        Ok((item, project.into_pm_project()))
+        Ok((item, project.into_pm_project()?))
     }
 }
 
@@ -1608,6 +1659,8 @@ struct TeamCreatePayload {
 struct ProjectNode {
     id: String,
     name: String,
+    #[serde(rename = "archivedAt")]
+    archived_at: Option<String>,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
@@ -1619,14 +1672,15 @@ struct ProjectNode {
 }
 
 impl ProjectNode {
-    fn into_pm_project(self) -> PmProject {
-        let content = parse_project_content(self.content.as_deref().unwrap_or_default());
-        PmProject {
+    fn into_pm_project(self) -> PmResult<PmProject> {
+        let content = parse_project_content(self.content.as_deref().unwrap_or_default())?;
+        Ok(PmProject {
             id: self.id,
             slug: project_slug(&self.name),
             name: self.name,
             summary: self.description.unwrap_or_default(),
-            definition: content.definition,
+
+            metric_targets: content.metric_targets,
             flows: Some(content.flows),
             krs: content.krs,
             initiative_ids: self
@@ -1636,7 +1690,7 @@ impl ProjectNode {
                 .map(|initiative| initiative.id)
                 .collect(),
             team_ids: self.teams.nodes.into_iter().map(|team| team.id).collect(),
-        }
+        })
     }
 }
 
@@ -1781,13 +1835,14 @@ fn linear_description(description: &str) -> String {
 }
 
 fn project_description(content: &ProjectContent) -> String {
-    let summary = content
-        .definition
-        .split("\n\n")
-        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
-        .find(|paragraph| !paragraph.is_empty())
-        .unwrap_or_default();
-    linear_description(&summary)
+    linear_description(
+        &content
+            .krs
+            .iter()
+            .map(|kr| kr.text.as_str())
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
 }
 
 fn first_meaningful_paragraph(description: &str) -> String {
@@ -2159,13 +2214,14 @@ mod tests {
                 "initiative-1",
                 "Wave Chat",
                 &ProjectContent {
-                    definition: "Conversation stays in flow.".to_string(),
+                    metric_targets: Vec::new(),
                     flows: crate::pm::ProjectFlowPlan::empty(),
                     krs: vec![PmKr {
                         text: "Replies stream".to_string(),
                         holds: false,
                     }],
                 },
+                None,
             )
             .await
             .expect("create project");
@@ -2201,7 +2257,7 @@ mod tests {
                 "project-1",
                 "Wave Chat",
                 &ProjectContent {
-                    definition: "Conversation stays in flow.".to_string(),
+                    metric_targets: Vec::new(),
                     flows: crate::pm::ProjectFlowPlan {
                         recommended: Some("task-design".to_string()),
                     },
@@ -2228,11 +2284,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archive_project_uses_linear_archive_mutation() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "projectArchive": { "success": true } } }),
-        )])
+    async fn archive_project_reports_provider_refusal() {
+        let (base_url, _requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "project": { "id": "project-1", "name": "Chapter one", "archivedAt": null } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "projectArchive": { "success": false } } }),
+            ),
+        ])
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
@@ -2240,18 +2302,13 @@ mod tests {
             base_url,
         );
 
-        client
+        let error = client
             .archive_project("project-1")
             .await
-            .expect("archive project");
-
-        let requests = requests.lock().await;
-        let archive: Value = serde_json::from_str(&requests[0].body).expect("archive json");
-        assert!(archive["query"]
-            .as_str()
-            .expect("query")
-            .contains("projectArchive"));
-        assert_eq!(archive["variables"]["id"], "project-1");
+            .expect_err("provider refused archive");
+        assert!(error
+            .to_string()
+            .contains("Linear did not archive Project project-1"));
     }
 
     #[tokio::test]

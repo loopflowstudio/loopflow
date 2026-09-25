@@ -104,13 +104,9 @@ pub struct Cli {
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
-    /// Select Wave Work, or qualify a selected Project or Task
+    /// Select Wave Work, or qualify a selected Task
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
-
-    /// Select Project Work, or qualify a selected Task
-    #[arg(long = "project", value_name = "SELECTOR")]
-    pub project: Option<String>,
 
     /// Select Task Work
     #[arg(long = "task", value_name = "ISSUE")]
@@ -120,7 +116,7 @@ pub struct Cli {
     #[arg(
         long = "as",
         value_name = "WORK",
-        conflicts_with_all = ["wave", "project", "task"]
+        conflicts_with_all = ["wave", "task"]
     )]
     pub as_work: Option<String>,
 
@@ -165,11 +161,6 @@ impl Cli {
             self.task
                 .as_ref()
                 .map(|task| format!("task:{task}"))
-                .or_else(|| {
-                    self.project
-                        .as_ref()
-                        .map(|project| format!("project:{project}"))
-                })
                 .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
         })
     }
@@ -291,7 +282,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Linear Initiatives, Projects, and tasks for waves
+    /// Connect Waves to Linear and manage their Tasks
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -316,19 +307,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// Run a Wave's listener, thread, and residency. Steerable.
-    ///
-    /// By convention this is the wave loop's entrypoint — a served mind is one
-    /// you can chat with while it runs.
+    /// Serve a Wave or rotate its chapter plan
     Wave {
-        /// Wave name
-        name: String,
-        /// Take over even if another live Wave is registered
-        #[arg(long)]
-        force: bool,
-        /// Replace a historical Flow definition with a newly compiled invocation
-        #[arg(long)]
-        restart_flow: bool,
+        #[command(subcommand)]
+        cmd: WaveCommand,
     },
     /// Start one or more Waves on this machine.
     Start {
@@ -375,11 +357,7 @@ pub enum Commands {
         index: usize,
         seed: String,
     },
-    /// Linear-backed Project facts and finite operations
-    Project {
-        #[command(subcommand)]
-        cmd: ProjectCommand,
-    },
+
     /// Linear-backed Task work and bounded workers
     Task {
         #[command(subcommand)]
@@ -479,11 +457,14 @@ pub enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Show one Wave's Project/Task hierarchy, Runs, and live loop
+    /// Show one Wave's chapter, Tasks, Runs, and live loop
     /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
+        /// Read a dated chapter snapshot instead of current execution
+        #[arg(long)]
+        chapter: Option<String>,
         /// Emit the status snapshot as JSON
         #[arg(long)]
         json: bool,
@@ -788,7 +769,7 @@ pub enum WorkCommand {
     },
     /// Allow this Home to pursue Work
     Enable {
-        #[arg(value_parser = ["wave", "project", "task"])]
+        #[arg(value_parser = ["wave", "task"])]
         kind: String,
         id: String,
         #[arg(long)]
@@ -796,7 +777,7 @@ pub enum WorkCommand {
     },
     /// Prevent this Home from starting new pursuit of Work
     Disable {
-        #[arg(value_parser = ["wave", "project", "task"])]
+        #[arg(value_parser = ["wave", "task"])]
         kind: String,
         id: String,
         #[arg(long)]
@@ -804,7 +785,7 @@ pub enum WorkCommand {
     },
     /// Refuse interruption until Work has an exact process owner
     Interrupt {
-        #[arg(value_parser = ["wave", "project", "task"])]
+        #[arg(value_parser = ["wave", "task"])]
         kind: String,
         id: String,
         #[arg(long)]
@@ -812,7 +793,7 @@ pub enum WorkCommand {
     },
     /// Abandon the Work
     Abandon {
-        #[arg(value_parser = ["wave", "project", "task"])]
+        #[arg(value_parser = ["wave", "task"])]
         kind: String,
         id: String,
         #[arg(long)]
@@ -859,55 +840,42 @@ pub struct WaveTargetArgs {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum ProjectCommand {
-    /// Ensure tracked Project Work without running an operation
-    Prepare {
-        /// Linear Project UUID or unique slug
-        project_id: String,
+pub enum WaveCommand {
+    /// Run the Wave listener in the foreground
+    Serve {
+        name: String,
         #[arg(long)]
-        json: bool,
+        force: bool,
+        #[arg(long)]
+        restart_flow: bool,
     },
-    /// Create a Linear Project, then run one finite operation
-    Start {
-        title: String,
-        #[arg(short = 'w', long = "wave")]
+    /// Replace the plan, carry started Tasks, and retire unopened backlog
+    NewChapter {
+        #[arg(short = 'w', long)]
         wave: Option<String>,
         #[arg(long)]
-        directive: Option<String>,
+        chapter: String,
+        /// Fresh chapter content as JSON: metric_targets, flows, and krs
+        #[arg(long)]
+        plan: Option<std::path::PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
         #[arg(long)]
         json: bool,
     },
-    /// Run one finite operation for an existing Linear Project
-    Run {
-        /// Linear Project UUID or unique slug
-        project_id: String,
-        #[arg(long)]
-        directive: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show durable Project facts and the most recent operation outcome
-    Status {
-        /// Linear Project UUID, unique slug, or historical Project id
-        project_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// End Project pursuit without deleting its durable history
-    Abandon {
-        project_id: String,
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Promote a project into a resident child wave through the authored flow
-    Promote {
-        /// Linear Project slug under the parent wave
-        slug: String,
-        /// Parent wave (default: ambient wave)
-        #[arg(short = 'w', long = "wave")]
+    /// List chapter boundary receipts
+    History {
+        #[arg(short = 'w', long)]
         wave: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replace the current chapter's KRs, targets, and Flow recommendation
+    UpdatePlan {
+        #[arg(short = 'w', long)]
+        wave: Option<String>,
+        #[arg(long)]
+        plan: std::path::PathBuf,
     },
 }
 
@@ -929,12 +897,12 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Ensure its Project, then start a Task worker for an existing Linear task
+    /// Start a worker for an existing Task
     Run {
         issue: String,
         #[arg(long)]
         name: Option<String>,
-        /// Select a Flow for this Task worker; defaults to the Project recommendation
+        /// Select a Flow for this Task worker; defaults to the chapter recommendation
         #[arg(long, value_name = "FLOW")]
         flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
@@ -945,15 +913,16 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Create a Linear task, ensure its Project, then start a Task worker
+    /// Create a Task in the Wave’s current chapter and start its worker
     Start {
-        /// Required Linear Project id or slug
-        project_id: String,
+        /// Wave name; defaults to the bound Wave
+        #[arg(long)]
+        wave: Option<String>,
         /// Task title; omitted when stdin supplies the report and first line
         title: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Select a Flow for this Task worker; defaults to the Project recommendation
+        /// Select a Flow for this Task worker; defaults to the chapter recommendation
         #[arg(long, value_name = "FLOW")]
         flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
@@ -1030,7 +999,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Begin the Project's currently recommended Flow in a fresh Task worker
+    /// Begin the chapter's currently recommended Flow in a fresh Task worker
     Restart {
         issue: String,
         advice: Option<String>,
@@ -1368,14 +1337,11 @@ pub enum PmCommand {
         #[arg(long = "team-name")]
         team_name: Option<String>,
     },
-    /// Read the wave's local Project and task snapshot
+    /// Read the Wave's current chapter and Tasks
     Show {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Linear Project slug
-        #[arg(short = 'p', long = "project")]
-        project: Option<String>,
         /// Emit the task snapshot as JSON
         #[arg(long)]
         json: bool,
@@ -1423,11 +1389,6 @@ pub enum PmCommand {
         #[command(subcommand)]
         cmd: PmTaskCommand,
     },
-    /// Linear Project operations
-    Project {
-        #[command(subcommand)]
-        cmd: PmProjectCommand,
-    },
     /// Linear webhook receiver: stream human edits into Tasks
     Webhook {
         #[command(subcommand)]
@@ -1454,58 +1415,12 @@ pub enum PmWebhookCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum PmProjectCommand {
-    /// Create a Linear Project in the wave's Initiative
-    Create {
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        #[arg(long = "title")]
-        title: String,
-        #[arg(long = "definition")]
-        definition: String,
-        /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
-        #[arg(long = "kr", required = true)]
-        krs: Vec<String>,
-        /// Flow recommended to each Task worker
-        #[arg(long)]
-        recommended: Option<String>,
-    },
-    /// Update a Linear Project's content or Task flows
-    Update {
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        #[arg(short = 'p', long = "project")]
-        project: String,
-        #[arg(long = "title")]
-        title: Option<String>,
-        #[arg(long = "definition")]
-        definition: Option<String>,
-        /// Replace KRs; repeat for each KR. Prefix with `[x] ` when it holds.
-        #[arg(long = "kr")]
-        krs: Vec<String>,
-        /// Flow recommended to each Task worker
-        #[arg(long)]
-        recommended: Option<String>,
-    },
-    /// Archive a Linear Project and refresh the wave snapshot
-    Archive {
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        #[arg(short = 'p', long = "project")]
-        project: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum PmTaskCommand {
     /// Create a Linear task
     Create {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Linear Project slug
-        #[arg(short = 'p', long = "project")]
-        project: String,
         /// Task title
         #[arg(long = "title")]
         title: String,
@@ -1521,9 +1436,6 @@ pub enum PmTaskCommand {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Linear Project slug
-        #[arg(short = 'p', long = "project")]
-        project: Option<String>,
         /// Task title
         #[arg(long = "title")]
         title: Option<String>,
@@ -1542,18 +1454,6 @@ pub enum PmTaskCommand {
         /// PR URL to attach as a comment
         #[arg(long = "pr")]
         pr: Option<String>,
-    },
-    /// Move a task into a wave's Linear Project
-    Move {
-        /// Existing task id to move
-        #[arg(long = "id")]
-        id: String,
-        /// Destination wave
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Destination Linear Project slug
-        #[arg(short = 'p', long = "project")]
-        project: String,
     },
 }
 
@@ -1933,26 +1833,61 @@ mod tests {
     }
 
     #[test]
-    fn hierarchical_work_selectors_choose_the_most_specific_subject() {
-        let before = Cli::try_parse_from([
-            "lf",
-            "--wave",
-            "intelligence",
-            "--project",
-            "context",
-            "--task",
-            "LOO-123",
-            "implement",
-        ])
-        .expect("parse selectors before skill");
-        assert_eq!(before.wave.as_deref(), Some("intelligence"));
-        assert_eq!(before.project.as_deref(), Some("context"));
-        assert_eq!(before.task.as_deref(), Some("LOO-123"));
-        assert_eq!(
-            before.work_subject_selector().as_deref(),
-            Some("task:LOO-123")
+    fn historical_projects_are_inspectable_but_not_controllable() {
+        assert!(
+            Cli::try_parse_from(["lf", "work", "status", "project", "proj_history", "--json"])
+                .is_ok()
         );
-        assert!(matches!(before.command, Some(Commands::External(_))));
+        for command in ["enable", "disable", "interrupt"] {
+            assert!(
+                Cli::try_parse_from(["lf", "work", command, "project", "proj_history"]).is_err()
+            );
+        }
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "abandon",
+            "project",
+            "proj_history",
+            "--reason",
+            "expired"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn chapter_and_task_commands_require_no_project_selector() {
+        let preview = Cli::try_parse_from([
+            "lf",
+            "wave",
+            "new-chapter",
+            "--wave",
+            "product",
+            "--chapter",
+            "two",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            preview.command,
+            Some(Commands::Wave {
+                cmd: WaveCommand::NewChapter { dry_run: true, .. }
+            })
+        ));
+        let task = Cli::try_parse_from([
+            "lf",
+            "task",
+            "start",
+            "--wave",
+            "product",
+            "Ship the outcome",
+        ])
+        .unwrap();
+        assert!(
+            matches!(task.command, Some(Commands::Task { cmd: TaskCommand::Start { wave: Some(wave), .. } }) if wave == "product")
+        );
+        assert!(Cli::try_parse_from(["lf", "--project", "old", "research"]).is_err());
     }
 
     #[test]
@@ -1961,13 +1896,13 @@ mod tests {
             "lf",
             "--batch",
             "--as",
-            "project:mac-surface-ux",
+            "wave:product",
             ":",
             "Which KR matters?",
         ])
         .expect("parse bound inline prompt");
 
-        assert_eq!(cli.as_work.as_deref(), Some("project:mac-surface-ux"));
+        assert_eq!(cli.as_work.as_deref(), Some("wave:product"));
         assert!(matches!(
             cli.command,
             Some(Commands::Inline { prompt }) if prompt == vec!["Which KR matters?"]
@@ -2490,44 +2425,6 @@ mod tests {
     }
 
     #[test]
-    fn project_prepare_accepts_existing_planning_identity() {
-        let cli = Cli::try_parse_from(["lf", "project", "prepare", "runtime-model", "--json"])
-            .expect("parse project prepare");
-        let Some(Commands::Project {
-            cmd: ProjectCommand::Prepare { project_id, json },
-        }) = cli.command
-        else {
-            panic!("expected project prepare command");
-        };
-        assert_eq!(project_id, "runtime-model");
-        assert!(json);
-    }
-
-    #[test]
-    fn project_run_is_a_finite_cli_operation() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "project",
-            "run",
-            "runtime-model",
-            "--directive",
-            "reconcile current evidence",
-            "--json",
-        ])
-        .expect("parse finite Project operation");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Project {
-                cmd: ProjectCommand::Run {
-                    project_id,
-                    directive: Some(directive),
-                    json: true,
-                },
-            }) if project_id == "runtime-model" && directive == "reconcile current evidence"
-        ));
-    }
-
-    #[test]
     fn task_run_accepts_flow_selection() {
         let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--flow", "incident"])
             .expect("parse task lifecycle overrides");
@@ -2553,20 +2450,18 @@ mod tests {
     }
 
     #[test]
-    fn task_start_requires_project_and_allows_piped_title_omission() {
-        let cli = Cli::try_parse_from(["lf", "task", "start", "incident-management"])
-            .expect("parse Task start with required Project");
+    fn task_start_uses_wave_and_allows_piped_title_omission() {
+        let cli = Cli::try_parse_from(["lf", "task", "start", "--wave", "product"])
+            .expect("parse Task start with Wave");
         let Some(Commands::Task {
-            cmd: TaskCommand::Start {
-                project_id, title, ..
-            },
+            cmd: TaskCommand::Start { wave, title, .. },
         }) = cli.command
         else {
             panic!("expected task start command");
         };
-        assert_eq!(project_id, "incident-management");
+        assert_eq!(wave.as_deref(), Some("product"));
         assert_eq!(title, None);
-        assert!(Cli::try_parse_from(["lf", "task", "start"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "start"]).is_ok());
     }
 
     #[test]
@@ -2756,31 +2651,6 @@ mod tests {
     }
 
     #[test]
-    fn project_start_accepts_title_wave_and_json() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "project",
-            "start",
-            "Release stability",
-            "--wave",
-            "infrastructure",
-            "--json",
-        ])
-        .expect("parse project start");
-        let Some(Commands::Project {
-            cmd: ProjectCommand::Start {
-                title, wave, json, ..
-            },
-        }) = cli.command
-        else {
-            panic!("expected project start command");
-        };
-        assert_eq!(title, "Release stability");
-        assert_eq!(wave.as_deref(), Some("infrastructure"));
-        assert!(json);
-    }
-
-    #[test]
     fn task_resume_advances_without_provider_handoff() {
         let task = Cli::try_parse_from([
             "lf",
@@ -2860,7 +2730,9 @@ mod tests {
         assert!(
             Cli::try_parse_from(["lf", "work", "steer", "task", "task_1", "direction"]).is_err()
         );
-        assert!(Cli::try_parse_from(["lf", "project", "steer", "project", "direction"]).is_err());
+        let project = Cli::try_parse_from(["lf", "project", "steer", "project", "direction"])
+            .expect("retired command names remain eligible for skill discovery");
+        assert!(matches!(project.command, Some(Commands::External(_))));
         assert!(Cli::try_parse_from(["lf", "work", "continue", "task", "task_1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
 
@@ -3151,40 +3023,12 @@ mod tests {
     }
 
     #[test]
-    fn pm_project_archive_accepts_wave_and_project() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "pm",
-            "project",
-            "archive",
-            "--wave",
-            "product",
-            "--project",
-            "wave-chat",
-        ])
-        .expect("parse");
-        let Some(Commands::Pm {
-            cmd:
-                PmCommand::Project {
-                    cmd: PmProjectCommand::Archive { wave, project },
-                },
-        }) = cli.command
-        else {
-            panic!("expected pm project archive command");
-        };
-
-        assert_eq!(wave.as_deref(), Some("product"));
-        assert_eq!(project, "wave-chat");
-    }
-
-    #[test]
     fn pm_show_parses_refresh_modes() {
         let cli = Cli::try_parse_from(["lf", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Pm {
             cmd:
                 PmCommand::Show {
                     wave,
-                    project,
                     json,
                     sync,
                     no_sync,
@@ -3194,7 +3038,6 @@ mod tests {
             panic!("expected pm show command");
         };
         assert_eq!(wave.as_deref(), Some("goals"));
-        assert_eq!(project, None);
         assert!(!json);
         assert!(!sync);
         assert!(!no_sync);

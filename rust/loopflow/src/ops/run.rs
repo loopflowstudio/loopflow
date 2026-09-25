@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::{render_steers, ProjectId, Steer, TaskId, WorkRef};
+use crate::durable::{render_steers, Steer, TaskId, WorkRef};
 use crate::engine::process::{
     current_home_execution_context, pin_control_binary, start_lf_session_with_env,
 };
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
-use crate::work::project::{ChildEventPayload, Project};
+
 use crate::work::task::{Task, TaskPr};
 use crate::work::wave::Wave;
 
@@ -24,7 +24,6 @@ pub struct WorkBinding {
     pub cwd: PathBuf,
     pub context: String,
     pub agent: Option<String>,
-    pub project_observations: Vec<crate::work::project::ObservationOutboxRow>,
 }
 
 pub(crate) fn render_task_context(
@@ -40,7 +39,7 @@ pub(crate) fn render_task_context(
         .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
         .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
     format!(
-        "Linear Task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
+        "Linear Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
@@ -57,29 +56,6 @@ pub(crate) fn render_task_context(
         pr_branch = pr.branch,
         base_commit = pr.base_commit,
         placement = placement,
-    )
-}
-
-pub(crate) fn render_project_context(
-    project: &Project,
-    wave_name: &str,
-    observations: &[String],
-    metric_context: &str,
-) -> String {
-    let observations = if observations.is_empty() {
-        "none".to_string()
-    } else {
-        observations.join("\n")
-    };
-    let progress = format!("Project Flow iteration: {}", project.iteration + 1);
-    format!(
-        "Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\nProject Work: {work_id}\n{progress}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}",
-        name = project.plan.name,
-        project_id = project.plan.id.as_str(),
-        wave = wave_name,
-        context = project.plan.prompt_context,
-        work_id = project.id,
-        synced_at = project.plan.pm_snapshot_synced_at,
     )
 }
 
@@ -119,7 +95,6 @@ pub(crate) fn render_wave_context(
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WorkSelection<'a> {
     pub task: Option<&'a str>,
-    pub project: Option<&'a str>,
     pub wave: Option<&'a str>,
 }
 
@@ -130,16 +105,12 @@ pub async fn resolve_work_binding(
 ) -> OpsResult<WorkBinding> {
     let (kind, value) = selector.split_once(':').ok_or_else(|| {
         run_error(format!(
-            "invalid Work selector {selector:?}; expected task:<selector>, project:<selector>, or wave:<selector>"
+            "invalid Work selector {selector:?}; expected task:<selector> or wave:<selector>"
         ))
     })?;
     let selection = match kind {
         "task" => WorkSelection {
             task: Some(value),
-            ..WorkSelection::default()
-        },
-        "project" => WorkSelection {
-            project: Some(value),
             ..WorkSelection::default()
         },
         "wave" => WorkSelection {
@@ -148,7 +119,7 @@ pub async fn resolve_work_binding(
         },
         _ => {
             return Err(run_error(format!(
-                "invalid Work selector kind {kind:?}; expected task, project, or wave"
+                "invalid Work selector kind {kind:?}; expected task or wave"
             )))
         }
     };
@@ -160,11 +131,7 @@ pub async fn resolve_work_selection(
     repo: &Path,
     selection: WorkSelection<'_>,
 ) -> OpsResult<WorkBinding> {
-    for (kind, value) in [
-        ("task", selection.task),
-        ("project", selection.project),
-        ("wave", selection.wave),
-    ] {
+    for (kind, value) in [("task", selection.task), ("wave", selection.wave)] {
         if value.is_some_and(|value| value.trim().is_empty()) {
             return Err(run_error(format!("{kind} selector cannot be empty")));
         }
@@ -193,13 +160,6 @@ pub async fn resolve_work_selection(
             .await
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {} has no owning Project", task.id)))?;
-        if let Some(project_selector) = selection.project {
-            require_project_match(
-                &project,
-                project_selector.trim(),
-                &format!("Task {}", task.plan.identifier),
-            )?;
-        }
         if let Some(selected_wave) = &selected_wave {
             require_wave_match(
                 &wave,
@@ -225,6 +185,10 @@ pub async fn resolve_work_selection(
         } else {
             task.worktree.clone()
         };
+        store
+            .begin_chapter_task(&task.id)
+            .await
+            .map_err(run_error)?;
         return Ok(WorkBinding {
             subjects: vec![
                 format!("wave:{}", wave.name()),
@@ -241,64 +205,6 @@ pub async fn resolve_work_selection(
                     .agent()
                     .to_string(),
             ),
-            project_observations: Vec::new(),
-        });
-    }
-
-    if let Some(value) = selection.project {
-        let value = value.trim();
-        let project = resolve_project(store, value, selected_wave.as_ref()).await?;
-        let wave = store
-            .get_wave(&project.wave_id)
-            .await
-            .map_err(run_error)?
-            .ok_or_else(|| run_error(format!("Project {} has no owning Wave", project.id)))?;
-        if let Some(selected_wave) = &selected_wave {
-            require_wave_match(
-                &wave,
-                selected_wave,
-                &format!("Project {}", project.plan.slug),
-            )?;
-        }
-        let metric_context = crate::ops::metrics::metric_prompt_section(
-            "project-owned-metrics",
-            crate::ops::metrics::stored_project_metric_portfolio(
-                store,
-                &wave,
-                project.plan.id.as_str(),
-                time::OffsetDateTime::now_utc(),
-            )
-            .await,
-        );
-        let work = WorkRef::Project(project.id.clone());
-        let project_observations = store
-            .pending_project_observations(&project.id)
-            .await
-            .map_err(run_error)?;
-        let observations = project_observations
-            .iter()
-            .filter_map(|observation| match observation.payload {
-                ChildEventPayload::Task { ref event } => serde_json::to_string(event).ok(),
-                ChildEventPayload::Project { .. } => None,
-            })
-            .collect::<Vec<_>>();
-        let context = render_project_context(&project, wave.name(), &observations, &metric_context);
-        return Ok(WorkBinding {
-            subjects: vec![
-                format!("wave:{}", wave.name()),
-                format!("project:{}", project.plan.slug),
-            ],
-            work,
-            wave_id: project.wave_id,
-            wave_name: wave.name().to_string(),
-            cwd: PathBuf::from(wave.repo()),
-            context,
-            agent: Some(
-                crate::engine::config::load_config_or_default(Some(Path::new(wave.repo())))
-                    .agent()
-                    .to_string(),
-            ),
-            project_observations,
         });
     }
 
@@ -322,11 +228,10 @@ pub async fn resolve_work_selection(
             cwd,
             context,
             agent: None,
-            project_observations: Vec::new(),
         });
     }
 
-    Err(run_error("select a Task, Project, or Wave"))
+    Err(run_error("select a Task or Wave"))
 }
 
 async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResult<Wave> {
@@ -337,51 +242,6 @@ async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResul
         store.get_wave_at(&locator).await.map_err(run_error)?
     };
     wave.ok_or_else(|| run_error(format!("Wave {value:?} is not registered")))
-}
-
-async fn resolve_project(
-    store: &SharedStore,
-    value: &str,
-    wave: Option<&Wave>,
-) -> OpsResult<Project> {
-    let project = if let Ok(id) = ProjectId::parse(value) {
-        store.get_project(&id).await.map_err(run_error)?
-    } else {
-        let matches = store
-            .list_projects(wave.map(Wave::id))
-            .await
-            .map_err(run_error)?
-            .into_iter()
-            .filter(|project| project_matches(project, value))
-            .collect::<Vec<_>>();
-        match matches.as_slice() {
-            [project] => Some(project.clone()),
-            [] => None,
-            _ => {
-                return Err(run_error(format!(
-                    "Project selector {value:?} is ambiguous; qualify it with --wave or use its durable or planning-system id"
-                )))
-            }
-        }
-    };
-    project.ok_or_else(|| run_error(format!("Project {value:?} is not registered")))
-}
-
-fn project_matches(project: &Project, value: &str) -> bool {
-    ProjectId::parse(value).map_or_else(
-        |_| project.plan.id.as_str() == value || project.plan.slug == value,
-        |id| project.id == id,
-    )
-}
-
-fn require_project_match(project: &Project, requested: &str, subject: &str) -> OpsResult<()> {
-    if project_matches(project, requested) {
-        return Ok(());
-    }
-    Err(run_error(format!(
-        "{subject} belongs to Project {}, not {requested}",
-        project.plan.slug
-    )))
 }
 
 fn require_wave_match(actual: &Wave, requested: &Wave, subject: &str) -> OpsResult<()> {
@@ -466,13 +326,17 @@ mod tests {
 
     use time::OffsetDateTime;
 
-    use super::*;
+    use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
+    use crate::durable::{ProjectId, TaskId, WorkRef};
+    use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::{PmKr, PmProject, PmSnapshot, ProjectFlowPlan};
+    use crate::store::SharedStore;
     use crate::store::{PmSnapshotRow, StorageConfig};
     use crate::work::project::Project;
     use crate::work::task::{Observation, PmWritebackState, Task, TaskPr, TaskPrId};
     use crate::work::wave::Wave;
+    use std::path::PathBuf;
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
@@ -548,7 +412,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_slug_selector_requires_one_exact_match() {
+    async fn project_selectors_are_not_an_execution_surface() {
         let (directory, store) = test_store().await;
         let wave = Wave::new(
             WaveId::new(),
@@ -567,9 +431,9 @@ mod tests {
 
         let error = resolve_work_binding(&store, directory.path(), "project:shared")
             .await
-            .expect_err("ambiguous slug must not infer identity");
+            .expect_err("chapters are not independent operators");
 
-        assert!(error.to_string().contains("ambiguous"));
+        assert!(error.to_string().contains("expected task or wave"));
     }
 
     #[tokio::test]
@@ -726,7 +590,6 @@ mod tests {
             &repo,
             WorkSelection {
                 task: Some("LOO-267"),
-                project: Some("loopflow-api"),
                 wave: Some(wave.id().as_str()),
             },
         )
@@ -734,25 +597,11 @@ mod tests {
         .unwrap();
         assert_eq!(binding.work, WorkRef::Task(task.id));
 
-        let project_error = resolve_work_selection(
-            &store,
-            &repo,
-            WorkSelection {
-                task: Some("LOO-267"),
-                project: Some("other"),
-                wave: None,
-            },
-        )
-        .await
-        .unwrap_err();
-        assert!(project_error.to_string().contains("belongs to Project"));
-
         let wave_error = resolve_work_selection(
             &store,
             &repo,
             WorkSelection {
-                task: None,
-                project: Some(primary_project.id.as_str()),
+                task: Some("LOO-267"),
                 wave: Some(other_wave.id().as_str()),
             },
         )
@@ -762,7 +611,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_wave_and_project_bindings_carry_the_shared_metric_context() {
+    async fn direct_wave_binding_carries_the_shared_metric_context() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join("wave/runtime")).unwrap();
@@ -782,7 +631,8 @@ mod tests {
                 slug: "loopflow-api".to_string(),
                 name: "Loopflow API".to_string(),
                 summary: String::new(),
-                definition: "Keep one product model.".to_string(),
+
+                metric_targets: Vec::new(),
                 flows: Some(ProjectFlowPlan::empty()),
                 krs: vec![PmKr {
                     text: "One model everywhere".to_string(),
@@ -804,21 +654,13 @@ mod tests {
             .await
             .unwrap();
 
-        let project_binding = resolve_work_binding(&store, &repo, "project:project-api")
+        let binding = resolve_work_binding(&store, &repo, "wave:runtime")
             .await
             .unwrap();
-        assert!(project_binding
-            .context
-            .contains("<lf:project-owned-metrics>"));
-        assert!(project_binding.context.contains("\"metrics\":[]"));
-        assert!(!project_binding.context.contains("<lf:metric-portfolio>"));
-
-        let wave_binding =
-            resolve_work_binding(&store, &repo, &format!("wave:{}", wave.id().as_str()))
-                .await
-                .unwrap();
-        assert!(wave_binding.context.contains("<lf:metric-portfolio>"));
-        assert!(wave_binding.context.contains("What signals are arriving?"));
-        assert!(!wave_binding.context.contains("<lf:project-owned-metrics>"));
+        assert_eq!(binding.work, WorkRef::Wave(wave.id().clone()));
+        assert!(binding.context.contains("metric-portfolio"));
+        assert!(resolve_work_binding(&store, &repo, "project:loopflow-api")
+            .await
+            .is_err());
     }
 }

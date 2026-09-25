@@ -88,7 +88,6 @@ After repairing provider access, retry the Task or Project operation:
 
 ```bash
 lf task resume INF-123 --reason "provider credentials repaired"
-lf project run project-slug
 ```
 
 Project operations are finite Runs, so recovery is a fresh `project run`, not a
@@ -139,7 +138,6 @@ field:
 
 ```bash
 lf status <wave> --json
-lf project status <project-id> --json
 lf task status INF-123 --json
 ```
 

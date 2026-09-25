@@ -82,6 +82,7 @@ public enum MetricFreshness: Decodable, Sendable, Hashable {
 }
 
 public enum MetricEvidence: Decodable, Sendable, Hashable {
+    case untargeted(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
     case met(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
     case missed(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
     case unknown(MetricUnknownCause)
@@ -97,6 +98,10 @@ public enum MetricEvidence: Decodable, Sendable, Hashable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
+        case "untargeted":
+            self = .untargeted(value: try container.decode(Double.self, forKey: .value),
+                sourceWindowStart: try container.decode(String.self, forKey: .sourceWindowStart),
+                sourceWindowEnd: try container.decode(String.self, forKey: .sourceWindowEnd))
         case "met":
             self = .met(
                 value: try container.decode(Double.self, forKey: .value),
@@ -194,12 +199,11 @@ public struct MetricReading: Decodable, Sendable, Hashable, Identifiable {
     public let contractRevision: String
     public let name: String
     public let description: String
-    public let projectId: String
     public let stage: MetricStage
     public let instrumented: Bool
     public let instrument: String
     public let unit: String
-    public let target: MetricTarget
+    public let target: MetricTarget?
     public let window: String
     public let freshnessPolicy: String
     public let freshness: MetricFreshness
@@ -208,14 +212,14 @@ public struct MetricReading: Decodable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case identity, name, description, stage, instrumented, instrument, unit, target, window, freshness, evidence
         case contractRevision = "contract_revision"
-        case projectId = "project_id"
         case freshnessPolicy = "freshness_policy"
     }
 }
 
 public enum MetricContractIssue: Decodable, Sendable, Hashable {
+    case chapterUnavailable(waveId: String, reason: String)
+    case unresolvedTarget(waveId: String, metricId: String)
     case malformedContract(path: String, message: String)
-    case unresolvedOwner(waveId: String, metricId: String, projectId: String)
     case instrumentMismatch(
         waveId: String,
         metricId: String,
@@ -233,7 +237,6 @@ public enum MetricContractIssue: Decodable, Sendable, Hashable {
         case kind, path, message, reason
         case waveId = "wave_id"
         case metricId = "metric_id"
-        case projectId = "project_id"
         case contractInstrument = "contract_instrument"
         case registeredInstrument = "registered_instrument"
         case contractRevision = "contract_revision"
@@ -242,16 +245,14 @@ public enum MetricContractIssue: Decodable, Sendable, Hashable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
+        case "chapter_unavailable":
+            self = .chapterUnavailable(waveId: try container.decode(String.self, forKey: .waveId), reason: try container.decode(String.self, forKey: .reason))
+        case "unresolved_target":
+            self = .unresolvedTarget(waveId: try container.decode(String.self, forKey: .waveId), metricId: try container.decode(String.self, forKey: .metricId))
         case "malformed_contract":
             self = .malformedContract(
                 path: try container.decode(String.self, forKey: .path),
                 message: try container.decode(String.self, forKey: .message)
-            )
-        case "unresolved_owner":
-            self = .unresolvedOwner(
-                waveId: try container.decode(String.self, forKey: .waveId),
-                metricId: try container.decode(String.self, forKey: .metricId),
-                projectId: try container.decode(String.self, forKey: .projectId)
             )
         case "instrument_mismatch":
             self = .instrumentMismatch(
@@ -274,5 +275,15 @@ public enum MetricContractIssue: Decodable, Sendable, Hashable {
                 debugDescription: "unknown metric contract issue '\(kind)'"
             )
         }
+    }
+}
+
+public struct ChapterMetricTarget: Decodable, Sendable, Hashable, Identifiable {
+    public var id: String { metricId }
+    public let metricId: String
+    public let target: MetricTarget
+    enum CodingKeys: String, CodingKey {
+        case metricId = "metric_id"
+        case target
     }
 }

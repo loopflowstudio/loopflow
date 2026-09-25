@@ -60,6 +60,14 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
+    public func chapterHistory(wave: String, cwd: String?) async throws -> [ChapterHistoryEntry] {
+        try Self.decode([ChapterHistoryEntry].self, from: await run(["wave", "history", "--wave", wave, "--json"], cwd))
+    }
+
+    public func chapter(wave: String, id: String, cwd: String?) async throws -> ChapterSnapshot {
+        try Self.decode(ChapterSnapshot.self, from: await run(["status", wave, "--chapter", id, "--json"], cwd))
+    }
+
     /// Probe one Wave's Home for liveness and the single contextual action.
     /// The app never does SSH — `lf home probe` classifies the Home (local reads
     /// are instant; remote routes run one `lf status` on the target Home)
@@ -229,22 +237,10 @@ public struct RegistryQuery: Sendable {
         cwd: String?,
         sync: Bool = false
     ) async throws -> WavePlan {
-        let freshness = sync ? "--sync" : "--no-sync"
-        let stdout = try await run(["pm", "show", "--wave", wave, "--json", freshness], cwd)
-        let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
-        return WavePlan(
-            objective: objective,
-            projects: snapshot.projects.map { project in
-                WaveProject(
-                    id: project.slug,
-                    title: project.name,
-                    definition: project.definition.isEmpty ? nil : project.definition,
-                    krs: project.krs.map {
-                        WaveKeyResult(text: $0.text, proof: $0.holds ? .holds : .open)
-                    }
-                )
-            }
-        )
+        if sync { _ = try await run(["pm", "sync", "--wave", wave], cwd) }
+        let stdout = try await run(["status", wave, "--json"], cwd)
+        let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
+        return WavePlan(objective: objective, chapter: snapshot.chapter)
     }
 
     /// Direct provider-authored usage for recent Home-local Runs, optionally
@@ -297,64 +293,6 @@ public struct RegistryQuery: Sendable {
             throw RegistryQueryError("lf query JSON did not decode: \(error)")
         }
     }
-}
-
-private struct PmShowSnapshot: Decodable {
-    let wave: String
-    let provider: String
-    let initiative: String
-    let project: String?
-    let syncedAt: Int64
-    let projects: [PmProjectSnapshot]
-    let items: [PmItemSnapshot]
-
-    enum CodingKeys: String, CodingKey {
-        case wave, provider, initiative, project, projects, items
-        case syncedAt = "synced_at"
-    }
-}
-
-private struct PmProjectSnapshot: Decodable {
-    let id: String
-    let slug: String
-    let name: String
-    let summary: String
-    let definition: String
-    let flows: ProjectFlowPlanSnapshot
-    let krs: [PmKrSnapshot]
-    let initiativeIds: [String]
-    let teamIds: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case id, slug, name, summary, definition, flows, krs
-        case initiativeIds = "initiative_ids"
-        case teamIds = "team_ids"
-    }
-}
-
-private struct PmItemSnapshot: Decodable {
-    let id: String
-    let identifier: String
-    let url: String?
-    let name: String
-    let description: String
-    let rank: Int
-    let completed: Bool
-    let projectId: String
-    let project: String
-    let teamId: String
-    let assignee: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, identifier, url, name, description, rank, completed, project, assignee
-        case projectId = "project_id"
-        case teamId = "team_id"
-    }
-}
-
-private struct PmKrSnapshot: Decodable {
-    let text: String
-    let holds: Bool
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
@@ -423,14 +361,13 @@ public struct HomeRuntime: Decodable, Sendable, Equatable {
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
-public struct WaveSnapshot: Decodable, Sendable, Hashable {
+public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
     public let status: WorkStatus
     public let goal: String
     public let repo: String
     public let activeTasks: Int
-    public let activeProjects: Int
     public let live: Bool
     public let paused: Bool
     public let enabled: Bool
@@ -445,7 +382,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, status, goal, repo, live, paused, enabled, endpoint, home
         case activeTasks = "active_tasks"
-        case activeProjects = "active_projects"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
         case retiredAt = "retired_at"
@@ -465,7 +401,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
             paused: paused,
             enabled: enabled,
             activeTasks: activeTasks,
-            activeProjects: activeProjects,
             parentWaveId: parentWaveId,
             retiredAt: retiredAt,
             supersededByWaveId: supersededByWaveId,
@@ -493,36 +428,19 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
-    public let projects: WorkEvidence<RoadmapProject>
-    public let unavailableProjects: [UnavailableProjectEvidence]
+    public let chapter: ChapterSummary?
+    public let tasks: WorkEvidence<RoadmapTask>
+    public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects
+        case wave, chapter, tasks
         case metricPortfolio = "metric_portfolio"
-        case unavailableProjects = "unavailable_projects"
+        case unavailableTasks = "unavailable_tasks"
     }
 }
 
 /// Durable Project Work that cannot join the current PM plan, including
 /// non-terminal Tasks stranded under a terminal historical Project.
-public struct UnavailableProjectEvidence: Decodable, Sendable, Hashable {
-    public let workId: String
-    public let projectId: String
-    public let projectSlug: String
-    public let status: WorkStatus
-    public let owner: WorkNextMoveOwner
-    public let reason: String
-    public let recovery: String
-    public let tasks: [UnavailableTaskEvidence]
-
-    enum CodingKeys: String, CodingKey {
-        case status, owner, reason, recovery, tasks
-        case workId = "work_id"
-        case projectId = "project_id"
-        case projectSlug = "project_slug"
-    }
-}
-
 /// Non-terminal durable Task Work whose historical Project is absent from the
 /// current PM plan.
 public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
@@ -547,23 +465,24 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let loopState: String?
-    public let projects: [WaveProjectWork]
+    public let chapter: ChapterSummary?
+    public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
-    public let unavailableProjects: [UnavailableProjectEvidence]
+    public let unavailableTasks: [UnavailableTaskEvidence]
     public let runs: WorkEvidence<RunSnapshot>
     /// The focused Wave's Home probed for liveness and its one contextual action.
     public let homeRuntime: HomeRuntime
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, projects: projects)
+        WaveWorkMap(objective: wave.goal, chapter: chapter, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, runs
+        case wave, chapter, tasks, runs
         case metricPortfolio = "metric_portfolio"
         case homeRuntime = "home_runtime"
         case loopState = "loop_state"
-        case unavailableProjects = "unavailable_projects"
+        case unavailableTasks = "unavailable_tasks"
     }
 }
 

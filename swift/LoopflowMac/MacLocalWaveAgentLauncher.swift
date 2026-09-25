@@ -47,7 +47,7 @@ enum LocalWaveAgentLauncher {
     static func startTask(
         repoPath: String,
         title: String,
-        project: String,
+        wave: String,
         directive: String
     ) throws -> TaskStartReceipt {
         let origin = WaveOrigin.resolve(repoPath)
@@ -56,7 +56,7 @@ enum LocalWaveAgentLauncher {
             taskStartCommand(
                 lfPath: lfPath,
                 title: title,
-                project: project,
+                wave: wave,
                 directive: directive
             ),
             cwd: origin
@@ -100,11 +100,11 @@ enum LocalWaveAgentLauncher {
     static func taskStartCommand(
         lfPath: String,
         title: String,
-        project: String,
+        wave: String,
         directive: String
     ) -> [String] {
         [
-            lfPath, "task", "start", project, title,
+            lfPath, "task", "start", "--wave", wave, title,
             "--directive", directive,
             "--json",
         ]

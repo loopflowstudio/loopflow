@@ -1666,14 +1666,17 @@ mod tests {
             "platform".to_string(),
             tmp.path().display().to_string(),
         );
-        let mut child = Wave::new(
+        let child = Wave::from_stored_parts(
             WaveId::new(),
             "ship".to_string(),
             tmp.path().display().to_string(),
+            time::OffsetDateTime::now_utc(),
+            Some(parent.id().clone()),
+            Some(time::OffsetDateTime::now_utc()),
+            None,
+            None,
+            None,
         );
-        child
-            .record_promotion(parent.id(), OffsetDateTime::now_utc())
-            .expect("record promotion");
         store.create_wave(&parent).await.expect("store parent");
         store.create_wave(&child).await.expect("store child");
 

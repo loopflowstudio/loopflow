@@ -98,7 +98,7 @@ fn discover_builtin_skills() {
 fn builtin_catalog_uses_slashes_for_ownership_and_never_underscores() {
     let skill_names = builtin_skill_names();
     assert!(skill_names.contains(&"wave/operate"));
-    assert!(skill_names.contains(&"project/operate"));
+    assert!(!skill_names.iter().any(|name| name.starts_with("project/")));
     assert!(skill_names.contains(&"task/mutate"));
     assert!(skill_names.iter().all(|name| !name.contains('_')));
     assert!(builtin_flow_names().iter().all(|name| !name.contains('_')));

@@ -11,6 +11,12 @@
     "cwd": "/src/loopflow.task",
     "state": "active",
     "ready_summary": null,
-    "open_argv": ["lf", "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"]
+    "open_argv": [
+      "lf",
+      "session",
+      "open",
+      "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+    ],
+    "wave_id": "wave_00000000000000000000000000000001"
   }
 ]

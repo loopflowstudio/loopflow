@@ -179,7 +179,7 @@ their last completed provider turn, including commentary, so callers can
 recover evidence without a false claim of exact extraction.
 
 `scan_runs_since` reduces record files into `RunSnapshot`. `lf runs` and `lf
-usage` apply the same Wave/Project/Task attribution drill over that projection;
+usage` apply the same Wave/Task attribution drill over that projection;
 Work activity, status views, and the Mac app consume it too. There is no
 authoritative Run index to repair.
 

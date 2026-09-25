@@ -35,18 +35,18 @@ selection. Follow the repo style guide.
   Legacy/New split, adapter, fallback, dual write, or parallel authority is
   blocking unless the reviewed design explicitly justifies it and names its
   deletion point.
-- Use a relevant Project metric when one already covers the outcome. While
-  building feature work, notice signals that could help the Project steer and
+- Use a relevant Wave metric when one already covers the outcome. While
+  building feature work, notice signals that could help the Wave steer and
   propose the useful ones back to it: name the outcome, the candidate measure,
   why it would change a decision, and the cheapest credible producer. When the
   first useful signal belongs naturally in this coherent change, ship it;
-  otherwise leave the proposal for Project sponsorship. A substantial new UI
+  otherwise leave the proposal for Wave sponsorship. A substantial new UI
   performance path is a strong reason to look. Metric proposals are discoveries,
   not a completion quota.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
 - When progress requires another Work's perspective, launch an ordinary
-  `lf --as project:<id> : "<prompt>"` Run. When it requires human authority and
+  `lf --as wave:<wave> : "<prompt>"` Run. When it requires human authority and
   no human is present, run `lf ask "<exact request>"` and wait for the human to
   complete that conversation. Do not invent a provider-specific decision command.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
@@ -55,7 +55,7 @@ selection. Follow the repo style guide.
 - Do not land or complete the Task from this loop. The pinned final flow owns
   its gate, learning record, and landing disposition.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
-  under a known project. Filing does not authorize launching it in this task.
+  under the owning Wave. Filing does not authorize launching it in this task.
 - Report consequential progress through the Task; its linked events
   keep the owning Wave informed without copying raw tool chatter.
 

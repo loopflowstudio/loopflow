@@ -10,6 +10,7 @@ use crate::profile::{
 };
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
+mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
@@ -586,6 +587,23 @@ impl Store {
         .await
     }
 
+    /// The file lock moves into the blocking write, surviving caller cancellation.
+    pub(crate) async fn replace_provider_token(
+        &self,
+        expected: &ProviderToken,
+        replacement: &ProviderToken,
+        lock: std::fs::File,
+        deadline: std::time::Instant,
+    ) -> StoreResult<ProviderTokenReplacement> {
+        let expected = expected.clone();
+        let replacement = replacement.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            let _lock = lock;
+            store.replace_provider_token(&expected, &replacement, deadline)
+        })
+        .await
+    }
+
     pub async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
         let provider = provider.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -864,6 +882,13 @@ impl std::fmt::Display for CredentialType {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum ProviderTokenReplacement {
+    Replaced,
+    Changed(ProviderToken),
+    Missing,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderToken {
     pub provider: String,
@@ -1036,6 +1061,18 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     })
 }
 
+/// Test-only: open a hermetic, fully-migrated [`Store`] at `path`. Unlike
+/// [`open_store`], it consults **no** ambient env or machine identity
+/// (`LF_HOME`, install selection, shared `~/.lf`), so the schema is deterministic
+/// under parallel test execution instead of racing on the draft-application
+/// decision. See [`sqlite::SqliteStore::open_ephemeral`].
+pub async fn open_ephemeral_store(cfg: &StorageConfig) -> StoreResult<Store> {
+    let StorageConfig::Sqlite { path } = cfg;
+    Ok(Store {
+        sqlite: sqlite::SqliteStore::open_ephemeral(path)?,
+    })
+}
+
 /// Open the machine's shared registry store only if one already exists.
 /// `None` means this machine has no registry yet; callers that instrument best-effort (lf
 /// self-registration, the wave server) treat that as "not instrumented" and
@@ -1100,21 +1137,23 @@ pub type SharedStore = Arc<Store>;
 mod tests {
     use super::sqlite::SqliteStore;
     use super::{
-        default_lf_home_dir_for, guard_development_database, may_apply_migrations, open_store,
+        default_lf_home_dir_for, guard_development_database, may_apply_migrations,
         read_nonterminal_task_worktrees, select_store_env_value, CredentialState, PmSnapshotRow,
         ProviderAccount, ProviderAccountId, RoutingState, RunEventRow, StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
-    use crate::controller::task::State as TaskControllerState;
-    use crate::durable::{Author, WorkRef};
-    use crate::id::WaveId;
+    use crate::durable::{
+        Author, FlowPosition, RunId, TaskFlowBlocker, TaskWorkerClaimOutcome, TaskWorkerOwner,
+        WorkRef,
+    };
+    use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
-        GithubPr, PmWritebackState, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
-        TaskId, TaskPr, TaskPrId,
+        CiIncident, GithubPr, PmWritebackState, PrPhase, PrPresentation, PrPublication, Task,
+        TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
     use crate::work::wave::Wave;
     use std::env;
@@ -1298,22 +1337,6 @@ mod tests {
         }
     }
 
-    fn make_task_controller(task: &Task) -> TaskControllerState {
-        TaskControllerState {
-            task_id: task.id.clone(),
-            lifecycle: crate::controller::task::TaskLifecyclePlan::defaults(),
-            lifecycle_phase: crate::controller::task::TaskLifecyclePhase::Loop,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            updated_at: task.updated_at,
-        }
-    }
-
     fn make_task_pr(task: &Task) -> TaskPr {
         TaskPr {
             id: TaskPrId::new(),
@@ -1349,6 +1372,7 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
+            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1356,12 +1380,178 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn chapter_transfer_preserves_worker_pr_and_rejects_stale_parent_updates() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let predecessor = make_project(&wave);
+        store.create_project(&predecessor).await.unwrap();
+        let task = make_task(&wave, &predecessor);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let position = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "code", 3, "review", None, false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 2,
+                    iteration: 4,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        store
+            .claim_task_worker(
+                &task.id,
+                position.version,
+                &owner,
+                OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+        let claimed = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        assert!(!store.retire_chapter_backlog(&task.id).await.unwrap());
+        let mut successor = make_project(&wave);
+        successor.plan.id = LinearProjectId::new("next-chapter").unwrap();
+        store.create_project(&successor).await.unwrap();
+        store
+            .move_chapter_task(&task.id, &successor.id)
+            .await
+            .unwrap();
+        store.update_task(&task).await.unwrap(); // stale worker snapshot
+        let moved = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(moved.project_id, successor.id);
+        assert_eq!(moved.worktree, task.worktree);
+        assert_eq!(moved.plan, task.plan);
+        assert_eq!(
+            store.flow_position(&task.id).await.unwrap().unwrap(),
+            claimed
+        );
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::Failed {
+                    error: "review needed".into(),
+                    resumable: true,
+                },
+            )
+            .await
+            .unwrap();
+        let pending = store
+            .pending_observations(&crate::child::ObservationRecipient::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap();
+        assert!(!pending.is_empty());
+        assert!(store
+            .pending_observations(&crate::child::ObservationRecipient::Project {
+                project_id: predecessor.id
+            })
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn chapter_retirement_fences_a_prepared_task_before_its_first_claim() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let position = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "code", 3, "review", None, false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 0,
+                    iteration: 1,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        assert!(store.retire_chapter_backlog(&task.id).await.unwrap());
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        assert!(store
+            .claim_task_worker(
+                &task.id,
+                position.version,
+                &owner,
+                OffsetDateTime::now_utc()
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            store
+                .work_status(&WorkRef::Task(task.id.clone()))
+                .await
+                .unwrap(),
+            crate::durable::WorkStatus::Abandoned
+        );
+        assert_eq!(
+            store.get_task(&task.id).await.unwrap().unwrap().worktree,
+            task.worktree
+        );
+    }
+
+    #[tokio::test]
     async fn steers_are_one_ordered_work_input_stream() {
         let directory = tempfile::tempdir().unwrap();
         let database_path = directory.path().join("registry.db");
-        let store = open_store(&StorageConfig::sqlite(database_path.clone()))
-            .await
-            .unwrap();
+        let store =
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(database_path.clone()))
+                .await
+                .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1382,10 +1572,10 @@ mod tests {
             .await
             .unwrap();
 
-        let steers = store.work_steers(&work).await.unwrap();
+        let steers = store.task_steers(&task.id).await.unwrap();
         assert_eq!(
-            steers.iter().map(|steer| &steer.id).collect::<Vec<_>>(),
-            [&first.steer.id, &second.steer.id]
+            steers.iter().map(|steer| steer.id).collect::<Vec<_>>(),
+            [first.id, second.id]
         );
         assert_eq!(
             steers
@@ -1394,15 +1584,275 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["inspect the failing test", "preserve the public behavior"]
         );
+
+        // The cross-Work `lf activity` timeline reads the same comments through
+        // `steers_since`, attributed to their Work and ordered by time. Stamp the
+        // two events so the `since` filter has something to bite on.
+        let conn = rusqlite::Connection::open(&database_path).unwrap();
+        conn.execute(
+            "UPDATE task_events SET created_at=1700000001 WHERE id=?1",
+            [first.id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE task_events SET created_at=1700000021 WHERE id=?1",
+            [second.id],
+        )
+        .unwrap();
+        let timeline = store.steers_since(0).await.unwrap();
+        assert_eq!(
+            timeline
+                .iter()
+                .map(|comment| comment.steer.text.as_str())
+                .collect::<Vec<_>>(),
+            ["inspect the failing test", "preserve the public behavior"]
+        );
+        assert!(timeline.iter().all(|comment| comment.work == work));
+        assert_eq!(
+            store
+                .steers_since(1_700_000_010)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|comment| comment.steer.id)
+                .collect::<Vec<_>>(),
+            [second.id]
+        );
     }
 
     #[tokio::test]
-    async fn task_creation_records_planning_and_opaque_run_provenance_without_a_run() {
+    async fn ci_incident_reports_find_human_help_in_task_comments() {
         let directory = tempfile::tempdir().unwrap();
-        let database_path = directory.path().join("registry.db");
-        let store = open_store(&StorageConfig::sqlite(database_path.clone()))
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
+        let observed_at = task.created_at - time::Duration::SECOND;
+        let settled_at = task.created_at + time::Duration::SECOND;
+        store
+            .observe_ci_incident(&CiIncident {
+                identity: "human-help-proof".to_string(),
+                landing_id: None,
+                task_id: Some(task.id.clone()),
+                pr_id: None,
+                repo: "loopflow".to_string(),
+                pr_number: 123,
+                failed_head_sha: "deadbeef".to_string(),
+                repaired_head_sha: None,
+                failure_set: vec!["tests".to_string()],
+                provider_completed_at: None,
+                poll_observed_at: Some(observed_at),
+                webhook_received_at: None,
+                claimed_landing_generation: None,
+                responded_at: None,
+                green_at: Some(settled_at),
+                merged_at: None,
+                blocked_at: None,
+                blocked_reason: None,
+                created_at: observed_at,
+                updated_at: settled_at,
+            })
+            .await
+            .unwrap();
+        store
+            .append_steer(
+                &WorkRef::Task(task.id.clone()),
+                Author::User,
+                "try the flaky test again",
+            )
+            .await
+            .unwrap();
+
+        let incidents = store
+            .ci_incidents_since(observed_at - time::Duration::SECOND, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(incidents.len(), 1);
+        assert!(incidents[0].human_assisted);
+    }
+
+    /// Records the text of every `send_current` it accepts; `steerable=false`
+    /// stands in for a worker (or a between-turns gap) that can't take live
+    /// input, so the caller must defer to the next boundary.
+    #[derive(Default)]
+    struct RecordingHarness {
+        sent: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        interrupts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        steerable: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::harness::Harness for RecordingHarness {
+        async fn start(&mut self, _config: &crate::engine::AgentConfig) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn send_current(&mut self, content: &str) -> crate::harness::SendCurrentOutcome {
+            if self.steerable {
+                self.sent.lock().unwrap().push(content.to_string());
+                crate::harness::SendCurrentOutcome::Sent {
+                    provider_turn_id: "turn".to_string(),
+                }
+            } else {
+                crate::harness::SendCurrentOutcome::NotSteerable
+            }
+        }
+        async fn interrupt(&mut self) -> anyhow::Result<()> {
+            self.interrupts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        async fn stop(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let work = WorkRef::Task(task.id.clone());
+
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut harness = RecordingHarness {
+            sent: sent.clone(),
+            steerable: true,
+            ..Default::default()
+        };
+
+        let first = store
+            .append_steer(&work, Author::User, "focus on the parser")
+            .await
+            .unwrap();
+        let second = store
+            .append_steer(&work, Author::User, "keep the API stable")
+            .await
+            .unwrap();
+        let mut cursor = 0;
+        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
+        assert_eq!(
+            *sent.lock().unwrap(),
+            ["focus on the parser", "keep the API stable"]
+        );
+        assert_eq!(
+            cursor, second.id,
+            "the cursor advances past what was injected"
+        );
+        assert!(first.id < second.id);
+
+        // A comment that arrives later injects only itself — the cursor gates it.
+        let third = store
+            .append_steer(&work, Author::User, "add a regression test")
+            .await
+            .unwrap();
+        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
+        assert_eq!(sent.lock().unwrap().len(), 3);
+        assert_eq!(cursor, third.id);
+
+        // A provider that can't take live input leaves the cursor where it is, so
+        // the comment rides the next skill boundary's seed instead.
+        store
+            .append_steer(&work, Author::User, "later direction")
+            .await
+            .unwrap();
+        let mut deaf = RecordingHarness {
+            steerable: false,
+            ..Default::default()
+        };
+        let before = cursor;
+        crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
+        assert_eq!(
+            cursor, before,
+            "NotSteerable defers the comment to the next boundary seed"
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupt_request_ends_the_turn_once_per_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let work = WorkRef::Task(task.id.clone());
+
+        let interrupts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut harness = RecordingHarness {
+            interrupts: interrupts.clone(),
+            ..Default::default()
+        };
+        let count = || interrupts.load(std::sync::atomic::Ordering::SeqCst);
+
+        // A run launches with the cursor at the newest interrupt: prior requests
+        // are inert history, never re-fired.
+        let mut cursor = store.latest_interrupt_id(&work).await.unwrap();
+        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        assert_eq!(count(), 0, "no interrupt requested yet");
+
+        // A new request ends the current turn exactly once.
+        store.append_interrupt(&work).await.unwrap();
+        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        assert_eq!(count(), 1);
+        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        assert_eq!(count(), 1, "the same request never fires twice");
+
+        // A second request fires again.
+        store.append_interrupt(&work).await.unwrap();
+        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        assert_eq!(count(), 2);
+    }
+
+    #[tokio::test]
+    async fn task_creation_records_placement_without_synthetic_direction() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("registry.db");
+        let store =
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(database_path.clone()))
+                .await
+                .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1410,15 +1860,9 @@ mod tests {
         let mut task = make_task(&wave, &project);
         task.worktree = directory.path().join("uncreated-child-worktree");
         let pr = make_task_pr(&task);
-        let source_run_id = crate::durable::RunId::new();
 
         store
-            .create_task_with_input(
-                &task,
-                &pr,
-                &Author::Run(source_run_id.clone()),
-                "a sibling completed; begin file-writing work",
-            )
+            .create_task_with_worktree(&task, &pr)
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
         let durable_child_rows = |path: &std::path::Path| {
@@ -1427,8 +1871,8 @@ mod tests {
                 .query_row(
                     "SELECT
                         (SELECT COUNT(*) FROM tasks WHERE id=?1),
-                        (SELECT COUNT(*) FROM steers
-                         WHERE work_kind='task' AND work_id=?1),
+                        (SELECT COUNT(*) FROM task_events
+                         WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='steer'),
                         (SELECT COUNT(*) FROM task_prs WHERE task_id=?1)",
                     [task.id.as_str()],
                     |row| {
@@ -1441,11 +1885,10 @@ mod tests {
                 )
                 .unwrap()
         };
-        assert_eq!(durable_child_rows(&database_path), (1, 1, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
 
-        let task_work = WorkRef::Task(task.id.clone());
-        let child_steers = store.work_steers(&task_work).await.unwrap();
-        assert_eq!(child_steers[0].author, Author::Run(source_run_id));
+        let child_steers = store.task_steers(&task.id).await.unwrap();
+        assert!(child_steers.is_empty());
         assert_eq!(
             store
                 .latest_task_event(&task.id)
@@ -1461,7 +1904,7 @@ mod tests {
                 base_commit: pr.base_commit.clone(),
             }
         );
-        assert_eq!(durable_child_rows(&database_path), (1, 1, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
         assert!(!task.worktree.exists());
     }
 
@@ -1469,9 +1912,10 @@ mod tests {
     async fn abandoned_task_reopens_without_replacing_work_identity() {
         let directory = tempfile::tempdir().unwrap();
         let database_path = directory.path().join("registry.db");
-        let store = open_store(&StorageConfig::sqlite(database_path.clone()))
-            .await
-            .unwrap();
+        let store =
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(database_path.clone()))
+                .await
+                .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1493,7 +1937,6 @@ mod tests {
         );
         let historical_prs = store.task_prs(&task.id).await.unwrap();
 
-        let source_run_id = crate::durable::RunId::new();
         let mut recovered = task.clone();
         recovered.updated_at = time::OffsetDateTime::now_utc();
 
@@ -1501,12 +1944,7 @@ mod tests {
         assert!(!task.worktree.exists());
 
         store
-            .reopen_task(
-                &recovered,
-                None,
-                &Author::Run(source_run_id.clone()),
-                "the dependency is complete",
-            )
+            .reopen_task(&recovered, None)
             .await
             .expect("generic Run identity is opaque planning provenance");
         assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
@@ -1517,29 +1955,26 @@ mod tests {
             crate::durable::WorkStatus::Ready
         );
         assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
-        let successor_steers = store.work_steers(&task_work).await.unwrap();
-        assert_eq!(successor_steers.len(), 2);
-        assert_eq!(successor_steers[1].author, Author::Run(source_run_id));
-        assert_eq!(successor_steers[1].text, "the dependency is complete");
+        let successor_steers = store.task_steers(&task.id).await.unwrap();
+        assert_eq!(successor_steers.len(), 1);
         let steers = SqliteStore::new(&database_path)
             .unwrap()
-            .list_steers_since(0)
+            .steers_since(0)
             .unwrap();
         assert!(steers
             .iter()
-            .any(|steer| steer.text == "initial Task direction"));
-        assert!(steers
-            .iter()
-            .any(|steer| steer.text == "the dependency is complete"));
+            .any(|comment| comment.steer.text == "initial Task direction"));
         assert!(!task.worktree.exists());
     }
 
     #[tokio::test]
     async fn sibling_completion_is_observation_not_task_recovery_authority() {
         let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1571,75 +2006,273 @@ mod tests {
             .await
             .unwrap();
         let observations = store
-            .pending_project_observations(&project.id)
+            .pending_observations(&crate::child::ObservationRecipient::Wave {
+                wave_id: wave.id().clone(),
+            })
             .await
             .unwrap();
         assert_eq!(observations.len(), 1);
-        assert!(store
-            .consume_task_observation_for_project(&project.id, &observations[0])
+        store
+            .append_task_event(
+                &sibling.id,
+                &TaskEventKind::Failed {
+                    error: "arrived during the Wave pass".to_string(),
+                    resumable: true,
+                },
+            )
             .await
-            .unwrap());
+            .unwrap();
+        for observation in observations {
+            store
+                .mark_observation_delivered(observation.id)
+                .await
+                .unwrap();
+        }
+        let pending = store
+            .pending_observations(&crate::child::ObservationRecipient::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            &pending[0].payload,
+            crate::work::project::ChildEventPayload::Task {
+                event: TaskEventKind::Failed { error, resumable: true }
+            } if error == "arrived during the Wave pass"
+        ));
 
         assert_eq!(
             store.work_status(&target_work).await.unwrap(),
             target_status
         );
         assert_eq!(store.task_prs(&target.id).await.unwrap(), target_prs);
-        assert!(store.work_steers(&target_work).await.unwrap().is_empty());
+        assert!(store.task_steers(&target.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn task_lifecycle_plan_and_progress_round_trip() {
+    async fn task_worker_settlement_rejects_stale_claims_atomically() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
+
+        let initial = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "code", 3, "review", None, false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 2,
+                    iteration: 4,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        let claim = match store
+            .claim_task_worker(&task.id, initial.version, &owner, OffsetDateTime::now_utc())
+            .await
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let claim = store
+            .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
+            .await
+            .unwrap();
+        let mut next = initial.clone();
+        next.step_index = 3;
+        next.iteration = 5;
+        next.version = claim.position_version;
+        let mut refreshed = task.clone();
+        refreshed.plan.title = "Updated while the worker ran".to_string();
+        store.update_task(&refreshed).await.unwrap();
+        let saved_task = store.get_task(&task.id).await.unwrap().unwrap();
+        let saved_position = store.flow_position(&task.id).await.unwrap().unwrap();
+        task.updated_at = saved_task.updated_at + time::Duration::seconds(60);
+        let mut stale = claim.clone();
+        stale.generation += 1;
+        assert!(store
+            .settle_task_worker(&task, &stale, &next, Some("must roll back"))
+            .await
+            .is_err());
+        let unchanged = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(unchanged, saved_position);
+        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), saved_task);
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
+
+        store
+            .settle_task_worker(&task, &claim, &next, Some("advanced atomically"))
+            .await
+            .unwrap();
+        let settled = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(settled.step_index, 3);
+        assert_eq!(settled.invocation, initial.invocation);
+        let updated_task = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(updated_task.updated_at, task.updated_at);
+        assert_eq!(updated_task.plan.title, refreshed.plan.title);
+    }
+
+    #[tokio::test]
+    async fn task_restart_fences_a_late_failure_from_the_prior_invocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
-        let mut controller = make_task_controller(&task);
-        controller.lifecycle = crate::controller::task::TaskLifecyclePlan::standard(
-            "task-design",
-            "code",
-            "ship-demo",
-        );
-        controller.phase_cursor = 2;
-        controller.phase_iteration = 4;
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        store.put_task_controller_state(&controller).await.unwrap();
-
-        let persisted = store
-            .task_controller_state(&task.id)
+        let first = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "task-design",
+                        0,
+                        "design",
+                        None,
+                        false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 0,
+                    iteration: 0,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let old_owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 601,
+            started_at: 1_700_000_000,
+        };
+        let old_claim = match store
+            .claim_task_worker(
+                &task.id,
+                first.version,
+                &old_owner,
+                OffsetDateTime::now_utc(),
+            )
             .await
             .unwrap()
-            .unwrap();
-        assert_eq!(persisted.lifecycle.loop_.flow, "code");
-        assert_eq!(persisted.lifecycle.first.flow, "task-design");
-        assert_eq!(persisted.lifecycle.finally.flow, "ship-demo");
-        assert_eq!(persisted.phase_cursor, 2);
-        assert_eq!(persisted.phase_iteration, 4);
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
 
-        controller.phase_cursor = 3;
-        controller.phase_iteration = 5;
-        store.put_task_controller_state(&controller).await.unwrap();
-        let resumed = store
-            .task_controller_state(&task.id)
+        store.restart_task_flow(&task, "deadbeef").await.unwrap();
+        let replacement = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "task-design",
+                        0,
+                        "design",
+                        None,
+                        false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 0,
+                    iteration: 0,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let new_owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 602,
+            started_at: 1_700_000_001,
+        };
+        let new_claim = match store
+            .claim_task_worker(
+                &task.id,
+                replacement.version,
+                &new_owner,
+                OffsetDateTime::now_utc(),
+            )
             .await
             .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let new_claim = store
+            .bind_task_worker_run(&task.id, &new_claim, &RunId::new(), &new_owner)
+            .await
             .unwrap();
-        assert_eq!((resumed.phase_cursor, resumed.phase_iteration), (3, 5));
+        let failure = TaskFlowBlocker {
+            reason: "late old failure".to_string(),
+            restart_required: false,
+            observed_at: OffsetDateTime::now_utc(),
+        };
+
+        assert!(store
+            .block_task_flow(&task.id, &old_claim, &failure)
+            .await
+            .is_err());
+        let current = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(current.claim.as_ref(), Some(&new_claim));
+        assert!(current.failure.is_none());
     }
 
     #[tokio::test]
-    async fn task_work_and_controller_state_are_independent() {
+    async fn task_facts_update_without_rewriting_work_progression() {
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("registry.db");
-        let store = open_store(&StorageConfig::sqlite(database.clone()))
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let wave = make_wave("/repo");
@@ -1651,39 +2284,10 @@ mod tests {
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        assert!(store
-            .task_controller_state(&task.id)
-            .await
-            .unwrap()
-            .is_none());
-
-        let mut controller = make_task_controller(&task);
-        store.put_task_controller_state(&controller).await.unwrap();
-
-        let mut core_update = task.clone();
-        core_update.plan.title = "Refreshed without controller ownership".to_string();
-        store.update_task(&core_update).await.unwrap();
+        task.plan.title = "Refreshed Task".to_string();
+        store.update_task(&task).await.unwrap();
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.plan.title, core_update.plan.title);
-        assert_eq!(
-            store.task_controller_state(&task.id).await.unwrap(),
-            Some(controller.clone())
-        );
-
-        task.plan.title = "Stale controller-side title".to_string();
-        controller.phase_cursor = 4;
-        store.put_task_controller_state(&controller).await.unwrap();
-        let persisted = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.plan.title, core_update.plan.title);
-        assert_eq!(
-            store
-                .task_controller_state(&task.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .phase_cursor,
-            4
-        );
+        assert_eq!(persisted.plan.title, "Refreshed Task");
 
         let conn = rusqlite::Connection::open(database).unwrap();
         let columns = |table: &str| {
@@ -1697,15 +2301,17 @@ mod tests {
         let task_columns = columns("tasks");
         assert!(!task_columns.contains(&"phase_epoch".to_string()));
         assert!(!task_columns.contains(&"lifecycle_phase".to_string()));
-        assert!(columns("task_controller_state").contains(&"lifecycle_phase".to_string()));
+        assert!(!columns("task_controller_state").contains(&"lifecycle_phase".to_string()));
     }
 
     #[tokio::test]
     async fn task_requires_an_existing_project_in_its_wave() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1731,9 +2337,11 @@ mod tests {
     #[tokio::test]
     async fn project_definition_updates_without_rewriting_the_task() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let mut project = make_project(&wave);
@@ -1746,11 +2354,13 @@ mod tests {
 
         project.plan.prompt_context = "Definition:\nCurrent proof".to_string();
         project.plan.pm_snapshot_synced_at += 1;
+        project.iteration = 9;
         store.update_project(&project).await.unwrap();
 
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(stored_project.plan, project.plan);
+        assert_eq!(stored_project.iteration, 0);
         assert_eq!(stored_task.plan, task.plan);
         assert_eq!(stored_task.project_id, stored_project.id);
     }
@@ -1758,9 +2368,10 @@ mod tests {
     #[tokio::test]
     async fn task_issue_identifier_rebind_updates_planning_identity() {
         let dir = tempfile::tempdir().unwrap();
-        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store =
+            super::open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1818,9 +2429,11 @@ mod tests {
     #[tokio::test]
     async fn task_pr_persists_presentation_github_and_ci_observations() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1873,9 +2486,11 @@ mod tests {
     #[tokio::test]
     async fn task_pr_persists_linear_linkage() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -1908,9 +2523,11 @@ mod tests {
     #[tokio::test]
     async fn task_prs_are_ordered_and_rotation_is_atomic() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -2028,9 +2645,11 @@ mod tests {
     #[tokio::test]
     async fn re_settling_an_abandoned_pr_is_idempotent_only_at_its_original_time() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -2059,9 +2678,11 @@ mod tests {
     #[tokio::test]
     async fn separate_task_worktree_tracks_and_collapses_its_parent_pr() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -2163,9 +2784,11 @@ mod tests {
     #[tokio::test]
     async fn pr_publication_round_trips_before_github_exists() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -2201,9 +2824,11 @@ mod tests {
     #[tokio::test]
     async fn empty_pr_is_skipped_when_task_completes() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -2333,7 +2958,7 @@ mod tests {
     #[tokio::test]
     async fn pm_snapshot_replacement_is_atomic_per_wave() {
         let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
-        let store = open_store(&StorageConfig::sqlite(db_path.clone()))
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(db_path.clone()))
             .await
             .expect("store should open");
         let wave = Wave::new(WaveId::new(), "product".to_string(), "/repo".to_string());
@@ -2513,9 +3138,11 @@ mod tests {
     #[tokio::test]
     async fn lifecycle_updates_do_not_overwrite_runtime_health() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let mut stale_account = provider_account("claude", "primary", 0);
         store.upsert_provider_account(&stale_account).await.unwrap();
         store
@@ -2550,9 +3177,11 @@ mod tests {
     #[tokio::test]
     async fn provider_login_email_is_unique_within_each_provider() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let primary = provider_account("claude", "primary", 0);
         let mut duplicate = provider_account("claude", "duplicate", 0);
         duplicate.login_email = primary.login_email.clone();
@@ -2625,6 +3254,8 @@ mod tests {
             .expect("insert plaintext token");
         }
 
+        // This test exercises the production open path itself (plaintext token
+        // migration only runs there), so it must NOT use the hermetic helper.
         let store = super::open_store(&StorageConfig::sqlite(db_path.clone()))
             .await
             .expect("open store");

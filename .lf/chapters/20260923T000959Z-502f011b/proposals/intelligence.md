@@ -1,0 +1,132 @@
+**Agree with the accepted Intelligence boundary.** Propose one **Trace & Context** Project, preserving Trace’s identity. Exact context, Run explanation, and Reliability measurement depend on the same evidence chain; a second monitoring Project would split ownership prematurely.
+
+This is a proposal for chapter `20260923T000959Z-502f011b`, pending parent Gate 2. No PM, Work, charter, or authored checkout files were changed. No human session, controller, implementation, commit, or push was started. The completed manual review was reused.
+
+**Evidence and qualifications**
+
+The completed baseline establishes unfinished work:
+
+- Exact ordered context reconstructed in **20/20 sampled launches**, but the full Context KR failed its budget and duration requirements.
+- Of **82 settled records**, six lacked context and 35 lacked launch contracts.
+- Of **80 settled usage rows**, 21 lacked tokens and 76 lacked cost.
+- Three qualifying context/prompting landings lacked motivating and follow-up Run identifiers.
+- None of the eleven prior KRs holds in full. These populations must remain distinct.
+
+Current source confirms a changed evidence model. [`lf runs`](/Users/jack/src/loopflow/rust/loopflow/src/lf/commands/runs.rs) and [`lf usage`](/Users/jack/src/loopflow/rust/loopflow/src/lf/commands/usage.rs) read Home-local Run bundles; Wave memory’s `run_events`/`own_spend` descriptions are stale. `lf doctor` still audits the older ledger.
+
+Two implementation details matter to acceptance:
+
+- [`context_ref_is_valid`](/Users/jack/src/loopflow/rust/loopflow/src/run_record.rs:798) accepts an absent reference. Zero reported gaps therefore does not prove required context exists.
+- [`scan_runs_since`](/Users/jack/src/loopflow/rust/loopflow/src/run_record.rs:413) warns and omits corrupt records. Successful reader execution therefore does not prove population completeness.
+
+Cache-only PM and current status matched the frozen Project definitions: zero open PM Tasks, 25 PM-complete Tasks, two Ready Projects, and a stopped resident. The `active_tasks: 2` summary coexists with residual historical Work. No sync or auth repair was attempted.
+
+**Proposed Wave purpose and boundary**
+
+Retain Intelligence Wave `cb366067-4821-4071-9393-82ff4b6d61d2`.
+
+Proposed purpose:
+
+> Make human-selected work across Cube, Etude, Kata, and Hootro explainable through reliable local context and execution evidence, so maintainers can diagnose stalled work and justify prompting changes.
+
+Intelligence owns exact submitted-context evidence, provenance, honest missingness, supported diagnostic readers, and attempted-operation measurement. Infrastructure owns execution mechanics, auth, recovery, releases, and repairs. Product owns external adoption, human presentation, Desktop planning, and open-Session organization.
+
+Evidence cannot select priorities, authorize execution, establish process ownership, or substitute process completion for delivered progress. Preserve the existing bounds against remote telemetry, global run servers, vector or vendor-memory backends, and cross-machine journal replay.
+
+**Exact Project portfolio**
+
+| Existing Project | Proposed disposition |
+|---|---|
+| **Trace**, `2f8390f7-6614-426c-84a8-fa5291358691`; Work `proj_9fffbe63b7594bdc8f5719c61b25876d` | **Rewrite** as **Trace & Context**, preserving Project and Work identity under Intelligence. Reconcile name-derived references during parent application. |
+| **Context**, `0f37b71f-3c7c-43f4-b809-ca2c346ca5fa`; Work `proj_c8a7e002f6cc4830893d540a93a1db09` | **Retire** as a separate Project, with Trace & Context as its successor. Retire residual execution intent; preserve original Task, Run, KR, and Project attribution. |
+
+No new Project identity is proposed. Context is retired through consolidation, not completed as a won bet.
+
+Exact proposed **Trace & Context definition**:
+
+> Human-selected portfolio work is explainable from durable local evidence. A maintainer can follow an attempted operation through its initiating intent, Work and Home, exact Loopflow-authored and provider-submitted context, provider activity, usage, outcome, and observed consequence, with missing evidence stated honestly. This evidence supports execution diagnosis and justified prompting changes; it never selects priorities or grants execution authority. Intelligence owns evidence and context reliability, Infrastructure owns execution mechanics and repair, and Product owns human presentation and adoption. No remote telemetry service or opaque vendor-state reconstruction is required.
+
+Exact proposed **KR 1**, initially unchecked:
+
+> Across fourteen consecutive days of real use, one supported local inspection path accounts for attempted core planning and execution operations, preserves their causal source identities, and distinguishes observed progress, intentional human waits, failures, and missing evidence. Twenty of twenty randomly selected settled agent Runs from the declared population reconstruct their required Loopflow-authored and provider-submitted context and connect initiating intent, Work where applicable, owning Home, provider activity, usage evidence, terminal result, and observed consequence without manual store joins. Required context includes exact submitted bytes and ordered component identities, sources, hashes, roles, and token accounting; absent required context fails reconstruction. Vendor-unavailable measurements remain explicitly unavailable. The readers remain usable against the long-lived migrated records, and the evidence neither substitutes successful process exit for delivered progress nor grants execution authority.
+
+Acceptance rules for this one KR:
+
+- Declare Homes, repositories, operation types, surfaces, interval, and sampling method before sampling. Include real use from at least two of Cube, Etude, Kata, and Hootro; do not manufacture activity.
+- Reconcile attempted operations with records and consequences, including pre-provider failures, retries, malformed records, inaccessible directories, and truncated listings. Existing Run bundles alone cannot establish the denominator.
+- Known missing required context in newly captured Runs within the window prevents acceptance, even if twenty other Runs pass. Historical gaps remain historical; do not reconstruct them from ambient current state.
+- Include available restarted/multi-pass and failed/heavily steered cases in declared sampling strata. Check applicable durable direction, design, observations, and slice. Retain motivating and follow-up evidence for prompting repairs undertaken.
+- Report progress, human waits, failures, unknowns, coverage, and denominators separately. Unavailable vendor cost remains unknown; process settlement does not establish usage finality.
+- Scope reconstruction to what Loopflow authored or submitted. Opaque provider state and replay-specific environment reproduction are separate promises.
+
+The fourteen-day population supports Reliability’s assessment. Honest measurement can coexist with failed availability; an actionable outage remains an outage.
+
+**Disposition of all eleven prior KRs**
+
+Numbering follows each frozen Project’s original order. Historical verdicts remain unchanged.
+
+| Prior KR | Verdict | Explicit disposition |
+|---|---|---|
+| **Trace 1:** month-long complete reconstruction | Fail | **Rewrite** into KR1’s declared population and twenty-Run proof. Preserve causal shape, context, time, result, and available usage. |
+| **Trace 2:** month of successful `runs`/`trace`/`usage` readers | Fail | **Rewrite** into supported reader acceptance against long-lived records. Use `lf runs <run>`; retire the obsolete command and unobserved month claim. |
+| **Trace 3:** universal usage coverage and no unexplained silence | Fail | **Rewrite** into attempt coverage, direct usage attribution, finality, and missingness. Quiet days alone do not establish outages; unavailable cost is not zero. |
+| **Trace 4:** any recent Run replays unattended, 10/10 | Fail | **Retire** from active scope and park. Reopen for a named debugging need with a bounded provider/environment contract and authorized execution. |
+| **Trace 5:** one-query hotness, cost, trends | Fail | **Rewrite** narrowly into supported inspection and Reliability’s population view. Park broad trends and cost-per-delivery until comparable evidence answers a concrete decision. |
+| **Context 1:** every qualifying landing has Run citations and no regression for thirty days | Fail | **Rewrite** as motivating/follow-up evidence for prompting repairs undertaken in this bet. Park repository-wide universal enforcement pending complete landing/gate joins. |
+| **Context 2:** exact context plus published budget compliance | Fail; reconstruction subproof passed | **Rewrite**, carrying exact bytes, provenance, ordering, roles, and token accounting. Retire the unsupported duration/budget conjunct; reopen budget tuning only for measured pressure. |
+| **Context 3:** ten intent-preserving handoffs | Unknown | **Rewrite** into sampled handoff acceptance. Prove what arrived; Infrastructure owns restart mechanics. Supplied context does not guarantee every agent decision respects every invariant. |
+| **Context 4:** lower tokens without gate regression across comparable cohorts | Unknown | **Retire** from active scope and park until comparable delivery/gate cohorts and a measured context-cost problem exist. |
+| **Context 5:** three zero-config repositories land PRs | Unknown | **Retire** the Intelligence adoption KR; route adoption proof to Product. Carry demonstrated context defects and launch/configuration evidence into this bet. |
+| **Context 6:** seven-day Discord disposition/relevance guarantees | Unknown | **Retire** the channel/cadence-specific KR. Carry provenance and relevance for selected inputs. Product owns communication behavior; Infrastructure owns delivery. |
+
+**Open Tasks and historical Work**
+
+There are **zero open PM Tasks** to carry. Every historical Task in the supplied Intelligence status receives a disposition below.
+
+| Historical Tasks | Proposed disposition |
+|---|---|
+| LOO-272, LOO-271, LOO-245, LOO-129, LOO-132, LOO-135, LOO-137, LOO-138, LOO-139, LOO-140, LOO-143 | **Keep complete.** Preserve history; completion does not certify current behavior or endurance KRs. |
+| LOO-130, LOO-131, LOO-133, LOO-134, LOO-136, LOO-142, LOO-144, LOO-145, LOO-146, LOO-147 | **Keep complete and absorbed.** Preserve successor relationships; do not recreate parallel scopes. |
+| LOO-141 | **Keep complete and retired.** |
+| LOO-267 | **Keep PM-complete and Work Abandoned**, retaining `task_c89277ebd41a41409fbf943524fa99de` and PR record `pr_f4aad1af594045d6a2ac2a71a53bc730`. Preserve missing-checkout evidence; do not restart it. |
+| LOO-246 | **Keep PM-complete; retire residual Ready Work** `task_630c7f1c1b6347ea8c31d99cf567cfb2`. Preserve working PR record `pr_711f255657d4433da2eff3691a5d72b7` and missing-checkout evidence; do not infer a merge. |
+| LOO-128 | **Keep PM-complete; retire residual Ready Work** `task_1b4e3f4279994c6ea611aebf64a7baa8`. Preserve working PR record `pr_15e37f8e911d467b859d6f4fa4efa037` and missing-checkout evidence. |
+
+Retirement here means removing obsolete execution intent during approved application, not deleting evidence, branches, or PR history. Future execution-mechanics work formerly associated with LOO-267 belongs to Infrastructure.
+
+**Small opening frontier**
+
+Propose three sequential Tasks, with **one initially active** and no invented IDs:
+
+1. **Capture required context and causal evidence at the actual launch boundary.** Prove exact context and source identity through real configured launches, including a fresh/restarted launch and pre-provider failure. Missing or corrupt required context cannot receive a reconstructed verdict. Correct stale evidence-contract guidance alongside the change.
+2. **Account for attempted operations and their observed outcomes.** Agree the core-operation boundary with Reliability; reconcile attempts, retries, waits, failures, missingness, and consequences without double-counting. Begin retention as soon as coverage exists.
+3. **Make reconstruction usable through the supported inspection path.** Connect evidence without manual store joins, with Product reviewing the human-facing contract. Retain the twenty-Run sample and fourteen-day population; report unmet conditions explicitly.
+
+This is a capacity proposal, not a runtime concurrency rule.
+
+Broad replay, optimization, dashboards, automated monitoring, and pre-human recovery promises remain parked. Reopen only for a named diagnostic need, comparable decision-relevant evidence, or a recurring measured failure. A trigger opens a scoped proposal; it does not automatically authorize work.
+
+**Dependencies and unresolved parent decisions**
+
+- **Reliability:** Intelligence supplies attempted-operation measurement; Infrastructure supplies operation semantics and repairs. Measurement must include attempts that never produce Runs.
+- **Architecture Minimalism:** Gate 2 must settle `loopflow.wave-agents`. Preserve causal identities without assuming either generic Work controllers or Task-only execution is accepted.
+- **Product:** supplies selected external journeys and owns presentation/adoption. Intelligence provides inspection evidence and context diagnosis without restarting Sessions design.
+- **Parent decisions:** ratify the single consolidated bet, its strict required-context rule, Reliability measurement within its acceptance evidence, and capacity for one active Intelligence Task.
+- **External sample:** the proposed two-repository minimum is a proof requirement, not a choice of human priorities. Insufficient real usage leaves the KR unchecked.
+
+Proposed review: **2026-10-21T00:09:59.226362+00:00**. Fourteen-day coverage must begin by **2026-10-07T00:09:59.226362+00:00** to finish by that review. Later instrumentation cannot justify backdating coverage.
+
+**Completed child and archive handoff**
+
+One bounded Project child ran; no second child was needed for Context’s proposed retirement.
+
+| Item | Value |
+|---|---|
+| Wave proposal Run | `run_5debbd828ff945eb86cc915cc626736e` |
+| Project child Run | `run_3a453ab92c124ced8f5f6f380a2349fb` |
+| Child outcome | `completed`, verified from its terminal receipt |
+| Complete original final report | [/tmp/intelligence-trace-context-child-final.md](/tmp/intelligence-trace-context-child-final.md) |
+| Full launch/output log, including reconnects and partial emissions | [/tmp/intelligence-trace-context-child.log](/tmp/intelligence-trace-context-child.log) |
+| Exact child brief | [/tmp/intelligence-trace-context-child-brief.txt](/tmp/intelligence-trace-context-child-brief.txt) |
+
+The complete final report was extracted verbatim from the successful final emission. No child remains failed or unanswered. Final acceptance and application remain with the parent.

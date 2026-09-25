@@ -11,6 +11,7 @@ struct MessageRowTests {
         let turn = try ChatTurn(
             id: "turn-2",
             role: .assistant,
+            authorName: nil,
             text: "",
             status: .failed,
             items: [],

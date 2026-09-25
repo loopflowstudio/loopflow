@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-use loopflow::store::{open_store, StorageConfig};
+use loopflow::store::StorageConfig;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -134,7 +134,7 @@ async fn lfd_dedups_signed_deliveries_across_restart() {
 
     // Create the store with migrations so `lfd serve` finds an existing db.
     let expected_home_id = {
-        let store = open_store(&StorageConfig::sqlite(db_path.clone()))
+        let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(db_path.clone()))
             .await
             .expect("create store");
         store.local_home().await.expect("read local Home").id

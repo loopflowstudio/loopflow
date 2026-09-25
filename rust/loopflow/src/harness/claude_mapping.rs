@@ -290,23 +290,25 @@ fn parse_reset_timestamp(value: &Value) -> Option<i64> {
 }
 
 /// Parse a single NDJSON line and emit conversation events.
+/// Map one NDJSON line to conversation events. Returns `Some(status)` when the
+/// line is a turn `result` — the caller owns the terminal `TurnCompleted`, so a
+/// persistent reader can coalesce a seed turn and its queued steer turns into a
+/// single boundary. `None` for every other line (including malformed ones).
 pub(super) fn process_line(
     line: &str,
     turn_id: &str,
     events: &mpsc::UnboundedSender<ConversationEvent>,
     state: &mut ReaderState,
-) -> bool {
+) -> Option<Lifecycle> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
-        return false;
+        return None;
     };
     let event = value
         .get("stream_event")
         .and_then(|stream| stream.get("event"))
         .unwrap_or(&value);
 
-    let Some(event_type) = event.get("type").and_then(Value::as_str) else {
-        return false;
-    };
+    let event_type = event.get("type").and_then(Value::as_str)?;
 
     match event_type {
         "system" => {
@@ -320,24 +322,14 @@ pub(super) fn process_line(
         }
 
         "content_block_start" => {
-            let Some(index) = event.get("index").and_then(Value::as_u64) else {
-                return false;
-            };
-            let Some(block) = event.get("content_block") else {
-                return false;
-            };
-            let Some(block_type) = block.get("type").and_then(Value::as_str) else {
-                return false;
-            };
+            let index = event.get("index").and_then(Value::as_u64)?;
+            let block = event.get("content_block")?;
+            let block_type = block.get("type").and_then(Value::as_str)?;
             let index = index as usize;
 
             if block_type == "tool_use" {
-                let Some(tool_id) = block.get("id").and_then(Value::as_str) else {
-                    return false;
-                };
-                let Some(tool_name) = block.get("name").and_then(Value::as_str) else {
-                    return false;
-                };
+                let tool_id = block.get("id").and_then(Value::as_str)?;
+                let tool_name = block.get("name").and_then(Value::as_str)?;
                 if state.track_tool(index, tool_id, tool_name, None) {
                     let item = infer_item(tool_name, tool_id, None);
                     let _ = events.send(ConversationEvent::ItemStarted {
@@ -353,12 +345,8 @@ pub(super) fn process_line(
                 .get("index")
                 .and_then(Value::as_u64)
                 .map(|v| v as usize);
-            let Some(delta) = event.get("delta") else {
-                return false;
-            };
-            let Some(delta_type) = delta.get("type").and_then(Value::as_str) else {
-                return false;
-            };
+            let delta = event.get("delta")?;
+            let delta_type = delta.get("type").and_then(Value::as_str)?;
 
             match delta_type {
                 "text_delta" => {
@@ -413,11 +401,9 @@ pub(super) fn process_line(
                     final_receipt: true,
                 });
             }
-            let _ = events.send(ConversationEvent::TurnCompleted {
-                turn_id: turn_id.to_string(),
-                status,
-            });
-            return true;
+            // The reader owns TurnCompleted so it can coalesce queued steer
+            // turns into one boundary.
+            return Some(status);
         }
 
         // Claude emits "assistant" events with full message content.
@@ -442,7 +428,7 @@ pub(super) fn process_line(
         _ => {}
     }
 
-    false
+    None
 }
 
 fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
@@ -809,7 +795,7 @@ mod tests {
         let line = r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#;
 
         let result = process_line(line, "turn_1", &tx, &mut state);
-        assert!(!result);
+        assert!(result.is_none());
         assert!(rx.is_empty(), "system event should not emit events");
         assert_eq!(
             state.take_provider_session_id().as_deref(),
@@ -825,7 +811,7 @@ mod tests {
         let line = r#"{"stream_event":{"event":{"type":"system","session_id":"sess_wrapped"}}}"#;
 
         let result = process_line(line, "turn_1", &tx, &mut state);
-        assert!(!result);
+        assert!(result.is_none());
         assert!(rx.is_empty(), "system event should not emit events");
         assert_eq!(
             state.take_provider_session_id().as_deref(),
@@ -918,8 +904,9 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false,"result":"done","session_id":"sess_abc"}"#;
 
+        // The reader owns TurnCompleted now; process_line reports the status.
         let result = process_line(line, "turn_1", &tx, &mut state);
-        assert!(result);
+        assert_eq!(result, Some(Lifecycle::Completed));
 
         let usage_event = rx.try_recv().expect("should have usage event");
         match usage_event {
@@ -931,13 +918,10 @@ mod tests {
             }
             other => panic!("expected TurnUsage, got {other:?}"),
         }
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(ConversationEvent::TurnCompleted {
-                turn_id,
-                status: Lifecycle::Completed,
-            }) if turn_id == "turn_1"
-        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "process_line emits no TurnCompleted"
+        );
     }
 
     #[test]
@@ -947,16 +931,11 @@ mod tests {
         let line = r#"{"type":"result","is_error":true,"result":"failed"}"#;
 
         let result = process_line(line, "turn_1", &tx, &mut state);
-        assert!(result);
-
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            ConversationEvent::TurnCompleted { turn_id, status } => {
-                assert_eq!(turn_id, "turn_1");
-                assert_eq!(status, Lifecycle::Failed);
-            }
-            other => panic!("expected TurnCompleted, got {other:?}"),
-        }
+        assert_eq!(result, Some(Lifecycle::Failed));
+        assert!(
+            rx.try_recv().is_err(),
+            "an error result with no usage emits no events"
+        );
     }
 
     #[test]
@@ -966,7 +945,7 @@ mod tests {
         let line = r#"{"type":"result","is_error":false,"model":"claude-sonnet-4","total_cost_usd":0.2,"usage":{"input_tokens":321,"output_tokens":123,"reasoning_tokens":9,"cache_read_input_tokens":11,"cache_creation_input_tokens":5}}"#;
 
         let result = process_line(line, "turn_42", &tx, &mut state);
-        assert!(result);
+        assert_eq!(result, Some(Lifecycle::Completed));
 
         let usage_event = rx.try_recv().expect("usage event");
         match usage_event {
@@ -983,13 +962,10 @@ mod tests {
             }
             other => panic!("expected TurnUsage, got {other:?}"),
         }
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(ConversationEvent::TurnCompleted {
-                turn_id,
-                status: Lifecycle::Completed,
-            }) if turn_id == "turn_42"
-        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "process_line emits no TurnCompleted"
+        );
     }
 
     #[test]
@@ -1000,9 +976,9 @@ mod tests {
         let repeated = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}"#;
         let second = r#"{"type":"assistant","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}"#;
 
-        assert!(!process_line(first, "turn_42", &tx, &mut state));
-        assert!(!process_line(repeated, "turn_42", &tx, &mut state));
-        assert!(!process_line(second, "turn_42", &tx, &mut state));
+        assert!(process_line(first, "turn_42", &tx, &mut state).is_none());
+        assert!(process_line(repeated, "turn_42", &tx, &mut state).is_none());
+        assert!(process_line(second, "turn_42", &tx, &mut state).is_none());
 
         let checkpoints = [
             rx.try_recv().unwrap(),
@@ -1032,8 +1008,11 @@ mod tests {
         let assistant = r#"{"type":"assistant","message":{"model":"claude-sonnet-4","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":49,"cache_creation_input_tokens":0}}}"#;
         let result = r#"{"type":"result","is_error":false,"usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":98,"cache_creation_input_tokens":4},"modelUsage":{"claude-sonnet-4":{"contextWindow":200}}}"#;
 
-        assert!(!process_line(assistant, "turn_42", &tx, &mut state));
-        assert!(process_line(result, "turn_42", &tx, &mut state));
+        assert!(process_line(assistant, "turn_42", &tx, &mut state).is_none());
+        assert_eq!(
+            process_line(result, "turn_42", &tx, &mut state),
+            Some(Lifecycle::Completed)
+        );
         let usage_event = rx.try_recv().expect("usage event");
         let ConversationEvent::UsageCheckpoint { usage, .. } = usage_event else {
             panic!("expected usage event");
@@ -1041,13 +1020,10 @@ mod tests {
         assert_eq!(usage.total_input_tokens, Some(104));
         assert_eq!(usage.peak_input_tokens, Some(50));
         assert_eq!(usage.context_window_tokens, Some(200));
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(ConversationEvent::TurnCompleted {
-                status: Lifecycle::Completed,
-                ..
-            })
-        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "process_line emits no TurnCompleted"
+        );
     }
 
     #[test]

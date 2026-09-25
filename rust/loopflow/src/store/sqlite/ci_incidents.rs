@@ -121,7 +121,7 @@ impl super::SqliteStore {
         Ok(())
     }
 
-    pub fn claim_ci_incident(
+    pub fn record_ci_response(
         &self,
         identity: &str,
         landing_id: &PrLandingId,
@@ -136,8 +136,6 @@ impl super::SqliteStore {
                  responded_at=COALESCE(responded_at, ?4),
                  updated_at=MAX(updated_at, ?4)
              WHERE identity=?1 AND landing_id=?2
-               AND claimed_landing_generation IS NULL
-               AND green_at IS NULL AND merged_at IS NULL AND blocked_at IS NULL
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
                     WHERE landing.id=?2 AND landing.generation=?3
@@ -162,7 +160,6 @@ impl super::SqliteStore {
              SET repaired_head_sha=COALESCE(repaired_head_sha, ?4),
                  updated_at=MAX(updated_at, ?5)
              WHERE identity=?1 AND landing_id=?2
-               AND claimed_landing_generation=?3
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
                     WHERE landing.id=?2 AND landing.generation=?3
@@ -262,15 +259,16 @@ impl super::SqliteStore {
                 ts.work_state,
                 ts.created_at,
                 EXISTS (
-                    SELECT 1 FROM steers s
-                    WHERE s.work_kind='task' AND s.work_id=ci.task_id
-                      AND s.author_kind='user'
-                      AND s.issued_at * 1000000000 >= CASE
+                    SELECT 1 FROM task_events event
+                    WHERE event.task_id=ci.task_id
+                      AND json_extract(event.kind_json, '$.kind')='steer'
+                      AND json_extract(event.kind_json, '$.author.kind')='user'
+                      AND event.created_at * 1000000000 >= CASE
                           WHEN ci.poll_observed_at IS NULL THEN COALESCE(ci.webhook_received_at, ci.created_at)
                           WHEN ci.webhook_received_at IS NULL THEN ci.poll_observed_at
                           ELSE MIN(ci.poll_observed_at, ci.webhook_received_at)
                       END
-                      AND s.issued_at * 1000000000 <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
+                      AND event.created_at * 1000000000 <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
                 )
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id

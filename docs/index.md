@@ -14,7 +14,7 @@ Home-local Run record. The Run records what happened; it does not reserve the
 repository, control a Wave, or become planning state.
 
 The same building block runs **Waves**: persistent agents that coordinate
-Linear-backed Projects and Tasks, remember what they learn, and stay steerable.
+chapter plans and Tasks, remember what they learn, and stay steerable.
 There is no Loopflow server at the center. Repo files hold authored behavior;
 Linear and GitHub hold shared coordination and delivery facts; each Home keeps
 its local execution records. `lf ssh` runs the same local commands on another
@@ -38,7 +38,7 @@ Start a Wave after authoring `wave/engbot/GOAL.md`:
 
 ```bash
 lf start engbot
-lf chat --steer "ship the parser fix first"
+lf --wave <wave> wave/operate "ship the parser fix first"
 lf status engbot
 lf stop engbot
 ```
@@ -88,13 +88,6 @@ A flow chains skills with commits between them:
 lf ship-api
 ```
 
-A direction shapes how the agent judges:
-
-```bash
-lf gate --direction ux            # optimize for user experience
-lf gate --direction ux,clarity    # stack intents
-```
-
 Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
 `gate`, `qa`, the `build` flow, and more. Repo skills in `.lf/skills/` override
 and extend them. [Authoring](authoring.md) starts with a working skill and then
@@ -123,7 +116,6 @@ Do not take the first N commits and call that the history.
 .lf/                      # Repo config and extensions
   config.yaml             # Model, context defaults
   skills/                 # Skill prompts
-  directions/             # Judgment and intent
   flows/                  # Flow definitions
 scratch/                  # PR scratchpad (cleared on merge)
 wave/                     # Wave goals and memory (persists)
@@ -136,7 +128,7 @@ wave/                     # Wave goals and memory (persists)
 
 ## For agents
 
-Every human docs URL serves HTML. The reviewed Markdown source remains
+Every documentation URL serves HTML. The reviewed Markdown source remains
 available to agents: append `.md` to the URL (`/docs/waves.md`) or request the
 canonical URL with `Accept: text/markdown`. The curated index is
 [/llms.txt](/llms.txt); the complete corpus in one file is

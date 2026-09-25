@@ -329,7 +329,6 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Skill> {
         content: Some(content),
         agent: None,
         default_agent: None,
-        directions: Vec::new(),
         action_style: None,
     })
 }
@@ -568,26 +567,6 @@ fn collect_markdown_names(root: &Path, dir: &Path, names: &mut HashSet<String>) 
     }
 }
 
-/// Collect sorted, deduplicated `.md` file stems from the given directories.
-fn list_md_stems(dirs: &[PathBuf]) -> Vec<String> {
-    let mut names = HashSet::new();
-    for dir in dirs {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(name) = path.file_stem() {
-                        names.insert(name.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
-    }
-    let mut sorted: Vec<_> = names.into_iter().collect();
-    sorted.sort();
-    sorted
-}
-
 /// Structured result from list_all_skills.
 pub type SkillListResult = (Vec<String>, Vec<String>, Vec<String>, Vec<(String, String)>);
 
@@ -640,55 +619,6 @@ pub fn list_all_skills(repo: Option<&Path>) -> SkillListResult {
     builtin_sorted.sort();
 
     (user_sorted, global_sorted, builtin_sorted, external_skills)
-}
-
-// =============================================================================
-// Direction discovery
-// =============================================================================
-
-/// List builtin + repo directions for display.
-pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
-    let mut directions: HashSet<String> = crate::engine::builtins::builtin_direction_names()
-        .into_iter()
-        .map(|name| name.to_string())
-        .collect();
-    directions.extend(
-        crate::engine::builtins::builtin_direction_group_names()
-            .into_iter()
-            .map(|name| name.to_string()),
-    );
-
-    if let Some(repo) = repo {
-        directions.extend(list_user_direction_names(repo));
-    }
-
-    let mut list: Vec<_> = directions.into_iter().collect();
-    list.sort();
-    list
-}
-
-fn list_user_direction_names(repo: &Path) -> HashSet<String> {
-    let directions_dir = repo.join(".lf/directions");
-    let mut names: HashSet<String> = list_md_stems(std::slice::from_ref(&directions_dir))
-        .into_iter()
-        .collect();
-    let Ok(entries) = std::fs::read_dir(&directions_dir) else {
-        return names;
-    };
-
-    let mut group_dirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(group_name) = path.file_name() {
-                names.insert(group_name.to_string_lossy().to_string());
-            }
-            group_dirs.push(path);
-        }
-    }
-
-    names.extend(list_md_stems(&group_dirs));
-    names
 }
 
 // =============================================================================
@@ -838,13 +768,12 @@ mod tests {
         fs::create_dir_all(&skills_dir).expect("create namespaced skills dir");
         fs::write(
             skills_dir.join("office-hours.md"),
-            "---\ninteractive: false\ndirections: [gstack]\n---\n# user override\n",
+            "---\ninteractive: false\n---\n# user override\n",
         )
         .expect("write skill");
 
         let skill = discover_skill(tmp.path(), "gstack/office-hours").expect("discover skill");
 
-        assert_eq!(skill.directions, vec!["gstack".to_string()]);
         assert!(skill
             .content
             .as_deref()

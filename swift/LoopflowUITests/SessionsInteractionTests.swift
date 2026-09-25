@@ -27,11 +27,28 @@ final class SessionsInteractionTests: XCTestCase {
             let row = element(app, id: "session-row-\(fixture.id)")
             XCTAssertTrue(row.waitForExistence(timeout: 8))
             row.click()
+            if fixture == .interactive {
+                // An active-elsewhere row opens a pane that explains the
+                // state; Move here is the explicit takeover inside it.
+                let explanation = element(app, id: "session-elsewhere-\(fixture.id)")
+                XCTAssertTrue(explanation.waitForExistence(timeout: 4))
+                let move = element(app, id: "session-move-here-\(fixture.id)")
+                XCTAssertTrue(move.waitForExistence(timeout: 4))
+                move.click()
+            }
 
             let pane = element(app, id: "session-pane-\(fixture.id)")
             XCTAssertTrue(pane.waitForExistence(timeout: 8))
             XCTAssertTrue(pane.label.contains("active"))
             XCTAssertTrue(waitForAbsence(app, id: "sessions-empty-new-shell"))
+
+            if fixture == .interactive {
+                element(app, id: "sessions-show-work").click()
+                XCTAssertTrue(waitForAbsence(app, id: "sessions-multiplexer"))
+                element(app, id: "podium-sessions").click()
+                XCTAssertTrue(pane.waitForExistence(timeout: 8))
+                XCTAssertTrue(element(app, id: "session-row-\(fixture.id)").label.contains("VIEWING"))
+            }
 
             let complete = element(app, id: "session-action-complete")
             let approve = element(app, id: "session-action-approve")

@@ -45,8 +45,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
             live: api.live,
             paused: api.paused,
             enabled: api.enabled,
-            activeTasks: api.activeTasks,
-            activeProjects: api.activeProjects
+            activeTasks: api.activeTasks
         )
     }
 

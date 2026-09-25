@@ -16,7 +16,7 @@
 //!
 //! Three inputs feed the journal: the resident's wire deltas
 //! ([`WaveRuntime::apply_resident_delta`] — the old in-process `TurnSink`
-//! vocabulary, now arriving over `POST /resident/deltas`), human messages, and
+//! vocabulary, now arriving over `POST /resident/deltas`), chat messages, and
 //! typed registry inputs. All appends go through one lock, so journal order,
 //! cache order, and broadcast order agree — one writer appends and broadcasts.
 //! This module is vendor-free: the harness lives with the resident process,
@@ -32,6 +32,7 @@ use tokio::sync::broadcast;
 
 use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::controller::wave::channel::{Author, Message};
 use crate::controller::wave::chat::{
     ChatBacking, ChatMessageSource, ConversationEpoch, WaveChatMessage,
 };
@@ -142,9 +143,7 @@ impl TurnBroadcast {
 /// (`inbox` SSE frames) and the supervisor.
 #[derive(Debug, Clone)]
 pub enum InboxItem {
-    /// A journaled user message (`message`, `steer`, or `interrupt`
-    /// carrying text — "interrupt & send"), awaiting consumption (named in a
-    /// `TurnStarted.answers` or `TurnSteered.answers`).
+    /// A journaled channel message awaiting observation by a pass.
     Message(PendingMessage),
     /// A typed Task ledger observation awaiting the same durable turn
     /// consumption acknowledgement as a queued message.
@@ -179,9 +178,14 @@ pub struct Subscription {
     pub state_rx: broadcast::Receiver<LoopState>,
     pub playhead: Option<PlayheadView>,
     pub playhead_rx: broadcast::Receiver<PlayheadView>,
-    /// The pending queue as of the snapshot: human messages and typed inputs
-    /// not yet named in any `answers` — the resident's boot replay.
+    /// The pending queue as of the snapshot: typed observation and promotion
+    /// inputs not yet named in any `answers` — the resident's boot replay.
     pub pending: Vec<PendingMessage>,
+    /// Chat messages the wave has not yet answered as of the snapshot. Chat is
+    /// observed, not drained, so it never enters `pending`; the inbox replay
+    /// hands these to the observe loop so a message that arrived before the
+    /// subscription (or before a restart) still gets a look.
+    pub chat_tail: Vec<PendingMessage>,
     pub tasks: HashMap<MessageId, TaskObservation>,
     pub projects: HashMap<MessageId, ProjectObservation>,
     pub(crate) promotions: HashMap<MessageId, PromotionWake>,
@@ -221,8 +225,11 @@ struct OpenTurn {
     /// Prose fragments so far, for `Message` item ids (`"text-<n>"`).
     text_items: usize,
     /// Message ids this turn claimed (`TurnOpened.answers` plus any mid-turn
-    /// `TurnSteered.answers`). Requeued if the turn ends without completing.
+    /// historical `TurnSteered.answers`). Requeued if the turn ends without completing.
     claims: Vec<MessageId>,
+    /// Channel message this turn explicitly answers. This is a visible reply
+    /// edge, independent of the old scheduler-consumption claims.
+    reply_to: Option<MessageId>,
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
@@ -244,17 +251,14 @@ struct Inner {
     drop_deltas_until_opened: bool,
     state: LoopState,
     playhead: Option<Playhead>,
-    /// Id of the loop's current or most recently committed assistant turn —
-    /// what `journal_steered` falls back to when the turn closed during the
-    /// send (the thread's *last* turn at that point is usually the steer's
-    /// own user turn, which must never be named as a consumer).
-    last_assistant_turn_id: Option<String>,
     /// Durable scheduler queue folded from the journal on boot.
     pending_messages: Vec<PendingMessage>,
     /// Every journaled input by id — requeues restore pending entries from it.
     messages: HashMap<MessageId, PendingMessage>,
     discord: Option<DiscordAttachment>,
     discord_deliveries: HashMap<String, DiscordDelivery>,
+    /// Completed assistant turn id → channel message it explicitly answers.
+    chat_reply_targets: HashMap<String, MessageId>,
     tasks: HashMap<MessageId, TaskObservation>,
     projects: HashMap<MessageId, ProjectObservation>,
     promotions: HashMap<MessageId, PromotionWake>,
@@ -288,7 +292,7 @@ pub struct WaveRuntime {
     resident_expected: AtomicBool,
 }
 
-/// A human-authored chat write either commits to the active local epoch or is
+/// A chat write from a participant either commits to the active local epoch or is
 /// rejected because its active authority is Discord.
 #[derive(Debug, thiserror::Error)]
 pub enum ChatWriteError {
@@ -371,13 +375,7 @@ impl WaveRuntime {
                 ids: requeued.clone(),
             });
         }
-        // Seed the steer-consumption fallback from the replayed thread.
-        let last_assistant_turn_id = fold
-            .turns
-            .iter()
-            .rev()
-            .find(|turn| turn.role == ChatRole::Assistant)
-            .map(|turn| turn.id.clone());
+
         // Janitor: no turn is live on a fresh boot, whatever the log says.
         let state = if fold.state == LoopState::Idle {
             LoopState::Idle
@@ -409,21 +407,28 @@ impl WaveRuntime {
             .last()
             .cloned()
             .expect("conversation epoch initialized before delivery recovery");
-        for (turn_id, claims) in &fold.completed_claims {
-            if planned_turns.contains(turn_id) {
-                continue;
-            }
-            let Some(turn) = fold.turns.iter().find(|turn| &turn.id == turn_id) else {
-                continue;
-            };
-            if turn_journal_seq(turn).is_none_or(|seq| seq <= active_epoch.journal_seq) {
-                continue;
-            }
+        // Recovery: a completed assistant turn whose delivery was never
+        // journaled (a crash between commit and plan) is replanned here. An
+        // explicit channel reply edge survives in the fold; autonomous turns
+        // without one are recovered as top-level posts.
+        let completed_turns = fold
+            .turns
+            .iter()
+            .filter(|turn| turn.role == ChatRole::Assistant && turn.status == Lifecycle::Completed)
+            .filter(|turn| !planned_turns.contains(&turn.id))
+            .filter(|turn| turn_journal_seq(turn).is_some_and(|seq| seq > active_epoch.journal_seq))
+            .cloned()
+            .collect::<Vec<_>>();
+        for turn in &completed_turns {
             let Some(binding) = active_epoch.backing.discord_binding() else {
                 continue;
             };
-            let Some(delivery) = build_discord_delivery(turn, claims, &fold.messages, &binding)
-            else {
+            let Some(delivery) = build_discord_delivery(
+                turn,
+                fold.chat_reply_targets.get(&turn.id),
+                &fold.messages,
+                &binding,
+            ) else {
                 continue;
             };
             journal.append(|_| EventKind::DiscordChatSendPlanned {
@@ -453,11 +458,11 @@ impl WaveRuntime {
                 drop_deltas_until_opened: false,
                 state,
                 playhead,
-                last_assistant_turn_id,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
                 discord: fold.discord,
                 discord_deliveries: fold.discord_deliveries,
+                chat_reply_targets: fold.chat_reply_targets,
                 tasks: fold.tasks,
                 projects: fold.projects,
                 promotions: fold.promotions,
@@ -660,16 +665,20 @@ impl WaveRuntime {
         })?;
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+        turn.author_name = source.author_name.clone();
         turn.created_at = event.at_rfc3339();
         self.commit_locked(&mut inner, turn);
         let pending = PendingMessage {
             id,
             op: input.op(),
-            text: format!("[{}]\n{}", source.uri(), text),
+            text: super::journal::attributed_message(
+                &format!("[{}]\n{}", source.uri(), text),
+                source.author_name.as_deref(),
+            ),
             source: Some(source.clone()),
         };
         inner.messages.insert(pending.id.clone(), pending.clone());
-        inner.pending_messages.push(pending.clone());
+
         let _ = self.inbox_tx.send(InboxItem::Message(pending));
         Ok(true)
     }
@@ -756,6 +765,48 @@ impl WaveRuntime {
         snapshot_tail_locked(&self.inner(), limit)
     }
 
+    /// Read the chat channel as unified [`Message`]s after `since` (a turn
+    /// sequence), **including the wave's own posts** — the Discord-shaped read
+    /// that lets an observer see it already replied. `None` reads from the start;
+    /// an in-progress reply is included once it has text.
+    pub fn read_channel(&self, since: Option<u64>) -> Vec<Message> {
+        let inner = self.inner();
+        snapshot_tail_locked(&inner, None)
+            .into_iter()
+            .filter_map(Message::from_turn)
+            .filter(|(seq, _)| since.is_none_or(|cursor| *seq > cursor))
+            .map(|(seq, mut message)| {
+                let source = inner
+                    .messages
+                    .get(&MessageId(format!("msg-{seq}")))
+                    .and_then(|pending| pending.source.as_ref());
+                if let Some(source) = source {
+                    message.author = Author::Bridge {
+                        platform: "discord".to_string(),
+                        user: source.author_id.clone(),
+                        name: source.author_name.clone(),
+                    };
+                }
+                if message.is_own() {
+                    message.reply_to = inner
+                        .chat_reply_targets
+                        .get(&message.id)
+                        .and_then(channel_turn_id_for_message);
+                }
+                message
+            })
+            .collect()
+    }
+
+    /// One durable chat trigger for a subscriber connect or resident restart.
+    /// The newest participant/app-authored message without a completed `reply_to` edge
+    /// is replayed even when a later unrelated bot post exists. The relation is
+    /// channel history, not consumption: both messages remain readable. `seen`
+    /// dedupes this trigger against the live inbox within one process.
+    pub fn unanswered_chat_tail(&self) -> Vec<PendingMessage> {
+        unanswered_chat_tail_locked(&self.inner())
+    }
+
     /// Thread length (open turn included) without cloning a single turn —
     /// `/health`'s counter.
     pub fn thread_len(&self) -> usize {
@@ -794,47 +845,54 @@ impl WaveRuntime {
         self.inner().playhead.as_ref().map(Playhead::view)
     }
 
-    /// Initialize the default Wave invocation, or reset stale execution state
-    /// once no body is active. Inbox messages live outside the playhead and
-    /// remain pending for the fresh root.
+    /// Initialize the default Wave invocation once. A started invocation owns
+    /// its persisted definition until it completes.
     pub fn ensure_playhead(&self) -> anyhow::Result<PlayheadView> {
         let mut inner = self.inner();
-        if inner
-            .playhead
-            .as_ref()
-            .is_some_and(|playhead| playhead.active.is_some())
-        {
-            return Ok(inner
-                .playhead
-                .as_ref()
-                .expect("active body belongs to an initialized playhead")
-                .view());
+        if let Some(playhead) = inner.playhead.as_ref() {
+            if playhead.has_executable_definition() {
+                return Ok(playhead.view());
+            }
+            anyhow::bail!(
+                "Wave '{}' stopped at a historical Flow definition; run `lf wave {} --restart-flow` to compile a new invocation",
+                self.name,
+                self.name
+            );
         }
         let root = QueuedInvocation::load(&self.repo_root, "wave")?;
-        if inner
-            .playhead
-            .as_ref()
-            .is_some_and(|playhead| playhead.definitions_match(&self.repo_root, &root))
-        {
-            return Ok(inner
-                .playhead
-                .as_ref()
-                .expect("matching playhead is initialized")
-                .view());
-        }
-        if inner.playhead.is_none() {
-            let (playhead, event) = Playhead::new(root);
-            inner.playhead = Some(playhead);
-            return self.journal_playhead_locked(&mut inner, vec![event]);
-        }
-
-        let (playhead, event) = Playhead::reset(root);
+        let (playhead, event) = Playhead::new(root);
         inner.playhead = Some(playhead);
         self.journal_playhead_locked(&mut inner, vec![event])
     }
 
+    /// Replace a pre-definition-storage playhead after an explicit operator
+    /// decision, preserving every named continuation as a newly compiled queue.
+    pub fn restart_legacy_playhead(&self) -> anyhow::Result<PlayheadView> {
+        let mut inner = self.inner();
+        let Some(legacy) = inner.playhead.as_ref() else {
+            drop(inner);
+            return self.ensure_playhead();
+        };
+        if legacy.has_executable_definition() {
+            return Ok(legacy.view());
+        }
+        let pending = legacy
+            .legacy_flow_intents()
+            .into_iter()
+            .map(|flow| QueuedInvocation::load(&self.repo_root, &flow))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let root = QueuedInvocation::load(&self.repo_root, "wave")?;
+        let (mut playhead, event) = Playhead::new(root);
+        let mut events = vec![event];
+        for invocation in pending {
+            events.push(playhead.enqueue(invocation)?);
+        }
+        inner.playhead = Some(playhead);
+        self.journal_playhead_locked(&mut inner, events)
+    }
+
     /// Enqueue a flow at the innermost active invocation. The queue keeps the
-    /// expanded plan until a definition change resets the playhead.
+    /// expanded plan until that invocation runs.
     pub fn enqueue_flow(&self, flow: &str) -> anyhow::Result<PlayheadView> {
         self.ensure_playhead()?;
         let invocation = QueuedInvocation::load(&self.repo_root, flow)?;
@@ -1024,6 +1082,7 @@ impl WaveRuntime {
             playhead: inner.playhead.as_ref().map(Playhead::view),
             playhead_rx: self.playhead_tx.subscribe(),
             pending: inner.pending_messages.clone(),
+            chat_tail: unanswered_chat_tail_locked(&inner),
             tasks: inner.tasks.clone(),
             projects: inner.projects.clone(),
             promotions: inner.promotions.clone(),
@@ -1093,7 +1152,10 @@ impl WaveRuntime {
         }
 
         if let Some(OpenTurn {
-            mut turn, claims, ..
+            mut turn,
+            claims,
+            reply_to,
+            ..
         }) = open
         {
             inner.drop_deltas_until_opened = true;
@@ -1108,7 +1170,15 @@ impl WaveRuntime {
             turn.status = status;
             turn.close_body(finished.at_rfc3339(), Some(reason.to_string()));
             self.transition_locked(&mut inner, LoopState::Idle, reason);
-            self.commit_locked(&mut inner, turn);
+            let committed = self.commit_locked(&mut inner, turn);
+            if status == Lifecycle::Completed {
+                if let Some(message_id) = reply_to {
+                    inner
+                        .chat_reply_targets
+                        .insert(committed.id.clone(), message_id);
+                }
+                self.plan_discord_delivery_locked(&mut inner, &committed);
+            }
         }
 
         if let Some(body_id) = active_body_id {
@@ -1143,9 +1213,6 @@ impl WaveRuntime {
     fn commit_locked(&self, inner: &mut Inner, turn: ChatTurn) -> ChatTurn {
         turn.validate()
             .expect("Wave thread entries must satisfy the ChatTurn wire invariant");
-        if turn.role == ChatRole::Assistant {
-            inner.last_assistant_turn_id = Some(turn.id.clone());
-        }
         inner.thread.push(turn.clone());
         // A send error just means no live subscribers — the store has it. The
         // finalized whole turn re-baselines any client that grew it from deltas.
@@ -1155,50 +1222,21 @@ impl WaveRuntime {
         turn
     }
 
-    /// Deliver one op from the thread door, uninterpreted by the caller:
-    /// the door validates SHAPE (op names, text presence) and hands the op
-    /// here; what an op *means* lives in this runtime and the loop's
-    /// scheduler. A bare interrupt (empty text) journals nothing
-    /// and appends no turn — `None`; every other delivery journals a
-    /// `UserMessage`, commits the user turn, and queues for the loop.
-    pub fn deliver(&self, op: MessageOp, text: String) -> Option<ChatTurn> {
-        self.try_deliver(op, text)
-            .expect("journal truth must accept a message before runtime delivery")
-    }
-
-    /// Deliver one human op only after its journal row is durable.
-    ///
-    /// The HTTP door uses this form so a failed write returns a non-success
-    /// response and leaves the transcript, pending queue, and live broadcasts
-    /// untouched. The caller may retry the same message.
-    ///
-    /// # Errors
-    /// The message's journal append could not be written and flushed.
-    pub fn try_deliver(
-        &self,
-        op: MessageOp,
-        text: String,
-    ) -> Result<Option<ChatTurn>, JournalAppendError> {
-        if op == MessageOp::Interrupt && text.trim().is_empty() {
-            self.deliver_interrupt();
-            return Ok(None);
-        }
-        self.try_deliver_message(text, op).map(Some)
-    }
-
     /// Deliver through the product write door, governed by the active epoch.
     /// A bare interrupt is a Wave control and remains available in either
-    /// backing; authored text never falls through to a local shadow thread.
+    /// backing and returns `None`. Text is journaled before updating the
+    /// transcript or broadcasting; an absent author name stays unknown.
     ///
     /// # Errors
     /// Discord-backed authored text is rejected at this local write boundary;
     /// the server routes it through the attached provider before calling here.
     /// Without a provider attachment, the active epoch owns its Open-in-Discord
     /// action. Local journal append failures leave every projection untouched.
-    pub fn try_deliver_authored(
+    pub fn try_deliver(
         &self,
         op: MessageOp,
         text: String,
+        author_name: Option<String>,
     ) -> Result<Option<ChatTurn>, ChatWriteError> {
         if op == MessageOp::Interrupt && text.trim().is_empty() {
             self.deliver_interrupt();
@@ -1210,39 +1248,36 @@ impl WaveRuntime {
         ) {
             return Err(ChatWriteError::OpenDiscord);
         }
-        self.try_deliver(op, text).map_err(ChatWriteError::from)
-    }
-
-    fn try_deliver_message(
-        &self,
-        text: String,
-        op: MessageOp,
-    ) -> Result<ChatTurn, JournalAppendError> {
         let mut inner = self.inner();
+        let author_name = author_name
+            .as_deref()
+            .and_then(crate::engine::config::normalize_user_name);
         let event = inner.journal.try_append(|seq| EventKind::UserMessage {
             id: MessageId(format!("msg-{seq}")),
             op,
             text: text.clone(),
+            author_name: author_name.clone(),
         })?;
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+        turn.author_name = author_name.clone();
         turn.created_at = event.at_rfc3339();
         let turn = self.commit_locked(&mut inner, turn);
-        // The pending fold stays live (not boot-only): it is the replay the
-        // resident's subscription serves and the validator for its `answers`.
+        // Chat is a stream to observe: a message signals the resident to observe
+        // (inbox broadcast) and is readable via read_channel — it is never queued
+        // as pending input to consume.
         let pending = PendingMessage {
             id,
             op,
-            text,
+            text: super::journal::attributed_message(&text, author_name.as_deref()),
             source: None,
         };
         inner.messages.insert(pending.id.clone(), pending.clone());
-        inner.pending_messages.push(pending.clone());
+
         // Inbox broadcast still under the lock, so inbox order == journal
-        // order — sending after release lets two deliveries invert. A send
-        // error just means no live subscribers; the pending fold has it.
+        // order — sending after release lets two deliveries invert.
         let _ = self.inbox_tx.send(InboxItem::Message(pending));
-        Ok(turn)
+        Ok(Some(turn))
     }
 
     #[cfg(test)]
@@ -1392,12 +1427,11 @@ impl WaveRuntime {
         match delta {
             ResidentDelta::TurnOpened { answers } => self.resident_turn_opened(answers),
             ResidentDelta::TurnText { text } => self.resident_turn_text(text),
+            ResidentDelta::TurnReplyTo { message_id } => self.resident_turn_reply_to(message_id),
             ResidentDelta::TurnItem { item } => self.resident_turn_item(item),
             ResidentDelta::TurnFinished { status, reason } => {
                 self.resident_turn_finished(status, reason)
             }
-            ResidentDelta::TurnSteered { answers } => self.resident_turn_steered(answers),
-            ResidentDelta::MessagesRequeued { ids } => self.resident_requeue(ids),
             ResidentDelta::BodyStarted { body } => {
                 if let Err(err) = self.start_body(body) {
                     tracing::warn!(error = %err, "resident body start rejected");
@@ -1497,6 +1531,7 @@ impl WaveRuntime {
             "turn opened",
         );
         let open = ChatTurn {
+            author_name: None,
             id: turn_id,
             role: ChatRole::Assistant,
             text: String::new(),
@@ -1513,7 +1548,35 @@ impl WaveRuntime {
             turn: open,
             text_items: 0,
             claims,
+            reply_to: None,
         });
+    }
+
+    fn resident_turn_reply_to(&self, message_id: String) {
+        let mut inner = self.inner();
+        if inner.drop_deltas_until_opened {
+            return;
+        }
+        let message_id = MessageId(message_id);
+        if !inner
+            .messages
+            .get(&message_id)
+            .is_some_and(|message| message.op == MessageOp::Message)
+        {
+            tracing::warn!(message_id = %message_id.0, "reply target is not a chat message; dropped");
+            return;
+        }
+        let Some(turn_id) = inner.open.as_ref().map(|open| open.turn.id.clone()) else {
+            tracing::warn!("reply relation with no open turn; dropped");
+            return;
+        };
+        inner.journal.append(|_| EventKind::ChatReplyLinked {
+            turn_id,
+            message_id: message_id.clone(),
+        });
+        if let Some(open) = inner.open.as_mut() {
+            open.reply_to = Some(message_id);
+        }
     }
 
     fn resident_turn_text(&self, text: String) {
@@ -1572,7 +1635,10 @@ impl WaveRuntime {
             return;
         }
         let Some(OpenTurn {
-            mut turn, claims, ..
+            mut turn,
+            claims,
+            reply_to,
+            ..
         }) = inner.open.take()
         else {
             tracing::warn!("TurnFinished with no open turn; dropped");
@@ -1593,16 +1659,16 @@ impl WaveRuntime {
         self.transition_locked(&mut inner, LoopState::Idle, "turn finalized");
         let committed = self.commit_locked(&mut inner, turn);
         if status == Lifecycle::Completed {
-            self.plan_discord_delivery_locked(&mut inner, &committed, &claims);
+            if let Some(message_id) = reply_to {
+                inner
+                    .chat_reply_targets
+                    .insert(committed.id.clone(), message_id);
+            }
+            self.plan_discord_delivery_locked(&mut inner, &committed);
         }
     }
 
-    fn plan_discord_delivery_locked(
-        &self,
-        inner: &mut Inner,
-        turn: &ChatTurn,
-        claims: &[MessageId],
-    ) {
+    fn plan_discord_delivery_locked(&self, inner: &mut Inner, turn: &ChatTurn) {
         let Some(binding) = inner
             .conversation_epochs
             .last()
@@ -1610,7 +1676,12 @@ impl WaveRuntime {
         else {
             return;
         };
-        let Some(delivery) = build_discord_delivery(turn, claims, &inner.messages, &binding) else {
+        let Some(delivery) = build_discord_delivery(
+            turn,
+            inner.chat_reply_targets.get(&turn.id),
+            &inner.messages,
+            &binding,
+        ) else {
             return;
         };
         if inner.discord_deliveries.contains_key(&delivery.delivery_id) {
@@ -1626,59 +1697,6 @@ impl WaveRuntime {
         inner
             .discord_deliveries
             .insert(delivery.delivery_id.clone(), delivery);
-    }
-
-    /// Steer consumption (`TurnSteered.answers`). Normally the live turn
-    /// consumed the message; when the turn closed between the harness
-    /// accepting the input and this delta arriving (the send/journal race),
-    /// consumption lands against the last assistant turn — the vendor heard
-    /// the text either way, and an unmarked message would stay pending
-    /// forever and be re-sent on every resident restart. A user turn is never
-    /// named. With no assistant turn anywhere (unreachable through the
-    /// resident's steer path, which requires an open turn) nothing is claimed
-    /// or journaled — the message stays pending.
-    fn resident_turn_steered(&self, answers: Vec<String>) {
-        let mut inner = self.inner();
-        let (turn_id, turn_live) = match inner.state.clone() {
-            LoopState::Turning { turn_id } | LoopState::Interrupting { turn_id } => (turn_id, true),
-            _ => match inner.last_assistant_turn_id.clone() {
-                Some(turn_id) => (turn_id, false),
-                None => {
-                    tracing::warn!("TurnSteered with no assistant turn anywhere; kept pending");
-                    return;
-                }
-            },
-        };
-        let answers = claim_answers(&mut inner, answers);
-        if answers.is_empty() {
-            return;
-        }
-        // Steered into the live turn: part of its claims, requeued with them
-        // if the turn ends without completing. The boundary-race fallback
-        // names a turn that already closed completed — nothing to track.
-        if turn_live {
-            if let Some(open) = inner.open.as_mut() {
-                open.claims.extend(answers.iter().cloned());
-            }
-        }
-        inner
-            .journal
-            .append(|_| EventKind::TurnSteered { turn_id, answers });
-    }
-
-    /// The resident's explicit consumption undo ([`ResidentDelta::
-    /// MessagesRequeued`]): it claimed these ids but the vendor never
-    /// received the input (harness send failed after the claim journaled).
-    /// Restore them to the pending fold — the next replay re-delivers; ids
-    /// still pending or unknown are dropped by the restore's own guards.
-    fn resident_requeue(&self, ids: Vec<String>) {
-        let mut inner = self.inner();
-        let ids: Vec<MessageId> = ids.into_iter().map(MessageId).collect();
-        // Undone claims must not requeue a second time when the turn ends.
-        if let Some(open) = inner.open.as_mut() {
-            open.claims.retain(|claim| !ids.contains(claim));
-        }
-        self.requeue_locked(&mut inner, &ids);
     }
 }
 
@@ -1786,6 +1804,41 @@ fn turn_journal_seq(turn: &ChatTurn) -> Option<u64> {
     turn.id.strip_prefix("turn-")?.parse().ok()
 }
 
+/// The newest chat message (`msg-<seq>`, participant or app-authored), used only to
+/// trigger one re-read of the channel after connect/restart. Observation and
+/// promotion inputs carry typed ids, so they never leak into this trigger.
+fn unanswered_chat_tail_locked(inner: &Inner) -> Vec<PendingMessage> {
+    let message_seq = |message: &PendingMessage| {
+        message
+            .id
+            .0
+            .strip_prefix("msg-")
+            .and_then(|seq| seq.parse::<u64>().ok())
+    };
+    inner
+        .messages
+        .values()
+        .filter(|message| message.op == MessageOp::Message)
+        .filter(|message| {
+            !inner
+                .chat_reply_targets
+                .values()
+                .any(|reply_to| reply_to == &message.id)
+        })
+        .filter(|message| message_seq(message).is_some())
+        .max_by_key(|message| message_seq(message).unwrap_or_default())
+        .cloned()
+        .into_iter()
+        .collect()
+}
+
+fn channel_turn_id_for_message(message_id: &MessageId) -> Option<String> {
+    message_id
+        .0
+        .strip_prefix("msg-")
+        .map(|seq| format!("turn-{seq}"))
+}
+
 fn tail_chat_messages(
     messages: Vec<WaveChatMessage>,
     limit: Option<usize>,
@@ -1832,22 +1885,22 @@ fn snapshot_tail_locked(inner: &Inner, limit: Option<usize>) -> Vec<ChatTurn> {
 
 fn build_discord_delivery(
     turn: &ChatTurn,
-    claims: &[MessageId],
+    reply_to: Option<&MessageId>,
     messages: &HashMap<MessageId, PendingMessage>,
     binding: &DiscordChatBinding,
 ) -> Option<DiscordDelivery> {
     if turn.text.trim().is_empty() {
         return None;
     }
-    let sources = claims
-        .iter()
-        .filter_map(|claim| {
-            messages
-                .get(claim)
-                .and_then(|message| message.source.clone())
-        })
+    // Replies carry an explicit Discord-shaped edge. Autonomous governance
+    // turns have no edge and are posted top-level; chronology never decides
+    // that a bot turn answered a chat message.
+    let sources = reply_to
+        .and_then(|message_id| messages.get(message_id))
+        .and_then(|message| message.source.clone())
         .filter(|source| &source.binding == binding)
-        .collect::<Vec<_>>();
+        .into_iter()
+        .collect();
     let mut hasher = Sha256::new();
     hasher.update(binding.guild_id.as_bytes());
     hasher.update(binding.channel_id.as_bytes());
@@ -1897,9 +1950,6 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use crate::controller::wave::playhead::{StepKind, StepPlan};
-    use crate::engine::OccurrencePolicy;
-
     /// Parse the sequence out of a `"turn-<n>"` id; panics on a malformed one
     /// (ids are always minted from journal seqs).
     fn turn_seq(id: &str) -> u64 {
@@ -1915,6 +1965,7 @@ mod tests {
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
+            author_name: None,
             id: String::new(),
             role: ChatRole::Assistant,
             text: text.to_string(),
@@ -1930,6 +1981,22 @@ mod tests {
         WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
     }
 
+    /// Put a durable wake in the pending fold the way a governance observation
+    /// does (chat no longer queues, so the pending/consumption machinery is
+    /// exercised through observations). Returns its pending id.
+    fn deliver_wake(rt: &WaveRuntime, n: i64, summary: &str) -> MessageId {
+        let observation = crate::work::task::TaskObservation {
+            task_id: crate::work::task::TaskId::from_raw(format!("task_{n}")),
+            issue_identifier: format!("INF-{n}"),
+            event_id: n,
+            event: crate::work::task::TaskEventKind::Progress {
+                summary: summary.to_string(),
+            },
+        };
+        assert!(rt.deliver_task_observation(observation.clone()));
+        MessageId(observation.inbox_id())
+    }
+
     fn open_discord_runtime(repo: &Path, binding: &DiscordChatBinding) -> Arc<WaveRuntime> {
         WaveRuntime::open_with_backing(
             "ship".into(),
@@ -1940,105 +2007,76 @@ mod tests {
     }
 
     #[test]
-    fn stale_wave_definition_resets_once_and_preserves_pending_input() {
+    fn read_channel_returns_the_conversation_including_the_bots_own_posts() {
+        use crate::controller::wave::channel::Author;
         let tmp = tempfile::tempdir().expect("tempdir");
-        let path = journal_path(tmp.path(), "ship");
-        let (mut journal, _) = Journal::open(&path).expect("open journal");
-        let mut root = QueuedInvocation {
-            id: "wave-root".to_string(),
-            flow: "wave".to_string(),
-            steps: ["wave_clarify", "wave_pursue", "wave_mutate"]
-                .into_iter()
-                .map(|name| StepPlan {
-                    name: name.to_string(),
-                    kind: StepKind::Skill,
-                    policy: OccurrencePolicy::default(),
-                })
-                .collect(),
-        };
-        root.steps[1].kind = StepKind::Op;
-        let (playhead, event) = Playhead::resume_root(root, 2, 7).expect("legacy playhead");
-        journal.append(|_| EventKind::PlayheadChanged {
-            event,
-            playhead: Box::new(playhead),
-        });
-        drop(journal);
+        let runtime = open_runtime(tmp.path());
+        runtime
+            .try_deliver(MessageOp::Message, "what's the top task?".into(), None)
+            .expect("journal write")
+            .expect("chat message");
+        runtime.append_finalized_turn(progress_turn("The top task is LOO-258."), Vec::new());
 
-        let rt = open_runtime(tmp.path());
-        rt.deliver(MessageOp::Message, "recover".to_string())
-            .expect("pending recovery message");
-        let reset = rt.ensure_playhead().expect("reset stale definition");
-        let current = reset.now.as_ref().expect("fresh root step");
-        assert_eq!(current.step, "wave/clarify");
-        assert_eq!(current.index, 0);
-        assert_eq!(current.iteration, 0);
-        assert_eq!(reset.stack.len(), 1);
-        assert!(reset.stack[0].queue.is_empty());
-        assert_ne!(reset.stack[0].id, "wave-root");
-        assert_eq!(rt.pending_messages().len(), 1);
+        let all = runtime.read_channel(None);
+        assert_eq!(all.len(), 2);
+        assert!(matches!(all[0].author, Author::Human { .. }));
+        assert_eq!(all[0].content, "what's the top task?");
+        // The wave's own reply reads back — this is how it knows it answered.
+        assert!(all[1].is_own());
+        assert_eq!(all[1].content, "The top task is LOO-258.");
 
-        let repeated = rt.ensure_playhead().expect("idempotent definition check");
-        assert_eq!(repeated, reset);
-        drop(rt);
-
-        let reopened = open_runtime(tmp.path());
-        let current = reopened
-            .playhead()
-            .expect("replayed reset playhead")
-            .now
-            .expect("selected fresh step");
-        assert_eq!(current.step, "wave/clarify");
-        assert_eq!(current.iteration, 0);
-        assert_eq!(reopened.pending_messages().len(), 1);
-        drop(reopened);
-
-        let (_, events) = Journal::open(&path).expect("read reset journal");
-        let resets = events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    &event.kind,
-                    EventKind::PlayheadChanged {
-                        event: PlayheadEvent::DefinitionReset,
-                        ..
-                    }
-                )
-            })
-            .count();
-        assert_eq!(resets, 1);
+        // Reading after the chat turn's cursor skips it, keeping the own reply.
+        let cursor = all[0]
+            .id
+            .strip_prefix("turn-")
+            .and_then(|seq| seq.parse::<u64>().ok())
+            .expect("turn seq");
+        let after = runtime.read_channel(Some(cursor));
+        assert_eq!(after.len(), 1);
+        assert!(after[0].is_own());
     }
 
     #[test]
-    fn stale_wave_definition_waits_for_the_active_body_to_close() {
+    fn a_later_bot_post_never_hides_the_restart_chat_trigger() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let playhead = rt.ensure_playhead().expect("initialize playhead");
-        let body = BodyProvenance::for_step(&playhead.now.expect("current step"), tmp.path());
-        let body_id = body.body_id.clone();
-        rt.start_body(body).expect("start body");
+        let runtime = open_runtime(tmp.path());
+        runtime
+            .try_deliver(MessageOp::Message, "please answer this".into(), None)
+            .expect("journal write")
+            .expect("chat message");
 
-        let flows = tmp.path().join(".lf/flows");
-        std::fs::create_dir_all(&flows).expect("flow directory");
-        std::fs::write(flows.join("wave.yaml"), "- replacement\n").expect("replacement flow");
+        // This can be governance news that happened to finish after the participant
+        // message; chronology does not prove that it answered the message.
+        runtime.append_finalized_turn(progress_turn("unrelated task finished"), Vec::new());
 
-        assert_eq!(
-            rt.ensure_playhead()
-                .expect("active body stays pinned")
-                .now
-                .expect("original step remains")
-                .step,
-            "wave/clarify"
-        );
-        rt.finish_body(&body_id, StepOutcome::Failed, "body ended")
-            .expect("close active body");
-        assert_eq!(
-            rt.ensure_playhead()
-                .expect("reset after body closes")
-                .now
-                .expect("fresh root")
-                .step,
-            "replacement"
-        );
+        let triggers = runtime.unanswered_chat_tail();
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0].text, "please answer this");
+    }
+
+    #[test]
+    fn explicit_chat_reply_relation_survives_restart_without_consumption() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = open_runtime(tmp.path());
+        runtime
+            .try_deliver(MessageOp::Message, "what is two plus two?".into(), None)
+            .expect("journal write")
+            .expect("chat message");
+        let message_id = runtime.unanswered_chat_tail()[0].id.0.clone();
+        runtime.apply_resident_delta(d_opened(&[]));
+        runtime.apply_resident_delta(ResidentDelta::TurnReplyTo { message_id });
+        runtime.apply_resident_delta(d_text("Four."));
+        runtime.apply_resident_delta(d_finished(Lifecycle::Completed));
+
+        assert!(runtime.unanswered_chat_tail().is_empty());
+        let channel = runtime.read_channel(None);
+        assert_eq!(channel[1].reply_to.as_deref(), Some(channel[0].id.as_str()));
+
+        drop(runtime);
+        let reopened = open_runtime(tmp.path());
+        assert!(reopened.unanswered_chat_tail().is_empty());
+        let channel = reopened.read_channel(None);
+        assert_eq!(channel[1].reply_to.as_deref(), Some(channel[0].id.as_str()));
     }
 
     // -- Wire delta builders (the resident door's vocabulary) --
@@ -2118,7 +2156,8 @@ mod tests {
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
         let turn = rt
-            .deliver(MessageOp::Message, "how goes it?".into())
+            .try_deliver(MessageOp::Message, "how goes it?".into(), None)
+            .expect("journal write")
             .expect("user turn");
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
@@ -2129,8 +2168,8 @@ mod tests {
         assert_eq!(msg.text, "how goes it?");
         assert_eq!(msg.op, MessageOp::Message);
         assert_eq!(msg.id, MessageId(msg_id(&turn)));
-        // And the durable queue has it immediately — no reboot needed.
-        assert_eq!(rt.pending_messages().len(), 1);
+        // Chat is observed via the live broadcast, not queued as pending input.
+        assert!(rt.pending_messages().is_empty());
     }
 
     #[test]
@@ -2174,7 +2213,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         for i in 0..5 {
-            rt.deliver(MessageOp::Message, format!("message {i}"))
+            rt.try_deliver(MessageOp::Message, format!("message {i}"), None)
+                .expect("journal write")
                 .expect("user turn");
         }
 
@@ -2187,7 +2227,8 @@ mod tests {
             vec!["message 3", "message 4"]
         );
 
-        rt.deliver(MessageOp::Message, "message 5".into())
+        rt.try_deliver(MessageOp::Message, "message 5".into(), None)
+            .expect("journal write")
             .expect("live user turn");
         assert_eq!(
             sub.turn_rx
@@ -2388,24 +2429,20 @@ mod tests {
     fn turn_opened_answers_are_validated_against_the_pending_fold() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt
-            .deliver(MessageOp::Message, "first".into())
-            .expect("user turn");
-        let m2 = rt
-            .deliver(MessageOp::Message, "second".into())
-            .expect("user turn");
+        let m1 = deliver_wake(&rt, 1, "first");
+        let m2 = deliver_wake(&rt, 2, "second");
         assert_eq!(rt.pending_messages().len(), 2);
 
-        // The turn claims both real messages plus a ghost id.
-        rt.apply_resident_delta(d_opened(&[&msg_id(&m1), &msg_id(&m2), "msg-999"]));
+        // The turn claims both real wakes plus a ghost id.
+        rt.apply_resident_delta(d_opened(&[&m1.0, &m2.0, "msg-999"]));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         assert!(
             rt.pending_messages().is_empty(),
-            "claimed messages leave the live pending fold"
+            "claimed wakes leave the live pending fold"
         );
 
         // A second turn re-claiming a consumed id gets nothing.
-        rt.apply_resident_delta(d_opened(&[&msg_id(&m1)]));
+        rt.apply_resident_delta(d_opened(&[&m1.0]));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
 
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
@@ -2419,7 +2456,7 @@ mod tests {
         assert_eq!(answers.len(), 2);
         assert_eq!(
             answers[0],
-            vec![MessageId(msg_id(&m1)), MessageId(msg_id(&m2))],
+            vec![m1.clone(), m2.clone()],
             "valid ids journaled, the ghost dropped"
         );
         assert!(answers[1].is_empty(), "already-consumed ids never re-claim");
@@ -2689,17 +2726,15 @@ mod tests {
     fn failed_turn_requeues_its_claimed_messages() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt
-            .deliver(MessageOp::Message, "do the thing".into())
-            .expect("user turn");
+        let m1 = deliver_wake(&rt, 1, "do the thing");
 
-        rt.apply_resident_delta(d_opened(&[&msg_id(&m1)]));
+        rt.apply_resident_delta(d_opened(&[&m1.0]));
         assert!(rt.pending_messages().is_empty(), "claimed at open");
         // The turn fails: the vendor never answered it, back to pending.
         rt.apply_resident_delta(d_finished(Lifecycle::Failed));
         let pending = rt.pending_messages();
         assert_eq!(pending.len(), 1, "failed turn requeues its claim");
-        assert_eq!(pending[0].text, "do the thing");
+        assert_eq!(pending[0].id, m1);
 
         // The fold agrees on restart — the requeue is journaled.
         let rt2 = open_runtime(tmp.path());
@@ -2709,10 +2744,8 @@ mod tests {
         // path above still holds m1's requeue, which never re-answered).
         let tmp3 = tempfile::tempdir().expect("tempdir");
         let rt3 = open_runtime(tmp3.path());
-        let m2 = rt3
-            .deliver(MessageOp::Message, "second".into())
-            .expect("user turn");
-        rt3.apply_resident_delta(d_opened(&[&msg_id(&m2)]));
+        let m2 = deliver_wake(&rt3, 2, "second");
+        rt3.apply_resident_delta(d_opened(&[&m2.0]));
         rt3.apply_resident_delta(d_finished(Lifecycle::Completed));
         assert!(
             rt3.pending_messages().is_empty(),
@@ -2729,13 +2762,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let claimed = {
             let rt = open_runtime(tmp.path());
-            let m = rt
-                .deliver(MessageOp::Message, "answer me".into())
-                .expect("user turn");
+            let m = deliver_wake(&rt, 1, "answer me");
             // Turn opens and claims it, then the server crashes (no finish).
-            rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
+            rt.apply_resident_delta(d_opened(&[&m.0]));
             assert!(rt.pending_messages().is_empty());
-            msg_id(&m)
+            m.0
         };
         // Second life: the janitor closes the crashed turn AND requeues.
         let rt = open_runtime(tmp.path());
@@ -2745,32 +2776,6 @@ mod tests {
         // Idempotent: a third boot doesn't requeue twice.
         let rt2 = open_runtime(tmp.path());
         assert_eq!(rt2.pending_messages().len(), 1);
-    }
-
-    /// The resident's explicit consumption undo (`MessagesRequeued`): a claim
-    /// the vendor never received is returned to pending, and the turn's own
-    /// terminal delta does not requeue it a second time.
-    #[test]
-    fn resident_requeue_undoes_a_claim_at_most_once() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let m = rt
-            .deliver(MessageOp::Steer, "steer".into())
-            .expect("user turn");
-        rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
-        // The harness send failed after the claim: the resident undoes it.
-        rt.apply_resident_delta(ResidentDelta::MessagesRequeued {
-            ids: vec![msg_id(&m)],
-        });
-        assert_eq!(
-            rt.pending_messages().len(),
-            1,
-            "undone claim back to pending"
-        );
-        // The turn then finishes failed: the already-undone claim is not
-        // requeued a second time (still exactly one pending).
-        rt.apply_resident_delta(d_finished(Lifecycle::Failed));
-        assert_eq!(rt.pending_messages().len(), 1, "no double requeue");
     }
 
     /// A paused wave (GOAL.md `paused: true`) refuses to START a turn: the
@@ -2788,21 +2793,19 @@ mod tests {
         .unwrap();
         let rt = open_runtime(origin);
         assert!(rt.paused(), "GOAL.md says paused");
-        let m = rt
-            .deliver(MessageOp::Message, "go".into())
-            .expect("user turn");
+        let m = deliver_wake(&rt, 1, "go");
 
-        rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
+        rt.apply_resident_delta(d_opened(&[&m.0]));
         rt.apply_resident_delta(d_text("working"));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-        // No assistant turn committed; the message is still queued.
+        // No assistant turn committed; the wake is still queued.
         assert!(
             rt.thread_snapshot()
                 .iter()
                 .all(|t| t.role == ChatRole::User),
             "paused: no assistant turn started"
         );
-        assert_eq!(rt.pending_messages().len(), 1, "the message waits");
+        assert_eq!(rt.pending_messages().len(), 1, "the wake waits");
 
         // Unpause: the next turn goes through.
         std::fs::write(
@@ -2811,122 +2814,11 @@ mod tests {
         )
         .unwrap();
         assert!(!rt.paused());
-        rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
+        rt.apply_resident_delta(d_opened(&[&m.0]));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         assert!(
             rt.pending_messages().is_empty(),
             "unpaused turn answered it"
-        );
-    }
-
-    /// Steer consumption over the wire: the live turn answers a steered
-    /// message; the boundary race (turn closed during the send) falls back to
-    /// the last assistant turn; nothing is claimed with no assistant turn
-    /// anywhere.
-    #[test]
-    fn turn_steered_consumes_against_live_or_just_closed_turn() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-
-        let m1 = rt
-            .deliver(MessageOp::Steer, "steer me".into())
-            .expect("user turn");
-        let m2 = rt
-            .deliver(MessageOp::Steer, "me too".into())
-            .expect("user turn");
-
-        // No assistant turn anywhere: nothing journaled, both stay pending.
-        rt.apply_resident_delta(ResidentDelta::TurnSteered {
-            answers: vec![msg_id(&m1)],
-        });
-        assert_eq!(rt.pending_messages().len(), 2, "kept pending");
-
-        // First consumed mid-turn, the normal steer path.
-        rt.apply_resident_delta(d_opened(&[]));
-        rt.apply_resident_delta(ResidentDelta::TurnSteered {
-            answers: vec![msg_id(&m1)],
-        });
-        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-
-        // The boundary race: the turn closed between the harness accepting
-        // the input and the delta arriving. The marker still lands, against
-        // the last assistant turn.
-        rt.apply_resident_delta(ResidentDelta::TurnSteered {
-            answers: vec![msg_id(&m2)],
-        });
-
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let assistant_turn = rt
-            .thread_snapshot()
-            .iter()
-            .find(|turn| turn.role == ChatRole::Assistant)
-            .map(|turn| turn.id.clone())
-            .expect("assistant turn");
-        let steered: Vec<_> = events
-            .iter()
-            .filter_map(|e| match &e.kind {
-                EventKind::TurnSteered { turn_id, answers } => {
-                    Some((turn_id.clone(), answers.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            steered,
-            vec![
-                (assistant_turn.clone(), vec![MessageId(msg_id(&m1))]),
-                (assistant_turn, vec![MessageId(msg_id(&m2))]),
-            ],
-            "both markers name the turn that heard the text"
-        );
-
-        // And the fold agrees: neither message re-sends after a restart.
-        let fold = fold_thread(&events);
-        assert!(
-            fold.pending_messages.is_empty(),
-            "consumed messages never re-send: {:?}",
-            fold.pending_messages
-        );
-    }
-
-    /// The steer-consumption fallback is seeded from the journal on boot: a
-    /// restarted runtime still names the last assistant turn, never the user
-    /// turn that carried the steer text.
-    #[test]
-    fn turn_steered_fallback_survives_restart() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let assistant_id = {
-            let rt = open_runtime(tmp.path());
-            rt.apply_resident_delta(d_opened(&[]));
-            rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-            rt.thread_snapshot()
-                .iter()
-                .find(|turn| turn.role == ChatRole::Assistant)
-                .expect("assistant turn")
-                .id
-                .clone()
-        };
-
-        let rt = open_runtime(tmp.path());
-        // The steer's own user turn is now the thread's last turn.
-        let steer = rt
-            .deliver(MessageOp::Steer, "steer me".into())
-            .expect("user turn");
-        rt.apply_resident_delta(ResidentDelta::TurnSteered {
-            answers: vec![msg_id(&steer)],
-        });
-
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let steered_turn = events
-            .iter()
-            .find_map(|e| match &e.kind {
-                EventKind::TurnSteered { turn_id, .. } => Some(turn_id.clone()),
-                _ => None,
-            })
-            .expect("TurnSteered journaled");
-        assert_eq!(
-            steered_turn, assistant_id,
-            "fallback names the first life's assistant turn, not the user turn"
         );
     }
 
@@ -2938,9 +2830,11 @@ mod tests {
         std::fs::create_dir_all(&origin).unwrap();
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
 
-        rt.deliver(MessageOp::Message, "to the wave".into())
+        rt.try_deliver(MessageOp::Message, "to the wave".into(), None)
+            .expect("journal write")
             .expect("user turn");
-        rt.deliver(MessageOp::Message, "to a".into());
+        rt.try_deliver(MessageOp::Message, "to a".into(), None)
+            .expect("journal write");
 
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
@@ -2958,12 +2852,15 @@ mod tests {
             .count();
         assert_eq!(messages, 2);
 
-        // Consumption: both are queued for the loop across a reopen.
+        // Readable across a reopen (chat is a stream to observe, not queued).
         let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
-        let pending = rt2.pending_messages();
-        let texts: Vec<_> = pending.iter().map(|m| m.text.as_str()).collect();
+        let texts: Vec<_> = rt2
+            .read_channel(None)
+            .into_iter()
+            .map(|message| message.content)
+            .collect();
         assert_eq!(texts.len(), 2);
-        assert!(texts.contains(&"to the wave") && texts.contains(&"to a"));
+        assert!(texts.contains(&"to the wave".to_string()) && texts.contains(&"to a".to_string()));
     }
 
     /// A subscription's snapshot carries the pending queue (the resident's
@@ -2972,15 +2869,17 @@ mod tests {
     fn subscription_carries_pending_replay_and_live_inbox() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        rt.deliver(MessageOp::Message, "before".into())
-            .expect("user turn");
+        // A governance wake (observation) is the pending-replay carrier; chat is
+        // observed live, never queued.
+        let before = deliver_wake(&rt, 1, "before");
 
         let mut sub = rt.subscribe_with_snapshot(None);
         assert_eq!(sub.pending.len(), 1);
-        assert_eq!(sub.pending[0].text, "before");
+        assert_eq!(sub.pending[0].id, before);
         assert!(sub.inbox_rx.try_recv().is_err(), "no frames from before");
 
-        rt.deliver(MessageOp::Message, "after".into())
+        rt.try_deliver(MessageOp::Message, "after".into(), None)
+            .expect("journal write")
             .expect("user turn");
         rt.deliver_interrupt();
         let InboxItem::Message(live) = sub.inbox_rx.try_recv().expect("live frame") else {
@@ -3007,7 +2906,8 @@ mod tests {
             let rt = rt.clone();
             handles.push(std::thread::spawn(move || {
                 for i in 0..50 {
-                    rt.deliver(MessageOp::Message, format!("m-{writer}-{i}"))
+                    rt.try_deliver(MessageOp::Message, format!("m-{writer}-{i}"), None)
+                        .expect("journal write")
                         .expect("user turn");
                 }
             }));
@@ -3046,6 +2946,7 @@ mod tests {
             channel_id: "channel".into(),
         };
         let source = DiscordMessageSource {
+            author_name: None,
             binding: binding.clone(),
             message_id: "101".into(),
             author_id: "human".into(),
@@ -3074,10 +2975,16 @@ mod tests {
         assert!(!reopened
             .try_deliver_discord("hello".into(), source)
             .expect("refetched input"));
-        assert_eq!(reopened.pending_messages().len(), 1);
-        assert!(reopened.pending_messages()[0]
-            .text
-            .starts_with("[discord://guild/channel/101]"));
+        // The discord message is readable (a channel turn), not queued as pending.
+        let channel = reopened.read_channel(None);
+        assert_eq!(channel.len(), 1, "one readable discord message");
+        assert_eq!(channel[0].content, "hello");
+        assert!(matches!(
+            &channel[0].author,
+            Author::Bridge { platform, user, .. }
+                if platform == "discord" && user == "human"
+        ));
+        assert!(reopened.pending_messages().is_empty());
         reopened
             .try_advance_discord_cursor(&binding, "101".into())
             .expect("commit cursor");
@@ -3094,40 +3001,90 @@ mod tests {
     }
 
     #[test]
-    fn discord_app_steer_keeps_its_operation_after_restart() {
-        let tmp = tempfile::tempdir().expect("tempdir");
+    fn request_authors_survive_local_replay_without_rewriting_conversation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rt = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap();
+        for name in [Some("Jack"), Some("Maya"), None] {
+            rt.try_deliver(
+                MessageOp::Message,
+                "You chose the prototype path.".into(),
+                name.map(str::to_string),
+            )
+            .unwrap();
+        }
+        let live = rt.read_channel(None);
+        let turns = rt.thread_tail(None);
+        drop(rt);
+        let reopened = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap();
+        assert_eq!(reopened.read_channel(None), live);
+        assert_eq!(reopened.thread_tail(None), turns);
+        assert_eq!(
+            turns
+                .iter()
+                .map(|turn| turn.author_name.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("Jack"), Some("Maya"), None]
+        );
+        assert!(turns
+            .iter()
+            .all(|turn| turn.text == "You chose the prototype path."));
+        assert_eq!(
+            live[0].author,
+            Author::Human {
+                name: "Jack".into()
+            }
+        );
+        assert_eq!(
+            live[1].author,
+            Author::Human {
+                name: "Maya".into()
+            }
+        );
+        assert_eq!(
+            live[2].author,
+            Author::Human {
+                name: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn request_authors_keep_discord_ids_separate_from_display_names() {
+        let tmp = tempfile::tempdir().unwrap();
         let binding = DiscordChatBinding {
             guild_id: "guild".into(),
             channel_id: "channel".into(),
         };
-        let source = DiscordMessageSource {
-            binding: binding.clone(),
-            message_id: "102".into(),
-            author_id: "bot".into(),
-        };
         let rt = open_discord_runtime(tmp.path(), &binding);
-        rt.try_attach_discord(binding.clone(), "bot".into(), Some("101".into()))
-            .expect("attach at current head");
-
-        assert!(rt
-            .try_deliver_discord_authored("change course".into(), source.clone(), MessageOp::Steer)
-            .expect("journal app steer"));
-        assert!(!rt
-            .try_deliver_discord_authored("change course".into(), source.clone(), MessageOp::Steer)
-            .expect("deduplicate app steer"));
-        assert_eq!(rt.pending_messages()[0].op, MessageOp::Steer);
-
+        for (id, name) in [("101", Some("Jack")), ("102", Some("Maya")), ("103", None)] {
+            rt.try_deliver_discord(
+                "prototype".into(),
+                DiscordMessageSource {
+                    binding: binding.clone(),
+                    message_id: id.into(),
+                    author_id: format!("person-{id}"),
+                    author_name: name.map(str::to_string),
+                },
+            )
+            .unwrap();
+        }
+        let live = rt.read_channel(None);
         drop(rt);
         let reopened = open_discord_runtime(tmp.path(), &binding);
-        assert_eq!(reopened.pending_messages().len(), 1);
-        assert_eq!(reopened.pending_messages()[0].op, MessageOp::Steer);
-        assert_eq!(
-            reopened.pending_messages()[0]
-                .source
-                .as_ref()
-                .expect("Discord source"),
-            &source
-        );
+        assert_eq!(reopened.read_channel(None), live);
+        for (message, (id, name)) in
+            live.iter()
+                .zip([("101", Some("Jack")), ("102", Some("Maya")), ("103", None)])
+        {
+            assert_eq!(
+                message.author,
+                Author::Bridge {
+                    platform: "discord".into(),
+                    user: format!("person-{id}"),
+                    name: name.map(str::to_string)
+                }
+            );
+        }
     }
 
     #[test]
@@ -3143,14 +3100,16 @@ mod tests {
         rt.try_deliver_discord(
             "question".into(),
             DiscordMessageSource {
+                author_name: None,
                 binding: binding.clone(),
                 message_id: "101".into(),
                 author_id: "human".into(),
             },
         )
         .expect("deliver");
-        let message_id = rt.pending_messages()[0].id.0.clone();
-        rt.apply_resident_delta(d_opened(&[&message_id]));
+        // Observe: the reply is an instantaneous turn (no consumption); delivery
+        // to the Discord epoch still chunks the outbound content.
+        rt.apply_resident_delta(d_opened(&[]));
         rt.apply_resident_delta(d_text(&"x".repeat(2_001)));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
 
@@ -3255,7 +3214,7 @@ mod tests {
         assert_eq!(local_epoch.number, 1);
         assert_eq!(local_epoch.backing, ChatBacking::Local);
         local
-            .try_deliver_authored(MessageOp::Message, "local question".into())
+            .try_deliver(MessageOp::Message, "local question".into(), None)
             .expect("local write")
             .expect("local turn");
         let local_messages = local.chat_messages(None, None);
@@ -3283,7 +3242,7 @@ mod tests {
             crate::controller::wave::journal::read_events(&journal_path(tmp.path(), "ship"));
         let before_pending = discord.pending_messages();
         let error = discord
-            .try_deliver_authored(MessageOp::Message, "shadow message".into())
+            .try_deliver(MessageOp::Message, "shadow message".into(), None)
             .expect_err("Discord mode rejects Loopflow compose");
         assert!(matches!(error, ChatWriteError::OpenDiscord));
         let after =
@@ -3293,7 +3252,7 @@ mod tests {
         assert!(discord.chat_messages(None, None).is_empty());
 
         discord
-            .try_deliver_authored(MessageOp::Interrupt, String::new())
+            .try_deliver(MessageOp::Interrupt, String::new(), None)
             .expect("bare interrupt remains available");
         drop(discord);
         let reopened = open_discord_runtime(tmp.path(), &binding);
@@ -3319,6 +3278,7 @@ mod tests {
         let path = journal_path(tmp.path(), "ship");
         let (mut journal, _) = Journal::open(&path).expect("legacy journal");
         journal.append(|_| EventKind::UserMessage {
+            author_name: None,
             id: MessageId("legacy-message".into()),
             op: MessageOp::Message,
             text: "before epochs".into(),
@@ -3353,6 +3313,7 @@ mod tests {
         };
         let (mut journal, _) = Journal::open(&path).expect("legacy journal");
         journal.append(|_| EventKind::UserMessage {
+            author_name: None,
             id: MessageId("local-message".into()),
             op: MessageOp::Message,
             text: "local history".into(),
@@ -3361,6 +3322,7 @@ mod tests {
             id: MessageId("discord-message".into()),
             text: "provider history".into(),
             source: DiscordMessageSource {
+                author_name: None,
                 binding: binding.clone(),
                 message_id: "101".into(),
                 author_id: "human".into(),

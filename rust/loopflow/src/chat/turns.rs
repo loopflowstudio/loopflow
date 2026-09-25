@@ -6,7 +6,7 @@
 //! runtime into journaled, broadcast turns.
 //!
 //! Mapping:
-//! - a human message becomes one `user` turn;
+//! - a chat message becomes one `user` turn;
 //! - each agent turn (text + tool activity, closed by the vendor's turn
 //!   completion) becomes one `assistant` turn whose `items` capture the
 //!   commands/edits/messages it ran.
@@ -90,7 +90,9 @@ pub struct ChatTurn {
     /// Stable within the wave journal across restarts: `"turn-1"`, `"turn-2"`, …
     pub id: String,
     pub role: ChatRole,
-    /// Accumulated assistant prose (or the human message for a `user` turn).
+    /// Name recorded with the request; absent for anonymous or agent turns.
+    pub author_name: Option<String>,
+    /// Accumulated assistant prose (or the chat message for a `user` turn).
     pub text: String,
     /// Lifecycle of the turn. A `user` turn is always `Completed`.
     pub status: Lifecycle,
@@ -99,7 +101,7 @@ pub struct ChatTurn {
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
     /// Body that produced an assistant span. Required on the wire and
-    /// explicitly null for human/attributed turns.
+    /// explicitly null for user/attributed turns.
     pub body: Option<BodyProvenance>,
     /// Structured child motion rendered as a linked activity card. Required on
     /// the wire and explicitly null for ordinary conversation turns.
@@ -129,16 +131,17 @@ pub enum ChatTurnError {
     MixedActivity,
     #[error("child activity entries must be completed user-side entries")]
     InvalidActivityEnvelope,
-    #[error("human turns must be completed and cannot carry provider items or a body")]
+    #[error("user turns must be completed and cannot carry provider items or a body")]
     InvalidHumanTurn,
 }
 
 impl ChatTurn {
-    /// A completed `user` turn carrying a human message.
+    /// A completed `user` turn carrying a chat message.
     pub fn user(id: String, text: String) -> Self {
         Self {
             id,
             role: ChatRole::User,
+            author_name: None,
             text,
             status: Lifecycle::Completed,
             items: Vec::new(),
@@ -152,6 +155,7 @@ impl ChatTurn {
         Self {
             id,
             role: ChatRole::User,
+            author_name: None,
             text: String::new(),
             status: Lifecycle::Completed,
             items: Vec::new(),
@@ -199,6 +203,7 @@ impl ChatTurn {
                     return;
                 }
                 Some("commentary") => {}
+                Some("final_answer") if self.text.ends_with(text) => return,
                 _ => {
                     self.push_text(text);
                     return;
@@ -211,7 +216,7 @@ impl ChatTurn {
     /// Close the body that produced this turn, if it had one. Every terminal
     /// path goes through here — the live finalizers, the boot janitor, and the
     /// journal fold — so a replayed turn's body reads exactly as the live one
-    /// did. Human and attributed turns have no body and close as a no-op.
+    /// did. User and attributed turns have no body and close as a no-op.
     pub fn close_body(&mut self, ended_at: String, reason: Option<String>) {
         if let Some(body) = self.body.as_mut() {
             body.ended_at = Some(ended_at);
@@ -237,6 +242,7 @@ impl<'de> Deserialize<'de> for ChatTurn {
         struct Wire {
             id: String,
             role: ChatRole,
+            author_name: Option<String>,
             text: String,
             status: Lifecycle,
             items: Vec<ConversationItem>,
@@ -249,6 +255,7 @@ impl<'de> Deserialize<'de> for ChatTurn {
         let turn = Self {
             id: wire.id,
             role: wire.role,
+            author_name: wire.author_name,
             text: wire.text,
             status: wire.status,
             items: wire.items,
@@ -286,6 +293,10 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
+        TaskEventKind::Steer { text, .. } => {
+            activity(ChildActivityKind::StateChanged, "Task steer", text)
+        }
+        TaskEventKind::Interrupt => activity(ChildActivityKind::StateChanged, "Task interrupt", ""),
         TaskEventKind::PrStarted {
             sequence, branch, ..
         } => activity(
@@ -331,6 +342,12 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             "Project iteration completed",
             summary,
         ),
+        ProjectEventKind::Steer { text, .. } => {
+            activity(ChildActivityKind::StateChanged, "Project steer", text)
+        }
+        ProjectEventKind::Interrupt => {
+            activity(ChildActivityKind::StateChanged, "Project interrupt", "")
+        }
         ProjectEventKind::Completed { summary } => {
             activity(ChildActivityKind::Completed, "Project completed", summary)
         }
@@ -485,5 +502,23 @@ mod tests {
         }
 
         assert_eq!(turn.text, "hello world");
+    }
+
+    #[test]
+    fn absorb_item_does_not_repeat_a_streamed_final_answer_receipt() {
+        let mut turn = ChatTurn::user("turn-5".into(), String::new());
+        turn.role = ChatRole::Assistant;
+        turn.absorb_item(ConversationItem::Message {
+            id: "stream-1".into(),
+            text: "working\nfinal report".into(),
+            phase: Some("stream".into()),
+        });
+        turn.absorb_item(ConversationItem::Message {
+            id: "answer-1".into(),
+            text: "final report".into(),
+            phase: Some("final_answer".into()),
+        });
+
+        assert_eq!(turn.text, "working\nfinal report");
     }
 }

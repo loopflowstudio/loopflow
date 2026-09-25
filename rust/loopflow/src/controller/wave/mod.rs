@@ -46,7 +46,9 @@
 //! exists on the machine, child observations wait durably; the listener remains
 //! functional and acquires the registry when it appears.
 
+pub mod channel;
 pub mod chat;
+pub mod chat_reply;
 pub(crate) mod discord;
 pub mod journal;
 pub mod metrics;
@@ -113,21 +115,22 @@ impl<F> ListenerSignals<F> {
 /// whether the resident endpoint/token were present in env, which meant any
 /// process holding a parent's env — a tmux child, a promoted Wave — booted
 /// the wrong half by accident.
-pub fn run(name: &str, force: bool) -> Result<()> {
+pub fn run(name: &str, force: bool, restart_flow: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let registry_config = resolve_registry(&main_repo, &wave).await;
-        run_listener(
+        run_listener_with_startup(
             main_repo,
             wave,
             registry_config,
             force,
             true,
             None,
-            shutdown_signal(),
+            restart_flow,
+            ListenerSignals::new(None, shutdown_signal()),
         )
         .await
     })
@@ -279,6 +282,7 @@ fn resident_command(
 /// server without a registry store; `force` rides separately because the
 /// endpoint-file floor must honor it even when there is no registry config at
 /// all.
+#[cfg(test)]
 pub(crate) async fn run_listener(
     repo_root: PathBuf,
     wave: String,
@@ -295,6 +299,7 @@ pub(crate) async fn run_listener(
         force,
         spawn_resident,
         discord_token,
+        false,
         ListenerSignals::new(None, shutdown),
     )
     .await
@@ -303,6 +308,7 @@ pub(crate) async fn run_listener(
 /// Run a listener and publish the exact point at which its endpoint becomes
 /// attachable. The Home host uses this instead of polling the discovery file;
 /// direct `lf wave` callers need no startup receiver.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_listener_with_startup<F>(
     repo_root: PathBuf,
     wave: String,
@@ -310,6 +316,7 @@ pub(crate) async fn run_listener_with_startup<F>(
     force: bool,
     spawn_resident: bool,
     discord_token: Option<SecretString>,
+    restart_legacy_flow: bool,
     signals: ListenerSignals<F>,
 ) -> Result<()>
 where
@@ -394,29 +401,19 @@ where
 
     let (chat_backing, discord_adapter) = match try_read_wave_chat_config(&repo_root, &wave)? {
         Some(WaveChatConfig::Discord {
-            home_id,
             guild_id,
             channel_id,
         }) => {
-            let registry = registry_config.as_ref().ok_or_else(|| {
-                anyhow!("Discord chat requires the local registry to verify its owner Home")
-            })?;
-            let work = crate::durable::WorkRef::Wave(registry.wave.id().clone());
-            let placement = registry.store.placement(&work).await?;
-            let local_home = registry.store.local_home().await?;
+            // The core Discord path is local: a binding is guild+channel, and the
+            // advisory OS lock in the adapter is the single-owner authority. Which
+            // Home auto-starts this Wave is the general placement layer, not a
+            // Discord-config pin — so no registry/placement lookup here.
             let binding = journal::DiscordChatBinding {
                 guild_id,
                 channel_id,
             };
             let backing = ChatBacking::discord(&binding);
-            let adapter = discord::DiscordAdapter::preflight(
-                binding,
-                &home_id,
-                &placement.home_id,
-                &local_home.id,
-                discord_token,
-            )
-            .await?;
+            let adapter = discord::DiscordAdapter::preflight(binding, discord_token).await?;
             (backing, Some(adapter))
         }
         Some(WaveChatConfig::Local) | None => (ChatBacking::Local, None),
@@ -438,6 +435,9 @@ where
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
     let runtime = WaveRuntime::open_with_backing(wave.clone(), repo_root.clone(), chat_backing)?;
+    if restart_legacy_flow {
+        runtime.restart_legacy_playhead()?;
+    }
     if let Some(adapter) = discord_adapter.as_ref() {
         adapter.attach(&runtime)?;
     }
@@ -639,6 +639,7 @@ mod tests {
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
+            author_name: None,
             id: String::new(),
             role: ChatRole::Assistant,
             text: text.to_string(),
@@ -762,7 +763,7 @@ mod tests {
         let client = reqwest::Client::new();
         let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
-            .json(&serde_json::json!({ "op": "message", "text": "how's it going?" }))
+            .json(&serde_json::json!({ "op": "message", "text": "how's it going?", "author_name": "Jack" }))
             .send()
             .await
             .unwrap()
@@ -772,6 +773,7 @@ mod tests {
         let posted = body.message.expect("posted message").turn;
         assert_eq!(posted.role, ChatRole::User);
         assert_eq!(posted.text, "how's it going?");
+        assert_eq!(posted.author_name.as_deref(), Some("Jack"));
         assert_eq!(body.state, "idle");
 
         // The message is in the thread; the resident answers it at its next
@@ -779,9 +781,10 @@ mod tests {
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].role, ChatRole::User);
+        assert_eq!(thread[0].author_name.as_deref(), Some("Jack"));
     }
 
-    /// The thread door is the human's: `say` is not a wire op and machine
+    /// The thread accepts conversation: `say` is not a wire op and machine
     /// attribution fields are refused. Invalid operations and unknown fields
     /// are rejected before journaling.
     #[tokio::test]
@@ -797,6 +800,8 @@ mod tests {
             }),
             serde_json::json!({ "op": "say", "text": "anon" }),
             serde_json::json!({ "op": "message", "text": "hello", "from": "cli" }),
+            serde_json::json!({ "op": "steer", "text": "change course" }),
+            serde_json::json!({ "op": "interrupt", "text": "stop here" }),
         ] {
             let response = client
                 .post(format!("{base}/messages"))
@@ -811,8 +816,7 @@ mod tests {
 
         for body in [
             serde_json::json!({ "op": "message", "text": "hello" }),
-            serde_json::json!({ "op": "steer", "text": "change course" }),
-            serde_json::json!({ "op": "interrupt", "text": "stop here" }),
+            serde_json::json!({ "op": "interrupt", "text": "" }),
         ] {
             let response = client
                 .post(format!("{base}/messages"))
@@ -822,6 +826,9 @@ mod tests {
                 .unwrap();
             assert!(response.status().is_success());
         }
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1, "bare interrupt adds no speech");
+        assert_eq!(thread[0].text, "hello");
     }
 
     #[tokio::test]
@@ -1056,7 +1063,8 @@ mod tests {
     async fn events_inbox_scope_replays_pending_and_streams_ops() {
         let (base, runtime, _tmp) = boot().await;
         runtime
-            .deliver(MessageOp::Message, "queued before".into())
+            .try_deliver(MessageOp::Message, "queued before".into(), None)
+            .expect("journal write")
             .expect("user turn");
 
         let host = base.strip_prefix("http://").unwrap().to_string();
@@ -1444,7 +1452,7 @@ mod tests {
         (format!("http://{addr}"), runtime, tmp)
     }
 
-    /// The thread door is the thread's alone: a human message lands one
+    /// The thread door is the thread's alone: a chat message lands one
     /// copy in the served wave's journal, and no journal exists elsewhere.
     #[tokio::test]
     async fn a_message_is_recorded_once_in_the_waves_journal() {
@@ -1499,7 +1507,7 @@ mod tests {
         }
 
         let store = Arc::new(
-            crate::store::open_store(&crate::store::StorageConfig::sqlite(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 tmp.path().join("registry.db"),
             ))
             .await

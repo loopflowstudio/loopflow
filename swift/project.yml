@@ -40,6 +40,10 @@ targets:
       - path: LoopflowMac
         excludes:
           - Info.plist
+          - GhosttyResources
+      - path: LoopflowMac/GhosttyResources
+        buildPhase: resources
+        type: folder
     dependencies:
       - target: Loopflow
     postBuildScripts:

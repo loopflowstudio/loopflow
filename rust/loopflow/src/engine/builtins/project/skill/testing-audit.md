@@ -6,7 +6,7 @@ action_style: procedural
 ---
 Audit the repository's testing system as an evidence portfolio, not a coverage
 contest. Find what earns confidence, what tests implementation accidents, and
-where agents or humans repeatedly pay for the same proof.
+where agents or developers repeatedly pay for the same proof.
 
 ## Orientation
 

@@ -1,5 +1,0 @@
-# One bounded Project iteration. The Project runner loops this whole flow when
-# authoritative KR and Task state says another pass is actionable.
-- project/clarify
-- project/pursue
-- project/mutate

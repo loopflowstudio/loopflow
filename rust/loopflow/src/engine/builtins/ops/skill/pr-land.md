@@ -23,8 +23,12 @@ re-derive what these already record.
 
 `lf pr land` stages uncommitted changes, rebases, creates or updates the PR,
 requests exact-head auto-merge, and watches GitHub. Failing required checks get
-one bounded `ci-fix` repair per failed head; a material repair is published and
-re-armed. The command returns only after merge or an actionable durable block.
+`ci-fix` repairs until resolved. The agent rebases, repairs, verifies,
+then publishes and enables auto-merge with the original Task disposition. The
+watcher only observes and launches repairs; it returns after merge or an
+actionable durable block. Rerun `lf pr land` after resolving a blocker; the same
+head can resume without an empty commit. Repair conclusions are retained in
+ordinary Runs (`lf runs <run> --final`).
 In a Task worktree, bare land settles one PR and keeps the Task open.
 
 Use `lf pr arm` for the one-shot prepare/request/return operation.
@@ -55,18 +59,15 @@ If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exis
 
 If those files are missing or stale, write title/body manually and pass `--title` + `--body`.
 
-**Title guidelines:** lowercase, concise, area prefix when focused.
-
-Examples:
-- `mobile: quote replies on iOS`
-- `cost: add analytics dashboard with timeseries API`
-- `fix worktree cleanup on branch delete`
-
-**Body:** markdown. Structure:
-
-1. **Usage** — code block showing how to try it or see it in action
-2. **Summary** — one paragraph on what changed and why
-3. **Changes** — optional bullet list for larger PRs
+Keep the title and opening summary focused on the benefit of this PR's actual
+change. Preserve command spelling and proper names; use an area prefix only
+when it helps recognition. Follow with minimal **What changes**, then **Why it
+matters** only if needed, and material limits. Keep automated test and lint results
+in **Checks** or CI. Put **Try it** last when useful: a user action and its visible
+result, never tests, test commands, or test results. Distinguish suggested steps
+from observed behavior and label simulations. Small changes may need only a summary
+and walkthrough. Reconcile changed scope instead of appending history. Loopflow adds
+Task identity and merge consequences; do not repeat or invent them.
 
 ### 3. Land
 

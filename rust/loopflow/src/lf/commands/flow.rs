@@ -34,9 +34,9 @@ pub fn validate(name: &str, repo: &Path) -> Result<()> {
     let mut human = human_occurrence_ids(&flow, repo)?;
     human.sort();
     if human.is_empty() {
-        println!("{}: valid (no human nodes)", flow.name);
+        println!("{}: valid (no review steps)", flow.name);
     } else {
-        println!("{}: valid (human nodes: {})", flow.name, human.join(", "));
+        println!("{}: valid (review steps: {})", flow.name, human.join(", "));
     }
     Ok(())
 }
@@ -154,13 +154,13 @@ fn render_pipeline_lines(items: &[ConcreteStep], repo: &Path) -> Result<Vec<Stri
 fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>> {
     match item {
         ConcreteStep::Skill(skill) if skill.policy.human => Ok(vec![format!(
-            "{} [human:{}]",
+            "{} [review:{}]",
             skill.skill.name,
             skill
                 .policy
                 .id
                 .as_deref()
-                .expect("validated human node has an id"),
+                .expect("validated review node has an id"),
         )]),
         ConcreteStep::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
         ConcreteStep::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
@@ -273,9 +273,9 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                 .policy
                 .id
                 .as_deref()
-                .expect("validated human flow node has an id");
+                .expect("validated review step has an id");
             anyhow::bail!(
-                "human flow node {node_id} requires an attached User surface; run it through durable Task Work to park it as a human session"
+                "review step {node_id} requires an attached User surface; run it through durable Task Work to park it as a session"
             );
         }
         if let Some(progress) = ctx.progress {
@@ -311,7 +311,7 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                             .policy
                             .id
                             .as_deref()
-                            .expect("validated human node has an id"),
+                            .expect("validated review node has an id"),
                         &mut std::io::stdin().lock(),
                         &mut std::io::stderr().lock(),
                     )?;
@@ -354,12 +354,12 @@ fn confirm_present_human_review(
 ) -> Result<()> {
     write!(
         output,
-        "Accept human flow node {node_id} against its exact current content? [y/N] "
+        "Approve step {node_id} against its exact current content? [y/N] "
     )?;
     output.flush()?;
     let mut response = String::new();
     if input.read_line(&mut response)? == 0 {
-        anyhow::bail!("human flow node {node_id} exited without explicit User acceptance");
+        anyhow::bail!("review step {node_id} exited without explicit User acceptance");
     }
     if matches!(
         response.trim().to_ascii_lowercase().as_str(),
@@ -367,7 +367,7 @@ fn confirm_present_human_review(
     ) {
         return Ok(());
     }
-    anyhow::bail!("human flow node {node_id} was not accepted by the User")
+    anyhow::bail!("review step {node_id} was not accepted by the User")
 }
 
 fn print_skill_progress(progress: FlowProgress, skill_name: &str) {
@@ -568,7 +568,6 @@ mod tests {
                                 skill: None,
                                 steps: Vec::new(),
                                 description: "Adjust the chord".to_string(),
-                                direction: Vec::new(),
                             },
                         ),
                         (
@@ -578,7 +577,6 @@ mod tests {
                                 skill: None,
                                 steps: Vec::new(),
                                 description: "No-op".to_string(),
-                                direction: Vec::new(),
                             },
                         ),
                     ]
@@ -615,7 +613,7 @@ mod tests {
             lines,
             vec![
                 "kickoff".to_string(),
-                "review-design [human:review_kickoff]".to_string(),
+                "review-design [review:review_kickoff]".to_string(),
             ]
         );
     }
@@ -637,7 +635,7 @@ mod tests {
         assert!(render_pipeline_lines(&items, repo.path())
             .unwrap()
             .iter()
-            .any(|line| line.contains("review-design [human:review_choice]")));
+            .any(|line| line.contains("review-design [review:review_choice]")));
     }
 
     #[test]
@@ -648,7 +646,7 @@ mod tests {
             &mut std::io::Cursor::new("accept\n"),
             &mut output,
         )
-        .expect("typed acceptance settles the present-human node");
+        .expect("typed acceptance settles the interactive review step");
         assert!(String::from_utf8(output)
             .unwrap()
             .contains("exact current content"));

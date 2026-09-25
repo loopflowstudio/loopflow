@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::{FlowPosition, ProjectId, RunId, WorkRef, WorkStatus};
+use crate::engine::Skill;
 use crate::id::WaveId;
 use crate::run_record::{ProviderSessionRef, RunManifest, RUN_DIR_ENV};
 use crate::store::SharedStore;
@@ -26,16 +27,17 @@ const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FlowSessionToken {
     pub(crate) task_id: TaskId,
+    pub(crate) invocation_id: String,
     pub(crate) flow: String,
     pub(crate) node_id: String,
-    pub(crate) skill: String,
+    pub(crate) skill: Skill,
     pub(crate) iteration: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum HumanSessionToken {
-    Flow { token: FlowSessionToken },
+    Flow { token: Box<FlowSessionToken> },
     Ask { id: String },
 }
 
@@ -74,6 +76,7 @@ pub struct SessionRecord {
     pub id: String,
     pub kind: SessionKind,
     pub work: Option<WorkRef>,
+    pub wave_id: Option<crate::id::WaveId>,
     pub title: String,
     pub detail: String,
     pub cwd: String,
@@ -110,12 +113,12 @@ struct AskSessionRecord {
 enum SessionTarget {
     Interactive {
         dir: PathBuf,
-        manifest: RunManifest,
+        manifest: Box<RunManifest>,
         provider_session: ProviderSessionRef,
     },
     Ask(AskSessionRecord),
     Flow {
-        task: Task,
+        task: Box<Task>,
         position: FlowPosition,
     },
 }
@@ -147,7 +150,9 @@ pub(crate) async fn ask(store: &SharedStore, question: &str) -> Result<String> {
         work,
         work_selector,
         title: question_title(question),
-        detail: manifest.skill.unwrap_or_else(|| "Human ask".to_string()),
+        detail: manifest
+            .skill
+            .unwrap_or_else(|| "Request for input".to_string()),
         prompt: question.to_string(),
         cwd,
         model,
@@ -161,7 +166,7 @@ pub(crate) async fn ask(store: &SharedStore, question: &str) -> Result<String> {
         return Err(error);
     }
     eprintln!(
-        "Waiting for human session {}. Open it in Loopflow or with `lf session open {}`.",
+        "Waiting for session {}. Open it in Loopflow or with `lf session open {}`.",
         record.id, record.id
     );
     wait_for_ask(&record.id).await
@@ -177,13 +182,13 @@ pub(crate) async fn prepare(
     if position.session_run_id.is_some() {
         return Ok(surface);
     }
-    let placement = store.placement(&position.work).await?;
+    let placement = store.placement(&position.work()).await?;
     let home = store
         .home_by_id(&placement.home_id)
         .await?
         .ok_or_else(|| anyhow!("Task {} Home {} disappeared", task.id, placement.home_id))?;
     if home.route != "local" {
-        bail!("human session starts on its placed Home; resume the Task there");
+        bail!("session starts on its placed Home; resume the Task there");
     }
     launch_flow(task, position).await?;
     flow_surface(store, task, position).await
@@ -194,6 +199,16 @@ pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     sessions.extend(list_ask_sessions().await?);
     let boundary_runs = boundary_run_ids(store).await?;
     sessions.extend(list_interactive_sessions(&boundary_runs)?);
+    for session in &mut sessions {
+        session.wave_id = match &session.work {
+            Some(WorkRef::Wave(id)) => Some(id.clone()),
+            Some(WorkRef::Task(id)) => store.get_task(id).await?.map(|task| task.wave_id),
+            Some(WorkRef::Project(id)) => {
+                store.get_project(id).await?.map(|project| project.wave_id)
+            }
+            None => None,
+        };
+    }
     sessions.sort_by(|left, right| left.title.cmp(&right.title).then(left.id.cmp(&right.id)));
     Ok(sessions)
 }
@@ -214,7 +229,7 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
                 })?;
             return Ok(Some(SessionTarget::Interactive {
                 dir,
-                manifest,
+                manifest: Box::new(manifest),
                 provider_session,
             }));
         }
@@ -224,14 +239,17 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
 
     if let Some(record) = read_ask_record(session_id)? {
         if !matches!(record.status, AskSessionStatus::Waiting) {
-            bail!("human session {:?} is already resolved", record.id);
+            bail!("session {:?} is already resolved", record.id);
         }
         return Ok(Some(SessionTarget::Ask(record)));
     }
     let Some((task, position)) = find_flow_session_optional(store, session_id).await? else {
         return Ok(None);
     };
-    Ok(Some(SessionTarget::Flow { task, position }))
+    Ok(Some(SessionTarget::Flow {
+        task: Box::new(task),
+        position,
+    }))
 }
 
 async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<SessionRecord> {
@@ -251,25 +269,24 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     let token = active_session_token()?;
     match token {
         HumanSessionToken::Flow { token } => {
-            let work = WorkRef::Task(token.task_id.clone());
             let mut position = store
-                .flow_position(&work)
+                .flow_position(&token.task_id)
                 .await?
-                .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
+                .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
             if !token_matches(&token, &position)
                 || position.session_run_id.as_ref() != Some(&run_id)
             {
-                bail!("human flow session is stale");
+                bail!("review session is stale");
             }
             position.ready_summary = Some(summary.to_string());
             position.updated_at = time::OffsetDateTime::now_utc();
-            store.set_flow_position(&work, position).await?;
+            store.set_flow_position(&token.task_id, position).await?;
         }
         HumanSessionToken::Ask { id } => {
-            let mut record = read_ask_record(&id)?
-                .ok_or_else(|| anyhow!("human Ask session {id:?} no longer exists"))?;
+            let mut record =
+                read_ask_record(&id)?.ok_or_else(|| anyhow!("session {id:?} no longer exists"))?;
             if record.session_run_id.as_ref() != Some(&run_id) {
-                bail!("human Ask session is stale");
+                bail!("session is stale");
             }
             record.ready_summary = Some(summary.to_string());
             write_ask_record(&record)?;
@@ -312,12 +329,25 @@ pub(crate) async fn decide(
         .map_err(|error| anyhow!(error.to_string()))
 }
 
+pub(crate) async fn decision_worktree(store: &SharedStore, session_id: &str) -> Result<PathBuf> {
+    match find_session(store, session_id)
+        .await?
+        .ok_or_else(|| session_not_found(session_id))?
+    {
+        SessionTarget::Flow { task, .. } => Ok(task.worktree.clone()),
+        SessionTarget::Interactive { .. } => {
+            bail!("Interactive Sessions use `lf session complete`")
+        }
+        SessionTarget::Ask(_) => bail!("Ad-hoc Ask Sessions use `lf session complete`"),
+    }
+}
+
 async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowPosition) {
     let Some(run_id) = position.session_run_id.clone() else {
         return;
     };
     let result = async {
-        let placement = store.placement(&position.work).await?;
+        let placement = store.placement(&position.work()).await?;
         let home = store
             .home_by_id(&placement.home_id)
             .await?
@@ -337,7 +367,7 @@ async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowPosition
             crate::lf::commands::ssh::capture_home_command(&home.id, &repo, &command)
         })
         .await
-        .context("join remote human Session stop")?
+        .context("join remote Session stop")?
         .map(|_| ())
         .map_err(|error| anyhow!(error.to_string()))
     }
@@ -370,18 +400,29 @@ async fn complete_ask(session_id: &str) -> Result<()> {
 pub(crate) async fn serve_flow(
     store: SharedStore,
     task_id: TaskId,
+    invocation_id: String,
     flow: String,
     node_id: String,
     skill: String,
     iteration: u32,
 ) -> Result<()> {
-    let token = FlowSessionToken {
-        task_id,
-        flow,
-        node_id,
-        skill,
-        iteration,
-    };
+    let task = store
+        .get_task(&task_id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
+    let position = store
+        .flow_position(&task_id)
+        .await?
+        .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
+    let token = flow_token(&task, &position)?;
+    if token.invocation_id != invocation_id
+        || token.flow != flow
+        || token.node_id != node_id
+        || token.skill.name != skill
+        || token.iteration != iteration
+    {
+        bail!("review session is stale");
+    }
     let launch_lock = lock_session_launch(&flow_token_id(&token))?;
     serve_flow_locked(store, token, launch_lock).await
 }
@@ -396,37 +437,43 @@ async fn serve_flow_locked(
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared", token.task_id))?;
     validate_token(&store, &token).await?;
+    let position = store
+        .flow_position(&token.task_id)
+        .await?
+        .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
+    if let Some(failure) = &position.failure {
+        bail!("review session cannot start: {}", failure.reason);
+    }
     let message = flow_message(&task, &token);
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let selector = format!("task:{}", token.task_id);
     let serialized = serde_json::to_string(&HumanSessionToken::Flow {
-        token: token.clone(),
+        token: Box::new(token.clone()),
     })?;
     let mut command = tokio::process::Command::new(lf);
     command
-        .args(["--tui", "--as", &selector, &token.skill, &message])
+        .args(["--tui", "--as", &selector, &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized);
     let (mut child, run_id) = spawn_session_run(&mut command).await?;
-    let work = WorkRef::Task(token.task_id.clone());
     let mut position = store
-        .flow_position(&work)
+        .flow_position(&token.task_id)
         .await?
-        .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
+        .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
     if !token_matches(&token, &position) {
         let _ = child.kill().await;
-        bail!("human flow session is stale");
+        bail!("review session is stale");
     }
     position.session_run_id = Some(run_id);
     position.ready_summary = None;
     position.updated_at = time::OffsetDateTime::now_utc();
-    store.set_flow_position(&work, position).await?;
+    store.set_flow_position(&token.task_id, position).await?;
     drop(launch_lock);
-    let status = child.wait().await.context("wait for human flow skill")?;
+    let status = child.wait().await.context("wait for review skill")?;
     if status.success() {
         Ok(())
     } else {
-        Err(anyhow!("human flow skill exited with {status}"))
+        Err(anyhow!("review skill exited with {status}"))
     }
 }
 
@@ -437,9 +484,9 @@ pub(crate) async fn serve_ask(id: &str) -> Result<()> {
 
 async fn serve_ask_locked(id: &str, launch_lock: File) -> Result<()> {
     let mut record =
-        read_ask_record(id)?.ok_or_else(|| anyhow!("human Ask session {id:?} no longer exists"))?;
+        read_ask_record(id)?.ok_or_else(|| anyhow!("session {id:?} no longer exists"))?;
     if !matches!(record.status, AskSessionStatus::Waiting) {
-        bail!("human Ask session {id:?} is already resolved");
+        bail!("session {id:?} is already resolved");
     }
     let message = ask_message(&record);
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
@@ -466,11 +513,11 @@ async fn serve_ask_locked(id: &str, launch_lock: File) -> Result<()> {
     record.ready_summary = None;
     write_ask_record(&record)?;
     drop(launch_lock);
-    let status = child.wait().await.context("wait for human Ask agent")?;
+    let status = child.wait().await.context("wait for session agent")?;
     if status.success() {
         Ok(())
     } else {
-        Err(anyhow!("human Ask agent exited with {status}"))
+        Err(anyhow!("session agent exited with {status}"))
     }
 }
 
@@ -483,12 +530,10 @@ pub(crate) fn publish_run_binding(run_id: &RunId) -> Result<()> {
     options.write(true).create_new(true);
     #[cfg(unix)]
     options.mode(0o600);
-    let mut file = options
-        .open(&path)
-        .context("publish human Session Run binding")?;
+    let mut file = options.open(&path).context("publish Session Run binding")?;
     file.write_all(run_id.as_str().as_bytes())
-        .context("write human Session Run binding")?;
-    file.sync_all().context("sync human Session Run binding")
+        .context("write Session Run binding")?;
+    file.sync_all().context("sync Session Run binding")
 }
 
 pub(crate) async fn open(
@@ -516,14 +561,16 @@ pub(crate) async fn open(
                         manifest.harness
                     );
                 }
-                OpenMode::Replace => crate::lf::commands::util::replace_provider_clients(
+                OpenMode::Replace if resume => crate::lf::commands::util::replace_provider_clients(
                     dir,
                     &manifest.harness,
                     &active_clients,
+                    crate::run_record::ProviderClientStopReason::Moved,
                 )?,
+                OpenMode::Replace => {}
                 OpenMode::Refuse | OpenMode::Try => {}
             }
-            let session = interactive_surface(dir, manifest)?;
+            let mut session = interactive_surface(dir, manifest)?;
             if resume {
                 crate::lf::commands::util::resume_session(
                     &manifest.harness,
@@ -533,6 +580,12 @@ pub(crate) async fn open(
                     dir,
                     provider_session,
                 )?;
+            } else {
+                match mode {
+                    OpenMode::Replace => session.open_argv.push("--replace".to_string()),
+                    OpenMode::Try => session.open_argv.push("--try".to_string()),
+                    OpenMode::Refuse => {}
+                }
             }
             Ok(session)
         }
@@ -562,6 +615,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
                 dir,
                 &manifest.harness,
                 &active_clients,
+                crate::run_record::ProviderClientStopReason::Completed,
             )?;
             crate::run_record::resolve_provider_session(dir)
                 .map_err(|error| anyhow!("cannot complete Session {}: {error}", manifest.run_id))?;
@@ -581,7 +635,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
 async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
     if let Some(mut record) = read_ask_record(session_id)? {
         if !matches!(record.status, AskSessionStatus::Waiting) {
-            bail!("human Ask session {session_id:?} is already complete");
+            bail!("session {session_id:?} is already complete");
         }
         if let Some(run_id) = &record.session_run_id {
             if resume_native_run(
@@ -598,7 +652,7 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
         }
         let launch_lock = lock_session_launch(session_id)?;
         record = read_ask_record(session_id)?
-            .ok_or_else(|| anyhow!("human Ask session {session_id:?} no longer exists"))?;
+            .ok_or_else(|| anyhow!("session {session_id:?} no longer exists"))?;
         if let Some(run_id) = &record.session_run_id {
             if resume_native_run(
                 run_id,
@@ -621,7 +675,7 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
         if resume_native_run(
             run_id,
             &HumanSessionToken::Flow {
-                token: token.clone(),
+                token: Box::new(token.clone()),
             },
         )? {
             return Ok(());
@@ -629,8 +683,8 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
         position.session_run_id = None;
         position.ready_summary = None;
         position.updated_at = time::OffsetDateTime::now_utc();
-        let work = position.work.clone();
-        store.set_flow_position(&work, position).await?;
+        let task_id = position.task_id.clone();
+        store.set_flow_position(&task_id, position).await?;
     }
     let launch_lock = lock_session_launch(session_id)?;
     let (_, current) = find_flow_session(store, session_id).await?;
@@ -638,7 +692,7 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
         if resume_native_run(
             run_id,
             &HumanSessionToken::Flow {
-                token: token.clone(),
+                token: Box::new(token.clone()),
             },
         )? {
             return Ok(());
@@ -653,7 +707,7 @@ pub(crate) fn stop_run(run_id: &RunId) -> Result<()> {
 
 async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
     let mut run_ids = store
-        .human_flow_positions()
+        .human_task_flow_positions()
         .await?
         .into_iter()
         .filter_map(|position| position.session_run_id)
@@ -662,10 +716,10 @@ async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(run_ids),
-        Err(error) => return Err(error).context("read human session directory"),
+        Err(error) => return Err(error).context("read session directory"),
     };
     for entry in entries {
-        let entry = entry.context("read human session entry")?;
+        let entry = entry.context("read session entry")?;
         let Some(id) = entry
             .file_name()
             .to_str()
@@ -706,6 +760,7 @@ fn interactive_surface(dir: &Path, manifest: &RunManifest) -> Result<SessionReco
     Ok(SessionRecord {
         id: manifest.run_id.to_string(),
         kind: SessionKind::Interactive,
+        wave_id: None,
         work: attributed_work(manifest),
         title: session_title(dir, manifest),
         detail: match &manifest.model {
@@ -793,13 +848,13 @@ async fn spawn_session_run(
     command: &mut tokio::process::Command,
 ) -> Result<(tokio::process::Child, RunId)> {
     let directory = ask_session_directory();
-    fs::create_dir_all(&directory).context("create human Session directory")?;
+    fs::create_dir_all(&directory).context("create Session directory")?;
     let binding = directory.join(format!(".run-bind-{}", uuid::Uuid::new_v4().simple()));
     let mut child = command
         .env(RUN_BIND_PATH_ENV, &binding)
         .kill_on_drop(true)
         .spawn()
-        .context("launch human Session Run")?;
+        .context("launch Session Run")?;
     let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
     let mut run = None;
     loop {
@@ -810,11 +865,11 @@ async fn spawn_session_run(
                     let home = crate::store::observability_home_dir();
                     let (dir, manifest) =
                         crate::run_record::resolve_manifest(&home, run_id.as_str())
-                            .context("resolve published human Session Run")?;
+                            .context("resolve published Session Run")?;
                     run = Some((run_id, dir, manifest));
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error).context("read human Session Run binding"),
+                Err(error) => return Err(error).context("read Session Run binding"),
             }
         }
         if let Some((run_id, dir, manifest)) = &run {
@@ -823,13 +878,13 @@ async fn spawn_session_run(
                 return Ok((child, run_id.clone()));
             }
         }
-        if let Some(status) = child.try_wait().context("probe human Session Run")? {
+        if let Some(status) = child.try_wait().context("probe Session Run")? {
             let _ = fs::remove_file(&binding);
-            bail!("human Session Run exited with {status} before becoming resumable");
+            bail!("Session Run exited with {status} before becoming resumable");
         }
         if tokio::time::Instant::now() >= deadline {
             let _ = fs::remove_file(&binding);
-            bail!("human Session Run did not become resumable within 30s");
+            bail!("Session Run did not become resumable within 30s");
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -847,10 +902,15 @@ fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Result<bool> 
     let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
         Ok(value) => value,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error).context("resolve human Session Run"),
+        Err(error) => return Err(error).context("resolve Session Run"),
     };
     let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
-    crate::lf::commands::util::replace_provider_clients(&dir, &manifest.harness, &clients)?;
+    crate::lf::commands::util::replace_provider_clients(
+        &dir,
+        &manifest.harness,
+        &clients,
+        crate::run_record::ProviderClientStopReason::Moved,
+    )?;
     let Some(provider_session) = crate::run_record::read_provider_session(&dir)? else {
         return Ok(false);
     };
@@ -873,10 +933,15 @@ fn stop_native_run(run_id: &RunId) -> Result<()> {
     let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
         Ok(value) => value,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error).context("resolve human Session Run"),
+        Err(error) => return Err(error).context("resolve Session Run"),
     };
     let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
-    crate::lf::commands::util::replace_provider_clients(&dir, &manifest.harness, &clients)?;
+    crate::lf::commands::util::replace_provider_clients(
+        &dir,
+        &manifest.harness,
+        &clients,
+        crate::run_record::ProviderClientStopReason::Completed,
+    )?;
     if crate::run_record::read_provider_session(&dir)?.is_some() {
         crate::run_record::resolve_provider_session(&dir)?;
     }
@@ -899,7 +964,7 @@ fn native_session_state(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(SessionState::Waiting);
         }
-        Err(error) => return Err(error).context("resolve human Session Run"),
+        Err(error) => return Err(error).context("resolve Session Run"),
     };
     if !crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?.is_empty() {
         return Ok(SessionState::Active);
@@ -915,9 +980,8 @@ pub(crate) async fn token_is_current(
     store: &SharedStore,
     token: &FlowSessionToken,
 ) -> Result<bool> {
-    let work = WorkRef::Task(token.task_id.clone());
     Ok(store
-        .flow_position(&work)
+        .flow_position(&token.task_id)
         .await?
         .as_ref()
         .is_some_and(|position| token_matches(token, position)))
@@ -925,14 +989,11 @@ pub(crate) async fn token_is_current(
 
 async fn list_flow_sessions(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     let mut sessions = Vec::new();
-    for position in store.human_flow_positions().await? {
-        let WorkRef::Task(task_id) = &position.work else {
+    for position in store.human_task_flow_positions().await? {
+        let Some(task) = store.get_task(&position.task_id).await? else {
             continue;
         };
-        let Some(task) = store.get_task(task_id).await? else {
-            continue;
-        };
-        if store.work_status(&position.work).await? != WorkStatus::Ready {
+        if store.work_status(&position.work()).await? != WorkStatus::Ready {
             continue;
         }
         sessions.push(flow_surface(store, &task, &position).await?);
@@ -945,11 +1006,11 @@ async fn list_ask_sessions() -> Result<Vec<SessionRecord>> {
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error).context("read human session directory"),
+        Err(error) => return Err(error).context("read session directory"),
     };
     let mut sessions = Vec::new();
     for entry in entries {
-        let entry = entry.context("read human session entry")?;
+        let entry = entry.context("read session entry")?;
         let file_name = entry.file_name();
         let Some(id) = file_name
             .to_str()
@@ -970,24 +1031,21 @@ async fn list_ask_sessions() -> Result<Vec<SessionRecord>> {
 async fn find_flow_session(store: &SharedStore, session_id: &str) -> Result<(Task, FlowPosition)> {
     find_flow_session_optional(store, session_id)
         .await?
-        .ok_or_else(|| anyhow!("human session {session_id:?} is no longer waiting"))
+        .ok_or_else(|| anyhow!("session {session_id:?} is no longer waiting"))
 }
 
 async fn find_flow_session_optional(
     store: &SharedStore,
     session_id: &str,
 ) -> Result<Option<(Task, FlowPosition)>> {
-    for position in store.human_flow_positions().await? {
+    for position in store.human_task_flow_positions().await? {
         if flow_id(&position)? != session_id {
             continue;
         }
-        let WorkRef::Task(task_id) = &position.work else {
-            break;
-        };
         let task = store
-            .get_task(task_id)
+            .get_task(&position.task_id)
             .await?
-            .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
+            .ok_or_else(|| anyhow!("Task {} disappeared", position.task_id))?;
         return Ok(Some((task, position)));
     }
     Ok(None)
@@ -999,7 +1057,8 @@ async fn flow_surface(
     position: &FlowPosition,
 ) -> Result<SessionRecord> {
     validate_task_position(task, position)?;
-    let placement = store.placement(&position.work).await?;
+    let step = position.current();
+    let placement = store.placement(&position.work()).await?;
     let home = store
         .home_by_id(&placement.home_id)
         .await?
@@ -1025,9 +1084,10 @@ async fn flow_surface(
     Ok(SessionRecord {
         id,
         kind: SessionKind::Flow,
-        work: Some(position.work.clone()),
+        wave_id: Some(task.wave_id.clone()),
+        work: Some(position.work()),
         title: task.plan.title.clone(),
-        detail: position.step.clone(),
+        detail: step.step,
         cwd: task.worktree.display().to_string(),
         state: runtime,
         ready_summary: position.ready_summary.clone(),
@@ -1044,6 +1104,7 @@ fn ask_surface(record: &AskSessionRecord) -> Result<SessionRecord> {
     Ok(SessionRecord {
         id: record.id.clone(),
         kind: SessionKind::Ask,
+        wave_id: None,
         work: record.work.clone(),
         title: record.title.clone(),
         detail: record.detail.clone(),
@@ -1077,15 +1138,17 @@ fn human_open_argv(
 }
 
 fn validate_task_position(task: &Task, position: &FlowPosition) -> Result<()> {
-    if position.work != WorkRef::Task(task.id.clone()) || !position.human {
-        return Err(anyhow!("human session does not belong to Task {}", task.id));
+    if position.task_id != task.id || !position.is_human() {
+        return Err(anyhow!("session does not belong to Task {}", task.id));
     }
-    let node_id = position
-        .node_id
+    let step = position.current();
+    let node_id = step
+        .policy
+        .id
         .as_deref()
-        .ok_or_else(|| anyhow!("human flow position has no node id"))?;
+        .ok_or_else(|| anyhow!("review flow position has no node id"))?;
     if node_id.trim().is_empty() {
-        return Err(anyhow!("human flow position has an empty node id"));
+        return Err(anyhow!("review flow position has an empty node id"));
     }
     Ok(())
 }
@@ -1094,37 +1157,44 @@ async fn validate_token(store: &SharedStore, token: &FlowSessionToken) -> Result
     if token_is_current(store, token).await? {
         Ok(())
     } else {
-        Err(anyhow!("human flow session is stale"))
+        Err(anyhow!("review session is stale"))
     }
 }
 
 fn flow_token(task: &Task, position: &FlowPosition) -> Result<FlowSessionToken> {
     validate_task_position(task, position)?;
+    let step = position.current();
+    let crate::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
+        bail!("review flow position does not select a Skill");
+    };
     Ok(FlowSessionToken {
         task_id: task.id.clone(),
-        flow: position.flow.clone(),
-        node_id: position
-            .node_id
-            .clone()
+        invocation_id: position.invocation.id.clone(),
+        flow: step.flow,
+        node_id: step
+            .policy
+            .id
             .expect("validated human position has a node id"),
-        skill: position.step.clone(),
+        skill: planned.skill.clone(),
         iteration: position.iteration,
     })
 }
 
 fn token_matches(token: &FlowSessionToken, position: &FlowPosition) -> bool {
-    position.work == WorkRef::Task(token.task_id.clone())
-        && position.human
-        && position.flow == token.flow
-        && position.node_id.as_deref() == Some(token.node_id.as_str())
-        && position.step == token.skill
+    let step = position.current();
+    position.task_id == token.task_id
+        && position.invocation.id == token.invocation_id
+        && step.policy.human
+        && step.flow == token.flow
+        && step.policy.id.as_deref() == Some(token.node_id.as_str())
+        && step.step == token.skill.name
         && position.iteration == token.iteration
 }
 
 fn flow_message(task: &Task, token: &FlowSessionToken) -> String {
     format!(
-        "<lf:human-session>\nThis `{skill}` Run is the writable human session for Task {identifier} at `{node}`. Work with the human in this terminal. When your work is ready for their decision, run `lf session ready \"<concise summary>\"`. Ready does not approve, iterate, close, or advance the Task; only the human can approve or iterate on the session.\n</lf:human-session>",
-        skill = token.skill,
+        "<lf:human-session>\nThis `{skill}` Run is the writable session for Task {identifier} at `{node}`. Work with the user in this terminal. When your work is ready for their decision, run `lf session ready \"<concise summary>\"`. Ready does not approve, iterate, close, or advance the Task; only the user can approve or iterate on the session.\n</lf:human-session>",
+        skill = token.skill.name,
         identifier = task.plan.identifier,
         node = token.node_id,
     )
@@ -1132,25 +1202,28 @@ fn flow_message(task: &Task, token: &FlowSessionToken) -> String {
 
 fn ask_message(record: &AskSessionRecord) -> String {
     format!(
-        "{}\n\n<lf:human-session>\nThe originating Loopflow Run is blocked while you work with the human in this terminal. You are in the caller's checkout and may inspect or edit it. When the work is ready, run `lf session ready \"<concise summary>\"`. Ready keeps this session visible and does not resume the caller; the human completes it when the conversation is finished.\n</lf:human-session>",
+        "{}\n\n<lf:human-session>\nThe originating Loopflow Run is blocked while you work with the user in this terminal. You are in the caller's checkout and may inspect or edit it. When the work is ready, run `lf session ready \"<concise summary>\"`. Ready keeps this session visible and does not resume the caller; the user completes it when the conversation is finished.\n</lf:human-session>",
         record.prompt
     )
 }
 
 async fn launch_flow(task: &Task, position: &FlowPosition) -> Result<()> {
-    let node_id = position
-        .node_id
+    let step = position.current();
+    let node_id = step
+        .policy
+        .id
         .as_deref()
-        .ok_or_else(|| anyhow!("human flow position has no node id"))?;
+        .ok_or_else(|| anyhow!("review flow position has no node id"))?;
     let lf = crate::engine::process::resolve_current_home_lf_binary();
     let argv = vec![
         lf.to_string_lossy().to_string(),
         "session".to_string(),
         "serve-flow".to_string(),
         task.id.to_string(),
-        position.flow.clone(),
+        position.invocation.id.clone(),
+        step.flow,
         node_id.to_string(),
-        position.step.clone(),
+        step.step,
         position.iteration.to_string(),
     ];
     start_durable_session(&flow_background_name(position)?, &task.worktree, &argv, &[]).await
@@ -1199,29 +1272,28 @@ async fn start_durable_session(
 }
 
 fn flow_id(position: &FlowPosition) -> Result<String> {
-    let node_id = position
-        .node_id
+    let step = position.current();
+    let node_id = step
+        .policy
+        .id
         .as_deref()
-        .ok_or_else(|| anyhow!("human flow position has no node id"))?;
+        .ok_or_else(|| anyhow!("review flow position has no node id"))?;
     Ok(format!(
-        "{}:{}:{}:{}",
-        position.work.id(),
-        position.flow,
-        node_id,
-        position.iteration
+        "{}:{}:{}:{}:{}",
+        position.task_id, position.invocation.id, step.flow, node_id, position.iteration
     ))
 }
 
 fn flow_token_id(token: &FlowSessionToken) -> String {
     format!(
-        "{}:{}:{}:{}",
-        token.task_id, token.flow, token.node_id, token.iteration
+        "{}:{}:{}:{}:{}",
+        token.task_id, token.invocation_id, token.flow, token.node_id, token.iteration
     )
 }
 
 fn lock_session_launch(id: &str) -> Result<File> {
     let directory = ask_session_directory();
-    fs::create_dir_all(&directory).context("create human Session directory")?;
+    fs::create_dir_all(&directory).context("create Session directory")?;
     let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
     let path = directory.join(format!(".{name}.launch.lock"));
     let file = OpenOptions::new()
@@ -1230,23 +1302,25 @@ fn lock_session_launch(id: &str) -> Result<File> {
         .create(true)
         .truncate(false)
         .open(path)
-        .context("open human Session launch lock")?;
-    FileExt::lock_exclusive(&file).context("lock human Session launch")?;
+        .context("open Session launch lock")?;
+    FileExt::lock_exclusive(&file).context("lock Session launch")?;
     Ok(file)
 }
 
 fn flow_background_name(position: &FlowPosition) -> Result<String> {
+    let step = position.current();
     Ok(flow_token_background_name(&FlowSessionToken {
-        task_id: match &position.work {
-            WorkRef::Task(task_id) => task_id.clone(),
-            _ => return Err(anyhow!("human flow position is not Task Work")),
+        task_id: position.task_id.clone(),
+        invocation_id: position.invocation.id.clone(),
+        flow: step.flow,
+        node_id: step
+            .policy
+            .id
+            .ok_or_else(|| anyhow!("review flow position has no node id"))?,
+        skill: match position.current_plan() {
+            crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
+            _ => bail!("review flow position does not select a Skill"),
         },
-        flow: position.flow.clone(),
-        node_id: position
-            .node_id
-            .clone()
-            .ok_or_else(|| anyhow!("human flow position has no node id"))?,
-        skill: position.step.clone(),
         iteration: position.iteration,
     }))
 }
@@ -1263,7 +1337,8 @@ fn flow_token_background_name(token: &FlowSessionToken) -> String {
         .chars()
         .take(24)
         .collect::<String>();
-    format!("lf-human-{task}-{node}-{}", token.iteration)
+    let invocation = token.invocation_id.chars().take(8).collect::<String>();
+    format!("lf-human-{task}-{node}-{invocation}-{}", token.iteration)
 }
 
 fn ask_background_name(id: &str) -> String {
@@ -1315,7 +1390,7 @@ fn question_title(question: &str) -> String {
     let first = question
         .lines()
         .find(|line| !line.trim().is_empty())
-        .unwrap_or("Human ask");
+        .unwrap_or("Request for input");
     let mut chars = first.trim().chars();
     let title = chars.by_ref().take(80).collect::<String>();
     if chars.next().is_some() {
@@ -1335,13 +1410,13 @@ fn ask_record_path(id: &str) -> PathBuf {
 
 fn write_ask_record(record: &AskSessionRecord) -> Result<()> {
     let directory = ask_session_directory();
-    fs::create_dir_all(&directory).context("create human session directory")?;
+    fs::create_dir_all(&directory).context("create session directory")?;
     #[cfg(unix)]
     fs::set_permissions(
         &directory,
         std::os::unix::fs::PermissionsExt::from_mode(0o700),
     )
-    .context("protect human session directory")?;
+    .context("protect session directory")?;
     let path = ask_record_path(&record.id);
     let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
     let bytes = serde_json::to_vec_pretty(record)?;
@@ -1349,13 +1424,10 @@ fn write_ask_record(record: &AskSessionRecord) -> Result<()> {
     options.write(true).create_new(true);
     #[cfg(unix)]
     options.mode(0o600);
-    let mut file = options
-        .open(&temporary)
-        .context("stage human session record")?;
-    file.write_all(&bytes)
-        .context("write human session record")?;
-    file.sync_all().context("sync human session record")?;
-    fs::rename(&temporary, &path).context("publish human session record")
+    let mut file = options.open(&temporary).context("stage session record")?;
+    file.write_all(&bytes).context("write session record")?;
+    file.sync_all().context("sync session record")?;
+    fs::rename(&temporary, &path).context("publish session record")
 }
 
 fn read_ask_record(id: &str) -> Result<Option<AskSessionRecord>> {
@@ -1363,12 +1435,12 @@ fn read_ask_record(id: &str) -> Result<Option<AskSessionRecord>> {
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).context("read human session record"),
+        Err(error) => return Err(error).context("read session record"),
     };
     let record: AskSessionRecord =
-        serde_json::from_slice(&bytes).context("parse human session record")?;
+        serde_json::from_slice(&bytes).context("parse session record")?;
     if record.id != id {
-        bail!("human session record {id:?} is invalid");
+        bail!("session record {id:?} is invalid");
     }
     Ok(Some(record))
 }
@@ -1376,11 +1448,11 @@ fn read_ask_record(id: &str) -> Result<Option<AskSessionRecord>> {
 async fn wait_for_ask(id: &str) -> Result<String> {
     loop {
         let record = read_ask_record(id)?
-            .ok_or_else(|| anyhow!("human Ask session {id:?} disappeared before resolution"))?;
+            .ok_or_else(|| anyhow!("session {id:?} disappeared before resolution"))?;
         match record.status {
             AskSessionStatus::Waiting => tokio::time::sleep(Duration::from_millis(250)).await,
             AskSessionStatus::Completed { summary } => {
-                fs::remove_file(ask_record_path(id)).context("remove resolved human session")?;
+                fs::remove_file(ask_record_path(id)).context("remove resolved session")?;
                 return Ok(summary);
             }
         }
@@ -1388,9 +1460,27 @@ async fn wait_for_ask(id: &str) -> Result<String> {
 }
 
 fn active_session_token() -> Result<HumanSessionToken> {
-    let raw = std::env::var(HUMAN_SESSION_ENV)
-        .context("this command requires an active human session")?;
-    serde_json::from_str(&raw).context("active human session token is invalid")
+    let raw =
+        std::env::var(HUMAN_SESSION_ENV).context("this command requires an active session")?;
+    serde_json::from_str(&raw).context("active session token is invalid")
+}
+
+pub(crate) fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
+    let Some(raw) = std::env::var_os(HUMAN_SESSION_ENV) else {
+        return Ok(None);
+    };
+    let raw = raw
+        .into_string()
+        .map_err(|_| anyhow!("active session token is not valid UTF-8"))?;
+    let token: HumanSessionToken =
+        serde_json::from_str(&raw).context("active session token is invalid")?;
+    let HumanSessionToken::Flow { token } = token else {
+        return Ok(None);
+    };
+    if token.skill.name != requested {
+        bail!("review session Skill does not match the requested Skill");
+    }
+    Ok(Some(token.skill))
 }
 
 fn active_run_id() -> Result<RunId> {
@@ -1402,25 +1492,32 @@ fn active_run_id() -> Result<RunId> {
 #[cfg(test)]
 mod tests {
     use super::{
-        concise_title, flow_background_name, flow_id, flow_token_id, human_open_argv,
-        preferred_work_selector, question_title, session_run_is_resumable, token_matches,
-        FlowSessionToken,
+        active_flow_skill, concise_title, flow_background_name, flow_id, flow_token_id,
+        human_open_argv, preferred_work_selector, question_title, session_run_is_resumable,
+        token_matches, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
     };
-    use crate::durable::{FlowPosition, WorkRef};
+    use crate::durable::FlowPosition;
     use crate::run_record::{AttributionSource, RunManifest, SubjectAttribution};
     use crate::work::task::TaskId;
 
     fn position() -> FlowPosition {
         FlowPosition {
-            work: WorkRef::Task(TaskId::new()),
-            flow: "review".to_string(),
-            step: "review-design".to_string(),
-            node_id: Some("review_kickoff".to_string()),
-            human: true,
+            task_id: TaskId::new(),
+            invocation: crate::durable::test_flow_invocation(
+                "review",
+                1,
+                "review-design",
+                Some("review_kickoff"),
+                true,
+            ),
             session_run_id: None,
             ready_summary: None,
             step_index: 1,
             iteration: 3,
+            version: 0,
+            worker_generation: 0,
+            claim: None,
+            failure: None,
             updated_at: time::OffsetDateTime::now_utc(),
         }
     }
@@ -1428,14 +1525,16 @@ mod tests {
     #[test]
     fn session_identity_is_the_exact_human_flow_position() {
         let position = position();
+        let step = position.current();
         let token = FlowSessionToken {
-            task_id: match &position.work {
-                WorkRef::Task(task_id) => task_id.clone(),
-                _ => unreachable!(),
+            task_id: position.task_id.clone(),
+            invocation_id: position.invocation.id.clone(),
+            flow: step.flow,
+            node_id: step.policy.id.unwrap(),
+            skill: match position.current_plan() {
+                crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
+                _ => panic!("human position must select a Skill"),
             },
-            flow: position.flow.clone(),
-            node_id: position.node_id.clone().unwrap(),
-            skill: position.step.clone(),
             iteration: position.iteration,
         };
 
@@ -1445,6 +1544,44 @@ mod tests {
         assert!(flow_background_name(&position)
             .unwrap()
             .starts_with("lf-human-"));
+    }
+
+    #[test]
+    fn human_session_carries_the_started_skill_definition() {
+        let _lock = crate::journal::test_env_lock();
+        let mut position = position();
+        let crate::engine::ConcreteStep::Skill(planned) =
+            &mut position.invocation.steps[position.step_index as usize]
+        else {
+            panic!("human position must select a Skill")
+        };
+        planned.skill.content = Some("started instructions".to_string());
+        let planned_skill = planned.skill.clone();
+        let step = position.current();
+        let token = FlowSessionToken {
+            task_id: position.task_id.clone(),
+            invocation_id: position.invocation.id.clone(),
+            flow: step.flow,
+            node_id: step.policy.id.unwrap(),
+            skill: planned_skill,
+            iteration: position.iteration,
+        };
+        let previous = std::env::var_os(HUMAN_SESSION_ENV);
+        std::env::set_var(
+            HUMAN_SESSION_ENV,
+            serde_json::to_string(&HumanSessionToken::Flow {
+                token: Box::new(token),
+            })
+            .unwrap(),
+        );
+
+        let skill = active_flow_skill("review-design").unwrap().unwrap();
+
+        match previous {
+            Some(value) => std::env::set_var(HUMAN_SESSION_ENV, value),
+            None => std::env::remove_var(HUMAN_SESSION_ENV),
+        }
+        assert_eq!(skill.content.as_deref(), Some("started instructions"));
     }
 
     #[test]

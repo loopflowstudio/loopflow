@@ -1,5 +1,37 @@
 # Configuration
 
+Remember a preferred name in personal configuration (`$LF_HOME/config.yaml`,
+or `~/.lf/config.yaml` when `LF_HOME` is unset):
+
+```yaml
+user:
+  name: Jack
+```
+
+Edit `user.name` to correct it; remove it or leave it blank to clear it. Keep
+other settings in the file. Repo configuration cannot supply or override this
+name. Direct interactive and batch launches use the preference, and `lf ssh`
+carries the caller's name rather than reading the destination owner's name.
+Names describe people; they do not grant authority or establish who wrote an
+older request. Unattributed background Task and Wave work remains unattributed.
+
+Persisted artifacts use the person's name; session replies use “you.” Stored
+transcripts retain their conversational wording.
+
+Opening or resuming a native session supplies a participant update from the
+current caller's preference, including an explicit unknown name when absent.
+This replaces earlier current-participant context without changing historical
+authorship. The update instructs the agent to wait for the next request;
+opening a session does not approve a review.
+
+`lf name --json` reads the saved preference without provider or PM access.
+The Mac chat composer uses this local query when sending a message; CLI chat
+captures the caller's name before posting to a listener. The name travels with
+the message and survives replay. Old messages without names stay anonymous.
+Bare interrupts do not load a name, so a preference-read failure cannot block them.
+Discord and Linear retain their provider author IDs alongside display names;
+a shared publisher account never substitutes for an explicitly named requester.
+
 Start with a one-run override; keep it in repo config only when the choice
 should apply to everyone:
 
@@ -22,18 +54,17 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent: claude:opus` |
-| Human-present TUI | direct TTY or `-i` | `session.launch: tui` |
+| Interactive TUI | direct TTY or `-i` | `session.launch: tui` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff-files` | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Disable Loopflow guidance | `--no-loopflow` | — |
 | Context files | — | `context: [FILE]` |
-| Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
-| Human FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
+| Review FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
 
 ## Context Assembly
 
@@ -72,9 +103,8 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 ```yaml
 # ~/.lf/config.yaml (global)
 agent: claude:opus
-direction: clarity
 session:
-  terminal: Ghostty       # presents human FlowStep sessions on this Home
+  terminal: Ghostty       # presents review FlowStep sessions on this Home
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global
@@ -89,8 +119,6 @@ agent: claude:opus
 
 session:
   launch: tui
-
-direction: clarity
 
 context:
   - src/schema.py
@@ -303,30 +331,17 @@ This list is additive across global and repo config.
 
 ### Run Mode
 
-Direct named invocations use a present-human session when stdin or stdout is a
+Direct named invocations use an interactive session when stdin or stdout is a
 TTY. Automated flow nodes and `--batch` invocations run headlessly. Skill
 frontmatter never changes scheduling.
 
 | | |
 |---|---|
 | **CLI** | `-i` (interactive), `-b` (batch/headless) |
-| **Default** | present-human for a direct TTY; headless otherwise |
+| **Default** | interactive for a direct TTY; headless otherwise |
 
 Flows declare a required User gate on the exact skill occurrence with a stable
 `id` and `human: true`; see [Authoring](authoring.md#flows).
-
-### Direction
-
-Directions shape judgment and intent—how the coding agent approaches work.
-
-| | |
-|---|---|
-| **CLI** | `--direction ux` or `--direction ux,clarity` |
-| **Config** | `direction: clarity` or `direction: [ux, clarity]` |
-
-Direction files live in `.lf/directions/` as markdown. Built-in direction groups:
-`infra`, `ux`, `craft`, `creativity`, `ceo`. Group members are also
-available directly (for example `security`, `feedback`, `clarity`, `alive`).
 
 ### Chrome
 
@@ -379,7 +394,7 @@ assigned files.
 
 ### Session Launch
 
-Pick where directly invoked human-present skills open.
+Pick where directly invoked interactive skills open.
 
 ```yaml
 session:

@@ -26,8 +26,25 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
+lf runs --task INF-123 --json
 lf session list
 ```
+
+`ready` means the Task is nonterminal. Status reports `execution` separately:
+starting, running, waiting for review, blocked, idle, or unknown. Read its
+reason and worker Run before recovery. Wave status and roadmap use that same
+execution evidence for their recommendations. Dirty files under a live worker
+are ongoing progress.
+
+Task Run history includes independent helpers, whether recorded with the public
+issue identifier or internal Task ID. An idle Task Flow does not prove those
+helpers are idle; a completed launcher does not prove its interactive Session
+is closed. Inspect Sessions separately. Recover advancement through Task
+controls; reserve bound helper Runs for distinct contributions.
+
+Task status and `lf runs` show up to 50 Runs started in the last seven days.
+Inspect an exact Run ID for older evidence; an empty recent list does not prove
+that no worker or Session remains active.
 
 Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:
@@ -38,17 +55,17 @@ lf session complete <interactive-or-ask-id>
 lf session approve <flowstep-id> "Verified summary"
 lf session iterate <flowstep-id> "Narrow the design"
 lf task steer INF-123 "address the latest feedback"
+lf task interrupt INF-123
 lf task resume INF-123
-lf task resume INF-123 --model codex --reason "Claude quota exhausted"
+lf task resume INF-123 --reason "provider credentials repaired"
 ```
 
-Plain `resume` continues the same provider transcript. `--model` keeps the Task
-Work, Steers, worktree, and active PR, but gives the next attempt to the selected
-agent. It refuses while another executor is still writing. There is currently
-no supported cross-process CLI for immediate Task cancellation; wait for the
-writer to stop, then resume. A Task Steer is durable input for the next
-controller boundary; it is not a live provider message or proof that the agent
-applied it.
+`resume` starts a fresh boundary from the Task Work, Steers, worktree, and
+active PR. It refuses while another exact Task worker is live. A Task Steer
+is a Linear Task comment; the active Task worker receives new comments when
+possible and the next Skill seed always reads them. `task interrupt` ends the
+active boundary so the next one re-reads direction. Neither command's receipt
+proves that the provider applied the direction.
 
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact
@@ -67,12 +84,14 @@ the account unavailable until its reported reset and immediately tries the next
 account in the grant. `--account` retains the normal route as fallback;
 `--only-account` stays inside the accounts it names.
 
-If the retries exhaust for a managed Task, resume it on another provider:
+After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task resume INF-123 --model codex --reason "Claude quota exhausted"
-lf project resume project-slug --model codex --reason "Claude quota exhausted"
+lf task resume INF-123 --reason "provider credentials repaired"
 ```
+
+Project operations are finite Runs, so recovery is a fresh `project run`, not a
+resume of Project process state.
 
 Other options:
 
@@ -109,21 +128,20 @@ checkout has not moved.
 ## Status says `ready`, but the Task is waiting
 
 **Symptom:** Project or Task Work is `ready`, while its condition says it is
-waiting on a child, human FlowStep, CI, or merge.
+waiting on a child, review FlowStep, CI, or merge.
 
 Work status is deliberately small: `ready`, `done`, or `abandoned`. Task
-condition summarizes process liveness, human FlowStep, child progress, CI, and
-merge evidence; unresolved human conversations appear under Sessions.
+condition summarizes process liveness, review FlowStep, child progress, CI, and
+merge evidence; unresolved conversations appear under Sessions.
 Inspect the focused projection instead of inferring a control state from one
 field:
 
 ```bash
 lf status <wave> --json
-lf project status <project-id> --json
 lf task status INF-123 --json
 ```
 
-Resolve the named fact: open the human session, inspect the child, repair CI, merge, or
+Resolve the named fact: open the session, inspect the child, repair CI, merge, or
 resume the provider. There is no Run slot or PR-limit counter to clear.
 
 ## Context too large

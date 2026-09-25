@@ -449,6 +449,50 @@ pub enum AuthError {
     CredentialSocket { provider: Provider, message: String },
 }
 
+/// Only closed categories and HTTP status codes may escape a Linear refresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum LinearRefreshError {
+    #[error("stored credential has no refresh token")]
+    MissingRefreshGrant,
+    #[error("OAuth client configuration is unavailable")]
+    ClientConfigurationUnavailable,
+    #[error("OAuth client configuration lookup failed")]
+    ConfigurationLookupFailed,
+    #[error("token endpoint rejected the refresh grant (invalid_grant)")]
+    InvalidGrant,
+    #[error("token endpoint rejected the OAuth client (invalid_client)")]
+    InvalidClient,
+    #[error("token endpoint rejected the request (HTTP {status}, code unknown)")]
+    Rejected { status: u16 },
+    #[error("token endpoint unavailable (HTTP status {status:?})")]
+    Unavailable { status: Option<u16> },
+    #[error("token endpoint returned an invalid or incomplete credential generation")]
+    InvalidResponse,
+}
+
+impl LinearRefreshError {
+    pub(crate) fn retryable_now(self) -> bool {
+        matches!(self, Self::Unavailable { .. } | Self::InvalidResponse)
+    }
+
+    pub(crate) fn requires_reconnect(self) -> bool {
+        matches!(
+            self,
+            Self::MissingRefreshGrant
+                | Self::ClientConfigurationUnavailable
+                | Self::InvalidGrant
+                | Self::InvalidClient
+        )
+    }
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static LINEAR_REFRESH_URL: String;
+    pub(crate) static LINEAR_REFRESH_CONFIG: Result<(String, String), LinearRefreshError>;
+}
+
 #[derive(Debug, Error)]
 pub enum TokenRefreshError {
     #[error("{provider} refresh command unavailable: {command}")]
@@ -466,7 +510,7 @@ pub enum TokenRefreshError {
     #[error("{provider} OAuth refresh failed: {reason}")]
     OAuth {
         provider: Provider,
-        reason: &'static str,
+        reason: LinearRefreshError,
     },
 }
 
@@ -2084,7 +2128,7 @@ fn parse_github_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
 }
 
 /// A loopback URL is the provider CLI's local callback listener, never the
-/// page a human authorizes on. codex prints its `localhost:1455` server line
+/// page for authorizing access. codex prints its `localhost:1455` server line
 /// before the real authorization URL, and the first URL parsed wins the flow —
 /// treating loopback as a verification URL opened a dead "Not Found" tab and
 /// returned before the real URL was ever read.
@@ -3083,7 +3127,7 @@ pub async fn refresh_stored_provider_token(
                 .filter(|token| !token.trim().is_empty())
                 .ok_or(TokenRefreshError::OAuth {
                     provider,
-                    reason: "stored credential has no refresh token",
+                    reason: LinearRefreshError::MissingRefreshGrant,
                 })?;
             refresh_pm_oauth_token(
                 provider,
@@ -3093,7 +3137,7 @@ pub async fn refresh_stored_provider_token(
             .await
             .map_err(|error| TokenRefreshError::OAuth {
                 provider,
-                reason: pm_refresh_failure_reason(&error),
+                reason: error,
             })?
         }
         _ => refresh_provider_token(provider).await?,
@@ -3142,20 +3186,9 @@ async fn refresh_provider_token_with_runner(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct PmOAuthEndpoint {
-    token_url: &'static str,
-    client_id_env: &'static str,
-    client_secret_env: &'static str,
-}
-
-fn pm_oauth_endpoint(provider: Provider) -> Option<PmOAuthEndpoint> {
+fn pm_oauth_endpoint(provider: Provider) -> Option<&'static str> {
     match provider {
-        Provider::Linear => Some(PmOAuthEndpoint {
-            token_url: LINEAR_OAUTH_TOKEN_URL,
-            client_id_env: LINEAR_CLIENT_ID_ENV,
-            client_secret_env: LINEAR_CLIENT_SECRET_ENV,
-        }),
+        Provider::Linear => Some(LINEAR_OAUTH_TOKEN_URL),
         _ => None,
     }
 }
@@ -3267,16 +3300,6 @@ struct OAuthRefreshResponse {
     expires_in: Option<i64>,
 }
 
-fn pm_refresh_failure_reason(error: &AuthError) -> &'static str {
-    match error {
-        AuthError::CommandUnavailable { .. } => "OAuth client configuration is unavailable",
-        AuthError::OAuthRequest { .. } => {
-            "the token endpoint rejected or could not complete the request"
-        }
-        _ => "the refresh request could not be completed",
-    }
-}
-
 fn encode_pm_refresh_request(
     provider: Provider,
     client_id: &str,
@@ -3297,33 +3320,23 @@ fn encode_pm_refresh_request(
     })
 }
 
-/// Exchange a stored refresh token for a fresh access token via the PM provider's
-/// OAuth `grant_type=refresh_token` endpoint. Linear PKCE grants reuse their
-/// stored client ID; legacy rows fall back to the configured client credentials.
-///
-/// The returned token carries `login: None`; callers should preserve the prior login.
+/// Exchange a Linear refresh grant without retaining provider error bodies.
 ///
 /// # Errors
-/// Returns `AuthError::UnsupportedProvider` for non-PM providers,
-/// `AuthError::CommandUnavailable` when client credentials are absent, and
-/// `AuthError::OAuthRequest` when the network request or token endpoint rejects it.
+/// Returns a sanitized protocol or configuration category. The caller owns retry
+/// policy, persistence, and preservation of the prior login.
 pub async fn refresh_pm_oauth_token(
     provider: Provider,
     refresh_token: &str,
     stored_client_id: Option<&str>,
-) -> Result<ProviderToken, AuthError> {
-    let endpoint = pm_oauth_endpoint(provider)
-        .ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))?;
+) -> Result<ProviderToken, LinearRefreshError> {
+    let endpoint =
+        pm_oauth_endpoint(provider).ok_or(LinearRefreshError::ClientConfigurationUnavailable)?;
     let (client_id, client_secret) = match stored_client_id {
-        Some(client_id) if !client_id.trim().is_empty() => (client_id.trim().to_string(), None),
+        Some(id) if !id.trim().is_empty() => (id.trim().to_string(), None),
         _ => {
-            let (client_id, client_secret) = oauth_client_credentials(
-                provider,
-                endpoint.client_id_env,
-                endpoint.client_secret_env,
-            )
-            .await?;
-            (client_id, Some(client_secret))
+            let (id, secret) = linear_refresh_client_config().await?;
+            (id, Some(secret))
         }
     };
     let body = encode_pm_refresh_request(
@@ -3331,59 +3344,109 @@ pub async fn refresh_pm_oauth_token(
         &client_id,
         client_secret.as_deref(),
         refresh_token,
-    )?;
+    )
+    .map_err(|_| LinearRefreshError::ClientConfigurationUnavailable)?;
+    let url = endpoint.to_string();
+    #[cfg(test)]
+    let url = LINEAR_REFRESH_URL.try_with(Clone::clone).unwrap_or(url);
 
-    let response = reqwest::Client::new()
-        .post(endpoint.token_url)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send()
-        .await
-        .map_err(|err| AuthError::OAuthRequest {
-            provider,
-            message: err.to_string(),
-        })?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response
-            .bytes()
+    let attempt = async {
+        let response = reqwest::Client::new()
+            .post(url)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
             .await
-            .map_err(|err| AuthError::OAuthRequest {
-                provider,
-                message: err.to_string(),
-            })?;
-        let message = oauth_error_message(body.as_ref())
-            .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
-        return Err(AuthError::OAuthRequest {
-            provider,
-            message: format!("HTTP {status}: {message}"),
-        });
-    }
-
-    let payload = response
-        .json::<OAuthRefreshResponse>()
+            .map_err(|_| LinearRefreshError::Unavailable { status: None })?;
+        let status = response.status();
+        if status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error() {
+            return Err(LinearRefreshError::Unavailable {
+                status: Some(status.as_u16()),
+            });
+        }
+        if !status.is_success() {
+            // Never retain arbitrary code/description strings in the error type.
+            let code = response.json::<serde_json::Value>().await.ok();
+            return Err(
+                match code
+                    .as_ref()
+                    .and_then(|body| body.get("error"))
+                    .and_then(|v| v.as_str())
+                {
+                    Some("invalid_grant") => LinearRefreshError::InvalidGrant,
+                    Some("invalid_client") => LinearRefreshError::InvalidClient,
+                    _ => LinearRefreshError::Rejected {
+                        status: status.as_u16(),
+                    },
+                },
+            );
+        }
+        let payload = response
+            .json::<OAuthRefreshResponse>()
+            .await
+            .map_err(|_| LinearRefreshError::InvalidResponse)?;
+        let refresh = payload
+            .refresh_token
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(LinearRefreshError::InvalidResponse)?;
+        let now = now_unix();
+        let expires_at = payload
+            .expires_in
+            .filter(|seconds| *seconds > 0)
+            .and_then(|seconds| now.checked_add(seconds))
+            .ok_or(LinearRefreshError::InvalidResponse)?;
+        if payload.access_token.trim().is_empty() {
+            return Err(LinearRefreshError::InvalidResponse);
+        }
+        Ok(ProviderToken {
+            provider: provider.as_str().to_string(),
+            access_token: payload.access_token,
+            refresh_token: Some(refresh),
+            oauth_client_id: Some(client_id),
+            expires_at: Some(expires_at),
+            login: None,
+            updated_at: now,
+            credential_type: CredentialType::OAuth,
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(2), attempt)
         .await
-        .map_err(|err| AuthError::OAuthRequest {
-            provider,
-            message: format!("failed to decode refresh response: {err}"),
-        })?;
+        .unwrap_or(Err(LinearRefreshError::Unavailable { status: None }))
+}
 
-    let expires_at = payload
-        .expires_in
-        .filter(|seconds| *seconds > 0)
-        .map(|seconds| now_unix() + seconds);
+async fn linear_refresh_client_config() -> Result<(String, String), LinearRefreshError> {
+    #[cfg(test)]
+    if let Ok(config) = LINEAR_REFRESH_CONFIG.try_with(Clone::clone) {
+        return config;
+    }
+    Ok((
+        linear_refresh_secret(LINEAR_CLIENT_ID_ENV).await?,
+        linear_refresh_secret(LINEAR_CLIENT_SECRET_ENV).await?,
+    ))
+}
 
-    Ok(ProviderToken {
-        provider: provider.as_str().to_string(),
-        access_token: payload.access_token,
-        refresh_token: payload.refresh_token,
-        oauth_client_id: Some(client_id),
-        expires_at,
-        login: None,
-        updated_at: now_unix(),
-        credential_type: CredentialType::OAuth,
-    })
+async fn linear_refresh_secret(name: &'static str) -> Result<String, LinearRefreshError> {
+    if let Some(value) = read_nonempty_env(name) {
+        return Ok(value);
+    }
+    let output = Command::new("doppler")
+        .args(["secrets", "get", name, "--plain"])
+        .kill_on_drop(true)
+        .output()
+        .await;
+    linear_refresh_secret_output(output)
+}
+
+fn linear_refresh_secret_output(
+    output: std::io::Result<std::process::Output>,
+) -> Result<String, LinearRefreshError> {
+    let output = output.map_err(|_| LinearRefreshError::ConfigurationLookupFailed)?;
+    if !output.status.success() {
+        return Err(LinearRefreshError::ConfigurationLookupFailed);
+    }
+    let value = std::str::from_utf8(&output.stdout)
+        .map_err(|_| LinearRefreshError::ConfigurationLookupFailed)?;
+    read_nonempty_value(value).ok_or(LinearRefreshError::ClientConfigurationUnavailable)
 }
 
 async fn refresh_github_token(
@@ -3828,7 +3891,7 @@ mod tests {
     }
 
     /// `codex login` announces its localhost callback server before printing
-    /// the real authorization URL. The listener is not a page a human can
+    /// the real authorization URL. The listener is not a page someone can
     /// authorize on — taking it as the verification URL opened a dead
     /// "Not Found" tab and ended the flow before the real URL arrived.
     #[test]
@@ -4385,7 +4448,7 @@ attributes:
         let db_path =
             std::env::temp_dir().join(format!("provider-auth-test-{}.db", Uuid::new_v4().simple()));
         Arc::new(
-            crate::store::open_store(&crate::store::StorageConfig::sqlite(db_path))
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open sqlite store"),
         )
@@ -4853,7 +4916,7 @@ attributes:
     #[test]
     fn pm_oauth_endpoint_maps_only_pm_providers() {
         assert_eq!(
-            pm_oauth_endpoint(Provider::Linear).map(|e| e.token_url),
+            pm_oauth_endpoint(Provider::Linear),
             Some(LINEAR_OAUTH_TOKEN_URL)
         );
         assert!(pm_oauth_endpoint(Provider::GitHub).is_none());
@@ -4930,11 +4993,11 @@ attributes:
     }
 
     #[tokio::test]
-    async fn linear_refresh_without_refresh_token_is_actionable_and_secret_free() {
+    async fn linear_oauth_without_refresh_token_is_actionable_and_secret_free() {
         let token = make_token("linear", CredentialType::OAuth);
-        let error = refresh_stored_provider_token(Provider::Linear, &token)
-            .await
-            .expect_err("missing refresh token should fail");
+        let Err(error) = refresh_stored_provider_token(Provider::Linear, &token).await else {
+            panic!("missing refresh token should fail");
+        };
 
         assert_eq!(
             error.to_string(),
@@ -5004,7 +5067,7 @@ attributes:
     #[tokio::test]
     async fn provider_env_vars_includes_opencode_zen_token_for_opencode_harness() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             tmp.path().join("loopflow.db"),
         ))
         .await
@@ -5201,7 +5264,7 @@ printf '{"id":2,"result":{"account":null}}\n'
     #[tokio::test]
     async fn provider_env_vars_returns_correct_vars_for_mixed_credential_types() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             tmp.path().join("loopflow.db"),
         ))
         .await
@@ -5232,5 +5295,41 @@ printf '{"id":2,"result":{"account":null}}\n'
         assert!(!vars.iter().any(|(n, _)| n == "CLAUDE_CODE_OAUTH_TOKEN"));
         assert!(vars.iter().any(|(n, _)| n == "CODEX_ACCESS_TOKEN"));
         assert!(!vars.iter().any(|(n, _)| n == "OPENAI_API_KEY"));
+    }
+}
+
+#[cfg(test)]
+mod linear_oauth_config_tests {
+    use super::{linear_refresh_secret_output, LinearRefreshError};
+    use std::os::unix::process::ExitStatusExt;
+
+    #[test]
+    fn linear_oauth_config_lookup_does_not_treat_command_failure_as_missing() {
+        for (status, stdout, expected) in [
+            (0, "", LinearRefreshError::ClientConfigurationUnavailable),
+            (
+                1,
+                "synthetic-secret-output",
+                LinearRefreshError::ConfigurationLookupFailed,
+            ),
+        ] {
+            let error = linear_refresh_secret_output(Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(status << 8),
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: b"synthetic-secret-stderr".to_vec(),
+            }))
+            .unwrap_err();
+            assert_eq!(error, expected);
+            assert!(!error.to_string().contains("synthetic-secret"));
+        }
+        assert_eq!(
+            linear_refresh_secret_output(Err(std::io::ErrorKind::NotFound.into())).unwrap_err(),
+            LinearRefreshError::ConfigurationLookupFailed
+        );
+        assert_eq!(
+            linear_refresh_secret_output(Err(std::io::ErrorKind::PermissionDenied.into()))
+                .unwrap_err(),
+            LinearRefreshError::ConfigurationLookupFailed
+        );
     }
 }

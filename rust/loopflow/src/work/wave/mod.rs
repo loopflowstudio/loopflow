@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use crate::id::WaveId;
 use crate::repository::{CanonicalRepo, CanonicalRepoError};
 
-/// A Wave's mutable human address inside one canonical repository.
+/// A Wave's mutable readable address inside one canonical repository.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WaveLocator {
     repo: CanonicalRepo,
@@ -141,27 +141,6 @@ impl Wave {
         }
     }
 
-    /// Record the first promotion occurrence and its validated ancestry.
-    pub(crate) fn record_promotion(
-        &mut self,
-        parent: &WaveId,
-        at: OffsetDateTime,
-    ) -> Result<(), String> {
-        if self
-            .parent_wave_id
-            .as_ref()
-            .is_some_and(|current| current != parent)
-        {
-            return Err(format!(
-                "Wave '{}' already belongs to another parent",
-                self.name
-            ));
-        }
-        self.parent_wave_id.get_or_insert_with(|| parent.clone());
-        self.promoted_at.get_or_insert(at);
-        Ok(())
-    }
-
     pub fn id(&self) -> &WaveId {
         &self.id
     }
@@ -208,15 +187,24 @@ impl Wave {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Wave, WaveLocator};
+    use crate::id::WaveId;
+    use time::OffsetDateTime;
 
     #[test]
     fn reconstructing_identity_cannot_copy_or_reparent_a_promotion() {
         let parent = WaveId::new();
-        let mut promoted = Wave::new(WaveId::new(), "ship".to_string(), "/repo".to_string());
-        promoted
-            .record_promotion(&parent, OffsetDateTime::now_utc())
-            .expect("record promotion");
+        let promoted = Wave::from_stored_parts(
+            WaveId::new(),
+            "ship".to_string(),
+            "/repo".to_string(),
+            OffsetDateTime::now_utc(),
+            Some(parent.clone()),
+            Some(OffsetDateTime::now_utc()),
+            None,
+            None,
+            None,
+        );
 
         let rebuilt = Wave::new(
             promoted.id().clone(),

@@ -33,7 +33,7 @@ struct LocalWaveAgentLauncherTests {
         ])
     }
 
-    @Test("Task controls use the existing lifecycle verbs")
+    @Test("Task controls use the bounded worker commands")
     func taskControlCommandShapes() {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 
@@ -43,10 +43,10 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskStartCommand(
             lfPath: lf,
             title: "Refine LOOPFLOW.md 5e41e69b",
-            project: "context-lab",
+            wave: "context-lab",
             directive: "Refine text for LOOPFLOW.md."
         ) == [
-            lf, "task", "start", "context-lab", "Refine LOOPFLOW.md 5e41e69b",
+            lf, "task", "start", "--wave", "context-lab", "Refine LOOPFLOW.md 5e41e69b",
             "--directive", "Refine text for LOOPFLOW.md.",
             "--json",
         ])

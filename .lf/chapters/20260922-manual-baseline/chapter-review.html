@@ -1,0 +1,1799 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loopflow chapter review and next chapter draft — September 2026</title>
+  <style>
+    :root {
+      --paper: #f2efe6;
+      --paper-deep: #e7e1d3;
+      --ink: #17211d;
+      --ink-soft: #4c5751;
+      --line: #c8c1b3;
+      --night: #14231e;
+      --night-soft: #20372f;
+      --hold: #167250;
+      --hold-soft: #d6eadf;
+      --fail: #c94c3f;
+      --fail-soft: #f2d8d1;
+      --unknown: #bb841e;
+      --unknown-soft: #f1e3bd;
+      --sky: #3f6d84;
+      --white: #fffdf6;
+      --shadow: 0 16px 40px rgba(23, 33, 29, 0.10);
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 4%, rgba(187,132,30,.09), transparent 24rem),
+        linear-gradient(90deg, rgba(20,35,30,.025) 1px, transparent 1px),
+        linear-gradient(var(--paper), var(--paper-deep));
+      background-size: auto, 48px 48px, auto;
+      font-family: var(--sans);
+    }
+
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+
+    .masthead {
+      min-height: min(92vh, 900px);
+      padding: 24px clamp(22px, 5vw, 80px) 64px;
+      color: var(--white);
+      background:
+        linear-gradient(110deg, rgba(20,35,30,.98) 0 58%, rgba(32,55,47,.94) 58% 100%),
+        var(--night);
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .masthead::after {
+      content: "39";
+      position: absolute;
+      right: -2vw;
+      bottom: -18vw;
+      font: 900 clamp(22rem, 49vw, 52rem)/.75 var(--serif);
+      color: rgba(255,253,246,.035);
+      letter-spacing: -.09em;
+      pointer-events: none;
+    }
+
+    .topline,
+    .chapter-tag,
+    .eyebrow,
+    .kicker,
+    .table-count,
+    th {
+      text-transform: uppercase;
+      letter-spacing: .13em;
+      font-size: .72rem;
+      font-weight: 800;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      color: rgba(255,253,246,.68);
+      border-bottom: 1px solid rgba(255,253,246,.18);
+      padding-bottom: 14px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(290px, .7fr);
+      align-items: end;
+      gap: clamp(42px, 8vw, 120px);
+      padding: clamp(56px, 10vh, 110px) 0 36px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .chapter-tag {
+      color: #e0bd68;
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 22px;
+    }
+
+    .chapter-tag::before {
+      content: "";
+      width: 38px;
+      height: 2px;
+      background: currentColor;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 900px;
+      margin-bottom: 24px;
+      font: 500 clamp(4rem, 9vw, 9rem)/.88 var(--serif);
+      letter-spacing: -.065em;
+    }
+
+    .hero-copy {
+      max-width: 790px;
+      margin: 0;
+      color: rgba(255,253,246,.78);
+      font: 400 clamp(1.05rem, 1.55vw, 1.38rem)/1.55 var(--sans);
+    }
+
+    .hero-copy strong { color: var(--white); }
+
+    .verdict-wheel {
+      width: min(31vw, 390px);
+      aspect-ratio: 1;
+      justify-self: end;
+      border-radius: 50%;
+      background: conic-gradient(var(--hold) 0 5.1282%, var(--fail) 5.1282% 46.1538%, var(--unknown) 46.1538% 100%);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 0 18px rgba(255,255,255,.035), 0 26px 60px rgba(0,0,0,.25);
+    }
+
+    .verdict-wheel::before {
+      content: "";
+      width: 68%;
+      aspect-ratio: 1;
+      border-radius: inherit;
+      background: var(--night);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
+    }
+
+    .wheel-label {
+      position: absolute;
+      text-align: center;
+      font-family: var(--mono);
+    }
+
+    .wheel-label strong {
+      display: block;
+      font: 500 clamp(3.2rem, 6vw, 5.5rem)/.9 var(--serif);
+      letter-spacing: -.06em;
+    }
+
+    .wheel-label span {
+      color: rgba(255,253,246,.62);
+      font-size: .72rem;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .legend {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+      flex-wrap: wrap;
+      position: relative;
+      z-index: 1;
+    }
+
+    .legend-item { display: flex; align-items: center; gap: 9px; color: rgba(255,253,246,.76); font-size: .86rem; }
+    .legend-item b { color: var(--white); }
+    .dot { width: 10px; height: 10px; border-radius: 99px; background: var(--dot); }
+    .baseline-note { margin-left: auto; color: rgba(255,253,246,.52); font: .76rem/1.4 var(--mono); }
+
+    main { padding: 0 clamp(22px, 5vw, 80px) 88px; }
+    section { max-width: 1480px; margin: 0 auto; }
+
+    .chapter-note {
+      position: relative;
+      z-index: 2;
+      margin-top: -1px;
+      padding: 24px clamp(22px, 4vw, 52px);
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 24px;
+      background: #e5b94f;
+      color: #2b2518;
+      border-bottom: 1px solid #ad862d;
+    }
+
+    .chapter-note p { margin: 0; max-width: 980px; line-height: 1.5; }
+
+    .section-head {
+      margin: 104px 0 34px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, .62fr);
+      gap: 36px;
+      align-items: end;
+    }
+
+    .section-head h2 {
+      margin-bottom: 0;
+      font: 500 clamp(2.7rem, 5vw, 5.2rem)/.95 var(--serif);
+      letter-spacing: -.045em;
+    }
+
+    .section-head p { margin: 0; color: var(--ink-soft); line-height: 1.6; }
+
+    .scoreboard {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 22px;
+    }
+
+    .panel {
+      background: rgba(255,253,246,.68);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .wave-chart { padding: clamp(24px, 4vw, 48px); }
+    .wave-row + .wave-row { margin-top: 28px; }
+    .wave-row button {
+      all: unset;
+      width: 100%;
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: 150px 1fr 86px;
+      gap: 18px;
+      align-items: center;
+    }
+    .wave-row button:focus-visible { outline: 3px solid var(--sky); outline-offset: 7px; }
+    .wave-name { font-weight: 800; }
+    .wave-total { text-align: right; color: var(--ink-soft); font: .72rem var(--mono); }
+    .stack { height: 18px; display: flex; background: #ddd7ca; overflow: hidden; }
+    .stack span { min-width: 2px; transition: filter .2s, transform .2s; }
+    .wave-row button:hover .stack span { filter: saturate(1.25); transform: scaleY(1.22); }
+
+    .score-note {
+      background: var(--night);
+      color: var(--white);
+      padding: clamp(26px, 4vw, 46px);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .score-note .big {
+      display: block;
+      margin: 20px 0 12px;
+      font: 500 clamp(4.8rem, 8vw, 8rem)/.85 var(--serif);
+      letter-spacing: -.07em;
+      color: #e0bd68;
+    }
+
+    .score-note p { max-width: 460px; color: rgba(255,253,246,.72); line-height: 1.55; }
+    .score-note small { color: rgba(255,253,246,.5); font: .72rem/1.55 var(--mono); }
+
+    .highlights {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+    }
+
+    .highlight {
+      grid-column: span 4;
+      min-height: 300px;
+      padding: 28px;
+      border-top: 5px solid var(--accent);
+      background: rgba(255,253,246,.72);
+      border-left: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+
+    .highlight:hover { transform: translateY(-5px); box-shadow: var(--shadow); }
+    .highlight.wide { grid-column: span 8; }
+    .highlight h3 { max-width: 560px; font: 500 clamp(1.65rem, 2.7vw, 2.65rem)/1.03 var(--serif); letter-spacing: -.03em; }
+    .highlight p { color: var(--ink-soft); line-height: 1.55; }
+    .highlight .measure { font: 800 .8rem/1.4 var(--mono); color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+
+    .lesson-strip {
+      margin-top: 18px;
+      padding: 34px;
+      background: #e4b84e;
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 28px;
+      align-items: center;
+    }
+    .lesson-strip strong { font: 500 2.2rem/1 var(--serif); }
+    .lesson-strip p { margin: 0; line-height: 1.55; }
+
+    .explorer {
+      border-top: 1px solid var(--line);
+      padding-top: 28px;
+    }
+
+    .filters {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .search,
+    .select {
+      min-height: 48px;
+      border: 1px solid var(--line);
+      background: rgba(255,253,246,.72);
+      color: var(--ink);
+      padding: 0 15px;
+      border-radius: 0;
+    }
+
+    .search:focus,
+    .select:focus { outline: 3px solid rgba(63,109,132,.3); border-color: var(--sky); }
+
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .chip {
+      border: 1px solid var(--line);
+      background: transparent;
+      padding: 9px 13px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .chip:hover, .chip.active { background: var(--night); border-color: var(--night); color: var(--white); }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); background: rgba(255,253,246,.68); }
+    table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    th { text-align: left; padding: 14px 16px; color: var(--ink-soft); border-bottom: 1px solid var(--line); background: rgba(231,225,211,.72); }
+    td { padding: 17px 16px; border-bottom: 1px solid rgba(200,193,179,.65); vertical-align: top; }
+    tbody tr { cursor: pointer; transition: background .14s; }
+    tbody tr:hover { background: var(--white); }
+    tbody tr:focus { outline: 3px solid var(--sky); outline-offset: -3px; }
+    .promise-cell { max-width: 720px; font: 500 1rem/1.45 var(--serif); }
+    .meta-cell { color: var(--ink-soft); font-size: .83rem; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+      padding: 6px 9px;
+      background: var(--status-soft);
+      color: var(--status);
+      font: 800 .68rem/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+    }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--status); }
+    .status.holds { --status: var(--hold); --status-soft: var(--hold-soft); }
+    .status.fail { --status: var(--fail); --status-soft: var(--fail-soft); }
+    .status.unknown { --status: #89600e; --status-soft: var(--unknown-soft); }
+    .empty { padding: 48px 20px; text-align: center; color: var(--ink-soft); }
+
+    .wave-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .wave-card {
+      position: relative;
+      padding: 30px;
+      border: 1px solid var(--line);
+      background: rgba(255,253,246,.72);
+      min-height: 330px;
+      overflow: hidden;
+    }
+    .wave-card::after {
+      content: attr(data-number);
+      position: absolute;
+      right: -8px;
+      bottom: -42px;
+      color: rgba(23,33,29,.055);
+      font: 500 11rem/.8 var(--serif);
+    }
+    .wave-card h3 { margin: 9px 0 15px; font: 500 2.5rem/1 var(--serif); letter-spacing: -.04em; }
+    .wave-card p { max-width: 620px; color: var(--ink-soft); line-height: 1.55; }
+    .wave-card .mini-rollup { display: flex; gap: 18px; margin-top: 26px; font: 700 .76rem var(--mono); }
+    .wave-card .mini-rollup span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 99px; background: currentColor; }
+
+    footer {
+      background: var(--night);
+      color: rgba(255,253,246,.68);
+      padding: 46px clamp(22px, 5vw, 80px);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 30px;
+      font-size: .82rem;
+      line-height: 1.55;
+    }
+    footer strong { color: var(--white); }
+    footer code { font-family: var(--mono); color: #e0bd68; }
+
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(10,18,15,.56);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s;
+      z-index: 19;
+    }
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: min(660px, 94vw);
+      height: 100vh;
+      z-index: 20;
+      background: var(--white);
+      box-shadow: -24px 0 70px rgba(0,0,0,.28);
+      padding: 26px clamp(24px, 5vw, 58px) 60px;
+      transform: translateX(105%);
+      transition: transform .28s cubic-bezier(.2,.8,.2,1);
+      overflow-y: auto;
+    }
+    body.drawer-open .drawer-backdrop { opacity: 1; pointer-events: auto; }
+    body.drawer-open .drawer { transform: translateX(0); }
+    .drawer-close {
+      width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: transparent; cursor: pointer;
+      display: grid; place-items: center; margin-left: auto; font-size: 1.35rem;
+    }
+    .drawer .route { color: var(--ink-soft); font: .72rem/1.5 var(--mono); text-transform: uppercase; letter-spacing: .08em; margin: 24px 0 15px; }
+    .drawer h2 { font: 500 clamp(2.1rem, 5vw, 3.8rem)/1 var(--serif); letter-spacing: -.04em; }
+    .drawer h3 { margin: 34px 0 9px; font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; }
+    .drawer p { line-height: 1.65; color: var(--ink-soft); }
+    .drawer .status { margin: 6px 0 18px; }
+    .run-id { margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--line); font: .72rem/1.5 var(--mono); color: var(--ink-soft); }
+
+    .reveal { opacity: 1; transform: none; }
+
+    @media (max-width: 900px) {
+      .masthead { min-height: auto; }
+      .hero, .section-head, .scoreboard { grid-template-columns: 1fr; }
+      .hero { align-items: start; }
+      .verdict-wheel { justify-self: start; width: min(76vw, 360px); }
+      .baseline-note { width: 100%; margin-left: 0; }
+      .chapter-note { grid-template-columns: 1fr; }
+      .highlight, .highlight.wide { grid-column: span 6; }
+      .lesson-strip { grid-template-columns: 1fr; }
+      .wave-cards { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 620px) {
+      .topline { align-items: flex-start; flex-direction: column; gap: 8px; }
+      h1 { font-size: clamp(3.5rem, 18vw, 5.8rem); }
+      .filters { grid-template-columns: 1fr; }
+      .highlight, .highlight.wide { grid-column: 1 / -1; }
+      .wave-row button { grid-template-columns: 108px 1fr; }
+      .wave-total { display: none; }
+      footer { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+    }
+  </style>
+  <style id="minimal-review">
+    :root {
+      --paper: #ffffff;
+      --paper-deep: #f5f5f3;
+      --ink: #202321;
+      --ink-soft: #5f6561;
+      --line: #d9dcda;
+      --hold: #2f6b50;
+      --hold-soft: #edf5f0;
+      --fail: #9a493f;
+      --fail-soft: #faefed;
+      --unknown: #777b78;
+      --unknown-soft: #f0f1f0;
+      --sky: #506c79;
+      --white: #ffffff;
+      --shadow: none;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+    }
+
+    html { scroll-behavior: auto; }
+    body { background: var(--paper); font-size: 15px; }
+    .masthead {
+      min-height: 0;
+      padding: 36px clamp(20px, 5vw, 72px) 48px;
+      color: var(--ink);
+      background: var(--paper);
+      display: block;
+      border-bottom: 1px solid var(--line);
+    }
+    .masthead::after { display: none; }
+    .topline {
+      color: var(--ink-soft);
+      border: 0;
+      padding: 0 0 30px;
+      font: 600 .72rem/1.4 var(--mono);
+      letter-spacing: .04em;
+      text-transform: none;
+    }
+    .hero {
+      display: block;
+      padding: 0;
+    }
+    .chapter-tag {
+      display: block;
+      margin: 0 0 10px;
+      color: var(--ink-soft);
+      font: 600 .72rem/1.4 var(--mono);
+      letter-spacing: .04em;
+      text-transform: none;
+    }
+    .chapter-tag::before { display: none; }
+    h1 {
+      max-width: none;
+      margin: 0 0 12px;
+      font: 500 clamp(2.2rem, 4vw, 4.2rem)/1.05 var(--serif);
+      letter-spacing: -.035em;
+    }
+    .hero-copy {
+      max-width: 760px;
+      color: var(--ink-soft);
+      font: 400 1rem/1.6 var(--sans);
+    }
+    .hero-copy strong { color: var(--ink); }
+    .goal-browser { margin-top: 34px; border-top: 1px solid var(--ink); }
+    .start-roster-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 12px 0;
+      color: var(--ink-soft);
+      border-bottom: 1px solid var(--line);
+      font: 700 .68rem/1.4 var(--mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .goal-tree details { margin: 0; }
+    .goal-tree summary {
+      list-style: none;
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .goal-tree summary::-webkit-details-marker { display: none; }
+    .goal-tree summary::before { content: "+"; color: var(--ink-soft); font: 500 1rem/1 var(--mono); }
+    .goal-tree details[open] > summary::before { content: "−"; }
+    .wave-node { border-bottom: 1px solid var(--line); }
+    .wave-node > summary { padding: 18px 0; font: 500 1.55rem/1.25 var(--serif); }
+    .wave-intro {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      gap: 24px;
+      margin-left: 34px;
+      padding: 17px 0;
+      border-top: 1px solid var(--line);
+    }
+    .wave-intro .label,
+    .project-intro .label,
+    .measure-heading {
+      color: var(--ink-soft);
+      font: 600 .68rem/1.4 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .wave-intro p { margin: 0; color: #3f4541; line-height: 1.55; }
+    .project-list { margin: 0 0 12px 34px; border-top: 1px solid var(--line); }
+    .project-node { border-bottom: 1px solid var(--line); }
+    .project-node > summary { padding: 15px 0; font-weight: 600; }
+    .start-tree .project-list { margin-bottom: 0; }
+    .start-tree .project-node > summary { grid-template-columns: 22px minmax(0, 1fr) 110px; }
+    .start-tree .project-node > summary .node-meta { justify-self: start; }
+    .start-kr {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr);
+      gap: 14px;
+      margin-left: 34px;
+      padding: 13px 0;
+      border-top: 1px solid #eceeec;
+      color: #3f4541;
+      line-height: 1.5;
+    }
+    .start-kr strong { color: var(--ink-soft); font: 700 .67rem/1.5 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+    .start-tasks { margin: 0 0 12px 34px; padding: 0; list-style: none; border-top: 1px solid #eceeec; }
+    .start-tasks li {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr) 72px;
+      gap: 14px;
+      padding: 11px 0;
+      border-bottom: 1px solid #eceeec;
+      line-height: 1.45;
+    }
+    .start-tasks a { color: var(--ink); text-underline-offset: 3px; }
+    .start-task-copy { display: grid; gap: 5px; }
+    .start-task-copy > strong { color: var(--ink); font-weight: 650; }
+    .start-task-copy > span { color: var(--ink-soft); font-size: .84rem; line-height: 1.55; }
+    .start-task-copy b { color: var(--ink); font: 700 .65rem/1.4 var(--mono); letter-spacing: .035em; text-transform: uppercase; }
+    .start-task-id,
+    .start-task-state { color: var(--ink-soft); font: 700 .67rem/1.5 var(--mono); }
+    .start-task-state { text-align: right; text-transform: uppercase; letter-spacing: .03em; }
+    .start-wave-note { margin: 0 0 16px 68px; color: var(--ink-soft); font-size: .85rem; line-height: 1.5; }
+    .unplanned-work { margin: 0 0 12px 34px; }
+    .unplanned-work > p { margin: 0; padding: 13px 0; color: var(--ink-soft); line-height: 1.5; border-top: 1px solid #eceeec; }
+    .project-intro {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 10px 24px;
+      margin-left: 34px;
+      padding: 15px 0 17px;
+      border-top: 1px solid #eceeec;
+    }
+    .project-intro p { margin: 0; color: #3f4541; line-height: 1.52; }
+    .project-intro .current { color: var(--ink-soft); }
+    .measure-heading {
+      display: flex;
+      justify-content: space-between;
+      margin: 5px 0 -1px 34px;
+      padding: 10px 0;
+      border-top: 1px solid #eceeec;
+    }
+    .kr-list { margin: 0 0 14px 34px; border-top: 1px solid #eceeec; }
+    .kr-node { border-bottom: 1px solid #eceeec; }
+    .kr-node > summary { padding: 13px 0; color: #3f4541; line-height: 1.45; }
+    .kr-body { margin: 0 0 22px 34px; padding: 4px 0 0; }
+    .node-meta { color: var(--ink-soft); font: 600 .68rem/1.4 var(--mono); }
+    .path-selectors {
+      display: grid;
+      grid-template-columns: minmax(180px, .72fr) 24px minmax(220px, .9fr) 24px minmax(320px, 1.5fr);
+      gap: 12px;
+      align-items: end;
+      padding: 20px 0;
+    }
+    .path-field label {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--ink-soft);
+      font: 600 .68rem/1.3 var(--mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .path-field select {
+      width: 100%;
+      min-height: 46px;
+      padding: 0 38px 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 0;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .path-field select:disabled { color: #9a9e9b; background: #f7f7f5; }
+    .path-arrow { align-self: center; padding-top: 20px; color: #9a9e9b; text-align: center; }
+    .goal-detail { padding: 30px 0 4px; border-top: 1px solid var(--line); }
+    .goal-route { margin-bottom: 12px; color: var(--ink-soft); font: 600 .7rem/1.4 var(--mono); }
+    .goal-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: start; }
+    .goal-heading h2 { max-width: 980px; margin: 0; font: 500 clamp(1.65rem, 3vw, 2.5rem)/1.18 var(--serif); letter-spacing: -.02em; }
+    .goal-sections { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 28px; border-top: 1px solid var(--line); }
+    .goal-section { padding: 20px 24px 24px 0; border-right: 1px solid var(--line); }
+    .goal-section + .goal-section { padding-left: 24px; }
+    .goal-section:last-child { border-right: 0; padding-right: 0; }
+    .goal-section h3 { margin: 0 0 9px; color: var(--ink-soft); font: 600 .68rem/1.4 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+    .goal-section p { margin: 0; color: var(--ink-soft); line-height: 1.58; }
+    .goal-work { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+    .goal-work h3 { margin: 0 0 5px; font-size: .9rem; }
+    .goal-work-note { margin: 0 0 12px; color: var(--ink-soft); font-size: .84rem; }
+    .goal-work ul { margin: 0; padding: 0; list-style: none; }
+    .goal-work li { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 12px; padding: 10px 0; border-top: 1px solid #eceeec; }
+    .goal-work a { color: var(--ink); text-decoration-color: #9a9e9b; text-underline-offset: 3px; }
+    .work-id, .work-note { color: var(--ink-soft); font: 600 .7rem/1.5 var(--mono); }
+    .interpretation {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 64px clamp(20px, 5vw, 72px) 76px;
+    }
+    .interpretation header { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 30px; padding-bottom: 22px; border-bottom: 1px solid var(--ink); }
+    .interpretation h2 { margin: 0; font: 500 2rem/1.1 var(--serif); letter-spacing: -.02em; }
+    .interpretation header p { margin: 0; color: var(--ink-soft); line-height: 1.55; }
+    .essay-wave { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 30px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+    .essay-wave h3 { margin: 0; font: 500 1.2rem/1.3 var(--serif); }
+    .essay-wave p { margin: 0; color: #3f4541; font: 400 1rem/1.68 var(--serif); }
+    .essay-conclusion { margin: 24px 0 0 220px; color: #3f4541; font: 500 1.05rem/1.65 var(--serif); }
+    .execution-history {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 70px clamp(20px, 5vw, 72px) 36px;
+    }
+    .execution-history > header {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 30px;
+      padding-bottom: 26px;
+      border-bottom: 1px solid var(--ink);
+    }
+    .execution-history .kicker { padding-top: 5px; color: var(--ink-soft); }
+    .execution-history h2 {
+      max-width: 860px;
+      margin: 0 0 14px;
+      font: 500 clamp(2rem, 4vw, 3.8rem)/1 var(--serif);
+      letter-spacing: -.035em;
+    }
+    .execution-history header p {
+      max-width: 820px;
+      margin: 0;
+      color: var(--ink-soft);
+      line-height: 1.58;
+    }
+    .topology-shift {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr) minmax(0, 1fr);
+      border-bottom: 1px solid var(--line);
+    }
+    .topology-shift > h3 {
+      margin: 0;
+      padding: 24px 30px 24px 0;
+      font: 500 1.15rem/1.35 var(--serif);
+    }
+    .topology-state {
+      padding: 24px 26px 26px;
+      border-left: 1px solid var(--line);
+    }
+    .topology-state .eyebrow { display: block; margin-bottom: 10px; color: var(--ink-soft); }
+    .topology-state strong { display: block; margin-bottom: 10px; font: 500 1.22rem/1.35 var(--serif); }
+    .topology-state p { margin: 0; color: var(--ink-soft); line-height: 1.55; }
+    .history-section {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 30px;
+      padding: 26px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .history-section > h3 { margin: 0; font: 500 1.18rem/1.35 var(--serif); }
+    .history-prose { max-width: 880px; }
+    .history-prose p { margin: 0 0 15px; color: #3f4541; font: 400 1rem/1.68 var(--serif); }
+    .history-prose p:last-child { margin-bottom: 0; }
+    .history-phases { border-bottom: 1px solid var(--line); }
+    .history-phases details { border-top: 1px solid var(--line); }
+    .history-phases details:first-child { border-top: 0; }
+    .history-phases summary {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 30px;
+      padding: 17px 0;
+      cursor: pointer;
+      list-style: none;
+    }
+    .history-phases summary::-webkit-details-marker { display: none; }
+    .history-phases summary::before {
+      content: "+";
+      grid-column: 1;
+      grid-row: 1;
+      justify-self: end;
+      padding-right: 4px;
+      color: var(--ink-soft);
+      font: 500 1rem/1 var(--mono);
+    }
+    .history-phases details[open] summary::before { content: "−"; }
+    .phase-date { grid-column: 1; grid-row: 1; color: var(--ink-soft); font: 600 .7rem/1.5 var(--mono); }
+    .phase-title { grid-column: 2; font-weight: 600; }
+    .phase-body { max-width: 880px; margin: 0 0 22px 220px; color: var(--ink-soft); line-height: 1.62; }
+    .history-judgment {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 30px;
+      padding: 27px 0 0;
+    }
+    .history-judgment h3 { margin: 0; font: 500 1.18rem/1.35 var(--serif); }
+    .history-judgment p { max-width: 880px; margin: 0; color: #3f4541; font: 500 1.04rem/1.66 var(--serif); }
+    main { display: none; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .summary-stat { padding: 16px 14px; border-right: 1px solid var(--line); }
+    .summary-stat:first-child { padding-left: 0; }
+    .summary-stat:last-child { border-right: 0; }
+    .summary-stat strong { display: block; margin-bottom: 3px; font: 500 1.65rem/1 var(--serif); }
+    .summary-stat span { color: var(--ink-soft); font: 600 .67rem/1.3 var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+    .summary-stat.hold strong { color: var(--hold); }
+    .summary-stat.fail strong { color: var(--fail); }
+    .legend { margin-top: 22px; color: var(--ink-soft); }
+    .legend-item { color: var(--ink-soft); }
+    .legend-item b { color: var(--ink); }
+    .baseline-note { color: var(--ink-soft); }
+
+    .chapter-note {
+      margin: 0;
+      padding: 20px clamp(20px, 5vw, 72px);
+      grid-template-columns: 150px minmax(0, 900px);
+      background: #f5f5f3;
+      color: var(--ink);
+      border-bottom: 1px solid var(--line);
+    }
+    .chapter-note .kicker { color: var(--ink-soft); }
+    .next-chapter {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 72px clamp(20px, 5vw, 72px) 36px;
+    }
+    .next-chapter > header {
+      display: grid;
+      grid-template-columns: minmax(280px, .85fr) minmax(320px, 1.15fr);
+      gap: clamp(30px, 6vw, 88px);
+      align-items: end;
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--ink);
+    }
+    .next-chapter h2 { margin: 9px 0 0; font: 500 clamp(2.2rem, 4.5vw, 4.5rem)/.98 var(--serif); letter-spacing: -.045em; }
+    .next-chapter header p { max-width: 720px; margin: 0; color: var(--ink-soft); font-size: 1.03rem; line-height: 1.6; }
+    .plan-state {
+      display: grid;
+      grid-template-columns: 190px 180px minmax(0, 1fr);
+      gap: 30px;
+      align-items: baseline;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .plan-state span,
+    .plan-label,
+    .shift-head,
+    .disposition strong {
+      color: var(--ink-soft);
+      font: 700 .68rem/1.4 var(--mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .plan-state strong { font: 500 1.08rem/1.3 var(--serif); }
+    .plan-state p { margin: 0; color: var(--ink-soft); line-height: 1.5; }
+    .plan-section { margin-top: 48px; }
+    .plan-section > header {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 30px;
+      margin-bottom: 16px;
+    }
+    .plan-section h3 { margin: 0; font: 500 1.32rem/1.25 var(--serif); }
+    .plan-section > header p { max-width: 760px; margin: 0; color: var(--ink-soft); line-height: 1.55; }
+    .shift-ledger { border-top: 1px solid var(--ink); }
+    .shift-row {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr) minmax(0, 1fr);
+      border-bottom: 1px solid var(--line);
+    }
+    .shift-row > * { margin: 0; padding: 15px 20px; line-height: 1.5; }
+    .shift-row > :first-child { padding-left: 0; color: var(--ink-soft); font: 700 .7rem/1.5 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+    .shift-row > :nth-child(n+2) { border-left: 1px solid var(--line); }
+    .shift-head > * { padding-top: 9px; padding-bottom: 9px; }
+    .plan-waves { border-top: 1px solid var(--ink); }
+    .plan-wave { border-bottom: 1px solid var(--line); }
+    .plan-wave > summary {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr) 150px;
+      gap: 30px;
+      align-items: baseline;
+      padding: 20px 0;
+      cursor: pointer;
+      list-style: none;
+    }
+    .plan-wave > summary::-webkit-details-marker { display: none; }
+    .plan-wave > summary::before { content: "+"; grid-column: 3; grid-row: 1; justify-self: end; font: 400 1.25rem/1 var(--mono); }
+    .plan-wave[open] > summary::before { content: "−"; }
+    .plan-wave-name { font: 500 1.28rem/1.25 var(--serif); }
+    .plan-wave-summary { color: #3f4541; line-height: 1.5; }
+    .plan-wave-status { grid-column: 3; grid-row: 1; justify-self: start; color: var(--ink-soft); font: 700 .66rem/1.4 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+    .plan-wave-body {
+      margin-left: 220px;
+      padding: 2px 0 28px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(220px, .6fr);
+      gap: 40px;
+    }
+    .minimum-krs { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); counter-reset: kr-floor; }
+    .minimum-krs li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); counter-increment: kr-floor; }
+    .minimum-krs li::before { content: counter(kr-floor, decimal-leading-zero); color: var(--ink-soft); font: 700 .68rem/1.6 var(--mono); }
+    .minimum-krs strong { display: block; margin-bottom: 4px; font: 600 .92rem/1.35 var(--sans); }
+    .minimum-krs p, .plan-notes p { margin: 0; color: var(--ink-soft); line-height: 1.55; }
+    .plan-notes { padding-top: 1px; }
+    .plan-notes .plan-label { display: block; margin-bottom: 8px; }
+    .plan-notes p + .plan-label { margin-top: 20px; }
+    .task-map { border-top: 1px solid var(--line); margin-top: 14px; }
+    .task-map-row { display: grid; grid-template-columns: 90px 140px minmax(0, 1fr); gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+    .task-map-row a { color: var(--ink); text-underline-offset: 3px; }
+    .task-map-row span { color: var(--ink-soft); line-height: 1.45; }
+    .disposition-ledger { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line); }
+    .disposition { min-height: 140px; padding: 18px 20px; border-right: 1px solid var(--line); }
+    .disposition:first-child { padding-left: 0; }
+    .disposition:last-child { border-right: 0; }
+    .disposition p { margin: 8px 0 0; color: var(--ink-soft); line-height: 1.5; }
+    .slate-scope { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 30px; padding-top: 18px; }
+    .slate-scope p { margin: 0; color: var(--ink-soft); line-height: 1.55; }
+    main { padding: 0 clamp(20px, 5vw, 72px) 72px; }
+    section { max-width: 1280px; }
+    .section-head {
+      margin: 66px 0 22px;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, .55fr);
+      gap: 48px;
+      align-items: end;
+    }
+    .section-head h2 { font: 500 clamp(1.8rem, 3vw, 2.8rem)/1.1 var(--serif); letter-spacing: -.025em; }
+    .section-head p { color: var(--ink-soft); line-height: 1.5; }
+    .panel, .score-note, .highlight, .wave-card, .table-wrap, .explorer {
+      border-color: var(--line);
+      box-shadow: none;
+      background: var(--paper);
+    }
+    .scoreboard { gap: 18px; }
+    .wave-chart { padding: 28px; }
+    .score-note { background: #f5f5f3; color: var(--ink); padding: 28px; }
+    .score-note .big { color: var(--ink); font-size: 2.2rem; }
+    .score-note p, .score-note small { color: var(--ink-soft); }
+    .wave-row button { padding: 12px 0; }
+    .stack { height: 10px; background: #eceeec; }
+    .stack span { transition: none; }
+    .wave-row button:hover .stack span { filter: none; transform: none; }
+
+    .finding-table { border-top: 1px solid var(--ink); }
+    .finding-row {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr) 180px;
+      gap: 26px;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--line);
+      align-items: start;
+    }
+    .finding-row.header { padding: 10px 0; color: var(--ink-soft); font: 600 .68rem/1.4 var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+    .finding-row p { margin: 0; color: var(--ink-soft); line-height: 1.55; }
+    .finding-row strong { font-weight: 600; }
+    .finding-result { color: var(--ink-soft); font: 600 .72rem/1.45 var(--mono); }
+    .method-note { margin-top: 22px; padding: 16px 18px; background: #f5f5f3; color: var(--ink-soft); line-height: 1.55; }
+    .method-note strong { color: var(--ink); }
+
+    .wave-cards { display: block; border-top: 1px solid var(--ink); }
+    .wave-card {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr) auto;
+      gap: 26px;
+      padding: 22px 0;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .wave-card::after { display: none; }
+    .wave-card .eyebrow { grid-column: 1; grid-row: 2; color: var(--ink-soft); }
+    .wave-card h3 { grid-column: 1; grid-row: 1; margin: 0; font: 500 1.45rem/1.2 var(--serif); }
+    .wave-card p { grid-column: 2; grid-row: 1 / span 2; margin: 0; }
+    .wave-card .mini-rollup { grid-column: 3; grid-row: 1 / span 2; margin: 0; align-self: center; white-space: nowrap; }
+
+    .filters { background: #f5f5f3; border-color: var(--line); }
+    .search, .select, .chip { border-color: var(--line); border-radius: 0; background: var(--paper); }
+    .chip.active { background: var(--ink); color: var(--paper); }
+    th { background: #f5f5f3; color: var(--ink-soft); }
+    tbody tr:hover { background: #fafafa; }
+    .status { border-radius: 2px; font-weight: 700; letter-spacing: .03em; }
+    .status.holds { color: var(--hold); background: var(--hold-soft); }
+    .status.fail { color: var(--fail); background: var(--fail-soft); }
+    .status.unknown { color: #5f6561; background: var(--unknown-soft); }
+    footer { background: #f5f5f3; color: var(--ink-soft); border-top: 1px solid var(--line); }
+    footer strong { color: var(--ink); }
+    footer code { color: var(--ink-soft); }
+    .drawer { box-shadow: -8px 0 24px rgba(0,0,0,.08); }
+
+    @media (max-width: 900px) {
+      .wave-intro, .project-list, .project-intro, .measure-heading, .kr-list, .kr-body { margin-left: 20px; }
+      .goal-sections { grid-template-columns: 1fr; }
+      .goal-section, .goal-section + .goal-section { padding: 18px 0; border-right: 0; border-bottom: 1px solid var(--line); }
+      .goal-section:last-child { border-bottom: 0; }
+      .section-head { grid-template-columns: 1fr; gap: 8px; }
+      .wave-card { grid-template-columns: 145px 1fr; }
+      .wave-card .mini-rollup { grid-column: 2; grid-row: 2; justify-self: start; }
+      .finding-row { grid-template-columns: 150px minmax(0, 1fr); }
+      .finding-row > :last-child { grid-column: 2; }
+      .plan-wave-body { grid-template-columns: 1fr; gap: 26px; }
+      .disposition-ledger { grid-template-columns: repeat(2, 1fr); }
+      .disposition:nth-child(2) { border-right: 0; }
+      .disposition:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .disposition:nth-child(3) { padding-left: 0; }
+    }
+    @media (max-width: 620px) {
+      .masthead { padding-top: 24px; }
+      .topline { padding-bottom: 22px; }
+      h1 { font-size: 2.65rem; }
+      .goal-tree summary { grid-template-columns: 20px minmax(0, 1fr); gap: 6px 9px; }
+      .goal-tree .node-meta, .kr-node > summary .status { grid-column: 2; justify-self: start; }
+      .start-tree .project-node > summary { grid-template-columns: 20px minmax(0, 1fr); }
+      .start-kr { grid-template-columns: 68px minmax(0, 1fr); gap: 10px; }
+      .start-tasks li { grid-template-columns: 68px minmax(0, 1fr); gap: 8px 10px; }
+      .start-task-state { grid-column: 2; text-align: left; }
+      .start-wave-note { margin-left: 49px; }
+      .wave-intro, .project-intro { grid-template-columns: 1fr; gap: 5px; }
+      .next-chapter > header, .plan-section > header, .slate-scope { grid-template-columns: 1fr; gap: 8px; }
+      .plan-state { grid-template-columns: 1fr; gap: 5px; }
+      .shift-row { grid-template-columns: 92px minmax(0, 1fr); }
+      .shift-row > :nth-child(3) { grid-column: 2; border-top: 1px solid #ded9cf; }
+      .shift-row > :first-child { grid-row: 1 / span 2; padding-right: 12px; }
+      .shift-head { display: none; }
+      .plan-wave > summary { grid-template-columns: minmax(0, 1fr) 90px; gap: 8px 16px; }
+      .plan-wave-summary { grid-column: 1; }
+      .plan-wave-status { grid-column: 1; grid-row: 2; }
+      .plan-wave > summary::before { grid-column: 2; grid-row: 1; }
+      .plan-wave-body { margin-left: 0; }
+      .task-map-row { grid-template-columns: 74px minmax(0, 1fr); }
+      .task-map-row span:last-child { grid-column: 2; }
+      .disposition-ledger { grid-template-columns: 1fr; }
+      .disposition, .disposition:first-child, .disposition:nth-child(3) { min-height: 0; padding: 15px 0; border-right: 0; border-bottom: 1px solid var(--line); }
+      .disposition:last-child { border-bottom: 0; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .summary-stat:nth-child(2) { border-right: 0; }
+      .summary-stat:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .goal-heading { grid-template-columns: 1fr; gap: 12px; }
+      .goal-work li { grid-template-columns: 68px minmax(0, 1fr); }
+      .work-note { grid-column: 2; }
+      .interpretation header, .essay-wave { grid-template-columns: 1fr; gap: 8px; }
+      .essay-conclusion { margin-left: 0; }
+      .execution-history > header,
+      .topology-shift,
+      .history-section,
+      .history-judgment { grid-template-columns: 1fr; gap: 9px; }
+      .topology-state { padding: 18px 0; border-left: 0; border-top: 1px solid var(--line); }
+      .topology-shift > h3 { padding-bottom: 12px; }
+      .history-phases summary { grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding-right: 26px; position: relative; }
+      .history-phases summary::before { position: absolute; right: 0; }
+      .phase-body { margin-left: 104px; }
+      .chapter-note { grid-template-columns: 1fr; gap: 8px; }
+      .finding-row, .finding-row.header { grid-template-columns: 1fr; gap: 7px; }
+      .finding-row.header { display: none; }
+      .finding-row > :last-child { grid-column: 1; }
+      .wave-card { grid-template-columns: 1fr; gap: 8px; }
+      .wave-card .eyebrow, .wave-card h3, .wave-card p, .wave-card .mini-rollup { grid-column: 1; grid-row: auto; }
+      .wave-card .mini-rollup { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="topline">
+      <span>Loopflow · chapter review and planning draft</span>
+      <span>Evidence through 22 September 2026 · plan not yet accepted</span>
+    </div>
+    <div class="hero">
+      <div>
+        <div class="chapter-tag">Draft recommendation · Product planning still open</div>
+        <h1>Next chapter roster</h1>
+        <p class="hero-copy">A candidate Project is shown only when it has one coherent bet, proof-shaped KRs, and enough seed Tasks to make those KRs computable—usually about three for a one-KR Project or two per KR when a Project has several. This is an initial planning heuristic for this chapter, not a quota or exhaustive backlog.</p>
+      </div>
+      <div class="goal-browser">
+        <div class="start-roster-head"><span>Wave → Project → KR → seed Tasks</span><span>Recommendation</span></div>
+        <div class="goal-tree start-tree" aria-label="Recommended Wave, Project, KR, and seed Task hierarchy">
+          <details class="wave-node" open>
+            <summary><span>Infrastructure</span><span class="node-meta">2 candidate Projects · 8 seed Tasks</span></summary>
+            <div class="project-list">
+              <details class="project-node" open>
+                <summary><span>Reliability</span><span class="node-meta">2 KRs · 4 Tasks</span></summary>
+                <div class="start-kr"><strong>Draft KR · Releases</strong><span>Every scheduled release opportunity is durably accounted for as on-time, caught up, deferred, or failed, and two consecutive opportunities complete through the configured path as a truthful no-op or complete exact-tag publication; at least one real publication reaches users, required verification passes, and no manual repair is required.</span></div>
+                <ul class="start-tasks">
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Account for and catch up every scheduled release opportunity</strong><span><b>Why</b> Thirty-three launchd-mediated runs prove that the configured path executes, but the ledger cannot distinguish calendar firings from manual triggers; one run started only after wake and another day had no separate firing while its predecessor remained active. <b>Done when</b> every daily obligation is recorded exactly once as on-time, caught up after wake, deferred behind an active attempt, or missed; caught-up and deferred work resumes automatically without duplication. Move the same contract to another Home or provider only if the local machine cannot satisfy it.</span></span><span class="start-task-state">Create</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Make scheduled release outcomes truthful and successful</strong><span><b>Why</b> On 22 September the release log said “Release did not complete,” while its cron receipt said <code>succeeded</code>; the scheduler currently measures agent-process exit rather than release outcome. <b>Done when</b> published, no-op, resumably blocked, and failed outcomes produce distinct truthful receipts; only reproduced blockers are repaired; then two consecutive opportunities settle without manual repair, at least one publishes, and all required surfaces pass exact-tag smoke checks.</span></span><span class="start-task-state">Create</span></li>
+                </ul>
+                <div class="start-kr"><strong>Draft KR · Dogfood availability</strong><span>Across 14 consecutive days of real self-hosting, every requested core planning or execution operation reaches provider progress or one bounded, truthful, actionable block; no credential expiry, stale resident, or silent controller failure creates a hidden outage, and status never claims availability that the configured path contradicts.</span></div>
+                <ul class="start-tasks">
+                  <li><span class="start-task-id">LOO-279</span><span class="start-task-copy"><strong><a href="https://linear.app/loopflow/issue/LOO-279">Make Linear OAuth recovery survive unattended Project runs</a></strong><span><b>Why</b> Token expiry stopped all three Infrastructure Project runs before they could refresh their plans. <b>Done when</b> expiry refreshes and persists atomically without interrupting work; a rejected refresh stops once with exact Doppler-aware recovery guidance and never executes a stale plan.</span></span><span class="start-task-state">Existing</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Measure dogfood availability from Intelligence evidence</strong><span><b>Why</b> The chapter has Linear-auth and controller incidents but no denominator showing how often <code>lf</code> Runs or Work advancements fail, or why. <b>Done when</b> one 14-day view classifies every attempted Run or advancement as progressed, intentionally waiting, failed by a named cause—including Linear auth—or unknown; reports counts and rates, links failures to evidence and owning Tasks, and never becomes execution authority.</span></span><span class="start-task-state">Create</span></li>
+                </ul>
+              </details>
+              <details class="project-node" open>
+                <summary><span>Architecture Minimalism</span><span class="node-meta">1 KR · 4 Tasks</span></summary>
+                <div class="start-kr"><strong>Draft KR</strong><span>Across planning, execution, evidence, operations, releases, and product surfaces, every public command, cross-module API, durable data concept, wire or process contract, and control authority maps to one intentional product concept and owner; the CLI, user docs, architecture map, and checker agree; no obsolete path, duplicate source of truth, or unexplained compatibility seam remains.</span></div>
+                <ul class="start-tasks">
+                  <li><span class="start-task-id">LOO-257</span><span class="start-task-copy"><strong><a href="https://linear.app/loopflow/issue/LOO-257">Base Task worktrees on current canonical main</a></strong><span><b>Why</b> Durable Wave learning committed on canonical main made the next Task impossible to create because placement required equality with origin. <b>Done when</b> a Task starts from the exact clean local main commit without a push, reset, allowlist, or manual reconciliation, while reuse and later landing remain safe.</span></span><span class="start-task-state">Existing</span></li>
+                  <li><span class="start-task-id">Needs Task</span><span class="start-task-copy"><strong>Finish flow-driven Work advancement</strong><span><b>Why</b> Ordinary Work advancement still depends on diagnosing resident agents, controllers, tmux sessions, or fallback Skills instead of one durable execution contract. <b>Done when</b> the existing <code>loopflow.wave-agents</code> branch is tracked and a configured-path proof starts or resumes dead-controller Work through one bounded operation, survives a killed provider with one successor at the same Flow position, and stops explicitly at human or terminal boundaries.</span></span><span class="start-task-state">Create</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Run a repository-wide reduce pass</strong><span><b>Why</b> Recent reviews repeatedly examined execution concepts, which can hide unnecessary architecture elsewhere in planning, evidence, release operations, CLI, Mac, or Discord. <b>Done when</b> every public, durable, or cross-process concept and each high-cost subsystem is challenged against current user value; each candidate is cut or simplified in code, or becomes one exact Task tied to a concrete failure or user cost if it cannot safely fit this pass. No catalog of retained helpers is produced.</span></span><span class="start-task-state">Create</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Make the reduced product tell one coherent story</strong><span><b>Why</b> Deleting internals does not help if users still encounter redundant commands, models, setup, or repair paths and the docs describe the pre-reduction system. <b>Done when</b> the selected simplifications land and CLI help, DTOs, user docs, the architecture map, and automated checks agree on the smaller product; obsolete public routes are gone and the checker prevents their accidental return.</span></span><span class="start-task-state">Create</span></li>
+                </ul>
+              </details>
+            </div>
+            <p class="start-wave-note">Reliability now covers both delivery and the smaller prerequisite: Loopflow must remain usable while it is being used to build Loopflow. LOO-279 is direct evidence for the dogfood-availability KR, not release work.</p>
+          </details>
+
+          <details class="wave-node" open>
+            <summary><span>Intelligence</span><span class="node-meta">1 candidate Project · 3 seed Tasks</span></summary>
+            <div class="project-list">
+              <details class="project-node" open>
+                <summary><span>Trace &amp; Context</span><span class="node-meta">1 KR · 3 Tasks</span></summary>
+                <div class="start-kr"><strong>Draft KR</strong><span>Twenty of twenty sampled settled Runs are reconstructable through one supported path from initiating Work and owning Home through exact launch context, provider Session, usage, terminal result, and resulting Work consequence; missing evidence is explicit and the readers succeed on the migrated long-lived ledger.</span></div>
+                <ul class="start-tasks">
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Make real Runs explainable end to end</strong><span><b>Why</b> Current trace claims come from partial readers and aggregate gaps, so users cannot tell what initiated a Run, what the agent saw, what happened, or what changed. <b>Done when</b> the system captures every edge needed to explain a named 20-Run sample from Work and Home through context, provider Session, usage, result, and consequence, with each missing edge explicit.</span></span><span class="start-task-state">Create</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Close the evidence gaps exposed by the audit</strong><span><b>Why</b> Settled Runs currently lack launch contracts, context, tokens, cost, or a reliable link to the resulting Work state, making failure analysis and availability measurement incomplete. <b>Done when</b> every newly sampled settled Run carries the required evidence and a typed outcome usable by the Reliability availability view, or a source-specific absence; unexplained silence reaches zero.</span></span><span class="start-task-state">Create</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Make trace reconstruction a usable product path</strong><span><b>Why</b> Evidence spread across raw stores and schema-fragile readers does not help a user explain a Run. <b>Done when</b> one supported drill-down reconstructs all 20 samples on the migrated long-lived ledger without manual joins, and unavailable evidence is labeled rather than rendered as success.</span></span><span class="start-task-state">Create</span></li>
+                </ul>
+              </details>
+            </div>
+            <p class="start-wave-note">No second Intelligence Project or KR is recommended yet. Runtime monitoring remains a candidate, not a commitment.</p>
+          </details>
+
+          <details class="wave-node" open>
+            <summary><span>Product</span><span class="node-meta">2 candidate Projects</span></summary>
+            <div class="project-list">
+              <details class="project-node" open>
+                <summary><span>Company Dogfood</span><span class="node-meta">1 KR · 3 Tasks</span></summary>
+                <div class="start-kr"><strong>Draft KR</strong><span>Each active company Wave completes one full operating loop through intended product paths: direction enters through its company surface, delivery and execution remain visible, and chapter review/reset supports the next decision; zero accepted direction disappears, crosses Waves, or creates a second transcript, and every manual fallback is classified and routed within one cadence.</span></div>
+                <ul class="start-tasks">
+                  <li><span class="start-task-id">LOO-185</span><span class="start-task-copy"><strong><a href="https://linear.app/loopflow/issue/LOO-185">Provision Loopflow's company Discord channels</a></strong><span><b>Why</b> Company direction currently depends on manually assembled rooms and can lose Wave identity across repositories and Homes. <b>Done when</b> one company Discord idempotently contains one shared room and one stable channel per Wave; reconciliation preserves identity and history, repairs safe drift, and refuses ambiguous ownership.</span></span><span class="start-task-state">Existing</span></li>
+                  <li><span class="start-task-id">LOO-278</span><span class="start-task-copy"><strong><a href="https://linear.app/loopflow/issue/LOO-278">Add chapter reviews and interactive plan resets</a></strong><span><b>Why</b> Without an evidence-backed close and explicit reset, old priorities and unproved claims bleed into the next planning interval. <b>Done when</b> a user can review every scoped KR, understand the portfolio, accept a new Wave plan interactively, and retain both records without the expired plan keeping authority.</span></span><span class="start-task-state">Existing</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Run one complete company operating cycle</strong><span><b>Why</b> Working channels, execution, and chapter tools in isolation do not prove that Loopflow supports the actual company loop. <b>Done when</b> direction enters through Discord, becomes visible Work, produces a reviewable result, and informs the next chapter without lost direction, a private transcript, or an uncategorized manual fallback.</span></span><span class="start-task-state">Create</span></li>
+                </ul>
+              </details>
+              <details class="project-node" open>
+                <summary><span>Desktop</span><span class="node-meta">1 KR · 2 Tasks</span></summary>
+                <div class="start-kr"><strong>Draft KR</strong><span>From one native workspace, a user can move between company planning and open provider-native Sessions without losing repository or Work context; planning remains shared <code>lf</code> state, Sessions retain their native lifecycle, and the Desktop invents neither authority nor ownership to connect them.</span></div>
+                <ul class="start-tasks">
+                  <li><span class="start-task-id">LOO-251</span><span class="start-task-copy"><strong><a href="https://linear.app/loopflow/issue/LOO-251">Finish the native Sessions multiplexer and promoted Ask handoff</a></strong><span><b>Why</b> The native workspace exists, but a promoted human Ask has not been proved end to end and compilation cannot establish truthful readiness or release of the waiting caller. <b>Done when</b> one real Ask survives open, provider-native continuation, Ready, Complete, pane clearing, and caller release with correct focus and legal actions.</span></span><span class="start-task-state">Existing</span></li>
+                  <li><span class="start-task-id">New</span><span class="start-task-copy"><strong>Integrate planning and open Sessions into one Desktop workspace</strong><span><b>Why</b> Planning shows what the company intends to advance while open Sessions show what agents are doing now; today they read as separate products. <b>Done when</b> a user moves directly between the Wave, Project, and Task planning hierarchy and relevant open Sessions without losing repository or Work context, while planning stays shared <code>lf</code> state and Session lifecycle stays provider-native.</span></span><span class="start-task-state">Create</span></li>
+                </ul>
+              </details>
+            </div>
+            <p class="start-wave-note"><a href="https://linear.app/loopflow/issue/LOO-148">LOO-148</a> remains unclustered Product recovery work rather than being forced into Desktop. The untracked <code>loopflow.wave-agents</code> branch now routes to Infrastructure / Architecture Minimalism.</p>
+          </details>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="chapter-note">
+    <div class="kicker">Coverage: incomplete</div>
+    <p>No chapter start record exists, so this review starts at the first observable KR state—not at the repository's first commit. All 39 KRs in the reviewed portfolio are enumerated. Earlier wording, establishment dates, and KRs closed along the way were not durably retained, so historical membership remains incomplete. Pre-KR git history is context, not retroactive proof.</p>
+  </div>
+
+  <article class="execution-history" aria-labelledby="execution-history-title">
+    <header>
+      <div class="kicker">Technical history</div>
+      <div>
+        <h2 id="execution-history-title">From remote <code>lfd</code> requests to execution on the owning Home</h2>
+        <p>No formal summer snapshot survives. This reconstruction starts with the service-shaped runtime documented on 30 June and ends with the checked architecture on 22 September. It excludes the planning redesign except where durable Work hands an objective to execution.</p>
+      </div>
+    </header>
+
+    <div class="topology-shift" aria-label="Execution topology before and after">
+      <h3>The topological change</h3>
+      <div class="topology-state">
+        <span class="eyebrow">Before</span>
+        <strong>Client → HTTP → <code>lfd</code> → runtime</strong>
+        <p>The Mac app reached remote <code>lfd</code> over HTTPS. A large client/service API carried lifecycle reads and actions, encouraging the daemon's representation to stand in for execution truth.</p>
+      </div>
+      <div class="topology-state">
+        <span class="eyebrow">After</span>
+        <strong>Client → <code>lf ssh</code> → target Home's <code>lf</code></strong>
+        <p>The target executes the same complete command against its own files, store, credentials, processes, and providers. SSH is transport. <code>lfd</code> remains a local keeper, not the universal runtime API.</p>
+      </div>
+    </div>
+
+    <section class="history-section">
+      <h3>The enabling boundary</h3>
+      <div class="history-prose">
+        <p>The topology only works if durable Work is distinct from the process acting on it. Wave, Project, or Task Work preserves purpose, input, status, and a controller playhead. A controller reconstructs one boundary, executes it, records one transition, and can disappear. A Run records one provider launch on the Home that launched it; attribution explains why it ran but grants no Work, Git, credential, or signal authority.</p>
+        <p>This boundary emerged through a reversal. On 18 July the system deleted duplicate Project and Task Session controllers and made Run the single execution path. That ended a split brain. Dogfooding then showed Run still carried too much meaning. By September, Work owned purpose, the provider owned conversation continuity, the direct spawner owned its child, the OS supplied current liveness, and Run had narrowed to immutable evidence and causality.</p>
+      </div>
+    </section>
+
+    <div class="history-phases" aria-label="Execution redesign phases">
+      <details>
+        <summary><span class="phase-date">Early summer</span><span class="phase-title">The runtime was held together by its container</span></summary>
+        <p class="phase-body">Service connection, tmux, environment, worktree names, controller Sessions, and ledger rows overlapped. They could each appear to answer what persisted, what was live, what was controllable, and what happened. Recovery and presentation repeatedly chose the wrong one.</p>
+      </details>
+      <details>
+        <summary><span class="phase-date">18–23 July</span><span class="phase-title">One execution substrate replaced duplicate controller stacks</span></summary>
+        <p class="phase-body">Session controllers collapsed into Run; cross-provider recovery followed. Immediate dogfood exposed missing-flow retry storms, containment presented as progress, synthetic Runs used for controller facts, and empty execution slots treated as retry permission.</p>
+      </details>
+      <details>
+        <summary><span class="phase-date">20–30 August</span><span class="phase-title">The distributed topology was made explicit</span></summary>
+        <p class="phase-body">Recorded history was separated from current liveness. Trace contention stopped killing healthy Work. Recovery began depending on direct process truth rather than telemetry completeness. Main agents moved into worktrees. Session returned with the narrower meaning of provider-native continuity or a human boundary. Mac reads moved from the <code>lfd</code> API to shared <code>lf --json</code> projections.</p>
+      </details>
+      <details open>
+        <summary><span class="phase-date">22 September</span><span class="phase-title">Authority is clearer than observation</span></summary>
+        <p class="phase-body">The current architecture enumerates its owners and projections, but users still cannot reconstruct every execution. Settled records lack context, replay contracts, token or cost evidence; cross-source state can disagree; and no unattended replay cohort exists. The runtime boundaries moved faster than tracing.</p>
+      </details>
+    </div>
+
+    <section class="history-section">
+      <h3>What “getting it right” required</h3>
+      <div class="history-prose">
+        <p>Once each Home executes locally, guarantees previously hidden inside one service have to be explicit. Identity cannot be recovered from a path or inherited environment. Placement cannot imply liveness. An old event cannot be shown as current state. Monitoring cannot gate the work it observes. A visible PID cannot manufacture control authority. Remote scope cannot remain ambient.</p>
+        <p>Read this way, most later runtime work was not a collection of unrelated lifecycle defects. It was the work of making the command-on-the-owning-Home model survive restart, concurrency, missing telemetry, provider replacement, remote placement, and partial failure.</p>
+      </div>
+    </section>
+
+    <section class="history-section">
+      <h3>Where the work actually happened</h3>
+      <div class="history-prose">
+        <p>The topology is an Infrastructure story, but the recorded implementation was mostly Product work. That was not simply misplaced development: failures in real product use correctly drove the redesign and clarified which mechanics should remain durable Infrastructure responsibilities. Product's <code>loopflow-api</code> Tasks built Session-to-Run convergence, cross-provider recovery, capability boundaries, explicit execution context, nonfatal tracing, watched landing, and human checkpoints. Product memory also records the Mac HTTP-client deletion. The Wave spent much of August building the runtime beneath the surface. Its Sessions and fleet-loading Tasks remain open; one Mac Surface KR holds because the app avoided a second authority, while the other six fail or remain unknown.</p>
+        <p>Infrastructure supplied Home identity and placement, start/wake behavior, worktree isolation, architecture checking, promotion, credentials, cron, and release hardening. Its roster also contains trace and ledger work—lineage, capture survival, usage parsing, continuity—that fits Intelligence's stated mandate. The Wave map lagged the architecture that emerged.</p>
+      </div>
+    </section>
+
+    <section class="history-section">
+      <h3>What the evidence layer still lacks</h3>
+      <div class="history-prose">
+        <p>Intelligence adapted the contracts late but not the operating evidence. Its immutable launch-contract and replay work matches the new authority model, but every Trace KR is false, real-ledger capture audits reported 1,767 decode failures, scheduled telemetry failed, and the activity projection has no delivery receipts for several Linear-complete Trace Tasks.</p>
+        <p>The technical map points toward monitoring rebuilt as a non-authoritative join across the design that now exists: Work boundary → owning Home and runtime artifact → Run launch contract → provider attempt and native Session → owned or merely observed process → events and terminal proof → resulting Work transition → delivery outcome. Whether that becomes a separate chapter KR remains a planning decision.</p>
+        <p>Each edge needs its source owner, stable identifier, time, freshness, and explicit missingness. A fleet index may aggregate across Homes, but it must be rebuildable and must never become the fact that decides whether a process is alive or Work may advance.</p>
+      </div>
+    </section>
+
+    <div class="history-judgment">
+      <h3>Judgment</h3>
+      <p>The decentralization thesis holds when stated as a topology: Loopflow moved from clients calling a lifecycle-shaped daemon API to complete <code>lf</code> execution on the Home that owns the processes and evidence. The Work/execution split defined what could safely cross that boundary. The achievement was not removing centers; it was replacing one general execution center with narrow authorities whose claims do not silently transfer to one another.</p>
+    </div>
+  </article>
+
+  <section class="next-chapter" aria-labelledby="next-chapter-title">
+    <header>
+      <div>
+        <div class="kicker">Draft planning direction</div>
+        <h2 id="next-chapter-title">Choose the user change first.</h2>
+      </div>
+      <p>The review establishes where the system is technically. It does not choose the next product. The next chapter starts with the changes users should experience, then uses this architecture and debt record to identify the smallest Infrastructure and Intelligence work needed to deliver and prove them.</p>
+    </header>
+
+    <div class="plan-state" role="note" aria-label="Planning status">
+      <span>Planning state</span>
+      <strong>Partially decided</strong>
+      <p>The three-Wave boundary and minimum technical commitments are taking shape. Product outcomes, final Project boundaries, additional KRs, and Task carry-over remain open until the hidden backlog is made explicit.</p>
+    </div>
+
+    <section class="plan-section" aria-labelledby="planning-shift-title">
+      <header>
+        <h3 id="planning-shift-title">What changes</h3>
+        <p>The closing chapter was largely an architectural redesign driven by failures encountered while dogfooding. That feedback loop continues, but architecture becomes the route to a product outcome rather than the destination.</p>
+      </header>
+      <div class="shift-ledger">
+        <div class="shift-row shift-head"><span></span><span>Closing chapter</span><span>Next chapter</span></div>
+        <div class="shift-row"><strong>Center of gravity</strong><p>Dogfood failures pulled work into execution architecture and recovery.</p><p>Select a small number of explicit user changes before deriving technical work.</p></div>
+        <div class="shift-row"><strong>Technical review</strong><p>The architectural redesign became much of the chapter's delivered work.</p><p>The review is a dependency map and debt register: it explains how to reach the selected experience.</p></div>
+        <div class="shift-row"><strong>Product input</strong><p>Surface outcomes competed with runtime repairs; open Tasks and old KRs became proxies for priority.</p><p>Product is planned from the human's hidden backlog and current dogfood pain. Existing Tasks are evidence and options, not the roadmap.</p></div>
+        <div class="shift-row"><strong>Wave routing</strong><p>Product implemented much of the semantic runtime because product use exposed the defects.</p><p>Product keeps owning the use and discovery loop; durable execution mechanics route to Infrastructure and evidence contracts to Intelligence.</p></div>
+        <div class="shift-row"><strong>Carry-over</strong><p>Broad or unsupported promises remained visible without a clear disposition.</p><p>Every prior claim is carried, made an invariant, parked with a trigger, or retired. Nothing survives merely because it is open.</p></div>
+      </div>
+    </section>
+
+    <section class="plan-section" aria-labelledby="planning-floor-title">
+      <header>
+        <h3 id="planning-floor-title">Current planning floor</h3>
+        <p>For this draft, a Project is ready to propose when it names one coherent bet, proof-shaped KRs, and enough known starting Tasks to make the first move. Roughly three Tasks works for a one-KR Project; roughly two per KR can be enough when several KRs share a Project. This is a planning-sufficiency heuristic, not a quota.</p>
+      </header>
+      <div class="plan-waves">
+        <details class="plan-wave" open>
+          <summary>
+            <span class="plan-wave-name">Infrastructure</span>
+            <span class="plan-wave-summary">Bootstrap from the observed operational and architectural remainder, then add only dependencies required by accepted Product outcomes.</span>
+            <span class="plan-wave-status">Review-seeded</span>
+          </summary>
+          <div class="plan-wave-body">
+            <ol class="minimum-krs">
+              <li><div><strong>Minimum KR · Releases</strong><p>One proof-shaped commitment that releases and their required verification operate dependably. The exact window and failure standard remain to be written.</p></div></li>
+              <li><div><strong>Minimum KR · Documentation and architectural minimalism</strong><p>One commitment that the execution architecture is documented, simpler, and free of unexplained duplicate authority or obsolete paths—not merely that a diagram exists.</p></div></li>
+            </ol>
+            <aside class="plan-notes">
+              <span class="plan-label">Known inputs</span>
+              <p>Credential expiry, release continuity, canonical-main Task worktrees, remaining shared-store ownership, and obsolete compatibility seams.</p>
+              <span class="plan-label">Not implied</span>
+              <p>Every observed Infrastructure failure does not become a KR. Unselected debt is preserved in the disposition ledger.</p>
+            </aside>
+          </div>
+        </details>
+
+        <details class="plan-wave" open>
+          <summary>
+            <span class="plan-wave-name">Intelligence</span>
+            <span class="plan-wave-summary">Bootstrap from the evidence failures revealed by the review and from whatever proof the selected Product outcomes require.</span>
+            <span class="plan-wave-status">Review-seeded</span>
+          </summary>
+          <div class="plan-wave-body">
+            <ol class="minimum-krs">
+              <li><div><strong>Minimum KR · Trace and context reliability and usability</strong><p>One user-legible proof that execution can be reconstructed through the context and trace system that now sits on top of Home-local execution.</p></div></li>
+              <li><div><strong>Open</strong><p>No second commitment has been selected. Runtime monitoring is a candidate because the review found failed scheduled telemetry and unreliable cross-source state, but it is not yet part of the plan.</p></div></li>
+            </ol>
+            <aside class="plan-notes">
+              <span class="plan-label">Known inputs</span>
+              <p>Missing launch contracts, context, tokens, cost, replay receipts, schema-safe readers, freshness, and source disagreement.</p>
+              <span class="plan-label">Constraint</span>
+              <p>Observation remains non-authoritative. Missing trace cannot stop, advance, or manufacture control over healthy Work.</p>
+            </aside>
+          </div>
+        </details>
+
+        <details class="plan-wave" open>
+          <summary>
+            <span class="plan-wave-name">Product</span>
+            <span class="plan-wave-summary">Start from desired user changes and current dogfood pain. The review can show unfinished promises, but it cannot choose the product.</span>
+            <span class="plan-wave-status">Direction needed</span>
+          </summary>
+          <div class="plan-wave-body">
+            <ol class="minimum-krs">
+              <li><div><strong>Hidden backlog first</strong><p>Name the few changes in what a user can understand, do, or trust. Only then define Product Projects and proof-shaped KRs.</p></div></li>
+              <li><div><strong>Dogfood remains the discovery loop</strong><p>Company use should expose Product, Infrastructure, and Intelligence failures. Product owns the loop; each finding routes to the Wave whose contract failed.</p></div></li>
+            </ol>
+            <aside class="plan-notes">
+              <span class="plan-label">Known ownership</span>
+              <p>Company Dogfood groups chapter review/reset with Discord-based company operation. Desktop is forming around native Sessions. Work Execution is forming around the untracked <code>loopflow.wave-agents</code> branch and its one-path Work advancement design.</p>
+              <span class="plan-label">Not implied</span>
+              <p>An open Product Task does not automatically carry. Existing Mac, Session, recovery, chapter, and Discord work must be tested against the newly stated priorities.</p>
+            </aside>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="plan-section" aria-labelledby="task-map-title">
+      <header>
+        <h3 id="task-map-title">Clarified ownership</h3>
+        <p>Ownership says where a Task belongs if it continues. It is not yet a decision to carry it.</p>
+      </header>
+      <div class="task-map">
+        <div class="task-map-row"><a href="https://linear.app/loopflow/issue/LOO-278">LOO-278</a><strong>Product</strong><span>Company Dogfood: chapter review and start-chapter cadence.</span></div>
+        <div class="task-map-row"><a href="https://linear.app/loopflow/issue/LOO-257">LOO-257</a><strong>Infrastructure</strong><span>Canonical-main Task worktrees and execution correctness.</span></div>
+        <div class="task-map-row"><a href="https://linear.app/loopflow/issue/LOO-185">LOO-185</a><strong>Product</strong><span>Company Dogfood: Discord operating surface.</span></div>
+        <div class="task-map-row"><a href="https://linear.app/loopflow/issue/LOO-251">LOO-251</a><strong>Product</strong><span>Desktop: native Session interaction.</span></div>
+        <div class="task-map-row"><a href="https://linear.app/loopflow/issue/LOO-279">LOO-279</a><strong>Infrastructure</strong><span>Reliability / dogfood availability: credential continuity and the currently observed controller blocker.</span></div>
+        <div class="task-map-row"><span><code>loopflow.wave-agents</code></span><strong>Product</strong><span>No Task yet. Seed for Work Execution: one bounded Flow-driven path for starting and resuming Work.</span></div>
+      </div>
+    </section>
+
+    <section class="plan-section" aria-labelledby="slate-title">
+      <header>
+        <h3 id="slate-title">How the slate becomes clean</h3>
+        <p>The archive remains comprehensive while the live plan becomes small. An unknown KR is not automatically debt: investigate it only if its truth would change the next plan.</p>
+      </header>
+      <div class="disposition-ledger">
+        <div class="disposition"><strong>Carry</strong><p>Required for an accepted user outcome. Assign one Wave, Project, and owning Task.</p></div>
+        <div class="disposition"><strong>Invariant</strong><p>Must keep holding, but belongs in a checker or cadence rather than a funded Project.</p></div>
+        <div class="disposition"><strong>Park</strong><p>Real debt outside this chapter. Preserve its consequence, owner, and objective reactivation trigger.</p></div>
+        <div class="disposition"><strong>Retire</strong><p>Obsolete, duplicated, or no longer intended. Remove it from the live planning surface after acceptance.</p></div>
+      </div>
+      <div class="slate-scope">
+        <span class="plan-label">Reconciliation scope</span>
+        <p>All 39 reviewed KRs, every current open Task, stale historical Project Work, duplicate or empty registrations, and every material technical remainder named in this review must appear exactly once in the final disposition ledger. That ledger—not an ever-growing KR list—is what permits the next chapter to start from zero without forgetting what remains.</p>
+      </div>
+    </section>
+  </section>
+
+  <article class="interpretation" aria-labelledby="interpretation-title">
+    <header>
+      <h2 id="interpretation-title">What changed for users</h2>
+      <p>An interpretation of the product experience, built from the objective Project evidence below. Historical chapter coverage remains incomplete.</p>
+    </header>
+    <section class="essay-wave">
+      <h3>Infrastructure</h3>
+      <p>Infrastructure was meant to make Loopflow disappear beneath ordinary work: a maintainer should be able to start, resume, verify, and land changes without repairing the system that coordinates them. One part of that experience improved. Nineteen consecutive first-parent landings remained legible against the architecture model. But the larger promise is not dependable: expired Linear credentials blocked planning, all 35 observed scheduled telemetry runs failed, and the main build occupied 18.4 GiB against a 12 GiB budget. The architecture became easier to reason about; daily operation did not yet become boring.</p>
+    </section>
+    <section class="essay-wave">
+      <h3>Intelligence</h3>
+      <p>Intelligence was meant to help users understand why an agent acted as it did, what context shaped the run, and whether the work could be reproduced. The strongest advance is concrete: a twenty-launch audit reconstructed ordered provider context, source identities, hashes, roles, and token totals every time. That makes individual launches more explainable. The experience still breaks at the level users need during failure or investigation. Settled records lack context, launch contracts, token counts, or cost; no unattended replay cohort exists. Loopflow remembers more, but users cannot yet treat the record as a complete explanation.</p>
+    </section>
+    <section class="essay-wave">
+      <h3>Product</h3>
+      <p>Product was meant to make goal-authored work understandable and steerable from the surface a user already occupies. It preserved an important foundation: Mac, CLI, and Discord continued to share authority rather than creating separate companies inside each interface. The visible experience remains fragmented. Mac lacks Project-management edits and recovery controls; a terminated provider can appear live; there is no iOS path; and PM, Git, Work, status, and presentation state disagree in real cases. Users see more of the system, but the surfaces expose unresolved contradictions instead of resolving them.</p>
+    </section>
+    <p class="essay-conclusion">Across the three Waves, Loopflow became more explicit about authority, context, and state, but not proportionally easier to trust. That imbalance begins in planning: many Project definitions describe the mechanism, while their KRs measure internal invariants without saying why those invariants prove a better user experience. The next chapter should name the beneficiary and experienced change first, explain the causal link from each KR to that change, and preserve an objective evidence packet beneath a short Project synthesis.</p>
+  </article>
+
+  <main>
+    <section aria-labelledby="shape-title">
+      <div class="section-head">
+        <h2 id="shape-title">Verdicts by Wave</h2>
+        <p>Select a Wave to filter the KR ledger. Counts are recomputed from the individual KR rows.</p>
+      </div>
+      <div class="scoreboard">
+        <div class="panel wave-chart" id="waveChart" aria-label="KR verdicts by wave"></div>
+        <aside class="score-note">
+          <div>
+            <div class="eyebrow">Evidence coverage</div>
+            <span class="big">21 / 39 unknown</span>
+            <p>Most unknown verdicts result from missing duration-window denominators, absent metric readings, or incomplete historical lineage.</p>
+          </div>
+          <small>21 unknown ÷ 39 reviewed KRs. Current scope complete; KR lineage incomplete.</small>
+        </aside>
+      </div>
+    </section>
+
+    <section aria-labelledby="ledger-title">
+      <div class="section-head">
+        <h2 id="ledger-title">Summary findings</h2>
+        <p>Selected observations that materially affected Project and Wave judgments.</p>
+      </div>
+      <div class="finding-table">
+        <div class="finding-row header"><span>Area</span><span>Observation</span><span>Effect</span></div>
+        <div class="finding-row"><strong>Technical Architecture</strong><p>All 19 first-parent landings from 23 August through 22 September passed the architecture checker contained in their own commit.</p><span class="finding-result">KR holds</span></div>
+        <div class="finding-row"><strong>Mac authority</strong><p>No second company transcript or Swift-owned Work runtime appeared during the observed month.</p><span class="finding-result">KR holds</span></div>
+        <div class="finding-row"><strong>Context</strong><p>Exact launch context reconstructed 20/20. The associated KR also requires published budgets and 30 days of compliance, which are absent.</p><span class="finding-result">KR does not hold</span></div>
+        <div class="finding-row"><strong>Infrastructure telemetry</strong><p>All 35 observed scheduled telemetry runs failed. The main build also exceeded its 12 GiB budget.</p><span class="finding-result">Direct counterevidence</span></div>
+        <div class="finding-row"><strong>Trace</strong><p>Six settled records lacked context, 35 lacked a launch contract, 21 lacked token evidence, 76 lacked cost, and no replay launches were recorded.</p><span class="finding-result">5 / 5 KRs do not hold</span></div>
+        <div class="finding-row"><strong>Task-loop trust</strong><p>The metric exists but has no observations; freshness is recorded as “never.”</p><span class="finding-result">Unknown</span></div>
+      </div>
+      <div class="method-note"><strong>Interpretation rule:</strong> a completed Task, merged PR, passing fixture, or implemented command is delivery evidence. It proves a KR only when the promised behavior was exercised and observed for the stated scope or duration.</div>
+    </section>
+
+    <section aria-labelledby="wave-title">
+      <div class="section-head">
+        <h2 id="wave-title">Wave summaries</h2>
+        <p>Mandate judgment, KR totals, and the main evidence limitation for each Wave.</p>
+      </div>
+      <div class="wave-cards" id="waveCards"></div>
+    </section>
+
+    <section aria-labelledby="explorer-title">
+      <div class="section-head">
+        <h2 id="explorer-title">Explore every promise</h2>
+        <p>Filter by Wave, Project, or verdict. Open any row for the evidence and the missing proof. Every current KR is present exactly once; closed or rewritten historical KRs may be missing.</p>
+      </div>
+      <div class="explorer">
+        <div class="filters">
+          <input class="search" id="search" type="search" placeholder="Search promises, evidence, projects…" aria-label="Search KRs">
+          <select class="select" id="waveFilter" aria-label="Filter by Wave"><option value="all">All Waves</option></select>
+          <select class="select" id="projectFilter" aria-label="Filter by Project"><option value="all">All Projects</option></select>
+        </div>
+        <div class="chips" aria-label="Filter by verdict">
+          <button class="chip active" type="button" data-verdict="all">All 39</button>
+          <button class="chip" type="button" data-verdict="holds">Holds 2</button>
+          <button class="chip" type="button" data-verdict="fail">Does not hold 16</button>
+          <button class="chip" type="button" data-verdict="unknown">Unknown 21</button>
+        </div>
+        <div class="table-count" id="tableCount"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Wave / Project</th><th>Promise</th><th>Verdict</th></tr></thead>
+            <tbody id="krTable"></tbody>
+          </table>
+          <div class="empty" id="empty" hidden>No promises match this view.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div><strong>Repository baseline review</strong><br>PM snapshot synced 22 September 2026. Reviewed portfolio: 3 Waves, 8 Projects, 39 KRs. First observed here; establishment and closure history was not retained.</div>
+    <div>Source Run <code>run_fffa8550b8944e88b0fd3dd997b2ab32</code><br>Archive not persisted: this Run is not bound to a Task worktree.</div>
+  </footer>
+
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drawerTitle">
+    <button class="drawer-close" id="drawerClose" aria-label="Close details">×</button>
+    <div class="route" id="drawerRoute"></div>
+    <h2 id="drawerTitle"></h2>
+    <div id="drawerStatus"></div>
+    <h3>What the evidence says</h3>
+    <p id="drawerEvidence"></p>
+    <h3>What is still missing</h3>
+    <p id="drawerGap"></p>
+    <div class="run-id" id="drawerRun"></div>
+  </aside>
+
+  <script>
+    const waves = {
+      "Infrastructure": {
+        order: 1,
+        mandate: "Make ordinary work fast, safe, and boring.",
+        userPromise: "Maintainers should be able to run and land work without repairing Loopflow itself.",
+        reading: "One of 12 KRs holds. OAuth expiry blocked planning, all 35 observed telemetry runs failed, the main build exceeded budget, and local architecture checks diverged from hosted-style checks.",
+        counts: [1, 4, 7]
+      },
+      "Intelligence": {
+        order: 2,
+        mandate: "Make Loopflow sharper from local context and trace evidence.",
+        userPromise: "Users should be able to understand why an agent acted and reconstruct what happened.",
+        reading: "None of 11 KRs holds. Exact context capture reconstructed 20/20 launches, but all five Trace KRs fail, recent context changes lack Run citations, budgets are unpublished, and most duration cohorts do not exist.",
+        counts: [0, 7, 4]
+      },
+      "Product": {
+        order: 3,
+        mandate: "Make goal-authored work understandable and steerable across surfaces.",
+        userPromise: "People should understand and steer the same work from whichever Loopflow surface they use.",
+        reading: "One of 16 KRs holds. The Mac remained on shared authority, but recovery and PM editing are absent, false readiness exists, iOS has no app path, and PM, Git, Work, and presentation state disagree.",
+        counts: [1, 5, 10]
+      }
+    };
+
+    const projectRuns = {
+      "Stability & Security": "run_cbd9f4b09a3a42ffa6af298d2333a982",
+      "Technical Architecture": "run_4963e1d5bfd04a6e9a904a31d4e36dcc",
+      "Performance & Efficiency": "run_386f9b3906de470bb52845f981f9460d",
+      "Trace": "run_666e4d99aa7247199cf99f58641882c0",
+      "Context": "run_c5880b1d2f684e12b95d8e4638ec2106",
+      "Mac Surface UX": "run_6d8bb1c87bd843c2920fa38794e64518",
+      "Loopflow API": "run_d2006f6015cb48189b3cb93ab1f0c44e",
+      "Auditability": "run_02669cd8b91f4529b41cf7581e241d32"
+    };
+
+    const projectSummaries = {
+      "Stability & Security": {
+        aim: "Operators can dispatch, resume, and release work without lost commands, expired authority, manual repair, or ambiguous terminal state.",
+        current: "Degraded state is often reported honestly, but credential expiry blocked planning and all 35 observed scheduled telemetry runs failed. The required strand and ownership cohorts were not retained.",
+        conclusion: "Failure reporting improved; dependable unattended operation was neither achieved nor fully measured."
+      },
+      "Technical Architecture": {
+        aim: "Maintainers can understand and change Loopflow from one architectural map without stale concepts or different local and hosted answers.",
+        current: "Nineteen consecutive first-parent landings mapped cleanly to the architecture model. The current tree still contains 43 locally detected stale vocabulary hits, and checker environments disagree.",
+        conclusion: "Landed changes stayed legible, but the promise of one consistently enforced architecture remains incomplete."
+      },
+      "Performance & Efficiency": {
+        aim: "Everyday commands start promptly and local development stays inside a predictable resource envelope.",
+        current: "The main build occupied 18.4 GiB against a 12 GiB budget. Authoritative latency, energy, thermal, and denominator scorecards were unavailable, while scheduled telemetry was failing.",
+        conclusion: "The user experience is not demonstrably faster, and one explicit resource promise does not hold."
+      },
+      "Trace": {
+        aim: "When a run fails or surprises someone, they can inspect a complete record, understand its cost, and replay eligible work.",
+        current: "Settled records still omit context, launch contracts, token counts, or cost, and no unattended replay cohort was recorded.",
+        conclusion: "Trace data exists, but users cannot yet rely on it as a complete debugging or replay surface."
+      },
+      "Context": {
+        aim: "Agents receive the right bounded context, and users can inspect what shaped a run without paying for unexplained prompt growth.",
+        current: "A twenty-launch audit reconstructed ordered provider context every time. Context budgets, thirty-day compliance, and durable Run citations were not established.",
+        conclusion: "Sampled launches became explainable; efficiency and sustained correctness remain unproved."
+      },
+      "Mac Surface UX": {
+        aim: "People can understand, steer, and recover goal-authored work from the Mac app without creating a second source of truth.",
+        current: "Mac remained on shared authority, but Project editing and recovery are absent, and an externally terminated provider can appear live.",
+        conclusion: "The shared foundation held; the Mac surface is still an incomplete and sometimes misleading control surface."
+      },
+      "Loopflow API": {
+        aim: "The same work model functions across CLI, Mac, iOS, and agents and scales across Waves and codebases without babysitting.",
+        current: "Five Waves were registered locally, but only one was live; no Cadenza week, complete spawn-chain cohort, or iOS application path was available.",
+        conclusion: "Core commands exist, but portability, scale, and unattended trust remain largely unproved."
+      },
+      "Auditability": {
+        aim: "A user can see what every Wave is doing and why, then drill from the summary to the run, session, and raw evidence.",
+        current: "Status surfaces are more readable, but PM, Work, Run, Git, and presentation state visibly disagree, and Project or KR claims lack durable evidence links.",
+        conclusion: "Visibility improved; the product still exposes contradictions that prevent the summary from being trusted."
+      }
+    };
+
+    const projectWork = {
+      "Stability & Security": [
+        {id:"LOO-277", title:"Make mutable release worktrees re-enter without losing preparation state", note:"PM complete · PR #1187 cited", pr:1187},
+        {id:"LOO-273", title:"Make PR landing repair observable and terminating", note:"PM complete · PR link not retained"},
+        {id:"LOO-266", title:"Restore caller edits after incomplete release synchronization", note:"PM complete · PR link not retained"}
+      ],
+      "Technical Architecture": [
+        {id:"LOO-270", title:"Make architecture drift evidence consistent across local and hosted trees", note:"PM complete · PR link not retained"},
+        {id:"LOO-253", title:"Main agents move off canonical main into a worktree", note:"PM complete · PR link not retained"},
+        {id:"LOO-208", title:"Make Loopflow architecture explainable from one map", note:"PM complete · PR link not retained"}
+      ],
+      "Performance & Efficiency": [
+        {id:"LOO-6", title:"Measure the local pre-land verification path against its budgets on every landing", note:"PM complete · PR link not retained"},
+        {id:"LOO-9", title:"Keep local development inside a predictable resource envelope", note:"PM complete · PR link not retained"},
+        {id:"LOO-216", title:"Make every Performance scorecard denominator authoritative", note:"PM complete · PR link not retained"}
+      ],
+      "Trace": [
+        {id:"LOO-272", title:"Replay an eligible recorded run unattended", note:"PM complete · PR link not retained"},
+        {id:"LOO-271", title:"Record immutable execution contracts for replay", note:"PM complete · PR link not retained"},
+        {id:"LOO-128", title:"Make every run a complete, inspectable local record", note:"PM complete · PR link not retained"}
+      ],
+      "Context": [
+        {id:"LOO-267", title:"Make tracked Work the substrate for end-to-end automation", note:"PM complete · PR link not retained"},
+        {id:"LOO-143", title:"Make launch context inspectable, bounded, and measurably better", note:"PM complete · PR link not retained"},
+        {id:"LOO-144", title:"Bound context assembly", note:"Absorbed Task · PR link not retained"}
+      ],
+      "Mac Surface UX": [
+        {id:"LOO-221", title:"Fix Mac app Agent activity banner decoding", note:"PM complete · PR link not retained"},
+        {id:"LOO-149", title:"Make Wave purpose, Projects, and Chat the stable Mac surface", note:"PM complete · PR link not retained"},
+        {id:"LOO-151", title:"Show Active Sessions without turning every process into a control", note:"PM complete · PR link not retained"}
+      ],
+      "Loopflow API": [
+        {id:"LOO-269", title:"Stop durable Turn Basis from gating Task launch", note:"PM complete · PR link not retained"},
+        {id:"LOO-256", title:"Give resumed Project Runs durable child-control Turn Basis", note:"PM complete · PR link not retained"},
+        {id:"LOO-252", title:"Run the skill as a command in human-gate Ask sessions", note:"PM complete · PR link not retained"}
+      ],
+      "Auditability": [
+        {id:"LOO-258", title:"Keep Product status readable after reviewer-copy regression", note:"PM complete · PR link not retained"},
+        {id:"LOO-242", title:"Keep status and roadmap readable when one Task lacks PR copy", note:"PM complete · PR link not retained"},
+        {id:"LOO-234", title:"Map what works and fails in the current lf agent experience", note:"PM complete · investigation"}
+      ]
+    };
+
+    const krs = [
+      {wave:"Infrastructure",project:"Stability & Security",verdict:"unknown",promise:"Seven consecutive days of real Task, Project, and Wave runs produce zero strands after owner, process, or provider failure; zero lost or duplicated durable commands; and zero terminal-truth regressions.",evidence:"Current status preserves terminal PM truth and renders degraded historical Work. The observed recent Run history covers only part of 22 September, not seven days.",gap:"A seven-day cross-kind ledger for strands, command loss or duplication, and terminal-truth regressions."},
+      {wave:"Infrastructure",project:"Stability & Security",verdict:"unknown",promise:"Across 30 days, one writer owns each assigned worktree and zero implementation writes occur outside it.",evidence:"On 22 September, LOO-279 and its uncommitted work were in the assigned worktree.",gap:"A 30-day writer-ownership and filesystem-write audit."},
+      {wave:"Infrastructure",project:"Stability & Security",verdict:"fail",promise:"Across 30 days, credentials and forwarded authority preflight or fail closed: zero runs are blocked by expiry and zero child receives secrets it does not need.",evidence:"Linear token expiry blocked Project planning on 28 August and again across three Project runs on 22 September.",gap:"A complete authority-forwarding audit remains absent, but the zero-expiry-block condition is already disproved."},
+      {wave:"Infrastructure",project:"Stability & Security",verdict:"fail",promise:"Four consecutive weekly releases and fourteen nightly verifications complete with zero manual repair; every red produces actionable work within one day.",evidence:"The latest fourteen verifications all failed. Across the larger observed window, all 35 telemetry targets failed; 32 of 33 release-run targets succeeded.",gap:"A four-publication release series and durable red-to-action latency mapping."},
+      {wave:"Infrastructure",project:"Stability & Security",verdict:"unknown",promise:"Across 30 days, host, daemon, migration, and registry drift surfaces before a human and recovery preserves state and history.",evidence:"Telemetry surfaced stale-binary and schema drift on 22 September; a later doctor run showed aligned migrations and an intact store.",gap:"A 30-day detection-to-recovery ledger proving completeness and preservation for every incident."},
+
+      {wave:"Infrastructure",project:"Technical Architecture",verdict:"unknown",promise:"A top-down architecture map names every durable control owner, truth source, process boundary, and public API; four consecutive weekly drift checks find zero unnamed owner, mirror, or shim.",evidence:"A clean current archive mapped every discovered category. Four weekly snapshots replay cleanly.",gap:"The retained reports from the four actual scheduled hosted runs were unavailable; replay is not an execution receipt."},
+      {wave:"Infrastructure",project:"Technical Architecture",verdict:"holds",promise:"For 30 consecutive days, every landed PR maps cleanly to documented architecture concepts or updates the map in the same PR.",evidence:"All 19 first-parent landings from 23 August through 22 September passed the architecture checker contained in their own commit.",gap:"No material gap for the stated window."},
+      {wave:"Infrastructure",project:"Technical Architecture",verdict:"fail",promise:"Stale pre-Run, pre-Home, and pre-native-PM language reaches zero outside migrations and historical release material and stays zero for 30 days.",evidence:"The normal current checkout reports 43 stale-vocabulary hits under ignored .lf prompt and temporary history: 15 ‘session context’, 26 ‘lf radio’, and 2 ‘pm.linear_project’ references.",gap:"Unify local and hosted reviewed-source boundaries, then retain 30 clean days."},
+
+      {wave:"Infrastructure",project:"Performance & Efficiency",verdict:"unknown",promise:"Task launch-to-first-progress, pre-land verification, and land-to-merge each have named p50 and p95 budgets and stay within them for 30 days.",evidence:"Named budgets exist, but the scorecard covers 14 days, owns no live metric, and failed on 22 September because the database lacked agent_turns.",gap:"A working authoritative 30-day scorecard."},
+      {wave:"Infrastructure",project:"Performance & Efficiency",verdict:"unknown",promise:"Thirty consecutive landings report every local pre-land verification stage against its budget.",evidence:"The trailing ledger had 16 records and 98 planned phases, but all were resource-blocked and executed zero phases; current merged landings do not join to exact-head gate records.",gap:"A durable landing-to-pre-land join covering 30 consecutive landings."},
+      {wave:"Infrastructure",project:"Performance & Efficiency",verdict:"unknown",promise:"Seven consecutive days of normal development require zero avoidable setup or repair steps and zero manual Git surgery.",evidence:"Manual Git repairs were recorded on 22 and 28 August. Recent operations cover only 20–22 September, not an exhaustive seven-day window.",gap:"A complete seven-day denominator for setup, repair, and Git surgery events."},
+      {wave:"Infrastructure",project:"Performance & Efficiency",verdict:"fail",promise:"Build artifacts, disk use, CPU, and agent spend remain within named budgets for 30 days without disrupting work.",evidence:"On 22 September the main build occupied 18.4 GiB against its 12.0 GiB limit. A current breach disproves continuous compliance.",gap:"Thirty-day CPU and agent-spend coverage is also absent."},
+
+      {wave:"Intelligence",project:"Trace",verdict:"fail",promise:"A month of runs is 100% reconstructable — prompt, context, flow/skill shape, spawned work, cost, time, result — verified by 20/20 random spot-audits against the long-lived ledger.",evidence:"Among 82 settled records, 6 lacked context and 35 lacked a launch contract. Of 80 settled usage rows, 21 lacked tokens and 76 lacked cost.",gap:"A durable 20-run reconstructability audit after population coverage reaches 100%."},
+      {wave:"Intelligence",project:"Trace",verdict:"fail",promise:"The trace readers survive the ledger they actually read: a month in which every lf runs, lf trace, and lf usage invocation on a real, migrated ledger succeeds, and none fails on a schema the migrations never produce.",evidence:"lf runs, lf usage, and doctor succeeded on 22 September. lf trace is no longer a command; its replacement is lf runs <run>.",gap:"Rewrite the stale contract and retain a month-long reader receipt series."},
+      {wave:"Intelligence",project:"Trace",verdict:"fail",promise:"Token and cost evidence has one home and no unexplained silence: for a month, every agent-bearing run lands in the ledger carrying provider, tokens, and cost; lf doctor reports no gap-day and no silence longer than a working day; and no run's spend is attributed to a nested lf sharing its run_id.",evidence:"Twenty-one of 80 settled rows lacked tokens, 76 lacked cost, and doctor retained eight gap-days in the month.",gap:"Close measurement gaps and retain a full-month continuity record."},
+      {wave:"Intelligence",project:"Trace",verdict:"fail",promise:"Any run from the last month replays against its recorded context, for debugging and for evals: 10/10 sampled runs replay unattended.",evidence:"Sixty-three records appear eligible for replay, but the durable event set contains zero replay operations.",gap:"Run and retain the required 10/10 unattended cohort."},
+      {wave:"Intelligence",project:"Trace",verdict:"fail",promise:"The stats surface answers the standing questions — what runs hot, what it costs, how it trends — in one query, on a month of real history.",evidence:"lf usage returns raw per-Run counters but does not aggregate hotness, cost, or trends, and does not claim interval completeness.",gap:"One Project-owned cohort query covering hotness, cost, and trend behavior."},
+
+      {wave:"Intelligence",project:"Context",verdict:"fail",promise:"For 30 consecutive days, every landed prompt, skill, flow, context-assembly, or chat-routing change cites the failing or costly run that motivated it and a follow-up run showing the intended behavior with no first-pass gate regression; zero uncited changes land.",evidence:"Three qualifying landings on 28 August, 1 September, and 22 September lacked motivating and follow-up Run identifiers.",gap:"A complete join from qualifying landings to motivating Run, follow-up Run, and first-pass gate result."},
+      {wave:"Intelligence",project:"Context",verdict:"fail",promise:"For 20/20 sampled launches, the exact ordered provider context is reconstructable and every authored or dynamic component has a source, stable identity, content hash, token count, rendered order, and stated role; every launch for 30 consecutive days stays within its published total and per-layer budgets as Wave history and scratch grow.",evidence:"The 20-launch reconstruction audit passed completely. The conjunct still fails because no total or per-layer budgets are published and no 30-day compliance window exists.",gap:"Publish the budgets and record daily compliance."},
+      {wave:"Intelligence",project:"Context",verdict:"unknown",promise:"Task intent survives handoffs: in 10/10 sampled multi-pass or restarted Tasks, a fresh agent receives the current human direction, full design, relevant Work observations, and current slice from durable worktree and launch context alone; no locally passing slice violates a recorded invariant or forbidden outcome.",evidence:"Durable Work binding, scratch capture, and restart behavior shipped on 28 August.",gap:"A named ten-Task handoff sample with fresh-agent and invariant results."},
+      {wave:"Intelligence",project:"Context",verdict:"unknown",promise:"Across at least three same-repository, same-flow, same-provider:model cohorts spanning at least two repositories and containing at least five landed runs in each adjacent 30-day window, median provider input tokens per run are lower in the later window and first-pass gate pass rate is no lower.",evidence:"Usage spans many repositories but only about one direct 30-day window and does not join Runs to landed delivery or first-pass gates.",gap:"Three qualifying adjacent-window cohorts with delivery and gate joins."},
+      {wave:"Intelligence",project:"Context",verdict:"unknown",promise:"Zero-config excellence repeats: 3/3 fresh repositories reach a landed PR without context configuration, and no context knob is added or required for 30 consecutive days.",evidence:"No audit names three fresh repositories, their landed PRs, and configuration state.",gap:"Three recorded zero-config repository journeys and a 30-day knob audit."},
+      {wave:"Intelligence",project:"Context",verdict:"unknown",promise:"For seven consecutive days, every applicable shared Discord message is either folded into the owning Wave context within one cadence or remains visibly pending; zero audited launches receive an irrelevant shared message, and no Wave action requires another Wave raw transcript.",evidence:"Unified Wave chat and delivery reconciliation shipped on 1 September.",gap:"A seven-day message disposition, cadence, launch-relevance, and cross-Wave transcript audit."},
+
+      {wave:"Product",project:"Mac Surface UX",verdict:"unknown",promise:"For one full week of real use, a cold launch exposes every repository and Wave, their purpose, Project/KR proof, open Tasks, attention, active agents, output-token rate, and Discord delivery state without opening a terminal.",evidence:"Current source covers the named surfaces, but no dated week-long cold-launch census exists.",gap:"A seven-day census against the long-lived registry."},
+      {wave:"Product",project:"Mac Surface UX",verdict:"unknown",promise:"Across the shared fixture suite and 20 sampled live Wave, Project, Task, and Run rows, every visible state agrees with the shared API on liveness, next owner, legal action, and reason.",evidence:"Sixty focused Swift tests and six Rust DTO fixture tests passed on 22 September.",gap:"A recorded comparison of 20 live rows across all four kinds."},
+      {wave:"Product",project:"Mac Surface UX",verdict:"unknown",promise:"Twenty cold launches and navigation trials stay inside published paint and interaction budgets on the long-lived registry; missing or stale evidence never renders as a healthy empty state.",evidence:"Tests prove failed refreshes retain last-good evidence and disclose the reason. No paint or interaction budgets are published.",gap:"Published budgets and twenty long-lived-registry trials."},
+      {wave:"Product",project:"Mac Surface UX",verdict:"fail",promise:"Ten of ten control-room paths start or recover Work, open the exact PR or trace, edit planning through the PM API, and open the owning Discord channel without Swift inventing lifecycle.",evidence:"Start, resume, PR, evidence, Wave pause/resume, and Discord actions exist. Recovery and PM mutation do not.",gap:"Shared recovery and PM-edit actions, then ten configured-path trials."},
+      {wave:"Product",project:"Mac Surface UX",verdict:"holds",promise:"For one month, the Mac app contains no second company transcript or Swift-owned Work concept; Discord and the shared lf DTOs remain the conversation and control authorities.",evidence:"The 22 August–22 September history retained backing-aware Discord, provider-native Sessions, and shared lf DTO authority; Swift added no independent transcript persistence.",gap:"No material gap for the stated month."},
+      {wave:"Product",project:"Mac Surface UX",verdict:"unknown",promise:"For 14 days of real use, opening Loopflow to a repository paints its scoped Sessions list with the true session count within the published p95 budget across at least 20 opens, with no empty-then-populate flash and no manual repair inside the window.",evidence:"The app reads repo-scoped Sessions and emits one-off time_to_sessions logs.",gap:"A published threshold plus a retained 14-day, 20-open count and flash dataset."},
+      {wave:"Product",project:"Mac Surface UX",verdict:"fail",promise:"For 14 days of real use, selecting a session opens a live interactive embedded terminal within the published p95 budget across at least 20 opens (serial-open position included), or shows an honest opening state that never claims false readiness.",evidence:"A 22 September review found an externally terminated provider could remain displayed as live. The repair was not on main/v0.12.18.",gap:"Land the repair, publish p95, and retain 20 real opens over 14 days."},
+
+      {wave:"Product",project:"Loopflow API",verdict:"unknown",promise:"The thesis holds under load: >= 5 waves run consistently for 1 week straight across loopflow and Cadenza, at least 2 per codebase driven from GOAL.md with zero repo-authored skills added for the work.",evidence:"Five Waves were registered locally, all in Loopflow; only Infrastructure was live. No Cadenza or seven-day fleet history was available.",gap:"Seven continuous days across both codebases and Homes, including skill provenance."},
+      {wave:"Product",project:"Loopflow API",verdict:"unknown",promise:"Task loops earn trust by streak: over one week of real work, every dispatched task loop either lands its PR unattended or stops with an actionable non-convergence record — zero silent stalls, zero human rescues inside the window.",evidence:"The task-loop-trust metric exists but is uninstrumented, freshness never.",gap:"Classify every settled Task over seven days by unattended landing, non-convergence, rescue, and repair."},
+      {wave:"Product",project:"Loopflow API",verdict:"unknown",promise:"The spawn chain survives a week: wave loops spawn project loops spawn task loops with caps enforced throughout, and no run escapes its budget.",evidence:"Recent records do not expose a complete Wave → Project → Task lineage or declared-cap comparison.",gap:"A seven-day lineage and cap-violation ledger."},
+      {wave:"Product",project:"Loopflow API",verdict:"fail",promise:"One model everywhere, continuously: for a month of landings, CLI, Mac, iOS, and agent prompts expose the same wave/project/task model — a parallel concept appearing anywhere is a failure event.",evidence:"CLI, Mac, and prompts share the model, but the repository explicitly has no iOS application target. Git and Task state also disagreed for LOO-278 on 22 September.",gap:"An actual iOS path and a month-long compatibility/reconciliation ledger."},
+      {wave:"Product",project:"Loopflow API",verdict:"unknown",promise:"A new wave can be created, steered, delegated, inspected, and closed through the shared API contract, repeated cold 3/3 times.",evidence:"The commands exist; no dated configured-path record exercises the full lifecycle three times.",gap:"Three timestamped cold create → steer → delegate → inspect → close runs."},
+
+      {wave:"Product",project:"Auditability",verdict:"unknown",promise:"One week of real operation answers every ‘what is this wave doing?’ from the product surfaces — each drop to raw transcripts or files is logged as a failure of this bet.",evidence:"Status exposes substantial Wave truth, but Auditability had an empty weekly activity window and no fallback ledger.",gap:"A seven-day question and raw-record-fallback denominator."},
+      {wave:"Product",project:"Auditability",verdict:"unknown",promise:"Drill-down holds end to end, every time: wave state -> run detail -> attachable live session, N/N attempts across a week.",evidence:"A Wave Run resolved by durable ID, but its detail had no trace, event, or Session link; Session rows had work:null.",gap:"An N/N weekly drill-down and live-attachment attempt ledger."},
+      {wave:"Product",project:"Auditability",verdict:"fail",promise:"Every visible state carries its reason (failed, waiting, running, idle, blocked, done) for the full lifetime of a wave, not just at steady state.",evidence:"On 22 September human status rendered several missing-worktree Tasks ready while roadmap JSON called them blocked. Other rows simultaneously carried done, blocked, waiting, and start recommendations.",gap:"One transition record and presentation contract that reconciles PM, Work, Run, PR, and UI state."},
+      {wave:"Product",project:"Auditability",verdict:"fail",promise:"Curation always points back: for a month, every summary, retained fact, and planning claim drills to the raw record or audit evidence that justifies it — pm doctor-class checks find zero orphaned claims.",evidence:"Project and KR payloads expose no evidence references; no claim-citation implementation exists; pm doctor does not audit orphaned claims.",gap:"Receipt fields, claim provenance, orphan checks, and a one-month observation window."}
+    ];
+
+    const labels = {holds:"Holds", fail:"Does not hold", unknown:"Unknown"};
+    const colors = {holds:"var(--hold)", fail:"var(--fail)", unknown:"var(--unknown)"};
+    const state = { verdict:"all", wave:"all", project:"all", search:"" };
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[character]);
+    }
+
+    function renderGoalTree() {
+      const tree = document.querySelector("#goalTree");
+      tree.innerHTML = Object.entries(waves).map(([wave, waveData]) => {
+        const projects = [...new Set(krs.filter(kr => kr.wave === wave).map(kr => kr.project))];
+        const projectNodes = projects.map(project => {
+          const projectKrs = krs.filter(kr => kr.wave === wave && kr.project === project);
+          const summary = projectSummaries[project];
+          const work = projectWork[project] || [];
+          const workRows = work.length ? work.map(item => {
+            const taskUrl = `https://linear.app/loopflow/issue/${item.id}`;
+            const pr = item.pr ? ` · <a href="https://github.com/loopflowstudio/loopflow/pull/${item.pr}">PR #${item.pr}</a>` : "";
+            return `<li><span class="work-id">${escapeHtml(item.id)}</span><span><a href="${taskUrl}">${escapeHtml(item.title)}</a>${pr}</span><span class="work-note">${escapeHtml(item.note)}</span></li>`;
+          }).join("") : `<li><span class="work-note">No completed Project Tasks were retained in the current snapshot.</span></li>`;
+          const krNodes = projectKrs.map(kr => `
+            <details class="kr-node">
+              <summary><span>${escapeHtml(kr.promise)}</span><span class="status ${kr.verdict}">${labels[kr.verdict]}</span></summary>
+              <div class="kr-body">
+                <div class="goal-sections">
+                  <section class="goal-section"><h3>Success measure</h3><p>${escapeHtml(kr.promise)}</p></section>
+                  <section class="goal-section"><h3>What happened</h3><p>${escapeHtml(kr.evidence)}</p></section>
+                  <section class="goal-section"><h3>What still blocks the user outcome</h3><p>${escapeHtml(kr.gap)}</p></section>
+                </div>
+                <div class="goal-work">
+                  <h3>Changes shipped toward this outcome</h3>
+                  <p class="goal-work-note">The records preserve Project → Task ownership, not a direct Task → KR edge. These deliveries are relevant context, not proof that this KR holds.</p>
+                  <ul>${workRows}</ul>
+                </div>
+              </div>
+            </details>`).join("");
+          return `<details class="project-node">
+            <summary><span>${escapeHtml(project)}</span><span class="node-meta">Project</span></summary>
+            <div class="project-intro">
+              <span class="label">Intended improvement</span><p>${escapeHtml(summary.aim)}</p>
+              <span class="label">Current experience</span><p class="current">${escapeHtml(summary.current)}</p>
+              <span class="label">Chapter conclusion</span><p>${escapeHtml(summary.conclusion)}</p>
+            </div>
+            <div class="measure-heading"><span>KRs · how we chose to prove it</span><span>${projectKrs.length} measures</span></div>
+            <div class="kr-list">${krNodes}</div>
+          </details>`;
+        }).join("");
+        return `<details class="wave-node">
+          <summary><span>${escapeHtml(wave)}</span><span class="node-meta">${escapeHtml(waveData.userPromise)}</span></summary>
+          <div class="wave-intro"><span class="label">Wave conclusion</span><p>${escapeHtml(waveData.reading)}</p></div>
+          <div class="project-list">${projectNodes}</div>
+        </details>`;
+      }).join("");
+    }
+
+    function renderWaveChart() {
+      const el = document.querySelector("#waveChart");
+      el.innerHTML = Object.entries(waves).map(([name, data]) => {
+        const total = data.counts.reduce((a,b) => a+b, 0);
+        const segments = ["holds","fail","unknown"].map((key, index) => `<span title="${labels[key]}: ${data.counts[index]}" style="width:${(data.counts[index]/total)*100}%;background:${colors[key]}"></span>`).join("");
+        return `<div class="wave-row"><button type="button" data-wave="${name}" aria-label="Filter to ${name}"><span class="wave-name">${name}</span><span class="stack">${segments}</span><span class="wave-total">${total} KRs</span></button></div>`;
+      }).join("");
+      el.querySelectorAll("button").forEach(button => button.addEventListener("click", () => {
+        state.wave = button.dataset.wave;
+        document.querySelector("#waveFilter").value = state.wave;
+        syncProjectOptions();
+        renderTable();
+        document.querySelector("#explorer-title").scrollIntoView({behavior:"smooth"});
+      }));
+    }
+
+    function renderWaveCards() {
+      document.querySelector("#waveCards").innerHTML = Object.entries(waves).map(([name,data]) => `
+        <article class="wave-card" data-number="0${data.order}">
+          <div class="eyebrow">Coverage: incomplete</div>
+          <h3>${name}</h3>
+          <p><strong>${data.mandate}</strong> ${data.reading}</p>
+          <div class="mini-rollup">
+            <span style="color:var(--hold)">${data.counts[0]} hold</span>
+            <span style="color:var(--fail)">${data.counts[1]} miss</span>
+            <span style="color:#89600e">${data.counts[2]} unknown</span>
+          </div>
+        </article>`).join("");
+    }
+
+    function syncSelects() {
+      const waveSelect = document.querySelector("#waveFilter");
+      Object.keys(waves).forEach(wave => waveSelect.insertAdjacentHTML("beforeend", `<option>${wave}</option>`));
+      syncProjectOptions();
+    }
+
+    function syncProjectOptions() {
+      const projectSelect = document.querySelector("#projectFilter");
+      const prior = state.project;
+      const projects = [...new Set(krs.filter(kr => state.wave === "all" || kr.wave === state.wave).map(kr => kr.project))];
+      projectSelect.innerHTML = `<option value="all">All Projects</option>` + projects.map(project => `<option>${project}</option>`).join("");
+      if (projects.includes(prior)) projectSelect.value = prior;
+      else { state.project = "all"; projectSelect.value = "all"; }
+    }
+
+    function filteredKrs() {
+      const query = state.search.toLowerCase();
+      return krs.filter(kr =>
+        (state.verdict === "all" || kr.verdict === state.verdict) &&
+        (state.wave === "all" || kr.wave === state.wave) &&
+        (state.project === "all" || kr.project === state.project) &&
+        (!query || `${kr.wave} ${kr.project} ${kr.promise} ${kr.evidence} ${kr.gap}`.toLowerCase().includes(query))
+      );
+    }
+
+    function renderTable() {
+      const rows = filteredKrs();
+      const tbody = document.querySelector("#krTable");
+      tbody.innerHTML = rows.map(kr => {
+        const index = krs.indexOf(kr);
+        return `<tr tabindex="0" data-index="${index}" aria-label="Open details for ${kr.promise}">
+          <td class="meta-cell"><strong>${kr.wave}</strong><br>${kr.project}</td>
+          <td class="promise-cell">${kr.promise}</td>
+          <td><span class="status ${kr.verdict}">${labels[kr.verdict]}</span></td>
+        </tr>`;
+      }).join("");
+      document.querySelector("#tableCount").textContent = `${rows.length} of 39 promises shown`;
+      document.querySelector("#empty").hidden = rows.length !== 0;
+      tbody.querySelectorAll("tr").forEach(row => {
+        row.addEventListener("click", () => openDrawer(krs[Number(row.dataset.index)]));
+        row.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDrawer(krs[Number(row.dataset.index)]); } });
+      });
+    }
+
+    function openDrawer(kr) {
+      document.querySelector("#drawerRoute").textContent = `${kr.wave}  /  ${kr.project}`;
+      document.querySelector("#drawerTitle").textContent = kr.promise;
+      document.querySelector("#drawerStatus").innerHTML = `<span class="status ${kr.verdict}">${labels[kr.verdict]}</span>`;
+      document.querySelector("#drawerEvidence").textContent = kr.evidence;
+      document.querySelector("#drawerGap").textContent = kr.gap;
+      document.querySelector("#drawerRun").textContent = `First observed: current PM snapshot, 22 Sep 2026 · Establishment date: unknown · Project review: ${projectRuns[kr.project]}`;
+      document.body.classList.add("drawer-open");
+      document.querySelector("#drawer").setAttribute("aria-hidden", "false");
+      document.querySelector("#drawerClose").focus();
+    }
+
+    function closeDrawer() {
+      document.body.classList.remove("drawer-open");
+      document.querySelector("#drawer").setAttribute("aria-hidden", "true");
+    }
+
+    document.querySelectorAll(".chip").forEach(chip => chip.addEventListener("click", () => {
+      document.querySelectorAll(".chip").forEach(item => item.classList.remove("active"));
+      chip.classList.add("active");
+      state.verdict = chip.dataset.verdict;
+      renderTable();
+    }));
+    document.querySelector("#search").addEventListener("input", event => { state.search = event.target.value; renderTable(); });
+    document.querySelector("#waveFilter").addEventListener("change", event => { state.wave = event.target.value; syncProjectOptions(); renderTable(); });
+    document.querySelector("#projectFilter").addEventListener("change", event => { state.project = event.target.value; renderTable(); });
+    document.querySelector("#drawerClose").addEventListener("click", closeDrawer);
+    document.querySelector("#drawerBackdrop").addEventListener("click", closeDrawer);
+    document.addEventListener("keydown", event => { if (event.key === "Escape") closeDrawer(); });
+
+    renderWaveChart();
+    renderWaveCards();
+    syncSelects();
+    renderTable();
+  </script>
+</body>
+</html>

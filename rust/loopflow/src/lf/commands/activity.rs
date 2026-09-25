@@ -1,20 +1,17 @@
 //! `lf activity` — one ordered record of durable Work facts.
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::{Author, Steer, SteerId, WorkRef};
+use crate::durable::{Author, SteerComment, WorkRef};
 use crate::lf::commands::runs::{collect_run_activity_since, RunSnapshot};
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
+use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
 use crate::store::sqlite::SqliteStore;
-use crate::work::project::Project;
-use crate::work::task::{GithubPr, Task, TaskPr, TaskPrId};
-use crate::work::wave::Wave;
+use crate::work::task::{GithubPr, TaskPr, TaskPrId};
 
 const MAX_LIMIT: usize = 200;
 
@@ -33,7 +30,7 @@ pub struct WorkActivityEntry {
     pub recorded_at: i64,
     pub summary: String,
     pub work: WorkRef,
-    /// Current human label: Wave name, Project slug, or Task identifier.
+    /// Current display label: Wave name, Project slug, or Task identifier.
     pub subject: String,
     pub fact: WorkActivityFact,
 }
@@ -71,24 +68,9 @@ pub enum WorkActivityFact {
         github: Option<GithubPr>,
     },
     SteerIssued {
-        id: SteerId,
+        id: i64,
         author: Author,
     },
-}
-
-#[derive(Debug)]
-struct WorkCatalog {
-    owners: HashMap<WorkRef, WorkOwner>,
-}
-
-#[derive(Debug, Clone)]
-struct WorkOwner {
-    work: WorkRef,
-    subject: String,
-    wave: String,
-    project: Option<String>,
-    task: Option<String>,
-    created_at: Option<i64>,
 }
 
 pub fn run(
@@ -142,16 +124,10 @@ fn build_snapshot(
     limit: usize,
     filter: WorkFilter<'_>,
 ) -> Result<WorkActivitySnapshot> {
-    let waves = store
-        .list_waves(None)
-        .map_err(|error| anyhow!("failed to read Waves: {error}"))?;
-    let projects = store
-        .list_projects(None)
-        .map_err(|error| anyhow!("failed to read Projects: {error}"))?;
     let tasks = store
         .list_tasks(None)
         .map_err(|error| anyhow!("failed to read Tasks: {error}"))?;
-    let catalog = WorkCatalog::new(&waves, &projects, &tasks)?;
+    let catalog = WorkCatalog::new(store.work_identities()?)?;
 
     let mut entries = catalog.creation_entries(since);
     for task in &tasks {
@@ -167,7 +143,7 @@ fn build_snapshot(
         }
     }
 
-    let runs = collect_run_activity_since(filter, since)?;
+    let runs = collect_run_activity_since(filter, since, &catalog)?;
     for run in runs {
         if let Some(work) = catalog.resolve_run(&run) {
             entries.extend(run_entries(&run, work, since));
@@ -175,11 +151,11 @@ fn build_snapshot(
     }
 
     let steers = store
-        .list_steers_since(since)
+        .steers_since(since)
         .map_err(|error| anyhow!("failed to read Steers: {error}"))?;
-    for steer in steers {
-        if let Some(work) = catalog.owners.get(&steer.work) {
-            entries.push(steer_entry(&steer, work));
+    for comment in steers {
+        if let Some(work) = catalog.owners.get(&comment.work) {
+            entries.push(steer_entry(&comment, work));
         }
     }
 
@@ -194,102 +170,6 @@ fn build_snapshot(
 }
 
 impl WorkCatalog {
-    fn new(waves: &[Wave], projects: &[Project], tasks: &[Task]) -> Result<Self> {
-        let mut catalog = Self {
-            owners: HashMap::new(),
-        };
-        for wave in waves {
-            let work = WorkRef::Wave(wave.id().clone());
-            catalog.owners.insert(
-                work.clone(),
-                WorkOwner {
-                    work,
-                    subject: wave.name().to_string(),
-                    wave: wave.name().to_string(),
-                    project: None,
-                    task: None,
-                    created_at: wave.created_at().map(OffsetDateTime::unix_timestamp),
-                },
-            );
-        }
-        for project in projects {
-            let wave = catalog
-                .owners
-                .get(&WorkRef::Wave(project.wave_id.clone()))
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Project {} refers to missing Wave {}",
-                        project.plan.slug,
-                        project.wave_id
-                    )
-                })?
-                .wave
-                .clone();
-            let work = WorkRef::Project(project.id.clone());
-            catalog.owners.insert(
-                work.clone(),
-                WorkOwner {
-                    work,
-                    subject: project.plan.slug.clone(),
-                    wave,
-                    project: Some(project.plan.slug.clone()),
-                    task: None,
-                    created_at: Some(project.created_at.unix_timestamp()),
-                },
-            );
-        }
-        for task in tasks {
-            let project = catalog
-                .owners
-                .get(&WorkRef::Project(task.project_id.clone()))
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Task {} refers to missing Project {}",
-                        task.plan.identifier,
-                        task.project_id
-                    )
-                })?;
-            let work = WorkRef::Task(task.id.clone());
-            catalog.owners.insert(
-                work.clone(),
-                WorkOwner {
-                    work,
-                    subject: task.plan.identifier.clone(),
-                    wave: project.wave.clone(),
-                    project: project.project.clone(),
-                    task: Some(task.plan.identifier.clone()),
-                    created_at: Some(task.created_at.unix_timestamp()),
-                },
-            );
-        }
-        Ok(catalog)
-    }
-
-    fn resolve_run(&self, run: &RunSnapshot) -> Option<&WorkOwner> {
-        if let Some(task) = run.subject("task") {
-            return unique_match(self.owners.values().filter(|owner| {
-                owner.task.as_deref() == Some(task)
-                    && run
-                        .subject("project")
-                        .is_none_or(|value| owner.project.as_deref() == Some(value))
-                    && run.subject("wave").is_none_or(|value| value == owner.wave)
-            }));
-        }
-        if let Some(project) = run.subject("project") {
-            return unique_match(self.owners.values().filter(|owner| {
-                owner.task.is_none()
-                    && owner.project.as_deref() == Some(project)
-                    && run.subject("wave").is_none_or(|value| value == owner.wave)
-            }));
-        }
-        let wave = run.subject("wave")?;
-        unique_match(
-            self.owners
-                .values()
-                .filter(|owner| owner.project.is_none() && owner.wave == wave),
-        )
-    }
-
     fn creation_entries(&self, since: i64) -> Vec<WorkActivityEntry> {
         self.owners
             .values()
@@ -310,11 +190,6 @@ impl WorkCatalog {
             })
             .collect()
     }
-}
-
-fn unique_match<'a>(mut matches: impl Iterator<Item = &'a WorkOwner>) -> Option<&'a WorkOwner> {
-    let value = matches.next()?;
-    matches.next().is_none().then_some(value)
 }
 
 fn activity_entry(
@@ -447,15 +322,20 @@ fn pr_entries(pr: &TaskPr, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntr
     entries
 }
 
-fn steer_entry(steer: &Steer, work: &WorkOwner) -> WorkActivityEntry {
+fn steer_entry(comment: &SteerComment, work: &WorkOwner) -> WorkActivityEntry {
     activity_entry(
-        format!("steer:{}", steer.id),
-        steer.issued_at.unix_timestamp(),
-        format!("Steered: {}", steer.text),
+        format!(
+            "steer:{}:{}:{}",
+            comment.work.kind(),
+            comment.work.id(),
+            comment.steer.id
+        ),
+        comment.issued_at.unix_timestamp(),
+        format!("Steered: {}", comment.steer.text),
         work,
         WorkActivityFact::SteerIssued {
-            id: steer.id.clone(),
-            author: steer.author.clone(),
+            id: comment.steer.id,
+            author: comment.steer.author.clone(),
         },
     )
 }
@@ -469,13 +349,10 @@ fn finalize_snapshot(
     filter: WorkFilter<'_>,
 ) -> WorkActivitySnapshot {
     entries.retain(|entry| {
-        catalog.owners.get(&entry.work).is_some_and(|owner| {
-            filter.matches(
-                Some(&owner.wave),
-                owner.project.as_deref(),
-                owner.task.as_deref(),
-            )
-        })
+        catalog
+            .owners
+            .get(&entry.work)
+            .is_some_and(|owner| owner.matches(filter))
     });
     entries.sort_by(|left, right| {
         right
@@ -566,11 +443,35 @@ mod tests {
         WorkOwner {
             work: WorkRef::Task(TaskId::new()),
             subject: identifier.to_string(),
-            wave: wave.to_string(),
-            project: Some(project.to_string()),
-            task: Some(identifier.to_string()),
+            selectors: vec![
+                format!("wave:{wave}"),
+                format!("project:{project}"),
+                format!("task:{identifier}"),
+            ],
             created_at: None,
         }
+    }
+
+    #[test]
+    fn steer_activity_ids_include_their_work_identity() {
+        let first = task_owner("W2-1", "control", "live");
+        let second = task_owner("W2-2", "control", "live");
+        let comment = |work: WorkRef| SteerComment {
+            work,
+            steer: crate::durable::Steer {
+                id: 1,
+                author: Author::User,
+                text: "direction".to_string(),
+            },
+            issued_at: OffsetDateTime::UNIX_EPOCH,
+        };
+
+        let first_entry = steer_entry(&comment(first.work.clone()), &first);
+        let second_entry = steer_entry(&comment(second.work.clone()), &second);
+
+        assert_ne!(first_entry.id, second_entry.id);
+        assert!(first_entry.id.contains(first.work.id()));
+        assert!(second_entry.id.contains(second.work.id()));
     }
 
     fn catalog(owners: &[WorkOwner]) -> WorkCatalog {

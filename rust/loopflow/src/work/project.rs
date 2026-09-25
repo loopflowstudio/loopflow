@@ -2,7 +2,7 @@
 //!
 //! A Project coordinates Tasks from the owning Wave's clean
 //! control checkout. It owns no worktree, shipping branch, PR, permanent
-//! memory, cadence, human chat, or controller state.
+//! memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -12,14 +12,6 @@ use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::work::task::{TaskEventKind, TaskId};
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ProjectDataError {
-    #[error("invalid Project id: {0}")]
-    InvalidId(String),
-    #[error("invalid Project: {0}")]
-    InvalidInvariant(String),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
@@ -27,17 +19,14 @@ pub struct Project {
     pub plan: ProjectPlan,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
+    /// Completed Project judgment passes. This is durable domain progress, not
+    /// the lifetime of a Project process.
+    pub iteration: u32,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Project Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
-}
-
-impl Project {
-    pub fn validate(&self) -> Result<(), ProjectDataError> {
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +45,16 @@ pub enum ProjectEventKind {
         iteration: u32,
         summary: String,
     },
+    /// A durable steer: direction handed to the Project. Folded into the run's
+    /// seed and injected into a live turn; not a report out, so it never
+    /// crosses to the parent Wave.
+    Steer {
+        author: crate::durable::Author,
+        text: String,
+    },
+    /// A request to end the Project's current turn so the next re-reads its
+    /// direction immediately. Acted on only by a live run, and not a report out.
+    Interrupt,
     Completed {
         summary: String,
     },
@@ -67,7 +66,10 @@ pub enum ProjectEventKind {
 
 impl ProjectEventKind {
     pub fn is_wave_observable(&self) -> bool {
-        !matches!(self, Self::Started | Self::TaskObserved { .. })
+        !matches!(
+            self,
+            Self::Started | Self::TaskObserved { .. } | Self::Steer { .. } | Self::Interrupt
+        )
     }
 
     fn failure_reason(&self) -> Option<&str> {

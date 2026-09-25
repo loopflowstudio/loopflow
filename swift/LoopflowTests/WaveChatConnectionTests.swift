@@ -29,6 +29,35 @@ struct WaveChatConnectionTests {
         return connection
     }
 
+    @Test("bare interrupts remain available when the name preference cannot be read")
+    func interruptDoesNotRequireNamePreference() async throws {
+        let response = "{\"message\":null,\"state\":\"interrupting\",\"epoch\":\(localEpochFrame)}"
+        let server = try LoopbackSSEServer(body: Data(response.utf8))
+        defer { server.stop() }
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let endpoint = WaveEndpoint.path(repoPath: repo.path, waveName: "ship")
+        try FileManager.default.createDirectory(
+            at: endpoint.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "127.0.0.1:\(server.port)".write(to: endpoint, atomically: true, encoding: .utf8)
+        let conn = WaveChatConnection(
+            repoPath: repo.path,
+            waveName: "ship",
+            loadUserName: { throw CocoaError(.fileReadCorruptFile) }
+        )
+        conn.start()
+        defer { conn.stop() }
+        for _ in 0..<100 where conn.phase == .idle {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        try await conn.send("", op: .interrupt)
+
+        #expect(conn.loopState == .interrupting)
+        #expect(conn.turns.isEmpty)
+    }
+
     private func localEpoch() -> ConversationEpoch {
         ConversationEpoch(
             id: "chat-epoch-1",
@@ -107,6 +136,7 @@ struct WaveChatConnectionTests {
         let saved = try ChatTurn(
             id: "turn-7",
             role: .user,
+            authorName: nil,
             text: "saved before restart",
             status: .completed,
             items: [],
@@ -191,6 +221,7 @@ struct WaveChatConnectionTests {
         let localTurn = try ChatTurn(
             id: "turn-2",
             role: .user,
+            authorName: nil,
             text: "local",
             status: .completed,
             items: [],
@@ -393,7 +424,6 @@ struct WaveChatConnectionTests {
     @Test("message ops encode to the wire values the server expects")
     func opWireEncoding() {
         #expect(WaveMessageOp.message.rawValue == "message")
-        #expect(WaveMessageOp.steer.rawValue == "steer")
         #expect(WaveMessageOp.interrupt.rawValue == "interrupt")
     }
 
@@ -520,19 +550,17 @@ struct ComposerVerbTests {
         let withText = composerVerbs(state: .idle, hasText: true)
         #expect(withText.primary == .send)
         #expect(withText.primaryEnabled)
-        #expect(withText.secondary == nil)
 
         let empty = composerVerbs(state: .idle, hasText: false)
         #expect(empty.primary == .send)
         #expect(!empty.primaryEnabled)
     }
 
-    @Test("turning + text steers, with Interrupt & Send one skill away")
-    func turningSteers() {
+    @Test("turning + text sends an ordinary channel message")
+    func turningSends() {
         let verbs = composerVerbs(state: .turning, hasText: true)
-        #expect(verbs.primary == .steer)
+        #expect(verbs.primary == .send)
         #expect(verbs.primaryEnabled)
-        #expect(verbs.secondary == .interruptAndSend)
     }
 
     @Test("turning + empty interrupts")
@@ -540,7 +568,6 @@ struct ComposerVerbTests {
         let verbs = composerVerbs(state: .turning, hasText: false)
         #expect(verbs.primary == .interrupt)
         #expect(verbs.primaryEnabled)
-        #expect(verbs.secondary == nil)
     }
 
     @Test("interrupting degrades: text queues a Send, re-interrupt is disabled")
@@ -548,7 +575,6 @@ struct ComposerVerbTests {
         let withText = composerVerbs(state: .interrupting, hasText: true)
         #expect(withText.primary == .send)
         #expect(withText.primaryEnabled)
-        #expect(withText.secondary == nil)
 
         let empty = composerVerbs(state: .interrupting, hasText: false)
         #expect(empty.primary == .interrupt)

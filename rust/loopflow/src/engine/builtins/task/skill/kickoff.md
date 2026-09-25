@@ -5,6 +5,19 @@ default_agent: claude
 ---
 Research risks that could derail the work, then transform a wave item into a bold, well-considered design.
 
+## Task and design
+
+Treat the Task as the user's problem and desired experience. Explore possible
+solutions before choosing one; distinguish observations, proposed mechanisms,
+real constraints, and accepted decisions. The design owns architecture,
+implementation sequencing, and proof. A Task need not arrive with an
+implementation plan. Preserve its original problem when the solution changes.
+
+Continue an existing design and investigate its material gaps; a newly filed
+Task does not require restarting discovery. Keep accepted decisions binding
+and linked, preserve draft status and open questions, and honor the selected
+Flow. Launching a draft does not approve it.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:
@@ -26,7 +39,7 @@ re-derive what these already record.
 
 2. **De-risk.** Before designing anything, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
 
-   **Start with what's already flagged.** If the ingested item, wave `GOAL.md`, `MEMORY.md`, or Linear Project definition/KRs call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
+   **Start with what's already flagged.** If the ingested item, wave `GOAL.md`, `MEMORY.md`, or current chapter KRs/metric targets call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
 
    **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
 
@@ -136,10 +149,10 @@ that still violate the target architecture.>
 If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
 
 - **Intent** — design must serve the wave's north star, stated in GOAL.md.
-- **Evidence** — derive "Done when" from Project KRs and user behavior. Use a
-  Project-owned signal when the direction names one. Leave room for feature work
+- **Evidence** — derive "Done when" from chapter KRs and user behavior. Use a
+  Wave-owned signal when the direction names one. Leave room for feature work
   to reveal a better metric proposal; a substantial new UI performance path is
-  a strong reason to capture one for Project sponsorship.
+  a strong reason to capture one for Wave sponsorship.
 - **Memory** — check `MEMORY.md` for known risks and prior decisions. If this design introduces a new risk, name it.
 - Scope must exclude what GOAL.md marks as out of scope.
 
@@ -153,7 +166,7 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs
 
 **Complete over incremental.** Prefer landing an entire architectural chunk in one go. Splitting a coherent change into pieces creates backwards-compatibility adapters, dual states, and integration ambiguity. Only split when pieces are genuinely independent and each delivers something a user or developer would notice on its own.
 
-**Comprehensive over light.** Kickoff outputs get read by humans evaluating the design and by implementing agents executing it. Be thorough — decisions, alternatives, "done when." This isn't a roadmap sketch; it's the spec a future session works from.
+**Comprehensive over light.** Kickoff outputs get read by reviewers evaluating the design and by implementing agents executing it. Be thorough — decisions, alternatives, "done when." This isn't a roadmap sketch; it's the spec a future session works from.
 
 **Integrate over layer.** Map current concepts, types, authorities, writers, and
 launch paths before adding another one. Name what the change reshapes and what

@@ -1,4 +1,3 @@
-import os
 import stat
 import subprocess
 import sys
@@ -19,9 +18,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
 
     assert nightly["name"] == "Packages (nightly)"
     assert nightly["on"]["schedule"] == [{"cron": "0 9 * * *"}]
-    assert nightly["jobs"] == {
-        "packages": {"uses": "./.github/workflows/package-build.yml"}
-    }
+    assert nightly["jobs"] == {"packages": {"uses": "./.github/workflows/package-build.yml"}}
     assert workflow["name"] == "Package build"
     assert set(workflow["on"]) == {"workflow_call"}
     assert "inputs.release_tag" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
@@ -132,42 +129,6 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
             assert subject in notes
 
 
-def test_pull_local_bin_forwards_to_published_refresh(tmp_path: Path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    scripts = repo / "scripts"
-    scripts.mkdir()
-    invocation = tmp_path / "invocation.txt"
-    (scripts / "install.py").write_text(
-        "import os, pathlib, sys\n"
-        "pathlib.Path(os.environ['LFTEST_INVOCATION']).write_text(' '.join(sys.argv[1:]))\n"
-        "print('installed: published release')\n"
-    )
-    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
-
-    install_dir = tmp_path / "local-bin"
-    env = os.environ.copy()
-    env["LFTEST_INVOCATION"] = str(invocation)
-
-    result = subprocess.run(
-        [
-            str(ROOT / "scripts/pull-local-bin.sh"),
-            "--repo",
-            str(repo),
-            "--install-dir",
-            str(install_dir),
-        ],
-        check=True,
-        text=True,
-        capture_output=True,
-        env=env,
-    )
-
-    assert "installed:" in result.stdout
-    assert invocation.read_text() == f"refresh --install-dir {install_dir}"
-    assert "scripts/install.py refresh" in (ROOT / "scripts/pull-local-bin.sh").read_text()
-
-
 def test_release_build_workflow_is_credential_free():
     release = yaml.load(
         (ROOT / ".github/workflows/release.yml").read_text(),
@@ -254,9 +215,9 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
     assert 'lf cron preflight --wave "$wave"' in bootstrap
     assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
     assert 'lf cron list --wave "$wave" --json' in bootstrap
-    assert 'lf cron trigger' in bootstrap
-    assert '--flow telemetry-daily --wait --timeout 15m' in bootstrap
-    assert '--flow release-run --wait --timeout 3h' in bootstrap
+    assert "lf cron trigger" in bootstrap
+    assert "--flow telemetry-daily --wait --timeout 15m" in bootstrap
+    assert "--flow release-run --wait --timeout 3h" in bootstrap
     assert 'lf cron history --wave "$wave" --days 35' in bootstrap
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap

@@ -3,9 +3,8 @@ import Foundation
 // The wave thread is a conversation, not a build log. The wire carries
 // everything the loop did — every tool call, every shell command, every file
 // edit, and the flow step (`task/clarify`, `task/pursue`, `task/mutate`) that
-// produced each assistant span. Rendering all of it, flat, buries the two
-// things a human actually reads for: what the wave SAID, and what needs a
-// decision.
+// produced each assistant span. Rendering all of it, flat, buries what readers
+// need: what the wave SAID, and what needs a decision.
 //
 // This is the projection that decides what reaches the eye. It is
 // surface-only: nothing here changes the wire, the journal, or the runtime.
@@ -14,9 +13,9 @@ import Foundation
 //
 // The rule: **prose and decisions are the conversation.** Execution evidence
 // stays in the journal. A failed turn or child remains visible through its
-// human-level failure presentation, never by rebuilding the shell log here.
+// user-facing failure presentation, never by rebuilding the shell log here.
 
-/// One turn, as a human reads it. `conclusion` is what the thread shows; `steps`
+/// One displayed turn. `conclusion` is what the thread shows; `steps`
 /// is operational narration the harness tagged as `commentary`, curated behind a
 /// disclosure so the wave's decision reads without the process around it. `prose`
 /// stays the full speech (conclusion + steps) so failure rollups and freshness
@@ -44,7 +43,7 @@ public struct TurnPresentation: Equatable, Sendable {
     public var hasSteps: Bool { !steps.isEmpty }
 }
 
-/// Project one wire turn into the one human-facing conversation.
+/// Project one wire turn into the one user-facing conversation.
 ///
 /// Prose (`turn.text`) is the conclusion — streamed fragments plus any
 /// `final_answer` or untagged message, joined by the fold (`ChatTurn.absorbing`).
@@ -81,7 +80,7 @@ public func turnPresentation(_ turn: ChatTurn) -> TurnPresentation {
     return TurnPresentation(prose: prose, conclusion: conclusion, steps: steps)
 }
 
-/// Child activity a human reads versus lifecycle churn the Wave summarizes.
+/// Child activity worth showing versus lifecycle churn the Wave summarizes.
 public func isConversational(_ activity: ChildControlActivity) -> Bool {
     switch activity.kind {
     case .stateChanged: false
@@ -89,9 +88,9 @@ public func isConversational(_ activity: ChildControlActivity) -> Bool {
     }
 }
 
-/// The turns a human sees. Empty completed spans at flow-step boundaries carry
+/// The displayed turns. Empty completed spans at flow-step boundaries carry
 /// nothing to read and are dropped. A running span stays visible as the one
-/// transient "Working…" row; a failed span gets a human-level failure badge.
+/// transient "Working…" row; a failed span gets a user-facing failure badge.
 public func isVisibleTurn(_ turn: ChatTurn) -> Bool {
     if let activity = turn.activity { return isConversational(activity) }
     if turn.role == .user { return true }

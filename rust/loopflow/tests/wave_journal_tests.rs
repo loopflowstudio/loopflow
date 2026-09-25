@@ -88,7 +88,8 @@ async fn restart_replays_thread_and_turn_ids_continue() {
     // First life: a user message and a real finalized turn.
     let before = {
         let rt = open_wave(tmp.path());
-        rt.deliver(MessageOp::Message, "please build the feature".into())
+        rt.try_deliver(MessageOp::Message, "please build the feature".into(), None)
+            .expect("journal write")
             .expect("user turn");
         run_resident_turn(rt.clone(), resident_turn_deltas());
         let before = rt.thread_snapshot();
@@ -108,7 +109,8 @@ async fn restart_replays_thread_and_turn_ids_continue() {
     // And new turn ids continue the journal's seq domain monotonically.
     let max_before = before.iter().map(|t| turn_seq(&t.id)).max().unwrap();
     let next = rt
-        .deliver(MessageOp::Message, "still there?".into())
+        .try_deliver(MessageOp::Message, "still there?".into(), None)
+        .expect("journal write")
         .expect("user turn");
     assert!(
         turn_seq(&next.id) > max_before,
@@ -218,7 +220,8 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let before = {
         let rt = open_wave(tmp.path());
-        rt.deliver(MessageOp::Message, "kept message".into())
+        rt.try_deliver(MessageOp::Message, "kept message".into(), None)
+            .expect("journal write")
             .expect("user turn");
         rt.thread_snapshot()
     };
@@ -236,9 +239,38 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
         "thread intact past the torn tail"
     );
     // The journal still appends cleanly after truncation.
-    rt.deliver(MessageOp::Message, "after the crash".into())
+    rt.try_deliver(MessageOp::Message, "after the crash".into(), None)
+        .expect("journal write")
         .expect("user turn");
     assert_eq!(rt.thread_snapshot().len(), 2);
+}
+
+#[test]
+fn legacy_playhead_cutover_preserves_queued_flow_intent() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = journal_path(tmp.path(), "ship");
+    std::fs::create_dir_all(path.parent().expect("journal parent")).expect("create journal dir");
+    let legacy = r#"{"v":1,"seq":1,"at":"2026-09-22T00:00:00Z","kind":{"type":"playhead_changed","event":{"kind":"definition_reset"},"playhead":{"stack":[{"id":"old-wave","flow":"wave","steps":[{"name":"research","kind":"skill","human":false}],"cursor":0,"iteration":3,"queue":[{"id":"queued-old","flow":"research","steps":[{"name":"research","kind":"skill","human":false}]}]}],"active":null}}}"#;
+    std::fs::write(&path, format!("{legacy}\n")).expect("write legacy journal");
+
+    let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
+    let before = runtime.playhead().expect("replayed legacy playhead");
+    assert_eq!(before.stack[0].queue[0].flow, "research");
+
+    let error = runtime
+        .ensure_playhead()
+        .expect_err("explicit restart required");
+    assert!(error.to_string().contains("--restart-flow"));
+    assert_eq!(runtime.playhead().expect("legacy remains"), before);
+
+    let after = runtime
+        .restart_legacy_playhead()
+        .expect("cut over playhead explicitly");
+    assert_ne!(after.stack[0].id, "old-wave");
+    assert_eq!(after.stack[0].queue.len(), 1);
+    assert_eq!(after.stack[0].queue[0].flow, "research");
+    let stable = runtime.ensure_playhead().expect("reuse converted playhead");
+    assert_eq!(stable.stack[0].id, after.stack[0].id);
 }
 
 #[tokio::test]

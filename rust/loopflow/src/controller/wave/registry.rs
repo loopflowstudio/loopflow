@@ -357,7 +357,7 @@ mod tests {
 
     async fn temp_store(tmp: &std::path::Path) -> SharedStore {
         Arc::new(
-            open_store(&StorageConfig::sqlite(tmp.join("loopflow.db")))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(tmp.join("loopflow.db")))
                 .await
                 .expect("open sqlite store"),
         )
@@ -432,14 +432,17 @@ mod tests {
             "platform".to_string(),
             tmp.path().display().to_string(),
         );
-        let mut child = Wave::new(
+        let child = Wave::from_stored_parts(
             WaveId::new(),
             "ship".to_string(),
             tmp.path().display().to_string(),
+            time::OffsetDateTime::now_utc(),
+            Some(parent.id().clone()),
+            Some(time::OffsetDateTime::now_utc()),
+            None,
+            None,
+            None,
         );
-        child
-            .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
-            .expect("record promotion");
         store.create_wave(&parent).await.expect("store parent");
         store.create_wave(&child).await.expect("store child");
 
@@ -504,15 +507,17 @@ mod tests {
             "platform".to_string(),
             tmp.path().display().to_string(),
         );
-        let mut child = Wave::new(
+        let child = Wave::from_stored_parts(
             WaveId::new(),
             "ship".to_string(),
             tmp.path().display().to_string(),
-        )
-        .with_parent(parent.id().clone());
-        child
-            .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
-            .expect("record promotion");
+            time::OffsetDateTime::now_utc(),
+            Some(parent.id().clone()),
+            Some(time::OffsetDateTime::now_utc()),
+            None,
+            None,
+            None,
+        );
         store.create_wave(&parent).await.expect("store parent");
         store.create_wave(&child).await.expect("store child");
 
@@ -556,15 +561,17 @@ mod tests {
             "platform".to_string(),
             tmp.path().display().to_string(),
         );
-        let mut child = Wave::new(
+        let child = Wave::from_stored_parts(
             WaveId::new(),
             "ship".to_string(),
             tmp.path().display().to_string(),
-        )
-        .with_parent(parent.id().clone());
-        child
-            .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
-            .expect("record promotion");
+            time::OffsetDateTime::now_utc(),
+            Some(parent.id().clone()),
+            Some(time::OffsetDateTime::now_utc()),
+            None,
+            None,
+            None,
+        );
         store.create_wave(&parent).await.expect("store parent");
         store.create_wave(&child).await.expect("store child");
         let runtime =

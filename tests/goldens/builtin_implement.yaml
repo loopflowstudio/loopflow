@@ -2,7 +2,6 @@ name: builtin_implement
 repo: tests/parity/fixtures/basic
 skill: implement
 surface: headless
-directions: []
 docs: []
 diff_files: false
 diff: false

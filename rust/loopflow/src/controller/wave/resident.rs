@@ -19,7 +19,7 @@
 //! Spawned by the listener with the endpoint and
 //! token in env, or attached by hand against the discovery files. On listener
 //! death the subscription ends and the resident exits cleanly — its keeper is
-//! gone; whether anything restarts the pair is the human's arrangement
+//! gone; whether anything restarts the pair is the operator's arrangement
 //! (tmux, systemd). On loop failure the resident reports
 //! `LoopState::Failed` over the wire and exits nonzero — the listener's
 //! supervisor owns the respawn ladder.
@@ -347,6 +347,25 @@ impl ListenerClient {
                 response.error_for_status().map_err(classify)?;
                 Ok(())
             }
+        })
+        .await
+    }
+
+    /// Read the wave's chat channel after `since` — unified messages including
+    /// the wave's own posts, the read that lets an observe pass see it already
+    /// replied. Retries like the other reads.
+    pub async fn read_channel(
+        &self,
+        since: Option<u64>,
+    ) -> Result<Vec<crate::controller::wave::channel::Message>> {
+        with_retries("read channel", &LISTENER_RETRY_DELAYS, || async {
+            let mut url = format!("http://{}/channel", self.endpoint);
+            if let Some(since) = since {
+                url.push_str(&format!("?since={since}"));
+            }
+            let response = self.http.get(url).send().await.map_err(classify)?;
+            let response = response.error_for_status().map_err(classify)?;
+            response.json().await.map_err(classify)
         })
         .await
     }

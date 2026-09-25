@@ -4,15 +4,13 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::durable::WorkStatus;
+use loopflow::controller::wave::playhead::QueuedInvocation;
+use loopflow::durable::{FlowPosition, WorkStatus};
 use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
 use loopflow::ops::{
     arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
     CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
 };
-use loopflow::profile::{ProviderRoute, RouteScope};
-use loopflow::provider_auth::Provider;
-use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::work::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
 };
@@ -31,16 +29,6 @@ fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
 
 fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
-}
-
-fn codex_auth_refresh_script() -> &'static str {
-    r#"#!/bin/sh
-read -r initialize
-echo '{"id":1,"result":{}}'
-read -r initialized
-read -r account_read
-echo '{"id":2,"result":{"account":{}}}'
-"#
 }
 
 fn reviewer_copy(head_sha: &str) -> PrPresentation {
@@ -501,15 +489,17 @@ fn github_failure_leaves_publication_intent_observable() {
         .presentation
         .as_ref()
         .expect("reviewer-facing Task copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "Persist publication first");
     assert!(presentation.body.contains(
-        "> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
+        "> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
     ));
-    assert!(presentation.body.ends_with("The GitHub call will fail."));
+    assert!(presentation
+        .body
+        .starts_with("The GitHub call will fail.\n\n<!--"));
     assert!(publication.github.is_none());
     assert!(publication.merge.is_none());
 }
@@ -519,7 +509,7 @@ fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
     let home = tempfile::TempDir::new().expect("temp home");
     let gh = write_gh_script("[]", None);
     let agent = codex_script(
-        r###"{"title":"Prove Task PR transitions — explain review contract","body":"## Evaluate\n\n`cargo test -p loopflow task_pr_copy --lib`\n\nObserve one canonical Task title and an explicit merge disposition.\n\n## Why it matters\n\nReviewers can recover purpose and settlement behavior without reconstructing Task state.\n\n## What changed\n\nTask publication now combines generated review guidance with durable Task context."}"###,
+        r###"{"title":"Understand what merging this PR will do","body":"Reviewers can see what work remains without reconstructing Task state.\n\n## What changes\n\nPublication adds durable Task context.\n\n## Evaluate\n\nSuggested check: inspect the Task link and merge consequence."}"###,
     );
     let _env = EnvGuard::with_lf_home(
         &[("gh", gh.as_str()), ("codex", agent.as_str())],
@@ -556,23 +546,23 @@ fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
         .as_ref()
         .and_then(|publication| publication.presentation.as_ref())
         .expect("generated Task PR copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(
+        presentation.title,
+        "Understand what merging this PR will do"
+    );
     assert_eq!(
         presentation.body,
-        "<!-- loopflow:task-pr-context:start -->\n\
+        "Reviewers can see what work remains without reconstructing Task state.\n\n\
+<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
-> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\
+> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\
 > **PR lifecycle:** PR 1 is published for review; no Task settlement is requested.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
+## What changes\n\n\
+Publication adds durable Task context.\n\n\
 ## Evaluate\n\n\
-`cargo test -p loopflow task_pr_copy --lib`\n\n\
-Observe one canonical Task title and an explicit merge disposition.\n\n\
-## Why it matters\n\n\
-Reviewers can recover purpose and settlement behavior without reconstructing Task state.\n\n\
-## What changed\n\n\
-Task publication now combines generated review guidance with durable Task context."
+Suggested check: inspect the Task link and merge consequence."
     );
-    assert!(!presentation.title.contains("explain review contract"));
 }
 
 #[test]
@@ -617,7 +607,7 @@ fn task_pr_generation_does_not_require_a_controller() {
         .as_ref()
         .and_then(|publication| publication.presentation.as_ref())
         .expect("generated fix Task PR copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "generated title");
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
@@ -820,18 +810,17 @@ fn serial_task_pr_publication_restores_task_context() {
         .as_ref()
         .and_then(|publication| publication.presentation.as_ref())
         .expect("serial reviewer copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "Second delivery slice");
     assert!(presentation.body.starts_with(
-        "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
+        "Serial reviewer context\n\n<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 2 is published for review; no Task settlement is requested."
     ));
-    assert!(presentation.body.ends_with("Serial reviewer context"));
     let gh_calls = fs::read_to_string(gh_log).expect("read GitHub calls");
-    assert!(gh_calls.contains("--title INF-123: Prove Task PR transitions"));
-    assert!(gh_calls.contains("--body <!-- loopflow:task-pr-context:start -->"));
+    assert!(gh_calls.contains("--title Second delivery slice"));
+    assert!(gh_calls.contains("--body Serial reviewer context"));
 }
 
 #[test]
@@ -984,18 +973,11 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
 }
 
 #[test]
-fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
+fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let home = tempfile::TempDir::new().expect("temp home");
     let log_path = home.path().join("gh.log");
     let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[
-            ("gh", script.as_str()),
-            ("tmux", noop_script()),
-            ("codex", codex_auth_refresh_script()),
-        ],
-        home.path(),
-    );
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
     let repo = TestRepo::new();
     let base = repo.head_sha();
     let branch = "jack/task-resume-proof";
@@ -1022,47 +1004,35 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let account_home = home.path().join("accounts/codex/ready");
-    std::fs::create_dir_all(&account_home).expect("create managed Codex home");
-    std::fs::write(
-        account_home.join("auth.json"),
-        r#"{"access_token":"test-oauth-token"}"#,
-    )
-    .expect("seed managed Codex login");
-    let account_id = ProviderAccountId::parse("ready").expect("account id");
-    let account_now = time::OffsetDateTime::now_utc().unix_timestamp();
-    runtime
-        .block_on(task.store.upsert_provider_account(&ProviderAccount {
-            provider: "codex".to_string(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: account_now,
-            updated_at: account_now,
-        }))
-        .expect("seed managed Codex account");
-    runtime
-        .block_on(task.store.set_provider_route(&ProviderRoute {
-            scope: RouteScope::Default,
-            provider: Provider::Codex,
-            accounts: vec![account_id],
-            created_at: account_now,
-            updated_at: account_now,
-        }))
-        .expect("seed default Codex route");
+    let position = FlowPosition {
+        task_id: task.task.id.clone(),
+        invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
+        session_run_id: None,
+        ready_summary: None,
+        step_index: 1,
+        iteration: 0,
+        version: 0,
+        worker_generation: 0,
+        claim: None,
+        failure: None,
+        updated_at: now,
+    };
+    assert!(position.is_human());
+    let position = runtime
+        .block_on(task.store.set_flow_position(&task.task.id, position))
+        .expect("persist review boundary");
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
 
-    task_resume("INF-123", None, None).expect("resume Task authored work");
+    task_resume("INF-123", None).expect("resume Task authored work");
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap(),
+        Some(position),
+        "resume preserves the exact review boundary"
+    );
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))

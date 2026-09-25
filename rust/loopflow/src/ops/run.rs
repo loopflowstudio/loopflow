@@ -1,26 +1,26 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::{render_steers, ProjectId, Steer, TaskId, WorkRef};
+use crate::durable::{render_steers, Steer, TaskId, WorkRef};
 use crate::engine::process::{
     current_home_execution_context, pin_control_binary, start_lf_session_with_env,
 };
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
-use crate::work::project::{ChildEventPayload, Project};
+
 use crate::work::task::{Task, TaskPr};
 use crate::work::wave::Wave;
 
 use super::{OpsError, OpsResult};
 
 pub(crate) const TASK_ACCOUNT_ID_ENV: &str = "LF_TASK_ACCOUNT_ID";
-pub(crate) const TASK_RESUME_TOKEN_ENV: &str = "LF_TASK_RESUME_TOKEN";
 
 #[derive(Debug, Clone)]
 pub struct WorkBinding {
     pub work: WorkRef,
     pub wave_id: WaveId,
     pub wave_name: String,
+    pub subjects: Vec<String>,
     pub cwd: PathBuf,
     pub context: String,
     pub agent: Option<String>,
@@ -28,7 +28,6 @@ pub struct WorkBinding {
 
 pub(crate) fn render_task_context(
     task: &Task,
-    state: Option<&crate::controller::task::State>,
     project: &ProjectPlan,
     pr: &TaskPr,
     wave_name: &str,
@@ -39,30 +38,8 @@ pub(crate) fn render_task_context(
         .as_ref()
         .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
         .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
-    let controller = state.map_or_else(
-        || "Task controller: not started".to_string(),
-        |state| {
-            let gate_proposal = state
-                .gate_proposal
-                .as_ref()
-                .map(|proposal| {
-                    format!(
-                        "Gate proposal: {} — {}",
-                        if proposal.done { "done" } else { "continue" },
-                        proposal.reason
-                    )
-                })
-                .unwrap_or_else(|| "Gate proposal: none".to_string());
-            format!(
-                "Lifecycle phase: {} (iteration {}, gate cycle {})\n{gate_proposal}",
-                state.lifecycle_phase.as_str(),
-                state.phase_iteration,
-                state.gate_cycle,
-            )
-        },
-    );
     format!(
-        "Linear Task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\n{controller}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
+        "Linear Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
@@ -79,35 +56,6 @@ pub(crate) fn render_task_context(
         pr_branch = pr.branch,
         base_commit = pr.base_commit,
         placement = placement,
-    )
-}
-
-pub(crate) fn render_project_context(
-    project: &Project,
-    state: Option<&crate::controller::project::State>,
-    wave_name: &str,
-    steers: &[Steer],
-    observations: &[String],
-    metric_context: &str,
-) -> String {
-    let observations = if observations.is_empty() {
-        "none".to_string()
-    } else {
-        observations.join("\n")
-    };
-    let controller = state.map_or_else(
-        || "Project controller: not started".to_string(),
-        |state| format!("Project controller iteration: {}", state.iteration + 1),
-    );
-    format!(
-        "Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\n{direction}\n\nProject Work: {work_id}\n{controller}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}",
-        name = project.plan.name,
-        project_id = project.plan.id.as_str(),
-        wave = wave_name,
-        context = project.plan.prompt_context,
-        direction = render_steers(steers),
-        work_id = project.id,
-        synced_at = project.plan.pm_snapshot_synced_at,
     )
 }
 
@@ -147,7 +95,6 @@ pub(crate) fn render_wave_context(
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WorkSelection<'a> {
     pub task: Option<&'a str>,
-    pub project: Option<&'a str>,
     pub wave: Option<&'a str>,
 }
 
@@ -158,16 +105,12 @@ pub async fn resolve_work_binding(
 ) -> OpsResult<WorkBinding> {
     let (kind, value) = selector.split_once(':').ok_or_else(|| {
         run_error(format!(
-            "invalid Work selector {selector:?}; expected task:<selector>, project:<selector>, or wave:<selector>"
+            "invalid Work selector {selector:?}; expected task:<selector> or wave:<selector>"
         ))
     })?;
     let selection = match kind {
         "task" => WorkSelection {
             task: Some(value),
-            ..WorkSelection::default()
-        },
-        "project" => WorkSelection {
-            project: Some(value),
             ..WorkSelection::default()
         },
         "wave" => WorkSelection {
@@ -176,7 +119,7 @@ pub async fn resolve_work_binding(
         },
         _ => {
             return Err(run_error(format!(
-                "invalid Work selector kind {kind:?}; expected task, project, or wave"
+                "invalid Work selector kind {kind:?}; expected task or wave"
             )))
         }
     };
@@ -188,11 +131,7 @@ pub async fn resolve_work_selection(
     repo: &Path,
     selection: WorkSelection<'_>,
 ) -> OpsResult<WorkBinding> {
-    for (kind, value) in [
-        ("task", selection.task),
-        ("project", selection.project),
-        ("wave", selection.wave),
-    ] {
+    for (kind, value) in [("task", selection.task), ("wave", selection.wave)] {
         if value.is_some_and(|value| value.trim().is_empty()) {
             return Err(run_error(format!("{kind} selector cannot be empty")));
         }
@@ -221,13 +160,6 @@ pub async fn resolve_work_selection(
             .await
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {} has no owning Project", task.id)))?;
-        if let Some(project_selector) = selection.project {
-            require_project_match(
-                &project,
-                project_selector.trim(),
-                &format!("Task {}", task.plan.identifier),
-            )?;
-        }
         if let Some(selected_wave) = &selected_wave {
             require_wave_match(
                 &wave,
@@ -236,24 +168,13 @@ pub async fn resolve_work_selection(
             )?;
         }
         let work = WorkRef::Task(task.id.clone());
-        let steers = store.work_steers(&work).await.map_err(run_error)?;
+        let steers = Vec::new();
         let pr = store
             .active_task_pr(&task.id)
             .await
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {} has no active PR", task.id)))?;
-        let state = store
-            .task_controller_state(&task.id)
-            .await
-            .map_err(run_error)?;
-        let context = render_task_context(
-            &task,
-            state.as_ref(),
-            &project.plan,
-            &pr,
-            wave.name(),
-            &steers,
-        );
+        let context = render_task_context(&task, &project.plan, &pr, wave.name(), &steers);
         let cwd = if crate::engine::git::origin_branch(repo)
             .ok()
             .flatten()
@@ -264,72 +185,26 @@ pub async fn resolve_work_selection(
         } else {
             task.worktree.clone()
         };
+        store
+            .begin_chapter_task(&task.id)
+            .await
+            .map_err(run_error)?;
         return Ok(WorkBinding {
+            subjects: vec![
+                format!("wave:{}", wave.name()),
+                format!("project:{}", project.plan.slug),
+                format!("task:{}", task.plan.identifier),
+            ],
             work,
             wave_id: task.wave_id,
             wave_name: wave.name().to_string(),
             cwd,
             context,
-            agent: state.map(|state| state.agent),
-        });
-    }
-
-    if let Some(value) = selection.project {
-        let value = value.trim();
-        let project = resolve_project(store, value, selected_wave.as_ref()).await?;
-        let wave = store
-            .get_wave(&project.wave_id)
-            .await
-            .map_err(run_error)?
-            .ok_or_else(|| run_error(format!("Project {} has no owning Wave", project.id)))?;
-        if let Some(selected_wave) = &selected_wave {
-            require_wave_match(
-                &wave,
-                selected_wave,
-                &format!("Project {}", project.plan.slug),
-            )?;
-        }
-        let metric_context = crate::ops::metrics::metric_prompt_section(
-            "project-owned-metrics",
-            crate::ops::metrics::stored_project_metric_portfolio(
-                store,
-                &wave,
-                project.plan.id.as_str(),
-                time::OffsetDateTime::now_utc(),
-            )
-            .await,
-        );
-        let work = WorkRef::Project(project.id.clone());
-        let steers = store.work_steers(&work).await.map_err(run_error)?;
-        let observations = store
-            .pending_project_observations(&project.id)
-            .await
-            .map_err(run_error)?
-            .into_iter()
-            .filter_map(|observation| match observation.payload {
-                ChildEventPayload::Task { event } => serde_json::to_string(&event).ok(),
-                ChildEventPayload::Project { .. } => None,
-            })
-            .collect::<Vec<_>>();
-        let state = store
-            .project_controller_state(&project.id)
-            .await
-            .map_err(run_error)?;
-        let context = render_project_context(
-            &project,
-            state.as_ref(),
-            wave.name(),
-            &steers,
-            &observations,
-            &metric_context,
-        );
-        return Ok(WorkBinding {
-            work,
-            wave_id: project.wave_id,
-            wave_name: wave.name().to_string(),
-            cwd: PathBuf::from(wave.repo()),
-            context,
-            agent: state.map(|state| state.agent),
+            agent: Some(
+                crate::engine::config::load_config_or_default(Some(&task.worktree))
+                    .agent()
+                    .to_string(),
+            ),
         });
     }
 
@@ -346,6 +221,7 @@ pub async fn resolve_work_selection(
         let cwd = PathBuf::from(wave.repo());
         let context = render_wave_context(&cwd, &cwd, wave.name(), &metric_context);
         return Ok(WorkBinding {
+            subjects: vec![format!("wave:{}", wave.name())],
             work: WorkRef::Wave(wave.id().clone()),
             wave_id: wave.id().clone(),
             wave_name: wave.name().to_string(),
@@ -355,7 +231,7 @@ pub async fn resolve_work_selection(
         });
     }
 
-    Err(run_error("select a Task, Project, or Wave"))
+    Err(run_error("select a Task or Wave"))
 }
 
 async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResult<Wave> {
@@ -366,51 +242,6 @@ async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResul
         store.get_wave_at(&locator).await.map_err(run_error)?
     };
     wave.ok_or_else(|| run_error(format!("Wave {value:?} is not registered")))
-}
-
-async fn resolve_project(
-    store: &SharedStore,
-    value: &str,
-    wave: Option<&Wave>,
-) -> OpsResult<Project> {
-    let project = if let Ok(id) = ProjectId::parse(value) {
-        store.get_project(&id).await.map_err(run_error)?
-    } else {
-        let matches = store
-            .list_projects(wave.map(Wave::id))
-            .await
-            .map_err(run_error)?
-            .into_iter()
-            .filter(|project| project_matches(project, value))
-            .collect::<Vec<_>>();
-        match matches.as_slice() {
-            [project] => Some(project.clone()),
-            [] => None,
-            _ => {
-                return Err(run_error(format!(
-                    "Project selector {value:?} is ambiguous; qualify it with --wave or use its durable or planning-system id"
-                )))
-            }
-        }
-    };
-    project.ok_or_else(|| run_error(format!("Project {value:?} is not registered")))
-}
-
-fn project_matches(project: &Project, value: &str) -> bool {
-    ProjectId::parse(value).map_or_else(
-        |_| project.plan.id.as_str() == value || project.plan.slug == value,
-        |id| project.id == id,
-    )
-}
-
-fn require_project_match(project: &Project, requested: &str, subject: &str) -> OpsResult<()> {
-    if project_matches(project, requested) {
-        return Ok(());
-    }
-    Err(run_error(format!(
-        "{subject} belongs to Project {}, not {requested}",
-        project.plan.slug
-    )))
 }
 
 fn require_wave_match(actual: &Wave, requested: &Wave, subject: &str) -> OpsResult<()> {
@@ -429,21 +260,21 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 }
 
 #[derive(Debug)]
-pub(crate) struct WorkLaunch {
-    pub work: WorkRef,
+pub(crate) struct TaskWorkerLaunch {
+    pub task_id: TaskId,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
     pub tmux_name: String,
     pub environment: Vec<(String, String)>,
 }
 
-pub(crate) async fn launch_work(request: WorkLaunch) -> OpsResult<()> {
+pub(crate) async fn launch_task_worker(request: TaskWorkerLaunch) -> OpsResult<()> {
     let environment = request.environment.clone();
     start_work_session(&request, environment).await
 }
 
 async fn start_work_session(
-    request: &WorkLaunch,
+    request: &TaskWorkerLaunch,
     mut environment: Vec<(String, String)>,
 ) -> OpsResult<()> {
     let execution = current_home_execution_context()
@@ -453,9 +284,9 @@ async fn start_work_session(
         .to_string();
     let argv = vec![
         control_bin.clone(),
-        "__work".to_string(),
-        request.work.kind().to_string(),
-        request.work.id().to_string(),
+        "task".to_string(),
+        "__worker".to_string(),
+        request.task_id.to_string(),
     ];
     environment.extend([
         (
@@ -486,12 +317,7 @@ async fn start_work_session(
         .collect::<Vec<_>>();
     start_lf_session_with_env(&request.tmux_name, &request.cwd, &argv, &environment)
         .await
-        .map_err(|error| {
-            OpsError::Message(format!(
-                "failed to launch {} body: {error}",
-                request.work.kind()
-            ))
-        })
+        .map_err(|error| OpsError::Message(format!("failed to launch Task worker: {error}")))
 }
 
 #[cfg(test)]
@@ -500,19 +326,25 @@ mod tests {
 
     use time::OffsetDateTime;
 
-    use super::*;
+    use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
+    use crate::durable::{ProjectId, TaskId, WorkRef};
+    use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::{PmKr, PmProject, PmSnapshot, ProjectFlowPlan};
-    use crate::store::{open_store, PmSnapshotRow, StorageConfig};
+    use crate::store::SharedStore;
+    use crate::store::{PmSnapshotRow, StorageConfig};
     use crate::work::project::Project;
     use crate::work::task::{Observation, PmWritebackState, Task, TaskPr, TaskPrId};
     use crate::work::wave::Wave;
+    use std::path::PathBuf;
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         (directory, Arc::new(store))
     }
 
@@ -528,6 +360,7 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
+            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -579,7 +412,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_slug_selector_requires_one_exact_match() {
+    async fn project_selectors_are_not_an_execution_surface() {
         let (directory, store) = test_store().await;
         let wave = Wave::new(
             WaveId::new(),
@@ -598,9 +431,9 @@ mod tests {
 
         let error = resolve_work_binding(&store, directory.path(), "project:shared")
             .await
-            .expect_err("ambiguous slug must not infer identity");
+            .expect_err("chapters are not independent operators");
 
-        assert!(error.to_string().contains("ambiguous"));
+        assert!(error.to_string().contains("expected task or wave"));
     }
 
     #[tokio::test]
@@ -619,18 +452,113 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
+        store
+            .apply_linear_comment(
+                &task.id,
+                "comment-1".into(),
+                "ADVANCER ONLY".into(),
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
         let (runtime, prompts) = tokio::join!(
             resolve_work_binding(&store, &repo, "task:LOO-267"),
             resolve_work_binding(&store, &repo, "task:LOO-267")
         );
 
-        assert_eq!(runtime.unwrap().cwd, worktree);
-        assert_eq!(prompts.unwrap().work, WorkRef::Task(task.id.clone()));
-        assert!(store
-            .task_controller_state(&task.id)
-            .await
-            .unwrap()
-            .is_none());
+        let runtime = runtime.unwrap();
+        let prompts = prompts.unwrap();
+        assert_eq!(runtime.cwd, worktree);
+        assert_eq!(
+            runtime.subjects,
+            ["wave:runtime", "project:loopflow-api", "task:LOO-267"]
+        );
+        assert_eq!(prompts.work, WorkRef::Task(task.id.clone()));
+        assert!(!runtime.context.contains("ADVANCER ONLY"));
+        assert!(!prompts.context.contains("ADVANCER ONLY"));
+        assert_eq!(store.task_steers(&task.id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn task_run_drill_includes_named_workers_and_opaque_helpers() {
+        let (directory, store) = test_store().await;
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let mut project = project(&wave, "desktop", "project-desktop");
+        store.create_project(&project).await.unwrap();
+        let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
+        // Historical Run labels remain unchanged when the Project is renamed.
+        project.plan.slug = "desktop-renamed".into();
+        store.update_project(&project).await.unwrap();
+        let catalog = crate::lf::commands::work_catalog::WorkCatalog::load_at(
+            &directory.path().join("registry.db"),
+        )
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        for subject in [
+            format!("task:{}", task.plan.identifier),
+            format!("task:{}", task.id),
+            "task:LOO-999".into(),
+        ] {
+            let mut subjects = vec![crate::run_record::SubjectAttribution::declared(
+                subject.clone(),
+            )];
+            if subject == format!("task:{}", task.plan.identifier) {
+                subjects.extend(["wave:runtime", "project:desktop"].map(|selector| {
+                    crate::run_record::SubjectAttribution::declared(selector.into())
+                }));
+            }
+            let capture = crate::run_record::CaptureHandle::begin_at(
+                home.path(),
+                crate::run_record::RunSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: directory.path().to_path_buf(),
+                    repo: None,
+                    worktree: None,
+                    skill: Some("implement".into()),
+                    subjects,
+                },
+            )
+            .unwrap();
+            capture.finish("completed").unwrap();
+        }
+        for selector in [
+            task.plan.identifier.as_str(),
+            task.id.as_str(),
+            task.plan.id.as_str(),
+        ] {
+            let runs = crate::lf::commands::runs::collect_runs_started_since_at(
+                home.path(),
+                crate::lf::commands::WorkFilter {
+                    task: Some(selector),
+                    project: Some(project.id.as_str()),
+                    wave: Some(wave.name()),
+                },
+                0,
+                &catalog,
+            )
+            .unwrap();
+            assert_eq!(runs.len(), 2);
+            for run in &runs {
+                assert_eq!(
+                    catalog.resolve_run(run).unwrap().work,
+                    WorkRef::Task(task.id.clone())
+                );
+                assert!(!catalog.matches_run(
+                    run,
+                    crate::lf::commands::WorkFilter {
+                        project: Some("other"),
+                        ..Default::default()
+                    }
+                ));
+            }
+        }
     }
 
     #[tokio::test]
@@ -662,7 +590,6 @@ mod tests {
             &repo,
             WorkSelection {
                 task: Some("LOO-267"),
-                project: Some("loopflow-api"),
                 wave: Some(wave.id().as_str()),
             },
         )
@@ -670,25 +597,11 @@ mod tests {
         .unwrap();
         assert_eq!(binding.work, WorkRef::Task(task.id));
 
-        let project_error = resolve_work_selection(
-            &store,
-            &repo,
-            WorkSelection {
-                task: Some("LOO-267"),
-                project: Some("other"),
-                wave: None,
-            },
-        )
-        .await
-        .unwrap_err();
-        assert!(project_error.to_string().contains("belongs to Project"));
-
         let wave_error = resolve_work_selection(
             &store,
             &repo,
             WorkSelection {
-                task: None,
-                project: Some(primary_project.id.as_str()),
+                task: Some("LOO-267"),
                 wave: Some(other_wave.id().as_str()),
             },
         )
@@ -698,7 +611,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_wave_and_project_bindings_carry_the_shared_metric_context() {
+    async fn direct_wave_binding_carries_the_shared_metric_context() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join("wave/runtime")).unwrap();
@@ -718,7 +631,8 @@ mod tests {
                 slug: "loopflow-api".to_string(),
                 name: "Loopflow API".to_string(),
                 summary: String::new(),
-                definition: "Keep one product model.".to_string(),
+
+                metric_targets: Vec::new(),
                 flows: Some(ProjectFlowPlan::empty()),
                 krs: vec![PmKr {
                     text: "One model everywhere".to_string(),
@@ -740,21 +654,13 @@ mod tests {
             .await
             .unwrap();
 
-        let project_binding = resolve_work_binding(&store, &repo, "project:project-api")
+        let binding = resolve_work_binding(&store, &repo, "wave:runtime")
             .await
             .unwrap();
-        assert!(project_binding
-            .context
-            .contains("<lf:project-owned-metrics>"));
-        assert!(project_binding.context.contains("\"metrics\":[]"));
-        assert!(!project_binding.context.contains("<lf:metric-portfolio>"));
-
-        let wave_binding =
-            resolve_work_binding(&store, &repo, &format!("wave:{}", wave.id().as_str()))
-                .await
-                .unwrap();
-        assert!(wave_binding.context.contains("<lf:metric-portfolio>"));
-        assert!(wave_binding.context.contains("What signals are arriving?"));
-        assert!(!wave_binding.context.contains("<lf:project-owned-metrics>"));
+        assert_eq!(binding.work, WorkRef::Wave(wave.id().clone()));
+        assert!(binding.context.contains("metric-portfolio"));
+        assert!(resolve_work_binding(&store, &repo, "project:loopflow-api")
+            .await
+            .is_err());
     }
 }

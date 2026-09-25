@@ -1,10 +1,9 @@
 use anyhow::{anyhow, Context};
 use serde::Serialize;
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::durable::{
-    AbandonReceipt, Placement, ProjectId, SteerReceipt, TaskId, WorkRef, WorkStatus,
-};
+use crate::durable::{AbandonReceipt, Placement, ProjectId, TaskId, WorkRef, WorkStatus};
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -23,7 +22,6 @@ enum WorkReceipt {
     Relocated(crate::controller::wave::relocate::WaveRelocationReceipt),
     Enabled(Placement),
     Disabled(Placement),
-    Steer(SteerReceipt),
     Abandoned(AbandonReceipt),
 }
 
@@ -89,18 +87,6 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             let placement = set_local_work_enabled(&store, &work, false).await?;
             print_receipt(&WorkReceipt::Disabled(placement), *json)?;
         }
-        WorkCommand::Steer {
-            kind,
-            id,
-            message,
-            json,
-        } => {
-            let work = parse_work(kind, id)?;
-            require_work_repository(&store, &work, repo).await?;
-            let author = crate::ops::ambient_author()?;
-            let receipt = store.append_steer(&work, author, message).await?;
-            print_receipt(&WorkReceipt::Steer(receipt), *json)?;
-        }
         WorkCommand::Interrupt { kind, id, .. } => {
             let work = parse_work(kind, id)?;
             require_work_repository(&store, &work, repo).await?;
@@ -125,10 +111,11 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn open_shared_store() -> anyhow::Result<Store> {
+async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     open_store(&config)
         .await
+        .map(Arc::new)
         .context("open the shared Loopflow store")
 }
 
@@ -272,7 +259,6 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
                 placement.work.id(),
                 placement.home_id
             ),
-            WorkReceipt::Steer(receipt) => println!("steered {}", receipt.steer.id),
             WorkReceipt::Abandoned(receipt) => println!("abandoned {}", receipt.work.id()),
         }
     }

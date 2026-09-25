@@ -49,13 +49,26 @@ private final class LoopflowBundleToken {}
 
 extension Bundle {
     /// The bundle holding the library's copied resources (Fonts), resolved for
-    /// both SwiftPM (`.module`) and xcodegen framework (`Bundle(for:)`) builds.
+    /// packaged apps, SwiftPM development, and xcodegen framework builds.
     static var loopflowResources: Bundle {
         #if SWIFT_PACKAGE
+        if let packaged = packagedLoopflowResources(at: Bundle.main.resourceURL) {
+            return packaged
+        }
         return .module
         #else
         return Bundle(for: LoopflowBundleToken.self)
         #endif
+    }
+
+    static func packagedLoopflowResources(at resourcesURL: URL?) -> Bundle? {
+        guard let bundleURL = resourcesURL?.appendingPathComponent(
+            "LoopflowSwift_Loopflow.bundle",
+            isDirectory: true
+        ) else {
+            return nil
+        }
+        return Bundle(url: bundleURL)
     }
 }
 

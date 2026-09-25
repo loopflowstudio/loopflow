@@ -66,26 +66,20 @@ shell / automation / Loopflow.app
       local store + repository/Git
                |
                v
-              lfd
-               |
-               v
-         Wave listener
-          |         |
-          |         `-- HTTP, conversation, journal
-          v
-       resident
+              lfd -------- Wave listener / resident
+
+ Task or Project CLI
           |
           v
- Project controller / Task controller
-          |
-          v
-    provider harness ------> Home-local Run record
+ Work Flow position -- exact claim --> boundary Run
+                                      |
+                                      `--> Home-local Run record
 ```
 
 The process that directly spawns a child owns that child handle and may cancel
-it. The Wave listener owns the resident child it spawned. Deterministic tmux
-names make resident startup and inspection repeatable; they do not reserve the
-Work against independent bound Runs.
+it. Project and Task execution authority comes from the exact Flow-position
+claim, not from a resident ancestor or deterministic tmux name. The current
+Wave listener still owns its resident governance child separately.
 
 None of those local facts becomes generic cross-process Run control. A PID,
 tmux name, parent Run, Work identity, or telemetry row cannot prove that a
@@ -116,7 +110,7 @@ or native scope. Every signal would need to revalidate that receipt.
 
 `lfd` serves one Home. It reconciles eligible Wave listeners, receives Linear
 and GitHub webhooks, and claims PR landing work. A Wave listener serves its own
-conversation, event, playhead, and resident endpoints.
+channel, conversation, event, playhead, and resident endpoints.
 
 Detached services scrub credentials forwarded from an origin. They use only
 authority installed on the target Home. A foreground SSH launch may offer an
@@ -124,7 +118,7 @@ explicit account lease for that command.
 
 ## Move a Wave without changing its identity
 
-Wave identity is a UUID. The human locator is `(canonical repository, slug)`.
+Wave identity is a UUID. The readable Wave locator is `(canonical repository, slug)`.
 A bare slug may be ambiguous across repositories and is not mutation authority.
 
 ```bash

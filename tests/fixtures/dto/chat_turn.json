@@ -1,6 +1,7 @@
 {
   "id": "turn-3",
   "role": "assistant",
+  "author_name": null,
   "text": "Ran the build and it passed.\n\n```bash\ncargo test\n```",
   "status": "running",
   "items": [

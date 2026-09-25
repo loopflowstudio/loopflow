@@ -47,12 +47,12 @@ be fine. Look past activity to actual progress toward finish lines.
    - **Silence** — A silent wave has no items, or its items didn't survive
      coherence review. That's healthy when nothing compelling exists to build.
      It's a problem when the area is changing and the wave isn't noticing.
-     Silent waves signal to the human: "add items here if you want work
+     Silent waves signal to the user: "add items here if you want work
      done in this area."
    - **Coherence** — Do the wave's remaining items still make sense? The
      codebase evolves between garden cycles. Items can go stale: finish lines
      moved, designs diverged, value diminished. Waves should reorganize
-     internally — this is a single beat, not a human review. Flag waves
+     internally — this is a single beat, not a review. Flag waves
      whose items look incoherent so play-chord can account for it.
 
 3. **Assess the chord.** Look across all waves:
@@ -73,20 +73,25 @@ be fine. Look past activity to actual progress toward finish lines.
 
 When the assessment names more than one Task, preserve or refresh their rows
 from `lf roadmap --wave <wave> --json` and `lf status <wave> --json`. Render
-every Task with the shared reference:
+operational Task lists with the shared reference:
 
 ```markdown
-[identifier](provider URL) — readable active PR/workspace slug — status/next owner
+[identifier · Task title](provider URL) — status; next action/owner
 ```
 
-Fill the link from `task.identifier` and `reference.issue_url`. Use
-`active_pr.slug` from roadmap; for status, match `active_pr` to `prs[].id` and
-use that PR's `slug`. Fall back to `reference.workspace.slug`. Take status from
-`runtime.status`, or from the roadmap `section` when runtime is absent;
-`next_move.owner` supplies next owner. Never reconstruct a provider URL, branch,
-or slug from an identifier, title, worktree, or naming convention. Omit only a
-link or slug whose snapshot evidence is explicitly absent; keep the Task and
-its available status/next owner.
+Use this ID-first form in operational lists. In prose, use
+`[Task title · identifier](provider URL)` on first mention; shorten later
+references when unambiguous.
+
+Fill the link from `task.identifier` and `reference.issue_url`, and the readable
+title from `task.title`. Take status from `runtime.status` or the roadmap
+`section`, and next owner from `next_move.owner`. State the next action only
+when supported by current evidence; leave unknown state unknown. Include an
+active PR/workspace slug only when navigating that workspace is the job. In
+roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
+URL, branch, or slug from a title or identifier. If a link is absent, keep the
+readable title and available status without inventing a URL.
 
 ## Output
 

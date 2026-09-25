@@ -4,32 +4,64 @@
 import Foundation
 import SwiftUI
 import AppKit
+import Darwin
 
 extension Notification.Name {
-    static let ghosttySessionBell = Notification.Name("loopflow.ghosttySessionBell")
-    static let ghosttySessionTitle = Notification.Name("loopflow.ghosttySessionTitle")
+    static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
+    static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
+    static let ghosttySurfaceClosed = Notification.Name("loopflow.ghosttySurfaceClosed")
 }
 
-struct GhosttySessionTitle {
-    let sessionId: String
+enum TerminalIdentity: Hashable, Sendable {
+    case session(String)
+    case shell(String)
+    case taskTerminal(String)
+}
+
+struct GhosttyTerminalTitle {
+    let terminal: TerminalIdentity
     let title: String
 }
 
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
-@MainActor
-protocol GhosttySessionSurfaceOwner: AnyObject {
-    func destroyManagedSurface(_ surface: ghostty_surface_t)
-}
+enum GhosttyRuntimeResources {
+    static let sourceRevision = "4c838723173da757a16a2f3afd4c94f16732ef6a"
 
-private final class ManagedGhosttySurface {
-    weak var owner: GhosttySessionSurfaceOwner?
-    let surface: ghostty_surface_t
+    static var directoryURL: URL? {
+        #if SWIFT_PACKAGE
+        if let resources = Bundle.main.resourceURL,
+           let bundle = Bundle(url: resources.appendingPathComponent(
+               "LoopflowSwift_LoopflowMac.bundle",
+               isDirectory: true
+           )),
+           let directory = directoryURL(in: bundle) {
+            return directory
+        }
+        return directoryURL(in: .module)
+        #else
+        return directoryURL(in: .main)
+        #endif
+    }
 
-    init(surface: ghostty_surface_t, owner: GhosttySessionSurfaceOwner) {
-        self.surface = surface
-        self.owner = owner
+    static func directoryURL(in bundle: Bundle) -> URL? {
+        guard let resources = bundle.resourceURL else { return nil }
+        let root = resources.appendingPathComponent("GhosttyResources", isDirectory: true)
+        let revision = root.appendingPathComponent("REVISION")
+        let share = root.appendingPathComponent("share", isDirectory: true)
+        let directory = share.appendingPathComponent("ghostty", isDirectory: true)
+        let integration = directory.appendingPathComponent(
+            "shell-integration/zsh/ghostty-integration"
+        )
+        let terminfo = share.appendingPathComponent("terminfo/78/xterm-ghostty")
+
+        guard let bundledRevision = try? String(contentsOf: revision, encoding: .utf8),
+              bundledRevision.trimmingCharacters(in: .whitespacesAndNewlines) == sourceRevision,
+              FileManager.default.fileExists(atPath: integration.path),
+              FileManager.default.fileExists(atPath: terminfo.path)
+        else { return nil }
+        return directory
     }
 }
 
@@ -46,8 +78,6 @@ final class GhosttyManager: ObservableObject {
 
     private nonisolated(unsafe) var app: ghostty_app_t?
     private nonisolated(unsafe) var config: ghostty_config_t?
-
-    private nonisolated(unsafe) var surfaces: [String: ManagedGhosttySurface] = [:]
 
     static let shared = GhosttyManager()
 
@@ -84,9 +114,13 @@ final class GhosttyManager: ObservableObject {
 
     """
 
-    // Agent output can be enormous. These limits load after user defaults so
-    // every embedded surface stays bounded when many panes are live at once.
-    private static let resourceLimitsConfig = """
+    // These settings load after user defaults. Resources enable Ghostty's
+    // native shell integration for detected shells; provider Sessions launch
+    // `lf`, so they receive no shell hooks. Keep their historical TERM value
+    // even though the matching Ghostty terminfo is now bundled.
+    private static let embeddedConfig = """
+    term = xterm-256color
+    shell-integration = detect
     scrollback-limit = 10000000
     image-storage-limit = 67108864
     """
@@ -109,6 +143,15 @@ final class GhosttyManager: ObservableObject {
         guard state == .uninitialized else { return }
         state = .initializing
 
+        guard let resources = GhosttyRuntimeResources.directoryURL else {
+            state = .failed("Bundled Ghostty shell resources are missing or mismatched")
+            return
+        }
+        guard setenv("GHOSTTY_RESOURCES_DIR", resources.path, 1) == 0 else {
+            state = .failed("Failed to configure bundled Ghostty shell resources")
+            return
+        }
+
         // Initialize Ghostty library
         let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         guard initResult == GHOSTTY_SUCCESS else {
@@ -127,7 +170,7 @@ final class GhosttyManager: ObservableObject {
             path.withCString { ghostty_config_load_file(cfg, $0) }
         }
         ghostty_config_load_default_files(cfg)
-        if let path = writeConfig(Self.resourceLimitsConfig, named: "loopflow-ghostty-limits") {
+        if let path = writeConfig(Self.embeddedConfig, named: "loopflow-ghostty-embedded") {
             path.withCString { ghostty_config_load_file(cfg, $0) }
         }
         ghostty_config_finalize(cfg)
@@ -146,10 +189,17 @@ final class GhosttyManager: ObservableObject {
         }
         runtimeConfig.action_cb = { _, target, action in
             guard target.tag == GHOSTTY_TARGET_SURFACE else { return false }
-            let surface = target.target.surface
+            guard let surface = target.target.surface,
+                  let userdata = ghostty_surface_userdata(surface)
+            else { return false }
+            // Resolve identity while the callback's surface is valid. Deferred
+            // notifications carry values, never an unowned terminal pointer.
+            let terminal = MainActor.assumeIsolated {
+                Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminal
+            }
             if action.tag == GHOSTTY_ACTION_RING_BELL {
                 Task { @MainActor in
-                    GhosttyManager.shared.handleBell(surface)
+                    NotificationCenter.default.post(name: .ghosttyTerminalBell, object: terminal)
                 }
                 return true
             }
@@ -157,25 +207,51 @@ final class GhosttyManager: ObservableObject {
                let title = action.action.set_title.title {
                 let value = String(cString: title)
                 Task { @MainActor in
-                    GhosttyManager.shared.handleTitle(value, surface: surface)
+                    NotificationCenter.default.post(
+                        name: .ghosttyTerminalTitle,
+                        object: GhosttyTerminalTitle(terminal: terminal, title: value)
+                    )
                 }
                 return true
             }
             return false
         }
-        runtimeConfig.read_clipboard_cb = { _, _, _ in }
-        runtimeConfig.confirm_read_clipboard_cb = { _, _, _, _ in }
+        runtimeConfig.read_clipboard_cb = { userdata, _, state in
+            guard let userdata else { return }
+            MainActor.assumeIsolated {
+                let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                guard let surface = view.surface else { return }
+                let value = NSPasteboard.general.string(forType: .string) ?? ""
+                value.withCString {
+                    ghostty_surface_complete_clipboard_request(surface, $0, state, false)
+                }
+            }
+        }
+        runtimeConfig.confirm_read_clipboard_cb = { userdata, content, state, request in
+            guard let userdata else { return }
+            MainActor.assumeIsolated {
+                let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                guard let surface = view.surface else { return }
+                let allowed = request == GHOSTTY_CLIPBOARD_REQUEST_PASTE
+                    || request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE
+                let value = allowed ? content.map(String.init(cString:)) ?? "" : ""
+                value.withCString {
+                    ghostty_surface_complete_clipboard_request(surface, $0, state, allowed)
+                }
+            }
+        }
         runtimeConfig.write_clipboard_cb = { _, _, content, len, _ in
             guard let content, len > 0, let data = content.pointee.data else { return }
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(String(cString: data), forType: .string)
         }
-        runtimeConfig.close_surface_cb = { (userdata: UnsafeMutableRawPointer?, _: Bool) in
+        runtimeConfig.close_surface_cb = { userdata, _ in
             guard let userdata else { return }
-            let manager = Unmanaged<GhosttyManager>.fromOpaque(userdata).takeUnretainedValue()
+            let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
             Task { @MainActor in
-                manager.tick()
+                view.handleSurfaceClose()
+                GhosttyManager.shared.tick()
             }
         }
 
@@ -196,7 +272,7 @@ final class GhosttyManager: ObservableObject {
     func createSurface(
         workingDirectory: String,
         command: String? = nil,
-        view: NSView
+        view: GhosttyMetalView
     ) -> ghostty_surface_t? {
         guard let app, case .ready = state else { return nil }
 
@@ -222,67 +298,7 @@ final class GhosttyManager: ObservableObject {
         }
     }
 
-    func registerSurface(
-        _ surface: ghostty_surface_t,
-        sessionId: String,
-        owner: GhosttySessionSurfaceOwner
-    ) {
-        surfaces[sessionId] = ManagedGhosttySurface(surface: surface, owner: owner)
-    }
-
-    func unregisterSurface(_ sessionId: String, surface: ghostty_surface_t) {
-        guard let handle = surfaces[sessionId], handle.surface == surface else { return }
-        surfaces.removeValue(forKey: sessionId)
-    }
-
-    func hasSession(_ sessionId: String) -> Bool {
-        surfaces[sessionId] != nil
-    }
-
-    func destroySession(_ sessionId: String) {
-        guard let handle = surfaces.removeValue(forKey: sessionId) else { return }
-        if let owner = handle.owner {
-            owner.destroyManagedSurface(handle.surface)
-        } else {
-            ghostty_surface_free(handle.surface)
-        }
-    }
-
-    func handleBell(_ surface: ghostty_surface_t?) {
-        guard let sessionId = sessionId(for: surface) else { return }
-        NotificationCenter.default.post(name: .ghosttySessionBell, object: sessionId)
-    }
-
-    func handleTitle(_ title: String, surface: ghostty_surface_t?) {
-        guard let sessionId = sessionId(for: surface) else { return }
-        NotificationCenter.default.post(
-            name: .ghosttySessionTitle,
-            object: GhosttySessionTitle(sessionId: sessionId, title: title)
-        )
-    }
-
-    private func sessionId(for surface: ghostty_surface_t?) -> String? {
-        guard let surface else { return nil }
-        return surfaces.first(where: { $0.value.surface == surface })?.key
-    }
-
-    func sendText(_ text: String, sessionId: String) {
-        guard let surface = surfaces[sessionId]?.surface else { return }
-        text.withCString { ptr in
-            ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
-        }
-    }
-
     deinit {
-        MainActor.assumeIsolated {
-            for handle in surfaces.values {
-                if let owner = handle.owner {
-                    owner.destroyManagedSurface(handle.surface)
-                } else {
-                    ghostty_surface_free(handle.surface)
-                }
-            }
-        }
         if let app {
             ghostty_app_free(app)
         }
@@ -315,22 +331,6 @@ final class GhosttyManager: ObservableObject {
     }
 
     func tick() {}
-
-    func hasSession(_ sessionId: String) -> Bool {
-        false
-    }
-
-    func unregisterSurface(_ sessionId: String, surface: OpaquePointer) {
-        // Stub - no-op
-    }
-
-    func destroySession(_ sessionId: String) {
-        // Stub - no-op
-    }
-
-    func sendText(_ text: String, sessionId: String) {
-        // Stub - no-op
-    }
 }
 
 #endif

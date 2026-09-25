@@ -227,7 +227,7 @@ DOCS_AREAS = (
         "extend",
         "Turn your own operating knowledge into reusable Skills and agent workflows.",
         (
-            DocPage("Authoring", "authoring", "Write Skills, Flows, directions, and goals"),
+            DocPage("Authoring", "authoring", "Write Skills, Flows, and goals"),
             DocPage(
                 "The Agent API",
                 "agent-api",
@@ -332,7 +332,7 @@ def generate_llms_txt() -> str:
         if doc_path(slug)
     )
     return f"""# Loopflow
-> Durable Work, replaceable agents, no central server. lf is the command humans type and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Home-local evidence.
+> Durable Work, replaceable agents, no central server. lf is the CLI for daily work and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Home-local evidence.
 
 Loopflow runs one Skill through a provider and records that launch in an
 immutable Home-local Run record. Stable Wave, Project, and Task Work preserves
@@ -765,7 +765,7 @@ def load_doc(slug: str) -> str:
 
 # Agent-facing markdown delivery: every docs page is retrievable as raw
 # markdown — /docs/<slug>.md, or Accept: text/markdown on the canonical URL.
-# Markdown is what agents actually consume; HTML is the human rendering.
+# Markdown is what agents actually consume; HTML is the browser rendering.
 
 MARKDOWN_MEDIA_TYPE = "text/markdown; charset=utf-8"
 
@@ -1174,7 +1174,7 @@ def get():
                     Div(
                         H2("CLI"),
                         P(
-                            "The command humans type and the API agents call. Best for: daily work, waves, and everything headless.",
+                            "The CLI for daily work and the API agents call. Best for: daily work, waves, and everything headless.",
                             cls="install-desc",
                         ),
                         Div(

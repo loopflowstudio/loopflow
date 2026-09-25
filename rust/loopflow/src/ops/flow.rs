@@ -255,7 +255,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             Ok(())
         }
         // A flow `op:` runs headless, so both publish and open only publish —
-        // presentation is a human-initiated CLI concern, never an automation step.
+        // presentation is an explicitly requested CLI action, never an automation step.
         PrCommand::Publish {
             model: _,
             title,
@@ -353,7 +353,6 @@ mod tests {
     use crate::controller::wave::metrics::MetricEvidenceDto;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
-    use crate::pm::{PmKr, PmProject, ProjectFlowPlan};
     use crate::store::{open_store, storage_config_from_env};
     use crate::work::wave::Wave;
 
@@ -436,7 +435,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
         std::fs::create_dir_all(&metrics).expect("create metrics directory");
         std::fs::write(
             metrics.join("task-loop-trust.md"),
-            "---\nschema: 1\nid: task-loop-trust\nproject_id: project-api\nstage: installed\ninstrument: lifecycle-scorecard\nunit: ratio\ntarget:\n  at_least: 1\nwindow: 7d\nfreshness: 30h\n---\n\n# Task loops earn trust\n\nCount settled Task loops.\n",
+            "---\nschema: 1\nid: task-loop-trust\nstage: installed\ninstrument: lifecycle-scorecard\nunit: ratio\nwindow: 7d\nfreshness: 30h\n---\n\n# Task loops earn trust\n\nCount settled Task loops.\n",
         )
         .expect("write metric contract");
         std::fs::write(
@@ -495,47 +494,19 @@ print(json.dumps({
         let store = runtime
             .block_on(open_store(&storage_config_from_env().unwrap()))
             .unwrap();
-        let projects = vec![PmProject {
-            id: "project-api".to_string(),
-            slug: "loopflow-api".to_string(),
-            name: "Loopflow API".to_string(),
-            summary: String::new(),
-            definition: "Make Task loops trustworthy.".to_string(),
-            flows: Some(ProjectFlowPlan::empty()),
-            krs: vec![PmKr {
-                text: "Task loops settle without repair.".to_string(),
-                holds: false,
-            }],
-            initiative_ids: vec!["initiative-1".to_string()],
-            team_ids: vec!["team-1".to_string()],
-        }];
         let portfolio = runtime
             .block_on(crate::ops::metrics::wave_metric_portfolio(
                 &store,
                 &wave,
-                &projects,
                 OffsetDateTime::now_utc(),
             ))
             .unwrap();
-        let project_portfolio = runtime
-            .block_on(crate::ops::metrics::project_metric_portfolio(
-                &store,
-                &wave,
-                &projects,
-                "project-api",
-                OffsetDateTime::now_utc(),
-            ))
-            .unwrap();
-        let prompt = crate::ops::metrics::metric_prompt_section(
-            "project-owned-metrics",
-            Ok(project_portfolio),
-        );
-
         assert!(portfolio.metrics[0].instrumented);
         assert!(matches!(
             portfolio.metrics[0].evidence,
-            MetricEvidenceDto::Met { value: 1.0, .. }
+            MetricEvidenceDto::Untargeted { value: 1.0, .. }
         ));
-        assert!(prompt.contains("\"kind\":\"met\",\"value\":1.0"));
+        let prompt = crate::ops::metrics::metric_prompt_section("wave-metrics", Ok(portfolio));
+        assert!(prompt.contains("\"kind\":\"untargeted\",\"value\":1.0"));
     }
 }

@@ -57,14 +57,14 @@ enum MockWaveFixture {
         [
             Wave(id: "wave-1", name: "infrastructure", repo: repoPath,
                  status: .ready,
-                 live: true, activeTasks: 1, activeProjects: 1),
+                 live: true, activeTasks: 1),
             Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
-                 live: false, activeTasks: 2, activeProjects: 1),
+                 live: false, activeTasks: 2),
             Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
-                 live: false, enabled: false, activeTasks: 0, activeProjects: 0),
+                 live: false, enabled: false, activeTasks: 0),
             Wave(id: "wave-4", name: "cadenza", repo: repoPath,
                  status: .ready,
-                 live: true, activeTasks: 0, activeProjects: 0, parentWaveId: "wave-1"),
+                 live: true, activeTasks: 0, parentWaveId: "wave-1"),
         ]
     }
 
@@ -75,7 +75,7 @@ enum MockWaveFixture {
         var result: [String: WavePlan] = [:]
         for wave in waves {
             let key = PortfolioRepoState.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
-            result[key] = WavePlan(objective: objective(for: wave.name))
+            result[key] = WavePlan(objective: objective(for: wave.name), chapter: wave.name == detailWaveName ? selectedWaveDetail()?.chapter : nil)
         }
         return result
     }
@@ -121,288 +121,346 @@ enum MockWaveFixture {
     }
 
     static let detailJSON = #"""
-    {
-      "wave": {
-        "id": "wave-1",
-        "name": "infrastructure",
-        "status": "ready",
-        "goal": "Make releases boring.",
-        "repo": "/src/loopflow",
-        "active_tasks": 1,
-        "active_projects": 1,
-        "live": true,
-        "paused": false,
-        "enabled": true,
-        "endpoint": "127.0.0.1:7777",
-        "created_at": "2026-07-01T00:00:00Z",
-        "parent_wave_id": null,
-        "retired_at": null,
-        "superseded_by_wave_id": null,
-        "retirement_reason": null,
-        "home": {
-          "id": "home_00000000000000000000000000000001",
-          "route": "ssh://jack@mini-heart",
-          "created_at": "2026-07-01T00:00:00Z",
-          "observed_at": "2026-07-17T00:00:00Z"
-        }
-      },
-      "loop_state": "idle",
-      "projects": [
         {
-          "project": {
-            "id": "project-1",
-            "slug": "release-feedback",
-            "name": "Release feedback",
-            "summary": "Failures become focused work.",
-            "definition": "Close the release feedback loop.",
-            "flows": {"first": "incident", "loop": "ship-5whys", "finally": "ship"},
-            "krs": [
-              {"text": "Every failed run has an owner", "holds": false}
-            ]
-          },
-          "runtime": {
-            "work_id": "ps_11111111111111111111111111111111",
+          "wave": {
+            "id": "wave-1",
+            "name": "infrastructure",
             "status": "ready",
-            "reason": "ready",
-            "updated_at": "2026-07-13T18:00:00Z",
-            "iteration": 2,
-            "pending_observations": 0,
-            "provider": "codex",
-            "last_failure": {
-              "message": "project runner failed: credential is missing",
-              "occurred_at": "2026-07-22T09:30:00Z"
+            "goal": "Make releases boring.",
+            "repo": "/src/loopflow",
+            "active_tasks": 1,
+            "live": true,
+            "paused": false,
+            "enabled": true,
+            "endpoint": "127.0.0.1:7777",
+            "created_at": "2026-07-01T00:00:00Z",
+            "parent_wave_id": null,
+            "retired_at": null,
+            "superseded_by_wave_id": null,
+            "retirement_reason": null,
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "ssh://jack@mini-heart",
+              "created_at": "2026-07-01T00:00:00Z",
+              "observed_at": "2026-07-17T00:00:00Z"
             }
           },
-          "directive": {
-            "version": 1,
-            "kind": "initial",
-            "text": "Own release feedback and supervise failures.",
-            "applied_at": "2026-07-13T17:55:00Z",
-            "incorporated_at": "2026-07-13T17:56:00Z",
-            "incorporated_summary": "Failure ownership is the active priority."
-          },
-          "next_move": {"owner": "project", "reason": "supervised Tasks are active"},
-          "tasks": [
-            {
-              "task": {
-                "id": "issue-1",
-                "identifier": "INF-123",
-                "name": "Surface nightly failures",
-                "description": "Surface one focused failure.",
-                "rank": 1,
-                "completed": false,
-                "assignee": "user-1"
-              },
-              "reference": {
-                "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
-                "workspace": {
-                  "slug": "infrastructure-task",
-                  "branch": "jack/infrastructure.task.20260713_1200",
-                  "worktree": "/src/loopflow.infrastructure.task"
+          "loop_state": "idle",
+          "metric_portfolio": {
+            "metrics": [
+              {
+                "identity": {
+                  "wave_id": "wave-1",
+                  "metric_id": "task-loop-trust"
+                },
+                "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "name": "Task loops earn trust",
+                "description": "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.",
+                "stage": "graduated",
+                "instrumented": true,
+                "instrument": "lifecycle-scorecard",
+                "unit": "ratio",
+                "target": {
+                  "kind": "at_least",
+                  "value": 1.0
+                },
+                "window": "7d",
+                "freshness_policy": "30h",
+                "freshness": {
+                  "kind": "fresh",
+                  "source_time": "2026-08-20T18:00:00Z",
+                  "expires_at": "2026-08-22T00:00:00Z"
+                },
+                "evidence": {
+                  "kind": "met",
+                  "value": 1.0,
+                  "source_window_start": "2026-08-13T18:00:00Z",
+                  "source_window_end": "2026-08-20T18:00:00Z"
                 }
               },
-              "runtime": {
-                "work_id": "ts_22222222222222222222222222222222",
-                "project_id": "ps_11111111111111111111111111111111",
-                "routing_project_id": "ps_11111111111111111111111111111111",
-                "status": "ready",
-                "reason": "ready",
-                "updated_at": "2026-07-13T19:00:00Z",
-                "provider": "codex"
+              {
+                "identity": {
+                  "wave_id": "wave-1",
+                  "metric_id": "failure-ownership"
+                },
+                "contract_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "name": "Failures leave with an owner",
+                "description": "Share of failed release runs assigned to one accountable Wave before the next scheduled run.",
+                "stage": "graduated",
+                "instrumented": true,
+                "instrument": "release-ledger",
+                "unit": "ratio",
+                "target": {
+                  "kind": "at_least",
+                  "value": 0.95
+                },
+                "window": "30d",
+                "freshness_policy": "24h",
+                "freshness": {
+                  "kind": "fresh",
+                  "source_time": "2026-08-20T18:00:00Z",
+                  "expires_at": "2026-08-21T18:00:00Z"
+                },
+                "evidence": {
+                  "kind": "missed",
+                  "value": 0.82,
+                  "source_window_start": "2026-07-21T18:00:00Z",
+                  "source_window_end": "2026-08-20T18:00:00Z"
+                }
               },
-              "directive": {
-                "version": 2,
-                "kind": "replacement",
-                "text": "Surface verification failures before publish failures.",
-                "applied_at": "2026-07-13T18:30:00Z",
-                "incorporated_at": "2026-07-13T18:31:00Z",
-                "incorporated_summary": "Verification failures are now first."
-              },
-              "next_move": {"owner": "user", "reason": "merge pull request head 333333333333 on GitHub"},
-              "condition": {
-                "state": "waiting",
-                "reason": "merge pull request head 333333333333 on GitHub",
-                "observed_at": "2026-07-13T21:00:00Z",
-                "evidence_age_secs": 7200,
-                "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null}
-              },
-              "actions":{"recommended":"open_pr","reason":"merge head 333333333333 on GitHub"},
-              "prs": [{
-                "id": "pr_33333333333333333333333333333333",
-                "sequence": 1,
-                "slug": "infrastructure-task",
-                "branch": "jack/infrastructure.task.20260713_1200",
-                "base_commit": "1111111111111111111111111111111111111111",
-                "phase": "open",
-                "empty": false,
-                "publication": {
-                    "requested_at": "2026-07-13T18:45:00Z",
-                    "presentation": {
+              {
+                "identity": {
+                  "wave_id": "wave-1",
+                  "metric_id": "diagnosis-latency"
+                },
+                "contract_revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "name": "Diagnosis stays fast",
+                "description": "Median elapsed time from a failed release check to an actionable diagnosis.",
+                "stage": "installed",
+                "instrumented": false,
+                "instrument": "incident-timeline",
+                "unit": "minutes",
+                "target": {
+                  "kind": "at_most",
+                  "value": 30.0
+                },
+                "window": "14d",
+                "freshness_policy": "24h",
+                "freshness": {
+                  "kind": "never"
+                },
+                "evidence": {
+                  "kind": "unknown",
+                  "cause": {
+                    "kind": "never"
+                  }
+                }
+              }
+            ],
+            "contract_issues": [
+              {
+                "kind": "instrument_mismatch",
+                "wave_id": "wave-1",
+                "metric_id": "diagnosis-latency",
+                "contract_instrument": "incident-timeline",
+                "registered_instrument": "release-events-v1"
+              }
+            ]
+          },
+          "runs": {
+            "state": "ok",
+            "truncated": false,
+            "items": [
+              {
+                "id": "run_00000000000000000000000000000001",
+                "parent_run_id": null,
+                "repo": "/src/loopflow",
+                "worktree": "/src/loopflow.task",
+                "subjects": [
+                  {
+                    "selector": "wave:infrastructure",
+                    "source": "declared"
+                  },
+                  {
+                    "selector": "task:INF-123",
+                    "source": "declared"
+                  }
+                ],
+                "skill": "task/pursue",
+                "outcome": "completed",
+                "started": 1784052000,
+                "ended": 1784052600,
+                "usage": {
+                  "streams": 1,
+                  "final_streams": 1,
+                  "gaps": 0,
+                  "input_tokens": 12000,
+                  "output_tokens": 3000,
+                  "total_input_tokens": 12000,
+                  "peak_input_tokens": 10000,
+                  "context_window_tokens": 200000,
+                  "reasoning_tokens": 1000,
+                  "cache_read_tokens": 8000,
+                  "cache_write_tokens": 500,
+                  "cost_usd": 0.42
+                },
+                "evidence_gaps": 0,
+                "harness": "codex",
+                "model": "gpt-5",
+                "surface": "headless"
+              }
+            ]
+          },
+          "home_runtime": {
+            "home": {
+              "id": "home_00000000000000000000000000000001",
+              "route": "ssh://jack@mini-heart",
+              "created_at": "2026-07-01T00:00:00Z",
+              "observed_at": "2026-07-17T00:00:00Z"
+            },
+            "state": "running",
+            "reason": "resident is serving on the Home",
+            "endpoint": "127.0.0.1:7777",
+            "action": {
+              "kind": "attach",
+              "endpoint": "127.0.0.1:7777"
+            }
+          },
+          "chapter": {
+            "id": "current",
+            "source_project_id": "project-1",
+          "source_project_slug": "release-feedback",
+            "metric_targets": [],
+            "flows": {
+              "recommended": "incident"
+            },
+            "krs": [
+              {
+                "text": "Every failed run has an owner",
+                "holds": false
+              }
+            ],
+            "phase": "complete",
+            "error": null
+          },
+          "tasks": {
+            "state": "ok",
+            "items": [
+              {
+                "task": {
+                  "id": "issue-1",
+                  "identifier": "INF-123",
+                  "name": "Surface nightly failures",
+                  "description": "Surface one focused failure.",
+                  "rank": 1,
+                  "completed": false,
+                  "assignee": "user-1"
+                },
+                "reference": {
+                  "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
+                  "workspace": {
+                    "slug": "infrastructure-task",
+                    "branch": "jack/infrastructure.task.20260713_1200",
+                    "worktree": "/src/loopflow.infrastructure.task"
+                  }
+                },
+                "runtime": {
+                  "work_id": "ts_22222222222222222222222222222222",
+                  "status": "ready",
+                  "reason": "ready",
+                  "updated_at": "2026-07-13T19:00:00Z",
+                  "provider": "codex"
+                },
+                "directive": {
+                  "version": 2,
+                  "kind": "replacement",
+                  "text": "Surface verification failures before publish failures.",
+                  "applied_at": "2026-07-13T18:30:00Z",
+                  "incorporated_at": "2026-07-13T18:31:00Z",
+                  "incorporated_summary": "Verification failures are now first."
+                },
+                "next_move": {
+                  "owner": "user",
+                  "reason": "merge pull request head 333333333333 on GitHub"
+                },
+                "condition": {
+                  "state": "waiting",
+                  "reason": "merge pull request head 333333333333 on GitHub",
+                  "observed_at": "2026-07-13T21:00:00Z",
+                  "evidence_age_secs": 7200,
+                  "local_progress": {
+                    "state": "observed",
+                    "unsettled": true,
+                    "dirty": false,
+                    "authored_commits": true,
+                    "recovery_required": false,
+                    "reason": null
+                  }
+                },
+                "actions": {
+                  "recommended": "open_pr",
+                  "reason": "merge head 333333333333 on GitHub"
+                },
+                "prs": [
+                  {
+                    "id": "pr_33333333333333333333333333333333",
+                    "sequence": 1,
+                    "slug": "infrastructure-task",
+                    "branch": "jack/infrastructure.task.20260713_1200",
+                    "base_commit": "1111111111111111111111111111111111111111",
+                    "phase": "open",
+                    "empty": false,
+                    "publication": {
+                      "requested_at": "2026-07-13T18:45:00Z",
+                      "presentation": {
                         "title": "Ship infrastructure task",
                         "body": "Explains the intent and proof for this head.",
                         "head_sha": "3333333333333333333333333333333333333333"
+                      },
+                      "github": {
+                        "number": 912,
+                        "url": "https://github.com/loopflowstudio/loopflow/pull/912"
+                      },
+                      "merge": {
+                        "mode": "user",
+                        "requested_at": "2026-07-13T18:46:00Z",
+                        "head_sha": "3333333333333333333333333333333333333333",
+                        "after_merge": "complete_task",
+                        "next_slug": null
+                      }
                     },
-                    "github": {
-                    "number": 912,
-                    "url": "https://github.com/loopflowstudio/loopflow/pull/912"
-                  },
-                  "merge": {
-                    "mode": "user",
-                    "requested_at": "2026-07-13T18:46:00Z",
-                    "head_sha": "3333333333333333333333333333333333333333",
-                    "after_merge": "complete_task",
-                    "next_slug": null
+                    "merge_commit": null,
+                    "abandoned_at": null
+                  }
+                ],
+                "active_pr": "pr_33333333333333333333333333333333"
+              },
+              {
+                "task": {
+                  "id": "issue-2",
+                  "identifier": "INF-124",
+                  "name": "Classify publish failures",
+                  "description": "",
+                  "rank": 2,
+                  "completed": false,
+                  "assignee": null
+                },
+                "reference": {
+                  "issue_url": null,
+                  "workspace": null
+                },
+                "runtime": null,
+                "directive": null,
+                "next_move": {
+                  "owner": "wave",
+                  "reason": "Task is ready to start"
+                },
+                "condition": {
+                  "state": "clear",
+                  "reason": "Task is ready to start",
+                  "observed_at": "2026-07-13T21:00:00Z",
+                  "evidence_age_secs": null,
+                  "local_progress": {
+                    "state": "not_applicable",
+                    "unsettled": false,
+                    "dirty": null,
+                    "authored_commits": null,
+                    "recovery_required": null,
+                    "reason": null
                   }
                 },
-                "merge_commit": null,
-                "abandoned_at": null
-              }],
-              "active_pr": "pr_33333333333333333333333333333333"
-            },
-            {
-              "task": {
-                "id": "issue-2",
-                "identifier": "INF-124",
-                "name": "Classify publish failures",
-                "description": "",
-                "rank": 2,
-                "completed": false,
-                "assignee": null
-              },
-              "reference": {
-                "issue_url": null,
-                "workspace": null
-              },
-              "runtime": null,
-              "directive": null,
-              "next_move": {"owner": "project", "reason": "Task is ready to start"},
-              "condition": {
-                "state": "clear",
-                "reason": "Task is ready to start",
-                "observed_at": "2026-07-13T21:00:00Z",
-                "evidence_age_secs": null,
-                "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null}
-              },
-              "actions":{"recommended":null,"reason":"Task is ready to start"},
-              "prs": [],
-              "active_pr": null
-            }
-          ]
-        }
-      ],
-      "metric_portfolio": {
-        "metrics": [
-          {
-            "identity": {"wave_id": "wave-1", "metric_id": "task-loop-trust"},
-            "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "name": "Task loops earn trust",
-            "description": "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.",
-            "project_id": "project-1",
-            "stage": "graduated",
-            "instrumented": true,
-            "instrument": "lifecycle-scorecard",
-            "unit": "ratio",
-            "target": {"kind": "at_least", "value": 1.0},
-            "window": "7d",
-            "freshness_policy": "30h",
-            "freshness": {"kind": "fresh", "source_time": "2026-08-20T18:00:00Z", "expires_at": "2026-08-22T00:00:00Z"},
-            "evidence": {"kind": "met", "value": 1.0, "source_window_start": "2026-08-13T18:00:00Z", "source_window_end": "2026-08-20T18:00:00Z"}
-          },
-          {
-            "identity": {"wave_id": "wave-1", "metric_id": "failure-ownership"},
-            "contract_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "name": "Failures leave with an owner",
-            "description": "Share of failed release runs assigned to one accountable Project before the next scheduled run.",
-            "project_id": "project-1",
-            "stage": "graduated",
-            "instrumented": true,
-            "instrument": "release-ledger",
-            "unit": "ratio",
-            "target": {"kind": "at_least", "value": 0.95},
-            "window": "30d",
-            "freshness_policy": "24h",
-            "freshness": {"kind": "fresh", "source_time": "2026-08-20T18:00:00Z", "expires_at": "2026-08-21T18:00:00Z"},
-            "evidence": {"kind": "missed", "value": 0.82, "source_window_start": "2026-07-21T18:00:00Z", "source_window_end": "2026-08-20T18:00:00Z"}
-          },
-          {
-            "identity": {"wave_id": "wave-1", "metric_id": "diagnosis-latency"},
-            "contract_revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            "name": "Diagnosis stays fast",
-            "description": "Median elapsed time from a failed release check to an actionable diagnosis.",
-            "project_id": "project-1",
-            "stage": "installed",
-            "instrumented": false,
-            "instrument": "incident-timeline",
-            "unit": "minutes",
-            "target": {"kind": "at_most", "value": 30.0},
-            "window": "14d",
-            "freshness_policy": "24h",
-            "freshness": {"kind": "never"},
-            "evidence": {"kind": "unknown", "cause": {"kind": "never"}}
-          }
-        ],
-        "contract_issues": [
-          {
-            "kind": "instrument_mismatch",
-            "wave_id": "wave-1",
-            "metric_id": "diagnosis-latency",
-            "contract_instrument": "incident-timeline",
-            "registered_instrument": "release-events-v1"
-          }
-        ]
-      },
-      "unavailable_projects": [],
-      "runs": {
-        "state": "ok",
-        "truncated": false,
-        "items": [
-          {
-            "id": "run_00000000000000000000000000000001",
-            "parent_run_id": null,
-            "repo": "/src/loopflow",
-            "worktree": "/src/loopflow.task",
-            "subjects": [
-              {"selector": "wave:infrastructure", "source": "declared"},
-              {"selector": "task:INF-123", "source": "declared"}
+                "actions": {
+                  "recommended": null,
+                  "reason": "Task is ready to start"
+                },
+                "prs": [],
+                "active_pr": null
+              }
             ],
-            "skill": "task/pursue",
-            "outcome": "completed",
-            "started": 1784052000,
-            "ended": 1784052600,
-            "usage": {
-              "streams": 1,
-              "final_streams": 1,
-              "gaps": 0,
-              "input_tokens": 12000,
-              "output_tokens": 3000,
-              "total_input_tokens": 12000,
-              "peak_input_tokens": 10000,
-              "context_window_tokens": 200000,
-              "reasoning_tokens": 1000,
-              "cache_read_tokens": 8000,
-              "cache_write_tokens": 500,
-              "cost_usd": 0.42
-            },
-            "evidence_gaps": 0,
-            "harness": "codex",
-            "model": "gpt-5",
-            "surface": "headless"
-          }
-        ]
-      },
-      "home_runtime": {
-        "home": {
-          "id": "home_00000000000000000000000000000001",
-          "route": "ssh://jack@mini-heart",
-          "created_at": "2026-07-01T00:00:00Z",
-          "observed_at": "2026-07-17T00:00:00Z"
-        },
-        "state": "running",
-        "reason": "resident is serving on the Home",
-        "endpoint": "127.0.0.1:7777",
-        "action": {"kind": "attach", "endpoint": "127.0.0.1:7777"}
-      }
-    }
-    """#
+            "truncated": false
+          },
+          "unavailable_tasks": []
+        }
+        """#
 }
 #endif

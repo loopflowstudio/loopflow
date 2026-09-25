@@ -45,7 +45,7 @@ of what changed and why. This step is both composer and performer.
 
 3. **Compose the chord.** For each change you will make, specify:
    - target wave
-   - lever (`objective`, `flow`, `project`, `task`, `agent`, `triggers`,
+   - lever (`objective`, `flow`, `chapter`, `task`, `agent`, `triggers`,
      `lifecycle`)
    - before / after
    - rationale
@@ -53,8 +53,8 @@ of what changed and why. This step is both composer and performer.
 
 4. **Play it immediately.** Apply each mutation through its owner:
    - edit wave YAML for config changes
-   - create or update Projects and tasks with `lf pm`; never write a local
-     planning mirror
+   - edit the chapter plan with `lf wave update-plan` and Tasks with `lf pm task`;
+     never create another Project or write a local planning mirror
    - create or remove wave directories only when lifecycle pressure requires it
 
 5. **Sync runtime state.** For changes that affect registered wave config,

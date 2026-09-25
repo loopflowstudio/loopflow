@@ -5,7 +5,7 @@
 //! covered by the repo's `.lf/journal/` gitignore entry — the log is
 //! per-machine, never committed). Every projection is a fold over the Wave log:
 //! the thread is the conversation events, the loop state is the last
-//! `LoopState` event, and the input queue is human messages and typed
+//! `LoopState` event, and the input queue is chat messages and typed
 //! observations not yet named in any `TurnStarted.answers` or
 //! `TurnSteered.answers`. The journal is truth; SSE is liveness.
 //!
@@ -40,7 +40,7 @@ use crate::work::wave::PromotionWake;
 /// Current journal format version, stamped on every line.
 const FORMAT_VERSION: u32 = 1;
 
-/// Identifies one pending Wave input: `"msg-<seq>"` for human messages and a
+/// Identifies one pending Wave input: `"msg-<seq>"` for chat messages and a
 /// deterministic typed id for observations and promotion wakes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -104,6 +104,16 @@ impl PendingMessage {
     }
 }
 
+pub(crate) fn attributed_message(text: &str, name: Option<&str>) -> String {
+    match name.and_then(crate::engine::config::normalize_user_name) {
+        Some(name) => format!(
+            "From {}:\n{text}",
+            serde_json::to_string(&name).expect("name is serializable")
+        ),
+        None => text.to_string(),
+    }
+}
+
 /// The authored-chat destination a resident pass is allowed to answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageDestination {
@@ -131,12 +141,13 @@ impl DiscordChatBinding {
     }
 }
 
-/// Provider identity retained with one imported human message.
+/// Provider identity retained with one imported chat message.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DiscordMessageSource {
     pub binding: DiscordChatBinding,
     pub message_id: String,
     pub author_id: String,
+    pub author_name: Option<String>,
 }
 
 /// architecture-shim: legacy-chat-import
@@ -231,6 +242,7 @@ pub enum EventKind {
         id: MessageId,
         op: MessageOp,
         text: String,
+        author_name: Option<String>,
     },
     DiscordChatAttached {
         binding: DiscordChatBinding,
@@ -281,6 +293,12 @@ pub enum EventKind {
         /// and every non-message item stay in `ChatTurn.items` (see
         /// `ChatTurn::absorb_item`).
         item: ConversationItem,
+    },
+    /// The channel message this assistant turn answers. Unlike `answers`, this
+    /// is a visible conversation relation, not a consumption marker.
+    ChatReplyLinked {
+        turn_id: String,
+        message_id: MessageId,
     },
     TurnSteered {
         turn_id: String,
@@ -521,7 +539,7 @@ impl Narrator {
             EventKind::ConversationEpochStarted {
                 number, backing, ..
             } => info(format!("chat epoch {number} started · {backing:?}")),
-            EventKind::UserMessage { id, op, text } => {
+            EventKind::UserMessage { id, op, text, .. } => {
                 let op_tag = match op {
                     MessageOp::Message => "",
                     MessageOp::Steer => "(steer) ",
@@ -611,6 +629,10 @@ impl Narrator {
                     }
                 }
             }
+            EventKind::ChatReplyLinked {
+                turn_id,
+                message_id,
+            } => debug(format!("turn {turn_id} replies to {message_id}")),
             EventKind::TurnSteered { turn_id, answers } => info(format!(
                 "turn {turn_id} steered{}",
                 answers_segment(answers)
@@ -643,7 +665,7 @@ impl Narrator {
                     info(format!("playhead completed · {flow}"))
                 }
                 PlayheadEvent::DefinitionReset => {
-                    info("playhead reset · definition changed".to_string())
+                    info("playhead replaced a historical definition".to_string())
                 }
                 PlayheadEvent::StepStarted { step, .. } => {
                     info(format!("playhead now · {} / {}", step.flow, step.step))
@@ -827,6 +849,14 @@ impl Journal {
                     );
                 }
                 Err(err) => {
+                    if line.ends_with('\n') {
+                        anyhow::bail!(
+                            "journal {} has an unreadable complete record at byte {}: {}",
+                            path.display(),
+                            start,
+                            err,
+                        );
+                    }
                     tracing::warn!(
                         path = %path.display(),
                         byte_offset = start,
@@ -992,7 +1022,7 @@ pub struct ThreadFold {
     /// Last durable playhead snapshot, absent before the first resident or
     /// enqueue initializes the default wave flow.
     pub playhead: Option<Playhead>,
-    /// Human messages and typed inputs not named by any `answers` event (minus
+    /// Chat messages and typed inputs not named by any `answers` event (minus
     /// what `MessagesRequeued` restored); this seeds the scheduler queue on
     /// restart.
     pub pending_messages: Vec<PendingMessage>,
@@ -1003,6 +1033,9 @@ pub struct ThreadFold {
     pub discord: Option<DiscordAttachment>,
     /// Outbound intents and receipts, keyed by deterministic delivery id.
     pub discord_deliveries: HashMap<String, DiscordDelivery>,
+    /// Completed assistant turn id → the channel message it explicitly
+    /// answers. Failed/crashed turns never publish a reply relation.
+    pub chat_reply_targets: HashMap<String, MessageId>,
     /// Completed assistant turns and the authored inputs they answered.
     pub completed_claims: HashMap<String, Vec<MessageId>>,
     /// Typed Task observations indexed by their synthetic consumption id.
@@ -1057,8 +1090,11 @@ pub fn restore_pending(
             tracing::warn!(id = %id, "requeue of an unknown message id; dropped");
             continue;
         };
-        pending.push(message.clone());
-        restored.push(id.clone());
+        // Retired Wave input remains readable, but never resumes steering.
+        if message.op == MessageOp::Message {
+            pending.push(message.clone());
+            restored.push(id.clone());
+        }
     }
     restored
 }
@@ -1082,6 +1118,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut discord: Option<DiscordAttachment> = None;
     let mut discord_deliveries: HashMap<String, DiscordDelivery> = HashMap::new();
+    let mut chat_reply_targets: HashMap<String, MessageId> = HashMap::new();
     let mut completed_claims: HashMap<String, Vec<MessageId>> = HashMap::new();
     let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
     let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
@@ -1090,6 +1127,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
+    let mut reply_target_by_open_turn: HashMap<String, MessageId> = HashMap::new();
 
     for event in events {
         match &event.kind {
@@ -1121,19 +1159,25 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     ended_at: None,
                 });
             }
-            EventKind::UserMessage { id, op, text } => {
+            EventKind::UserMessage {
+                id,
+                op,
+                text,
+                author_name,
+            } => {
+                // Chat is a stream to observe, not a queue to drain: a participant
+                // message becomes a thread turn (read back via read_channel), but
+                // is never queued as pending input to consume.
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+                turn.author_name = author_name.clone();
                 turn.created_at = event.at_rfc3339();
                 turns.push(turn);
                 let message = PendingMessage {
                     id: id.clone(),
                     op: *op,
-                    text: text.clone(),
+                    text: attributed_message(text, author_name.as_deref()),
                     source: None,
                 };
-                if !consumed_messages.contains(id) {
-                    pending_messages.push(message.clone());
-                }
                 messages.insert(id.clone(), message);
             }
             EventKind::DiscordChatAttached {
@@ -1150,19 +1194,23 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::DiscordUserMessage { id, text, source } => {
                 let turn_id = format!("turn-{}", event.seq);
                 let mut turn = ChatTurn::user(turn_id.clone(), text.clone());
+                turn.author_name = source.author_name.clone();
                 turn.created_at = event.at_rfc3339();
                 turns.push(turn);
                 discord_turn_bindings.insert(turn_id, source.binding.clone());
-                let message = PendingMessage {
-                    id: id.clone(),
-                    op: MessageOp::Message,
-                    text: format!("[{}]\n{}", source.uri(), text),
-                    source: Some(source.clone()),
-                };
-                if !consumed_messages.contains(id) {
-                    pending_messages.push(message.clone());
-                }
-                messages.insert(id.clone(), message);
+                // Observed, not queued (see UserMessage).
+                messages.insert(
+                    id.clone(),
+                    PendingMessage {
+                        id: id.clone(),
+                        op: MessageOp::Message,
+                        text: attributed_message(
+                            &format!("[{}]\n{}", source.uri(), text),
+                            source.author_name.as_deref(),
+                        ),
+                        source: Some(source.clone()),
+                    },
+                );
             }
             EventKind::DiscordAuthoredMessage {
                 id,
@@ -1172,18 +1220,19 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 let turn_id = format!("turn-{}", event.seq);
                 let mut turn = ChatTurn::user(turn_id.clone(), text.clone());
+                turn.author_name = source.author_name.clone();
                 turn.created_at = event.at_rfc3339();
                 turns.push(turn);
                 discord_turn_bindings.insert(turn_id, source.binding.clone());
                 let message = PendingMessage {
                     id: id.clone(),
                     op: *op,
-                    text: format!("[{}]\n{}", source.uri(), text),
+                    text: attributed_message(
+                        &format!("[{}]\n{}", source.uri(), text),
+                        source.author_name.as_deref(),
+                    ),
                     source: Some(source.clone()),
                 };
-                if !consumed_messages.contains(id) {
-                    pending_messages.push(message.clone());
-                }
                 messages.insert(id.clone(), message);
             }
             EventKind::DiscordChatCursorAdvanced {
@@ -1283,6 +1332,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 mark_consumed(&mut pending_messages, &mut consumed_messages, answers);
                 claims_by_open_turn.insert(turn_id.clone(), answers.clone());
                 open.push(ChatTurn {
+                    author_name: None,
                     id: turn_id.clone(),
                     role: ChatRole::Assistant,
                     text: String::new(),
@@ -1304,6 +1354,20 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 };
                 turn.absorb_item(item.clone());
             }
+            EventKind::ChatReplyLinked {
+                turn_id,
+                message_id,
+            } => {
+                if open.iter().any(|turn| &turn.id == turn_id) {
+                    reply_target_by_open_turn.insert(turn_id.clone(), message_id.clone());
+                } else {
+                    tracing::warn!(
+                        turn_id,
+                        seq = event.seq,
+                        "ChatReplyLinked for a turn that isn't open"
+                    );
+                }
+            }
             EventKind::TurnFinished {
                 turn_id,
                 status,
@@ -1324,6 +1388,11 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let claims = claims_by_open_turn.remove(turn_id).unwrap_or_default();
                 if *status == Lifecycle::Completed {
                     completed_claims.insert(turn_id.clone(), claims);
+                    if let Some(message_id) = reply_target_by_open_turn.remove(turn_id) {
+                        chat_reply_targets.insert(turn_id.clone(), message_id);
+                    }
+                } else {
+                    reply_target_by_open_turn.remove(turn_id);
                 }
                 turns.push(turn);
             }
@@ -1400,6 +1469,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         messages,
         discord,
         discord_deliveries,
+        chat_reply_targets,
         completed_claims,
         tasks,
         projects,
@@ -1459,8 +1529,24 @@ mod tests {
         (tmp, path)
     }
 
+    #[test]
+    fn request_authors_leave_old_journal_messages_anonymous() {
+        let legacy = serde_json::json!({"type": "user_message", "id": "msg-1", "op": "message", "text": "old request"});
+        let kind: EventKind = serde_json::from_value(legacy).unwrap();
+        assert!(matches!(
+            kind,
+            EventKind::UserMessage {
+                author_name: None,
+                ..
+            }
+        ));
+        let source: DiscordMessageSource = serde_json::from_value(serde_json::json!({"binding":{"guild_id":"g","channel_id":"c"},"message_id":"m","author_id":"p"})).unwrap();
+        assert!(source.author_name.is_none());
+    }
+
     fn user_message(seq: u64, text: &str) -> EventKind {
         EventKind::UserMessage {
+            author_name: None,
             id: MessageId(format!("msg-{seq}")),
             op: MessageOp::Message,
             text: text.to_string(),
@@ -1499,6 +1585,7 @@ mod tests {
 
     fn discord_source() -> DiscordMessageSource {
         DiscordMessageSource {
+            author_name: None,
             binding: discord_binding(),
             message_id: "101".into(),
             author_id: "human".into(),
@@ -1551,6 +1638,37 @@ mod tests {
         let (_, events) = Journal::open(&path).expect("reopen again");
         assert_eq!(events.len(), 2);
         assert_eq!(events[1].seq, 2);
+    }
+
+    #[test]
+    fn shipped_step_plan_journal_replays_without_truncation() {
+        let (_tmp, path) = open_tmp();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let playhead = r#"{"v":1,"seq":1,"at":"2026-09-22T00:00:00Z","kind":{"type":"playhead_changed","event":{"kind":"definition_reset"},"playhead":{"stack":[{"id":"old-wave","flow":"wave","steps":[{"name":"wave/operate","kind":"skill","human":false}],"cursor":0,"iteration":0,"queue":[]}],"active":null}}}"#;
+        let message = r#"{"v":1,"seq":2,"at":"2026-09-22T00:01:00Z","kind":{"type":"user_message","id":"msg-2","op":"message","text":"Keep this durable conversation"}}"#;
+        let raw = format!("{playhead}\n{message}\n");
+        std::fs::write(&path, &raw).unwrap();
+
+        let (journal, events) = Journal::open(&path).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(journal.next_seq(), 3);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
+        let EventKind::PlayheadChanged { playhead, .. } = &events[0].kind else {
+            panic!("first event must retain the historical playhead")
+        };
+        assert!(!playhead.has_executable_definition());
+    }
+
+    #[test]
+    fn unreadable_complete_record_is_not_destroyed_as_a_torn_tail() {
+        let (_tmp, path) = open_tmp();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let raw = "{\"complete\":\"but unknown\"}\n";
+        std::fs::write(&path, raw).unwrap();
+
+        assert!(Journal::open(&path).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
     }
 
     #[test]
@@ -1885,6 +2003,37 @@ mod tests {
     }
 
     #[test]
+    fn historical_wave_steering_is_readable_without_replaying_it() {
+        let (_tmp, path) = open_tmp();
+        let (mut journal, _) = Journal::open(&path).unwrap();
+        journal.append(|_| EventKind::UserMessage {
+            author_name: None,
+            id: MessageId("local-steer".into()),
+            op: MessageOp::Steer,
+            text: "old direction".into(),
+        });
+        journal.append(|_| EventKind::DiscordAuthoredMessage {
+            id: MessageId("discord-steer".into()),
+            op: MessageOp::Steer,
+            text: "old Discord direction".into(),
+            source: discord_source(),
+        });
+        journal.append(|_| EventKind::MessagesRequeued {
+            ids: vec![
+                MessageId("local-steer".into()),
+                MessageId("discord-steer".into()),
+            ],
+        });
+        drop(journal);
+        let (_, events) = Journal::open(&path).unwrap();
+        let folded = fold_thread(&events);
+        assert_eq!(folded.turns.len(), 2);
+        assert_eq!(folded.turns[0].text, "old direction");
+        assert_eq!(folded.turns[1].text, "old Discord direction");
+        assert!(folded.pending_messages.is_empty());
+    }
+
+    #[test]
     fn typed_task_observation_uses_the_existing_durable_consumption_fold() {
         let observation = task_observation();
         let observation_id = MessageId(observation.inbox_id());
@@ -1925,8 +2074,8 @@ mod tests {
         assert!(consumed.pending_messages.is_empty());
     }
 
-    /// A fixed event sequence renders the console a human would want to read:
-    /// human chat with explicit ops, turn open/close with items and usage, the
+    /// A fixed event sequence renders the console readers need:
+    /// chat with explicit ops, turn open/close with items and usage, the
     /// prose gist once at INFO with the rest at DEBUG, and legacy worker
     /// observations.
     #[test]
@@ -1943,6 +2092,7 @@ mod tests {
         };
 
         let n = render(EventKind::UserMessage {
+            author_name: None,
             id: MessageId("msg-1".into()),
             op: MessageOp::Message,
             text: "how is the reactive server refactor going?".into(),
@@ -1954,6 +2104,7 @@ mod tests {
         );
 
         let n = render(EventKind::UserMessage {
+            author_name: None,
             id: MessageId("msg-3".into()),
             op: MessageOp::Steer,
             text: "focus on the journal tests first".into(),
@@ -2074,6 +2225,7 @@ mod tests {
         let mut narrator = Narrator::default();
         let long = "x".repeat(100);
         let n = narrator.render(&EventKind::UserMessage {
+            author_name: None,
             id: MessageId("msg-1".into()),
             op: MessageOp::Message,
             text: long.clone(),

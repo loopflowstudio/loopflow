@@ -1,6 +1,6 @@
 //! `lf tokens` — how big is this codebase, in the units a model pays for.
 //!
-//! Lines are what a human counts; tokens are what a run costs. They disagree
+//! Lines measure source size; tokens are what a run costs. They disagree
 //! wildly — a minified file or a lockfile is cheap in lines and ruinous in
 //! tokens — and the context project is about the second number, so that is the
 //! one this measures.

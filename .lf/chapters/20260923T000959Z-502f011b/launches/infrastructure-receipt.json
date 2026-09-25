@@ -1,0 +1,19 @@
+{
+  "wave": "infrastructure",
+  "started_at": "2026-09-23T00:12:36.060089+00:00",
+  "command": [
+    "lf",
+    "-b",
+    "--wave",
+    "infrastructure",
+    "wave/start-chapter"
+  ],
+  "status": "returned",
+  "exit_code": 0,
+  "finished_at": "2026-09-23T00:25:53.744552+00:00",
+  "run_id": "run_fb04e36d5fe742c19463ba94385590cf",
+  "project_runs": {
+    "reliability": "run_d9299390668b41d582405e990ee7e788",
+    "architecture-minimalism": "run_84eafc507dd94ea9b382e293738adb58"
+  }
+}

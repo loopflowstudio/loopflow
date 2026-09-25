@@ -14,13 +14,21 @@ Home-local Run record. The Run records what happened; it does not reserve the
 repository, control a Wave, or become planning state.
 
 The same building block runs **Waves**: persistent agents that coordinate
-Linear-backed Projects and Tasks, remember what they learn, and stay steerable.
+chapter plans and Tasks, remember what they learn, and stay steerable.
 There is no Loopflow server at the center. Repo files hold authored behavior;
 Linear and GitHub hold shared coordination and delivery facts; each Home keeps
 its local execution records. `lf ssh` runs the same local commands on another
 Home.
 
 ## More install options
+
+```bash
+lf install                  # update to the latest published release, from any directory
+lf install schedule         # check at login and weekly (macOS)
+lf install schedule daily   # also accepts weekly, hourly, 5min
+```
+
+Use `lf rebase` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -56,14 +64,14 @@ Author a Wave in the repo and run it:
 <!-- wave/designer/GOAL.md -->
 ## Objective
 
-Keep the design system coherent. Each wake: read the Linear Projects and
-Tasks, direct the Project with the highest-leverage open KR, start a concrete
+Keep the design system coherent. Each wake: read the chapter plan and
+Tasks, pursue the highest-leverage open KR, start a concrete
 Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
 lf start designer                           # serve it from this Home's one keeper
-lf chat --steer "ship the button audit first"
+lf --wave designer wave/operate "ship the button audit first"
 lf pause designer                           # keep listening; queue new turn starts
 lf resume designer
 lf stop designer                            # stay off across Home restarts
@@ -77,15 +85,18 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
 lf task prepare INF-123                               # durable Task Work + worktree, no controller
-lf project prepare runtime-model                      # durable Project Work, no controller
 lf task run INF-123                                   # start end-to-end Task automation
-lf task steer INF-123 "take the smaller approach"     # queue direction; wake its controller if installed
+lf task steer INF-123 "take the smaller approach"     # post a Linear comment for the Task advancer
+lf task interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # watch, repair CI, merge, then complete the Task
 ```
+
+Task comments in Linear also reach the advancing worker. Steering never starts
+an idle Task or broadcasts to independent Runs.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -100,9 +111,11 @@ Watch this repository and the current Home:
 lf ls                  # every durable Wave and its Home/runtime evidence
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
-lf status designer     # one wave's live Project → Task hierarchy
+lf status designer     # one Wave's current chapter and Tasks
 lf activity            # durable Work changes with exact Run, PR, and Steer proof
 lf runs                # recent Home-local Run records
+lf runs --parent run_ab12 --json # every direct child Run, uncapped
+lf runs run_ab12 --final  # print the durable provider conclusion
 lf runs run_ab12 --events # inspect one Run's append-only evidence
 lf replay run_ab12     # repeat its recorded provider request as a child Run
 lf usage --days 30     # direct provider-authored usage for those Runs
@@ -131,6 +144,8 @@ lf session iterate <flowstep-id> "Narrow the design"
 
 Ready, provider exit, and pane close resolve nothing. Complete resolves an
 interactive Run or Ask. Approve and Iterate act only on Task FlowSteps.
+In Loopflow.app, switching Sessions or closing a pane keeps its terminal live.
+**Move here** explicitly takes over a Session active in another terminal.
 
 ## The model
 
@@ -138,8 +153,8 @@ interactive Run or Ask. Approve and Iterate act only on Task FlowSteps.
 |------|--------------|----------------|
 | **Skill** | Runs a prompt with assembled context | `.lf/skills/*.md` |
 | **Flow** | Chains skills together | `.lf/flows/*.yaml` |
-| **Wave** | Durable operating context: memory, cadence, chat, project selection | `wave/<name>/` |
-| **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
+| **Wave** | Durable operating context: memory, cadence, chat, metrics | `wave/<name>/` |
+| **Chapter** | Fresh plan and KRs for one interval | Internal Linear Project, via `lf wave` |
 | **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf pm` |
 | **Run** | Append-only evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
 | **Home** | Stable machine identity; its SSH route may move | local SQLite |
@@ -163,7 +178,7 @@ each `.md` URL, use the curated
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
-| [Authoring](docs/authoring.md) | Writing skills, flows, directions, and goals |
+| [Authoring](docs/authoring.md) | Writing skills, flows, and goals |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
 | [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |
@@ -171,8 +186,11 @@ each `.md` URL, use the curated
 ## Developing loopflow
 
 ```bash
+lf install                                   # install the latest published Loopflow from anywhere
+lf install schedule                          # update Loopflow at login and weekly (macOS)
+lf rebase                                    # refresh main and integrate it into this worktree
 uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
-uv run python scripts/install.py refresh      # return to the latest published release and reliable Home
+lf install                                   # return to the latest published release and reliable Home
 uv run python scripts/install.py local        # build only under local-bin/
 ```
 

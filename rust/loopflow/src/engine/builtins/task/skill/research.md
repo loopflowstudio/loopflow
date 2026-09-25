@@ -49,7 +49,7 @@ Research first, then analysis. Understand what exists before evaluating it. If y
   especially evidence that predates or contradicts the favored explanation.
 - Treat a contradiction as a reason to revise the representation or boundary,
   not merely patch the local claim.
-- If the human explicitly authorizes parallel agent research, divide work by
+- If the user explicitly authorizes parallel agent research, divide work by
   independent approach family, keep a registry of evidence and exact gaps, and
   require concrete findings rather than status reports. Do not broadcast the
   favored route until the independent passes have exposed their own gaps.

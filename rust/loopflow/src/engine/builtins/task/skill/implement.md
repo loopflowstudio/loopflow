@@ -82,7 +82,7 @@ in `scratch/questions.md`.
 
 If implementation reveals a counterexample that invalidates the slice,
 authority model, deletion path, or full-design trajectory, stop dependent work
-and revise the design or return to human review. Never note an architectural
+and revise the design or return to review. Never note an architectural
 contradiction and keep building on it.
 
 ## Adaptation

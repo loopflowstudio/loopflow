@@ -103,8 +103,8 @@ const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($in
   }
 }"#;
 
-const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $content: String!, $teamId: String!) {
-  projectCreate(input: { name: $name, description: $description, content: $content, teamIds: [$teamId] }) {
+const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($id: String, $name: String!, $description: String!, $content: String!, $teamId: String!) {
+  projectCreate(input: { id: $id, name: $name, description: $description, content: $content, teamIds: [$teamId] }) {
     project {
       id
     }
@@ -212,6 +212,7 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
   project(id: $id) {
     id
     name
+    archivedAt
     description
     content
     initiatives(first: 50) { nodes { id } }
@@ -270,6 +271,12 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
   }
 }"#;
 
+const LIST_CANCELED_WORKFLOW_STATES_QUERY: &str = r#"query CanceledWorkflowStates($teamId: ID!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
+    nodes { id }
+  }
+}"#;
+
 const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) {
     nodes {
@@ -287,7 +294,7 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
   }
 }"#;
 
-// Loopflow's own OAuth user. Its id lets the observer tell a human's edit or
+// Loopflow's own OAuth user. Its id lets the observer distinguish a participant's edit or
 // comment from Loopflow's own writeback, so ingestion never feeds itself.
 const VIEWER_QUERY: &str = r#"query Viewer {
   viewer {
@@ -326,10 +333,10 @@ const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: Stri
   }
 }"#;
 
-// One issue's human-editable content plus a `createdAt`-ordered page of its
-// comments. Each comment carries `user { id }` (the human author) but not
-// `botActor`, so an integration-authored comment decodes to a null author and is
-// never treated as human direction. `updatedAt` is the revision marker. The
+// One issue's editable content plus a `createdAt`-ordered page of its comments.
+// Each comment carries its author's ID and display name, but not `botActor`;
+// integration-authored comments have no user author. Explicit steering carries
+// separate requester metadata. `updatedAt` is the revision marker. The
 // reconciler orders delivery itself and dedupes against the cursor, so page
 // order only bounds how many comments one read can surface (OBSERVATION_COMMENT_PAGE).
 const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $comments: Int!) {
@@ -341,10 +348,14 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
       nodes {
         id
         body
+        updatedAt
         user {
           id
+          displayName
+          name
         }
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }"#;
@@ -355,6 +366,12 @@ const ISSUE_COMMENTS_QUERY: &str = r#"query IssueComments($id: String!, $comment
       nodes {
         id
         body
+        updatedAt
+        user {
+          id
+          displayName
+          name
+        }
       }
       pageInfo {
         hasNextPage
@@ -385,7 +402,7 @@ const UPDATE_ATTACHMENT_MUTATION: &str = r#"mutation UpdateAttachment($id: Strin
 }"#;
 
 /// How many recent comments one observation reads. A Task accumulating more than
-/// this many unseen human comments between polls is not a real case; the cursor
+/// this many unseen participant comments between polls is not a real case; the cursor
 /// still refuses to double-deliver any it does see.
 const OBSERVATION_COMMENT_PAGE: u32 = 50;
 
@@ -732,12 +749,14 @@ impl LinearClient {
         initiative_id: &str,
         name: &str,
         content: &ProjectContent,
+        id: Option<&str>,
     ) -> PmResult<String> {
         let team_id = self.require_team_id()?;
         let response: ProjectCreateData = self
             .graphql(
                 CREATE_PROJECT_MUTATION,
                 json!({
+                    "id": id,
                     "name": name,
                     "description": project_description(content),
                     "content": render_project_content(content),
@@ -746,6 +765,11 @@ impl LinearClient {
             )
             .await?;
         let project_id = response.project_create.project.id;
+        self.attach_project(initiative_id, &project_id).await?;
+        Ok(project_id)
+    }
+
+    pub async fn attach_project(&self, initiative_id: &str, project_id: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(
                 ATTACH_PROJECT_MUTATION,
@@ -755,7 +779,7 @@ impl LinearClient {
                 }),
             )
             .await?;
-        Ok(project_id)
+        Ok(())
     }
 
     pub async fn update_project(
@@ -779,6 +803,9 @@ impl LinearClient {
     }
 
     pub async fn archive_project(&self, project_id: &str) -> PmResult<()> {
+        if self.project_node(project_id).await?.archived_at.is_some() {
+            return Ok(());
+        }
         let response: ProjectArchiveData = self
             .graphql(
                 ARCHIVE_PROJECT_MUTATION,
@@ -810,7 +837,12 @@ impl LinearClient {
                 )
                 .await?;
             let page = response.initiative.projects;
-            projects.extend(page.nodes.into_iter().map(ProjectNode::into_pm_project));
+            projects.extend(
+                page.nodes
+                    .into_iter()
+                    .map(ProjectNode::into_pm_project)
+                    .collect::<PmResult<Vec<_>>>()?,
+            );
             if !page.page_info.has_next_page {
                 return Ok(projects);
             }
@@ -971,13 +1003,41 @@ impl LinearClient {
     }
 
     pub async fn project_ownership(&self, project_id: &str) -> PmResult<PmProject> {
+        self.project_node(project_id).await?.into_pm_project()
+    }
+
+    async fn project_node(&self, project_id: &str) -> PmResult<ProjectNode> {
         let response: ProjectOwnershipData = self
             .graphql(PROJECT_OWNERSHIP_QUERY, json!({ "id": project_id }))
             .await?;
         response
             .project
-            .map(ProjectNode::into_pm_project)
             .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
+    }
+
+    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
+        let team_id = self.item_team_id(item_id).await?;
+        let states: WorkflowStatesData = self
+            .graphql(
+                LIST_CANCELED_WORKFLOW_STATES_QUERY,
+                json!({ "teamId": team_id }),
+            )
+            .await?;
+        let state = states
+            .workflow_states
+            .nodes
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                PmError::Message(format!("no canceled workflow state for team {team_id}"))
+            })?;
+        let _: Value = self
+            .graphql(
+                SET_ITEM_STATE_MUTATION,
+                json!({ "id": item_id, "stateId": state.id }),
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
@@ -1167,20 +1227,53 @@ impl LinearClient {
         let issue = response
             .issue
             .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?;
+        let mut page = issue.comments;
+        let mut comments = Vec::new();
+        loop {
+            comments.extend(page.nodes.into_iter().map(|node| IssueComment {
+                id: node.id,
+                revision: node.updated_at,
+                body: node.body,
+                author_name: node.user.as_ref().and_then(|user| {
+                    user.display_name
+                        .as_deref()
+                        .and_then(crate::engine::config::normalize_user_name)
+                        .or_else(|| {
+                            user.name
+                                .as_deref()
+                                .and_then(crate::engine::config::normalize_user_name)
+                        })
+                }),
+                author_id: node.user.map(|user| user.id),
+            }));
+            if !page.page_info.has_next_page {
+                break;
+            }
+            let after = page.page_info.end_cursor.ok_or_else(|| {
+                PmError::Message("Linear comment page is missing its continuation cursor".into())
+            })?;
+            let response: IssueCommentsData = self
+                .graphql(
+                    ISSUE_COMMENTS_QUERY,
+                    json!({"id": issue_id, "comments": OBSERVATION_COMMENT_PAGE, "after": after}),
+                )
+                .await?;
+            page = response
+                .issue
+                .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?
+                .comments;
+        }
+        // A correction to an older comment follows the original direction.
+        comments.sort_by(|left, right| {
+            left.revision
+                .cmp(&right.revision)
+                .then(left.id.cmp(&right.id))
+        });
         Ok(IssueObservation {
             revision: issue.updated_at,
             title: issue.title,
             description: issue.description.unwrap_or_default(),
-            comments: issue
-                .comments
-                .nodes
-                .into_iter()
-                .map(|node| IssueComment {
-                    id: node.id,
-                    body: node.body,
-                    author_id: node.user.map(|user| user.id),
-                })
-                .collect(),
+            comments,
         })
     }
 }
@@ -1349,7 +1442,7 @@ struct IssueObservationNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
-    comments: CommentConnection,
+    comments: PagedCommentConnection,
 }
 
 #[derive(Deserialize)]
@@ -1370,17 +1463,22 @@ struct PagedCommentConnection {
 }
 
 #[derive(Deserialize)]
-struct CommentConnection {
-    nodes: Vec<CommentNode>,
-}
-
-#[derive(Deserialize)]
 struct CommentNode {
     id: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: Option<String>,
     #[serde(default)]
     body: String,
     #[serde(default)]
-    user: Option<IdNode>,
+    user: Option<CommentUser>,
+}
+
+#[derive(Deserialize)]
+struct CommentUser {
+    id: String,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1433,6 +1531,7 @@ impl IssueNode {
             description: self.description.unwrap_or_default(),
             rank,
             completed,
+            state: self.state.map(|state| state.r#type),
             project_id: project.id,
             project: project_slug(&project.name),
             team_id: team.id,
@@ -1498,7 +1597,7 @@ impl OwnedIssueNode {
             team: self.team,
         }
         .into_pm_item(0)?;
-        Ok((item, project.into_pm_project()))
+        Ok((item, project.into_pm_project()?))
     }
 }
 
@@ -1584,6 +1683,8 @@ struct TeamCreatePayload {
 struct ProjectNode {
     id: String,
     name: String,
+    #[serde(rename = "archivedAt")]
+    archived_at: Option<String>,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
@@ -1595,14 +1696,15 @@ struct ProjectNode {
 }
 
 impl ProjectNode {
-    fn into_pm_project(self) -> PmProject {
-        let content = parse_project_content(self.content.as_deref().unwrap_or_default());
-        PmProject {
+    fn into_pm_project(self) -> PmResult<PmProject> {
+        let content = parse_project_content(self.content.as_deref().unwrap_or_default())?;
+        Ok(PmProject {
             id: self.id,
             slug: project_slug(&self.name),
             name: self.name,
             summary: self.description.unwrap_or_default(),
-            definition: content.definition,
+
+            metric_targets: content.metric_targets,
             flows: Some(content.flows),
             krs: content.krs,
             initiative_ids: self
@@ -1612,7 +1714,7 @@ impl ProjectNode {
                 .map(|initiative| initiative.id)
                 .collect(),
             team_ids: self.teams.nodes.into_iter().map(|team| team.id).collect(),
-        }
+        })
     }
 }
 
@@ -1757,13 +1859,14 @@ fn linear_description(description: &str) -> String {
 }
 
 fn project_description(content: &ProjectContent) -> String {
-    let summary = content
-        .definition
-        .split("\n\n")
-        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
-        .find(|paragraph| !paragraph.is_empty())
-        .unwrap_or_default();
-    linear_description(&summary)
+    linear_description(
+        &content
+            .krs
+            .iter()
+            .map(|kr| kr.text.as_str())
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
 }
 
 fn first_meaningful_paragraph(description: &str) -> String {
@@ -1902,8 +2005,9 @@ mod tests {
                         "title": "Stream Linear edits",
                         "description": "New body",
                         "comments": {
+                            "pageInfo": {"hasNextPage": false, "endCursor": null},
                             "nodes": [
-                                { "id": "c-1", "body": "please prioritize", "user": { "id": "user-human" } },
+                                { "id": "c-1", "body": "please prioritize", "user": { "id": "user-human", "displayName": "Jack", "name": "Jack F" } },
                                 { "id": "c-2", "body": "PR: https://x", "user": { "id": "user-loopflow" } },
                                 { "id": "c-3", "body": "integration note", "user": null }
                             ]
@@ -1926,17 +2030,23 @@ mod tests {
             observation.comments,
             vec![
                 IssueComment {
+                    author_name: Some("Jack".to_string()),
                     id: "c-1".to_string(),
+                    revision: None,
                     body: "please prioritize".to_string(),
                     author_id: Some("user-human".to_string()),
                 },
                 IssueComment {
+                    author_name: None,
                     id: "c-2".to_string(),
+                    revision: None,
                     body: "PR: https://x".to_string(),
                     author_id: Some("user-loopflow".to_string()),
                 },
                 IssueComment {
+                    author_name: None,
                     id: "c-3".to_string(),
+                    revision: None,
                     body: "integration note".to_string(),
                     author_id: None,
                 },
@@ -1947,6 +2057,58 @@ mod tests {
         let body: Value = serde_json::from_str(&requests[0].body).expect("body is json");
         assert_eq!(body["variables"]["id"], "issue-1");
         assert_eq!(body["variables"]["comments"], OBSERVATION_COMMENT_PAGE);
+    }
+
+    #[tokio::test]
+    async fn observe_issue_reads_every_comment_page_in_revision_order() {
+        // Model GraphQL's field selection so a response fixture cannot supply
+        // author names that a continuation query forgot to request.
+        let app = axum::Router::new().route("/", axum::routing::post(|axum::Json(request): axum::Json<Value>| async move {
+            let first = request["variables"]["after"].is_null();
+            let (id, date, name) = if first {
+                ("newer", "2026-09-23T00:00:00Z", "Jack")
+            } else {
+                ("older", "2026-09-22T00:00:00Z", "Maya")
+            };
+            let mut user = json!({"id": format!("person-{id}")});
+            let query = request["query"].as_str().unwrap();
+            if query.contains("displayName") {
+                user["displayName"] = json!(name);
+            }
+            axum::Json(json!({"data": {"issue": {
+                "updatedAt": "2026-09-23T00:00:00Z", "title": "Task", "description": "",
+                "comments": {
+                    "nodes": [{"id": id, "body": "advice", "updatedAt": date, "user": user}],
+                    "pageInfo": {"hasNextPage": first, "endCursor": if first { Some("cursor-1") } else { None }}
+                }
+            }}}))
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = LinearClient::with_base_url("fixture-token".into(), None, url);
+        let observed = client.observe_issue("issue-1").await.unwrap();
+        server.abort();
+        assert_eq!(
+            observed
+                .comments
+                .iter()
+                .map(|comment| comment.id.as_str())
+                .collect::<Vec<_>>(),
+            ["older", "newer"]
+        );
+        assert_eq!(
+            observed.comments[1].revision.as_deref(),
+            Some("2026-09-23T00:00:00Z")
+        );
+        assert_eq!(
+            observed
+                .comments
+                .iter()
+                .map(|comment| comment.author_name.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Maya"), Some("Jack")]
+        );
     }
 
     #[tokio::test]
@@ -2103,13 +2265,14 @@ mod tests {
                 "initiative-1",
                 "Wave Chat",
                 &ProjectContent {
-                    definition: "Conversation stays in flow.".to_string(),
+                    metric_targets: Vec::new(),
                     flows: crate::pm::ProjectFlowPlan::empty(),
                     krs: vec![PmKr {
                         text: "Replies stream".to_string(),
                         holds: false,
                     }],
                 },
+                None,
             )
             .await
             .expect("create project");
@@ -2145,11 +2308,9 @@ mod tests {
                 "project-1",
                 "Wave Chat",
                 &ProjectContent {
-                    definition: "Conversation stays in flow.".to_string(),
+                    metric_targets: Vec::new(),
                     flows: crate::pm::ProjectFlowPlan {
-                        first: Some("incident".to_string()),
-                        loop_: Some("ship-5whys".to_string()),
-                        finally: Some("ship".to_string()),
+                        recommended: Some("task-design".to_string()),
                     },
                     krs: vec![PmKr {
                         text: "Replies survive every restart boundary".to_string(),
@@ -2170,15 +2331,21 @@ mod tests {
         assert!(update["variables"]["content"]
             .as_str()
             .expect("content")
-            .contains("loop: ship-5whys"));
+            .contains("recommended: task-design"));
     }
 
     #[tokio::test]
-    async fn archive_project_uses_linear_archive_mutation() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "projectArchive": { "success": true } } }),
-        )])
+    async fn archive_project_reports_provider_refusal() {
+        let (base_url, _requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "project": { "id": "project-1", "name": "Chapter one", "archivedAt": null } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "projectArchive": { "success": false } } }),
+            ),
+        ])
         .await;
         let client = LinearClient::with_base_url(
             "linear-secret".to_string(),
@@ -2186,18 +2353,13 @@ mod tests {
             base_url,
         );
 
-        client
+        let error = client
             .archive_project("project-1")
             .await
-            .expect("archive project");
-
-        let requests = requests.lock().await;
-        let archive: Value = serde_json::from_str(&requests[0].body).expect("archive json");
-        assert!(archive["query"]
-            .as_str()
-            .expect("query")
-            .contains("projectArchive"));
-        assert_eq!(archive["variables"]["id"], "project-1");
+            .expect_err("provider refused archive");
+        assert!(error
+            .to_string()
+            .contains("Linear did not archive Project project-1"));
     }
 
     #[tokio::test]
@@ -2601,7 +2763,7 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "teams": { "nodes": [{
                     "id": "team-loo", "name": "Loopflow", "key": "LOO",
-                    "description": "Human-owned team notes."
+                    "description": "Maintainer-owned team notes."
                 }] } } }),
             ),
             json_response(
@@ -2612,7 +2774,7 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "teams": { "nodes": [{
                     "id": "team-loo", "name": "Loopflow", "key": "LOO",
-                    "description": "Human-owned team notes.\n\n<!-- loopflow-repository: loopflowstudio/loopflow -->"
+                    "description": "Maintainer-owned team notes.\n\n<!-- loopflow-repository: loopflowstudio/loopflow -->"
                 }] } } }),
             ),
         ])
@@ -2628,7 +2790,7 @@ mod tests {
         let requests = requests.lock().await;
         let update: Value = serde_json::from_str(&requests[1].body).unwrap();
         let description = update["variables"]["description"].as_str().unwrap();
-        assert!(description.starts_with("Human-owned team notes."));
+        assert!(description.starts_with("Maintainer-owned team notes."));
         assert!(description.contains("loopflowstudio/loopflow"));
     }
 
@@ -2659,7 +2821,7 @@ mod tests {
             StatusCode::OK,
             json!({ "data": { "teams": { "nodes": [{
                 "id": "team-loo", "name": "Loopflow", "key": "LOO",
-                "description": "Human-owned team notes."
+                "description": "Maintainer-owned team notes."
             }] } } }),
         )])
         .await;

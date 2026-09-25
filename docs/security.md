@@ -41,8 +41,8 @@ Four controls answer different questions:
 1. **Execution boundary:** which files, processes, and networks the OS permits.
 2. **Action policy:** which vendor tools run automatically or ask first.
 3. **Identity:** which accounts and external systems the process tree can use.
-4. **Workflow review:** when kickoff, iterate, and gate sessions involve a
-   human.
+4. **Workflow review:** when kickoff, iterate, and gate sessions need your
+   decision.
 
 Only the first is general containment. Review and shipping decisions make work
 legible; they do not contain hostile code.
@@ -68,7 +68,7 @@ network, browser, MCP, or credential boundary around the whole process tree.
 
 Skills can edit, commit, push, land a PR, deploy, or update GitHub and Linear
 when the matching tool and credential are present. A gate may decide that work
-is ready to ship. `lf pr submit` leaves the exact-head merge to a human;
+is ready to ship. `lf pr submit` leaves the exact-head merge to a person;
 `arm` and `land` request GitHub auto-merge. GitHub remains authoritative for
 whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
+use crate::durable::{ProjectId, TaskId, WorkRef};
 use crate::id::WaveId;
 use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
@@ -13,14 +14,14 @@ use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult,
-    WaveLocatorUpdate,
+    ProviderAccountSelection, ProviderTokenReplacement, RoutingState, RunEventRow, StoreError,
+    StoreResult, WaveLocatorUpdate,
 };
 use crate::work::wave::{Wave, WaveLocator};
 
+mod chapters;
 mod children;
 mod ci_incidents;
-mod controller;
 mod durable;
 mod metrics;
 mod pr_landings;
@@ -34,6 +35,16 @@ pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+}
+
+/// Stable identity fields for observation, independent of execution schema.
+#[derive(Debug)]
+pub(crate) struct WorkIdentity {
+    pub work: WorkRef,
+    pub parent: Option<WorkRef>,
+    pub subject: String,
+    pub external_id: Option<String>,
+    pub created_at: Option<i64>,
 }
 
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -329,6 +340,32 @@ impl SqliteStore {
         })
     }
 
+    /// Open a hermetic, fully-migrated store at `path`: the base canonical
+    /// migrations plus this build's exact embedded draft manifest, reading **no**
+    /// process- or machine-global state — no `LF_HOME`, no install selection, no
+    /// shared `~/.lf` identity, no frontier authority. Tests use this so their
+    /// schema is deterministic under parallel execution; the production
+    /// [`Self::open`] path resolves real install/frontier authority and is what
+    /// races when tests mutate ambient env concurrently.
+    pub(crate) fn open_ephemeral(path: &Path) -> StoreResult<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                StoreError::InvalidData(format!("failed to create db dir: {error}"))
+            })?;
+        }
+        let conn = Connection::open(path)?;
+        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        super::migrations::apply_installed_development_sqlite(
+            &conn,
+            crate::build_info::migration_draft_manifest(),
+        )?;
+        validate_run_events_schema(&conn)?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
     fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
         Self::open_with(
             path,
@@ -388,7 +425,7 @@ impl SqliteStore {
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install a published release with `uv run python scripts/install.py refresh`",
+                 install a published release with `lf install`",
                 path.display()
             )));
         }
@@ -426,7 +463,7 @@ impl SqliteStore {
                 return Err(StoreError::InvalidData(format!(
                     "shared store {} is at an older frontier than this lf (pending {pending}); \
                      an ordinary lf must not advance it — install a published release with \
-                     `uv run python scripts/install.py refresh`",
+                     `lf install`",
                     path.display()
                 )));
             }
@@ -458,6 +495,43 @@ impl SqliteStore {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT 0 AS kind, id, NULL AS parent, name, NULL AS external_id, created_at FROM waves
+             UNION ALL
+             SELECT 1, id, wave_id, project_slug, external_project_id, created_at FROM projects
+             UNION ALL
+             SELECT 2, id, project_id, issue_identifier, external_issue_id, created_at FROM tasks
+             ORDER BY kind",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let id: String = row.get(1)?;
+            let (work, parent) = match row.get::<_, u8>(0)? {
+                0 => (WorkRef::Wave(row.get(1)?), None),
+                1 => (
+                    WorkRef::Project(ProjectId::from_raw(id)),
+                    Some(WorkRef::Wave(row.get(2)?)),
+                ),
+                2 => (
+                    WorkRef::Task(TaskId::from_raw(id)),
+                    Some(WorkRef::Project(ProjectId::from_raw(
+                        row.get::<_, String>(2)?,
+                    ))),
+                ),
+                _ => unreachable!("identity query selects only Wave, Project, and Task"),
+            };
+            Ok(WorkIdentity {
+                work,
+                parent,
+                subject: row.get(3)?,
+                external_id: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
     /// Run several ledger queries against one SQLite read snapshot.
@@ -683,6 +757,61 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub(crate) fn replace_provider_token(
+        &self,
+        expected: &super::ProviderToken,
+        replacement: &super::ProviderToken,
+        deadline: std::time::Instant,
+    ) -> StoreResult<super::ProviderTokenReplacement> {
+        let expired = || StoreError::InvalidData("credential replacement deadline elapsed".into());
+        let access = token_crypto::encrypt_token(&replacement.access_token)
+            .map_err(|_| StoreError::InvalidData("credential encryption failed".into()))?;
+        let refresh = token_crypto::encrypt_optional(replacement.refresh_token.as_deref())
+            .map_err(|_| StoreError::InvalidData("credential encryption failed".into()))?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let previous: u32 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .ok_or_else(expired)?;
+        conn.busy_timeout(remaining)?;
+        let result = (|| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if std::time::Instant::now() >= deadline {
+                return Err(expired());
+            }
+            let row = tx.query_row(
+                "SELECT provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted
+                 FROM provider_tokens WHERE provider = ?1",
+                params![expected.provider], read_token_row,
+            ).optional()?.map(decrypt_token_row).transpose()?;
+            let Some(current) = row else {
+                return Ok(ProviderTokenReplacement::Missing);
+            };
+            if current != *expected {
+                return Ok(ProviderTokenReplacement::Changed(current));
+            }
+            if replacement
+                .expires_at
+                .is_some_and(|expiry| expiry <= now_unix())
+            {
+                return Err(StoreError::InvalidData(
+                    "refreshed credential expired before persistence".into(),
+                ));
+            }
+            tx.execute(
+                "UPDATE provider_tokens SET access_token=?2, refresh_token=?3, oauth_client_id=?4,
+                 expires_at=?5, login=?6, updated_at=?7, credential_type=?8, encrypted=1 WHERE provider=?1",
+                params![expected.provider, access, refresh, replacement.oauth_client_id,
+                    replacement.expires_at, replacement.login, replacement.updated_at,
+                    replacement.credential_type.as_str()],
+            )?;
+            tx.commit()?;
+            Ok(ProviderTokenReplacement::Replaced)
+        })();
+        conn.busy_timeout(Duration::from_millis(u64::from(previous)))?;
+        result
     }
 
     pub fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
@@ -1752,6 +1881,29 @@ mod frontier_tests {
     use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
 
+    #[test]
+    fn observation_reads_identity_without_execution_schema() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE waves (id TEXT, name TEXT, created_at INTEGER);
+             CREATE TABLE projects (id TEXT, wave_id TEXT, project_slug TEXT, external_project_id TEXT, created_at INTEGER);
+             CREATE TABLE tasks (id TEXT, project_id TEXT, issue_identifier TEXT, external_issue_id TEXT, created_at INTEGER);
+             INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'product', 1);
+             INSERT INTO projects VALUES ('proj_desktop', '00000000-0000-0000-0000-000000000001', 'desktop', 'linear-project', 2);
+             INSERT INTO tasks VALUES ('task_watcher', 'proj_desktop', 'LOO-293', 'linear-issue', 3);
+             PRAGMA query_only = ON;",
+        ).unwrap();
+        let store = SqliteStore {
+            conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
+        };
+        let identities = store.work_identities().unwrap();
+        assert_eq!(identities.len(), 3);
+        assert_eq!(identities[2].subject, "LOO-293");
+        assert_eq!(identities[2].external_id.as_deref(), Some("linear-issue"));
+        assert_eq!(identities[2].parent.as_ref(), Some(&identities[1].work));
+        assert_eq!(identities[1].parent.as_ref(), Some(&identities[0].work));
+    }
+
     /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
     /// the shared release store. The regressions inject it so they never touch a
     /// developer's real `~/.lf`.
@@ -1849,7 +2001,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open must not initialize the shared store");
         assert!(
-            error.to_string().contains("scripts/install.py refresh"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -1877,7 +2029,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
         assert!(
-            error.to_string().contains("scripts/install.py refresh"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2002,5 +2154,91 @@ mod frontier_tests {
             frontier(&private).as_deref(),
             Some(latest_known_version().as_str())
         );
+    }
+}
+
+#[cfg(test)]
+mod linear_oauth_tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use super::{SqliteStore, SQLITE_WRITE_BUSY_TIMEOUT};
+    use crate::store::{CredentialType, ProviderToken, ProviderTokenReplacement, Store};
+
+    #[tokio::test]
+    async fn linear_oauth_cancelled_commit_retains_lock_until_blocking_work_settles() {
+        let directory = tempfile::tempdir().unwrap();
+        let sqlite = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let store = Arc::new(Store::from_sqlite_for_test(sqlite.clone()));
+        let original = ProviderToken {
+            provider: "linear".into(),
+            access_token: "A1".into(),
+            refresh_token: Some("R1".into()),
+            oauth_client_id: Some("client".into()),
+            expires_at: Some(1),
+            login: None,
+            updated_at: 1,
+            credential_type: CredentialType::OAuth,
+        };
+        let replacement = ProviderToken {
+            access_token: "A2".into(),
+            refresh_token: Some("R2".into()),
+            expires_at: Some(time::OffsetDateTime::now_utc().unix_timestamp() + 86400),
+            ..original.clone()
+        };
+        store.upsert_provider_token(&original).await.unwrap();
+        let lock_path = directory.path().join("refresh.lock");
+        let lock = std::fs::File::create(&lock_path).unwrap();
+        fs2::FileExt::try_lock_exclusive(&lock).unwrap();
+        let observer = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        // Hold the real connection mutex on a separate thread, across cancellation.
+        let (held_tx, held_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let held_sqlite = sqlite.clone();
+        let holder = std::thread::spawn(move || {
+            let _connection = held_sqlite.conn.lock().unwrap();
+            held_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        held_rx.await.unwrap();
+        let deadline = Instant::now() + Duration::from_millis(50);
+        let write = store.replace_provider_token(&original, &replacement, lock, deadline);
+        assert!(tokio::time::timeout(Duration::from_millis(75), write)
+            .await
+            .is_err());
+        assert!(fs2::FileExt::try_lock_exclusive(&observer).is_err());
+        release_tx.send(()).unwrap();
+        holder.join().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while fs2::FileExt::try_lock_exclusive(&observer).is_err() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // The expired queued closure declined to write, and restored normal SQLite policy.
+        assert!(store.get_provider_token("linear").await.unwrap().as_ref() == Some(&original));
+        let busy: u32 = sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "busy_timeout", |r| r.get(0))
+            .unwrap();
+        assert_eq!(u128::from(busy), SQLITE_WRITE_BUSY_TIMEOUT.as_millis());
+        let outcome = store
+            .replace_provider_token(
+                &original,
+                &replacement,
+                observer,
+                Instant::now() + Duration::from_secs(2),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, ProviderTokenReplacement::Replaced));
+        assert!(store.get_provider_token("linear").await.unwrap().as_ref() == Some(&replacement));
     }
 }

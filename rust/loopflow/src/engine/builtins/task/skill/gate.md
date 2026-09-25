@@ -28,8 +28,6 @@ Polish means: the code is as good as it can be given the design intent, and a re
 
 Ship-ready code. Reviewer-friendly docs. No excuses left.
 
-If directions are loaded, use them as the quality lens for this polish pass.
-
 ## Phase 1: Polish Code
 
 Make the implementation as clean as possible.
@@ -97,20 +95,40 @@ Make the change easy to review.
    - Not every PR has metrics — but when they exist, capture them now. The reviewer shouldn't have to reproduce your setup to see the impact.
    - For substantial UI work, state which production performance signal covers
      the new path. If none does, capture a concrete metric proposal for the
-     Project. A local benchmark supports it but is not live coverage by itself.
+     Wave. A local benchmark supports it but is not live coverage by itself.
 
 3. **Write PR copy for ops handoff**
 
-   The PR body is written for an engineer picking this up cold. Loopflow adds
-   the canonical Task title, Linear link, PR sequence, and merge disposition at
-   publication; do not repeat or guess them in the handoff copy. Controller
-   phase is not part of the Task contract shown to reviewers.
+   Write for someone returning after time away. Name the concrete improvement in the
+   title. Open the body with one short paragraph of one or two sentences explaining
+   what was difficult before
+   and what this PR makes easier or newly possible for users, operators, or maintainers.
+   They should understand the benefit without running a command or opening another document.
 
-   Structure:
-   - **Evaluate** — lead with concrete commands or steps and the observable result. If there are metrics, show "Before: X, After: Y."
-   - **Why it matters** — one paragraph connecting the behavior to its user or operational consequence.
-   - **What changed** — meaningful scope and decisions, not a file-by-file changelog.
-   - **Risks / Not included** — assumptions and intentional boundaries, when they help review.
+   Keep the promise within what this PR delivers, even when the Task has a larger ambition.
+   Use familiar product language and concrete verbs. An area prefix is useful only when
+   it helps recognition. Preserve proper names and command spelling.
+
+   Follow with **What changes**: a short paragraph or a few bullets describing the
+   meaningful change. Include implementation detail only when it helps review. Put **Why
+   it matters** after that, and omit it if the summary already explains the consequence.
+   Include material risks or limitations when needed. Keep automated test and lint
+   results in **Checks** when useful, or link to CI. Finish with **Try it** when there
+   is a useful walkthrough: describe a concrete user action and the visible result
+   that demonstrates the benefit. Tests, test commands, and test results never belong
+   in this section. Distinguish suggested steps from behavior actually observed;
+   label simulations and remaining limits. Omit the walkthrough when it adds nothing.
+
+   Use only the sections the change needs. A small change may need only a short summary
+   and a useful walkthrough. Rewrite around the current diff when scope changes; remove
+   superseded explanation instead of appending a diary. Loopflow supplies Task identity
+   and merge consequences from durable state; do not invent or repeat those facts.
+
+   Link related work where you explain its relevance. In prose and PR bodies, use
+   `[Title · Task ID or PR number](known URL)` on first mention; shorten later references
+   when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
+   Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
+   In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
 
    Write to:
    - `scratch/pr-title.txt` — one-line PR title
@@ -132,7 +150,7 @@ Make the change easy to review.
 
 6. **Wave alignment** (if running in a wave context)
    - Does the shipped code advance the wave's Goals?
-   - Were any known risks from `GOAL.md`, `MEMORY.md`, or the Linear Project definition/KRs introduced or ignored?
+   - Were any known risks from `GOAL.md`, `MEMORY.md`, or the current chapter KRs/metric targets introduced or ignored?
    - Are there observable project KRs or measures to note in the review doc?
 
 ## Scope

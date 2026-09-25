@@ -21,32 +21,54 @@ only through the Task Work that owns them.
 ⌘W / ⌘Z     close / restore a pane
 ```
 
+Shell panes with Ghostty shell integration group each completed command and its
+output into a full-width block. Click anywhere in a block to select the whole
+unit, then use Command-C or the terminal's context menu to copy the command and
+all of its output.
+Command-Up/Down navigates between prompts. The live prompt remains ungrouped;
+Session/provider panes keep their native TUI behavior and do not expose shell
+command blocks.
+Automatic integration depends on the configured shell; macOS `/bin/bash` is
+excluded by the pinned Ghostty build.
+
 Opening Loopflow to a repository leads with its Sessions queue. Select a session
 to resume its provider-native terminal in the focused Ghostty pane; selecting it again
 jumps back to that pane. Each pane owns one native libghostty surface. Sessions
-include native interactive provider Runs, Task human FlowSteps, and `lf ask`
+include native interactive provider Runs, Task review FlowSteps, and `lf ask`
 calls made by ordinary Runs. Rows use the real prompt or Task title plus the
-actual provider, Skill, or Run detail.
+actual provider, Skill, or Run detail. The row badge names the terminal's real
+state: **VIEWING** (in a pane here), **RUNNING** (live, view closed),
+**ELSEWHERE** (another client — Warp, another window, SSH — holds it).
+
+Selecting an ELSEWHERE row opens a pane that explains the situation; nothing is
+stopped until its explicit **Move here**, which stops the other client and
+resumes the Session in that pane. Unsent text typed in the other client is
+lost, and the pane says so before you commit.
 
 The green **Complete** action stops an interactive provider client and removes
-its Session from the queue while retaining provider-native history. Closing its
-pane stops only the current client; the Session stays resumable. An Ask agent
-can mark itself ready, but the row and terminal remain until the human completes
+its Session from the queue while retaining provider-native history. Closing a
+pane only hides the view: the terminal and its provider client keep running
+(the row shows RUNNING) and reopen exactly as left. An Ask agent
+can mark itself ready, but the row and terminal remain until the user completes
 the conversation. Task FlowSteps instead expose Approve and Iterate. Closing
-or detaching either human boundary never resolves it.
+or detaching either review boundary never resolves it.
 
 Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
-files before the caller resumes. A thin detached PTY cradle keeps only the
-initial client alive; selecting a Session stops that client and resumes its
-provider-native history. The app lists, opens, and acts on the shared Rust
-`SessionRecord` projection; it owns no parallel queue.
-Selecting another session replaces the focused pane. Use the split controls
-first when both sessions should remain visible; closing the final pane clears it
-without ending the durable session.
+files before the caller resumes. The app lists, opens, and acts on the shared
+Rust `SessionRecord` projection; it owns no parallel queue.
+Selecting another session replaces the focused pane's view. Use the split
+controls first when both sessions should remain visible; closing the final pane
+clears it without ending the durable session.
 Completing the selected Session returns the main pane to its empty workspace.
 Use **New shell** there or in the sidebar for a bare terminal, and **Waves &
-roadmap** to return to Work.
+roadmap** to return to Work. A shell pane closes when its process exits;
+closing a shell pane ends its shell. A Session whose provider client is
+stopped elsewhere reclassifies to ELSEWHERE instead of showing a dead
+terminal as live. Terminals survive Sessions ↔ Work navigation and
+repository switches within a window. Each window owns its panes and surfaces;
+the same Session shown from another window is simply another client and reads
+ELSEWHERE there.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
@@ -84,7 +106,7 @@ mirror the same source-linked transcript and open Discord to reply; they never
 create a parallel local thread. Prior backing epochs remain selectable and
 read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
-decisions, deliveries, and human-level failures remain visible. The detail pane
+decisions, deliveries, and actionable failures remain visible. The detail pane
 reads Projects, Tasks, decisions, PR delivery, and Task conditions from `lf
 status --json`.
 
@@ -100,15 +122,15 @@ codebase tree, and registry health.
 
 ## Product ownership
 
-- **Wave Chat** owns the human conversation, the active Wave turn, and
-  send/steer/interrupt behavior.
+- **Wave Chat** owns the conversation, the active Wave turn, and
+  Send and bare Interrupt controls.
 - **Projects and Tasks** appear in the Wave work map. Linear owns their planning
   identity; Loopflow's registry owns their runtime state.
 - **Tasks** own implementation worktrees and PR delivery. Every Task
   reports through its Project Work; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
-  Lifecycle mutations remain `lf task run/resume/interrupt`; human nodes use
+  Lifecycle mutations remain `lf task run/resume/interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
@@ -160,12 +182,16 @@ Home.
 | `uv run python scripts/loopflow-dev.py install` | Build and install without launching |
 | `uv run python scripts/loopflow-dev.py run-debug` | Build and run with stdout |
 | `uv run python scripts/loopflow-dev.py build` | Build only |
+| `uv run python scripts/loopflow-dev.py ghostty-build` | Rebuild the pinned patched GhosttyKit and emit its SwiftPM artifact/checksum |
 | `uv run python scripts/loopflow-dev.py test` | Run unit tests |
 | `uv run python scripts/loopflow-dev.py xcode` | Generate and open the Xcode project |
 | `uv run python scripts/loopflow-dev.py release` | Build the release app and DMG |
 | `uv run python scripts/loopflow-dev.py clean` | Remove the development app and reset permissions |
 
 Long-running development commands write logs under `~/.lf/logs/dev/`.
+The release command signs the app, hides SwiftPM's build-time resource bundles,
+and requires the packaged app to render before it creates the DMG. Build
+resources are restored on every verification exit.
 
 `project.yml` generates `LoopflowSwift.xcodeproj`:
 

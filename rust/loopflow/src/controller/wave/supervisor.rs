@@ -11,7 +11,7 @@
 //!   `LoopState::Failed`, and arms the respawn ladder.
 //! - **Respawn ladder.** Process-level auto-revival: attempt N waits the Nth
 //!   rung (5m/15m/45m by default, the last rung repeating; an empty ladder
-//!   disables it). A completed assistant turn resets the ladder. A human
+//!   disables it). A completed assistant turn resets the ladder. A chat
 //!   message revives a dead resident immediately, ladder or no ladder —
 //!   talking to the wave brings it back. An ATTACHED resident is a revival
 //!   too: the attach door signals the supervisor ([`SupervisorHandle`]),
@@ -36,7 +36,6 @@ use tokio::time::Instant;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::Lifecycle;
-use crate::controller::wave::journal::MessageOp;
 use crate::controller::wave::registry::process_alive;
 use crate::controller::wave::runtime::{InboxItem, TurnBroadcast, WaveRuntime};
 use crate::controller::wave::server::ResidentDoor;
@@ -67,7 +66,7 @@ pub type SpawnResident = Box<dyn FnMut() -> std::io::Result<Child> + Send>;
 /// Supervisor knobs. `Default` is production.
 #[derive(Debug, Clone)]
 pub struct SupervisorConfig {
-    /// Respawn ladder; empty disables auto-respawn (a human message is then
+    /// Respawn ladder; empty disables auto-respawn (a chat message is then
     /// the only revival).
     pub respawn_backoff: Vec<Duration>,
     /// Interrupt janitor bound (see [`LISTENER_INTERRUPT_DEADLINE`]).
@@ -347,9 +346,9 @@ impl Supervisor {
     async fn on_inbox(&mut self, item: InboxItem) {
         let is_interrupt = match &item {
             InboxItem::Interrupt | InboxItem::Skip => true,
-            InboxItem::Message(message) => {
-                // A human message revives a dead resident immediately —
-                // ladder or no ladder ("interrupt & send" included).
+            InboxItem::Message(_) => {
+                // A chat message revives a dead resident immediately —
+                // regardless of the restart backoff.
                 if self.spawner.is_some()
                     && self.child.is_none()
                     && matches!(self.runtime.loop_state(), LoopState::Failed { .. })
@@ -360,7 +359,7 @@ impl Supervisor {
                     );
                     self.spawn().await;
                 }
-                message.op == MessageOp::Interrupt
+                false
             }
             InboxItem::Task(_) | InboxItem::Project(_) | InboxItem::Promotion { .. } => {
                 if self.spawner.is_some()
@@ -489,7 +488,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
-    use crate::controller::wave::journal::{journal_path, EventKind, Journal};
+    use crate::controller::wave::journal::{journal_path, EventKind, Journal, MessageOp};
     use crate::controller::wave::wire::ResidentDelta;
 
     fn open_runtime(repo: &std::path::Path) -> Arc<WaveRuntime> {
@@ -621,7 +620,7 @@ mod tests {
         assert!(matches!(rt.loop_state(), LoopState::Failed { .. }));
     }
 
-    /// A human message revives a dead resident immediately, even when the
+    /// A chat message revives a dead resident immediately, even when the
     /// ladder's next rung is far away.
     #[tokio::test]
     async fn human_message_respawns_a_dead_resident_immediately() {
@@ -644,7 +643,8 @@ mod tests {
         })
         .await;
         let before = spawns.load(Ordering::SeqCst);
-        rt.deliver(MessageOp::Message, "are you alive?".into())
+        rt.try_deliver(MessageOp::Message, "are you alive?".into(), None)
+            .expect("journal write")
             .expect("user turn");
         wait_for("immediate respawn", || {
             spawns.load(Ordering::SeqCst) > before

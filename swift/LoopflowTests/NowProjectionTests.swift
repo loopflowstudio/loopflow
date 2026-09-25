@@ -7,8 +7,8 @@ struct NowProjectionTests {
     @Test("Each Task lands in the group its shared evidence dictates")
     func nowGroupFollowsSharedEvidence() throws {
         let snapshot = try loadRoadmapFixture()
-        let project = try #require(snapshot.waves.first?.projects.items.first)
-        let tasks = project.tasks
+        let wave = try #require(snapshot.waves.first)
+        let tasks = wave.tasks.items
 
         // A clear Task condition is not a NOW row.
         #expect(nowGroup(for: tasks[0]) == nil)
@@ -31,7 +31,7 @@ struct NowProjectionTests {
         // Rows carry their Wave/Project as context.
         let input = try #require(sections.first)
         #expect(input.rows.first?.task.task.identifier == "W2-131")
-        #expect(input.rows.first?.projectName == "Loopflow API")
+        #expect(input.rows.first?.wave.name == "product")
     }
 
     @Test("Shared fixture preserves all Task conditions and the spoken reason")

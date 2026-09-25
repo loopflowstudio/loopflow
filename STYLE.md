@@ -1,17 +1,18 @@
 # Loopflow Style Guide
 
-This is the governing document of the loopflow codebase. Humans and LLMs alike are expected to follow it.
+This is the governing document of the loopflow codebase. Contributors and agents alike are expected to follow it.
 
 ## Quick Reference
 
 **Wave planning:**
-- Wave = durable operating context; project = measured bet inside one wave; task = concrete work under a project
-- Every project belongs to exactly one wave; no orphan projects and no project subtrees
-- Waves own memory, cadence, budget, chat, and project selection
-- Projects own KRs and closure criteria; they do not own memory or cadence
-- Tasks own implementation, investigation, docs, or shipped changes
-- Individual technical-debt cleanup is a task; a standing debt frontier can be a project
-- KRs should read as proof: observable end states, not backlog bullets or implementation receipts
+- Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
+- Each Wave has exactly one current chapter plan, stored in an internal Project
+- The Project owns Tasks, KRs, and metric targets; the Wave UI presents them
+- Chapters replace that Project and its content; completed history stays readable
+- Started unfinished Tasks move with identity, worktree, PR, and Flow intact
+- Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
+- User and agent interfaces select Waves and Tasks; Project identity is internal
+- Definitions name the beneficiary and experienced improvement; KRs prove it
 
 **Python:**
 - Use `uv run` or activate `.venv` before any Python command
@@ -37,6 +38,18 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - If a value does leak into output, say so and flag it for rotation — don't quote it again.
 
 ## Voice
+
+Use people's names in persisted artifacts: Tasks, PRs, designs, memory,
+reports, and decision summaries. Write “Jack requested the prototype path.”
+In session conversation, use “you”: “You requested the prototype path.”
+Storing a transcript does not change its wording; a summary written from it
+uses names. Refer to other participants by name. Use known preferred names,
+never infer authorship from a machine owner or account. Ask when a necessary
+name is missing, or record that attribution is unresolved.
+
+Write in language the user would use themselves. Never refer to a person as
+“the human.” Generic role labels belong in instructions where the role matters,
+not in place of known names in authored artifacts.
 
 The creator's flow is sacred. Every interaction either sustains it or breaks it.
 
@@ -107,7 +120,7 @@ When writing CLI code with Typer:
 When editing builtin skills (`engine/builtins/**`):
 - Skills must be self-contained: never reference repo-relative docs or files —
   the skill runs in repos that don't have them. Inline the compressed guidance;
-  the long form lives in this repo's docs for humans.
+  the long form lives in this repo's docs for readers.
 - Doctrine rides only where it's exercised: teach a rule in the skill that uses
   it, not in every context (LOOPFLOW.md is paid for on every run, everywhere).
 
@@ -178,17 +191,25 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 
 ## Wave Planning
 
-Use three planning nouns, and keep them distinct by kind rather than size:
+A Wave is a durable responsibility. Its objective, memory, cadence, budget, chat,
+and metric instruments survive chapter boundaries. Its current chapter plan
+contains proof-shaped KRs, metric targets, recommended Flow, and Tasks. Exactly
+one internal Project holds that plan; it is replaced every chapter. Do not
+create sibling current Projects, standing Projects, or a separate Project
+operator. Ordinary UI and CLI navigation is Wave → Task.
 
-- **Wave**: a durable operating context with memory, cadence, budget, chat, and judgment about which projects matter next.
-- **Project**: a measured bet inside exactly one wave, expressed as a definition plus KRs.
-- **Task**: a concrete implementation step, investigation, document, or shipped change that advances a project.
+Start a chapter through `lf wave new-chapter --wave <wave> --chapter <id>`.
+The deterministic operation owns previews, classification, transfer, retirement,
+and retry receipts. Started unfinished Tasks retain their identities and
+execution state. Untouched backlog is canceled, never marked successful.
+Completed Tasks remain historical. Missing evidence is unresolved. Skills judge
+outcomes and author new content; they never implement their own rotation.
 
-Do not make recursive project trees. If a project wants subprojects, either split it into sibling projects under the same wave, promote the durable operating context into a wave, or demote the pieces into tasks. For now, do not create orphan or ephemeral projects; every project has one parent wave.
-
-Good projects are either completable behavioral improvements or standing quality frontiers. "Wave Chat works from CLI and Mac" can be a project. "Technical Architecture stays legible and minimally simple" can be a project. "Delete an obsolete API" is a task under a project, not a project by itself.
-
-Write project KRs as proof. A KR should state an observable condition that would let a maintainer say "this bet now holds." Avoid mixing the KR with task lists, implementation receipts, or Linear issue ids. Put those in tasks and PR notes.
+The Wave objective names who benefits and what improves. KRs prove observable outcomes
+across a stated window; issue lists and implementation receipts belong in Tasks.
+Metric instruments belong to the Wave. Their chapter-specific targets and
+evaluations belong to the Project and remain readable in chapter history.
+Do not add a second objective to the Project or a Project tier to the UI.
 
 # Development Environment
 
@@ -463,4 +484,4 @@ and open Warp + Cursor. Reuses existing worktree if branch exists.
 
 Keep messages short—one sentence to one paragraph.
 
-Do not add AI attribution footers like "Generated with Claude Code" or "Co-Authored-By: Claude" to commits. The git history should read the same whether written by a human or AI.
+Do not add AI attribution footers like "Generated with Claude Code" or "Co-Authored-By: Claude" to commits. The git history should read the same whether written by a person or AI.

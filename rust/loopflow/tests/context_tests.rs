@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use loopflow::engine::{
-    format_prompt, gather_context, DocumentSource, GatherContextOpts, GatheredContext,
+    format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptComponents,
     PromptFormatMode, Surface,
 };
 use tempfile::TempDir;
@@ -44,20 +44,8 @@ fn write_skill(repo: &Path, name: &str, content: &str) {
     fs::write(path, content).unwrap();
 }
 
-fn write_direction(repo: &Path, name: &str, content: &str) {
-    let dir = repo.join(".lf/directions");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join(format!("{name}.md")), content).unwrap();
-}
-
-fn write_direction_group(repo: &Path, group: &str, name: &str, content: &str) {
-    let dir = repo.join(".lf/directions").join(group);
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join(format!("{name}.md")), content).unwrap();
-}
-
-fn render_prompt(components: GatheredContext) -> String {
-    format_prompt(PromptFormatMode::Full, components.components()).into_string()
+fn render_prompt(components: PromptComponents) -> String {
+    format_prompt(PromptFormatMode::Full, &components)
 }
 
 // =============================================================================
@@ -79,7 +67,6 @@ fn gather_context_with_skill() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None,
@@ -105,7 +92,6 @@ fn gather_context_with_inline_prompt() {
         message: Some("Fix the bug in main.rs".to_string()),
         operate: false,
         surface: Surface::Cli,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None,
@@ -116,71 +102,6 @@ fn gather_context_with_inline_prompt() {
 
     // No skill when using inline
     assert!(components.skill.is_none());
-}
-
-#[test]
-fn gather_context_with_directions() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-
-    write_skill(repo, "review", "Review the code.");
-    write_direction(repo, "concise", "Be brief and direct.");
-    write_direction(repo, "security", "Focus on security issues.");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("review".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        directions: vec!["concise".to_string(), "security".to_string()],
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    assert_eq!(components.directions.len(), 2);
-}
-
-#[test]
-fn gather_context_expands_user_direction_group() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-    write_skill(repo, "review", "Review the code.");
-    write_direction_group(repo, "mygroup", "alpha", "Alpha direction");
-    write_direction_group(repo, "mygroup", "beta", "Beta direction");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("review".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        directions: vec!["mygroup".to_string()],
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    let direction_names: Vec<String> = components
-        .directions
-        .iter()
-        .map(|direction| direction.name.clone())
-        .collect();
-    assert_eq!(
-        direction_names,
-        vec!["alpha".to_string(), "beta".to_string()]
-    );
 }
 
 // =============================================================================
@@ -203,7 +124,6 @@ fn gather_context_includes_explicit_readme_docs_target() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec!["README.md".to_string()],
         wave: None,
@@ -242,7 +162,6 @@ fn gather_context_includes_scratch_docs() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None,
@@ -281,7 +200,6 @@ fn gather_context_with_wave() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: Some("auth".to_string()),
@@ -311,7 +229,6 @@ fn gather_context_preserves_surface() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None,
@@ -326,7 +243,6 @@ fn gather_context_preserves_surface() {
         message: None,
         operate: false,
         surface: Surface::Cli,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None,
@@ -358,7 +274,6 @@ fn format_prompt_includes_skill_content() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None,
@@ -386,7 +301,6 @@ fn format_prompt_includes_auto_mode_header() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None,
@@ -397,35 +311,6 @@ fn format_prompt_includes_auto_mode_header() {
 
     let prompt = render_prompt(components);
     assert!(prompt.contains("Run mode is headless"));
-}
-
-#[test]
-fn format_prompt_includes_directions() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-
-    write_skill(repo, "review", "Review code.");
-    write_direction(repo, "concise", "Be brief.");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("review".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        directions: vec!["concise".to_string()],
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    let prompt = render_prompt(components);
-    assert!(prompt.contains("Be brief."));
 }
 
 #[test]
@@ -449,7 +334,6 @@ fn format_prompt_includes_wave_context() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: Some("payments".to_string()),
@@ -518,7 +402,6 @@ fn wave_filtering_includes_only_specified_wave() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: Some("auth".to_string()),
@@ -574,7 +457,6 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: None, // No wave specified
@@ -621,7 +503,6 @@ fn wave_filtering_handles_nonexistent_wave() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: Some("nonexistent".to_string()),
@@ -686,7 +567,6 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: Some("features".to_string()),
@@ -739,7 +619,6 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         message: None,
         operate: false,
         surface: Surface::Headless,
-        directions: vec![],
         files: vec![],
         docs: vec![],
         wave: Some("living".to_string()),
@@ -804,6 +683,7 @@ fn assert_work_prompt_omits_unselected_wave_turn(skill: &str) {
     let assistant_text = format!("unrelated Wave answer before {skill}");
     let (mut journal, _) = Journal::open(&journal_path(repo, "goals")).unwrap();
     journal.append(|_| EventKind::UserMessage {
+        author_name: None,
         id: MessageId("msg-1".to_string()),
         op: MessageOp::Message,
         text: user_text.clone(),

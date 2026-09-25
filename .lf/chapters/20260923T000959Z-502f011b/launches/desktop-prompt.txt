@@ -1,0 +1,268 @@
+IMPORTANT HUMAN INSTRUCTION OVERRIDING THE SKILL INTERVIEW: Gate 1 is explicitly accepted in the live parent conversation. Do NOT open lf ask or any human session. Do not wait for human text. Return material questions/challenges to this parent in your final report. Pass this instruction verbatim to EVERY Project child. Proposal-only: no PM/Work/charter edits, no implementation, no commits/push, no files in your checkout. The parent alone writes archives. Do not rerun the completed manual review.
+
+Chapter 20260923T000959Z-502f011b, root Run run_502f011b9d1f4596ba62eff0e54a8b0e, Task LOO-278. Proposed review 2026-10-21T00:09:59.226362+00:00. Read-only code/current work inspection; use cache-only PM if needed; preserve divergences, no auth repair. No children or controllers needed for this bounded Project proposal. Save your COMPLETE ORIGINAL final Markdown report under the exact /tmp path specified below, and also return it in final. /tmp writes are permitted; no checkout files. Capture your own Run id from LF_RUN_ID and include it in report. Exact definitions, proposed numbered KR texts, explicit dispositions of every prior numbered KR and supplied Task, small opening frontier/park triggers, dependencies, and agree/challenge verdict required. Do not claim human acceptance. Unknown proof stays unknown. Human chooses external priorities; Run success or honest failure is not portfolio momentum. Small/Medium/Big are review heuristics only, no runtime enforcement.
+
+Full accepted scope:
+# Gate 1 — accepted repository direction
+
+Loopflow exists to keep Cube, Etude, Kata, and Hootro moving. In each week at least three have durable Work that accurately states the human's desired next focus and observable forward momentum on at least one Task. The human selects priorities. Product dogfooding is external: those four projects are the proving ground. Desktop joins current Project/KR/Task planning to excellent open-Session organization. Account juggling and prompting evidence support that loop, not disconnected bets.
+
+Portfolio parallelism is desirable; intra-project parallelism stays low. Small = 1–2 active Tasks (Cube, Etude, Hootro), Medium = 2–4 (Kata), Big = 2–8 (Loopflow across Projects). These are company-specific review heuristics, not new Work kinds or execution constraints.
+
+Keep Product, Infrastructure, and Intelligence. Infrastructure owns Loopflow-on-Loopflow reliability: releases, auth, execution continuity, flow-driven Work advancement, and repository-wide architecture reduction/minimalism. Intelligence owns non-authoritative evidence that makes real Runs explainable and useful for diagnosing portfolio execution and improving prompting. Product owns external dogfood and the shared user contract, including Desktop planning plus open Sessions. List and engbot are stale structures to disposition, not next-chapter Waves. Favor excellent completion, fewer concurrent Loopflow commitments, and capacity for the external projects.
+
+Routing: loopflow.wave-agents belongs in Infrastructure / Architecture Minimalism. Loopflow self-hosting failures belong in Infrastructure Reliability or Intelligence evidence. Sessions design is validated enough to build on, not restart. Small/Medium/Big never enforce runtime behavior.
+
+Acceptance source: explicit instruction from the live parent conversation supplied to Run `run_502f011b9d1f4596ba62eff0e54a8b0e`. No new interview or human Session is required. New questions and challenges return to that parent. Gate 2 is not accepted.
+
+Product scoped brief: Own external portfolio progress and Desktop planning plus open Sessions. Shape Company Dogfood around Cube, Etude, Kata, Hootro (not Loopflow self-hosting), with weekly >=3/4 current human-selected Work focus plus Task momentum. Desktop builds on validated native Sessions and integrates current Project/KR/Task intent. LOO-278 and LOO-185 are candidate Company Dogfood Tasks; LOO-251 seeds Desktop. LOO-257 and loopflow.wave-agents route to Infrastructure / Architecture Minimalism. Explicitly disposition all supplied open Tasks, including new LOO-280–284; desired Session polish and shared-view experiments must not silently expand the active frontier. LOO-274 was rejected in the baseline direction. LOO-148 needs an exact owner and park trigger if not selected, not an orphan. Consider rewriting Mac Surface UX to Desktop, Loopflow API to Company Dogfood, retiring Auditability while assigning its evidence/UI obligations. Prior iOS/general fleet/broad performance promises need not survive. Account juggling and prompting evidence are supporting dependencies.
+Infrastructure proposes Reliability + Architecture Minimalism and initially one active Task each (LOO-279; existing loopflow.wave-agents). Latest flow branch target is Task-only execution with finite Wave/Project Runs; this MATERIAL CHANGE is OPEN for parent Gate 2, not accepted by routing it to Infrastructure. Intelligence proposes Trace & Context: 20 real settled Runs and a fourteen-day attempted-operation population, preserving pre-Run failures/corrupt omissions, missing required context never success. Do not add an evidence/control authority in Desktop. Auditability retirement routes raw trace/context/provenance to Intelligence; shared semantics/repair to Infrastructure; user presentation to Desktop; weekly external momentum judgement to Company Dogfood.
+Source artifacts (read-only):
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/chapter-review.html
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/review-ledger.json
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/sources/product-status.json
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/frozen-ledger.json
+
+Your bounded slice: Propose reuse Mac Surface UX stable Project UUID as Desktop. Build on validated native Sessions. LOO-251 seeds completion; planning+Sessions integration should be a precise follow-on Task rather than fleet restoration. Explicitly dispose all 8 supplied Tasks. Consider LOO-280 build parity as prerequisite serial work, not another permanently concurrent commitment. LOO-284 coherent shared projection may be prerequisite to planning integration. LOO-281/282/283 must stay parked unless justified. LOO-148 stale NextMove/action-enum proposal conflicts with current descriptive conditions and Sessions authority: exact owner Desktop with Infrastructure semantics dependency is an option; decide explicit park trigger. Preserve published-budget evidence obligations without inventing thresholds. Scope one or at most two active Product Tasks across both Projects; Company Dogfood has existing LOO-278. No broad performance/fleet/iOS restoration.
+Complete original final report path: /tmp/product-desktop-original.md
+EXACT STARTING LEDGER:
+{
+  "wave": {
+    "id": "5081a624-c095-4218-9a54-6d1a6711f282",
+    "name": "product",
+    "status": "ready",
+    "goal": "Loopflow is the product for conducting goal-authored work across humans, agents, devices, and machines. The product is not one interface; it is the shared API and surfaces that make waves understandable and steerable wherever they run: CLI, Mac, iOS, agent turns, local workers, and remote compute.",
+    "repo": "/Users/jack/src/loopflow",
+    "active_tasks": 37,
+    "active_projects": 5,
+    "live": false,
+    "paused": false,
+    "enabled": false,
+    "endpoint": null,
+    "created_at": "2026-07-14T19:04:43Z",
+    "parent_wave_id": null,
+    "retired_at": null,
+    "superseded_by_wave_id": null,
+    "retirement_reason": null,
+    "home": {
+      "id": "home_39860354aaca640c2ccb50bf6ca609d8",
+      "route": "local",
+      "created_at": "2026-07-19T14:56:05Z",
+      "observed_at": "2026-07-19T14:56:05Z"
+    }
+  },
+  "project": {
+    "id": "57fee17f-7231-46f3-afd8-031d866a1779",
+    "slug": "mac-surface-ux",
+    "name": "Mac Surface UX",
+    "summary": "The Mac app is Loopflow's fast control room: all repositories, Waves, Projects, Tasks, Runs, PRs, activity, health, and legal controls remain legible without making Swift a second runtime. Company Discord is the canonical conversation; the app links to it",
+    "definition": "The Mac app is Loopflow's fast control room: all repositories, Waves, Projects, Tasks, Runs, PRs, activity, health, and legal controls remain legible without making Swift a second runtime. Company Discord is the canonical conversation; the app links to it and shows Work consequences. The Project prioritizes outcome repair when either Sessions readiness signal misses its published p95, reports an incorrect count, or claims readiness before interaction is live; Met readings stay quiet while the 14-day evidence windows accrue.",
+    "flows": {
+      "first": null,
+      "loop": null,
+      "finally": null
+    },
+    "krs": [
+      {
+        "text": "For one full week of real use, a cold launch exposes every repository and Wave, their purpose, Project/KR proof, open Tasks, attention, active agents, output-token rate, and Discord delivery state without opening a terminal.",
+        "holds": false
+      },
+      {
+        "text": "Across the shared fixture suite and 20 sampled live Wave, Project, Task, and Run rows, every visible state agrees with the shared API on liveness, next owner, legal action, and reason.",
+        "holds": false
+      },
+      {
+        "text": "Twenty cold launches and navigation trials stay inside published paint and interaction budgets on the long-lived registry; missing or stale evidence never renders as a healthy empty state.",
+        "holds": false
+      },
+      {
+        "text": "Ten of ten control-room paths start or recover Work, open the exact PR or trace, edit planning through the PM API, and open the owning Discord channel without Swift inventing lifecycle.",
+        "holds": false
+      },
+      {
+        "text": "For one month, the Mac app contains no second company transcript or Swift-owned Work concept; Discord and the shared lf DTOs remain the conversation and control authorities.",
+        "holds": false
+      },
+      {
+        "text": "For 14 days of real use, opening Loopflow to a repository paints its scoped Sessions list with the true session count within the published p95 budget across at least 20 opens, with no empty-then-populate flash and no manual repair inside the window.",
+        "holds": false
+      },
+      {
+        "text": "For 14 days of real use, selecting a session opens a live interactive embedded terminal within the published p95 budget across at least 20 opens (serial-open position included), or shows an honest opening state that never claims false readiness.",
+        "holds": false
+      }
+    ],
+    "initiative_ids": [
+      "33e774b0-ec3b-4bd6-a4f8-07676f9e897b"
+    ],
+    "team_ids": [
+      "3871bed0-8c95-4077-ab72-728327d615b3"
+    ]
+  },
+  "open_tasks": [
+    {
+      "id": "9ed54c17-2b89-4bf9-b20d-0a95a1a65d44",
+      "identifier": "LOO-283",
+      "url": "https://linear.app/loopflow/issue/LOO-283/evaluate-shared-warp-and-loopflow-viewing-without-terminal-regressions",
+      "name": "Evaluate shared Warp and Loopflow viewing without terminal regressions",
+      "description": "Bounded investigation, not authorization to restore tmux presentation by default. Native provider launch plus explicit Move here is the current contract. Human direction on 2026-09-22: simultaneous viewing is desirable; the second attachment starts view-only and Take control explicitly transfers input. Previous tmux presentation distorted colors and caused terminal-specific bugs. History: 4d5e96383 shared raw resume argv, not one live PTY; 90c871805 removed tmux presentation; 7889d65bc consolidated native resume.\n\nCompare an opt-in tmux configuration and a transparent PTY relay using disposable Sessions in Warp and embedded Ghostty. Prove one provider PID and unsent draft survive late attachment, takeover, detach, and viewer close/crash; test truecolor, keyboard, image paste/drop with visible provider attachments, independently sized windows, scrollback and viewport behavior. Read-only must be enforced by the PTY owner. Record what app relaunch can recover separately from client-local selection/scroll position. Concurrent provider resumes are not a shared-PTY solution.\n\nTmux control mode would need a protocol/rendering client and does not provide Warp-native presentation automatically. Research reports Claude clipboard-image failures inside tmux (anthropics/claude-code#25672); retest on the exact stack rather than assume text file paths prove image attachment. A custom relay needs replay, flow control, resize, failure recovery, and durable PTY ownership. Remote Home attachment remains a separate scope decision. The existing Task tmux kill-on-close/quit policy must not be copied for durable human Sessions.\n\nDone when a dated comparison records reproducible passes/failures and an explicit recommendation or no-go. Keep the native default unless all fidelity proofs justify a separately reviewed change. No production client interruption or app restart is required by this investigation.",
+      "rank": 0,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "f7d1f6d9-0ed9-4ace-8d49-ed967dc875c9",
+      "identifier": "LOO-282",
+      "url": "https://linear.app/loopflow/issue/LOO-282/show-the-recorded-location-of-an-active-session-client",
+      "name": "Show the recorded location of an active Session client",
+      "description": "The ELSEWHERE pane is intentionally generic because ProviderClientRef records PID/start evidence but no terminal provenance. Record available client/terminal and Home context at provider launch and expose it through the shared Session projection so Mac/CLI can explain where the client is active (Warp, another Loopflow window, or SSH when known). Do not infer ownership from labels or add a Swift liveness registry. Missing provenance must stay explicit and readable; mirror any DTO additions in Rust/Swift fixtures without defaults.\n\nDone when an active client with known provenance has the same location in CLI and Mac, unknown/legacy provenance stays generic, and PID reuse cannot inherit another client's label. Selecting it leaves it alive. Move here remains explicit and warns about unsent input loss; no automatic takeover is introduced. Preserve the separate moved/completed stop intent consumed by the displaced launcher.",
+      "rank": 1,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "656ca5c8-fe92-41c1-848a-b69b8b10f633",
+      "identifier": "LOO-284",
+      "url": "https://linear.app/loopflow/issue/LOO-284/project-session-actions-and-work-labels-from-the-shared-api",
+      "name": "Project Session actions and Work labels from the shared API",
+      "description": "Follow-up already called for in Product memory after native Sessions PR #1250; preserve it as a Linear Task rather than a scratch-only item. Rust owns Session legality and exact Work identity, but Swift reconstructs legal actions from kind/state and joins roadmap data for display labels.\n\nProject legal actions and the display Work path in SessionRecord, update Rust/Swift shared fixtures with required or explicitly optional fields, and delete the corresponding Swift action matrix, replacement-policy inference, Sessions-only roadmap join, and unused narrower scopes in the same coherent change. Keep view-local opening/error state and terminal presence separate: they cannot be derived from the durable record alone. Preserve explicit Move here and non-destructive preparation.\n\nDone when CLI and Mac render identical legal actions and Work labels from the same projection across interactive Sessions, Asks, and human FlowSteps; no parallel Swift legality model or extra roadmap lookup remains. Exercise pending/ready/resolved and active-elsewhere cases and prove illegal resolution remains rejected at the shared API boundary.",
+      "rank": 2,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "40872684-3ee0-4507-b038-f1d379f49df6",
+      "identifier": "LOO-280",
+      "url": "https://linear.app/loopflow/issue/LOO-280/build-one-ghostty-enabled-mac-terminal-product",
+      "name": "Build one Ghostty-enabled Mac terminal product",
+      "description": "Observed 2026-09-22 at d31f2ffdf: SwiftPM links GhosttyKit and defines GHOSTTY_ENABLED; project.yml copies GhosttyResources but links neither GhosttyKit nor that flag, compiling terminal stubs. Earlier fresh Xcode build-for-testing failed on Ghostty-only test symbols. Resource validation also fails every terminal if optional shell payload is absent or mismatched; GHOSTTY_RESOURCES_DIR remains mutated process-wide.\n\nReplace these parallel definitions with one Mac terminal dependency consumed by both builds. Keep Loopflow's cross-platform library independent. One authoritative input must determine upstream revision, patch artifact version/checksum, and generated shell/terminfo provenance; ghostty-build currently rebuilds the library but not checked-in resources. Remove redundant Mac stubs/feature flags once consumers share the required target. Missing shell resources should disable blocks with a diagnostic while ordinary provider terminals still work; genuine library initialization failure remains an error. Contain initialization environment changes.\n\nDone when both SwiftPM and Xcode build-for-testing link the command-block exports, contain resources generated from the same source, and execute a real embedded PTY copy test through supported test paths. An app bundle missing shell resources still accepts terminal input. Resource copying, matching two manually edited revision strings, or compiling stubs does not count. Retain xterm-256color for provider fidelity unless separately proven. Respect hosted UI permission limits. Publish any changed binary only with authorization; no local .build path may remain in Package.swift.",
+      "rank": 3,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "01a33274-2895-4b44-b599-7e298f9b7656",
+      "identifier": "LOO-281",
+      "url": "https://linear.app/loopflow/issue/LOO-281/prove-shell-blocks-through-the-real-shell-geometry-and-long-output",
+      "name": "Prove shell blocks through the real shell, geometry, and long-output paths",
+      "description": "The branch at d31f2ffdf implements persistent completed command/output blocks, ordinary click selection, and Copy via a separate read-block C API. A real marked-output PTY test copies two blocks without native character selection. Human confirmation of final block appearance is still pending; invisible OSC metadata or triple-click selection does not meet the contract. Warp is the visual benchmark: whole-width grouping and separation, restrained tint/accent, hover/selection over the entire unit, and a distinct live prompt.\n\nClose the remaining evidence gaps and fix reproduced defects: shellIntegrationEmitsSemanticMarks manually calls zsh hooks, so it proves a fixture, not Ghostty login-shell detection/injection. Exercise the real no-command shell surface and one customized prompt (starship/powerlevel10k); document upstream system /bin/bash exclusion and avoid claiming all bundled shells are proven. Preserve provider Session behavior outside block semantics.\n\nGeometry helpers and their test both assume vertically centered grid padding; compare overlays and clicks to actual rendered cells at fractional cell heights, custom padding, resizing, scrolling, and wrapped output. Investigate renderer-mutex cost: ghostty_surface_command_blocks scans each viewport row with selectCommandBlock/prompt iteration every 100ms. Measure long output with the prompt thousands of rows above, then eliminate repeated scans if needed; record before/after latency. Treat geometry/performance as hypotheses until reproduced. Run the patch's two filtered Zig Screen tests or record the exact blocker.\n\nDone when visible blocks exist before interaction, ordinary clicks on command or output select and copy exactly both, switching blocks moves one highlight, live prompt remains editable, alternate-screen apps remain usable, and measured long-output/resize checks pass. Wait for parsed blocks in synthetic fixtures; inspect the real pasteboard. Page/pin IDs are not durable across reflow/recycling. Preserve one selected (id,text) snapshot and independent hover geometry. Do not restore native highlighting on block selection. Packaging parity is a separate Task; binary changes require a newly versioned artifact and authorized publication.",
+      "rank": 4,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "56cfdb24-cc73-4153-9ea8-1f2dab2af71a",
+      "identifier": "LOO-274",
+      "url": "https://linear.app/loopflow/issue/LOO-274/restore-wave-fleet-and-roadmap-loading-in-the-mac-app",
+      "name": "Restore Wave fleet and roadmap loading in the Mac app",
+      "description": "Restore Wave fleet and roadmap loading in the Mac app\n\n<!-- loopflow-task-start:b298456644b27e19cead7f4344385592d4ac6affbb9e13ee84b9f38f0d5feb2e -->",
+      "rank": 5,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "3aef0d2f-630c-49ba-9535-01a7591b7d18",
+      "identifier": "LOO-251",
+      "url": "https://linear.app/loopflow/issue/LOO-251/finish-the-native-sessions-multiplexer-and-promoted-ask-handoff",
+      "name": "Finish the native Sessions multiplexer and promoted Ask handoff",
+      "description": "Reconciled 2026-09-22 against branch d31f2ffdf and Product memory. The original Ask-only directive is obsolete: use lf session list/open and provider-native resume. The split tree, per-window/per-repository layout and view retention, explicit Move here, typed TerminalIdentity, and clipboard/drop plumbing already exist. Do not rebuild them or restore a global surface registry/tmux presentation layer.\n\nRemaining outcome: prove the native Sessions workspace completes a promoted human Ask end to end and retains truthful readiness. One real promoted Ask must survive open, provider-native continuation, Ready, Complete, pane clearing, and release of the blocked caller. Exercise the permissioned UI path for focus, legal actions, and reconciliation; LocalAuthentication previously prevented runner initialization, which is no behavioral result. Preserve the existing Sessions readiness instrumentation and serial-open position evidence; measured Project budgets remain authoritative.\n\nKeep row selection non-destructive; Close view hides a Session while Complete resolves it. Move here alone replaces the exact owned client, warning that unsent input in the other terminal is lost. JSON preparation must not stop a provider. Window close/app quit still end embedded clients; provider history remains resumable.\n\nEvidence already recorded on 2026-09-22: human confirmed retained Session switching, copy/image paste/drop, and explicit Warp handoff. Subsequent real-PTY tests prove window-local release, typed close-event classification, and split paste routing. Human confirmation of corrected split paste remains pending: focus each side and confirm only that composer receives Command-V. Do not infer all-provider coverage from the Codex demo or mark this Task done from compilation alone.\n\nGhostty build parity, shell-block reliability, client provenance, and shared-view experiments are separate follow-ups. No fresh runtime proof or Task closure is claimed by this reconciliation.",
+      "rank": 6,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "daeb8f50-8a6a-4168-9c65-adbee99e2d96",
+      "identifier": "LOO-148",
+      "url": "https://linear.app/loopflow/issue/LOO-148/surface-abandoned-task-recovery-on-the-shared-nowroadmap-dto",
+      "name": "Surface abandoned-Task recovery on the shared Now/Roadmap DTO",
+      "description": "W2-145 shipped recovery (lf task recover) + a CLI TaskActionHint {recover,resume,none} on the ops Task snapshot. The shared Now/Roadmap next-move DTO (NextMove{owner,reason} on RoadmapTask/TaskDetailSnapshot) still routes an abandoned Task to owner=Project instead of surfacing recovery, so CLI/Mac/iOS don't yet offer the recover action there. Close the contract's 'expose actionability in shared Now/Roadmap DTOs: recover/resume/start_next_pr/complete/none, with reason and owner'. Design note: doing it truthfully needs the recover-safety signal (worktree adoptability) so the surface offers 'recover' only when the successor can actually adopt the worktree/PR, and 'start a new Task' otherwise \u2014 a naive abandoned->recover over-promises. Likely a wire-DTO change (action verb enum) mirrored in Swift + dto fixtures; the Mac/iOS rendering rides under mac-surface-ux/ios-surface-ux.",
+      "rank": 8,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    }
+  ]
+}
+COMPLETED BASELINE REVIEW (do not rerun):
+[
+  {
+    "wave": "Product",
+    "project": "Mac Surface UX",
+    "verdict": "unknown",
+    "promise": "For one full week of real use, a cold launch exposes every repository and Wave, their purpose, Project/KR proof, open Tasks, attention, active agents, output-token rate, and Discord delivery state without opening a terminal.",
+    "evidence": "Current source covers the named surfaces, but no dated week-long cold-launch census exists.",
+    "gap": "A seven-day census against the long-lived registry."
+  },
+  {
+    "wave": "Product",
+    "project": "Mac Surface UX",
+    "verdict": "unknown",
+    "promise": "Across the shared fixture suite and 20 sampled live Wave, Project, Task, and Run rows, every visible state agrees with the shared API on liveness, next owner, legal action, and reason.",
+    "evidence": "Sixty focused Swift tests and six Rust DTO fixture tests passed on 22 September.",
+    "gap": "A recorded comparison of 20 live rows across all four kinds."
+  },
+  {
+    "wave": "Product",
+    "project": "Mac Surface UX",
+    "verdict": "unknown",
+    "promise": "Twenty cold launches and navigation trials stay inside published paint and interaction budgets on the long-lived registry; missing or stale evidence never renders as a healthy empty state.",
+    "evidence": "Tests prove failed refreshes retain last-good evidence and disclose the reason. No paint or interaction budgets are published.",
+    "gap": "Published budgets and twenty long-lived-registry trials."
+  },
+  {
+    "wave": "Product",
+    "project": "Mac Surface UX",
+    "verdict": "fail",
+    "promise": "Ten of ten control-room paths start or recover Work, open the exact PR or trace, edit planning through the PM API, and open the owning Discord channel without Swift inventing lifecycle.",
+    "evidence": "Start, resume, PR, evidence, Wave pause/resume, and Discord actions exist. Recovery and PM mutation do not.",
+    "gap": "Shared recovery and PM-edit actions, then ten configured-path trials."
+  },
+  {
+    "wave": "Product",
+    "project": "Mac Surface UX",
+    "verdict": "holds",
+    "promise": "For one month, the Mac app contains no second company transcript or Swift-owned Work concept; Discord and the shared lf DTOs remain the conversation and control authorities.",
+    "evidence": "The 22 August\u201322 September history retained backing-aware Discord, provider-native Sessions, and shared lf DTO authority; Swift added no independent transcript persistence.",
+    "gap": "No material gap for the stated month."
+  },
+  {
+    "wave": "Product",
+    "project": "Mac Surface UX",
+    "verdict": "unknown",
+    "promise": "For 14 days of real use, opening Loopflow to a repository paints its scoped Sessions list with the true session count within the published p95 budget across at least 20 opens, with no empty-then-populate flash and no manual repair inside the window.",
+    "evidence": "The app reads repo-scoped Sessions and emits one-off time_to_sessions logs.",
+    "gap": "A published threshold plus a retained 14-day, 20-open count and flash dataset."
+  },
+  {
+    "wave": "Product",
+    "project": "Mac Surface UX",
+    "verdict": "fail",
+    "promise": "For 14 days of real use, selecting a session opens a live interactive embedded terminal within the published p95 budget across at least 20 opens (serial-open position included), or shows an honest opening state that never claims false readiness.",
+    "evidence": "A 22 September review found an externally terminated provider could remain displayed as live. The repair was not on main/v0.12.18.",
+    "gap": "Land the repair, publish p95, and retain 20 real opens over 14 days."
+  }
+]
+Prior sequential Project child completed: Company Dogfood Run run_dfe0cc8351914375b3769a953cad3cfe, complete report /tmp/product-company-dogfood-original.md. Reconciled frontier recommendation: LOO-278 only for Company Dogfood plus one serial Desktop slot. Prefer LOO-251 completion first; if build packaging prevents its configured proof, replace the slot with LOO-280 rather than expanding simultaneous commitments. Your proposal may challenge this sequencing. Company Dogfood recommends LOO-148 stays owned by Desktop, rewritten against current shared conditions/action semantics, parked until a reproduced abandoned-task gap blocks selected external work/planning path; Infrastructure provides recovery legality. Be explicit if you disagree. Local source confirms Rust/Swift SessionRecord lacks legal actions/display path, Swift SessionsView reconstructs labels via roadmap and resolution actions locally; current Package.swift includes GhosttyKit while project.yml has no Ghostty dependency. Preserve branch/current-source divergence rather than treating branch behavior as shipped.

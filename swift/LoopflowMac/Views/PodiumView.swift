@@ -14,6 +14,9 @@ struct PodiumView: View {
     @Environment(\.palette) private var palette
     @State private var model: PodiumModel
     @State private var surface: PodiumSurface
+    /// Per-window terminal workspaces: this window's panes and surfaces are
+    /// never shared with another window showing the same repository.
+    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
     private let query: RegistryQuery
 
     init(
@@ -51,6 +54,7 @@ struct PodiumView: View {
                 if surface == .sessions, let repoPath = model.repoPath {
                     SessionsView(
                         scope: .repo(repoPath),
+                        workspaces: sessionWorkspaces,
                         query: query,
                         initialRecords: model.sessions.value,
                         onShowWork: { surface = .work }

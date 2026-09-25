@@ -1,6 +1,6 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
-use crate::engine::config::load_config_or_default;
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
+use crate::engine::config::{load_config_or_default, Config};
+use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
@@ -15,9 +15,7 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, discover_target, Target};
 use crate::lf::output::{column_width, Colors};
-use crate::lf::{
-    CronCommand, PmCommand, PmProjectCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand,
-};
+use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
@@ -183,7 +181,8 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     }
 }
 
-struct CliProgress;
+#[derive(Debug)]
+pub(crate) struct CliProgress;
 
 impl Progress for CliProgress {
     fn status(&self, msg: &str) {
@@ -218,7 +217,7 @@ pub fn run_rebase(
     adopt: bool,
 ) -> Result<()> {
     let progress = &CliProgress;
-    let repo_root = find_repo_root()?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
     if onto.is_some() && (continue_rebase || abort) {
         return Err(anyhow!(
             "a rebase target cannot be combined with --continue or --abort"
@@ -260,9 +259,23 @@ pub fn run_rebase(
         return Ok(());
     }
     let started = Instant::now();
+    let default = get_default_branch(&repo_root)?;
+    let upstream = format!("origin/{default}");
+    let on_main = current_branch(&repo_root)?.as_deref() == Some(&default);
+    if !plan_only {
+        crate::ops::checkout::refresh_main(&repo_root, progress)?;
+        if on_main && onto.is_none_or(|target| target == upstream) {
+            progress.status("Main is current; unpublished commits and edits remain local.");
+            return Ok(());
+        }
+    }
     // A Task stack owns its rebase target: the live parent branch until merge,
     // then the default branch. An explicit override could silently drop work.
-    let stacked = crate::ops::task::task_stack(&repo_root)?;
+    let stacked = if on_main {
+        None
+    } else {
+        crate::ops::task::task_stack(&repo_root)?
+    };
     if stacked.is_some() && onto.is_some() {
         return Err(anyhow!(
             "stacked Task rebases choose their parent automatically; omit --onto"
@@ -273,9 +286,10 @@ pub fn run_rebase(
         .and_then(|stacked| stacked.parent_branch.as_ref())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
+    let default_target = if on_main { upstream } else { default.clone() };
     let plan = plan_rebase(
         &repo_root,
-        stacked_onto.as_deref().or(onto),
+        stacked_onto.as_deref().or(onto).or(Some(&default_target)),
         fork_base.clone(),
     )?;
     let onto_ref = plan.base_ref.clone();
@@ -296,33 +310,39 @@ pub fn run_rebase(
         .map(|_| ())
         .map_err(Into::into);
     }
-    let (verification, agent_launched) = match rebase_with_recovery(
-        &repo_root,
-        &RebaseOptions {
-            onto: onto_ref.clone(),
-            push: true,
-            fork_base,
-        },
-        progress,
-    ) {
-        Ok(verification) => (verification, false),
-        Err(OpsError::RebaseConflict {
-            onto,
-            detail,
-            recovery,
-        }) => (
-            resolve_rebase_conflict(
+    let recovery_config = load_config_or_default(Some(&repo_root));
+    let (verification, agent_launched) =
+        crate::ops::checkout::with_preserved_edits(&repo_root, || {
+            match rebase_with_recovery(
                 &repo_root,
-                &onto,
-                &detail,
-                recovery,
-                is_avoidable_rebase_class(&plan.class),
+                &RebaseOptions {
+                    onto: onto_ref.clone(),
+                    push: !on_main,
+                    fork_base,
+                },
                 progress,
-            )?,
-            true,
-        ),
-        Err(err) => return Err(err.into()),
-    };
+            ) {
+                Ok(verification) => Ok((verification, false)),
+                Err(OpsError::RebaseConflict {
+                    onto,
+                    detail,
+                    recovery,
+                }) => Ok((
+                    resolve_rebase_conflict(
+                        &repo_root,
+                        &onto,
+                        &detail,
+                        recovery,
+                        is_avoidable_rebase_class(&plan.class),
+                        progress,
+                        &recovery_config,
+                    )
+                    .map_err(|error| OpsError::Message(error.to_string()))?,
+                    true,
+                )),
+                Err(err) => Err(err),
+            }
+        })?;
     if let Some(stacked) = stacked.as_ref() {
         crate::ops::task::record_stack_rebase(
             stacked,
@@ -376,6 +396,7 @@ fn resolve_rebase_conflict(
     recovery: Option<Box<crate::ops::RebaseRecovery>>,
     avoidable: bool,
     progress: &impl Progress,
+    config: &Config,
 ) -> Result<crate::ops::RebaseVerification> {
     let recovery =
         recovery.ok_or_else(|| anyhow!("rebase conflict has no owned recovery operation"))?;
@@ -390,8 +411,14 @@ fn resolve_rebase_conflict(
     }
     progress.status("Launching rebase agent to resolve conflicts...");
     Ok(recover_rebase(*recovery, |env| {
-        launch_skill_agent(repo_root, "rebase-conflicts", Some(&context), Some(env))
-            .map_err(|error| OpsError::Message(error.to_string()))
+        launch_skill_agent(
+            repo_root,
+            "rebase-conflicts",
+            Some(&context),
+            Some(env),
+            config,
+        )
+        .map_err(|error| OpsError::Message(error.to_string()))
     })?)
 }
 
@@ -434,7 +461,15 @@ fn with_rebase_retry<T>(
             detail,
             recovery,
         }) => {
-            resolve_rebase_conflict(repo_root, &onto, &detail, recovery, false, progress)?;
+            resolve_rebase_conflict(
+                repo_root,
+                &onto,
+                &detail,
+                recovery,
+                false,
+                progress,
+                &load_config_or_default(Some(repo_root)),
+            )?;
             progress.status(&format!("Retrying {label} after rebase..."));
             op(repo_root, true).map_err(Into::into)
         }
@@ -630,7 +665,7 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
 
 pub fn run_pm(cmd: &PmCommand) -> Result<()> {
     let progress = &CliProgress;
-    let repo_root = find_repo_root()?;
+    let repo_root = crate::repo::working_directory()?;
     // The one ambient-Wave rule for every PM arm: `--wave` wins, else
     // `LF_WAVE_ID` (durable UUID or repository-scoped registered name).
     // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
@@ -699,7 +734,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
         }
         PmCommand::Show {
             wave,
-            project,
             json,
             sync,
             no_sync,
@@ -713,7 +747,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             };
             let options = crate::ops::pm::PmShowOptions {
                 wave: ambient_wave(wave.as_deref())?,
-                project: project.clone(),
+                project: None,
                 refresh,
             };
             let result = if *json {
@@ -721,11 +755,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             } else {
                 crate::ops::pm::pm_show(&repo_root, &options, progress)?
             };
-            if *json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else {
-                print_pm_show_result(&result);
-            }
+            crate::lf::commands::waves::status(Some(&result.wave), *json)?;
         }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
@@ -743,9 +773,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                         "{}: Linear Initiative `{}` ({}) — {} open / {} total",
                         wave.wave, wave.initiative_name, wave.initiative, wave.open, wave.total
                     );
-                    for (project, open) in wave.open_by_project {
-                        println!("  {project:<28} {open} open");
-                    }
                 }
             }
         }
@@ -764,17 +791,11 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             );
         }
         PmCommand::Task { cmd } => match cmd {
-            PmTaskCommand::Create {
-                wave,
-                project,
-                title,
-                notes,
-            } => {
+            PmTaskCommand::Create { wave, title, notes } => {
                 let result = crate::ops::pm::pm_update(
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: ambient_wave(wave.as_deref())?,
-                        project: Some(project.clone()),
                         id: None,
                         title: Some(title.clone()),
                         notes: notes.clone(),
@@ -783,15 +804,11 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     },
                     progress,
                 )?;
-                println!(
-                    "{}: created task {} in project:{}",
-                    result.wave, result.id, project
-                );
+                println!("{}: created task {}", result.wave, result.id);
             }
             PmTaskCommand::Update {
                 id,
                 wave,
-                project,
                 title,
                 notes,
             } => {
@@ -799,7 +816,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: ambient_wave(wave.as_deref())?,
-                        project: project.clone(),
                         id: Some(id.clone()),
                         title: title.clone(),
                         notes: notes.clone(),
@@ -815,7 +831,6 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: ambient_wave(wave.as_deref())?,
-                        project: None,
                         id: Some(id.clone()),
                         title: None,
                         notes: None,
@@ -830,97 +845,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 };
                 println!("{}: closed task {}{linked}", result.wave, result.id);
             }
-            PmTaskCommand::Move { id, wave, project } => {
-                let result = crate::ops::pm::pm_task_move(
-                    &repo_root,
-                    &crate::ops::pm::PmTaskMoveOptions {
-                        id: id.clone(),
-                        wave: ambient_wave(wave.as_deref())?,
-                        project: project.clone(),
-                    },
-                    progress,
-                )?;
-                println!(
-                    "{}: moved task {} to project:{}",
-                    result.wave, result.id, result.project
-                );
-            }
         },
-        PmCommand::Project { cmd } => {
-            let (wave, project, title, definition, krs, first, loop_, finally) = match cmd {
-                PmProjectCommand::Create {
-                    wave,
-                    title,
-                    definition,
-                    krs,
-                    first,
-                    loop_,
-                    finally,
-                } => (
-                    wave.clone(),
-                    None,
-                    Some(title.clone()),
-                    Some(definition.clone()),
-                    krs.clone(),
-                    first.clone(),
-                    loop_.clone(),
-                    finally.clone(),
-                ),
-                PmProjectCommand::Update {
-                    wave,
-                    project,
-                    title,
-                    definition,
-                    krs,
-                    first,
-                    loop_,
-                    finally,
-                } => (
-                    wave.clone(),
-                    Some(project.clone()),
-                    title.clone(),
-                    definition.clone(),
-                    krs.clone(),
-                    first.clone(),
-                    loop_.clone(),
-                    finally.clone(),
-                ),
-                PmProjectCommand::Archive { wave, project } => {
-                    let result = crate::ops::pm::pm_project_archive(
-                        &repo_root,
-                        &crate::ops::pm::PmProjectArchiveOptions {
-                            wave: ambient_wave(wave.as_deref())?,
-                            project: project.clone(),
-                        },
-                        progress,
-                    )?;
-                    println!(
-                        "{}: archived project:{} ({})",
-                        result.wave, result.slug, result.id
-                    );
-                    return Ok(());
-                }
-            };
-            let result = crate::ops::pm::pm_project_write(
-                &repo_root,
-                &crate::ops::pm::PmProjectWriteOptions {
-                    wave: ambient_wave(wave.as_deref())?,
-                    project,
-                    title,
-                    definition,
-                    krs,
-                    first,
-                    loop_,
-                    finally,
-                },
-                progress,
-            )?;
-            let verb = if result.created { "created" } else { "updated" };
-            println!(
-                "{}: {verb} project:{} ({})",
-                result.wave, result.slug, result.id
-            );
-        }
         PmCommand::Doctor => {
             let result = crate::ops::pm::pm_sync(
                 &repo_root,
@@ -1049,133 +974,6 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     }
     if result.already > 0 {
         println!("  already in repository Team: {} (skipped)", result.already);
-    }
-}
-
-fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
-    if result.items.is_empty() {
-        let suffix = result
-            .project
-            .as_deref()
-            .map(|project| format!(" project:{project}"))
-            .unwrap_or_default();
-        println!("{}{}: no Linear tasks", result.wave, suffix);
-        print_pm_snapshot_age(result);
-        return;
-    }
-
-    let colors = Colors::default();
-    for (index, line) in format_pm_task_table(&result.items).iter().enumerate() {
-        if index == 0 {
-            println!("{}{}{}", colors.bold, line, colors.reset);
-        } else {
-            println!("{line}");
-        }
-    }
-    print_pm_snapshot_age(result);
-}
-
-fn print_pm_snapshot_age(result: &crate::ops::pm::PmShowResult) {
-    let age = time::OffsetDateTime::now_utc().unix_timestamp() - result.synced_at;
-    let colors = Colors::default();
-    let phrase = if age < 60 {
-        "just now".to_string()
-    } else {
-        format!("{} ago", crate::ops::pm::format_age(age))
-    };
-    println!("{}snapshot synced {}{}", colors.dim, phrase, colors.reset);
-}
-
-#[derive(Debug)]
-struct PmTaskRow {
-    status: &'static str,
-    title: String,
-    project: String,
-    assignee: String,
-    id: String,
-    completed: bool,
-    rank: u32,
-}
-
-fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
-    let mut rows: Vec<_> = items
-        .iter()
-        .map(|item| PmTaskRow {
-            status: if item.completed { "done" } else { "open" },
-            title: item.name.split_whitespace().collect::<Vec<_>>().join(" "),
-            project: item.project.clone(),
-            assignee: item.assignee.clone().unwrap_or_else(|| "-".to_string()),
-            id: item.id.clone(),
-            completed: item.completed,
-            rank: item.rank,
-        })
-        .collect();
-    rows.sort_by_key(|row| (row.completed, row.rank));
-
-    let status_width = column_width("STATUS", rows.iter().map(|row| row.status));
-    let title_width = column_width("TITLE", rows.iter().map(|row| row.title.as_str()));
-    let project_width = column_width("PROJECT", rows.iter().map(|row| row.project.as_str()));
-    let assignee_width = column_width("ASSIGNEE", rows.iter().map(|row| row.assignee.as_str()));
-
-    let mut lines = Vec::with_capacity(rows.len() + 1);
-    lines.push(format!(
-        "{:<status_width$}  {:<title_width$}  {:<project_width$}  {:<assignee_width$}  ID",
-        "STATUS", "TITLE", "PROJECT", "ASSIGNEE"
-    ));
-    lines.extend(rows.into_iter().map(|row| {
-        format!(
-            "{:<status_width$}  {:<title_width$}  {:<project_width$}  {:<assignee_width$}  {}",
-            row.status, row.title, row.project, row.assignee, row.id
-        )
-    }));
-    lines
-}
-
-#[cfg(test)]
-mod pm_output_tests {
-    use super::format_pm_task_table;
-    use crate::pm::PmItem;
-
-    #[test]
-    fn task_table_is_aligned_complete_and_open_first() {
-        let lines = format_pm_task_table(&[
-            PmItem {
-                id: "done-1".to_string(),
-                identifier: "INF-1".to_string(),
-                url: None,
-                name: "Done task".to_string(),
-                description: String::new(),
-                rank: 0,
-                completed: true,
-                project_id: "project-done".to_string(),
-                project: "-".to_string(),
-                team_id: "team-loo".to_string(),
-                assignee: None,
-            },
-            PmItem {
-                id: "open-1".to_string(),
-                identifier: "INF-2".to_string(),
-                url: None,
-                name: "Longer\ntitle".to_string(),
-                description: String::new(),
-                rank: 1,
-                completed: false,
-                project_id: "project-chat".to_string(),
-                project: "wave-chat".to_string(),
-                team_id: "team-loo".to_string(),
-                assignee: Some("me".to_string()),
-            },
-        ]);
-
-        assert_eq!(
-            lines,
-            vec![
-                "STATUS  TITLE         PROJECT    ASSIGNEE  ID",
-                "open    Longer title  wave-chat  me        open-1",
-                "done    Done task     -          -         done-1",
-            ]
-        );
-        assert!(lines.iter().all(|line| line.lines().count() == 1));
     }
 }
 
@@ -1741,8 +1539,9 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     let main_repo = main_repo_root(&repo_root)?;
     let segment = WorktreeSegment::parse(name)?;
 
-    let default_branch = get_default_branch(&main_repo)?;
-    let _ = sync_main(&main_repo, &default_branch);
+    if !dry_run {
+        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
+    }
 
     let placement = plan_placement(&main_repo, segment)?;
 
@@ -1859,11 +1658,11 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     let default_branch = get_default_branch(&main_repo)?;
     // `wt list` is an inspection surface and stays side-effect free by default:
     // merge/fresh flags reflect the last-synced main. `--sync` is the explicit,
-    // self-owned mutation that fetches origin and fast-forwards main first — a
+    // self-owned mutation that fetches origin and integrates main first — a
     // read never fetches, resets, or stashes the canonical checkout behind the
     // user's back.
     if sync {
-        let _ = sync_main(&main_repo, &default_branch);
+        crate::ops::checkout::refresh_main(&main_repo, &crate::ops::NullProgress)?;
     }
     let worktrees = list_worktrees(&main_repo)?;
 
@@ -2092,8 +1891,9 @@ fn parse_shortstat(raw: &str) -> String {
 fn wt_prune(dry_run: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
-    let _ = sync_main(&main_repo, &default_branch);
+    if !dry_run {
+        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
+    }
     let protected_paths = protected_worktree_paths()?;
     let report = prune_worktrees(
         &main_repo,
@@ -2365,19 +2165,20 @@ fn launch_skill_agent(
     skill_name: &str,
     context: Option<&str>,
     env: Option<&std::collections::BTreeMap<String, String>>,
+    config: &Config,
 ) -> Result<()> {
     let skill = discover_skill(repo_root, skill_name)?;
-    let config = load_config_or_default(Some(repo_root));
 
     let message = context.map(|value| value.to_string());
     let prepared = prepare_launch_prompt(
-        &config,
+        config,
         LaunchPromptInput {
             repo_root: repo_root.to_path_buf(),
             skill: Some(skill_name.to_string()),
             resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
+            user_name: crate::engine::config::launch_user_name()?,
             cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
@@ -2421,7 +2222,7 @@ fn launch_skill_agent(
     capture.record_input("initial", &prepared.config.task_prompt);
 
     let mut launch = prepared.config;
-    launch.env = env.cloned().unwrap_or_default();
+    launch.env.extend(env.cloned().unwrap_or_default());
     let process = ProcessConfig {
         auto: true,
         stream: true,
@@ -2456,7 +2257,7 @@ fn launch_skill_agent(
 /// How a dependency is installed via Homebrew (macOS).
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Brew {
-    /// `brew install <name>` — plain formula (or tap-qualified, e.g. dopplerhq/cli/doppler).
+    /// `brew install <name>` — plain formula (or tap-qualified, e.g. doppler).
     Formula(&'static str),
     /// `brew install --cask <name>` — GUI app.
     Cask(&'static str),
@@ -2552,7 +2353,7 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         command: "doppler",
         required: true,
         macos_only: false,
-        brew: Some(Brew::Formula("dopplerhq/cli/doppler")),
+        brew: Some(Brew::Formula("doppler")),
         fallback: "https://docs.doppler.com/docs/install-cli",
     },
     // Optional: agent CLIs and editors.

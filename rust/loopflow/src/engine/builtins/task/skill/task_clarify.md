@@ -5,10 +5,10 @@ action_style: procedural
 Clarify the exact Task named in the seed. The Run records one attempt; the Task
 Basis, not Run attribution, governs planning changes.
 
-Read the Task seed, current durable direction, Project definition/KRs, repository
+Read the Task seed, current durable direction, current chapter KRs/metric targets, repository
 instructions, current worktree, and any existing design note in `scratch/`.
 
-Use the Project's KRs and any metrics named in the direction to understand the
+Use the chapter's KRs and any metrics named in the direction to understand the
 outcome. Do not force the design to invent a metric before the work reveals the
 useful signal; feature implementation may expose a better proposal.
 
@@ -19,9 +19,22 @@ useful signal; feature implementation may expose a better proposal.
 - Write or tighten the single Task design note only when the change is not yet
   computable. Preserve a clear existing design.
 - Resolve reversible ambiguity with the simpler path. When a choice changes
-  scope, behavior, or authority and no human is present, run
-  `lf ask "<exact request>"`. The caller resumes only after human completion.
+  scope, behavior, or authority and no one is available in the session, run
+  `lf ask "<exact request>"`. The caller resumes only after session completion.
 - Do not implement beyond a trivial probe that makes the design computable.
+
+## Task and design
+
+Treat the Task as the user's problem and desired experience. Explore possible
+solutions before choosing one; distinguish observations, proposed mechanisms,
+real constraints, and accepted decisions. The design owns architecture,
+implementation sequencing, and proof. A Task need not arrive with an
+implementation plan. Preserve its original problem when the solution changes.
+
+Continue an existing design and investigate its material gaps; a newly filed
+Task does not require restarting discovery. Keep accepted decisions binding
+and linked, preserve draft status and open questions, and honor the selected
+Flow. Launching a draft does not approve it.
 
 ## Computable design contract
 

@@ -16,7 +16,7 @@ If clipboard is empty or no -c flag, ask what error to debug.
 
 **Minimal and targeted.** Fix the bug, not the neighborhood. Don't refactor, don't "improve while you're here."
 
-**Grease the wheels.** If debugging was hard, add tooling that makes it easier next time—for both humans and LLMs. A well-placed log statement, a clearer error message, a helper function that surfaces state. Small improvements that compound.
+**Grease the wheels.** If debugging was hard, add tooling that makes it easier next time—for both people and agents. A well-placed log statement, a clearer error message, a helper function that surfaces state. Small improvements that compound.
 
 ## Input
 

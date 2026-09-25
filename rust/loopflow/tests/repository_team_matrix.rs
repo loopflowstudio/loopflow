@@ -1,5 +1,8 @@
 //! PRD-43: one repository Team, stable Project ownership, and a fail-closed migration.
 
+#[path = "support/chapter.rs"]
+mod chapter;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -55,8 +58,8 @@ fn snapshot(
             "slug": project_slug,
             "name": project_name,
             "summary": "Fixture project",
-            "definition": "A measured bet.",
-            "flows": { "first": null, "loop": null, "finally": null },
+            "metric_targets": [],
+            "flows": { "recommended": null },
             "krs": [{ "text": "Ownership is deterministic", "holds": true }],
             "initiative_ids": [initiative],
             "team_ids": ["team-loo"]
@@ -83,6 +86,17 @@ fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, 
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
+    let snapshot: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    if let Some(project_id) = snapshot["projects"][0]["id"].as_str() {
+        if store.chapter(registered.id(), None).unwrap().is_none() {
+            store
+                .save_chapter(
+                    &chapter::current_chapter(registered.id(), wave, project_id),
+                    true,
+                )
+                .unwrap();
+        }
+    }
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: registered.id().clone(),
@@ -110,14 +124,6 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> Command {
 
 fn run_lf(home: &Path, repo: &Path, args: &[&str]) -> Output {
     lf_command(home, repo, args).output().expect("run lf")
-}
-
-fn run_project_control(home: &Path, repo: &Path, project: &str) -> Output {
-    lf_command(home, repo, &["project", "run", project])
-        .env("LF_BIN", repo.join("missing-lf"))
-        .env_remove("LF_CONTROL_BIN")
-        .output()
-        .expect("run project control")
 }
 
 fn assert_success(output: &Output, command: &str) -> String {
@@ -325,74 +331,6 @@ fn repository_team_matrix() {
     assert!(roadmap.contains("LOO-1"));
     assert!(roadmap.contains("LOO-2"));
 
-    // Project controls resolve each stable Project id to its own Wave before
-    // the deliberately missing worker binary stops the fixture from launching.
-    let control_home = fixture.path().join("project-control-home");
-    std::fs::create_dir_all(&control_home).unwrap();
-    let control_store = SqliteStore::new(&control_home.join("loopflow.db")).unwrap();
-    let control_survival = Wave::new(
-        WaveId::new(),
-        "survival".to_string(),
-        repo_locator.repo().to_string(),
-    );
-    let control_infrastructure = Wave::new(
-        WaveId::new(),
-        "survival/infrastructure".to_string(),
-        repo_locator.repo().to_string(),
-    )
-    .with_parent(control_survival.id().clone());
-    control_store.create_wave(&control_survival).unwrap();
-    control_store.create_wave(&control_infrastructure).unwrap();
-    put_snapshot(
-        &control_store,
-        &repo,
-        "survival",
-        "initiative-survival",
-        snapshot(
-            "initiative-survival",
-            "project-survival",
-            "a-real-task",
-            "A real task reaches done",
-            "issue-survival",
-            "LOO-1",
-            true,
-        ),
-    );
-    put_snapshot(
-        &control_store,
-        &repo,
-        "survival/infrastructure",
-        "initiative-infrastructure",
-        snapshot(
-            "initiative-infrastructure",
-            "project-gmail",
-            "gmail",
-            "Gmail",
-            "issue-gmail",
-            "LOO-2",
-            true,
-        ),
-    );
-    drop(control_store);
-    for (project_id, wave_id) in [
-        ("project-survival", control_survival.id()),
-        ("project-gmail", control_infrastructure.id()),
-    ] {
-        let output = run_project_control(&control_home, &repo, project_id);
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert!(!output.status.success());
-        assert!(
-            error.contains("cannot resolve current lf binary"),
-            "{error}"
-        );
-        let control_store = SqliteStore::new(&control_home.join("loopflow.db")).unwrap();
-        let project = control_store
-            .project_by_project(project_id)
-            .unwrap()
-            .expect("Project control reserved the resolved Project");
-        assert_eq!(&project.wave_id, wave_id);
-    }
-
     // Reopening the store preserves the local ancestry and foreign collision.
     let reopened = SqliteStore::new(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
@@ -422,7 +360,6 @@ fn repository_team_matrix() {
         &["status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
         &["roadmap", "--wave", "survival", "--json"][..],
-        &["project", "run", "project-survival"][..],
     ] {
         let output = run_lf(&home, &repo, args);
         let error = String::from_utf8_lossy(&output.stderr);
@@ -509,17 +446,7 @@ fn repository_team_matrix() {
         &home,
         &legacy_repo,
         &[
-            "pm",
-            "project",
-            "create",
-            "--wave",
-            "product",
-            "--title",
-            "Blocked",
-            "--definition",
-            "No side effects",
-            "--kr",
-            "Nothing changed",
+            "pm", "task", "create", "--wave", "product", "--title", "Blocked",
         ],
     );
     let error = String::from_utf8_lossy(&blocked.stderr);

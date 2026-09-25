@@ -9,7 +9,20 @@ use crate::ops::human_session::{FlowDecision, OpenMode, SessionKind, SessionReco
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(run_async(command))
+    let runtime = tokio::runtime::Runtime::new()?;
+    let session_id = match command {
+        SessionCommand::Approve { id, .. } | SessionCommand::Iterate { id, .. } => Some(id),
+        _ => None,
+    };
+    let Some(session_id) = session_id else {
+        return runtime.block_on(run_async(command));
+    };
+    let store = runtime.block_on(open_shared_store())?;
+    let worktree = runtime.block_on(crate::ops::human_session::decision_worktree(
+        &store, session_id,
+    ))?;
+    let argv = std::env::args().collect::<Vec<_>>();
+    crate::journal::with_runtime(&worktree, &argv, || runtime.block_on(run_async(command)))
 }
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
@@ -38,7 +51,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let text = required_text(summary, "ready summary")?;
             let store = open_shared_store().await?;
             crate::ops::human_session::mark_ready(&store, &text).await?;
-            println!("Session is ready for human action.");
+            println!("Session is ready for your review.");
             Ok(())
         }
         SessionCommand::Approve { id, summary } => {
@@ -49,6 +62,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
         }
         SessionCommand::ServeFlow {
             task_id,
+            invocation_id,
             flow,
             node_id,
             skill,
@@ -58,6 +72,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             crate::ops::human_session::serve_flow(
                 store,
                 task_id.clone(),
+                invocation_id.clone(),
                 flow.clone(),
                 node_id.clone(),
                 skill.clone(),
@@ -72,7 +87,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
     let mut sessions = crate::ops::human_session::list(store).await?;
-    sessions = scope_to_repo(sessions, all);
+    sessions = scope_to_repo(sessions, all)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -145,17 +160,17 @@ async fn decide_flow(
     Ok(())
 }
 
-fn scope_to_repo(sessions: Vec<SessionRecord>, all: bool) -> Vec<SessionRecord> {
+fn scope_to_repo(sessions: Vec<SessionRecord>, all: bool) -> anyhow::Result<Vec<SessionRecord>> {
     if all {
-        return sessions;
+        return Ok(sessions);
     }
-    let Some(scope) = crate::repository::CanonicalRepo::current() else {
-        return sessions;
+    let Some(scope) = crate::repository::CanonicalRepo::current()? else {
+        return Ok(sessions);
     };
-    sessions
+    Ok(sessions
         .into_iter()
         .filter(|session| scope.contains(Path::new(&session.cwd)))
-        .collect()
+        .collect())
 }
 
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
@@ -181,6 +196,6 @@ mod tests {
 
     #[test]
     fn an_empty_session_list_stays_empty() {
-        assert!(scope_to_repo(Vec::new(), true).is_empty());
+        assert!(scope_to_repo(Vec::new(), true).unwrap().is_empty());
     }
 }

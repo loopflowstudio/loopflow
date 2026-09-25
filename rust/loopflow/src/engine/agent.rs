@@ -711,13 +711,8 @@ impl ClaudeArgs {
 ///
 /// This is shared by session harnesses so session turn invocation stays aligned
 /// with engine-owned Claude argument conventions.
-pub fn build_claude_session_turn_args(
-    content: &str,
-    config: &AgentConfig,
-    resume_id: Option<&str>,
-) -> Vec<String> {
-    let mut args = vec!["-p".to_string(), content.to_string()];
-    let claude_args = ClaudeArgs {
+fn claude_args_for(config: &AgentConfig, resume_id: Option<&str>) -> ClaudeArgs {
+    ClaudeArgs {
         model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
         system_prompt: Some(system_prompt_with_structured_replies(config)),
         system_prompt_file: None,
@@ -731,8 +726,33 @@ pub fn build_claude_session_turn_args(
         stream: true,
         chrome: false,
         resume_id: resume_id.map(str::to_string),
-    };
-    args.extend(claude_args.to_args());
+    }
+}
+
+pub fn build_claude_session_turn_args(
+    content: &str,
+    config: &AgentConfig,
+    resume_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec!["-p".to_string(), content.to_string()];
+    args.extend(claude_args_for(config, resume_id).to_args());
+    args
+}
+
+/// Args for the persistent stream-json driver: `-p --input-format stream-json`
+/// plus the shared session flags (`--output-format stream-json --verbose`, model,
+/// system prompt, writable roots, permissions, `--resume`). Turn content is fed
+/// on stdin as stream-json user messages, not as a positional argument.
+pub fn build_claude_stream_session_args(
+    config: &AgentConfig,
+    resume_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "-p".to_string(),
+        "--input-format".to_string(),
+        "stream-json".to_string(),
+    ];
+    args.extend(claude_args_for(config, resume_id).to_args());
     args
 }
 

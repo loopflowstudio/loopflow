@@ -1,7 +1,7 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child::ObservationRecipient;
-use crate::durable::Author;
+use crate::durable::{FlowPosition, TaskFlowBlocker, TaskWorkerClaim};
 use crate::id::WaveId;
 use crate::work::project::{
     ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
@@ -21,36 +21,20 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_task(&task, &pr)).await
     }
 
-    pub async fn create_task_with_input(
-        &self,
-        task: &Task,
-        pr: &TaskPr,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub async fn create_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();
-        let author = author.clone();
-        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_with_input(&task, &pr, &author, &text)
+            store.insert_task_with_worktree(&task, &pr)
         })
         .await
     }
 
-    pub async fn reopen_task(
-        &self,
-        task: &Task,
-        pr: Option<&TaskPr>,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub async fn reopen_task(&self, task: &Task, pr: Option<&TaskPr>) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.cloned();
-        let author = author.clone();
-        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.reopen_task(&task, pr.as_ref(), &author, &text)
+            store.reopen_task(&task, pr.as_ref())
         })
         .await
     }
@@ -58,6 +42,139 @@ impl Store {
     pub async fn update_task(&self, task: &Task) -> StoreResult<()> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| store.update_task(&task)).await
+    }
+
+    pub async fn settle_task_worker(
+        &self,
+        task: &Task,
+        expected: &TaskWorkerClaim,
+        next: &FlowPosition,
+        progress: Option<&str>,
+    ) -> StoreResult<FlowPosition> {
+        let task = task.clone();
+        let expected = expected.clone();
+        let next = next.clone();
+        let progress = progress.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.settle_task_worker(&task, &expected, &next, progress.as_deref())
+        })
+        .await
+    }
+
+    pub async fn finish_task_flow(
+        &self,
+        task: &Task,
+        expected: &TaskWorkerClaim,
+        progress: Option<&str>,
+    ) -> StoreResult<()> {
+        let task = task.clone();
+        let expected = expected.clone();
+        let progress = progress.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.finish_task_flow(&task, &expected, progress.as_deref())
+        })
+        .await
+    }
+
+    pub async fn block_task_flow(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        failure: &TaskFlowBlocker,
+    ) -> StoreResult<FlowPosition> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        let failure = failure.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.block_task_flow(&task_id, &expected, &failure)
+        })
+        .await
+    }
+
+    pub async fn release_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+    ) -> StoreResult<FlowPosition> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.release_task_worker(&task_id, &expected)
+        })
+        .await
+    }
+
+    pub async fn approve_human_task_boundary(
+        &self,
+        task: &Task,
+        expected: &FlowPosition,
+        next: &FlowPosition,
+        summary: &str,
+    ) -> StoreResult<FlowPosition> {
+        let task = task.clone();
+        let expected = expected.clone();
+        let next = next.clone();
+        let summary = summary.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.approve_human_task_boundary(&task, &expected, &next, &summary)
+        })
+        .await
+    }
+
+    pub async fn finish_human_task_boundary(
+        &self,
+        task: &Task,
+        expected: &FlowPosition,
+        summary: &str,
+    ) -> StoreResult<()> {
+        let task = task.clone();
+        let expected = expected.clone();
+        let summary = summary.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.finish_human_task_boundary(&task, &expected, &summary)
+        })
+        .await
+    }
+
+    pub async fn iterate_human_task_boundary(
+        &self,
+        task: &Task,
+        expected: &FlowPosition,
+        next: &FlowPosition,
+    ) -> StoreResult<FlowPosition> {
+        let task = task.clone();
+        let expected = expected.clone();
+        let next = next.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.iterate_human_task_boundary(&task, &expected, &next)
+        })
+        .await
+    }
+
+    pub async fn retry_task_flow(
+        &self,
+        task_id: &TaskId,
+        expected: &FlowPosition,
+    ) -> StoreResult<FlowPosition> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.retry_task_flow(&task_id, &expected)
+        })
+        .await
+    }
+
+    pub(crate) async fn restart_task_flow(
+        &self,
+        task: &Task,
+        checkpoint_head: &str,
+    ) -> StoreResult<()> {
+        let task = task.clone();
+        let checkpoint_head = checkpoint_head.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.restart_task_flow(&task, &checkpoint_head)
+        })
+        .await
     }
 
     pub async fn rebind_task_issue_identifier(
@@ -278,7 +395,7 @@ impl Store {
         comment_id: String,
         text: String,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<crate::durable::SteerId>> {
+    ) -> StoreResult<Option<i64>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.apply_linear_comment(&task_id, &comment_id, &text, observed_at)
@@ -321,39 +438,14 @@ impl Store {
         kind: &TaskEventKind,
         event: &TaskEvent,
     ) -> StoreResult<()> {
-        if kind.is_project_observable() {
+        if kind.is_wave_observable() {
             if let Some(task) = self.get_task(task_id).await? {
-                if let Err(error) = crate::ops::project::wake_task_project_route(self, &task).await
-                {
-                    tracing::debug!(
-                        %error,
-                        %task_id,
-                        project_id = %task.project_id,
-                        event_id = event.id,
-                        "Task observation wake failed; Project lifecycle touch will retry"
-                    );
-                }
-                if kind.is_root_wave_observable() {
-                    match self.get_wave(&task.wave_id).await? {
-                        Some(wave) => {
-                            if let Err(error) =
-                                crate::lf::commands::chat::nudge_child_observations(wave.name())
-                                    .await
-                            {
-                                tracing::debug!(
-                                    %error,
-                                    %task_id,
-                                    event_id = event.id,
-                                    "live Task observation delivery failed; Wave observer will retry"
-                                );
-                            }
-                        }
-                        None => tracing::error!(
-                            wave_id = %task.wave_id,
-                            %task_id,
-                            event_id = event.id,
-                            "Task observation cannot nudge its missing owning Wave"
-                        ),
+                if let Some(wave) = self.get_wave(&task.wave_id).await? {
+                    if let Err(error) =
+                        crate::lf::commands::chat::nudge_child_observations(wave.name()).await
+                    {
+                        tracing::debug!(%error, %task_id, event_id = event.id,
+                            "Task delivery failed; the Wave observer will retry its durable outbox");
                     }
                 }
             }
@@ -390,110 +482,14 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_project(&project)).await
     }
 
-    pub async fn create_project_with_steer(
-        &self,
-        project: &Project,
-        author: Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub async fn reopen_project(&self, project: &Project) -> StoreResult<()> {
         let project = project.clone();
-        let text = text.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_project_with_steer(&project, &author, &text)
-        })
-        .await
-    }
-
-    pub async fn reopen_project(
-        &self,
-        project: &Project,
-        author: Author,
-        text: &str,
-    ) -> StoreResult<()> {
-        let project = project.clone();
-        let text = text.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reopen_project(&project, &author, &text)
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.reopen_project(&project)).await
     }
 
     pub async fn update_project(&self, project: &Project) -> StoreResult<()> {
         let project = project.clone();
         run_sqlite(&self.sqlite, move |store| store.update_project(&project)).await
-    }
-
-    pub(crate) async fn adopt_project_plan(
-        &self,
-        project_id: &ProjectId,
-        plan: &crate::planning::ProjectPlan,
-    ) -> StoreResult<(Project, bool)> {
-        let project_id = project_id.clone();
-        let plan = plan.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.adopt_project_plan(&project_id, &plan)
-        })
-        .await
-    }
-
-    pub(crate) async fn fail_project(
-        &self,
-        project: &Project,
-        error: &str,
-    ) -> StoreResult<ProjectEvent> {
-        let project_id = project.id.clone();
-        let wave_id = project.wave_id.clone();
-        let project = project.clone();
-        let error = error.to_string();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.fail_project(&project, &error)
-        })
-        .await?;
-        self.nudge_project_terminal_observation(&project_id, &wave_id, event.id, "failed")
-            .await;
-        Ok(event)
-    }
-
-    pub(crate) async fn complete_project(
-        &self,
-        project: &Project,
-        summary: &str,
-    ) -> StoreResult<ProjectEvent> {
-        let project_id = project.id.clone();
-        let wave_id = project.wave_id.clone();
-        let project = project.clone();
-        let summary = summary.to_string();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.complete_project(&project, &summary)
-        })
-        .await?;
-        self.nudge_project_terminal_observation(&project_id, &wave_id, event.id, "completed")
-            .await;
-        Ok(event)
-    }
-
-    async fn nudge_project_terminal_observation(
-        &self,
-        project_id: &ProjectId,
-        wave_id: &WaveId,
-        event_id: i64,
-        outcome: &'static str,
-    ) {
-        match self.get_wave(wave_id).await {
-            Ok(Some(wave)) => {
-                if let Err(error) =
-                    crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                {
-                    tracing::debug!(%error, %project_id, event_id, outcome, "live Project terminal observation delivery failed; Wave observer will retry");
-                }
-            }
-            Ok(None) => {
-                tracing::error!(%wave_id, %project_id, event_id, outcome, "Project terminal event cannot nudge its missing owning Wave")
-            }
-            Err(error) => {
-                tracing::debug!(%error, %wave_id, %project_id, event_id, outcome, "Project terminal observation lookup failed; Wave observer will retry")
-            }
-        }
     }
 
     pub async fn get_project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
@@ -594,19 +590,6 @@ impl Store {
     pub async fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| {
             store.mark_observation_delivered(id)
-        })
-        .await
-    }
-
-    pub async fn consume_task_observation_for_project(
-        &self,
-        project_id: &ProjectId,
-        observation: &ObservationOutboxRow,
-    ) -> StoreResult<bool> {
-        let project_id = project_id.clone();
-        let observation = observation.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.consume_task_observation_for_project(&project_id, &observation)
         })
         .await
     }

@@ -11,7 +11,7 @@ use std::process::Command;
 
 use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
+use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
 use loopflow::work::wave::Wave;
 
@@ -21,9 +21,11 @@ use loopflow::work::wave::Wave;
 #[tokio::test]
 async fn resolver_matrix_agrees_across_every_environment() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let store = open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
-        .await
-        .expect("open store");
+    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(
+        tmp.path().join("loopflow.db"),
+    ))
+    .await
+    .expect("open store");
     let repo = tmp.path().join("repo");
     std::fs::create_dir_all(&repo).expect("repo");
     let wave = Wave::new(

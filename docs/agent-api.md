@@ -1,7 +1,7 @@
 # The Agent API
 
 `lf` is the API agents call to launch, steer, and observe other agents. There
-is no SDK and no central server. The verbs are the same binary humans type;
+is no SDK and no central server. The verbs are the same binary you use;
 every read surface takes `--json`; and every launched agent receives the
 operating contract (`LOOPFLOW.md`) in its context, so it already knows these
 verbs when it starts.
@@ -22,26 +22,26 @@ second client, store, or transport.
 
 An external harness opened by a person is a Loopflow **User**, the same caller
 kind as the Mac app. It may inspect status and use `lf chat` when the person
-asks it to converse with or steer a Wave.
+asks it to converse with a Wave.
 
-A Loopflow-launched Wave, Project, or Task agent is an internal participant.
+A Loopflow-launched Wave or Task agent is an internal participant.
 It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
-while `lf ask` parks the Run at a durable human session in its own checkout.
+while `lf ask` parks the Run at a durable session in its own checkout.
 
 A Wave directing a task is the internal case:
 
 ```bash
-lf task prepare INF-123                              # tracked Work, no controller
+lf task prepare INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent bounded Run
 lf task run INF-123                                  # start built-in Task automation
-lf task steer INF-123 "take the smaller approach"    # queue durable direction
+lf task steer INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                # block until it settles
 ```
 
 ## The nouns
 
-Tracked Work follows **Wave → Project → Task**. These are stable planning
+Tracked Work follows **Wave → Task**. These are stable planning
 records, not a process hierarchy. A Wave coordinates and remembers; a Project
 pursues measurable KRs; only Task Work owns a worktree, and every file-writing
 change happens there on its one active remote branch and PR to `main`. Work is `ready`,
@@ -54,20 +54,20 @@ Run identity does not reserve Work, authorize a worktree mutation, or prove a
 process signal-safe. Tasks are Linear issues, so durable delegated work starts
 from an existing issue and the roadmap remains the queue.
 
-Built-in Wave, Project, and Task controllers form a layer above these records.
-An agent may instead compose `lf task prepare`, a `--task`/`--project`/`--wave`
-skill Run, Work input, and delivery commands itself; it need not install a
-controller to act for Work.
+Only Task Work persists a selected Flow and advances it one exact boundary at a
+time. Project operation is a finite `wave/operate` Run over current facts.
+An agent may also compose `lf task prepare`, a `--task`/`--wave`
+skill Run, Work input, and delivery commands itself. Attribution grants context,
+not permission to move a Task's Flow position.
 
 ## Delegate
 
 ```bash
 lf task prepare INF-123                      # ensure Work and worktree only
 lf task run INF-123                          # run an existing Linear issue
-lf task start <project-id> "add passkeys"    # create the issue, then run it
-pbpaste | lf task start <project-id>         # report from stdin; first line is the title
+lf task start --wave <wave> "add passkeys"    # create the issue, then run it
+pbpaste | lf task start --wave <wave>         # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123       # dependent work before the parent PR merges
-lf project run <project-id>                  # start the supervising Project Work
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -82,39 +82,35 @@ merge, then replays only child-authored commits onto `main`.
 
 ## Steer
 
-Task and Project Steer appends direction to durable Work before doing anything
-else. If the Work has a controller, a stopped controller is relaunched and a
-running controller reads the new direction at its next boundary. Controller-free
-Work simply retains the direction for the next bounded Run or future controller.
-Steer does not inject text into an active provider turn:
-
 ```bash
-lf task steer INF-123 "support passkeys too"       # durable direction
-lf task steer INF-123 "stop; make this a smaller PR"
+lf task steer INF-123 "keep the public API"          # post a Linear Task comment
+lf --wave <wave> wave/operate "prioritize the parser"
+lf --wave <wave> wave/operate "reassess Project priorities"
 ```
 
-The Task and Project wrappers resolve familiar Linear ids. Agents can also use
-the stable Work control surface directly:
+Comment on the Linear Task directly, or use `task steer`. Both reach only the
+worker advancing that Task. Independent Runs sharing its worktree or using
+`--task`/`--as` do not subscribe to steering. With no active worker, comments
+wait for explicit advancement; steering never starts execution.
 
-```bash
-lf work status task task_... --json
-lf work steer task task_... "show the failing fixture" --json
-lf --as project:proj_... : "Which proof matters?"    # ordinary agent perspective
-lf ask "Review this proof with me"                    # durable human session
-lf session list --json                                # unresolved human Sessions
-```
+Linear comments are the authored record. Workers refresh comments while running
+and before starting a Skill; local events cache their delivery. The command
+receipt confirms publication to Linear. Run traces distinguish input included
+in the starting prompt from input accepted by the live provider transport;
+neither proves the model followed it. Provider scheduling determines when a
+live correction is consumed.
 
-A Steer receipt proves that the direction was stored, not that a provider read
-or applied it. Generic `lf work interrupt`, `lf task interrupt`, and
-`lf project interrupt` refuse because these controllers do not publish an exact
-process owner. Loopflow never guesses signal authority from a Run id, Work id,
-PID, or tmux name. There is currently no supported cross-process CLI for
-immediate Task cancellation. Project Work alone has `lf project attach <id>`
-for an operator who needs the provider's native controls.
+`lf task interrupt INF-123` appends a durable interrupt comment;
+the active Task worker observes it and ends the current provider turn so the
+next boundary re-reads direction. With no live worker it remains durable input.
+Generic `lf work interrupt` refuses because it does not publish an exact process
+owner. Loopflow never guesses signal authority from a Run id, Work id, PID, or
+tmux name. Project operations are ordinary finite Runs; they have no resident
+process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. `lf task resume INF-123 --model codex`
-selects another provider without losing durable direction, the worktree, or
-the Task PR. `lf task run` never reopens terminal Work: a person can use
+Work survives its provider process. `lf task resume INF-123` starts a fresh
+boundary without losing durable direction, the worktree, or the Task PR. `lf
+task run` never reopens terminal Work: a person can use
 `lf task recover` to restart an abandoned Task on the same worktree, while a
 completed Task requires a new Linear task.
 
@@ -124,8 +120,8 @@ fails closed before a commit, push, publication, merge request, rotation, or
 completion; a person retains explicit authority to inspect and remediate the
 preserved Work.
 
-`lf project` carries the same durable `steer`, `wait`, `resume`, and `attach`
-controls one level up.
+Guide Project and Wave operations through extra instructions to their operate
+skills. Edit their definition or goal when the guidance should persist.
 
 ## Memory
 
@@ -140,13 +136,13 @@ lands it:
 
 ```bash
 lf pr publish    # make work visible mid-stream; the agent's default verb
-lf pr submit     # done, a human clicks merge
+lf pr submit     # done, a person clicks merge
 lf pr arm        # request exact-head auto-merge and return
 lf pr land       # watch, repair CI, and return only after merge
 ```
 
 `lf pr open` is the one presenting verb — it opens a browser. Agents reach for
-it only when a human asked to see the PR.
+it only when a person asked to see the PR.
 
 ## Observe
 
@@ -185,9 +181,9 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Route git, worktrees, and PRs through `lf`; never raw `git worktree`.
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
-- Answer present humans in turn text; use typed Work observations for durable
+- Answer the user in the current conversation; use typed Work observations for durable
   coordination, ordinary `lf --as` Runs for another agent perspective, and
-  `lf ask` only for a new human session.
+  `lf ask` only for a new session.
 - Write repo-specific learnings into `.lf/` and commit them with the work.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.

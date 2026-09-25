@@ -1,7 +1,10 @@
+use time::OffsetDateTime;
+
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, Steer, SteerReceipt,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerComment, TaskId,
+    TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -61,23 +64,71 @@ impl Store {
 
     pub async fn set_flow_position(
         &self,
-        work: &WorkRef,
+        task_id: &TaskId,
         position: FlowPosition,
     ) -> StoreResult<FlowPosition> {
-        let work = work.clone();
+        let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.set_flow_position(&work, &position)
+            store.set_flow_position(&task_id, &position)
         })
         .await
     }
 
-    pub async fn flow_position(&self, work: &WorkRef) -> StoreResult<Option<FlowPosition>> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.flow_position(&work)).await
+    pub async fn flow_position(&self, task_id: &TaskId) -> StoreResult<Option<FlowPosition>> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.flow_position(&task_id)).await
     }
 
-    pub async fn human_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
-        run_sqlite(&self.sqlite, |store| store.human_flow_positions()).await
+    pub async fn claim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected_version: u64,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaimOutcome> {
+        let task_id = task_id.clone();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_task_worker(&task_id, expected_version, &owner, claimed_at)
+        })
+        .await
+    }
+
+    pub async fn reclaim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reclaim_task_worker(&task_id, &expected, &owner, claimed_at)
+        })
+        .await
+    }
+
+    pub async fn bind_task_worker_run(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        worker_run_id: &RunId,
+        owner: &TaskWorkerOwner,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        let worker_run_id = worker_run_id.clone();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.bind_task_worker_run(&task_id, &expected, &worker_run_id, &owner)
+        })
+        .await
+    }
+
+    pub async fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
+        run_sqlite(&self.sqlite, |store| store.human_task_flow_positions()).await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -96,25 +147,32 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.work_for_child(&target)).await
     }
 
-    pub async fn work_steers(&self, work: &WorkRef) -> StoreResult<Vec<Steer>> {
+    pub async fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_steers(&task_id)).await
+    }
+
+    pub async fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
+        run_sqlite(&self.sqlite, move |store| store.steers_since(since)).await
+    }
+
+    pub async fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {
         let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.work_steers(&work)).await
+        run_sqlite(&self.sqlite, move |store| store.append_interrupt(&work)).await
     }
 
-    pub(crate) async fn work_steers_for_child(&self, target: &ChildRef) -> StoreResult<Vec<Steer>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.work_steers_for_child(&target)
-        })
-        .await
+    pub async fn latest_interrupt_id(&self, work: &WorkRef) -> StoreResult<i64> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.latest_interrupt_id(&work)).await
     }
 
+    #[cfg(test)]
     pub(crate) async fn append_steer(
         &self,
         work: &WorkRef,
-        author: Author,
+        author: crate::durable::Author,
         text: &str,
-    ) -> StoreResult<SteerReceipt> {
+    ) -> StoreResult<Steer> {
         let work = work.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -153,14 +211,16 @@ impl Store {
 mod tests {
     use crate::durable::WorkRef;
     use crate::id::WaveId;
-    use crate::store::{open_store, StorageConfig, StoreError};
+    use crate::store::{StorageConfig, StoreError};
     use crate::work::wave::Wave;
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
-        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),

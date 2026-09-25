@@ -396,12 +396,25 @@ mod tests {
             .all(|path| path.starts_with(home.path())));
         assert!(home
             .path()
-            .join(".agents/skills/wave/clarify/SKILL.md")
+            .join(".agents/skills/wave/operate/SKILL.md")
             .exists());
         assert!(!home
             .path()
-            .join(".agents/skills/wave_clarify/SKILL.md")
+            .join(".agents/skills/wave_operate/SKILL.md")
             .exists());
+
+        // Standalone vendor skills receive their procedures without an ambient prompt.
+        for vendor in [".agents", ".claude"] {
+            let root = home.path().join(vendor).join("skills");
+            let control = fs::read_to_string(root.join("loopflow/SKILL.md")).unwrap();
+            assert!(control.contains("lf task restart"));
+            assert!(control.contains("lf work place"));
+            let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
+            assert!(!implement.contains("lf task restart"));
+            let learn = fs::read_to_string(root.join("record-learnings/SKILL.md")).unwrap();
+            assert!(learn.contains("wave/<name>/MEMORY.md"));
+            assert!(!learn.contains("lf memory add"));
+        }
     }
 
     #[test]

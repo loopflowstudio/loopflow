@@ -380,16 +380,29 @@ pub(super) fn process_notification(
             if item_type == "userMessage" {
                 return;
             }
-            // agentMessage/delta is the live prose stream. The matching
-            // item/completed repeats the entire message, but remains useful
-            // as a fallback if a provider version omits the deltas.
-            if item_type == "agentMessage"
-                && (method == "item/started"
-                    || state
-                        .streamed_agent_messages
-                        .contains(&codex_mapping::map_item_id(params)))
-            {
-                return;
+            // agentMessage/delta is the live prose stream. Preserve a matching
+            // final-answer completion as a durable phase receipt; the shared
+            // turn fold recognizes that its prose was already streamed.
+            if item_type == "agentMessage" {
+                if method == "item/started" {
+                    return;
+                }
+                if state
+                    .streamed_agent_messages
+                    .contains(&codex_mapping::map_item_id(params))
+                {
+                    let item = codex_mapping::build_item(params, ItemPhase::Completed);
+                    if matches!(
+                        &item,
+                        ConversationItem::Message { phase, .. }
+                            if phase.as_deref() == Some("final_answer")
+                    ) {
+                        let tid = state.resolve_turn_id(turn_id_from_params);
+                        let _ =
+                            events.send(ConversationEvent::ItemCompleted { turn_id: tid, item });
+                    }
+                    return;
+                }
             }
             let tid = state.resolve_turn_id(turn_id_from_params);
             if method == "item/started" {
@@ -1716,10 +1729,17 @@ mod tests {
         );
 
         let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
         assert!(matches!(
             &events[0],
             ConversationEvent::TextDelta { content, .. } if content == "Hello"
+        ));
+        assert!(matches!(
+            &events[1],
+            ConversationEvent::ItemCompleted {
+                item: ConversationItem::Message { text, phase, .. },
+                ..
+            } if text == "Hello" && phase.as_deref() == Some("final_answer")
         ));
     }
 

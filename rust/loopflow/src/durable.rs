@@ -3,10 +3,12 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::WaveId;
+use crate::controller::wave::playhead::QueuedInvocation;
+use crate::id::{ExecId, TraceId, WaveId};
 
 /// The exact active Run named by an in-Run process.
 pub const RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const TASK_WORKER_CLAIM_ENV: &str = "LF_WORK_ADVANCE_CLAIM";
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -64,7 +66,6 @@ durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 durable_id!(RunId, "run_");
 durable_id!(HomeId, "home_");
-durable_id!(SteerId, "steer_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(CronReceiptId, "cron_");
 
@@ -127,17 +128,105 @@ pub struct Placement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowPosition {
-    pub work: WorkRef,
-    pub flow: String,
-    pub step: String,
-    pub node_id: Option<String>,
-    pub human: bool,
+    pub task_id: TaskId,
+    pub invocation: QueuedInvocation,
     pub session_run_id: Option<RunId>,
     pub ready_summary: Option<String>,
     pub step_index: u32,
     pub iteration: u32,
+    pub version: u64,
+    pub worker_generation: u64,
+    pub claim: Option<TaskWorkerClaim>,
+    pub failure: Option<TaskFlowBlocker>,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+}
+
+impl FlowPosition {
+    pub fn work(&self) -> WorkRef {
+        WorkRef::Task(self.task_id.clone())
+    }
+
+    pub fn current_plan(&self) -> &crate::engine::ConcreteStep {
+        self.invocation
+            .steps
+            .get(self.step_index as usize)
+            .expect("a persisted Flow position always selects a validated step")
+    }
+
+    pub fn current(&self) -> crate::controller::wave::playhead::StepRef {
+        self.invocation
+            .step_at(self.step_index, self.iteration)
+            .expect("a persisted Flow position always selects a validated step")
+    }
+
+    pub fn is_human(&self) -> bool {
+        self.current().policy.human
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_flow_invocation(
+    flow: &str,
+    step_index: u32,
+    step: &str,
+    node_id: Option<&str>,
+    human: bool,
+) -> QueuedInvocation {
+    let steps = (0..=step_index)
+        .map(|index| {
+            let target = index == step_index;
+            let name = if target {
+                step.to_string()
+            } else {
+                format!("before-{index}")
+            };
+            crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
+                skill: crate::engine::Skill::named(&name),
+                policy: crate::engine::OccurrencePolicy {
+                    id: target.then(|| node_id.map(str::to_string)).flatten(),
+                    human: target && human,
+                },
+                flow_parents: Vec::new(),
+            })
+        })
+        .collect();
+    QueuedInvocation::new(flow, steps).expect("test Flow invocation has a step")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskWorkerOwner {
+    pub trace_id: TraceId,
+    pub exec_id: ExecId,
+    pub pid: u32,
+    pub started_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskWorkerClaim {
+    pub invocation_id: String,
+    pub generation: u64,
+    pub position_version: u64,
+    pub owner: TaskWorkerOwner,
+    pub worker_run_id: Option<RunId>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub claimed_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskFlowBlocker {
+    pub reason: String,
+    pub restart_required: bool,
+    #[serde(with = "time::serde::rfc3339")]
+    pub observed_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TaskWorkerClaimOutcome {
+    Claimed(TaskWorkerClaim),
+    Busy(TaskWorkerClaim),
+    Stale { actual_version: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,19 +236,23 @@ pub enum Author {
     Run(RunId),
 }
 
+/// A steer projected from a Work's durable comment stream
+/// (`TaskEventKind::Steer` / `ProjectEventKind::Steer`). Not a durable entity —
+/// its identity is the event id, so ordering and change-detection use `id`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Steer {
-    pub id: SteerId,
-    pub work: WorkRef,
+    pub id: i64,
     pub author: Author,
     pub text: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub issued_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SteerReceipt {
+/// A steer comment surfaced for the cross-Work `lf activity` timeline: the read
+/// model plus the Work it targets and when it was issued.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerComment {
+    pub work: WorkRef,
     pub steer: Steer,
+    pub issued_at: OffsetDateTime,
 }
 
 pub fn render_steers(steers: &[Steer]) -> String {
@@ -229,19 +322,16 @@ pub struct AbandonReceipt {
 #[cfg(test)]
 mod tests {
     use super::{render_steers, Steer, WorkStatus};
-    use crate::durable::{Author, ProjectId, SteerId, WorkRef};
+    use crate::durable::Author;
 
     #[test]
     fn ordered_steers_render_as_one_input_projection() {
-        let work = WorkRef::Project(ProjectId::new());
-        let steer = |text: &str| Steer {
-            id: SteerId::new(),
-            work: work.clone(),
+        let steer = |id: i64, text: &str| Steer {
+            id,
             author: Author::User,
             text: text.to_string(),
-            issued_at: time::OffsetDateTime::UNIX_EPOCH,
         };
-        let steers = vec![steer("first"), steer("second")];
+        let steers = vec![steer(1, "first"), steer(2, "second")];
 
         assert_eq!(
             render_steers(&steers),

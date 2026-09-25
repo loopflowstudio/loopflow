@@ -1,35 +1,50 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
+use crate::engine::agent::{build_claude_stream_session_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent};
+use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
 
+/// One persistent `claude -p --input-format stream-json` process drives every
+/// turn of a run. `send_input` writes the seed message; the process stays alive
+/// (holding conversation context, warm prompt cache) for the next turn instead
+/// of respawning. `send_current` writes a steer mid-turn — claude applies it as
+/// the next turn in the same session — and the reader coalesces the seed turn
+/// and its queued steers into one `TurnCompleted` so the runner still sees one
+/// boundary per `send_input`.
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
-    /// Vendor session id captured from the first turn's `system` event;
-    /// subsequent turns resume it via `--resume`.
+    /// Vendor session id captured from the first turn's `system` event; a
+    /// respawn (after interrupt/crash) resumes it via `--resume`.
     provider_session_id: Arc<Mutex<Option<String>>>,
     account_route: Option<ProviderAccountRoute>,
     requested_account_id: Option<ProviderAccountId>,
     turn_in_progress: Arc<AtomicBool>,
+    /// Provider results still owed for the current runner turn: 1 for the seed,
+    /// plus 1 per accepted `send_current`. The reader emits `TurnCompleted` only
+    /// when this reaches 0, coalescing queued steer turns into one boundary.
+    pending_results: Arc<AtomicI64>,
+    /// The runner turn id every provider turn in the current coalesced boundary
+    /// reports under. Set by `send_input`, read by the reader.
+    current_turn_id: Arc<Mutex<Option<String>>>,
     child: Option<Child>,
+    stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
     stderr_task: Option<JoinHandle<()>>,
     shutdown_requested: Arc<AtomicBool>,
@@ -40,6 +55,15 @@ impl std::fmt::Debug for ClaudeHarness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClaudeHarness").finish()
     }
+}
+
+/// Serialize one Claude Code stream-json user message.
+fn user_message_line(text: &str) -> String {
+    let message = serde_json::json!({
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+    });
+    format!("{message}\n")
 }
 
 impl ClaudeHarness {
@@ -53,7 +77,10 @@ impl ClaudeHarness {
             account_route: None,
             requested_account_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
+            pending_results: Arc::new(AtomicI64::new(0)),
+            current_turn_id: Arc::new(Mutex::new(None)),
             child: None,
+            stdin: None,
             reader_task: None,
             stderr_task: None,
             shutdown_requested: Arc::new(AtomicBool::new(false)),
@@ -61,12 +88,182 @@ impl ClaudeHarness {
         }
     }
 
-    async fn kill_turn_process(&mut self) {
+    /// Spawn the persistent stream-json process and its reader, if not already
+    /// running. Resumes the captured vendor session after an interrupt/crash.
+    async fn ensure_process(&mut self) -> Result<()> {
+        if self.child.is_some() {
+            return Ok(());
+        }
+        let config = self
+            .config
+            .as_ref()
+            .ok_or_else(|| anyhow!("claude harness not started"))?;
+        let resume_id = self
+            .provider_session_id
+            .lock()
+            .expect("claude provider session id lock poisoned")
+            .clone();
+        let args = build_claude_stream_session_args(config, resume_id.as_deref());
+        let mut cmd = Command::new("claude");
+        cmd.args(&args);
+        super::configure_agent_env(&mut cmd, config);
+        if let Some(route) = &self.account_route {
+            route.apply_tokio(&mut cmd);
+        }
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = &config.cwd {
+            cmd.current_dir(cwd);
+        }
+        super::configure_vendor_tokio_env(&mut cmd)?;
+        self.shutdown_requested.store(false, Ordering::SeqCst);
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture claude stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture claude stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
+
+        self.spawn_reader(stdout);
+        self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
+        self.stdin = Some(stdin);
+        self.child = Some(child);
+        Ok(())
+    }
+
+    /// The persistent NDJSON reader: maps events for the whole process lifetime
+    /// and emits one `TurnCompleted` per coalesced runner turn.
+    fn spawn_reader(&mut self, stdout: tokio::process::ChildStdout) {
+        let events = self.events.clone();
+        let raw_provider = self.raw_provider.clone();
+        let turn_in_progress = self.turn_in_progress.clone();
+        let pending_results = self.pending_results.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let shutdown = self.shutdown_requested.clone();
+        let interrupted = self.interrupt_requested.clone();
+        let session_slot = self.provider_session_id.clone();
+        let account_route = self.account_route.clone();
+        self.reader_task = Some(tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            let mut state = ReaderState::default();
+            let turn_id = || {
+                current_turn_id
+                    .lock()
+                    .expect("claude turn id lock poisoned")
+                    .clone()
+                    .unwrap_or_default()
+            };
+
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(raw_provider) = &raw_provider {
+                    let _ = raw_provider.send(RawProviderEvent {
+                        stream: "stdout",
+                        line: line.clone(),
+                    });
+                }
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
+                if line.trim().is_empty() {
+                    continue;
+                }
+
+                if let (Some(route), Some(signal)) = (
+                    account_route.as_ref(),
+                    claude_mapping::rate_limit_signal(&line),
+                ) {
+                    if let Err(error) = route.record_rate_limit(&signal).await {
+                        tracing::warn!(%error, "failed to record Claude account rate limit");
+                    }
+                    if signal.limited {
+                        let _ = events.send(ConversationEvent::Error {
+                            code: "provider_rate_limited".to_string(),
+                            message: signal.reason,
+                            evidence: None,
+                        });
+                        pending_results.store(0, Ordering::SeqCst);
+                        let _ = events.send(ConversationEvent::TurnCompleted {
+                            turn_id: turn_id(),
+                            status: Lifecycle::Failed,
+                        });
+                        turn_in_progress.store(false, Ordering::SeqCst);
+                        state = ReaderState::default();
+                        continue;
+                    }
+                }
+
+                let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
+                if let Some(session_id) = state.take_provider_session_id() {
+                    *session_slot
+                        .lock()
+                        .expect("claude provider session id lock poisoned") =
+                        Some(session_id.clone());
+                    if let Some(route) = &account_route {
+                        if let Err(error) = route.pin_session(&session_id).await {
+                            tracing::warn!(%error, "failed to pin Claude provider session account");
+                        }
+                    }
+                }
+                if let Some(status) = result {
+                    // One provider turn ended. Only close the runner turn once
+                    // every queued steer turn has also drained.
+                    state = ReaderState::default();
+                    if pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
+                        pending_results.store(0, Ordering::SeqCst);
+                        let _ = events.send(ConversationEvent::TurnCompleted {
+                            turn_id: turn_id(),
+                            status,
+                        });
+                        turn_in_progress.store(false, Ordering::SeqCst);
+                    }
+                }
+            }
+
+            // The process ended. If a turn was open (interrupt or crash), close
+            // it so the runner is never left waiting.
+            if turn_in_progress.load(Ordering::SeqCst) && !shutdown.load(Ordering::Relaxed) {
+                let status = if interrupted.load(Ordering::SeqCst) {
+                    Lifecycle::Interrupted
+                } else {
+                    tracing::warn!("claude stream ended without a final result");
+                    Lifecycle::Failed
+                };
+                for item in state.drain_open_items(status) {
+                    let _ = events.send(ConversationEvent::ItemCompleted {
+                        turn_id: turn_id(),
+                        item,
+                    });
+                }
+                let _ = events.send(ConversationEvent::TurnCompleted {
+                    turn_id: turn_id(),
+                    status,
+                });
+            }
+            pending_results.store(0, Ordering::SeqCst);
+            turn_in_progress.store(false, Ordering::SeqCst);
+        }));
+    }
+
+    /// Tear the persistent process down and reap its tasks. The next
+    /// `send_input` respawns and resumes the captured session.
+    async fn kill_process(&mut self) {
+        self.stdin = None;
         if let Some(mut child) = self.child.take() {
             let _ = child.kill().await;
             let _ = child.wait().await;
         }
-
         if let Some(task) = self.reader_task.take() {
             let mut task = task;
             if tokio::time::timeout(Duration::from_secs(2), &mut task)
@@ -81,7 +278,7 @@ impl ClaudeHarness {
         if let Some(task) = self.stderr_task.take() {
             task.abort();
         }
-
+        self.pending_results.store(0, Ordering::SeqCst);
         self.turn_in_progress.store(false, Ordering::SeqCst);
     }
 }
@@ -160,186 +357,105 @@ impl Harness for ClaudeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
-        let config = self
-            .config
-            .as_ref()
-            .ok_or_else(|| anyhow!("claude harness not started"))?;
+        // The first message of a run carries the task prompt as a preamble.
         let mut turn_content = content.to_string();
         if self.should_seed_task_prompt {
+            let task_prompt = self
+                .config
+                .as_ref()
+                .ok_or_else(|| anyhow!("claude harness not started"))?
+                .task_prompt
+                .trim()
+                .to_string();
             self.should_seed_task_prompt = false;
-            if !config.task_prompt.trim().is_empty() {
-                turn_content = format!("{}\n\n{}", config.task_prompt.trim(), content);
+            if !task_prompt.is_empty() {
+                turn_content = format!("{task_prompt}\n\n{content}");
             }
         }
 
-        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+        self.interrupt_requested.store(false, Ordering::SeqCst);
+        self.ensure_process().await?;
 
+        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+        *self
+            .current_turn_id
+            .lock()
+            .expect("claude turn id lock poisoned") = Some(turn_id.clone());
+        // One result owed for this seed; each accepted steer adds another.
+        self.pending_results.store(1, Ordering::SeqCst);
         let _ = self.events.send(ConversationEvent::TurnStarted {
             turn_id: turn_id.clone(),
         });
 
-        let resume_id = self
-            .provider_session_id
-            .lock()
-            .expect("claude provider session id lock poisoned")
-            .clone();
-        let args = build_claude_session_turn_args(&turn_content, config, resume_id.as_deref());
-        let mut cmd = Command::new("claude");
-        cmd.args(&args);
-        super::configure_agent_env(&mut cmd, config);
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut cmd);
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| anyhow!("claude stdin not available"))?;
+        if let Err(error) = stdin
+            .write_all(user_message_line(&turn_content).as_bytes())
+            .await
+        {
+            // The process died between spawn and write; tear it down so the
+            // next send_input respawns cleanly.
+            drop(turn_guard);
+            self.kill_process().await;
+            return Err(anyhow!("failed to write claude seed message: {error}"));
         }
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-        cmd.stdin(std::process::Stdio::null());
-
-        if let Some(cwd) = &config.cwd {
-            cmd.current_dir(cwd);
-        }
-        super::configure_vendor_tokio_env(&mut cmd)?;
-        self.shutdown_requested.store(false, Ordering::SeqCst);
-        self.interrupt_requested.store(false, Ordering::SeqCst);
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
-
-        let stdout = match child.stdout.take() {
-            Some(stdout) => stdout,
-            None => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err(anyhow!("failed to capture claude stdout"));
-            }
-        };
-        let stderr = match child.stderr.take() {
-            Some(stderr) => stderr,
-            None => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err(anyhow!("failed to capture claude stderr"));
-            }
-        };
-
-        self.child = Some(child);
-
-        // Spawn reader task for NDJSON stdout.
-        let events = self.events.clone();
-        let raw_provider = self.raw_provider.clone();
-        let turn_in_progress = self.turn_in_progress.clone();
-        let shutdown = self.shutdown_requested.clone();
-        let interrupted = self.interrupt_requested.clone();
-        let session_slot = self.provider_session_id.clone();
-        let account_route = self.account_route.clone();
-        let reader_turn_id = turn_id.clone();
-        self.reader_task = Some(tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            let mut state = ReaderState::default();
-            let mut saw_turn_completed = false;
-
-            while let Ok(Some(line)) = lines.next_line().await {
-                if let Some(raw_provider) = &raw_provider {
-                    let _ = raw_provider.send(RawProviderEvent {
-                        stream: "stdout",
-                        line: line.clone(),
-                    });
-                }
-                if shutdown.load(Ordering::Relaxed) {
-                    break;
-                }
-                if line.trim().is_empty() {
-                    continue;
-                }
-
-                if let (Some(route), Some(signal)) = (
-                    account_route.as_ref(),
-                    claude_mapping::rate_limit_signal(&line),
-                ) {
-                    if let Err(error) = route.record_rate_limit(&signal).await {
-                        tracing::warn!(%error, "failed to record Claude account rate limit");
-                    }
-                    if signal.limited {
-                        let _ = events.send(ConversationEvent::Error {
-                            code: "provider_rate_limited".to_string(),
-                            message: signal.reason,
-                            evidence: None,
-                        });
-                        saw_turn_completed = true;
-                        break;
-                    }
-                }
-
-                let done =
-                    claude_mapping::process_line(&line, &reader_turn_id, &events, &mut state);
-                if let Some(session_id) = state.take_provider_session_id() {
-                    *session_slot
-                        .lock()
-                        .expect("claude provider session id lock poisoned") =
-                        Some(session_id.clone());
-                    if let Some(route) = &account_route {
-                        if let Err(error) = route.pin_session(&session_id).await {
-                            tracing::warn!(%error, "failed to pin Claude provider session account");
-                        }
-                    }
-                }
-                if done {
-                    saw_turn_completed = true;
-                    break;
-                }
-            }
-
-            if !saw_turn_completed && !shutdown.load(Ordering::Relaxed) {
-                // The per-turn process died without a result event: either we
-                // killed it (interrupt) or it crashed (failed).
-                let status = if interrupted.load(Ordering::SeqCst) {
-                    Lifecycle::Interrupted
-                } else {
-                    tracing::warn!(
-                        turn_id = %reader_turn_id,
-                        "claude turn ended without result event"
-                    );
-                    Lifecycle::Failed
-                };
-                for item in state.drain_open_items(status) {
-                    let _ = events.send(ConversationEvent::ItemCompleted {
-                        turn_id: reader_turn_id.clone(),
-                        item,
-                    });
-                }
-                let _ = events.send(ConversationEvent::TurnCompleted {
-                    turn_id: reader_turn_id,
-                    status,
-                });
-            }
-
-            turn_in_progress.store(false, Ordering::SeqCst);
-        }));
-
-        self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
+        let _ = stdin.flush().await;
 
         turn_guard.disarm();
         Ok(())
     }
 
+    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
+        let Some(stdin) = self.stdin.as_mut() else {
+            return SendCurrentOutcome::NotSteerable;
+        };
+        // Atomically join the open boundary. A separate bool check followed by
+        // `fetch_add` races the reader's final `fetch_sub`: a steer could be
+        // accepted after TurnCompleted and escape as a second boundary.
+        if self
+            .pending_results
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+                (pending > 0).then(|| pending.saturating_add(1))
+            })
+            .is_err()
+        {
+            return SendCurrentOutcome::NotSteerable;
+        }
+        if let Err(error) = stdin.write_all(user_message_line(content).as_bytes()).await {
+            self.pending_results.fetch_sub(1, Ordering::SeqCst);
+            return SendCurrentOutcome::Failed {
+                error: format!("failed to write claude steer: {error}"),
+            };
+        }
+        let _ = stdin.flush().await;
+        let provider_turn_id = self
+            .current_turn_id
+            .lock()
+            .expect("claude turn id lock poisoned")
+            .clone()
+            .unwrap_or_default();
+        SendCurrentOutcome::Sent { provider_turn_id }
+    }
+
     async fn interrupt(&mut self) -> Result<()> {
-        // Claude has no per-turn cancel RPC: every turn is its own
-        // `claude -p` process. Interrupt kills that process (no cooperative
-        // grace); the reader finalizes the turn as Interrupted, and the
-        // vendor session — addressed by the captured session id — survives
-        // for the next `--resume` turn.
+        // Claude's stream-json input has no in-band cancel, so interrupt tears
+        // the process down: the reader finalizes the open turn as Interrupted,
+        // and the next send_input respawns and `--resume`s the captured session
+        // (which survives the kill). The steer that prompted the interrupt rides
+        // that next seed.
         if !self.turn_in_progress.load(Ordering::SeqCst) {
             return Ok(());
         }
         self.interrupt_requested.store(true, Ordering::SeqCst);
-        self.kill_turn_process().await;
+        self.kill_process().await;
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::SeqCst);
-        self.kill_turn_process().await;
+        self.kill_process().await;
         Ok(())
     }
 
@@ -426,5 +542,120 @@ mod tests {
         let mut harness = ClaudeHarness::new(tx);
         harness.interrupt().await.expect("noop interrupt");
         assert!(!harness.interrupt_requested.load(Ordering::SeqCst));
+    }
+
+    // Live persistent-process checks against the real `claude` CLI (subscription
+    // auth). Ignored by default — run explicitly with a live login:
+    //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
+    fn live_config() -> AgentConfig {
+        AgentConfig {
+            system_prompt: String::new(),
+            task_prompt: String::new(),
+            agent: None,
+            cwd: Some(std::env::temp_dir()),
+            max_turns: None,
+            resume_token: None,
+            provider_account_id: None,
+            provider_account_authority_home: None,
+            write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            execution_boundary: None,
+            skip_permissions: false,
+            structured_replies: Vec::new(),
+            directive_relay: None,
+            env: Default::default(),
+        }
+    }
+
+    async fn drive_turn(
+        rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
+    ) -> (Lifecycle, String, usize) {
+        let mut text = String::new();
+        let mut completions = 0usize;
+        loop {
+            match tokio::time::timeout(Duration::from_secs(180), rx.recv()).await {
+                Ok(Some(ConversationEvent::TextDelta { content, .. })) => text.push_str(&content),
+                Ok(Some(ConversationEvent::ItemCompleted {
+                    item: crate::chat::types::ConversationItem::Message { text: t, .. },
+                    ..
+                })) => text.push_str(&t),
+                Ok(Some(ConversationEvent::TurnCompleted { status, .. })) => {
+                    completions += 1;
+                    return (status, text, completions);
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("event channel closed before TurnCompleted"),
+                Err(_) => panic!("timed out waiting for a turn"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "drives the real claude CLI; needs a live subscription login"]
+    async fn live_persistent_process_handles_sequential_turns() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut harness = ClaudeHarness::new(tx);
+        harness.start(&live_config()).await.expect("start");
+
+        harness
+            .send_input("Reply with exactly: ALPHA")
+            .await
+            .expect("first turn");
+        let (status, text, _) = drive_turn(&mut rx).await;
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(text.contains("ALPHA"), "first turn text: {text:?}");
+
+        // Same persistent process, second turn — the session id must be stable.
+        let session_after_first = harness.provider_session_id();
+        harness
+            .send_input("Reply with exactly: BETA")
+            .await
+            .expect("second turn");
+        let (status, text, _) = drive_turn(&mut rx).await;
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(text.contains("BETA"), "second turn text: {text:?}");
+        assert_eq!(
+            session_after_first,
+            harness.provider_session_id(),
+            "the persistent process keeps one vendor session across turns"
+        );
+
+        harness.stop().await.expect("stop");
+    }
+
+    #[tokio::test]
+    #[ignore = "drives the real claude CLI; needs a live subscription login"]
+    async fn live_send_current_coalesces_into_one_boundary() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut harness = ClaudeHarness::new(tx);
+        harness.start(&live_config()).await.expect("start");
+
+        harness
+            .send_input("Write a slow, detailed 200-word explanation of how a bicycle works.")
+            .await
+            .expect("seed turn");
+        // Inject a steer while the seed turn is still generating.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let outcome = harness
+            .send_current("IMPORTANT: also include the word PANGOLIN in your reply.")
+            .await;
+        assert!(
+            matches!(outcome, SendCurrentOutcome::Sent { .. }),
+            "steer accepted into the live turn: {outcome:?}"
+        );
+
+        // The reader must coalesce the seed turn and the queued steer turn into
+        // exactly one TurnCompleted for this one send_input.
+        let (status, text, completions) = drive_turn(&mut rx).await;
+        assert_eq!(status, Lifecycle::Completed);
+        assert_eq!(completions, 1, "one coalesced boundary for the send_input");
+        assert!(
+            text.to_uppercase().contains("PANGOLIN"),
+            "the steer was incorporated: {text:?}"
+        );
+        // The coalesced boundary drained the pending counter.
+        assert_eq!(harness.pending_results.load(Ordering::SeqCst), 0);
+        assert!(!harness.turn_in_progress.load(Ordering::SeqCst));
+
+        harness.stop().await.expect("stop");
     }
 }

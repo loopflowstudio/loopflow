@@ -41,11 +41,16 @@ fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<Strin
         if line.trim().is_empty() {
             continue;
         }
-        if claude_mapping::process_line(&line, "turn_trace", &tx, &mut state) {
-            saw_turn_completed = true;
-        }
+        // process_line reports the result status; the reader (mirrored here)
+        // owns the terminal TurnCompleted.
+        let result = claude_mapping::process_line(&line, "turn_trace", &tx, &mut state);
         drain_events(&mut rx, &mut events);
-        if saw_turn_completed {
+        if let Some(status) = result {
+            saw_turn_completed = true;
+            events.push(ConversationEvent::TurnCompleted {
+                turn_id: "turn_trace".to_string(),
+                status,
+            });
             break;
         }
     }
@@ -234,13 +239,14 @@ fn claude_trace_multi_tool_lifecycle() {
 fn codex_trace_normal_turn() {
     let events = replay_codex_trace("codex_normal_turn.jsonl");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    // User echoes, the completed copy of streamed agent prose, and status
-    // notifications produce no events; tokenUsage folds into usage_checkpoint.
+    // User echoes and status notifications produce no events. The final-answer
+    // completion preserves its phase receipt; tokenUsage folds into usage_checkpoint.
     assert_eq!(
         event_types,
         vec![
             "turn_started",
             "text_delta",
+            "item_completed",
             "usage_checkpoint",
             "usage_checkpoint",
             "turn_completed",
@@ -259,11 +265,18 @@ fn codex_trace_normal_turn() {
         events.get(1),
         Some(ConversationEvent::TextDelta { content, .. }) if content == "OK"
     ));
+    assert!(matches!(
+        events.get(2),
+        Some(ConversationEvent::ItemCompleted {
+            item: ConversationItem::Message { text, phase, .. },
+            ..
+        }) if text == "OK" && phase.as_deref() == Some("final_answer")
+    ));
     // Codex reports cumulative gross input (cache included); the harness
     // reports the turn's own spend in Claude's shape: input net of cache,
     // gross in total_input_tokens.
     assert!(matches!(
-        events.get(2),
+        events.get(3),
         Some(ConversationEvent::UsageCheckpoint {
             usage,
             final_receipt: false,
@@ -275,7 +288,7 @@ fn codex_trace_normal_turn() {
                 && usage.total_input_tokens == Some(16065)
     ));
     assert!(matches!(
-        events.get(3),
+        events.get(4),
         Some(ConversationEvent::UsageCheckpoint {
             final_receipt: true,
             ..

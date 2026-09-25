@@ -1,7 +1,7 @@
-//! Durable tracking and delivery identity for one Linear Task.
+//! Durable state for one Linear Task.
 //!
-//! A Task owns one durable worktree and serial PR chain. End-to-end execution
-//! state belongs to the controller layer; one-shot Runs need only this record.
+//! A Task owns one durable worktree, serial PR chain, and Flow progression.
+//! Runs are transient executors of that state.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -121,13 +121,8 @@ impl CiObservation {
     /// Whether this reading makes a `ci-fix` repair *legal*: the current head is
     /// failing a required check that a repair turn could actually act on.
     ///
-    /// This asks only about legality. Whether a repair has already fired for this
-    /// exact failure is a separate question with a separate owner — the durable
-    /// CI incident, keyed on the incident identity and claimed by one landing
-    /// generation. Those two questions used to be conflated in one mutable JSON
-    /// marker on this struct, which meant the wake was deduplicated by a value
-    /// re-derived on every reconcile and committed only once a body had already
-    /// been born.
+    /// The landing supervisor owns execution; CI incidents record responses
+    /// without limiting how often the current failure can be repaired.
     ///
     /// A head whose failures are *all* land-time preconditions is red and not
     /// repairable ([`CiCheck::land_time_precondition`]): waking a body there
@@ -192,7 +187,7 @@ pub struct CiIncident {
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,
     pub webhook_received_at: Option<OffsetDateTime>,
-    /// Landing generation that won repair admission for this exact incident.
+    /// Landing generation that most recently responded to this incident.
     pub claimed_landing_generation: Option<u64>,
     pub responded_at: Option<OffsetDateTime>,
     pub green_at: Option<OffsetDateTime>,
@@ -666,6 +661,17 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    /// A durable steer: direction handed to the Task. Folded into the run's
+    /// seed and injected into a live turn; not a report out, so it never
+    /// crosses to the parent Project.
+    Steer {
+        author: crate::durable::Author,
+        text: String,
+    },
+    /// A request to end the Task's current turn so the next one re-reads its
+    /// direction immediately. A live run acts on interrupts issued after it
+    /// launched; there is nothing to interrupt otherwise. Not a report out.
+    Interrupt,
     PrStarted {
         pr_id: TaskPrId,
         sequence: u32,
@@ -695,19 +701,16 @@ pub enum TaskEventKind {
 }
 
 impl TaskEventKind {
-    /// Whether the event crosses the required Task → Project boundary.
-    pub fn is_project_observable(&self) -> bool {
+    /// Whether the event should wake the owning Wave.
+    pub fn is_wave_observable(&self) -> bool {
         !matches!(
             self,
-            Self::WorktreeInitializing { .. } | Self::Started | Self::Progress { .. }
+            Self::WorktreeInitializing { .. }
+                | Self::Started
+                | Self::Progress { .. }
+                | Self::Steer { .. }
+                | Self::Interrupt
         )
-    }
-
-    /// Whether a Project-observable Task event also belongs in the root Wave.
-    /// This currently mirrors the Project boundary; the server-topology design
-    /// must decide whether the duplicate delivery remains necessary.
-    pub fn is_root_wave_observable(&self) -> bool {
-        self.is_project_observable()
     }
 }
 
@@ -742,7 +745,7 @@ impl TaskObservation {
     }
 }
 
-/// The durable cursor for streaming human Linear edits into one Task.
+/// The durable cursor for streaming Linear edits by participants into one Task.
 /// It is the exactly-once ledger — what issue revision and comments have already
 /// become Task direction — plus the health of the last observation, so
 /// `lf task status` can show stale reads and their degraded reason.
@@ -775,7 +778,7 @@ pub struct LinearObservationApply {
     pub observed_at: OffsetDateTime,
     /// A title/description edit to persist as one authored Steer.
     pub content_steer: Option<String>,
-    /// Human comments observed this pass, oldest first.
+    /// Participant comments observed this pass, oldest first.
     pub follow_ups: Vec<LinearFollowUp>,
 }
 
@@ -793,7 +796,8 @@ pub struct LinearObservationOutcome {
     /// emitted no direction (existing comments are marked seen, not replayed).
     pub baselined: bool,
     pub content_steer_applied: bool,
-    pub follow_ups_created: Vec<crate::durable::SteerId>,
+    /// Event ids of the steer comments this observation appended.
+    pub follow_ups_created: Vec<i64>,
 }
 
 #[cfg(test)]

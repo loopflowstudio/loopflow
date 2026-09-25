@@ -5,13 +5,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
 use crate::engine::error::CoreError;
-use crate::engine::flow::{expand_direction_names, load_direction, load_skill, Direction, Skill};
+use crate::engine::flow::{load_skill, Skill};
 use crate::repository::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -23,7 +22,6 @@ use tracing::{debug, warn};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentSource {
     Skill,
-    Direction,
     Scratch,
     Wave,
     WaveMemory,
@@ -94,7 +92,6 @@ pub struct GatherContextOpts {
     /// Include loopflow operating guidance.
     pub operate: bool,
     pub surface: Surface,
-    pub directions: Vec<String>,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
     /// Specific files to include in context.
@@ -139,17 +136,21 @@ pub enum Surface {
     Ide,
     Mac,
     Iphone,
+    /// A live chat channel (e.g. Discord) where a person is reading. The reply
+    /// is the message they see, so the resident speaks plainly and deliberately.
+    Chat,
     #[default]
     #[serde(other)]
     Headless,
 }
 
 impl Surface {
-    /// State whether this conversation has a human before the skill can decide
+    /// State whether someone is participating in this conversation before the skill can decide
     /// where a real dependency should route.
     pub fn instructions(self) -> &'static str {
         match self {
             Self::Headless => crate::engine::builtins::SURFACE_HEADLESS,
+            Self::Chat => crate::engine::builtins::SURFACE_CHAT,
             _ => crate::engine::builtins::SURFACE_HUMAN_PRESENT,
         }
     }
@@ -164,6 +165,7 @@ impl std::str::FromStr for Surface {
             "ide" => Self::Ide,
             "mac" => Self::Mac,
             "iphone" => Self::Iphone,
+            "chat" => Self::Chat,
             _ => Self::Headless,
         };
         Ok(surface)
@@ -174,13 +176,13 @@ impl std::str::FromStr for Surface {
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
     pub surface: Surface,
+    pub user_name: Option<String>,
     pub docs: Vec<Document>,
     pub diff: Option<String>,
     pub diff_files: Vec<Document>,
     pub skill: Option<Skill>,
     pub repo_root: String,
     pub clipboard: Option<String>,
-    pub directions: Vec<Direction>,
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
@@ -195,58 +197,6 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
-}
-
-/// Prompt context gathered from repo/state inputs.
-#[derive(Debug, Clone, Default)]
-pub struct GatheredContext(pub PromptComponents);
-
-impl GatheredContext {
-    pub fn into_components(self) -> PromptComponents {
-        self.0
-    }
-
-    pub fn components(&self) -> &PromptComponents {
-        &self.0
-    }
-
-    pub fn components_mut(&mut self) -> &mut PromptComponents {
-        &mut self.0
-    }
-}
-
-impl Deref for GatheredContext {
-    type Target = PromptComponents;
-
-    fn deref(&self) -> &Self::Target {
-        self.components()
-    }
-}
-
-impl DerefMut for GatheredContext {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.components_mut()
-    }
-}
-
-/// Fully rendered prompt content.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RenderedPrompt(pub String);
-
-impl RenderedPrompt {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
-    }
-}
-
-impl std::fmt::Display for RenderedPrompt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
@@ -363,7 +313,7 @@ pub(crate) fn account_prompt_tokens(
 }
 
 /// Gather all prompt components.
-pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreError> {
+pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, CoreError> {
     let start = Instant::now();
     let repo_root = &opts.repo_root;
 
@@ -376,24 +326,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     debug!(
         elapsed_ms = skill_start.elapsed().as_millis(),
         "loaded skill"
-    );
-
-    // Load directions
-    let directions_start = Instant::now();
-    let mut direction_names = Vec::new();
-    if let Some(ref skill) = skill {
-        direction_names.extend(skill.directions.clone());
-    }
-    direction_names.extend(opts.directions.clone());
-    let expanded_names = expand_direction_names(&direction_names, repo_root);
-    let mut directions = Vec::new();
-    for name in &expanded_names {
-        directions.push(load_direction(name, repo_root)?);
-    }
-    debug!(
-        elapsed_ms = directions_start.elapsed().as_millis(),
-        count = directions.len(),
-        "loaded directions"
     );
 
     let spec = opts.gather_spec();
@@ -425,7 +357,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::WaveMemory => wave_memory = Some(doc),
             DocumentSource::Diff => diff_files.push(doc),
-            DocumentSource::Skill | DocumentSource::Direction | DocumentSource::Clipboard => {}
+            DocumentSource::Skill | DocumentSource::Clipboard => {}
         }
     }
     dedup_documents(&mut diff_files);
@@ -458,15 +390,15 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     );
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
-    Ok(GatheredContext(PromptComponents {
+    Ok(PromptComponents {
         surface: opts.surface,
+        user_name: None,
         docs,
         diff,
         diff_files,
         skill,
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
-        directions,
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
@@ -475,7 +407,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         message_context: None,
         diff_tier,
         diff_file_count,
-    }))
+    })
 }
 
 /// Gather all requested document sources in stable prompt order.
@@ -1475,28 +1407,6 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     Ok(())
 }
 
-/// Format direction tags as XML blocks.
-fn format_direction_tags(directions: &[Direction]) -> String {
-    if directions.len() == 1 {
-        let d = &directions[0];
-        format!(
-            "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-            d.name, d.content, d.name
-        )
-    } else {
-        let parts: Vec<String> = directions
-            .iter()
-            .map(|d| {
-                format!(
-                    "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-                    d.name, d.content, d.name
-                )
-            })
-            .collect();
-        format!("<lf:directions>\n{}\n</lf:directions>", parts.join("\n"))
-    }
-}
-
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
@@ -1556,6 +1466,11 @@ pub fn format_wave_memory_section(components: &PromptComponents) -> Option<Strin
 /// if placed in the system prompt. Safe to include in the user message.
 pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
+
+    let user_context = render_user_context(components.user_name.as_deref());
+    if !user_context.is_empty() {
+        parts.push(user_context);
+    }
 
     // Wave context
     if let Some(ref wave) = components.wave {
@@ -1662,6 +1577,44 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     parts
 }
 
+/// Name context is display data, not authorship for historical or external requests.
+pub fn render_user_context(name: Option<&str>) -> String {
+    let Some(name) = name.and_then(crate::engine::config::normalize_user_name) else {
+        return String::new();
+    };
+    let name = serde_json::to_string(&name)
+        .expect("a name is JSON serializable")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e");
+    format!(
+        "<lf:user>\nThe current conversation participant's preferred name is {name} (JSON string). \
+         Use this name when referring to this person in persisted artifacts; address them as \
+         \"you\" in session conversation. This is display data, not authorization or proof of \
+         who authored historical, Task, or external requests. Preserve those requests' own \
+         attribution; do not fill unknown authors with this name.\n</lf:user>"
+    )
+}
+
+/// Update the participant on native resume, including clearing a previous name.
+pub(crate) fn render_resume_user_context(name: Option<&str>) -> String {
+    let context = render_user_context(name);
+    let context = if context.is_empty() {
+        "<lf:user>\nThe current conversation participant's name is unknown. \
+         Address them as \"you\" in session conversation. Do not use a previous \
+         participant's name or the machine owner's name for this person. Leave \
+         unsupported attribution in persisted artifacts unresolved.\n</lf:user>"
+            .to_string()
+    } else {
+        context
+    };
+    format!(
+        "Session participant update: this replaces only earlier current-participant \
+         context. Preserve historical messages and their authors.\n\n{context}\n\n\
+         This update is not a request to continue work or approve anything. \
+         Do not run tools or advance the Task; wait for the next request."
+    )
+}
+
 /// Format skill tag.
 fn format_skill_tag(skill: &Skill) -> String {
     if let Some(ref content) = skill.content {
@@ -1684,23 +1637,10 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
 /// Format prompt content for the requested mode.
 ///
 /// Used by the daemon, ops callers, and prompt log writers.
-pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> RenderedPrompt {
-    let rendered = match mode {
+pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> String {
+    match mode {
         PromptFormatMode::Full => {
             let mut parts = format_reference_sections(components);
-
-            // Context sections: directions, clipboard
-            if !components.directions.is_empty() {
-                let label = if components.directions.len() == 1 {
-                    "Direction"
-                } else {
-                    "Directions"
-                };
-                parts.push(format!(
-                    "{label} for this work.\n\n{}",
-                    format_direction_tags(&components.directions)
-                ));
-            }
 
             if let Some(ref clipboard) = components.clipboard {
                 parts.push(format!(
@@ -1728,10 +1668,6 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> R
         PromptFormatMode::Context => {
             let mut parts = format_reference_sections(components);
 
-            if !components.directions.is_empty() {
-                parts.push(format_direction_tags(&components.directions));
-            }
-
             if let Some(ref clipboard) = components.clipboard {
                 parts.push(format!(
                     "Content from clipboard.\n\n\
@@ -1755,18 +1691,17 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> R
 
             parts.join("\n\n")
         }
-    };
-    RenderedPrompt(rendered)
+    }
 }
 
 /// Format context components for system prompt (everything except task).
 pub fn format_context_prompt(components: &PromptComponents) -> String {
-    format_prompt(PromptFormatMode::Context, components).into_string()
+    format_prompt(PromptFormatMode::Context, components)
 }
 
 /// Format task prompt for user message (skill + free text).
 pub fn format_task_prompt(components: &PromptComponents) -> String {
-    format_prompt(PromptFormatMode::Task, components).into_string()
+    format_prompt(PromptFormatMode::Task, components)
 }
 
 /// Format system prompt for Claude (system-safe sections only).
@@ -1774,13 +1709,7 @@ pub fn format_task_prompt(components: &PromptComponents) -> String {
 /// Excludes docs, diffs, wave context, and clipboard — those go in the task
 /// prompt to avoid triggering third-party app classifiers.
 pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
-    let mut parts = format_system_sections(components);
-
-    if !components.directions.is_empty() {
-        parts.push(format_direction_tags(&components.directions));
-    }
-
-    parts.join("\n\n")
+    format_system_sections(components).join("\n\n")
 }
 
 /// Format task prompt for Claude (includes content sections + clipboard + skill + message).
@@ -1870,13 +1799,12 @@ fn format_files(docs: &[Document]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::flow::{Direction, Skill};
+    use crate::engine::flow::Skill;
     use std::path::{Path, PathBuf};
 
     fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".lf/skills")).expect("create skills");
-        std::fs::create_dir_all(dir.path().join(".lf/directions")).expect("create directions");
         dir
     }
 
@@ -1897,7 +1825,7 @@ mod tests {
     }
 
     fn render_full_prompt(components: PromptComponents) -> String {
-        format_prompt(PromptFormatMode::Full, &components).into_string()
+        format_prompt(PromptFormatMode::Full, &components)
     }
 
     #[test]
@@ -2034,29 +1962,38 @@ mod tests {
         assert!(!prompt.contains("lf chat"));
     }
 
-    /// A bare flow/skill run gets the universal execution floor, not wave or
-    /// project orchestration capabilities.
     #[test]
-    fn assembled_prompt_carries_only_universal_loopflow_guidance() {
-        let components = PromptComponents {
-            operate: true,
-            skill: Some(Skill::named("implement")),
-            ..Default::default()
-        };
+    fn assembled_prompts_deliver_procedures_to_the_owning_skill() {
+        let repo = init_repo();
+        for name in ["implement", "debug", "loopflow", "wave/operate"] {
+            let components = gather_context(&GatherContextOpts {
+                repo_root: repo.path().to_path_buf(),
+                skill: Some(name.to_string()),
+                operate: true,
+                ..Default::default()
+            })
+            .expect("assemble customer skill in a neutral repository");
+            let prompt = render_full_prompt(components);
+            assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+            assert!(prompt.contains("Execute Here First"));
+            assert!(prompt.contains("Evidence Loop"));
+            assert!(prompt.contains("all relevant recorded evidence"));
+            assert!(prompt.contains("lf pr land"));
+            assert!(!prompt.contains("scripts/dev-lf"));
+            assert!(!prompt.contains("LOO-267"));
 
-        let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-        assert!(prompt.contains("Execute Here First"));
-        assert!(prompt.contains("Evidence Loop"));
-        assert!(prompt.contains("all relevant recorded evidence"));
-        assert!(prompt.contains("Treat unexpected tool, test, or user output as a"));
-        assert!(prompt.contains("lf pr land"));
-        assert!(prompt.contains("edit\n`wave/<name>/MEMORY.md`"));
-        assert!(!prompt.contains("## Prompt layers"));
-        assert!(!prompt.contains("## Search portfolios"));
-        assert!(!prompt.contains("lf pm show"));
-        assert!(!prompt.contains("lf loop <flow>"));
-        assert!(!prompt.contains("tmux attach"));
+            let orchestrates = matches!(name, "loopflow" | "wave/operate");
+            for procedure in ["lf task restart", "lf work place", "lf ps --json"] {
+                assert_eq!(
+                    prompt.contains(procedure),
+                    orchestrates,
+                    "{name}: {procedure}"
+                );
+            }
+            if !orchestrates {
+                assert!(!prompt.contains("doppler run"), "{name}");
+            }
+        }
     }
 
     #[test]
@@ -2068,9 +2005,12 @@ mod tests {
             };
 
             let prompt = render_full_prompt(components);
-            assert!(prompt.contains("A human is present"), "surface {surface:?}");
             assert!(
-                prompt.contains("never create a human session"),
+                prompt.contains("You are working directly with the user"),
+                "surface {surface:?}"
+            );
+            assert!(
+                prompt.contains("never create another session"),
                 "surface {surface:?}"
             );
         }
@@ -2270,52 +2210,6 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_with_single_direction() {
-        let components = PromptComponents {
-            directions: vec![Direction {
-                name: "concise".to_string(),
-                content: "Be concise and direct.".to_string(),
-                source: PathBuf::from(".lf/directions/concise.md"),
-            }],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:direction:concise>"));
-        assert!(prompt.contains("Be concise and direct."));
-        assert!(prompt.contains("</lf:direction:concise>"));
-        assert!(prompt.contains("Direction for this work"));
-        // Should NOT use plural wrapper for single direction
-        assert!(!prompt.contains("<lf:directions>"));
-    }
-
-    #[test]
-    fn format_prompt_with_multiple_directions() {
-        let components = PromptComponents {
-            directions: vec![
-                Direction {
-                    name: "concise".to_string(),
-                    content: "Be concise.".to_string(),
-                    source: PathBuf::from(".lf/directions/concise.md"),
-                },
-                Direction {
-                    name: "architect".to_string(),
-                    content: "Think architecturally.".to_string(),
-                    source: PathBuf::from(".lf/directions/architect.md"),
-                },
-            ],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:directions>"));
-        assert!(prompt.contains("</lf:directions>"));
-        assert!(prompt.contains("<lf:direction:concise>"));
-        assert!(prompt.contains("<lf:direction:architect>"));
-        assert!(prompt.contains("Directions for this work"));
-    }
-
-    #[test]
     fn format_prompt_with_skill() {
         let components = PromptComponents {
             skill: Some(Skill {
@@ -2323,7 +2217,6 @@ mod tests {
                 content: Some("Implement the feature described.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             ..Default::default()
@@ -2344,7 +2237,6 @@ mod tests {
                 content: None,
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             ..Default::default()
@@ -2432,17 +2324,11 @@ mod tests {
                 content: "# Project".to_string(),
                 source: DocumentSource::Docs,
             }],
-            directions: vec![Direction {
-                name: "concise".to_string(),
-                content: "Be concise.".to_string(),
-                source: PathBuf::from(".lf/directions/concise.md"),
-            }],
             skill: Some(Skill {
                 name: "implement".to_string(),
                 content: Some("Implement it.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             diff: Some("diff content".to_string()),
@@ -2457,15 +2343,13 @@ mod tests {
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:files>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
-        let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
         let skill_pos = prompt.find("<lf:skill:implement>").unwrap();
 
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
         assert!(docs_pos < diff_pos);
-        assert!(diff_pos < direction_pos);
-        assert!(direction_pos < clipboard_pos);
+        assert!(diff_pos < clipboard_pos);
         assert!(clipboard_pos < skill_pos);
     }
 
@@ -2475,8 +2359,8 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
         assert!(prompt.contains("launch an ordinary Run explicitly"));
-        assert!(prompt.contains("opens a durable human session"));
-        assert!(prompt.contains("If no human authority is required"));
+        assert!(prompt.contains("opens a durable session"));
+        assert!(prompt.contains("If no user authorization is required"));
     }
 
     #[test]
@@ -2493,6 +2377,19 @@ mod tests {
             .parse::<Surface>()
             .expect("surface parsing is infallible");
         assert_eq!(parsed, Surface::Ide);
+    }
+
+    #[test]
+    fn chat_surface_speaks_plainly_and_is_distinct_from_headless() {
+        assert_eq!(
+            "chat".parse::<Surface>().expect("infallible"),
+            Surface::Chat
+        );
+        let chat = Surface::Chat.instructions();
+        assert!(chat.contains("live chat channel"));
+        assert!(chat.contains("Never narrate your internal machinery"));
+        assert_ne!(chat, Surface::Headless.instructions());
+        assert_ne!(chat, Surface::Cli.instructions());
     }
 
     // ==========================================================================
@@ -2639,7 +2536,7 @@ mod tests {
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
+        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
 
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
@@ -2692,7 +2589,7 @@ mod tests {
         };
         let ctx = gather_context(&opts).expect("gather context");
         let has_diff = ctx.diff.is_some();
-        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
+        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
 
         assert!(
             !has_diff,
@@ -2725,7 +2622,7 @@ mod tests {
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, ctx.components()).into_string();
+        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
 
         assert!(prompt.contains("mod changed;"));
         assert!(!prompt.contains("mod unchanged;"));
@@ -2863,59 +2760,6 @@ mod tests {
         assert!(paths.contains(&"README.md"));
         assert!(paths.contains(&"docs/README.md"));
         assert!(paths.contains(&"docs/nested/README.md"));
-    }
-
-    #[test]
-    fn gather_context_with_directions() {
-        let temp = tempfile::tempdir().expect("create temp dir");
-        let repo = temp.path();
-
-        // Create direction
-        std::fs::create_dir_all(repo.join(".lf/directions")).expect("create directions");
-        std::fs::write(repo.join(".lf/directions/concise.md"), "Be concise.")
-            .expect("write direction");
-
-        let opts = GatherContextOpts {
-            repo_root: repo.to_path_buf(),
-            directions: vec!["concise".to_string()],
-            ..Default::default()
-        };
-
-        let result = gather_context(&opts);
-        assert!(result.is_ok());
-        let components = result.unwrap();
-        assert_eq!(components.directions.len(), 1);
-        assert_eq!(components.directions[0].name, "concise");
-        assert!(components.directions[0].content.contains("Be concise"));
-    }
-
-    #[test]
-    fn directions_from_skill_and_cli_combined() {
-        let repo = init_repo();
-        write_file(
-            repo.path(),
-            ".lf/skills/impl.md",
-            r#"---
-directions:
-  - thorough
----
-# Implement
-"#,
-        );
-        write_file(repo.path(), ".lf/directions/thorough.md", "Be thorough.");
-        write_file(repo.path(), ".lf/directions/fast.md", "Be fast.");
-
-        let opts = GatherContextOpts {
-            repo_root: repo.path().to_path_buf(),
-            skill: Some("impl".to_string()),
-            directions: vec!["fast".to_string()],
-            ..Default::default()
-        };
-        let ctx = gather_context(&opts).expect("gather context");
-
-        assert_eq!(ctx.directions.len(), 2);
-        assert_eq!(ctx.directions[0].name, "thorough");
-        assert_eq!(ctx.directions[1].name, "fast");
     }
 
     #[test]
@@ -3066,7 +2910,6 @@ directions:
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             ..Default::default()
@@ -3089,18 +2932,12 @@ directions:
                 content: "# Project".to_string(),
                 source: DocumentSource::Docs,
             }],
-            directions: vec![Direction {
-                name: "concise".to_string(),
-                content: "Be concise.".to_string(),
-                source: PathBuf::from(".lf/directions/concise.md"),
-            }],
             clipboard: Some("Error message".to_string()),
             skill: Some(Skill {
                 name: "debug".to_string(),
                 content: Some("Fix the error.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             ..Default::default()
@@ -3111,9 +2948,6 @@ directions:
         assert!(context.contains("<lf:files>"));
         assert!(context.contains("# Project"));
         assert!(context.contains("<lf:clipboard>"));
-        // Should include directions (context, not task)
-        assert!(context.contains("<lf:direction:concise>"));
-        assert!(context.contains("Be concise."));
         // Should NOT include skill (goes in task prompt)
         assert!(!context.contains("<lf:skill:debug>"));
         assert!(!context.contains("Fix the error."));
@@ -3143,7 +2977,6 @@ directions:
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             ..Default::default()
@@ -3180,7 +3013,6 @@ directions:
                 content: Some("Debug the error.".to_string()),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             message: Some("login page crashes".to_string()),
@@ -3199,7 +3031,6 @@ directions:
                 content: None,
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
             }),
             ..Default::default()

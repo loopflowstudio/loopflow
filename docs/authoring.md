@@ -1,7 +1,7 @@
 # Authoring
 
-The prompt library lives in your repo and is reviewed like code: skills,
-flows, and directions under `.lf/`, goals under `wave/`. This page is how to
+The prompt library lives in your repo and is reviewed like code: skills
+and flows under `.lf/`, goals under `wave/`. This page is how to
 write each one well. Where they resolve and what ships builtin is reference —
 see [`lf` → Skills](lf.md#skills).
 
@@ -31,16 +31,16 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs with a present human. `--batch` and automated
+Direct launch from a TTY runs interactively. `--batch` and automated
 flow execution run the same skill headlessly, so write a bounded contract for
 both surfaces when the work involves judgment or conversation:
 
 ```markdown
 ## Reviewer mode
 
-- **Human reviewer:** explore the problem in the current conversation.
+- **Interactive reviewer:** explore the problem in the current conversation.
 - **Parent reviewer:** answer the assigned question from supplied evidence and
-  return without waiting for a human.
+  return without waiting for a person.
 ```
 
 Skills chain through `scratch/`: a step writes `scratch/<branch>.md`, the
@@ -60,11 +60,11 @@ flow — with commits between them:
 ```
 
 Skills that need another Work's perspective launch it directly with
-`lf --as <work> : "<prompt>"`. Skills that genuinely need human judgment use
-`lf ask "<request>"`; the Run blocks while a durable human session works in the
-same checkout, then resumes when the human completes that conversation.
+`lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
+`lf ask "<request>"`; the Run blocks while a durable session works in the
+same checkout, then resumes when the user completes that conversation.
 
-Put a mandatory human gate on the exact authored occurrence. `id` is
+Put a mandatory review gate on the exact authored occurrence. `id` is
 stable within the expanded flow and required with `human: true`:
 
 ```yaml
@@ -77,7 +77,7 @@ stable within the expanded flow and required with `human: true`:
 A headless Task parks at that node; an attached TUI uses its present User.
 Iterate returns to the nearest preceding autonomous occurrence. Flow policy
 does not create a separate review ledger; workflows that are already designed
-can select an existing gate-free first flow when they launch a Task.
+can select an existing gate-free Flow when they launch a Task worker.
 
 Mechanical git/PR operations ride along as `op:` steps:
 
@@ -114,30 +114,6 @@ with no `flow:` or `skill:` (like `silence`) is a clean no-op exit. With no
 
 Keep flows bounded. A flow is one pass — repetition belongs to Wave,
 Project, and Task runtimes, not to loops inside a flow.
-
-## Directions
-
-A direction shapes judgment — what "good" means for this run:
-
-```markdown
-# .lf/directions/ux.md
-
-Optimize for user experience quality: visibility, feedback, consistency.
-
-## Success
-
-A design doc in scratch/ that another engineer could implement from.
-```
-
-```bash
-lf gate -d ux
-lf gate -d ux,clarity     # directions compose; stack intents
-```
-
-Write a direction as values plus a success condition, not a task list. A
-`ux` direction sets user-facing intent; a `clarity` direction adds
-code-model rigor; stacking gets both. Builtin groups: `infra`, `ux`,
-`craft`, `creativity`, `ceo`.
 
 ## Goals
 
@@ -204,17 +180,26 @@ the goal or another repository file.
 
 ### Writing KRs
 
-Project KRs live in Linear, but writing them is goal craft. A KR should read
+Project KRs live in Linear, but writing them begins one level above the
+measurement. State who the Project serves and what becomes easier, safer,
+faster, clearer, or newly possible in their real work. For internal Projects,
+the beneficiary may be an operator, maintainer, or agent; still name the
+downstream experience instead of treating the mechanism as self-justifying.
+
+Then choose evidence. A KR should read
 as **proof under duration**: an observable end state demonstrated on real
 work over a stated window, not a capability checkbox that passes once on a
 demo.
 
+- **Connected to the bet.** Be able to finish the sentence: “If this holds,
+  the intended user improvement is credible because …” A convenient metric
+  with no causal link is telemetry, not a KR.
 - **Endurance over capability.** Not "the loop can fix a failing build" but
   "over one week, every dispatched loop lands or stops with an actionable
   record — zero silent stalls."
 - **Counted.** Streaks, N/N trials: "four consecutive weekly releases with
   zero manual repair," "5/5 restarts lose nothing."
-- **Unattended.** The window counts only if no human repaired anything
+- **Unattended.** The window counts only if no one intervened
   inside it. A rescue resets the streak.
 - **Falsifiable on real load.** Measured against the living workspace, never
   a fresh demo state.
@@ -224,7 +209,8 @@ demo.
 - The agent can fix a failing build.
 - Reports are visible in the app.
 
-# Strong: proof under duration
+# Strong: user promise with proof under duration
+# Project: Operators can dispatch work without babysitting the loop.
 - Over one week of real work, every dispatched loop lands its PR unattended
   or stops with an actionable record — zero silent stalls, zero rescues.
 - Four consecutive weekly releases complete with no manual repair.
@@ -249,10 +235,17 @@ agents edit the same reviewed file through the ordinary repository workflow;
 
 ## Adaptation
 
-When an agent learns something repo-specific, the durable home for that
-learning is `.lf/`: adapt the skill, add a direction, or set config — and
-commit it with the work so the change stays reviewable. Prompts that live in
-the repo improve the way code does: by diff.
+Curate durable lessons and decisions in the owning Wave's
+`wave/<name>/MEMORY.md`. Identify the owner from the work's context and Wave
+objectives. A repository with no Waves gets one named for the repository, with
+a repo-wide GOAL grounded in its purpose and a MEMORY for durable lessons.
+This local setup needs no PM binding or running Wave. If existing Waves leave
+ownership unclear, ask the human and keep the question in scratch until resolved.
+
+Put executable changes where they apply: task instructions in the relevant
+skill, repo conventions in the agent guide, and configuration in
+`.lf/config.yaml`. Do not create standalone learning or memory files in `.lf/`.
+Commit these changes with the work so they stay reviewable.
 
 ## See Also
 

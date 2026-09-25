@@ -117,6 +117,7 @@ struct AttemptFailurePresentationTests {
         let turn = try! ChatTurn(
             id: "turn-legacy",
             role: .assistant,
+            authorName: nil,
             text: "",
             status: .failed,
             items: [],
@@ -140,6 +141,7 @@ struct AttemptFailurePresentationTests {
         let authored = try ChatTurn(
             id: "turn-13",
             role: .assistant,
+            authorName: nil,
             text: "The provider is still at capacity; the Wave remains available for messages.",
             status: .completed,
             items: [],
@@ -169,6 +171,7 @@ struct AttemptFailurePresentationTests {
         let first = try ChatTurn(
             id: "turn-10",
             role: .assistant,
+            authorName: nil,
             text: "First attempt reached the provider but failed.",
             status: .failed,
             items: [],
@@ -179,6 +182,7 @@ struct AttemptFailurePresentationTests {
         let second = try ChatTurn(
             id: "turn-11",
             role: .assistant,
+            authorName: nil,
             text: "Second attempt failed after preserving the queue.",
             status: .failed,
             items: [],
@@ -234,6 +238,7 @@ struct AttemptFailurePresentationTests {
         try! ChatTurn(
             id: id,
             role: .assistant,
+            authorName: nil,
             text: "",
             status: status,
             items: [],

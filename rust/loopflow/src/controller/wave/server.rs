@@ -23,7 +23,7 @@
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
 //!   passes 12; absent means the whole thread.
-//! - `GET /events` → SSE, the served mind's thread. Human subscriptions replay
+//! - `GET /events` → SSE, the served mind's thread. Client subscriptions replay
 //!   the most recent 12 turns by default; optional `?limit=N` overrides that
 //!   tail while every subsequent turn still streams live. Resident inbox
 //!   subscriptions remain complete.
@@ -37,7 +37,7 @@
 //!     under the same id — each frame replaces the client's previous state
 //!     for that id (upsert, never append-if-seen).
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
-//!     is an [`InboxFrame`] — a resident-directed human message, typed Task or
+//!     is an [`InboxFrame`] — a resident-directed chat message, typed Task or
 //!     Project observation, promotion wake, or control op. The pending queue
 //!     (journaled inputs not yet named in any `answers`) replays on
 //!     connect, then live ops stream; a bare interrupt rides live-only with
@@ -54,12 +54,11 @@
 //!   - `GET /resident/context` → `{playhead, provider_session}` — the
 //!     pre-turn snapshot and optional typed provider thread; serving it drains
 //!     pending child observations first.
-//! - `POST /messages {id?, op, text}` → `{message, state, epoch}`. `op` is
-//!   required — `"message"` (queued; the next turn answers it), `"steer"`
-//!   (into the live turn when the harness supports it, else degrades to a
-//!   queued message), `"interrupt"` (cancel the open turn; non-empty text
-//!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
-//!   a no-op success). `text` may be empty only for `interrupt` (400
+//! - `POST /messages {id?, op, text, author_name?}` → `{message, state, epoch}`. `op` is
+//!   required — `"message"` (observed on the channel) or `"interrupt"`
+//!   (cancel the open turn with empty text; a no-op while idle).
+//!   `author_name` is display data captured by the sender; absence stays unknown.
+//!   A message requires text; an interrupt requires empty text (400
 //!   otherwise). A local epoch journals immediately; a Discord epoch uses
 //!   `id` as an enforced provider nonce and returns the source-bearing provider
 //!   message, which the adapter then queues from its canonical Discord id.
@@ -251,6 +250,13 @@ struct ConversationQuery {
     epoch: Option<String>,
 }
 
+/// `GET /channel?since=<seq>` — the unified channel read. `since` omitted reads
+/// from the start.
+#[derive(Debug, Deserialize)]
+struct ChannelQuery {
+    since: Option<u64>,
+}
+
 /// `POST /messages` request body. `op` is required — explicit, never inferred.
 /// `id` becomes the Discord nonce when the active epoch is provider-backed.
 #[derive(Debug, Deserialize)]
@@ -259,6 +265,7 @@ struct PostMessage {
     id: Option<String>,
     op: MessageOp,
     text: String,
+    author_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -350,6 +357,7 @@ pub(crate) fn router_with_chat_projection(
         .route("/health", get(health_handler))
         .route("/stop", post(stop_handler))
         .route("/conversation", get(conversation_handler))
+        .route("/channel", get(channel_handler))
         .route("/playhead", get(playhead_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
@@ -508,6 +516,16 @@ async fn resident_context_handler(
     }))
 }
 
+/// `GET /channel` — the unified channel read: recent messages as `Message`s
+/// including the wave's own posts. The platform-agnostic read `lf chat` and the
+/// responder both consume.
+async fn channel_handler(
+    State(state): State<ServerState>,
+    Query(query): Query<ChannelQuery>,
+) -> Json<Vec<crate::controller::wave::channel::Message>> {
+    Json(state.runtime.read_channel(query.since))
+}
+
 async fn conversation_handler(
     State(state): State<ServerState>,
     Query(query): Query<ConversationQuery>,
@@ -584,7 +602,7 @@ async fn conversation_handler(
 /// The door is opaque on resident ops: this handler validates SHAPE only —
 /// `text` may be empty only for
 /// `interrupt` — then hands the op to the runtime uninterpreted
-/// ([`WaveRuntime::try_deliver`]). What steer or interrupt *means* lives with the
+/// ([`WaveRuntime::try_deliver`]). What a message or interrupt means lives with the
 /// resident, not the ear. Honest partial: the `{turn, state}` echo still
 /// leaks that a bare interrupt appends nothing (`turn: null`), but that fact
 /// comes back from the runtime's return, not from the door interpreting.
@@ -592,6 +610,18 @@ async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
 ) -> axum::response::Response {
+    if body.op == MessageOp::Steer
+        || (body.op == MessageOp::Interrupt && !body.text.trim().is_empty())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(PostMessageErrorResponse {
+                error: "Wave steering was removed; use wave/operate with instructions".to_string(),
+                epoch: state.runtime.active_conversation_epoch(),
+            }),
+        )
+            .into_response();
+    }
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
         return (
             StatusCode::BAD_REQUEST,
@@ -612,7 +642,13 @@ async fn messages_handler(
                 .map(str::to_string)
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             return match discord
-                .post_authored(&state.runtime, body.op, body.text.trim(), &request_id)
+                .post_authored(
+                    &state.runtime,
+                    body.op,
+                    body.text.trim(),
+                    &request_id,
+                    body.author_name.as_deref(),
+                )
                 .await
             {
                 Ok(message) => Json(PostMessageResponse {
@@ -639,7 +675,10 @@ async fn messages_handler(
             };
         }
     }
-    let turn = match state.runtime.try_deliver_authored(body.op, body.text) {
+    let turn = match state
+        .runtime
+        .try_deliver(body.op, body.text, body.author_name)
+    {
         Ok(turn) => turn,
         Err(error) => {
             let status = match &error {
@@ -665,7 +704,7 @@ async fn messages_handler(
     .into_response()
 }
 
-/// The served mind's thread as SSE. Human subscriptions open with epoch and
+/// The served mind's thread as SSE. Client subscriptions open with epoch and
 /// backing health, then carry source-bearing `message` frames and plain
 /// `message-delta` increments. Resident inbox subscriptions keep the private
 /// `turn`/`turn-delta` wire. Both emit `resync` when a turn broadcast lags so
@@ -755,6 +794,18 @@ async fn events_handler(
     } else {
         Vec::new()
     };
+    // Chat is observed, not drained: unanswered chat messages never enter the
+    // pending queue, so they replay from the channel tail here. The observe
+    // loop dedupes by message id and reads-incl-own, so a replayed message it
+    // already answered stays silent.
+    let chat_tail_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+        sub.chat_tail
+            .iter()
+            .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let turn_replay: Vec<Result<Event, Infallible>> = if include_inbox {
         sub.turns
             .into_iter()
@@ -777,9 +828,10 @@ async fn events_handler(
             .chain(std::iter::once(Ok(state_event(&sub.state))))
             .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
             .chain(turn_replay)
-            .chain(inbox_replay),
+            .chain(inbox_replay)
+            .chain(chat_tail_replay),
     );
-    // The resident keeps private turn frames; human chat converts the same
+    // The resident keeps private turn frames; chat converts the same
     // broadcasts into source-bearing messages. Both make lag an explicit
     // `resync`, never a silent drop.
     let live_turns: BoxedEventStream = if include_inbox {
@@ -1245,6 +1297,16 @@ mod tests {
         ));
         let response: PostMessageResponse =
             serde_json::from_str(fixture).expect("decode post message response fixture");
+        assert_eq!(
+            response
+                .message
+                .as_ref()
+                .unwrap()
+                .turn
+                .author_name
+                .as_deref(),
+            Some("Jack")
+        );
         let encoded = serde_json::to_string(&response).expect("encode post message response");
         let decoded: PostMessageResponse =
             serde_json::from_str(&encoded).expect("re-decode post message response");
@@ -1423,7 +1485,7 @@ mod tests {
                 .expect("error body")
                 .contains("message was not accepted"));
             assert!(runtime.thread_snapshot().is_empty());
-            assert!(runtime.pending_messages().is_empty());
+            assert!(runtime.read_channel(None).is_empty());
             assert_eq!(
                 read_events(&journal_path(tmp.path(), "ship")).len(),
                 1,
@@ -1452,7 +1514,7 @@ mod tests {
         assert_eq!(accepted["message"]["turn"]["text"], "keep this");
         assert_eq!(accepted["message"]["source"]["kind"], "local");
         assert_eq!(runtime.thread_snapshot().len(), 1);
-        assert_eq!(runtime.pending_messages().len(), 1);
+        assert_eq!(runtime.read_channel(None).len(), 1);
 
         let events = read_events(&journal_path(tmp.path(), "ship"));
         assert_eq!(events.len(), 2);
@@ -1466,6 +1528,44 @@ mod tests {
         assert_eq!(transcript.len(), 1);
         assert_eq!(transcript[0].id, "turn-2");
         assert_eq!(transcript[0].text, "keep this");
+    }
+
+    #[tokio::test]
+    async fn wave_steering_is_rejected_without_journaling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap();
+        let app = router_with_observer(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            Arc::new(ObserverSlot::new(runtime.clone(), None)),
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/messages", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+        for op in ["steer", "interrupt"] {
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({"op": op, "text": "change direction"}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        assert!(runtime.thread_snapshot().is_empty());
+        let response = client
+            .post(&url)
+            .json(&serde_json::json!({"op": "message", "text": "hello"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(runtime.thread_snapshot().len(), 1);
+        server.abort();
     }
 
     #[tokio::test]
@@ -1587,14 +1687,17 @@ mod tests {
             "platform".to_string(),
             tmp.path().display().to_string(),
         );
-        let mut child = Wave::new(
+        let child = Wave::from_stored_parts(
             WaveId::new(),
             "ship".to_string(),
             tmp.path().display().to_string(),
+            time::OffsetDateTime::now_utc(),
+            Some(parent.id().clone()),
+            Some(time::OffsetDateTime::now_utc()),
+            None,
+            None,
+            None,
         );
-        child
-            .record_promotion(parent.id(), OffsetDateTime::now_utc())
-            .expect("record promotion");
         store.create_wave(&parent).await.expect("store parent");
         store.create_wave(&child).await.expect("store child");
 

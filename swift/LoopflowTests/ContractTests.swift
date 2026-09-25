@@ -114,7 +114,7 @@ struct ContractTests {
         // Applying the delta grows a turn exactly as the listener's fold does: a
         // stream message concatenates into text, never into items.
         let opened = try ChatTurn(
-            id: "turn-3", role: .assistant, text: "so ", status: .running, items: [],
+            id: "turn-3", role: .assistant, authorName: nil, text: "so ", status: .running, items: [],
             createdAt: "2026-07-03T18:30:00Z", body: nil, activity: nil
         )
         let grown = try opened.absorbing(delta.item)
@@ -130,7 +130,7 @@ struct ContractTests {
     @Test("absorbing keeps commentary as a curatable item, not folded into prose")
     func absorbingKeepsCommentaryAsItem() throws {
         let opened = try ChatTurn(
-            id: "turn-10", role: .assistant, text: "", status: .running, items: [],
+            id: "turn-10", role: .assistant, authorName: nil, text: "", status: .running, items: [],
             createdAt: "2026-07-10T17:52:05Z", body: nil, activity: nil
         )
         // Operational narration the provider tagged `commentary` must survive as
@@ -187,6 +187,7 @@ struct ContractTests {
         let message = try #require(posted.message)
         let turn = message.turn
         #expect(turn.id == "turn-4")
+        #expect(turn.authorName == "Jack")
         #expect(turn.role == .user)
         #expect(turn.status == .completed)
         #expect(turn.items.isEmpty)

@@ -1,0 +1,106 @@
+{
+  "chapter_id": "20260923T000959Z-502f011b",
+  "run_id": "run_502f011b9d1f4596ba62eff0e54a8b0e",
+  "started_at": "2026-09-23T00:09:59.226362+00:00",
+  "proposed_review_at": "2026-10-21T00:09:59.226362+00:00",
+  "sources": [
+    {
+      "source": "/Users/jack/src/loopflow.review-chapter/scratch/chapter-review.html",
+      "archive": ".lf/chapters/20260922-manual-baseline/chapter-review.html",
+      "mtime_utc": "2026-09-22T22:51:28.936100+00:00",
+      "sha256": "20dfb9ab6a3fa326396086fcb0c5c5544a5f07607dcbb49c96af16f7bc41483c"
+    },
+    {
+      "source": "/Users/jack/src/loopflow.review-chapter/scratch/start-chapter-direction-draft.md",
+      "archive": ".lf/chapters/20260922-manual-baseline/start-chapter-direction-draft.md",
+      "mtime_utc": "2026-09-23T00:05:07.088419+00:00",
+      "sha256": "2709705782250c28a4a85888f7df27b916e93ac651c673de92eec38dc42888c6"
+    },
+    {
+      "source": "/Users/jack/src/loopflow.review-chapter/scratch/execution-architecture-synthesis.md",
+      "archive": ".lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md",
+      "mtime_utc": "2026-09-22T21:21:03.725342+00:00",
+      "sha256": "6c48c508cdbad699b99cc9377a67a6de14959154fb24ef825159218792a4743c"
+    },
+    {
+      "source": "/Users/jack/src/loopflow.review-chapter/scratch/execution-architecture-evolution.md",
+      "archive": ".lf/chapters/20260922-manual-baseline/execution-architecture-evolution.md",
+      "mtime_utc": "2026-09-22T21:09:05.837933+00:00",
+      "sha256": "8f751042d389738ce473e84024d4031df8a2f9583284b175a79d877e8643447a"
+    },
+    {
+      "source": "/Users/jack/src/loopflow.review-chapter/scratch/research-execution-narrative-claude-97b2ab32.md",
+      "archive": ".lf/chapters/20260922-manual-baseline/research-execution-narrative-claude-97b2ab32.md",
+      "mtime_utc": "2026-09-22T21:13:51.103685+00:00",
+      "sha256": "4afc0041d786a4916c5b738785ec09a8ccb24f5771b94b12618d4e6fddcdb2e5"
+    },
+    {
+      "source": "/Users/jack/src/loopflow.review-chapter/scratch/research-decentralization-97b2ab32.md",
+      "archive": ".lf/chapters/20260922-manual-baseline/research-decentralization-97b2ab32.md",
+      "mtime_utc": "2026-09-22T21:21:14.965791+00:00",
+      "sha256": "da23be95fa9819bd076c0acb644330400b2eb6246b0f77ea36819fd715d31173"
+    },
+    {
+      "source": "/Users/jack/src/loopflow.review-chapter/scratch/research-infrastructure-cross-wave-claude-97b2ab32.md",
+      "archive": ".lf/chapters/20260922-manual-baseline/research-infrastructure-cross-wave-claude-97b2ab32.md",
+      "mtime_utc": "2026-09-22T21:19:30.861761+00:00",
+      "sha256": "067069d0cc160f6698aeb1637ab881b1f42e409d251eb98889ee9ce209443362"
+    }
+  ],
+  "source_capture_started_at": "2026-09-23T00:09:59.229630+00:00",
+  "source_capture_completed_at": "2026-09-23T00:13:21.476961+00:00",
+  "pm_cache_times": {
+    "infrastructure": {
+      "epoch": 1790116742,
+      "utc": "2026-09-22T22:39:02+00:00"
+    },
+    "intelligence": {
+      "epoch": 1790116739,
+      "utc": "2026-09-22T22:38:59+00:00"
+    },
+    "product": {
+      "epoch": 1790116739,
+      "utc": "2026-09-22T22:38:59+00:00"
+    },
+    "list": {
+      "epoch": 1790116750,
+      "utc": "2026-09-22T22:39:10+00:00"
+    }
+  },
+  "frozen_file_sha256": {
+    "sources/engbot-pm.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/engbot-pm.stderr": "874e0b81a93fa7208726161b546fddcf288be5dad561ae98b5a3a6dafce59b03",
+    "sources/engbot-status.json": "e9a23dd2c693f7ede48daa11eaf40bc2dccf51c5ca7618b226c3a6fd5c8e7644",
+    "sources/engbot-status.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/infrastructure-pm.json": "931c0fba5a88d21d69d3113c6aecbce555eed9628c7b124f334df963dcc0db53",
+    "sources/infrastructure-pm.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/infrastructure-status.json": "3b4d6bb469f3e9099c59fa6b1ef095248a1f872eb261d658476ddb959b39e028",
+    "sources/infrastructure-status.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/intelligence-pm.json": "7bb67aad950ccb419b98703683fc0a46cdf767b66f513ed5c082496c408f334d",
+    "sources/intelligence-pm.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/intelligence-status.json": "ae28d4915de94577741d91b2603213ee79cb3903456d76a7eb7c0058424f1fd8",
+    "sources/intelligence-status.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/list-pm.json": "d60ae5aa13e4269ef96a68d074e5b58767f9fd80311056d27b71e90876e52aa5",
+    "sources/list-pm.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/list-status.json": "278d43ddf0b8b87a2224b3ff64034d2142d88768525f1ac5dc34b736f58e153d",
+    "sources/list-status.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/product-pm.json": "1b077508b51bf8abfbb5505d18d498c4a9ed40dfc02d48a928828abe539845a2",
+    "sources/product-pm.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/product-status.json": "a90340b95394d9ae4545095300527eaab3402accfa3988ee2ea05e8bca8e9c74",
+    "sources/product-status.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources/roadmap.json": "471d2fc7a073f0967360987c32fd3aad6925e541f9cfd9b20d448c42ad08092e",
+    "sources/wave/infrastructure/GOAL.md": "7586362f078d4146635f971c7b31ae8a143573c2c54136a681c77c7276308be9",
+    "sources/wave/infrastructure/MEMORY.md": "0bd5b945464abab81edf1bec5045ca9ac1755a46d25eca4c2995597c570366aa",
+    "sources/wave/intelligence/GOAL.md": "164b1290133f4d57ea928bff845828b916303d25e9cd317abf861325993768a2",
+    "sources/wave/intelligence/MEMORY.md": "fb245358f8af40b3fa90ec6e401440f25cb511555deb9fb881e1c925d2589099",
+    "sources/wave/list/GOAL.md": "87da6a82b57836c028a9b7cde8723a14d295fedd16ddcb413c8c05dec4ac81d7",
+    "sources/wave/list/MEMORY.md": "3eb06b5d1af2b1fb0f653c8c9528bac5f06057bad669d9fe08d2abe3a92a4158",
+    "sources/wave/product/GOAL.md": "71b7c524fefe0a172075cda25943d1ab9ae583fcbe171335d6ae00016b5477b3",
+    "sources/wave/product/MEMORY.md": "203470c92329f2d473d7daa4fb6e6962698ae7f8722c4d41b7562ffe4c88ee91",
+    "sources/waves.json": "4dbc202bd38435a3e21b204ec540d7463580cddc76f8a17f07612f811ee1d142"
+  },
+  "gate_2_accepted_date": "2026-09-23",
+  "sealed_at": "2026-09-23T16:13:45.110901+00:00",
+  "review_at": "2026-10-21T00:09:59.226362+00:00",
+  "application_run_id": "run_712877d44f3d4393b14c8d484481186a"
+}

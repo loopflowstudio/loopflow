@@ -1,75 +1,127 @@
 # intelligence wave memory
 
-Renamed from `memory` in the 2026-07-08 wave/project/task restructure. Intelligence
-owns Context and Trace — there is no standalone Memory or Evals project. Context is
-the operating contract a process receives; Trace is the monitoring layer over that
-context, its launch situation, execution, and outcome.
+Renamed from `memory` in July 2026. The accepted September chapter combines
+Trace & Context in one measured bet: explicitly selected work is explainable from
+durable local evidence. No standalone Memory, Evals, or Runtime Monitoring
+Project is implied by the historical research.
 
-## The ledger contract (post-057, the branch that made `run_events` an API)
+## Instruction ownership and design delivery (2026-09-25)
 
-- **`run_id` is the trace; `process_id` is the span.** A nested `lf` inherits
-  `LF_RUN_ID` (by design) but never inherits `LF_PROCESS_ID` — it reads the
-  parent's value as its `parent_process_id`, then overwrites the variable with
-  its own freshly minted id. Before this, 134 run_ids carried more than one
-  command (one carried nine) and `lf runs` spliced two processes into one row:
-  label from the first event, cost from the last terminal row.
-- **A terminal row is self-describing.** It carries the same `command` its
-  `started` row carried. A reader never joins to learn what a cost bought.
-- **`node ∈ {run, flow, skill}`, `event ∈ {started, completed, errored,
-  escalated}`, enforced by CHECK.** Migration 054 renamed the column and not the
-  values, splitting `step`/`skill` across history; the constraint is what stops
-  the next half-landed rename.
-- **`repo` is the absolute main-repo root**, never a basename. The old
-  `.file_name()` derivation made 888 of 898 values temp roots.
-- **Every usage field is cumulative to that point in the process.** A span's own
-  figure is the diff against the previous boundary row in the same `process_id`;
-  the terminal row is the process total. One rule, no per-field exceptions —
-  cost was the exception (`=` where tokens used `+=`) and it silently
-  undercounted 28 multi-skill runs.
-- **`own_spend` (`lf/commands/runs.rs`) is the single home for that diff.** No
-  consumer reimplements it. `boundary_spend_sums_to_the_run_total_without_double_counting`
-  pins the contract: a skill boundary carries the spend, and the terminal run row
-  that follows reports zero of its own rather than counting it twice.
-- **057 truncated the table.** Pre-contract rows could not be attributed to a
-  process, their cost was undercounted, and their repo was a basename. Carrying
-  them would have forced a nullable `process_id`, a legacy branch in every
-  reader, and a `lf doctor` that could never go green. `process_id` is
-  `NOT NULL`; there is no legacy path anywhere. The per-repo file journals
-  (`.lf/journal/runs/*/events.jsonl`) remain the durable per-repo record.
-- **`SpanDto` is boundary-shaped, not process-shaped.** It carries `repo`,
-  `wave`, `flow`, `skill`; `TraceSpan`'s id is composite, because one process
-  contributes several boundary rows and `process_id` alone no longer identifies
-  one. (This supersedes the earlier "one SpanDto per process" assumption, which
-  could not coexist with `own_spend` diffing boundaries inside a process.)
-- **`lf doctor` runs daily**, via `.lf/flows/telemetry-daily.yaml` wired into
-  this wave's `crons:`. Six checks: continuity, vocabulary, attribution,
-  identity, lineage, coverage. It exits 0 on the real ledger and must stay
-  there — a monitor that is permanently red is one people learn to ignore, which
-  is exactly how a 29-hour outage went unnoticed.
+- Customer operating guidance carries universal execution rules. Detailed Task,
+  placement and recovery procedures belong in the skills exercising them.
+  Generic model/API reduction advice now lives in builtin compress; maintainer
+  migration/updater constraints remain in repo guidance. Repo `.lf/skills` replace
+  local execution skills but are not exported to customers by skill sync.
+- `.lf/` document gathering is excluded, but branch diffs can include its changes.
+  The tracked chapter archive is historical evidence, not ambient prompt input.
+  Keep repeatable instructions in skills, conventions in the agent guide,
+  durable judgment in Wave memory and temporary designs in scratch. Do not
+  recreate retired root `.lf/` handoff notes or prompt directions.
+- Existing-design handoff prepares the Task, copies actual artifacts with their
+  relative references and draft status, then launches the selected Flow. Task
+  creation stdin is the problem brief. Worker startup alone cannot establish
+  delivery of context. Preserve newer destination edits and existing code ownership.
+  The [preserved handoff design](https://github.com/loopflowstudio/loopflow/blob/033e0758504390e5db9d254fed4964b0dd6da4bc/scratch/prs-and-tasks-handoff.md)
+  proposes scratch import; no automatic `--scratch` transfer or checkout adoption
+  was established by the authorship branch. Those remain separate design questions.
+- The former skill-sync probe expected retired repo-local exports and could
+  mutate personal skills before failing. Removed it; isolated-home Rust tests
+  prove current delivery. Prompt boundary tests must inspect the assembled
+  customer examples, not rely solely on a few forbidden vocabulary assertions.
 
-## The dashboard
+## Current evidence boundary (2026-09-23)
 
-- **Four cards, one payload each.** `lf usage --json --days 30` emits one row per
-  *boundary* with the cumulative-diff rule already applied; the rows are additive
-  and must reconcile with what `lf usage` prints (verified: 20,010 tokens summed
-  across boundaries against 20,010 in the table). A chart that disagrees with the
-  table is wrong. Cards: tokens by skill (a boundary with no skill is inline
-  work, labelled, never dropped), tokens by `provider:model`, cache-hit ratio
-  (`cache read / (input + cache read)` — the largest cost lever in the system),
-  plus the codebase cards below.
-- **Width is tokens, never wall-clock.** The first draft led with a wall-clock
-  flamechart and a cost waterfall; neither answered the question anyone asks of a
-  token ledger. A fast skill can be the widest thing on the page, and a cost
-  chart should say so.
-- **The silence ribbon became a row of `lf doctor` check dots** in the dashboard
-  header. Same job — make the ledger's own trustworthiness the first thing you
-  see — with no second implementation of the continuity query.
-- **Movement metrics stay out** until a delivery record and `escalated` exist.
-  Do not synthesize them from `runs.snapshot_pr`: 7 of 171 rows carry one, all
-  from `break-test`. The dashboard's Home/Movement direction (a wave is the unit
-  of investment, a landed PR the unit of output; expose the tension between
-  throughput, cost, time, and intervention rather than hiding it in a synthetic
-  productivity score) is unbuilt and waiting on those two records.
+The [accepted chapter](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+requires exact authored/submitted context, causal identities, an honest attempted-
+operation population, and usable reconstruction against long-lived records.
+Intelligence owns evidence; Infrastructure owns execution repair; Product judges
+external user value. The broad replay and monitoring proposals in the summer
+research were not all accepted commitments. Current Task directives govern scope.
+
+- **Run records are Home-local bundles.** Immutable manifests own launch
+  identity, parentage and Work attribution; normalized event streams own prose;
+  terminal receipts own settlement. `lf runs` and `lf usage` scan these records,
+  without an authoritative Run index or an `lfd` read dependency. Historical
+  SQLite-ledger contracts below explain past failures, not current Run ownership.
+- **Trace joins never transfer authority.** Follow intent/Work → Home/runtime
+  artifact → Run/context → provider attempt/native Session → observed or owned
+  process → terminal result → Work consequence/delivery. Each edge needs a source,
+  identity, observation time, freshness and missingness. Unterminated is not live,
+  visible PID is not control authority, unavailable Home is not stopped, and
+  process success is not delivered progress. Include failures before Run creation.
+- **Exact conclusions need completion receipts.** Codex deltas once lost the
+  completed message's final phase. Preserve that normalized completion while
+  the chat fold suppresses repeated prose. `lf runs <id> --final` prefers tagged
+  final text, then an untagged completion, then explicitly labeled streamed prose.
+  Preserve all three evidence qualities; old narration cannot become an exact
+  report just because a reader wants one. Parentage and final text alone do not
+  establish successful child settlement.
+- **The denominator must match the question.** Exact direct-child scans are
+  uncapped; recent Run lists are presentation windows; activity includes starts
+  or completions inside its window. The shared Work filter serves CLI, Wave
+  status, activity and behavioral tests. A fixture-only copy is not production
+  reader proof.
+- **Historical coverage is incomplete even when current enumeration is full.**
+  The summer baseline lacks a start snapshot and KR revision dates. The review
+  judged 39 KRs; the later start freeze contains 42 with List's three additional
+  claims. Recompute totals from exact rows, exclude definition verdicts, and
+  preserve rewritten claims. An incomplete duration window is unknown unless
+  dated counterevidence already disproves its universal/conjunctive claim.
+- **Scope operational evidence explicitly.** The research observed a 200-row
+  activity cap and same-name Intelligence results from another repository.
+  Restrict attribution to stable repository/Work identity; zero returned delivery
+  receipts do not disprove a Linear-asserted merge. Empty, truncated, unavailable,
+  and stale are different evidence states.
+- **Contracts moved faster than operating proof.** The September baseline found
+  settled records missing context, launch contracts, tokens or cost, plus no
+  unattended replay cohort. A 20/20 context audit did not satisfy the separate
+  budget/duration obligations. These are dated baseline observations, not current
+  health claims. LOO-288/289/290 own capture, population, and usable reconstruction;
+  retain observations while the serial implementation slot advances.
+
+## Prompt assembly reduction (branch evidence, 2026-09-24)
+
+- **Prompt directions are removed after an explicit request.** The `task-viewer`
+  branch removes CLI switches, config/Skill/Flow fields, directory and fallback
+  loaders, discovery/build generation, injection, and current authoring guidance.
+  Do not restore an implicit skill fallback or compatibility selector. Ordinary
+  Work Steer and Session Iterate advice retain their separate semantics;
+  `DirectionSnapshot` projects Steer, not the removed prompt feature.
+- **Historical trace categories remain readable.** Keep persisted
+  `ContextAssetKind::Direction` for old records; current assembly emits none.
+  Historical release notes and chapter evidence are not active feature paths.
+- **Gather and render the actual values.** The path is now
+  `GatherContextOpts -> PromptComponents -> String`. `GatheredContext` and
+  `RenderedPrompt` had public tuple constructors and unchecked mutable access,
+  so their names supplied no validation or phase guarantee. `PreparedLaunchPrompt`
+  still carries separately consumed agent configuration, deduplication evidence,
+  components, and rendered channels. Preserve those facts for capture work.
+- **Separate removal proof from representation proof.** Direction removal
+  deliberately changes prompt fixtures; the later wrapper reduction preserves
+  those fixtures byte-for-byte. Recorded context/golden/launch tests (34) and
+  Clippy pass for the reduction. These establish source behavior, not installed
+  promotion or the Trace & Context population/reconstruction KRs. LOO-288/289/290
+  remain open; this reduction introduces no migration or new evidence store.
+
+## Lessons from the retired SQLite ledger
+
+The [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/intelligence/MEMORY.md)
+retains exact migration, schema, dashboard and historical code-map details.
+Do not restore those paths to satisfy a present evidence gap.
+
+- One identity cannot stand for multiple processes: 134 old run ids carried
+  several commands, mixing labels and cost. Terminal evidence must describe what
+  it measured; canonical repository identity cannot be replaced by a basename.
+- Usage must have one accumulation rule per source. Overwriting cumulative cost
+  undercounted 28 multi-skill runs; summing cumulative skill and terminal rows
+  double-counted others. A boundary chart and its table must reconcile against
+  the same population, and missing usage must not silently become zero.
+- An unwritten `run_token_usage` table made a working reader permanently empty.
+  Never build a second evidence store merely because its schema looks convenient.
+- Expose the evidence layer's own health before its charts. Compare like
+  repository/flow/provider cohorts, preserve unknown skill attribution, and keep
+  delivery/intervention metrics parked until their source records exist. Do not
+  infer delivery from sparse PR snapshots or create a synthetic productivity score.
 
 ## `lf tokens` — what a model pays to read a repo
 
@@ -101,8 +153,7 @@ context, its launch situation, execution, and outcome.
 - **Persist more now.** The durable core is the exact provider-facing prompts,
   component manifest and token weights, normalized user/assistant/tool events,
   usage, lifecycle, and artifact identities. Large records live on disk with
-  pointers and summary dimensions in `run_events`, not transcript blobs in
-  SQLite.
+  references in the Run manifest; do not put transcript blobs in SQLite.
 - **Vendor records are useful but not the contract.** Keep pointers to raw
   Codex/Claude sessions and degrade honestly if they disappear. Loopflow's own
   normalized record should remain. Deduplication, compression, and raw-artifact
@@ -165,23 +216,6 @@ context, its launch situation, execution, and outcome.
 - **No memory backend.** Loopflow has no vector store, remote memory service,
   live compactor, export protocol, or vendor-memory dependency.
 
-## Decisions (usage evidence)
-
-- **`run_events` is the one home for token and cost evidence.** `run_token_usage`
-  was a second table no production code ever wrote to — its only callers lived in
-  `#[cfg(test)] mod tests`, so `lf usage` aggregated an always-empty table and
-  printed "No token usage recorded yet." forever. Dropped.
-- **Wiring `run_token_usage` would have silently lost tokens.** Its `run_id TEXT
-  PRIMARY KEY` + `ON CONFLICT DO UPDATE SET input_tokens = excluded.…` overwrote
-  rather than accumulated, and a `run_id` is shared by a run and every nested
-  `lf` it spawns. Last writer would have won.
-- **Aggregate only terminal run rows.** Skill-boundary rows carry a cumulative
-  snapshot of the run so far, so `SUM()` over every row double-counts once per
-  skill.
-- **`lf usage` reads the ledger directly**, like `lf runs` and `lf trace`. It
-  used to fetch `GET /v0/usage` from a running `lfd` — the sole consumer of the
-  whole `lfd::client` module, which died with it.
-
 ## Constraints
 
 - **A silent best-effort write is worse than the bug it hides.** `ledger_insert`
@@ -208,10 +242,9 @@ context, its launch situation, execution, and outcome.
   gap-days and pronounced the real ledger healthy — the 29.2-hour outage began
   and ended mid-day, so both days held rows. Longest-silence catches it. A
   surface nobody has queried on real data is a surface that does not work.
-- **A shell launched by an `lf` run inherits `LF_RUN_ID`**, so every `lf` invoked
-  from it joins that trace as a child span. That is the design. It also means a
-  demo run from such a shell will not mint a fresh trace: prefix
-  `env -u LF_RUN_ID` when you want a root.
+- **Do not infer present Run identity from the old inherited-span model.** The
+  harness publishes one immutable Run manifest before launch and records verified
+  parentage separately. Inspect that manifest when attributing a demonstration.
 - **Only committed `MEMORY.md` crosses a branch or machine boundary.** Per-run
   journals remain execution evidence, not an uncompiled memory tail.
 - **Provider context is not Wave memory.** Loopflow cannot and need not extract
@@ -242,27 +275,15 @@ Stale-binary check: `strings "$D/Loopflow" | grep -c "Tokens by skill"`.
   parked until Trace has delivery, intervention, complete context, and transcript
   evidence and the wave deliberately reopens Evals as a project.
 
-## Glossary
+## Code map
 
-- **trace** — a `run_id`. The whole tree, stable across nested `lf`.
-- **span** — a `process_id`. One process, minted once, never inherited.
-- **boundary** — one usage-bearing row inside a span (a skill frame, or the
-  terminal run row). Readings are cumulative; `own_spend` diffs them.
-- **Wave memory** — the committed `MEMORY.md` files selected for a Run's
-  authored context; no live delta exists beside them.
+Current capture and readers live in `run_record.rs` and
+`lf/commands/{runs,usage,replay}.rs`. Codex normalization lives in
+`harness/codex.rs`; shared chat folding lives in `chat/turns.rs`. Runtime ownership
+and context contracts are documented in `docs/architecture/execution.md`.
+`RunSnapshot` is a disposable Run projection; `FinalAnswer` reports prose and
+exactness. Neither becomes a wire-model default or a source of execution authority.
 
-## Code map (current state)
-
-Wave-memory resolution lives in `wave/memory.rs`; the read-only CLI is
-`lf/commands/memory.rs`; prompt injection uses `wave_memory_section` →
-`<lf:wave-memory>` in `engine/flow.rs`. None of these paths requires a Wave
-server.
-
-Telemetry: writer in `journal/mod.rs` (`RunContext`, `ledger_insert`,
-`LF_PROCESS_ID_ENV`); storage in `lfdb/` (migrations 055–058); readers in
-`lf/commands/{runs,usage,tokens,doctor}.rs`, with `own_spend` in `runs.rs`;
-Swift consumer in `swift/Loopflow/Services/RegistryQuery.swift` and
-`swift/LoopflowMac/Views/TelemetryDashboardView.swift`.
-
-The boundary is the committed file: there is no cross-machine replay protocol
-and no journal-to-memory fold.
+Wave memory remains committed `wave/<name>/MEMORY.md`, curated by ordinary
+repository edits. There is no live delta, memory backend, or cross-machine replay
+protocol beside it.

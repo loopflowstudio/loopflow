@@ -1,0 +1,157 @@
+[
+  {
+    "project_id": "03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+    "work_id": "proj_33676884d672454780209ce4e5b624fa",
+    "wave": "infrastructure",
+    "prior_slug": "stability-security",
+    "accepted_name": "Reliability",
+    "planning_read": [
+      "lf",
+      "pm",
+      "show",
+      "--wave",
+      "infrastructure",
+      "--no-sync",
+      "--json"
+    ],
+    "work_read": [
+      "lf",
+      "work",
+      "status",
+      "project",
+      "proj_33676884d672454780209ce4e5b624fa",
+      "--json"
+    ],
+    "lifecycle_read": [
+      "lf",
+      "project",
+      "status",
+      "03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+      "--json"
+    ]
+  },
+  {
+    "project_id": "62b73cde-5057-4959-8ad8-fca96b9e80b5",
+    "work_id": "proj_b98a997ce55a45d1981ad9537d21da3b",
+    "wave": "infrastructure",
+    "prior_slug": "technical-architecture",
+    "accepted_name": "Architecture Minimalism",
+    "planning_read": [
+      "lf",
+      "pm",
+      "show",
+      "--wave",
+      "infrastructure",
+      "--no-sync",
+      "--json"
+    ],
+    "work_read": [
+      "lf",
+      "work",
+      "status",
+      "project",
+      "proj_b98a997ce55a45d1981ad9537d21da3b",
+      "--json"
+    ],
+    "lifecycle_read": [
+      "lf",
+      "project",
+      "status",
+      "62b73cde-5057-4959-8ad8-fca96b9e80b5",
+      "--json"
+    ]
+  },
+  {
+    "project_id": "2f8390f7-6614-426c-84a8-fa5291358691",
+    "work_id": "proj_9fffbe63b7594bdc8f5719c61b25876d",
+    "wave": "intelligence",
+    "prior_slug": "trace",
+    "accepted_name": "Trace & Context",
+    "planning_read": [
+      "lf",
+      "pm",
+      "show",
+      "--wave",
+      "intelligence",
+      "--no-sync",
+      "--json"
+    ],
+    "work_read": [
+      "lf",
+      "work",
+      "status",
+      "project",
+      "proj_9fffbe63b7594bdc8f5719c61b25876d",
+      "--json"
+    ],
+    "lifecycle_read": [
+      "lf",
+      "project",
+      "status",
+      "2f8390f7-6614-426c-84a8-fa5291358691",
+      "--json"
+    ]
+  },
+  {
+    "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+    "work_id": "proj_9f1fc19a84211aed8b8136e55c8ab1f3",
+    "wave": "product",
+    "prior_slug": "loopflow-api",
+    "accepted_name": "Company Dogfood",
+    "planning_read": [
+      "lf",
+      "pm",
+      "show",
+      "--wave",
+      "product",
+      "--no-sync",
+      "--json"
+    ],
+    "work_read": [
+      "lf",
+      "work",
+      "status",
+      "project",
+      "proj_9f1fc19a84211aed8b8136e55c8ab1f3",
+      "--json"
+    ],
+    "lifecycle_read": [
+      "lf",
+      "project",
+      "status",
+      "d19956b2-9955-437d-aea6-d91766231c77",
+      "--json"
+    ]
+  },
+  {
+    "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+    "work_id": "proj_86f8af8b1e71ee288b167663c5f9e41b",
+    "wave": "product",
+    "prior_slug": "mac-surface-ux",
+    "accepted_name": "Desktop",
+    "planning_read": [
+      "lf",
+      "pm",
+      "show",
+      "--wave",
+      "product",
+      "--no-sync",
+      "--json"
+    ],
+    "work_read": [
+      "lf",
+      "work",
+      "status",
+      "project",
+      "proj_86f8af8b1e71ee288b167663c5f9e41b",
+      "--json"
+    ],
+    "lifecycle_read": [
+      "lf",
+      "project",
+      "status",
+      "57fee17f-7231-46f3-afd8-031d866a1779",
+      "--json"
+    ]
+  }
+]

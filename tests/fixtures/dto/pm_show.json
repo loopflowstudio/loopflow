@@ -10,11 +10,8 @@
       "slug": "gmail",
       "name": "Gmail",
       "summary": "Keep mail flowing.",
-      "definition": "Keep mail flowing.",
       "flows": {
-        "first": null,
-        "loop": "task/pursue",
-        "finally": null
+        "recommended": null
       },
       "krs": [
         {
@@ -27,7 +24,8 @@
       ],
       "team_ids": [
         "team-loo"
-      ]
+      ],
+      "metric_targets": []
     }
   ],
   "items": [
@@ -42,7 +40,8 @@
       "project_id": "project-gmail",
       "project": "gmail",
       "team_id": "team-loo",
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted"
     }
   ]
 }

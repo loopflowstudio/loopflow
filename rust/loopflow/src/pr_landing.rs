@@ -98,14 +98,6 @@ impl LandingPlacement {
 pub struct LandingSupervisor {
     pub placement: LandingPlacement,
     pub process_id: u32,
-    pub generation: u64,
-    pub heartbeat_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LandingClaim {
-    pub placement: LandingPlacement,
-    pub process_id: u32,
     pub heartbeat_at: OffsetDateTime,
 }
 
@@ -125,7 +117,6 @@ pub struct PrLanding {
     pub state: PrLandingState,
     pub generation: u64,
     pub supervisor: Option<LandingSupervisor>,
-    pub repair_count: u32,
     pub blocked_reason: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -160,7 +151,6 @@ impl PrLanding {
             state: PrLandingState::Watching,
             generation: 1,
             supervisor: None,
-            repair_count: 0,
             blocked_reason: None,
             created_at: now,
             updated_at: now,
@@ -207,9 +197,9 @@ impl PrLanding {
             ));
         }
         if let Some(supervisor) = &self.supervisor {
-            if supervisor.generation != self.generation || supervisor.process_id == 0 {
+            if supervisor.process_id == 0 {
                 return Err(PrLandingDataError::InvalidInvariant(
-                    "landing supervisor must name its current generation and process".to_string(),
+                    "landing supervisor must name its process".to_string(),
                 ));
             }
         }

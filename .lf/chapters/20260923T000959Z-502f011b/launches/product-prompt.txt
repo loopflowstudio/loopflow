@@ -1,0 +1,333 @@
+Repository start-chapter proposal Run for chapter 20260923T000959Z-502f011b; parent Run run_502f011b9d1f4596ba62eff0e54a8b0e, Task LOO-278. UTC start 2026-09-23T00:09:59.226362+00:00; proposed review 2026-10-21T00:09:59.226362+00:00 for every scope.
+
+IMPORTANT HUMAN INSTRUCTION OVERRIDING THE SKILL INTERVIEW: Gate 1 is explicitly accepted in the live parent conversation. Do NOT open lf ask or any human session. Do not wait for human text. Return material questions/challenges to this parent in your final report. Pass this instruction verbatim to EVERY Project child. Proposal-only: no PM/Work/charter edits, no implementation, no commits/push, no files in your checkout. The parent alone writes archives. Do not rerun the completed manual review.
+
+Loopflow exists to keep Cube, Etude, Kata, and Hootro moving. In each week at least three have durable Work that accurately states the human's desired next focus and observable forward momentum on at least one Task. The human selects priorities. Product dogfooding is external: those four projects are the proving ground. Desktop joins current Project/KR/Task planning to excellent open-Session organization. Account juggling and prompting evidence support that loop, not disconnected bets.
+
+Portfolio parallelism is desirable; intra-project parallelism stays low. Small = 1–2 active Tasks (Cube, Etude, Hootro), Medium = 2–4 (Kata), Big = 2–8 (Loopflow across Projects). These are company-specific review heuristics, not new Work kinds or execution constraints.
+
+Keep Product, Infrastructure, and Intelligence. Infrastructure owns Loopflow-on-Loopflow reliability: releases, auth, execution continuity, flow-driven Work advancement, and repository-wide architecture reduction/minimalism. Intelligence owns non-authoritative evidence that makes real Runs explainable and useful for diagnosing portfolio execution and improving prompting. Product owns external dogfood and the shared user contract, including Desktop planning plus open Sessions. List and engbot are stale structures to disposition, not next-chapter Waves. Favor excellent completion, fewer concurrent Loopflow commitments, and capacity for the external projects.
+
+Routing: loopflow.wave-agents belongs in Infrastructure / Architecture Minimalism. Loopflow self-hosting failures belong in Infrastructure Reliability or Intelligence evidence. Sessions design is validated enough to build on, not restart. Small/Medium/Big never enforce runtime behavior.
+
+Your accepted scoped brief:
+Own external portfolio progress and Desktop planning plus open Sessions. Shape Company Dogfood around Cube, Etude, Kata, Hootro (not Loopflow self-hosting), with weekly >=3/4 current human-selected Work focus plus Task momentum. Desktop builds on validated native Sessions and integrates current Project/KR/Task intent. LOO-278 and LOO-185 are candidate Company Dogfood Tasks; LOO-251 seeds Desktop. LOO-257 and loopflow.wave-agents route to Infrastructure / Architecture Minimalism. Explicitly disposition all 11 open Tasks, including new LOO-280–284; desired Session polish and shared-view experiments must not silently expand the active frontier. LOO-274 was rejected in the baseline direction. LOO-148 needs an exact owner and park trigger if not selected, not an orphan. Consider rewriting Mac Surface UX to Desktop, Loopflow API to Company Dogfood, retiring Auditability while assigning its evidence/UI obligations. Prior iOS/general fleet/broad performance promises need not survive. Account juggling and prompting evidence are supporting dependencies.
+
+Inspect actual code/current work read-only and the supplied exact starting ledger. Use cache-only lf pm show --no-sync if needed; preserve any divergence instead of refreshing or repairing auth. Read these local parent artifacts (paths are accessible read-only):
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/chapter-review.html (complete baseline, current evidence and Project verdicts)
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/review-ledger.json (exact 39 reviewed claims/evidence/gaps and prior Project review Run ids)
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/accepted-direction.md
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/sources/product-status.json
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/frozen-ledger.json
+The old direction draft is historical discussion; do not treat its older Project map as settled.
+
+EXACT FROZEN STARTING WAVE / PROJECT / KR / OPEN TASK LEDGER:
+{
+  "wave": {
+    "id": "5081a624-c095-4218-9a54-6d1a6711f282",
+    "name": "product",
+    "status": "ready",
+    "goal": "Loopflow is the product for conducting goal-authored work across humans, agents, devices, and machines. The product is not one interface; it is the shared API and surfaces that make waves understandable and steerable wherever they run: CLI, Mac, iOS, agent turns, local workers, and remote compute.",
+    "repo": "/Users/jack/src/loopflow",
+    "active_tasks": 37,
+    "active_projects": 5,
+    "live": false,
+    "paused": false,
+    "enabled": false,
+    "endpoint": null,
+    "created_at": "2026-07-14T19:04:43Z",
+    "parent_wave_id": null,
+    "retired_at": null,
+    "superseded_by_wave_id": null,
+    "retirement_reason": null,
+    "home": {
+      "id": "home_39860354aaca640c2ccb50bf6ca609d8",
+      "route": "local",
+      "created_at": "2026-07-19T14:56:05Z",
+      "observed_at": "2026-07-19T14:56:05Z"
+    }
+  },
+  "charter": "sources/wave/product/GOAL.md",
+  "pm_snapshot": "sources/product-pm.json",
+  "pm_synced_at": 1790116739,
+  "projects": [
+    {
+      "id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "slug": "mac-surface-ux",
+      "name": "Mac Surface UX",
+      "summary": "The Mac app is Loopflow's fast control room: all repositories, Waves, Projects, Tasks, Runs, PRs, activity, health, and legal controls remain legible without making Swift a second runtime. Company Discord is the canonical conversation; the app links to it",
+      "definition": "The Mac app is Loopflow's fast control room: all repositories, Waves, Projects, Tasks, Runs, PRs, activity, health, and legal controls remain legible without making Swift a second runtime. Company Discord is the canonical conversation; the app links to it and shows Work consequences. The Project prioritizes outcome repair when either Sessions readiness signal misses its published p95, reports an incorrect count, or claims readiness before interaction is live; Met readings stay quiet while the 14-day evidence windows accrue.",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "For one full week of real use, a cold launch exposes every repository and Wave, their purpose, Project/KR proof, open Tasks, attention, active agents, output-token rate, and Discord delivery state without opening a terminal.",
+          "holds": false
+        },
+        {
+          "text": "Across the shared fixture suite and 20 sampled live Wave, Project, Task, and Run rows, every visible state agrees with the shared API on liveness, next owner, legal action, and reason.",
+          "holds": false
+        },
+        {
+          "text": "Twenty cold launches and navigation trials stay inside published paint and interaction budgets on the long-lived registry; missing or stale evidence never renders as a healthy empty state.",
+          "holds": false
+        },
+        {
+          "text": "Ten of ten control-room paths start or recover Work, open the exact PR or trace, edit planning through the PM API, and open the owning Discord channel without Swift inventing lifecycle.",
+          "holds": false
+        },
+        {
+          "text": "For one month, the Mac app contains no second company transcript or Swift-owned Work concept; Discord and the shared lf DTOs remain the conversation and control authorities.",
+          "holds": false
+        },
+        {
+          "text": "For 14 days of real use, opening Loopflow to a repository paints its scoped Sessions list with the true session count within the published p95 budget across at least 20 opens, with no empty-then-populate flash and no manual repair inside the window.",
+          "holds": false
+        },
+        {
+          "text": "For 14 days of real use, selecting a session opens a live interactive embedded terminal within the published p95 budget across at least 20 opens (serial-open position included), or shows an honest opening state that never claims false readiness.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "33e774b0-ec3b-4bd6-a4f8-07676f9e897b"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    },
+    {
+      "id": "d19956b2-9955-437d-aea6-d91766231c77",
+      "slug": "loopflow-api",
+      "name": "Loopflow API",
+      "summary": "The loopflow API is the product contract for goal-authored computation. Waves, projects, tasks, agents, runs, chat, delegation, termination, recovery, and evidence all share one coherent model across CLI, Mac, iOS, prompts, and worker processes.",
+      "definition": "The loopflow API is the product contract for goal-authored computation. Waves,\nprojects, tasks, agents, runs, chat, delegation, termination, recovery, and\nevidence all share one coherent model across CLI, Mac, iOS, prompts, and worker\nprocesses.",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "The thesis holds under load: >= 5 waves run consistently for 1 week straight across loopflow and Cadenza, at least 2 per codebase driven from GOAL.md with zero repo-authored skills added for the work.",
+          "holds": false
+        },
+        {
+          "text": "Task loops earn trust by streak: over one week of real work, every dispatched task loop either lands its PR unattended or stops with an actionable non-convergence record — zero silent stalls, zero human rescues inside the window.",
+          "holds": false
+        },
+        {
+          "text": "The spawn chain survives a week: wave loops spawn project loops spawn task loops with caps enforced throughout, and no run escapes its budget.",
+          "holds": false
+        },
+        {
+          "text": "One model everywhere, continuously: for a month of landings, CLI, Mac, iOS, and agent prompts expose the same wave/project/task model — a parallel concept appearing anywhere is a failure event.",
+          "holds": false
+        },
+        {
+          "text": "A new wave can be created, steered, delegated, inspected, and closed through the shared API contract, repeated cold 3/3 times.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "33e774b0-ec3b-4bd6-a4f8-07676f9e897b"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    },
+    {
+      "id": "95159066-9098-4d0b-8903-01459dc7ec14",
+      "slug": "auditability",
+      "name": "Auditability",
+      "summary": "Every product surface shows enough truth to trust the system. Curation helps the user read; it never replaces the raw record — and that includes the system's own planning record: every claim points back to its receipt.",
+      "definition": "Every product surface shows enough truth to trust the system. Curation helps the user read; it never replaces the raw record — and that includes the system's own planning record: every claim points back to its receipt.",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "One week of real operation answers every \"what is this wave doing?\" from the product surfaces — each drop to raw transcripts or files is logged as a failure of this bet.",
+          "holds": false
+        },
+        {
+          "text": "Drill-down holds end to end, every time: wave state -> run detail -> attachable live session, N/N attempts across a week.",
+          "holds": false
+        },
+        {
+          "text": "Every visible state carries its reason (failed, waiting, running, idle, blocked, done) for the full lifetime of a wave, not just at steady state.",
+          "holds": false
+        },
+        {
+          "text": "Curation always points back: for a month, every summary, retained fact, and planning claim drills to the raw record or audit evidence that justifies it — `pm doctor`-class checks find zero orphaned claims.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "33e774b0-ec3b-4bd6-a4f8-07676f9e897b"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    }
+  ],
+  "open_tasks": [
+    {
+      "id": "9ed54c17-2b89-4bf9-b20d-0a95a1a65d44",
+      "identifier": "LOO-283",
+      "url": "https://linear.app/loopflow/issue/LOO-283/evaluate-shared-warp-and-loopflow-viewing-without-terminal-regressions",
+      "name": "Evaluate shared Warp and Loopflow viewing without terminal regressions",
+      "description": "Bounded investigation, not authorization to restore tmux presentation by default. Native provider launch plus explicit Move here is the current contract. Human direction on 2026-09-22: simultaneous viewing is desirable; the second attachment starts view-only and Take control explicitly transfers input. Previous tmux presentation distorted colors and caused terminal-specific bugs. History: 4d5e96383 shared raw resume argv, not one live PTY; 90c871805 removed tmux presentation; 7889d65bc consolidated native resume.\n\nCompare an opt-in tmux configuration and a transparent PTY relay using disposable Sessions in Warp and embedded Ghostty. Prove one provider PID and unsent draft survive late attachment, takeover, detach, and viewer close/crash; test truecolor, keyboard, image paste/drop with visible provider attachments, independently sized windows, scrollback and viewport behavior. Read-only must be enforced by the PTY owner. Record what app relaunch can recover separately from client-local selection/scroll position. Concurrent provider resumes are not a shared-PTY solution.\n\nTmux control mode would need a protocol/rendering client and does not provide Warp-native presentation automatically. Research reports Claude clipboard-image failures inside tmux (anthropics/claude-code#25672); retest on the exact stack rather than assume text file paths prove image attachment. A custom relay needs replay, flow control, resize, failure recovery, and durable PTY ownership. Remote Home attachment remains a separate scope decision. The existing Task tmux kill-on-close/quit policy must not be copied for durable human Sessions.\n\nDone when a dated comparison records reproducible passes/failures and an explicit recommendation or no-go. Keep the native default unless all fidelity proofs justify a separately reviewed change. No production client interruption or app restart is required by this investigation.",
+      "rank": 0,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "f7d1f6d9-0ed9-4ace-8d49-ed967dc875c9",
+      "identifier": "LOO-282",
+      "url": "https://linear.app/loopflow/issue/LOO-282/show-the-recorded-location-of-an-active-session-client",
+      "name": "Show the recorded location of an active Session client",
+      "description": "The ELSEWHERE pane is intentionally generic because ProviderClientRef records PID/start evidence but no terminal provenance. Record available client/terminal and Home context at provider launch and expose it through the shared Session projection so Mac/CLI can explain where the client is active (Warp, another Loopflow window, or SSH when known). Do not infer ownership from labels or add a Swift liveness registry. Missing provenance must stay explicit and readable; mirror any DTO additions in Rust/Swift fixtures without defaults.\n\nDone when an active client with known provenance has the same location in CLI and Mac, unknown/legacy provenance stays generic, and PID reuse cannot inherit another client's label. Selecting it leaves it alive. Move here remains explicit and warns about unsent input loss; no automatic takeover is introduced. Preserve the separate moved/completed stop intent consumed by the displaced launcher.",
+      "rank": 1,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "656ca5c8-fe92-41c1-848a-b69b8b10f633",
+      "identifier": "LOO-284",
+      "url": "https://linear.app/loopflow/issue/LOO-284/project-session-actions-and-work-labels-from-the-shared-api",
+      "name": "Project Session actions and Work labels from the shared API",
+      "description": "Follow-up already called for in Product memory after native Sessions PR #1250; preserve it as a Linear Task rather than a scratch-only item. Rust owns Session legality and exact Work identity, but Swift reconstructs legal actions from kind/state and joins roadmap data for display labels.\n\nProject legal actions and the display Work path in SessionRecord, update Rust/Swift shared fixtures with required or explicitly optional fields, and delete the corresponding Swift action matrix, replacement-policy inference, Sessions-only roadmap join, and unused narrower scopes in the same coherent change. Keep view-local opening/error state and terminal presence separate: they cannot be derived from the durable record alone. Preserve explicit Move here and non-destructive preparation.\n\nDone when CLI and Mac render identical legal actions and Work labels from the same projection across interactive Sessions, Asks, and human FlowSteps; no parallel Swift legality model or extra roadmap lookup remains. Exercise pending/ready/resolved and active-elsewhere cases and prove illegal resolution remains rejected at the shared API boundary.",
+      "rank": 2,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "40872684-3ee0-4507-b038-f1d379f49df6",
+      "identifier": "LOO-280",
+      "url": "https://linear.app/loopflow/issue/LOO-280/build-one-ghostty-enabled-mac-terminal-product",
+      "name": "Build one Ghostty-enabled Mac terminal product",
+      "description": "Observed 2026-09-22 at d31f2ffdf: SwiftPM links GhosttyKit and defines GHOSTTY_ENABLED; project.yml copies GhosttyResources but links neither GhosttyKit nor that flag, compiling terminal stubs. Earlier fresh Xcode build-for-testing failed on Ghostty-only test symbols. Resource validation also fails every terminal if optional shell payload is absent or mismatched; GHOSTTY_RESOURCES_DIR remains mutated process-wide.\n\nReplace these parallel definitions with one Mac terminal dependency consumed by both builds. Keep Loopflow's cross-platform library independent. One authoritative input must determine upstream revision, patch artifact version/checksum, and generated shell/terminfo provenance; ghostty-build currently rebuilds the library but not checked-in resources. Remove redundant Mac stubs/feature flags once consumers share the required target. Missing shell resources should disable blocks with a diagnostic while ordinary provider terminals still work; genuine library initialization failure remains an error. Contain initialization environment changes.\n\nDone when both SwiftPM and Xcode build-for-testing link the command-block exports, contain resources generated from the same source, and execute a real embedded PTY copy test through supported test paths. An app bundle missing shell resources still accepts terminal input. Resource copying, matching two manually edited revision strings, or compiling stubs does not count. Retain xterm-256color for provider fidelity unless separately proven. Respect hosted UI permission limits. Publish any changed binary only with authorization; no local .build path may remain in Package.swift.",
+      "rank": 3,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "01a33274-2895-4b44-b599-7e298f9b7656",
+      "identifier": "LOO-281",
+      "url": "https://linear.app/loopflow/issue/LOO-281/prove-shell-blocks-through-the-real-shell-geometry-and-long-output",
+      "name": "Prove shell blocks through the real shell, geometry, and long-output paths",
+      "description": "The branch at d31f2ffdf implements persistent completed command/output blocks, ordinary click selection, and Copy via a separate read-block C API. A real marked-output PTY test copies two blocks without native character selection. Human confirmation of final block appearance is still pending; invisible OSC metadata or triple-click selection does not meet the contract. Warp is the visual benchmark: whole-width grouping and separation, restrained tint/accent, hover/selection over the entire unit, and a distinct live prompt.\n\nClose the remaining evidence gaps and fix reproduced defects: shellIntegrationEmitsSemanticMarks manually calls zsh hooks, so it proves a fixture, not Ghostty login-shell detection/injection. Exercise the real no-command shell surface and one customized prompt (starship/powerlevel10k); document upstream system /bin/bash exclusion and avoid claiming all bundled shells are proven. Preserve provider Session behavior outside block semantics.\n\nGeometry helpers and their test both assume vertically centered grid padding; compare overlays and clicks to actual rendered cells at fractional cell heights, custom padding, resizing, scrolling, and wrapped output. Investigate renderer-mutex cost: ghostty_surface_command_blocks scans each viewport row with selectCommandBlock/prompt iteration every 100ms. Measure long output with the prompt thousands of rows above, then eliminate repeated scans if needed; record before/after latency. Treat geometry/performance as hypotheses until reproduced. Run the patch's two filtered Zig Screen tests or record the exact blocker.\n\nDone when visible blocks exist before interaction, ordinary clicks on command or output select and copy exactly both, switching blocks moves one highlight, live prompt remains editable, alternate-screen apps remain usable, and measured long-output/resize checks pass. Wait for parsed blocks in synthetic fixtures; inspect the real pasteboard. Page/pin IDs are not durable across reflow/recycling. Preserve one selected (id,text) snapshot and independent hover geometry. Do not restore native highlighting on block selection. Packaging parity is a separate Task; binary changes require a newly versioned artifact and authorized publication.",
+      "rank": 4,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "56cfdb24-cc73-4153-9ea8-1f2dab2af71a",
+      "identifier": "LOO-274",
+      "url": "https://linear.app/loopflow/issue/LOO-274/restore-wave-fleet-and-roadmap-loading-in-the-mac-app",
+      "name": "Restore Wave fleet and roadmap loading in the Mac app",
+      "description": "Restore Wave fleet and roadmap loading in the Mac app\n\n<!-- loopflow-task-start:b298456644b27e19cead7f4344385592d4ac6affbb9e13ee84b9f38f0d5feb2e -->",
+      "rank": 5,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "3aef0d2f-630c-49ba-9535-01a7591b7d18",
+      "identifier": "LOO-251",
+      "url": "https://linear.app/loopflow/issue/LOO-251/finish-the-native-sessions-multiplexer-and-promoted-ask-handoff",
+      "name": "Finish the native Sessions multiplexer and promoted Ask handoff",
+      "description": "Reconciled 2026-09-22 against branch d31f2ffdf and Product memory. The original Ask-only directive is obsolete: use lf session list/open and provider-native resume. The split tree, per-window/per-repository layout and view retention, explicit Move here, typed TerminalIdentity, and clipboard/drop plumbing already exist. Do not rebuild them or restore a global surface registry/tmux presentation layer.\n\nRemaining outcome: prove the native Sessions workspace completes a promoted human Ask end to end and retains truthful readiness. One real promoted Ask must survive open, provider-native continuation, Ready, Complete, pane clearing, and release of the blocked caller. Exercise the permissioned UI path for focus, legal actions, and reconciliation; LocalAuthentication previously prevented runner initialization, which is no behavioral result. Preserve the existing Sessions readiness instrumentation and serial-open position evidence; measured Project budgets remain authoritative.\n\nKeep row selection non-destructive; Close view hides a Session while Complete resolves it. Move here alone replaces the exact owned client, warning that unsent input in the other terminal is lost. JSON preparation must not stop a provider. Window close/app quit still end embedded clients; provider history remains resumable.\n\nEvidence already recorded on 2026-09-22: human confirmed retained Session switching, copy/image paste/drop, and explicit Warp handoff. Subsequent real-PTY tests prove window-local release, typed close-event classification, and split paste routing. Human confirmation of corrected split paste remains pending: focus each side and confirm only that composer receives Command-V. Do not infer all-provider coverage from the Codex demo or mark this Task done from compilation alone.\n\nGhostty build parity, shell-block reliability, client provenance, and shared-view experiments are separate follow-ups. No fresh runtime proof or Task closure is claimed by this reconciliation.",
+      "rank": 6,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "daeb8f50-8a6a-4168-9c65-adbee99e2d96",
+      "identifier": "LOO-148",
+      "url": "https://linear.app/loopflow/issue/LOO-148/surface-abandoned-task-recovery-on-the-shared-nowroadmap-dto",
+      "name": "Surface abandoned-Task recovery on the shared Now/Roadmap DTO",
+      "description": "W2-145 shipped recovery (lf task recover) + a CLI TaskActionHint {recover,resume,none} on the ops Task snapshot. The shared Now/Roadmap next-move DTO (NextMove{owner,reason} on RoadmapTask/TaskDetailSnapshot) still routes an abandoned Task to owner=Project instead of surfacing recovery, so CLI/Mac/iOS don't yet offer the recover action there. Close the contract's 'expose actionability in shared Now/Roadmap DTOs: recover/resume/start_next_pr/complete/none, with reason and owner'. Design note: doing it truthfully needs the recover-safety signal (worktree adoptability) so the surface offers 'recover' only when the successor can actually adopt the worktree/PR, and 'start a new Task' otherwise — a naive abandoned->recover over-promises. Likely a wire-DTO change (action verb enum) mirrored in Swift + dto fixtures; the Mac/iOS rendering rides under mac-surface-ux/ios-surface-ux.",
+      "rank": 8,
+      "completed": false,
+      "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+      "project": "mac-surface-ux",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "eef88fa6-ddcf-4570-a779-8110c7a161c6",
+      "identifier": "LOO-278",
+      "url": "https://linear.app/loopflow/issue/LOO-278/add-chapter-reviews-and-interactive-plan-resets",
+      "name": "Add chapter reviews and interactive plan resets",
+      "description": "Create a built-in chapter skill family. Autonomous review-chapter evaluates every Project KR across the chapter and writes an evidence-backed chapter report. Interactive start-chapter begins with substantial human direction, decides the Wave portfolio, then launches scoped Wave and Project chapter sessions whose findings can revise parent boundaries. Preserve shipped code and history; expired plans lose planning authority. Prepare a design in the Task worktree, implement the coherent first slice, and stop at a working demo/review for the human.",
+      "rank": 0,
+      "completed": false,
+      "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+      "project": "loopflow-api",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "2ada2b81-ffe1-40cb-9544-8c7bcb613c66",
+      "identifier": "LOO-257",
+      "url": "https://linear.app/loopflow/issue/LOO-257/base-new-task-worktrees-on-current-canonical-main",
+      "name": "Base new Task worktrees on current canonical main",
+      "description": "## Outcome\n\n`lf task run` creates a new Task worktree from the exact current canonical-main commit even when that commit is ahead of or otherwise unpublished to origin. Placement records that commit as the Task/PR base and leaves publication/rebase to the normal Task lifecycle.\n\n## Observed configured failure — 2026-08-21\n\nThe Product Wave committed durable memory on canonical main. Starting LOO-256 then failed before Task creation because main was ahead of origin/main. The refusal made the Wave’s own durable learning prevent all subsequent Task work.\n\n## Proof\n\n* In a temporary repository whose clean canonical main is one or more commits ahead of origin/main, `lf task run` creates the sibling Task worktree and bases it at the exact local canonical-main HEAD.\n* No push, reset, force-push, origin equality check, allowlist, or manual reconciliation is required.\n* Existing Task/worktree reuse remains idempotent.\n* Landing still rebases/integrates through normal Loopflow PR mechanics.\n* The configured Product path can create LOO-256 without first publishing Wave commits.\n\n## Boundaries\n\nThis intentionally supersedes LOO-175’s fixed fetched-origin placement precondition while preserving its minimal-PR-range outcome. Remove the fixed-context precondition rather than extend it. Do not silently include uncommitted filesystem changes, mutate origin, or weaken Task/worktree ownership.",
+      "rank": 3,
+      "completed": false,
+      "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+      "project": "loopflow-api",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "2c3d04d1-91b9-45ab-9ee5-2488f97d8aad",
+      "identifier": "LOO-185",
+      "url": "https://linear.app/loopflow/issue/LOO-185/provision-loopflows-company-discord-channels",
+      "name": "Provision Loopflow's company Discord channels",
+      "description": "## Outcome\n\nA company installs Loopflow in one Discord and idempotently receives one shared Loopflow room plus one channel per Wave, usable by humans and Waves across repositories, users, and Homes.\n\n> \"basically it is a set of channels that are loopflow-managed inside of a company discord\"\n\n## Contract\n\n* Guild and channel IDs are identity; names are presentation and may be renamed.\n* Provision only the category/channels, permissions, and webhook/byline resources the product uses.\n* Reconciliation adopts existing managed resources, repairs safe drift, and refuses ambiguous or foreign resources.\n* Every Wave has a stable visible byline. A Wave ignores its own echo without hiding another Wave's message.\n* Task and incident depth uses Discord threads rather than permanent Task channels.\n* Setup explains required Message Content access and least-privilege bot permissions.\n* Never store the bot token or webhook tokens in git or non-secret configuration.\n\n## Demo and done when\n\nProvision two repositories on two Homes into one company Discord. Both Wave sets appear once. Rename a Wave channel, reconcile, and prove its binding and history survive. Re-run provisioning with no changes and observe a no-op. Tests cover partial setup, duplicate names, missing permissions, a deleted managed channel, foreign channels, and restart after a partially completed reconciliation.",
+      "rank": 44,
+      "completed": false,
+      "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+      "project": "loopflow-api",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    }
+  ],
+  "gap": null
+}
+
+Launch bounded project/start-chapter Runs sequentially for Project definitions/KRs needing real shaping using lf -b --wave NAME --project EXISTING_ID project/start-chapter "brief + exact ledger"; proposed new bets use --wave without --project. Do not use provider-native subagents or controllers. Keep at most one Project child at a time. For trivial retirement propose directly. Carry the full accepted scope, exact relevant ledger, and no-human-session/proposal-only instruction to each child. Capture every child Run id and full final proposal in a distinct /tmp file. Return the exact absolute /tmp paths so this parent can archive the original complete text. Do not write files in the Wave checkout; temporary capture under /tmp is fine.
+
+Return one complete final Markdown report with: agree/challenge verdict and evidence; proposed Wave purpose/boundary; EXACT proposed Project names, stable reuse/new identities, definitions and KR texts; one explicit disposition for every prior Project, numbered KR, open Task, relevant historical Work; small opening frontier plus parked triggers; dependencies; unresolved questions for parent; proposed review date; all Project child Run ids and absolute /tmp paths containing their complete original final reports. This parent will copy those full originals into the archive; do not spend output tokens retyping reports already captured in those files. Include your own complete reconciled Wave proposal and every disposition in your final output. Failed/unanswered children stay explicit and block affected scope. Do not claim human acceptance or apply anything.
+
+Cross-Wave findings to reconcile (proposals, not accepted additional scope): Infrastructure proposes Reliability + Architecture Minimalism and initially one active Task each (LOO-279; existing loopflow.wave-agents). Latest flow branch target is Task-only execution with finite Wave/Project Runs; this MATERIAL CHANGE is OPEN for parent Gate 2, not accepted by routing it to Infrastructure. Intelligence is shaping one Trace & Context bet: inspect 20 real settled Runs and a fourteen-day attempted-operation population, preserving pre-Run failures and corrupt-record omissions; missing required context cannot count as successful reconstruction. Product judges human-selected external progress; a successful Run or honest error is not portfolio momentum. Do not add a second evidence/control authority in Desktop. Root detected duplicate historical LOO-57 under two Project displays: exact Work IDs govern disposition, not row counts.
+
+For final report capture, save complete original Project reports to /tmp and return their absolute paths and Run IDs; this parent archives them directly. Include your own full Wave proposal with every prior Project/KR/open-Task disposition. Do not re-emit full Project appendices already saved.

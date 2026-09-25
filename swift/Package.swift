@@ -28,8 +28,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "GhosttyKit",
-            url: "https://bin.loopflow.studio/GhosttyKit-4c83872.xcframework.zip",
-            checksum: "b0e75385d69477d92f673962f2361642b1a22b228ad249036cbef53c0788a74d"
+            url: "https://bin.loopflow.studio/GhosttyKit-4c83872-lf1.xcframework.zip",
+            checksum: "8d65702d5ceb7e751a794620f7c15dd8a6a6f90d367e301a43d10fb839ade9a5"
         ),
         .executableTarget(
             name: "LoopflowMac",
@@ -45,6 +45,9 @@ let package = Package(
                 "AppIcon.icns",
                 "logo.svg",
                 "dmg-background.png",
+            ],
+            resources: [
+                .copy("GhosttyResources")
             ],
             swiftSettings: [
                 .define("GHOSTTY_ENABLED", .when(platforms: [.macOS])),

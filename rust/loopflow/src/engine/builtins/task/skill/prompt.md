@@ -1,7 +1,7 @@
 ---
-description: Author or audit a Loopflow skill, Wave goal, direction, or inline prompt.
+description: Author or audit a Loopflow skill, Wave goal, or inline prompt.
 requires: a prompt idea or existing prompt asset
-produces: .lf/skills/*.md | .lf/directions/*.md | wave/<name>/GOAL.md | reviewed prompt text
+produces: .lf/skills/*.md | wave/<name>/GOAL.md | reviewed prompt text
 default_agent: claude
 action_style: exploratory
 ---
@@ -16,13 +16,13 @@ lf prompt: tighten wave/infra/GOAL.md
 
 The launch prompt identifies the reviewer for this exercise.
 
-- **Human reviewer:** read any named file, state the contract you see, and ask
+- **Interactive reviewer:** read any named file, state the contract you see, and ask
   only about choices whose answers materially change behavior, scope, or
   authority. Write reversible improvements as decisions land.
 - **Parent reviewer:** treat the supplied directive, quoted user language, and
   existing asset as intent. Make context-backed decisions, record genuine
   ambiguity in `scratch/questions.md`, and use the review protocol to return the
-  exact proposed content. Do not wait for an unavailable human or claim their
+  exact proposed content. Do not wait for an unavailable reviewer or claim their
   confirmation.
 
 ## Choose the artifact
@@ -32,19 +32,26 @@ Put each instruction at the narrowest layer that exercises it:
 | Artifact | Use it for | Do not put here |
 | --- | --- | --- |
 | Skill | A repeatable task and its output contract | Repo-wide conventions or Wave portfolio policy |
-| Wave `GOAL.md` | Durable identity, bounds, cadence, and selection judgment | Project KRs, live metric contracts, task lists, implementation steps |
-| Direction | A composable quality or user intent | A workflow tied to one skill or code area |
+| Wave `GOAL.md` | Durable identity, bounds, cadence, and selection judgment | Chapter KRs, live metric contracts, task lists, implementation steps |
 | Inline prompt | One concrete request | Reusable doctrine that deserves a skill |
 | Repo agent doc | Conventions every task in this repository must follow | One feature's design or temporary context |
+| Wave `MEMORY.md` | Curated decisions, lessons, and evidence limits | A second plan or a transcript |
 
 Do not repeat Loopflow's ambient operating guidance in customer prompts. It is
 already supplied to standard runs. Add only the domain contract and method this
 artifact uniquely owns.
 
+Shared skills must work in a customer's repository without your source files,
+internal issue IDs, tool wrappers or secret-manager policy. Keep specialized
+procedures in the skills that perform them. Repo-local skills replace the named
+skill; they are not appended supplements or automatically exported to customers.
+Improve the shared skill for general lessons; keep local rules with their local
+consumer. Do not create miscellaneous `.lf/` learning notes.
+
 ## Workflow
 
 1. **Resolve the target.** Infer the artifact kind from the named path or
-   request. Read the existing file when present. If a human request leaves two
+   request. Read the existing file when present. If a user request leaves two
    materially different targets possible, ask one focused question; otherwise
    choose the narrower artifact and proceed.
 
@@ -54,6 +61,13 @@ artifact uniquely owns.
    - plausible near-misses that do not count;
    - affected boundaries, edge cases, permissions, and exclusions;
    - the command, observation, or artifact that proves success.
+
+   Match proof to maturity: an early Task needs a concrete problem and
+   recognizable success; design chooses the implementation and operational proof.
+   Name the output's reader and their next decision. State how separate input
+   artifacts reach the consumer's execution context and which copy stays current;
+   a path alone does not deliver contents. Name a missing transfer mechanism
+   instead of using a Task description as a substitute document store.
 
 3. **Design the evidence loop.** For uncertain work, tell the agent to preserve
    observations separately from hypotheses, externalize the cheapest useful
@@ -70,11 +84,19 @@ artifact uniquely owns.
    cheaply. Could it satisfy the words while missing the intent? Does a receipt
    such as “tests added” masquerade as the outcome? Does it know what to do when
    evidence contradicts the favored plan? Tighten the contract until the easy
-   loopholes close.
+   loopholes close. Check a real example: can someone without the transcript
+   understand the benefit and current problem before opening tools? Keep the
+   Task's problem distinct from the design's solution. Trace competing rules
+   through examples, handoffs, later edits, and mechanical rendering. Review a
+   second revision after scope changes, not just the first draft. Put resulting
+   guidance only in authorship surfaces that exercise it.
 
 6. **Deliver at the source.** Update the named customer file or return reviewed
    prompt text. Do not create a second copy in documentation. Summarize the
    behavioral change, not each wording edit.
+   When relocating instructions, inspect both the ordinary assembled prompt
+   and the receiving skill's standalone export. Prove the old audience no longer
+   pays for the procedure and the intended consumer can still execute it.
 
 ## Skill contract
 
@@ -101,7 +123,7 @@ Write `scratch/security-audit.md` with evidence, severity, and reproduction.
 
 Give procedural skills numbered work and a concrete output. Give exploratory
 skills room to follow evidence without turning “explore” into permission to
-change unrelated code. Skills that may run with a present human must also
+change unrelated code. Skills that may run interactively must also
 define bounded behavior for a headless parent reviewer.
 
 ## Wave goal contract
@@ -110,8 +132,8 @@ The body of `wave/<name>/GOAL.md` is the prompt a Wave runs repeatedly. Make it
 loop well:
 
 1. **Identity by contrast** — what this Wave owns and what a sibling owns.
-2. **Selection signals** — the evidence that changes Project selection or
-   strategy. Reference Project-owned metrics when they exist; never copy them
+2. **Selection signals** — the evidence that changes chapter strategy or
+   strategy. Reference Wave-owned metrics when they exist; never copy them
    into the Wave body.
 3. **Concrete moves** — the kinds of useful action it may select now.
 4. **Honest question** — the check a lazy loop cannot satisfy by gaming a proxy.
@@ -119,25 +141,9 @@ loop well:
    work.
 
 Frontmatter carries machine policy such as `agent`, `crons`, `pm`, and `home`.
-Keep Project definitions and proof-shaped KRs in the Project system. Keep
-concrete implementation in Tasks. A Wave chooses among measured bets; it does
+Keep current chapter metric targets and proof-shaped KRs in the internal Project, edited with `lf wave update-plan`. Keep
+concrete implementation in Tasks. A Wave steers one current chapter; it does
 not contain a roadmap disguised as a prompt.
-
-## Direction contract
-
-A direction changes judgment without prescribing steps:
-
-```markdown
-Make operational failure obvious before it becomes expensive.
-
-- Can an operator see the failing boundary without opening raw logs?
-- Does the signal identify the next owner and safe next action?
-- Will retries preserve the evidence needed to explain the first failure?
-```
-
-Keep directions orthogonal to skills and code areas. “When reviewing this API”
-is a coupled workflow; “make operational failure obvious” composes with design,
-implementation, review, and any area.
 
 ## Parallel search
 
@@ -156,5 +162,5 @@ ceremony to ordinary deterministic work.
 - Success, insufficiency, boundaries, and proof are explicit where they matter.
 - Observations cannot be silently rewritten to save a hypothesis.
 - Unexpected evidence has a named consequence.
-- Output is useful to the next human or agent.
+- Output is useful to the next reader or agent.
 - Repeated runs can stop without inventing work.

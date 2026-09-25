@@ -83,6 +83,158 @@ fn rebase_onto_main_succeeds() {
 }
 
 #[test]
+fn rebase_publishes_new_existing_and_deleted_remote_branches() {
+    for remote_state in ["new", "existing", "deleted"] {
+        let repo = TestRepo::new();
+        repo.create_branch("feature");
+        repo.create_file("feature.txt", "feature\n");
+        repo.stage_all();
+        repo.commit("feature work");
+        let original_head = repo.head_sha();
+        if remote_state != "new" {
+            repo.push_new_branch("feature");
+        }
+        if remote_state == "deleted" {
+            git(
+                repo.bare_path(),
+                &["update-ref", "-d", "refs/heads/feature"],
+            );
+            assert_eq!(
+                git(repo.path(), &["rev-parse", "origin/feature"]),
+                original_head
+            );
+        }
+        repo.checkout("main");
+        repo.create_file("main.txt", "main\n");
+        repo.stage_all();
+        repo.commit("main work");
+        repo.push();
+        repo.checkout("feature");
+
+        let result = rebase_with_recovery(
+            repo.path(),
+            &RebaseOptions {
+                onto: "origin/main".to_string(),
+                push: true,
+                fork_base: None,
+            },
+            &NullProgress,
+        )
+        .unwrap_or_else(|error| panic!("{remote_state}: {error}"));
+
+        assert_ne!(result.head, original_head);
+        assert_eq!(
+            git(repo.bare_path(), &["rev-parse", "refs/heads/feature"]),
+            result.head
+        );
+        assert_eq!(git(repo.path(), &["rev-parse", "@{upstream}"]), result.head);
+        assert_eq!(
+            git(repo.bare_path(), &["show", "feature:feature.txt"]),
+            "feature"
+        );
+        assert_eq!(git(repo.bare_path(), &["show", "feature:main.txt"]), "main");
+    }
+}
+
+#[test]
+fn rebase_preserves_unseen_remote_work() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature\n");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch("feature");
+    let published_head = repo.head_sha();
+    repo.create_file("remote.txt", "concurrent work\n");
+    repo.stage_all();
+    repo.commit("concurrent work");
+    repo.push();
+    let remote_head = repo.head_sha();
+    git(repo.path(), &["reset", "--hard", &published_head]);
+    git(
+        repo.path(),
+        &["update-ref", "refs/remotes/origin/feature", &published_head],
+    );
+    repo.create_file("local.txt", "local follow-up\n");
+    repo.stage_all();
+    repo.commit("local follow-up");
+
+    let result = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: true,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(result
+        .expect_err("reject unseen work")
+        .to_string()
+        .contains("stale info"));
+    assert_eq!(
+        git(repo.bare_path(), &["rev-parse", "refs/heads/feature"]),
+        remote_head
+    );
+    assert_eq!(
+        git(repo.path(), &["show", "HEAD:local.txt"]),
+        "local follow-up"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rebase_preserves_branch_recreated_during_push() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "published work\n");
+    repo.stage_all();
+    repo.commit("published work");
+    repo.push_new_branch("feature");
+    let published_head = repo.head_sha();
+    git(
+        repo.bare_path(),
+        &["update-ref", "-d", "refs/heads/feature"],
+    );
+    repo.create_file("local.txt", "local follow-up\n");
+    repo.stage_all();
+    repo.commit("local follow-up");
+    // Restore the remote after the absence observation, before Git sends updates.
+    repo.create_file(".git/hooks/pre-push", "#!/bin/sh\ngit --git-dir=\"$(git remote get-url origin)\" update-ref refs/heads/feature \"$(git rev-parse origin/feature)\"\n");
+    std::fs::set_permissions(
+        repo.path().join(".git/hooks/pre-push"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+
+    let result = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: true,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(result
+        .expect_err("reject concurrent recreation")
+        .to_string()
+        .contains("reference already exists"));
+    assert_eq!(
+        git(repo.bare_path(), &["rev-parse", "refs/heads/feature"]),
+        published_head
+    );
+    assert_eq!(
+        git(repo.path(), &["show", "HEAD:local.txt"]),
+        "local follow-up"
+    );
+}
+
+#[test]
 fn rebase_conflict_returns_error() {
     let repo = create_conflicting_repo();
     let result = rebase_with_recovery(

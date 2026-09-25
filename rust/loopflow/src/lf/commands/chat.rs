@@ -1,11 +1,7 @@
-//! `lf chat` — the human conversing with a served mind's durable thread.
+//! `lf chat` — converse with a Wave through its durable thread.
 //!
-//! One door, `POST /messages` on the wave's server. `--steer` uses the `steer`
-//! op, reaching a live steer-capable turn and otherwise queueing for the next
-//! one. The default `message` op queues for the loop. Local chat commits it to
-//! the journal; Discord chat posts the same op through its provider-backed
-//! composer and queues the canonical provider echo. The Mac composer uses the
-//! identical door.
+//! One door, `POST /messages` on the Wave server. Messages join the channel
+//! for its next pass. The Mac composer uses the same door.
 //!
 //! # Targeting
 //! - default: the invoking context's wave from `LF_WAVE_ID`.
@@ -22,7 +18,7 @@
 //!
 //! # Following
 //! `--follow` composes the same post door with [`super::thread`]'s SSE replay.
-//! Typed lines are ordinary messages, or steer requests when `--steer` is set;
+//! Typed lines are ordinary messages;
 //! slash commands stay local to the terminal session.
 
 use std::io::BufRead;
@@ -48,7 +44,6 @@ use anyhow::{anyhow, bail, Result};
 #[derive(Debug, Clone, Copy)]
 pub struct ChatOptions<'a> {
     pub follow: bool,
-    pub steer: bool,
     pub history: bool,
     pub json: bool,
     pub limit: Option<usize>,
@@ -71,9 +66,9 @@ pub fn run(text_args: &[String], options: ChatOptions<'_>, target: &WaveTargetAr
             )
             .await
         } else if options.follow {
-            follow_with_context(&context, options.steer, target).await
+            follow_with_context(&context, target).await
         } else {
-            run_with_context(&context, text_args, options.steer, target).await
+            run_with_context(&context, text_args, target).await
         }
     })
 }
@@ -204,7 +199,6 @@ fn history_snapshot(
 pub(crate) async fn run_with_context(
     context: &CliContext,
     text_args: &[String],
-    steer: bool,
     target: &WaveTargetArgs,
 ) -> Result<()> {
     let Some(resolved) = resolve_target(
@@ -220,25 +214,13 @@ pub(crate) async fn run_with_context(
     };
     let text = message_text(text_args, std::io::stdin())?;
     let endpoint = resolved.require_endpoint()?;
-    post_message(&endpoint, &text, steer).await?;
-    println!(
-        "sent to '{}' ({})",
-        resolved.name,
-        if steer {
-            "steer live, otherwise queue"
-        } else {
-            "queued for the next turn"
-        }
-    );
+    post_message(&endpoint, &text).await?;
+    println!("sent to '{}'", resolved.name);
     Ok(())
 }
 
-/// Replay and follow the resolved thread while stdin supplies human speech.
-async fn follow_with_context(
-    context: &CliContext,
-    steer: bool,
-    target: &WaveTargetArgs,
-) -> Result<()> {
+/// Replay and follow the resolved thread while stdin supplies messages.
+async fn follow_with_context(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
     let Some(resolved) = resolve_target(
         target,
         context.store.as_ref(),
@@ -249,10 +231,10 @@ async fn follow_with_context(
     else {
         bail!("no wave here — name one with `lf chat --follow -w <wave>`");
     };
-    follow_thread(&resolved, steer).await
+    follow_thread(&resolved).await
 }
 
-async fn follow_thread(resolved: &ResolvedWave, steer: bool) -> Result<()> {
+async fn follow_thread(resolved: &ResolvedWave) -> Result<()> {
     let endpoint = resolved.require_endpoint()?;
     println!(
         "chat: {} @ {endpoint}   (/help, Ctrl-D to leave)",
@@ -292,7 +274,7 @@ async fn follow_thread(resolved: &ResolvedWave, steer: bool) -> Result<()> {
             }
             continue;
         }
-        post_message(&endpoint, line, steer).await?;
+        post_message(&endpoint, line).await?;
     }
 
     stream.abort();
@@ -335,17 +317,14 @@ async fn handle_command(command: &str, endpoint: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Post one unattributed human act, shared by one-shot and followed chat.
-async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
-    let op = if steer {
-        MessageOp::Steer
-    } else {
-        MessageOp::Message
-    };
+/// Capture the caller's name when posting, never from the listener's Home.
+async fn post_message(endpoint: &str, text: &str) -> Result<()> {
+    let op = MessageOp::Message;
     let body = serde_json::json!({
         "id": uuid::Uuid::new_v4().to_string(),
         "op": op,
         "text": text,
+        "author_name": crate::engine::config::launch_user_name()?,
     });
     post_json(endpoint, "/messages", &body).await?;
     Ok(())
@@ -515,7 +494,7 @@ pub(crate) async fn resolve_target(
 pub(crate) async fn parent_wave(store: &SharedStore, own: &Wave) -> Result<Wave> {
     let parent_id = own.parent_wave_id().ok_or_else(|| {
         anyhow!(
-            "wave '{}' has no parent — it is a root wave; the human \
+            "wave '{}' has no parent — it is a root wave; the user \
              fall-through arrives with Decisions",
             own.name()
         )
@@ -598,7 +577,8 @@ mod tests {
         .expect("open wave journal");
         for index in 0..15 {
             runtime
-                .deliver(MessageOp::Message, format!("message {index}"))
+                .try_deliver(MessageOp::Message, format!("message {index}"), None)
+                .expect("journal write")
                 .expect("append message");
         }
 
@@ -627,6 +607,7 @@ mod tests {
         let (mut journal, _) =
             crate::controller::wave::journal::Journal::open(&path).expect("legacy journal");
         journal.append(|_| EventKind::UserMessage {
+            author_name: None,
             id: crate::controller::wave::journal::MessageId("legacy-message".into()),
             op: MessageOp::Message,
             text: "read me after migration".into(),
@@ -659,7 +640,7 @@ mod tests {
         )
         .expect("open local epoch");
         local
-            .try_deliver_authored(MessageOp::Message, "local history".into())
+            .try_deliver(MessageOp::Message, "local history".into(), None)
             .expect("write local message");
         drop(local);
 
@@ -749,7 +730,7 @@ mod tests {
             axum::serve(listener, app).await.ok();
         });
 
-        let error = post_message(&address.to_string(), "shadow", false)
+        let error = post_message(&address.to_string(), "shadow")
             .await
             .expect_err("Discord mode rejects CLI compose");
         assert_eq!(
@@ -853,55 +834,12 @@ mod tests {
             .expect("resolve");
         assert!(resolved.is_none(), "plain temp dir is not a wave context");
 
-        run_with_context(
-            &context,
-            &["hello".into()],
-            false,
-            &WaveTargetArgs::default(),
-        )
-        .await
-        .expect("dropped publish exits 0");
+        run_with_context(&context, &["hello".into()], &WaveTargetArgs::default())
+            .await
+            .expect("dropped publish exits 0");
     }
 
-    /// `--steer` uses the same wire op as the Mac composer and carries no
-    /// attributed byline.
-    #[tokio::test]
-    async fn steer_flag_requests_live_steering() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = temp_store(tmp.path()).await;
-        let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(&origin).unwrap();
-        let (_addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
-        let wave = make_wave("ship", &origin, None);
-        store.create_wave(&wave).await.expect("seed wave");
-
-        let context = CliContext {
-            store: Some(store),
-            repo: None,
-            env_wave_id: None,
-        };
-        run_with_context(
-            &context,
-            &["skip".into(), "the".into(), "migration".into()],
-            true,
-            &WaveTargetArgs {
-                wave: Some("ship".into()),
-                parent: false,
-            },
-        )
-        .await
-        .expect("post human message");
-
-        let thread = runtime.thread_snapshot();
-        assert_eq!(thread.len(), 1);
-        assert_eq!(thread[0].text, "skip the migration");
-        let InboxItem::Message(message) = inbox.try_recv().expect("steer inbox item") else {
-            panic!("expected message inbox item");
-        };
-        assert_eq!(message.op, MessageOp::Steer);
-    }
-
-    /// The same human act journals the same way on every surface: a plain
+    /// The same chat input journals the same way on every surface: a plain
     /// CLI message is unattributed and op `message`, exactly what the Mac
     /// composer sends.
     #[tokio::test]
@@ -922,7 +860,6 @@ mod tests {
         run_with_context(
             &context,
             &["CI".into(), "failed".into()],
-            false,
             &WaveTargetArgs {
                 wave: Some("ship".into()),
                 parent: false,
@@ -941,7 +878,7 @@ mod tests {
     }
 
     /// `--parent` walks `parent_wave_id` and posts to the parent's live
-    /// server. The thread door refuses bylines; a human turn arrives plain.
+    /// server. The thread door refuses machine bylines; a user turn retains its source.
     #[tokio::test]
     async fn parent_targeting_reaches_the_parent_server_unattributed() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -985,8 +922,7 @@ mod tests {
             .expect("post");
         assert_eq!(refused.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
 
-        // A human standing in the child steers the parent: unattributed, like
-        // every human turn.
+        // A caller in the child can steer the parent through its ordinary chat door.
         post_json(
             &endpoint,
             "/messages",

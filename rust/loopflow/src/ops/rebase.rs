@@ -38,6 +38,7 @@ pub enum RebaseClass {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RebaseStrategy {
     Noop,
+    MergeMain,
     ResetToBase,
     DirectRebase,
 }
@@ -113,7 +114,14 @@ pub fn plan_rebase(
         .any(|path| !path.starts_with(Path::new("scratch")));
 
     let (class, strategy) = if branch == default_branch {
-        (RebaseClass::Protected, RebaseStrategy::Noop)
+        let strategy = if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
+            RebaseStrategy::Noop
+        } else if base_ref == format!("origin/{default_branch}") {
+            RebaseStrategy::MergeMain
+        } else {
+            RebaseStrategy::DirectRebase
+        };
+        (RebaseClass::Protected, strategy)
     } else if protected {
         (RebaseClass::Protected, RebaseStrategy::DirectRebase)
     } else if unique_commits == 0 && scratch_only {
@@ -148,6 +156,19 @@ pub fn rebase_with_recovery(
     options: &RebaseOptions,
     progress: &impl Progress,
 ) -> OpsResult<RebaseVerification> {
+    let default = get_default_branch(repo)?;
+    if current_branch(repo)?.as_deref() == Some(&default)
+        && options.onto == format!("origin/{default}")
+    {
+        crate::ops::checkout::refresh_main(repo, progress)?;
+        let target_sha = rev_parse(repo, &options.onto)?;
+        return Ok(RebaseVerification {
+            branch: default,
+            head: rev_parse(repo, "HEAD")?,
+            unique_commits: count_unique_commits(repo, &target_sha)?,
+            target_sha,
+        });
+    }
     start_owned_rebase(repo, options, false, progress)
 }
 
@@ -173,7 +194,7 @@ pub fn start_rebase_for_resolution(
         push: false,
         fork_base: options.fork_base.clone(),
     };
-    start_owned_rebase(repo, &local, false, progress)
+    rebase_with_recovery(repo, &local, progress)
 }
 
 /// Continue a local rebase after its conflict paths have been resolved.
@@ -605,33 +626,16 @@ fn cherry_authored_count(repo: &Path, target_sha: &str, head: &str) -> OpsResult
 }
 
 fn push_rebased_branch(repo: &Path, branch: &str) -> OpsResult<()> {
-    let upstream = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args([
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{upstream}",
-        ])
-        .output()?;
-    let args = if upstream.status.success() {
-        vec!["push", "--force-with-lease"]
+    let reference = format!("refs/heads/{branch}");
+    let remote = git(repo, &["ls-remote", "--heads", "origin", &reference])?;
+    let lease = if remote.trim().is_empty() {
+        // Deletion leaves a stale tracking ref. Require absence atomically so a
+        // concurrently recreated branch cannot be overwritten.
+        format!("--force-with-lease={reference}:")
     } else {
-        vec!["push", "--force-with-lease", "-u", "origin", branch]
+        "--force-with-lease".to_string()
     };
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(&args)
-        .output()?;
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(())
+    git(repo, &["push", &lease, "-u", "origin", &reference]).map(|_| ())
 }
 
 /// Validate a durable stacked fork base before it drives a `git rebase --onto`.
@@ -640,7 +644,7 @@ fn push_rebased_branch(repo: &Path, branch: &str) -> OpsResult<()> {
 /// `fork_base..HEAD` preserve exactly the child-authored commits. If the base
 /// diverged from HEAD (the child was itself rewritten, or the base is
 /// unreachable), refuse rather than silently rewrite history, and name the
-/// commits since the common ancestor so a human can reconcile.
+/// commits since the common ancestor for manual reconciliation.
 fn resolve_fork_point(repo: &Path, options: &RebaseOptions) -> OpsResult<Option<String>> {
     let Some(base) = options.fork_base.as_deref() else {
         return Ok(None);
@@ -816,7 +820,6 @@ fn is_protected_path(path: &Path) -> bool {
     path.starts_with(Path::new("wave"))
         || path.starts_with(Path::new(".lf/skills"))
         || path.starts_with(Path::new(".lf/flows"))
-        || path.starts_with(Path::new(".lf/directions"))
         || path == Path::new(".lf/config.yaml")
 }
 
@@ -833,6 +836,7 @@ pub fn rebase_class_name(class: &RebaseClass) -> &'static str {
 pub fn rebase_strategy_name(strategy: &RebaseStrategy) -> &'static str {
     match strategy {
         RebaseStrategy::Noop => "noop",
+        RebaseStrategy::MergeMain => "merge_main",
         RebaseStrategy::ResetToBase => "reset_to_base",
         RebaseStrategy::DirectRebase => "direct_rebase",
     }

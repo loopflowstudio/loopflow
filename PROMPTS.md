@@ -11,10 +11,9 @@ How to write prompts for loopflow. Prompts are instructions for LLM sessions—h
 
 This is the canonical long-form guide for two authors:
 
-- **Loopflow maintainers** writing builtin skills, goals, directions, operating
+- **Loopflow maintainers** writing builtin skills, goals, operating
   guidance, and prompt assembly.
-- **Loopflow customers** writing repo-local `.lf/skills/*.md`,
-  `.lf/directions/*.md`, and `wave/<name>/GOAL.md` files.
+- **Loopflow customers** writing repo-local `.lf/skills/*.md` and `wave/<name>/GOAL.md` files.
 
 Agents executing ordinary work do not need this whole document. `PROMPTS.md` is
 not auto-injected into normal runs and should not be added to repo-wide
@@ -25,7 +24,7 @@ The guide reaches each audience deliberately:
 
 | Surface | Who reads it | When |
 | --- | --- | --- |
-| `PROMPTS.md` and `/docs/prompts` | Human and agent prompt authors | While creating or auditing prompt assets |
+| `PROMPTS.md` and `/docs/prompts` | Prompt authors | While creating or auditing prompt assets |
 | `lf prompt` | Customer prompt authors with an idea or existing file | On demand; the bundled skill carries the compressed authoring method |
 | `LOOPFLOW.md` | Every standard Loopflow run | Once per launch; universal execution invariants only |
 | Selected skill or goal | The agent doing that kind of work | At execution time; specialized doctrine only |
@@ -35,6 +34,26 @@ In this repository, `STYLE.md` points maintainers here, the website publishes
 this file, and a compile-time test protects its load-bearing sections. The
 bundled `prompt` skill is self-contained; it does not depend on customer repos
 having this file.
+
+## Keep instructions with their consumer
+
+Builtin prompts ship to customers. Write them for a repository that has none of
+Loopflow's source files, internal issue IDs, tooling wrappers, or secret-manager
+policy. Universal guidance is the small execution floor; Task supervision,
+placement, authentication recovery and delivery procedures belong in the skills
+that perform them. Independently exported skills must carry their own method.
+
+Repo `.lf/skills` replace the selected skill locally; they do not append a small
+extension and are not included in customer skill exports. Improve a builtin when
+the lesson applies to customers. Keep repository-specific rules beside the code,
+in the relevant local skill, or in the repo guide when every task needs them.
+Curate durable decisions in the owning Wave's memory. Do not create standalone
+`.lf/` learning notes or a second copy of this guide.
+
+Verify delivery with assembled prompts from a neutral fixture repository and
+skill exports to a temporary home. An ordinary implementation prompt should
+omit specialized orchestration procedures; the selected control skill should
+contain them. A smaller prompt that strands the instructions is a regression.
 
 ## Structure
 
@@ -48,8 +67,8 @@ produces: scratch/something.md | code changes | verdict
 ```
 
 Skill frontmatter configures the work, not its launch surface. Direct TTY
-invocations have a present human; automated and `--batch` invocations are
-headless. Put a required User gate on the exact flow occurrence instead:
+invocations run interactively; automated and `--batch` invocations are
+headless. Put a required review gate on the exact flow occurrence instead:
 
 ```yaml
 - step:
@@ -69,6 +88,16 @@ Simplify code touched by this branch while preserving user behavior.
 ```
 
 ## Contract
+
+Match the contract to the artifact's maturity. An executable design or skill
+needs operational proof. An early Task needs a concrete user problem and
+recognizable success without preselecting an implementation. A Task can be
+ready for design while its solution is still unknown.
+
+An artifact reference must resolve where the next worker executes. Passing a
+path is not passing its contents. State how separate inputs reach the consumer
+before launch and which copy remains current. Name a missing transport mechanism
+instead of expanding the Task description into a document store.
 
 Define the finish line before the procedure. A strong prompt makes five things
 computable:
@@ -193,11 +222,21 @@ Not every prompt needs every section. Short prompts can skip Goal if the opening
 
 ## Voice
 
+**Names in artifacts, “you” in sessions.** Prompts should model the writing
+they ask for. Saved Tasks, PRs, designs, memory, reports, and decision summaries
+name the people they describe: “Jack chose the prototype path.” Session replies
+address the person directly: “You chose the prototype path.” Transcript storage
+does not turn conversation into an artifact; extracting a summary does. Output
+templates should ask for named decisions, not “human reasoning” or ambiguous
+“your feedback.” Preserve unknown authorship instead of guessing a name from
+an account, machine, or assignment. Generic instructions can name a role when
+needed; authored prose should read like something its readers would write.
+
 **Direct and imperative.** "Run tests." "Read the diff." Not "You should run tests" or "It's a good idea to read the diff."
 
 **No identity framing.** Don't tell the agent what it is. "You are a code reviewer..." or "Your role is to..." assigns identity. Just instruct. Using "you" is fine—"Run tests and verify you see green" is direct and clear.
 
-**Write for humans and agents alike.** The same words should make sense whether read by a person or executed by an LLM. "Identify where architecture and product intent are misaligned" works for both. "Think about what the user might want" doesn't.
+**Write for people and agents alike.** The same words should make sense whether read by a person or executed by an LLM. "Identify where architecture and product intent are misaligned" works for both. "Think about what the user might want" doesn't.
 
 **Opinionated, not balanced.** If there's a right way, say so. "The best reduction isn't deleting a function—it's reshaping a structure so three special cases become one."
 
@@ -237,14 +276,19 @@ either split it into sibling projects, promote the operating context into a
 wave, or demote the pieces into tasks.
 
 Good projects are either completable behavioral improvements or standing quality
-frontiers. "Wave Chat can steer and interrupt work from CLI and Mac" is a
-project. "Technical Architecture stays legible and minimally simple" is a
-project. "Delete an obsolete API" is individual debt: file it as a task under
-a project.
+frontiers. Begin with the beneficiary and the experienced change, then name
+the system boundary. "Operators can steer and interrupt Wave work from CLI
+and Mac without switching mental models" is a project. "Maintainers can
+change Loopflow without rediscovering its architecture" is a project.
+"Delete an obsolete API" is individual debt: file it as a task under a
+project.
 
 Write project KRs as proof, not backlog. A KR states an observable end state:
 what would let a maintainer say the bet now holds. Do not mix task lists,
-implementation receipts, issue ids, or status into the KR line.
+implementation receipts, issue ids, or status into the KR line. The Project
+definition carries the user promise; each KR needs a credible causal link to
+that promise. Instrumentation that is easy to count but does not establish a
+better user, operator, maintainer, or agent experience is not a strong KR.
 
 ```markdown
 # Weak: task bundle pretending to be a project
@@ -259,9 +303,10 @@ implementation receipts, issue ids, or status into the KR line.
 # Strong: project frontier with proof-shaped KRs
 # Technical Architecture
 
-Loopflow's architecture is legible from the top down: the key data structures
-and APIs explain the system, the implementation follows that map, and obsolete
-pre-loop concepts do not linger as alternate design.
+Maintainers can change Loopflow without first reverse-engineering competing
+models. The key data structures and APIs explain the system, the implementation
+follows that map, and obsolete pre-loop concepts do not linger as alternate
+design.
 
 ## KRs
 
@@ -335,60 +380,9 @@ Action goals can include light process for system navigation. Perspective goals 
 
 **Loopflow system concepts are fine:** `wave/`, `scratch/`, frontmatter, areas, flows—these are part of how loopflow works and belong in goals.
 
-**Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for humans on mobile, LLMs using browser tools, or any other user type."
+**Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for people on mobile and agents using browser tools."
 
 The goal should work for any codebase using loopflow, not just the one where it was written.
-
-### Orthogonality
-
-Directions are orthogonal to steps and areas. A direction applies to any task in any scope.
-
-```
-Step = what you're doing (implement, review, design)
-Area = where you're working (src/api/, swift/Loopflow/)
-Direction = which users you're trying to serve
-```
-
-**Don't couple to steps.** "When reviewing code, ask..." ties the direction to `review`. The same concerns apply whether you're reviewing, implementing, or designing.
-
-**Don't couple to areas.** "When working on Loopflow..." ties the direction to a specific codebase. User patterns like conductor/improviser/listener exist in any product with parallel work.
-
-### How directions apply
-
-Directions are not roleplay. A direction is intent—what you're optimizing for while doing your work.
-
-Directions can be:
-- **User patterns**: conductor, improviser, listener—make this kind of user thrive
-- **Perspectives**: ux, infra, craft, ceo—think with these concerns
-- **Metrics**: performance, security, accessibility—optimize for this quality
-- **Values**: simplicity, craft—hold this standard
-
-The questions in a direction help you check if your work serves the intent.
-
-```bash
-lf implement --direction conductor --area src/api/
-```
-
-You're implementing in src/api/. The conductor direction means you're building with the intent that conductors thrive. The questions ("can I see what needs attention without drilling in?") verify your implementation serves that intent.
-
-```bash
-lf review --direction security --area src/auth/
-```
-
-You're reviewing src/auth/. The security direction means you're optimizing for security. The questions surface vulnerabilities you might otherwise miss.
-
-```markdown
-# Bad: coupled to step and area
-When reviewing Loopflow code, ask:
-- Can I tell what needs attention?
-
-# Good: intent + questions
-Managing multiple parallel workstreams. Checking in, not diving deep.
-
-- Can I see what needs attention without drilling in?
-- Is urgency visually obvious?
-- How many clicks from "I see a problem" to "I'm acting on it"?
-```
 
 ### Voice
 
@@ -408,29 +402,56 @@ Two modes for the same concern:
 
 **Big prompts (`-big`)**: Strategic assessment for steering.
 - Broad: look at the whole codebase or system
-- Produce documentation for human review
+- Produce documentation for review
 - Identify highest-leverage changes
 - "What should we focus on?"
 
-## Outputs for humans
+## Outputs for readers
 
-Prompts are executed by agents, but outputs are read by humans. Keep both audiences in mind:
+**Write for the reader's next decision.** Someone returning from vacation should
+understand what matters before opening tools. Name the reader, what they already know,
+and what they need to decide. Put the benefit and current meaning first; let evidence
+support them below. The order used to investigate a change is rarely the right order for
+explaining it.
 
-- CLI commands should be copy-pasteable
-- Output formats should be scannable
-- Verdicts should be unambiguous
-- Design docs should stand alone
+Give each artifact a distinct job:
 
-When a prompt produces a test plan or demo procedure, produce a runnable script in `scripts/` — not a list of commands. Check `scripts/` first and extend existing scripts when possible. The bar: one command to run, one environment to verify in.
+- **Task:** the user's situation, problem, why it matters, and the experience they want. Observations and real constraints ground it. Solution ideas remain ideas until chosen.
+- **Design:** the chosen solution, alternatives and tradeoffs, architecture, boundaries, and proof. Turn the Task into an implementation decision without rewriting its original problem to fit the first solution.
+- **PR:** the benefit and actual change delivered by this increment. Start with a benefit-focused title and short summary, then minimal What changes, then Why it matters if needed. Keep automated test and lint evidence in Checks or CI. Finish with Try it when useful: a user walkthrough and its visible result. Tests never belong in that walkthrough.
+- **Status or report:** what changed, what needs attention, and the next decision or action supported by current evidence. Use readable titles and links; include execution identifiers only when needed to act.
 
-When in doubt about output format, optimize for the person who'll read it.
+“Join current Project/KR/Task planning to native Sessions” describes machinery. “Find
+planned work and its running conversations in one place” describes the intended
+experience. Keep the technical choices in the design, where they can be evaluated.
+
+Keep the current explanation current. When facts or scope change, reconcile the brief
+instead of appending another competing account. Preserve decisions and contrary evidence
+through durable links. History explains how we got here; it must not require every
+reader to reconstruct today's instructions.
+
+Templates establish reading order, not a quota of headings. Omit sections that repeat
+the summary. Technical work may benefit maintainers or operators; describe that concrete
+benefit without inventing a customer promise.
+
+Keep evidence and reproduction available without making them the entry requirement.
+Distinguish intended behavior, observed results, and remaining uncertainty. Extend an
+existing runnable demo when repeated execution warrants it; a simple check can remain a
+command with its expected result.
+
+Review the rendered output, including tool-added text. Hide the implementation details
+and ask whether the title and opening still explain the benefit. Then inspect the
+details for unsupported claims or lost constraints. Repeat with a changed scope or a
+second PR for the same Task; first drafts alone do not test whether the instructions
+resist entropy.
+
 
 ## Examples
 
 Opening lines that work:
 - "Does this work? Ship or iterate?"
 - "Simplify code touched by this branch while preserving user behavior."
-- "Look at this codebase through a user's eyes—human or digital."
+- "Look at this codebase through its users' eyes."
 - "Investigate the approach in the current diff and consider alternatives."
 
 Opening lines that don't work:
@@ -447,13 +468,17 @@ Before committing a prompt:
 - [ ] Success, insufficient outcomes, boundaries, and proof are explicit when
       ambiguity would change the result
 - [ ] No identity framing ("You are...", "Your role is...")
-- [ ] Language works for both human readers and LLM executors
+- [ ] Language works for both readers and agents
 - [ ] Workflow steps are concrete and numbered
 - [ ] Uncertain work separates observations from hypotheses and says what to do
       when evidence contradicts the plan
 - [ ] Parallel search, when authorized and useful, preserves independent
       approach families and requires concrete returns
 - [ ] Candidate results face an adversarial audit of the named edge cases
+- [ ] Title and opening explain the benefit to a reader without the transcript
+- [ ] A second revision preserves current meaning, decisions, and contrary evidence
+- [ ] Referenced inputs are available in the consumer’s execution context
+- [ ] Rendered output, including tool-added text, preserves the reading order
 - [ ] Output format is specified if the prompt produces artifacts
 - [ ] Gate prompts have clear verdicts
 - [ ] Big prompts produce documentation, not just observations

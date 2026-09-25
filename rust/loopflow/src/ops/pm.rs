@@ -1,13 +1,14 @@
 //! `lf pm` — read and write a wave's PM tasks directly in a provider.
 //!
-//! Linear is authoritative for the wave's project inventory, project specs, and
-//! tasks. `lf pm sync` projects that state into SQLite; reads serve that
-//! snapshot and only reach Linear through a bounded staleness policy (see
-//! `load_show_snapshot`).
+//! Linear owns authored chapter content and Tasks; the durable chapter binding
+//! identifies the current Project. `lf pm sync` projects provider state into
+//! SQLite; reads serve that snapshot and only reach Linear through a bounded
+//! staleness policy (see `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 
@@ -17,14 +18,17 @@ use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmPortfolioValidator, PmProject,
-    PmProviderKind, PmSnapshot, PmWave, ProjectContent, ProjectFlowPlan,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmPortfolioValidator, PmProject, PmProviderKind,
+    PmSnapshot, PmWave, ProjectContent,
 };
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
 use crate::repository::RepoId;
-use crate::store::{open_existing_store, open_store, PmSnapshotRow, ProviderToken, Store};
+use crate::store::{
+    open_existing_store, open_store, PmSnapshotRow, ProviderToken, ProviderTokenReplacement,
+    StorageConfig, Store,
+};
 use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 
 // ── Options and results ─────────────────────────────────────────────
@@ -70,7 +74,7 @@ pub enum PmRefresh {
     Never,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PmShowResult {
     pub wave: String,
     pub provider: PmProviderKind,
@@ -84,7 +88,6 @@ pub struct PmShowResult {
 #[derive(Debug, Clone)]
 pub struct PmUpdateOptions {
     pub wave: Option<String>,
-    pub project: Option<String>,
     pub id: Option<String>,
     pub title: Option<String>,
     pub notes: Option<String>,
@@ -195,151 +198,12 @@ pub struct PmRenameResult {
     pub title: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct PmTaskMoveOptions {
-    pub id: String,
-    pub wave: Option<String>,
-    pub project: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmTaskMoveResult {
-    pub wave: String,
-    pub id: String,
-    pub project: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct PmProjectWriteOptions {
-    pub wave: Option<String>,
-    pub project: Option<String>,
-    pub title: Option<String>,
-    pub definition: Option<String>,
-    pub krs: Vec<String>,
-    pub first: Option<String>,
-    pub loop_: Option<String>,
-    pub finally: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmProjectWriteResult {
-    pub wave: String,
-    pub id: String,
-    pub slug: String,
-    pub created: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct PmProjectArchiveOptions {
-    pub wave: Option<String>,
-    pub project: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmProjectArchiveResult {
-    pub wave: String,
-    pub id: String,
-    pub slug: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PmResolvedTask {
     pub wave: String,
     pub initiative_id: String,
     pub project: PmProject,
     pub item: PmItem,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmResolvedProject {
-    pub wave: String,
-    pub initiative_id: String,
-    pub project: PmProject,
-}
-
-pub fn pm_create_project(
-    repo: &Path,
-    wave: Option<&str>,
-    title: &str,
-) -> OpsResult<PmResolvedProject> {
-    block_on_pm(pm_create_project_async(repo, wave, title))
-}
-
-async fn pm_create_project_async(
-    repo: &Path,
-    wave: Option<&str>,
-    title: &str,
-) -> OpsResult<PmResolvedProject> {
-    let wave = resolve_wave(wave)?;
-    let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    if let Some(project) = projects
-        .into_iter()
-        .find(|project| project.name.eq_ignore_ascii_case(title))
-    {
-        return Ok(PmResolvedProject {
-            wave,
-            initiative_id: ctx.initiative,
-            project,
-        });
-    }
-    let seed = LocalProject {
-        slug: crate::pm::project_slug(title),
-        name: title.to_string(),
-        summary: title.to_string(),
-        definition: title.to_string(),
-        flows: ProjectFlowPlan::empty(),
-        krs: Vec::new(),
-    };
-    let linear_name = linear_project_name(repo, &wave, &seed.name).await?;
-    let id = match ctx
-        .client
-        .create_project(
-            &ctx.initiative,
-            &linear_name,
-            &ProjectContent {
-                definition: seed.definition.clone(),
-                flows: seed.flows.clone(),
-                krs: seed.krs.clone(),
-            },
-        )
-        .await
-    {
-        Ok(id) => id,
-        Err(create_error) => checked_projects(repo, &ctx, &wave)
-            .await?
-            .into_iter()
-            .find(|project| project.name.eq_ignore_ascii_case(title))
-            .map(|project| project.id)
-            .ok_or_else(|| pm_to_ops(create_error))?,
-    };
-    Ok(PmResolvedProject {
-        wave,
-        initiative_id: ctx.initiative.clone(),
-        project: PmProject {
-            id,
-            slug: seed.slug,
-            name: seed.name,
-            summary: seed.summary,
-            definition: seed.definition,
-            flows: Some(seed.flows),
-            krs: seed.krs,
-            initiative_ids: vec![ctx.initiative.clone()],
-            // The create result is transient — the next sync resolves the
-            // authoritative teams from Linear.
-            team_ids: vec![ctx.team_id.clone()],
-        },
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LocalProject {
-    slug: String,
-    name: String,
-    summary: String,
-    definition: String,
-    flows: ProjectFlowPlan,
-    krs: Vec<PmKr>,
 }
 
 // ── Client + Linear project resolution ──────────────────────────────
@@ -370,7 +234,7 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
-fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
+pub(crate) fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
     wave.and_then(normalize_wave_name)
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
@@ -487,6 +351,10 @@ async fn build_client(
     team: Option<String>,
 ) -> OpsResult<LinearClient> {
     let token = resolve_pm_token(provider).await?;
+    #[cfg(test)]
+    if let Ok(url) = PM_TEST_CONTEXT.try_with(|ctx| ctx.graphql_url.clone()) {
+        return Ok(LinearClient::with_base_url(token, team, url));
+    }
     match provider {
         PmProviderKind::Linear => Ok(LinearClient::new(token, team)),
     }
@@ -524,7 +392,12 @@ pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
     Ok(resolve_repository_context(repo).await?.client)
 }
 
-async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
+/// A Task already names its linked issue; comment access needs no team discovery.
+pub(crate) async fn issue_client(repo: &Path) -> OpsResult<LinearClient> {
+    build_client(repo, resolve_provider(repo)?, None).await
+}
+
+pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let repository = resolve_repository_context(repo).await?;
     let provider = repository.provider;
     let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {
@@ -551,70 +424,160 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
         return Ok(token);
     }
 
-    let store = open_store(&storage_config_from_env()?)
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to open credential store: {err}")))?;
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    resolve_pm_token_from_store(provider, &store, now, |provider, token| async move {
-        refresh_stored_provider_token(provider, &token).await
-    })
-    .await
+    resolve_local_pm_token(provider)
+        .await?
+        .ok_or_else(missing_linear_credential)
 }
 
-async fn resolve_pm_token_from_store<F, Fut>(
+fn missing_linear_credential() -> OpsError {
+    OpsError::Message("No Linear credential found. Run `doppler run -- lf auth linear`.".into())
+}
+
+fn credential_retry(reason: &str) -> OpsError {
+    OpsError::Message(format!(
+        "{reason}. Retry the PM operation; no credential was cleared."
+    ))
+}
+
+fn credential_deadline() -> OpsError {
+    credential_retry("Linear credential resolution deadline elapsed; a pending write may still settle, so the next call must re-read the credential")
+}
+
+/// Optional local authority for SSH; forwarded bearer tokens are resolved separately.
+pub(crate) async fn resolve_local_pm_token(provider: PmProviderKind) -> OpsResult<Option<String>> {
+    let deadline = Instant::now() + PM_REFRESH_TIMEOUT;
+    tokio::time::timeout(PM_REFRESH_TIMEOUT, async {
+        let config = storage_config_from_env()?;
+        let store = open_pm_store(&config).await?;
+        let StorageConfig::Sqlite { path } = config;
+        resolve_pm_token_from_store(provider, &store, &path, deadline).await
+    })
+    .await
+    .map_err(|_| credential_deadline())?
+}
+
+fn usable_token(token: ProviderToken) -> OpsResult<String> {
+    if token.access_token.trim().is_empty()
+        || token
+            .expires_at
+            .is_some_and(|expiry| expiry <= time::OffsetDateTime::now_utc().unix_timestamp())
+    {
+        return Err(credential_retry(
+            "Current Linear credential is unusable or expired",
+        ));
+    }
+    Ok(token.access_token)
+}
+
+fn changed_token(token: Option<ProviderToken>) -> OpsResult<Option<String>> {
+    token.map(usable_token).transpose()
+}
+
+async fn linear_refresh_lock(database: &Path, deadline: Instant) -> OpsResult<std::fs::File> {
+    let database = std::fs::canonicalize(database)
+        .map_err(|_| credential_retry("Could not resolve the Linear credential store path"))?;
+    let mut path = database.into_os_string();
+    path.push(".linear-refresh.lock");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|_| credential_retry("Could not open the Linear refresh lock"))?;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(credential_deadline());
+        }
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Err(_) => {
+                return Err(credential_retry(
+                    "Could not acquire the Linear refresh lock",
+                ))
+            }
+        }
+    }
+}
+
+async fn resolve_pm_token_from_store(
     provider: PmProviderKind,
     store: &Store,
-    now: i64,
-    refresh: F,
-) -> OpsResult<String>
-where
-    F: FnOnce(Provider, ProviderToken) -> Fut,
-    Fut: Future<Output = Result<ProviderToken, TokenRefreshError>>,
-{
-    let auth_provider = match provider {
-        PmProviderKind::Linear => Provider::Linear,
+    database: &Path,
+    deadline: Instant,
+) -> OpsResult<Option<String>> {
+    let read = || async {
+        store
+            .get_provider_token(provider.as_str())
+            .await
+            .map_err(|_| credential_retry("Could not read the Linear credential"))
     };
-    let token = store
-        .get_provider_token(provider.as_str())
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
-        .ok_or_else(|| {
-            OpsError::Message(format!(
-                "No {provider} credential found. Run `lf auth {provider}`."
-            ))
-        })?;
-
-    let expired = token.expires_at.is_some_and(|expires_at| expires_at <= now);
-    if !provider_token_refresh_due(&token, now) {
-        return Ok(token.access_token);
+    let Some(initial) = read().await? else {
+        return Ok(None);
+    };
+    if !provider_token_refresh_due(&initial, time::OffsetDateTime::now_utc().unix_timestamp()) {
+        return usable_token(initial).map(Some);
     }
-
-    match refresh(auth_provider, token.clone()).await {
-        Ok(refreshed) => {
-            let access_token = refreshed.access_token.clone();
-            store
-                .upsert_provider_token(&refreshed)
-                .await
-                .map_err(|err| {
-                    OpsError::Message(format!(
-                        "failed to persist refreshed {provider} token: {err}"
+    let lock = linear_refresh_lock(database, deadline).await?;
+    let Some(current) = read().await? else {
+        return Ok(None);
+    };
+    if !provider_token_refresh_due(&current, time::OffsetDateTime::now_utc().unix_timestamp()) {
+        return usable_token(current).map(Some);
+    }
+    for attempt in 0..2 {
+        match refresh_stored_provider_token(Provider::Linear, &current).await {
+            Ok(refreshed) => {
+                // Persistence owns the file descriptor even if this future is cancelled.
+                let replacement = store
+                    .replace_provider_token(&current, &refreshed, lock, deadline)
+                    .await;
+                return match replacement {
+                    Ok(ProviderTokenReplacement::Replaced) => usable_token(refreshed).map(Some),
+                    Ok(ProviderTokenReplacement::Changed(winner)) => usable_token(winner).map(Some),
+                    Ok(ProviderTokenReplacement::Missing) => Ok(None),
+                    Err(_) => {
+                        // A failed write (including an uncertain commit) cannot authorize
+                        // an unpersisted response. Re-read before considering fallback.
+                        if let Some(latest) = read().await? {
+                            if let Ok(access) = usable_token(latest) {
+                                tracing::warn!("Linear refresh persistence failed; using the current stored token");
+                                return Ok(Some(access));
+                            }
+                        }
+                        Err(credential_retry("Could not persist the refreshed Linear credential; re-read it on the next call"))
+                    }
+                };
+            }
+            Err(error) => {
+                let latest = read().await?;
+                if latest.as_ref() != Some(&current) {
+                    return changed_token(latest);
+                }
+                let TokenRefreshError::OAuth { reason, .. } = error else {
+                    return Err(credential_retry("Linear credential refresh failed"));
+                };
+                if attempt == 0 && reason.retryable_now() {
+                    continue;
+                }
+                if let Ok(access) = usable_token(current.clone()) {
+                    tracing::warn!(error = %reason, "proactive Linear refresh failed; using the still-valid token");
+                    return Ok(Some(access));
+                }
+                return Err(if reason.requires_reconnect() {
+                    OpsError::Message(format!("Linear refresh failed: {reason}. Run `doppler run -- lf auth linear` to reconnect."))
+                } else {
+                    credential_retry(&format!(
+                        "Linear refresh failed: {reason}; prior credential preserved"
                     ))
-                })?;
-            Ok(access_token)
+                });
+            }
         }
-        Err(error) if !expired => {
-            tracing::warn!(
-                provider = %provider,
-                error = %error,
-                "proactive PM token refresh failed; using the current token"
-            );
-            Ok(token.access_token)
-        }
-        Err(error) => Err(OpsError::Message(format!(
-            "Stored {provider} token expired and automatic refresh failed: {error}. \
-             Run `lf auth {provider}` once to reconnect."
-        ))),
     }
+    unreachable!("both refresh attempts return or retry")
 }
 
 /// Env var carrying a PM access token forwarded by `lf ssh`.
@@ -626,6 +589,10 @@ pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
 /// When `LF_FORWARDED_PM_PROVIDER` is set it must name `provider`; when it is
 /// absent the token is accepted for whatever provider the wave resolves to.
 fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
+    #[cfg(test)]
+    if PM_TEST_CONTEXT.try_with(|_| ()).is_ok() {
+        return None;
+    }
     let token = std::env::var(FORWARDED_PM_TOKEN_ENV)
         .ok()
         .map(|value| value.trim().to_string())
@@ -639,15 +606,49 @@ fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
 }
 
 fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
+    #[cfg(test)]
+    if let Ok(config) = PM_TEST_CONTEXT.try_with(|ctx| StorageConfig::sqlite(ctx.path.clone())) {
+        return Ok(config);
+    }
     crate::store::storage_config_from_env()
         .map_err(|err| OpsError::Message(format!("failed to resolve credential store: {err}")))
 }
 
-async fn pm_store() -> OpsResult<Store> {
-    open_store(&storage_config_from_env()?)
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to open PM snapshot store: {err}")))
+pub(crate) async fn pm_store() -> OpsResult<Store> {
+    open_pm_store(&storage_config_from_env()?).await
 }
+
+async fn open_pm_store(config: &StorageConfig) -> OpsResult<Store> {
+    #[cfg(test)]
+    if let Ok(store) =
+        PM_TEST_CONTEXT.try_with(|ctx| Store::from_sqlite_for_test(ctx.store.sqlite.clone()))
+    {
+        return Ok(store);
+    }
+    let config = config.clone();
+    // Store opening uses synchronous SQLite I/O. Keep it off the deadline's executor.
+    tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(open_store(&config))
+    })
+    .await
+    .map_err(|_| credential_retry("Could not open the PM store"))?
+    .map_err(|err| OpsError::Message(format!("failed to open PM snapshot store: {err}")))
+}
+
+#[cfg(test)]
+pub(crate) struct PmTestContext {
+    pub(crate) path: std::path::PathBuf,
+    pub(crate) store: std::sync::Arc<Store>,
+    pub(crate) graphql_url: String,
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static PM_TEST_CONTEXT: PmTestContext;
+}
+
+#[cfg(test)]
+mod oauth_tests;
 
 // ── snapshot freshness policy ────────────────────────────────────────
 
@@ -720,7 +721,7 @@ async fn try_timed_refresh(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> 
     match tokio::time::timeout(PM_REFRESH_TIMEOUT, work).await {
         Ok(result) => result,
         Err(_) => Err(OpsError::Message(format!(
-            "Linear did not respond within {}s",
+            "Planning refresh exceeded its {}s deadline. Retry the PM operation; a pending credential write may still settle and will be re-read",
             PM_REFRESH_TIMEOUT.as_secs()
         ))),
     }
@@ -787,7 +788,7 @@ async fn load_show_snapshot(
         Err(err) => match existing {
             Some(row) if !hard => {
                 progress.status(&format!(
-                    "Linear unreachable ({err}); showing cached snapshot from {} ago",
+                    "PM refresh failed ({err}); showing cached snapshot from {} ago",
                     format_age(now - row.synced_at)
                 ));
                 Ok(row)
@@ -797,19 +798,26 @@ async fn load_show_snapshot(
                     format!("could not refresh wave/{wave} from Linear: {err}")
                 } else {
                     format!(
-                        "wave/{wave} PM snapshot is over a week stale and Linear is unreachable: {err}"
+                        "wave/{wave} PM snapshot is over a week stale and refresh failed: {err}"
                     )
                 };
                 Err(OpsError::Message(format!(
-                    "{reason}. Reconnect or run `lf pm sync --wave {wave}`."
+                    "{reason}. Retry with `lf pm sync --wave {wave}` after addressing the reported cause."
                 )))
             }
-            None => Err(missing_snapshot_error(wave)),
+            None => Err(OpsError::Message(format!(
+                "{}; refresh failed: {err}",
+                missing_snapshot_error(wave)
+            ))),
         },
     }
 }
 
-async fn fetch_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
+pub(crate) async fn fetch_pm_snapshot(
+    repo: &Path,
+    wave: &str,
+    ctx: &PmContext,
+) -> OpsResult<PmSnapshot> {
     let store = pm_store().await?;
     fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await
 }
@@ -884,7 +892,11 @@ async fn store_pm_snapshot_with_store(
         .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))
 }
 
-async fn refresh_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
+pub(crate) async fn refresh_pm_snapshot(
+    repo: &Path,
+    wave: &str,
+    ctx: &PmContext,
+) -> OpsResult<PmSnapshot> {
     let snapshot = fetch_pm_snapshot(repo, wave, ctx).await?;
     store_pm_snapshot(repo, wave, ctx, &snapshot).await?;
     Ok(snapshot)
@@ -994,6 +1006,35 @@ async fn pm_init_async(
         )?;
     }
 
+    let store = pm_store().await?;
+    let registered = crate::controller::wave::registry::ensure_wave_row(&store, repo, &wave)
+        .await
+        .map_err(|cause| OpsError::Message(cause.to_string()))?;
+    if store
+        .chapter(registered.id(), None)
+        .await
+        .map_err(|cause| OpsError::Message(cause.to_string()))?
+        .is_none()
+    {
+        let ctx = resolve_context(repo, &wave).await?;
+        if !checked_projects(repo, &ctx, &wave).await?.is_empty() {
+            return Err(OpsError::Message(format!("Wave {wave} has an existing plan; preview its migration with `lf wave new-chapter --wave {wave} --chapter <id> --dry-run`")));
+        }
+        let receipt = super::chapter::rotate(
+            repo,
+            &super::chapter::NewChapterRequest {
+                wave: Some(wave.clone()),
+                chapter: crate::work::chapter::ChapterId::parse("initial")
+                    .map_err(OpsError::Message)?,
+                content: super::chapter::empty_plan(),
+            },
+            false,
+        )
+        .await?;
+        if let Some(error) = receipt.error {
+            return Err(OpsError::Message(error));
+        }
+    }
     Ok(PmInitResult {
         wave,
         initiative_id,
@@ -1059,7 +1100,6 @@ pub fn pm_update(
 pub fn pm_create_task_idempotent(
     repo: &Path,
     wave: &str,
-    project_slug: &str,
     title: &str,
     description: &str,
     marker: &str,
@@ -1068,7 +1108,6 @@ pub fn pm_create_task_idempotent(
     block_on_pm(pm_create_task_idempotent_async(
         repo,
         wave,
-        project_slug,
         title,
         description,
         marker,
@@ -1079,15 +1118,24 @@ pub fn pm_create_task_idempotent(
 async fn pm_create_task_idempotent_async(
     repo: &Path,
     wave: &str,
-    project_slug: &str,
     title: &str,
     description: &str,
     marker: &str,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
+    let store = pm_store().await?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let registered = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
+    super::chapter::require_chapter_home(&store, &registered).await?;
+    let _lock = super::chapter::rotation_lock(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
-    let projects = checked_projects(repo, &ctx, wave).await?;
-    let project = find_project(&projects, wave, project_slug)?;
+    refresh_pm_snapshot(repo, wave, &ctx).await?;
+    let project = super::chapter::current_project(&store, &registered).await?;
     let find_existing = |items: Vec<PmItem>| {
         items
             .into_iter()
@@ -1109,7 +1157,7 @@ async fn pm_create_task_idempotent_async(
     }
 
     progress.status(&format!(
-        "creating idempotent {} task in Linear Project {} for wave/{wave}",
+        "creating idempotent {} task in the current chapter {} for wave/{wave}",
         ctx.provider, project.id
     ));
     let item = PmItemCreate {
@@ -1167,16 +1215,7 @@ pub(crate) async fn pm_update_async(
         }
     }
     let store = pm_store().await?;
-    let result = apply_update(
-        repo,
-        &wave,
-        options.project.as_deref(),
-        &ctx,
-        options,
-        progress,
-        &store,
-    )
-    .await?;
+    let result = apply_update(repo, &wave, &ctx, options, progress, &store).await?;
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
     refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(result)
@@ -1185,17 +1224,54 @@ pub(crate) async fn pm_update_async(
 async fn apply_update(
     repo: &Path,
     wave: &str,
-    project_slug: Option<&str>,
     ctx: &PmContext,
     options: &PmUpdateOptions,
     progress: &impl Progress,
     store: &Store,
 ) -> OpsResult<PmUpdateResult> {
     let mark_done = parse_done_status(options.status.as_deref())?;
+    let registered = if options.id.is_none() {
+        let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        Some(
+            store
+                .get_wave_at(&locator)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?,
+        )
+    } else {
+        None
+    };
+    let _lock = if let Some(registered) = &registered {
+        super::chapter::require_chapter_home(store, registered).await?;
+        Some(super::chapter::rotation_lock(registered).await?)
+    } else {
+        None
+    };
     let projects = checked_projects_with_store(repo, ctx, wave, store).await?;
-    let project = project_slug
-        .map(|slug| find_project(&projects, wave, slug))
-        .transpose()?;
+    let current = if let Some(registered) = &registered {
+        let chapter = store
+            .chapter(registered.id(), None)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| {
+                OpsError::Message("the Wave has no chapter; run `lf wave new-chapter`".into())
+            })?;
+        Some(
+            projects
+                .iter()
+                .find(|project| project.id == chapter.project_id)
+                .ok_or_else(|| {
+                    OpsError::Message(
+                        "current chapter is unavailable; resume its transition".into(),
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
+    let project = current;
 
     let (id, created) = match options.id.as_ref() {
         Some(id) => {
@@ -1226,11 +1302,11 @@ async fn apply_update(
             };
             let Some(project) = project else {
                 return Err(OpsError::Message(
-                    "`lf pm task create --project <slug>` is required".to_string(),
+                    "the Wave has no current chapter; run `lf wave new-chapter`".to_string(),
                 ));
             };
             progress.status(&format!(
-                "creating {} task in Linear Project {} for wave/{wave}",
+                "creating {} task in the current chapter {} for wave/{wave}",
                 ctx.provider, project.id
             ));
             let id = ctx
@@ -1538,30 +1614,6 @@ async fn resolve_owned_issue(
     let wave = wave_for_initiative(repo, &initiative_id)?;
     validate_project_ownership(&project, &wave, &initiative_id, &repository.team_id)?;
     Ok((wave, initiative_id, item, project))
-}
-
-pub fn pm_resolve_project(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
-    block_on_pm(pm_resolve_project_async(repo, project_id))
-}
-
-async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
-    let repository = resolve_repository_context(repo).await?;
-    let mut project = repository
-        .client
-        .project_ownership(project_id)
-        .await
-        .map_err(pm_to_ops)?;
-    let initiative_id = singular_project_initiative(&project)?;
-    let wave = wave_for_initiative(repo, &initiative_id)?;
-    validate_project_ownership(&project, &wave, &initiative_id, &repository.team_id)?;
-    let title_path = canonical_wave_title_path_async(repo, &wave).await?;
-    project.name = canonical_project_name(&title_path, &wave, &project.name)?;
-    project.slug = crate::pm::project_slug(&project.name);
-    Ok(PmResolvedProject {
-        wave,
-        initiative_id,
-        project,
-    })
 }
 
 fn singular_project_initiative(project: &PmProject) -> OpsResult<String> {
@@ -1939,7 +1991,7 @@ async fn apply_or_plan_repository_reteam(
                         &state.project.id,
                         &state.target_name,
                         &ProjectContent {
-                            definition: state.project.definition.clone(),
+                            metric_targets: state.project.metric_targets.clone(),
                             flows,
                             krs: state.project.krs.clone(),
                         },
@@ -2258,7 +2310,7 @@ async fn pm_sync_async(
                             &project.id,
                             &expected_name,
                             &ProjectContent {
-                                definition: project.definition.clone(),
+                                metric_targets: project.metric_targets.clone(),
                                 flows: project.flows.clone().expect("preflight required flows"),
                                 krs: project.krs.clone(),
                             },
@@ -2289,168 +2341,6 @@ async fn pm_sync_async(
 
 // ── explicit mutations ─────────────────────────────────────────────
 
-pub fn pm_project_write(
-    repo: &Path,
-    options: &PmProjectWriteOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectWriteResult> {
-    block_on_pm(pm_project_write_async(repo, options, progress))
-}
-
-pub fn pm_project_archive(
-    repo: &Path,
-    options: &PmProjectArchiveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectArchiveResult> {
-    block_on_pm(pm_project_archive_async(repo, options, progress))
-}
-
-async fn pm_project_archive_async(
-    repo: &Path,
-    options: &PmProjectArchiveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectArchiveResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    let project = find_project(&projects, &wave, &options.project)?;
-    progress.status(&format!("archiving Linear Project `{}`", project.name));
-    ctx.client
-        .archive_project(&project.id)
-        .await
-        .map_err(pm_to_ops)?;
-    let result = PmProjectArchiveResult {
-        wave: wave.clone(),
-        id: project.id.clone(),
-        slug: project.slug.clone(),
-    };
-    refresh_pm_snapshot(repo, &wave, &ctx).await?;
-    Ok(result)
-}
-
-async fn pm_project_write_async(
-    repo: &Path,
-    options: &PmProjectWriteOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmProjectWriteResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    // Creating a Project (no `--project` slug to update) must bind an explicit
-    // team; updating an existing Project does not move it between teams.
-    let ctx = resolve_context(repo, &wave).await?;
-    let requested_krs = options
-        .krs
-        .iter()
-        .map(|value| {
-            let value = value.trim();
-            let (holds, text) = value
-                .strip_prefix("[x] ")
-                .or_else(|| value.strip_prefix("[X] "))
-                .map(|text| (true, text))
-                .or_else(|| value.strip_prefix("[ ] ").map(|text| (false, text)))
-                .unwrap_or((false, value));
-            PmKr {
-                text: text.trim().to_string(),
-                holds,
-            }
-        })
-        .filter(|kr| !kr.text.is_empty())
-        .collect::<Vec<_>>();
-    if options.project.is_none() && requested_krs.is_empty() {
-        return Err(OpsError::Message(
-            "at least one `--kr` is required".to_string(),
-        ));
-    }
-
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    let (id, slug, created) = if let Some(slug) = options.project.as_deref() {
-        let project = find_project(&projects, &wave, slug)?;
-        let name = options
-            .title
-            .clone()
-            .unwrap_or_else(|| project.name.clone());
-        let new_slug = crate::pm::project_slug(&name);
-        if projects
-            .iter()
-            .any(|candidate| candidate.id != project.id && candidate.slug == new_slug)
-        {
-            return Err(OpsError::Message(format!(
-                "wave/{wave} already has a Linear Project with slug `{new_slug}`"
-            )));
-        }
-        progress.status(&format!("updating Linear Project `{}`", project.name));
-        let linear_name = linear_project_name(repo, &wave, &name).await?;
-        let content = ProjectContent {
-            definition: options
-                .definition
-                .clone()
-                .unwrap_or_else(|| project.definition.clone()),
-            flows: ProjectFlowPlan {
-                first: options
-                    .first
-                    .clone()
-                    .or_else(|| project.flows.as_ref().and_then(|flows| flows.first.clone())),
-                loop_: options
-                    .loop_
-                    .clone()
-                    .or_else(|| project.flows.as_ref().and_then(|flows| flows.loop_.clone())),
-                finally: options.finally.clone().or_else(|| {
-                    project
-                        .flows
-                        .as_ref()
-                        .and_then(|flows| flows.finally.clone())
-                }),
-            },
-            krs: if options.krs.is_empty() {
-                project.krs.clone()
-            } else {
-                requested_krs.clone()
-            },
-        };
-        ctx.client
-            .update_project(&project.id, &linear_name, &content)
-            .await
-            .map_err(pm_to_ops)?;
-        (project.id.clone(), new_slug, false)
-    } else {
-        let name = options.title.clone().ok_or_else(|| {
-            OpsError::Message("`lf pm project create --title` is required".to_string())
-        })?;
-        let slug = crate::pm::project_slug(&name);
-        if projects.iter().any(|project| project.slug == slug) {
-            return Err(OpsError::Message(format!(
-                "wave/{wave} already has a Linear Project with slug `{slug}`; use `lf pm project update`"
-            )));
-        }
-        progress.status(&format!("creating Linear Project `{name}`"));
-        let linear_name = linear_project_name(repo, &wave, &name).await?;
-        let content = ProjectContent {
-            definition: options.definition.clone().ok_or_else(|| {
-                OpsError::Message("`lf pm project create --definition` is required".to_string())
-            })?,
-            flows: ProjectFlowPlan {
-                first: options.first.clone(),
-                loop_: options.loop_.clone(),
-                finally: options.finally.clone(),
-            },
-            krs: requested_krs.clone(),
-        };
-        let id = ctx
-            .client
-            .create_project(&ctx.initiative, &linear_name, &content)
-            .await
-            .map_err(pm_to_ops)?;
-        (id, slug, true)
-    };
-
-    refresh_pm_snapshot(repo, &wave, &ctx).await?;
-    Ok(PmProjectWriteResult {
-        wave,
-        id,
-        slug,
-        created,
-    })
-}
-
 pub fn pm_rename(
     repo: &Path,
     options: &PmRenameOptions,
@@ -2480,41 +2370,6 @@ async fn pm_rename_async(
         wave,
         initiative: ctx.initiative,
         title: options.title.clone(),
-    })
-}
-
-pub fn pm_task_move(
-    repo: &Path,
-    options: &PmTaskMoveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmTaskMoveResult> {
-    block_on_pm(pm_task_move_async(repo, options, progress))
-}
-
-async fn pm_task_move_async(
-    repo: &Path,
-    options: &PmTaskMoveOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmTaskMoveResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(repo, &ctx, &wave).await?;
-    let project = find_project(&projects, &wave, &options.project)?;
-    resolve_owned_issue(repo, &ctx.repository, &options.id).await?;
-    progress.status(&format!(
-        "moving {} task {} to wave/{wave} Linear Project {}",
-        ctx.provider, options.id, project.id
-    ));
-    ctx.client
-        .move_item_to_project(&options.id, &project.id)
-        .await
-        .map_err(pm_to_ops)?;
-    progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
-    refresh_pm_snapshot(repo, &wave, &ctx).await?;
-    Ok(PmTaskMoveResult {
-        wave,
-        id: options.id.clone(),
-        project: options.project.clone(),
     })
 }
 
@@ -2741,7 +2596,11 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
 }
 
 /// List a Wave's Projects and enforce repository Team + singular Initiative ownership.
-async fn checked_projects(repo: &Path, ctx: &PmContext, wave: &str) -> OpsResult<Vec<PmProject>> {
+pub(crate) async fn checked_projects(
+    repo: &Path,
+    ctx: &PmContext,
+    wave: &str,
+) -> OpsResult<Vec<PmProject>> {
     let store = pm_store().await?;
     checked_projects_with_store(repo, ctx, wave, &store).await
 }
@@ -2758,6 +2617,40 @@ async fn checked_projects_with_store(
         .list_projects(&ctx.initiative)
         .await
         .map_err(pm_to_ops)?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if let Some(registered) = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(format!("failed to read Wave registry: {error}")))?
+    {
+        if let Some(chapter) = store
+            .chapter(registered.id(), None)
+            .await
+            .map_err(|error| {
+                OpsError::Message(format!("failed to read current chapter: {error}"))
+            })?
+        {
+            if !projects
+                .iter()
+                .any(|project| project.id == chapter.project_id)
+            {
+                // The binding owns identity; a portfolio omission cannot erase its content.
+                projects.push(
+                    ctx.client
+                        .project_ownership(&chapter.project_id)
+                        .await
+                        .map_err(|error| {
+                            OpsError::Message(format!(
+                                "current chapter {} ({}) evidence unavailable: {error}",
+                                chapter.id.as_str(),
+                                chapter.project_id
+                            ))
+                        })?,
+                );
+            }
+        }
+    }
     for project in &mut projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
         project.name = canonical_project_name(&title_path, wave, &project.name)?;
@@ -2810,7 +2703,11 @@ fn title_case(slug: &str) -> String {
         .join(" ")
 }
 
-async fn linear_project_name(repo: &Path, wave: &str, canonical_name: &str) -> OpsResult<String> {
+pub(crate) async fn linear_project_name(
+    repo: &Path,
+    wave: &str,
+    canonical_name: &str,
+) -> OpsResult<String> {
     Ok(format!(
         "{} — {}",
         canonical_wave_title_path_async(repo, wave).await?,
@@ -2833,7 +2730,7 @@ fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> Op
     if linear_name.contains(" — ") {
         return Err(OpsError::Message(format!(
             "Linear Project title {linear_name:?} has an unrecognized Wave prefix; \
-             run `lf pm project update --wave {wave} --project <slug> --title <name>` explicitly"
+             inspect `lf pm doctor` and correct the provider title before retrying"
         )));
     }
     Ok(linear_name.trim().to_string())
@@ -2924,6 +2821,7 @@ mod tests {
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
+    use crate::pm::{PmKr, ProjectFlowPlan};
     use crate::work::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
@@ -2958,7 +2856,7 @@ mod tests {
     }
 
     async fn isolated_pm_store(repo: &Path) -> Store {
-        open_store(&crate::store::StorageConfig::sqlite(
+        crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             repo.join("registry.db"),
         ))
         .await
@@ -2968,12 +2866,11 @@ mod tests {
     async fn isolated_apply_update(
         repo: &Path,
         wave: &str,
-        project: Option<&str>,
         ctx: &PmContext,
         options: &PmUpdateOptions,
     ) -> OpsResult<PmUpdateResult> {
         let store = isolated_pm_store(repo).await;
-        apply_update(repo, wave, project, ctx, options, &NullProgress, &store).await
+        apply_update(repo, wave, ctx, options, &NullProgress, &store).await
     }
 
     fn write_goal(repo: &Path, wave: &str, frontmatter: &str) {
@@ -3064,7 +2961,10 @@ mod tests {
             json!({ "data": { "issue": {
                 "updatedAt": "2026-07-20T00:00:00.000Z",
                 "title": "Task", "description": "",
-                "comments": { "nodes": nodes }
+                "comments": {
+                    "nodes": nodes,
+                    "pageInfo": { "hasNextPage": false, "endCursor": null }
+                }
             } } }),
         )
     }
@@ -3168,9 +3068,11 @@ mod tests {
         );
 
         let database = repo.path().join("registry.db");
-        let store = open_store(&crate::store::StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+            database.clone(),
+        ))
+        .await
+        .unwrap();
         let survival = Wave::new(
             WaveId::new(),
             "survival".to_string(),
@@ -3342,9 +3244,11 @@ mod tests {
         );
 
         let database = repo.path().join("registry.db");
-        let store = open_store(&crate::store::StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+            database.clone(),
+        ))
+        .await
+        .unwrap();
         store
             .create_wave(&Wave::new(
                 WaveId::new(),
@@ -3458,7 +3362,8 @@ mod tests {
             slug: crate::pm::project_slug(name),
             name: name.to_string(),
             summary: String::new(),
-            definition: String::new(),
+
+            metric_targets: Vec::new(),
             flows: Some(ProjectFlowPlan::empty()),
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
@@ -3484,11 +3389,10 @@ mod tests {
                 slug: "wave-chat".to_string(),
                 name: "Wave Chat".to_string(),
                 summary: "Stay in flow.".to_string(),
-                definition: "Conversation stays in flow.".to_string(),
+
+                metric_targets: Vec::new(),
                 flows: Some(ProjectFlowPlan {
-                    first: Some("task-design".to_string()),
-                    loop_: Some("slice".to_string()),
-                    finally: Some("ship".to_string()),
+                    recommended: Some("task-design".to_string()),
                 }),
                 krs: vec![PmKr {
                     text: "Replies survive restarts.".to_string(),
@@ -3504,10 +3408,11 @@ mod tests {
         assert_eq!(value["synced_at"], 42);
         assert_eq!(value["projects"][0]["team_ids"][0], "team-prd");
         assert_eq!(
-            value["projects"][0]["definition"],
-            "Conversation stays in flow."
+            value["projects"][0]["metric_targets"],
+            serde_json::json!([])
         );
-        assert_eq!(value["projects"][0]["flows"]["loop"], "slice");
+        assert!(value["projects"][0].get("definition").is_none());
+        assert_eq!(value["projects"][0]["flows"]["recommended"], "task-design");
         assert_eq!(value["projects"][0]["krs"][0]["holds"], true);
         assert_eq!(value["items"], serde_json::json!([]));
     }
@@ -3569,66 +3474,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_update_requires_a_project_when_creating() {
-        let (base_url, _requests) = test_server::spawn(vec![projects_response(json!([]))]).await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-        let repo = tempfile::tempdir().unwrap();
-        let options = PmUpdateOptions {
-            wave: None,
-            project: None,
-            id: None,
-            title: Some("New task".to_string()),
-            notes: Some("details".to_string()),
-            status: None,
-            pr: None,
-        };
-
-        let error = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
-            .await
-            .expect_err("project is required");
-        assert!(error.to_string().contains("--project <slug>"));
-    }
-
-    #[tokio::test]
-    async fn apply_update_creates_task_in_native_project() {
-        let (base_url, requests) = test_server::spawn(vec![
-            projects_response(json!([project_node("project-chat", "Wave Chat")])),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-todo", "position": 1.0 }] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueCreate": { "issue": { "id": "new-task" } } } }),
-            ),
-        ])
-        .await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-        let repo = tempfile::tempdir().unwrap();
-        let options = PmUpdateOptions {
-            wave: None,
-            project: Some("wave-chat".to_string()),
-            id: None,
-            title: Some("New task".to_string()),
-            notes: None,
-            status: None,
-            pr: None,
-        };
-
-        let result =
-            isolated_apply_update(repo.path(), "product", Some("wave-chat"), &ctx, &options)
-                .await
-                .expect("update succeeds");
-
-        assert!(result.created);
-        let requests = requests.lock().await;
-        let create_body: serde_json::Value =
-            serde_json::from_str(&requests[2].body).expect("create body is json");
-        assert_eq!(create_body["variables"]["projectId"], "project-chat");
-        assert!(create_body["variables"].get("labelIds").is_none());
-    }
-
-    #[tokio::test]
     async fn apply_update_completes_when_status_done() {
         let (base_url, _requests) = test_server::spawn(vec![
             projects_response(json!([])),
@@ -3652,7 +3497,6 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
-            project: None,
             id: Some("task-9".to_string()),
             title: None,
             notes: None,
@@ -3660,7 +3504,7 @@ mod tests {
             pr: None,
         };
 
-        let result = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
+        let result = isolated_apply_update(repo.path(), "goals", &ctx, &options)
             .await
             .expect("update succeeds");
         assert!(!result.created);
@@ -3703,7 +3547,6 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
-            project: None,
             id: Some("task-9".to_string()),
             title: Some("Existing".to_string()),
             notes: None,
@@ -3711,7 +3554,7 @@ mod tests {
             pr: Some("https://github.com/acme/repo/pull/42".to_string()),
         };
 
-        let result = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
+        let result = isolated_apply_update(repo.path(), "goals", &ctx, &options)
             .await
             .expect("update succeeds");
         assert!(result.completed);
@@ -3907,103 +3750,6 @@ mod tests {
     // Env vars are process-global; serialize the forwarded-token tests so a
     // concurrent test never observes a half-set environment.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[tokio::test]
-    async fn pm_refreshes_due_linear_token_before_using_it() {
-        let db_path =
-            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
-        let store = std::sync::Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(db_path))
-                .await
-                .expect("open token store"),
-        );
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        store
-            .upsert_provider_token(&ProviderToken {
-                provider: "linear".to_string(),
-                access_token: "old-access".to_string(),
-                refresh_token: Some("old-refresh".to_string()),
-                oauth_client_id: Some("linear-client".to_string()),
-                expires_at: Some(now + 60),
-                login: None,
-                updated_at: now,
-                credential_type: crate::store::CredentialType::OAuth,
-            })
-            .await
-            .expect("store current token");
-
-        let access_token = resolve_pm_token_from_store(
-            PmProviderKind::Linear,
-            &store,
-            now,
-            |provider, current| async move {
-                assert_eq!(provider, Provider::Linear);
-                assert_eq!(current.refresh_token.as_deref(), Some("old-refresh"));
-                Ok(ProviderToken {
-                    provider: "linear".to_string(),
-                    access_token: "new-access".to_string(),
-                    refresh_token: Some("new-refresh".to_string()),
-                    oauth_client_id: Some("linear-client".to_string()),
-                    expires_at: Some(now + 24 * 60 * 60),
-                    login: None,
-                    updated_at: now,
-                    credential_type: crate::store::CredentialType::OAuth,
-                })
-            },
-        )
-        .await
-        .expect("resolve refreshed token");
-
-        assert_eq!(access_token, "new-access");
-        let stored = store
-            .get_provider_token("linear")
-            .await
-            .expect("load refreshed token")
-            .expect("refreshed token row");
-        assert_eq!(stored.refresh_token.as_deref(), Some("new-refresh"));
-        assert_eq!(stored.oauth_client_id.as_deref(), Some("linear-client"));
-    }
-
-    #[tokio::test]
-    async fn proactive_refresh_failure_uses_still_valid_token() {
-        let db_path =
-            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
-        let store = std::sync::Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(db_path))
-                .await
-                .expect("open token store"),
-        );
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        store
-            .upsert_provider_token(&ProviderToken {
-                provider: "linear".to_string(),
-                access_token: "still-valid".to_string(),
-                refresh_token: Some("refresh-token".to_string()),
-                oauth_client_id: Some("linear-client".to_string()),
-                expires_at: Some(now + 60),
-                login: None,
-                updated_at: now,
-                credential_type: crate::store::CredentialType::OAuth,
-            })
-            .await
-            .expect("store current token");
-
-        let access_token = resolve_pm_token_from_store(
-            PmProviderKind::Linear,
-            &store,
-            now,
-            |provider, _| async move {
-                Err(TokenRefreshError::OAuth {
-                    provider,
-                    reason: "the token endpoint rejected or could not complete the request",
-                })
-            },
-        )
-        .await
-        .expect("valid token remains usable");
-
-        assert_eq!(access_token, "still-valid");
-    }
 
     #[test]
     fn resolve_pm_token_prefers_forwarded_env() {

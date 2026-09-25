@@ -1,0 +1,19 @@
+{
+  "wave": "product",
+  "started_at": "2026-09-23T01:33:45.192053+00:00",
+  "command": [
+    "lf",
+    "-b",
+    "--wave",
+    "product",
+    "wave/start-chapter"
+  ],
+  "status": "returned",
+  "exit_code": 0,
+  "finished_at": "2026-09-23T01:50:07.137984+00:00",
+  "run_id": "run_ea98cc7ad3ac40908b01ca0e8455f724",
+  "project_runs": {
+    "company-dogfood": "run_dfe0cc8351914375b3769a953cad3cfe",
+    "desktop": "run_787dbbe691c44d5d91ea7cf94575cde2"
+  }
+}

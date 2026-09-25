@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -274,7 +275,7 @@ fn git_output_bare(repo: &TestRepo, args: &[&str]) -> String {
 }
 
 fn wait_for_path(path: &std::path::Path) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !path.exists() {
         assert!(
             Instant::now() < deadline,
@@ -961,6 +962,163 @@ exit 2
 }
 
 #[test]
+fn release_run_owns_each_interrupted_candidate_preparation_materialization() {
+    for interrupted in [
+        InterruptedWorktree::EmptyPath,
+        InterruptedWorktree::BranchOnly,
+        InterruptedWorktree::MissingPath,
+        InterruptedWorktree::Complete,
+    ] {
+        let repo = TestRepo::new();
+        let state = tempfile::tempdir().expect("release state");
+        let fixture = configure_candidate_publisher(&repo, state.path());
+        let worktree = leave_interrupted_worktree(
+            &repo,
+            interrupted,
+            &fixture.worktree_name,
+            &fixture.branch,
+            &fixture.head,
+        );
+        let _env = EnvGuard::new(&[("gh", fixture.gh_script.as_str())]);
+
+        let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+            .unwrap_or_else(|error| panic!("{interrupted:?} retry failed: {error}"));
+
+        let ReleaseRunOutcome::Released(receipt) = outcome else {
+            panic!("{interrupted:?} should release the prepared candidate");
+        };
+        assert_eq!(receipt.commit, fixture.head);
+        assert_eq!(
+            fs::read_to_string(&fixture.attempts).expect("candidate preparation attempt"),
+            "prepare\n"
+        );
+        assert!(receipt.release_exists);
+        assert!(!worktree.exists());
+    }
+}
+
+#[test]
+fn release_run_preserves_dirty_candidate_preparation_worktree() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().expect("release state");
+    let fixture = configure_candidate_publisher(&repo, state.path());
+    let worktree = leave_interrupted_worktree(
+        &repo,
+        InterruptedWorktree::Complete,
+        &fixture.worktree_name,
+        &fixture.branch,
+        &fixture.head,
+    );
+    fs::write(worktree.join("operator.txt"), "preserve me\n").expect("dirty candidate tree");
+    let branch_head = git_output(&repo, &["rev-parse", &fixture.branch]);
+    let _env = EnvGuard::new(&[("gh", fixture.gh_script.as_str())]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("dirty candidate state must fail closed");
+    let message = error.to_string();
+
+    assert!(message.contains(&worktree.display().to_string()));
+    assert!(message.contains(&fixture.branch));
+    assert!(message.contains(&fixture.head));
+    assert!(message.contains("operator.txt"));
+    assert!(message.contains("no state was changed"));
+    assert_eq!(
+        fs::read_to_string(worktree.join("operator.txt")).expect("preserved file"),
+        "preserve me\n"
+    );
+    assert_eq!(
+        git_output(&repo, &["rev-parse", &fixture.branch]),
+        branch_head
+    );
+    assert!(!fixture.attempts.exists());
+}
+
+#[test]
+fn release_run_preserves_divergent_candidate_preparation_worktree() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().expect("release state");
+    let fixture = configure_candidate_publisher(&repo, state.path());
+    let worktree = leave_interrupted_worktree(
+        &repo,
+        InterruptedWorktree::Complete,
+        &fixture.worktree_name,
+        &fixture.branch,
+        "v0.9.1",
+    );
+    let branch_head = git_output(&repo, &["rev-parse", &fixture.branch]);
+    let _env = EnvGuard::new(&[("gh", fixture.gh_script.as_str())]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("divergent candidate state must fail closed");
+    let message = error.to_string();
+
+    assert!(message.contains(&worktree.display().to_string()));
+    assert!(message.contains(&fixture.branch));
+    assert!(message.contains(&fixture.head));
+    assert!(message.contains(&branch_head));
+    assert!(message.contains("no state was changed"));
+    assert!(worktree.exists());
+    assert_eq!(
+        git_output(&repo, &["rev-parse", &fixture.branch]),
+        branch_head
+    );
+    assert!(!fixture.attempts.exists());
+}
+
+#[test]
+fn active_candidate_preparation_blocks_concurrent_cleanup_until_exit() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().expect("release state");
+    let fixture = configure_candidate_publisher(&repo, state.path());
+    fs::write(&fixture.block, "").expect("block candidate preparation");
+    let _env = EnvGuard::new(&[("gh", fixture.gh_script.as_str())]);
+
+    let release = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["release", "run", "patch"])
+        .current_dir(repo.path())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("start candidate preparation");
+
+    wait_for_path(&fixture.ready);
+    assert!(fixture.worktree.exists());
+    let branch_head = git_output(&repo, &["rev-parse", &fixture.branch]);
+    let removal = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["wt", "remove", fixture.worktree_name.as_str()])
+        .current_dir(repo.path())
+        .output()
+        .expect("attempt concurrent candidate cleanup");
+
+    assert!(!removal.status.success());
+    assert!(
+        String::from_utf8_lossy(&removal.stderr)
+            .contains("release candidate preparation for v0.9.2"),
+        "unexpected cleanup error: {}",
+        String::from_utf8_lossy(&removal.stderr)
+    );
+    assert!(fixture.worktree.exists());
+    assert_eq!(
+        git_output(&repo, &["rev-parse", &fixture.branch]),
+        branch_head
+    );
+    assert_eq!(branch_head, fixture.head);
+
+    fs::write(&fixture.allow, "").expect("allow candidate preparation");
+    let output = release.wait_with_output().expect("wait for release");
+    assert!(
+        output.status.success(),
+        "release failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.attempts).expect("candidate preparation attempt"),
+        "prepare\n"
+    );
+    assert!(!fixture.worktree.exists());
+}
+
+#[test]
 fn failed_candidate_build_reuses_the_version_after_a_fix_merges() {
     let repo = TestRepo::new();
     prepare_candidate_release_repo(&repo);
@@ -1388,6 +1546,439 @@ exit 1
     assert!(!publisher_worktree.exists());
     assert!(neighbor.exists());
     assert_eq!(git_output(&repo, &["tag", "--list"]), tags_before);
+}
+
+#[derive(Debug, Clone, Copy)]
+enum InterruptedWorktree {
+    EmptyPath,
+    BranchOnly,
+    MissingPath,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PublisherRegistrationConflict {
+    BranchElsewhere,
+    PathOnOtherBranch,
+}
+
+struct CandidatePublisherFixture {
+    head: String,
+    worktree_name: String,
+    worktree: PathBuf,
+    branch: String,
+    gh_script: String,
+    attempts: PathBuf,
+    block: PathBuf,
+    ready: PathBuf,
+    allow: PathBuf,
+}
+
+fn configure_candidate_publisher(
+    repo: &TestRepo,
+    state: &std::path::Path,
+) -> CandidatePublisherFixture {
+    prepare_candidate_release_repo(repo);
+    let log_path = state.join("gh.log");
+    let attempts = state.join("preparation-attempts");
+    let block = state.join("block-preparation");
+    let ready = state.join("preparation-ready");
+    let allow = state.join("allow-preparation");
+    let publisher = repo.path().join("publisher.sh");
+    fs::write(
+        &publisher,
+        format!(
+            r#"#!/bin/sh
+case "$1" in
+  check) exit 0 ;;
+  prepare)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output) output="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    expected="$(git -C "$LF_RELEASE_MAIN_REPO" rev-parse 'HEAD^{{commit}}')"
+    observed="$(git rev-parse 'HEAD^{{commit}}')"
+    prefix="$(printf '%s' "$expected" | cut -c1-9)"
+    branch="$(git symbolic-ref --short HEAD)"
+    [ "$observed" = "$expected" ] || {{ echo "preparation commit mismatch: $observed" >&2; exit 71; }}
+    [ "$branch" = "jack/prepare-default-v0-9-2-$prefix" ] || {{ echo "preparation branch mismatch: $branch" >&2; exit 72; }}
+    printf 'prepare\n' >> '{}'
+    if [ -f '{}' ]; then
+      : > '{}'
+      waits=0
+      while [ ! -f '{}' ] && [ "$waits" -lt 500 ]; do
+        waits=$((waits + 1))
+        sleep 0.02
+      done
+      [ -f '{}' ] || {{ echo 'candidate preparation timed out' >&2; exit 73; }}
+    fi
+    mkdir -p "$output"
+    printf '{{}}\n' > "$output/candidate.json"
+    exit 0 ;;
+  publish)
+    : > '{}.published'
+    exit 0 ;;
+esac
+exit 2
+"#,
+            attempts.display(),
+            block.display(),
+            ready.display(),
+            allow.display(),
+            allow.display(),
+            log_path.display(),
+        ),
+    )
+    .expect("write publisher");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      workflow: release.yml\n      publisher: [\"sh\", \"{repo}/publisher.sh\"]\n",
+    )
+    .expect("configure publisher");
+    git(repo, &["add", ".lf/config.yaml", "publisher.sh"]);
+    git(repo, &["commit", "-m", "Configure candidate publisher"]);
+    git(repo, &["push", "origin", "HEAD"]);
+
+    let head = git_output(repo, &["rev-parse", "HEAD"]);
+    let revision = head.get(..9).expect("full commit hash");
+    let worktree_name = format!("prepare-default-v0-9-2-{revision}");
+    let worktree = named_worktree_path(repo, &worktree_name);
+    let branch = format!("jack/{worktree_name}");
+    let gh_script = write_gh_candidate_release_script(&log_path.to_string_lossy(), "success");
+    CandidatePublisherFixture {
+        head,
+        worktree_name,
+        worktree,
+        branch,
+        gh_script,
+        attempts,
+        block,
+        ready,
+        allow,
+    }
+}
+
+fn named_worktree_path(repo: &TestRepo, name: &str) -> PathBuf {
+    let repo_name = repo
+        .path()
+        .file_name()
+        .expect("repo name")
+        .to_string_lossy();
+    repo.path()
+        .parent()
+        .expect("repo parent")
+        .join(format!("{repo_name}.{name}"))
+}
+
+fn publisher_worktree_path(repo: &TestRepo) -> PathBuf {
+    named_worktree_path(repo, "publish-default-v0-9-1")
+}
+
+fn leave_interrupted_worktree(
+    repo: &TestRepo,
+    state: InterruptedWorktree,
+    name: &str,
+    branch: &str,
+    revision: &str,
+) -> PathBuf {
+    let path = named_worktree_path(repo, name);
+    if matches!(state, InterruptedWorktree::EmptyPath) {
+        fs::create_dir(&path).expect("leave empty worktree path");
+        return path;
+    }
+
+    let path_arg = path.to_string_lossy();
+    git(
+        repo,
+        &["worktree", "add", "-b", branch, &path_arg, revision],
+    );
+    match state {
+        InterruptedWorktree::BranchOnly => {
+            git(repo, &["worktree", "remove", "--force", &path_arg]);
+        }
+        InterruptedWorktree::MissingPath => {
+            fs::remove_dir_all(&path).expect("remove interrupted worktree body");
+        }
+        InterruptedWorktree::Complete => {}
+        InterruptedWorktree::EmptyPath => unreachable!(),
+    }
+    path
+}
+
+fn leave_interrupted_publisher_tree(repo: &TestRepo, state: InterruptedWorktree) -> PathBuf {
+    leave_interrupted_worktree(
+        repo,
+        state,
+        "publish-default-v0-9-1",
+        "jack/publish-default-v0-9-1",
+        "v0.9.1",
+    )
+}
+
+fn configure_same_tag_publisher(repo: &TestRepo, state: &std::path::Path) -> String {
+    let published = state.join("published");
+    let attempts = state.join("attempts");
+    let publisher = repo.path().join("publisher.sh");
+    fs::write(
+        &publisher,
+        format!(
+            r#"#!/bin/sh
+case "$1" in
+  check) exit 0 ;;
+  prepare)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output) output="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    mkdir -p "$output"
+    printf '{{}}\n' > "$output/candidate.json"
+    exit 0 ;;
+  publish)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --artifacts) artifacts="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    expected="$(git -C "$LF_RELEASE_MAIN_REPO" rev-parse 'v0.9.1^{{commit}}')"
+    observed="$(git rev-parse 'HEAD^{{commit}}')"
+    branch="$(git symbolic-ref --short HEAD)"
+    [ "$observed" = "$expected" ] || {{ echo "publisher commit mismatch: $observed" >&2; exit 71; }}
+    [ "$branch" = jack/publish-default-v0-9-1 ] || {{ echo "publisher branch mismatch: $branch" >&2; exit 72; }}
+    [ -f "$artifacts/candidate.json" ] || {{ echo "verified candidate missing: $artifacts" >&2; exit 73; }}
+    case "$artifacts" in
+      */.lf/releases/v0-9-1/"$expected"-42) ;;
+      *) echo "candidate ownership mismatch: $artifacts" >&2; exit 74 ;;
+    esac
+    printf 'publish\n' >> '{}'
+    : > '{}'
+    exit 0 ;;
+esac
+exit 2
+"#,
+            attempts.display(),
+            published.display(),
+        ),
+    )
+    .expect("write publisher");
+    fs::create_dir_all(repo.path().join(".lf")).expect("config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"{repo}/publisher.sh\"]\n",
+    )
+    .expect("release config");
+    git(repo, &["add", ".lf/config.yaml", "publisher.sh"]);
+    git(repo, &["commit", "-m", "Configure current publisher"]);
+    git(repo, &["push", "origin", "HEAD"]);
+
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+case "$1 $2" in
+  'release view')
+    [ -f '{}' ] || exit 1
+    echo '{{"isDraft":false}}'
+    exit 0 ;;
+  'run list')
+    echo '[{{"databaseId":42,"headBranch":"v0.9.1","status":"completed","conclusion":"success"}}]'
+    exit 0 ;;
+  'run download') exit 0 ;;
+esac
+echo "unexpected gh invocation: $*" >&2
+exit 1
+"#,
+        published.display()
+    )
+}
+
+#[test]
+fn same_tag_release_retry_owns_each_interrupted_publisher_materialization() {
+    for interrupted in [
+        InterruptedWorktree::EmptyPath,
+        InterruptedWorktree::BranchOnly,
+        InterruptedWorktree::MissingPath,
+        InterruptedWorktree::Complete,
+    ] {
+        let repo = TestRepo::new();
+        git(&repo, &["tag", "v0.9.1"]);
+        git(&repo, &["push", "origin", "v0.9.1"]);
+        let state = tempfile::tempdir().expect("publisher state");
+        let gh_script = configure_same_tag_publisher(&repo, state.path());
+        let publisher_worktree = leave_interrupted_publisher_tree(&repo, interrupted);
+        let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+        let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+            .unwrap_or_else(|error| panic!("{interrupted:?} retry failed: {error}"));
+
+        let ReleaseRunOutcome::Resumed(receipt) = outcome else {
+            panic!("{interrupted:?} should resume the tagged release");
+        };
+        assert_eq!(receipt.tag, "v0.9.1");
+        assert_eq!(
+            fs::read_to_string(state.path().join("attempts")).expect("publication attempt"),
+            "publish\n"
+        );
+        assert!(state.path().join("published").exists());
+        assert!(!publisher_worktree.exists());
+    }
+}
+
+#[test]
+fn same_tag_release_retry_preserves_dirty_publisher_worktree() {
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    let state = tempfile::tempdir().expect("publisher state");
+    let gh_script = configure_same_tag_publisher(&repo, state.path());
+    let publisher_worktree = leave_interrupted_publisher_tree(&repo, InterruptedWorktree::Complete);
+    fs::write(publisher_worktree.join("operator.txt"), "preserve me\n")
+        .expect("dirty publisher tree");
+    let tag_commit = git_output(&repo, &["rev-parse", "v0.9.1^{commit}"]);
+    let branch_head = git_output(
+        &repo,
+        &["rev-parse", "jack/publish-default-v0-9-1^{commit}"],
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("dirty publisher state must fail closed");
+    let message = error.to_string();
+
+    assert!(message.contains(&publisher_worktree.display().to_string()));
+    assert!(message.contains("jack/publish-default-v0-9-1"));
+    assert!(message.contains(&tag_commit));
+    assert!(message.contains("operator.txt"));
+    assert!(message.contains("no state was changed"));
+    assert_eq!(
+        fs::read_to_string(publisher_worktree.join("operator.txt")).expect("preserved file"),
+        "preserve me\n"
+    );
+    assert_eq!(
+        git_output(
+            &repo,
+            &["rev-parse", "jack/publish-default-v0-9-1^{commit}"],
+        ),
+        branch_head
+    );
+    assert!(!state.path().join("attempts").exists());
+}
+
+#[test]
+fn same_tag_release_retry_preserves_mismatched_publisher_worktree() {
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    let state = tempfile::tempdir().expect("publisher state");
+    let gh_script = configure_same_tag_publisher(&repo, state.path());
+    let publisher_worktree = publisher_worktree_path(&repo);
+    let path_arg = publisher_worktree.to_string_lossy();
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "jack/publish-default-v0-9-1",
+            &path_arg,
+            "main",
+        ],
+    );
+    let tag_commit = git_output(&repo, &["rev-parse", "v0.9.1^{commit}"]);
+    let branch_head = git_output(
+        &repo,
+        &["rev-parse", "jack/publish-default-v0-9-1^{commit}"],
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("mismatched publisher state must fail closed");
+    let message = error.to_string();
+
+    assert!(message.contains(&publisher_worktree.display().to_string()));
+    assert!(message.contains(&tag_commit));
+    assert!(message.contains(&branch_head));
+    assert!(message.contains("no state was changed"));
+    assert!(publisher_worktree.exists());
+    assert_eq!(
+        git_output(
+            &repo,
+            &["rev-parse", "jack/publish-default-v0-9-1^{commit}"],
+        ),
+        branch_head
+    );
+    assert!(!state.path().join("attempts").exists());
+}
+
+#[test]
+fn same_tag_release_retry_preserves_differently_registered_publisher_worktrees() {
+    for conflict in [
+        PublisherRegistrationConflict::BranchElsewhere,
+        PublisherRegistrationConflict::PathOnOtherBranch,
+    ] {
+        let repo = TestRepo::new();
+        git(&repo, &["tag", "v0.9.1"]);
+        git(&repo, &["push", "origin", "v0.9.1"]);
+        let state = tempfile::tempdir().expect("publisher state");
+        let gh_script = configure_same_tag_publisher(&repo, state.path());
+        let publisher_worktree = publisher_worktree_path(&repo);
+        let expected_branch = "jack/publish-default-v0-9-1";
+        let (registered_path, registered_branch) = match conflict {
+            PublisherRegistrationConflict::BranchElsewhere => (
+                named_worktree_path(&repo, "publisher-registered-elsewhere"),
+                expected_branch,
+            ),
+            PublisherRegistrationConflict::PathOnOtherBranch => {
+                (publisher_worktree.clone(), "jack/operator-publisher-state")
+            }
+        };
+        let path_arg = registered_path.to_string_lossy();
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                registered_branch,
+                &path_arg,
+                "v0.9.1",
+            ],
+        );
+        let tag_commit = git_output(&repo, &["rev-parse", "v0.9.1^{commit}"]);
+        let registered_head = git_output(
+            &repo,
+            &["rev-parse", &format!("{registered_branch}^{{commit}}")],
+        );
+        let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+        let error = match release_run(repo.path(), "patch", None, &NullProgress) {
+            Err(error) => error,
+            Ok(_) => panic!("{conflict:?} should fail closed"),
+        };
+        let message = error.to_string();
+
+        assert!(message.contains(&publisher_worktree.display().to_string()));
+        assert!(message.contains(expected_branch));
+        assert!(message.contains(&tag_commit));
+        assert!(message.contains(&registered_path.display().to_string()));
+        assert!(message.contains(registered_branch));
+        assert!(message.contains("no state was changed"));
+        assert!(registered_path.exists());
+        assert_eq!(
+            git_output(
+                &repo,
+                &["rev-parse", &format!("{registered_branch}^{{commit}}")],
+            ),
+            registered_head
+        );
+        assert!(!state.path().join("attempts").exists());
+    }
 }
 
 #[test]

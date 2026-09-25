@@ -2,7 +2,7 @@
 //!
 //! Linear pushes each issue/comment change to a Loopflow receiver. This module
 //! is the receiver's brain: verify the signature, parse the event, and map it
-//! onto the durable Task input spine — a title/description edit or a human
+//! onto the durable Task input spine — a title/description edit or a participant
 //! comment becomes an ordered Steer. Exactly-once lives in the store
 //! ([`crate::ops::linear_observe`] + the `task_linear_*` tables); this module
 //! never bypasses them, so a redelivered or out-of-order webhook is a no-op.
@@ -24,7 +24,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 use time::OffsetDateTime;
 
-use crate::ops::linear_observe::{linear_follow_up_text, reconcile_linear_observation};
+use crate::ops::linear_observe::reconcile_linear_observation;
 use crate::pm::IssueObservation;
 use crate::store::{Store, StoreError};
 
@@ -82,13 +82,15 @@ pub enum WebhookEvent {
         revision: String,
         actor_id: Option<String>,
     },
-    /// A new comment. `author_id` distinguishes a human from Loopflow's own
+    /// A new comment. `author_id` distinguishes a participant from Loopflow's own
     /// writeback and from an integration/bot with no backing user.
     Comment {
         issue_id: String,
         comment_id: String,
+        revision: Option<String>,
         body: String,
         author_id: Option<String>,
+        author_name: Option<String>,
     },
     Ignored,
 }
@@ -118,6 +120,28 @@ fn nested_str(value: &serde_json::Value, path: &[&str]) -> Option<String> {
 }
 
 impl RawWebhook {
+    fn comment_author(&self) -> (Option<String>, Option<String>) {
+        let actor_id = nested_str(&self.actor, &["id"]);
+        let author_id = nested_str(&self.data, &["user", "id"])
+            .or_else(|| nested_str(&self.data, &["userId"]))
+            .or_else(|| {
+                (self.action == "create")
+                    .then(|| actor_id.clone())
+                    .flatten()
+            });
+        let author_name = nested_str(&self.data, &["user", "displayName"])
+            .or_else(|| nested_str(&self.data, &["user", "name"]))
+            .or_else(|| {
+                (author_id.is_some() && author_id == actor_id)
+                    .then(|| {
+                        nested_str(&self.actor, &["displayName"])
+                            .or_else(|| nested_str(&self.actor, &["name"]))
+                    })
+                    .flatten()
+            });
+        (author_id, author_name)
+    }
+
     fn classify(&self) -> WebhookEvent {
         match (self.kind.as_str(), self.action.as_str()) {
             ("Issue", "update") => {
@@ -137,7 +161,8 @@ impl RawWebhook {
                     _ => WebhookEvent::Ignored,
                 }
             }
-            ("Comment", "create") => {
+            ("Comment", "create" | "update") => {
+                let (author_id, author_name) = self.comment_author();
                 match (
                     nested_str(&self.data, &["id"]),
                     nested_str(&self.data, &["issue", "id"]),
@@ -145,9 +170,10 @@ impl RawWebhook {
                     (Some(comment_id), Some(issue_id)) => WebhookEvent::Comment {
                         issue_id,
                         comment_id,
+                        revision: nested_str(&self.data, &["updatedAt"]),
                         body: nested_str(&self.data, &["body"]).unwrap_or_default(),
-                        author_id: nested_str(&self.data, &["user", "id"])
-                            .or_else(|| nested_str(&self.actor, &["id"])),
+                        author_id,
+                        author_name,
                     },
                     _ => WebhookEvent::Ignored,
                 }
@@ -155,6 +181,22 @@ impl RawWebhook {
             _ => WebhookEvent::Ignored,
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn request_authors_do_not_confuse_comment_editors_with_authors() {
+    let raw = serde_json::json!({"type":"Comment", "action":"update", "actor":{"id":"editor", "name":"Maya"}, "data":{"id":"comment", "issue":{"id":"issue"}, "body":"request", "userId":"author"}});
+    let (event, _) = parse_event(raw.to_string().as_bytes()).unwrap();
+    assert!(
+        matches!(event, WebhookEvent::Comment { author_id: Some(id), author_name: None, .. } if id == "author")
+    );
+    let mut named = raw;
+    named["data"]["user"] = serde_json::json!({"id":"author", "displayName":"Jack"});
+    let (event, _) = parse_event(named.to_string().as_bytes()).unwrap();
+    assert!(
+        matches!(event, WebhookEvent::Comment { author_name: Some(name), .. } if name == "Jack")
+    );
 }
 
 /// Parse a raw body into a typed event plus its `webhookTimestamp` (ms).
@@ -175,12 +217,8 @@ pub enum WebhookOutcome {
     SelfAuthored,
     /// A title/description edit; `steer_applied` is false for a duplicate.
     Edit { steer_applied: bool },
-    /// A human comment; `delivered` is false for a duplicate delivery.
+    /// A participant comment; `delivered` is false for a duplicate delivery.
     Comment { delivered: bool },
-}
-
-fn is_human(author_id: Option<&str>, viewer_id: &str) -> bool {
-    author_id.is_some_and(|id| id != viewer_id)
 }
 
 /// Map one verified, parsed event onto the durable Task control substrate.
@@ -226,14 +264,23 @@ pub async fn ingest_event(
         }
         WebhookEvent::Comment {
             comment_id,
+            revision,
             body,
             author_id,
+            author_name,
             ..
         } => {
-            if !is_human(author_id.as_deref(), viewer_id) {
+            if !crate::ops::linear_observe::is_direction_comment(&body, author_id.as_deref()) {
                 return Ok(WebhookOutcome::SelfAuthored);
             }
-            let text = linear_follow_up_text(&body);
+            let text = crate::ops::linear_observe::render_comment(
+                &comment_id,
+                &body,
+                author_id.as_deref(),
+                author_name.as_deref(),
+            );
+            let comment_id =
+                crate::ops::linear_observe::comment_revision_id(&comment_id, revision.as_deref());
             let created = store
                 .apply_linear_comment(&task.id, comment_id, text, now)
                 .await?;
@@ -380,8 +427,10 @@ mod tests {
         assert_eq!(
             event,
             WebhookEvent::Comment {
+                author_name: None,
                 issue_id: "issue-1".into(),
                 comment_id: "c-1".into(),
+                revision: None,
                 body: "please prioritize".into(),
                 author_id: Some("user-human".into()),
             }

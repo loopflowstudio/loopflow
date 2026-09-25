@@ -5,22 +5,18 @@
     install.py local --use      # promote it into the installed development Home
     install.py local --skip swift
     install.py local -n         # dry run
-    install.py refresh          # install the latest published release
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import platform
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,8 +33,6 @@ APP_NAME = "Loopflow"
 # app binary is built as `LoopflowMac` and renamed to APP_NAME inside the bundle.
 SWIFT_APP_PRODUCT = "LoopflowMac"
 BUILD_STAGES = ("cargo", "swift")
-LATEST_RELEASE_URL = "https://github.com/loopflowstudio/loopflow/releases/latest"
-RELEASE_DOWNLOAD_BASE = "https://github.com/loopflowstudio/loopflow/releases/download"
 
 
 # --- Bundle spec (single source of truth for Loopflow.app layout) ---
@@ -269,69 +263,6 @@ def _stage_binaries(local_bin: Path) -> None:
     _atomic_install(ROOT / "target" / "release" / "lfd", local_bin / "lfd")
 
 
-def _download_release_asset(url: str, destination: Path) -> str:
-    try:
-        with urllib.request.urlopen(url, timeout=30) as response:
-            destination.write_bytes(response.read())
-            return response.geturl()
-    except OSError as exc:
-        raise StageError(f"download failed: {url}: {exc}") from exc
-
-
-def _release_tag_from_latest_url(url: str) -> str:
-    marker = "/releases/tag/"
-    if marker not in url:
-        raise StageError(f"latest release did not resolve to a pinned tag: {url}")
-    tag = url.split(marker, 1)[1].split("/", 1)[0]
-    if not tag.startswith("v") or len(tag) == 1:
-        raise StageError(f"latest release resolved to an invalid tag: {tag}")
-    return tag
-
-
-def _latest_release_tag() -> str:
-    request = urllib.request.Request(LATEST_RELEASE_URL, method="HEAD")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return _release_tag_from_latest_url(response.geturl())
-    except OSError as exc:
-        raise StageError(f"latest release lookup failed: {exc}") from exc
-
-
-def _manifest_digest(manifest: Path, asset: str) -> str:
-    for line in manifest.read_text().splitlines():
-        fields = line.split()
-        if len(fields) == 2 and fields[1].removeprefix("*") == asset:
-            return fields[0]
-    raise StageError(f"published SHA256SUMS does not name {asset}")
-
-
-def _verify_release_asset(path: Path, expected: str) -> None:
-    actual = hashlib.sha256(path.read_bytes()).hexdigest()
-    if actual != expected:
-        raise StageError(
-            f"digest mismatch for {path.name}: expected {expected}, downloaded {actual}"
-        )
-
-
-def _install_published_release(install_dir: Path) -> str:
-    with tempfile.TemporaryDirectory(prefix="loopflow-release-") as temp:
-        directory = Path(temp)
-        tag = _latest_release_tag()
-        pinned_base = f"{RELEASE_DOWNLOAD_BASE}/{tag}"
-        manifest = directory / "SHA256SUMS"
-        _download_release_asset(f"{pinned_base}/SHA256SUMS", manifest)
-        installer = directory / "install.sh"
-        _download_release_asset(f"{pinned_base}/install.sh", installer)
-        _verify_release_asset(installer, _manifest_digest(manifest, "install.sh"))
-        env = {**os.environ, "LF_INSTALL_DIR": str(install_dir)}
-        _run_or_raise(
-            ["sh", str(installer), "--version", tag],
-            "published release",
-            env=env,
-        )
-        return tag
-
-
 # --- Loopflow bundle ---
 
 
@@ -473,27 +404,26 @@ def _root() -> None:
     """Build and install loopflow locally."""
 
 
-@app.command()
+@app.command(hidden=True)
 def refresh(
-    install_dir: Path | None = typer.Option(
-        None, "--install-dir", help="Install lf here instead of the resolved local bin dir"
-    ),
+    install_dir: Annotated[
+        Path | None,
+        typer.Option("--install-dir", help="Install lf here instead of the resolved local bin dir"),
+    ] = None,
 ) -> None:
-    """Install the latest published release through the external-user path."""
-    resolved_install_dir = install_dir.expanduser() if install_dir else _resolve_install_dir()
-
+    """Upgrade callers installed before native release installation."""
+    # Older installed CLIs update main before calling this entry point.
+    # Calling `lf install` here would recurse into that same older CLI.
+    directory = install_dir.expanduser() if install_dir else _resolve_install_dir()
     try:
-        tag = _install_published_release(resolved_install_dir)
+        _run_or_raise(
+            ["sh", str(ROOT / "release" / "install.sh")],
+            "published release",
+            env={**os.environ, "LF_INSTALL_DIR": str(directory)},
+        )
     except StageError as exc:
         typer.echo(f"refresh failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-
-    target = resolved_install_dir / "lf"
-    typer.echo(f"release: {tag}")
-    typer.echo(f"installed: {target}")
-    result = subprocess.run([str(target), "--version"], text=True)
-    if result.returncode != 0:
-        raise typer.Exit(code=result.returncode)
 
 
 @app.command()

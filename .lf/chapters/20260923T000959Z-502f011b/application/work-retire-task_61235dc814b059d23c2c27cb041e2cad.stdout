@@ -1,0 +1,9 @@
+{
+  "kind": "abandoned",
+  "work": {
+    "kind": "task",
+    "id": "task_61235dc814b059d23c2c27cb041e2cad"
+  },
+  "reason": "Chapter 20260923T000959Z-502f011b explicitly accepted 2026-09-23: retire stale pursuit; preserve PM completion, branches, PR/Run history and artifacts. Retirement is not achievement.",
+  "abandoned_at": "2026-09-23T14:01:04Z"
+}

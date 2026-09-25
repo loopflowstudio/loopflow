@@ -7,7 +7,7 @@ scripts/check_monthly_spend.py --csv ~/.lf/costs/mercury-2026-06.csv
 scripts/check_monthly_spend.py --json ~/.lf/costs/mercury-transactions-2026-06.json
 ```
 
-The monthly automation budget is **$100**. If actual or projected spend crosses that line, stop and get human approval before adding spend.
+The monthly automation budget is **$100**. If actual or projected spend crosses that line, stop and ask for approval before adding spend.
 
 ## Source of truth
 

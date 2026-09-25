@@ -1,18 +1,18 @@
 ---
 requires: code on branch
-produces: PR ready, assigned to a human to merge
+produces: PR ready, assigned to its reviewer to merge
 ---
-Submit the current branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until a human clicks merge.
+Submit the current branch for review and manual merge. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. The reviewer clicks merge.
 
-Use `pr-submit` (not `pr-land`) whenever a person should land the work by hand.
+Use `pr-submit` (not `pr-land`) whenever the user will merge the work.
 `pr-land` is for headless/auto runs where loopflow merges hands-off;
-`pr-submit` leaves the one required merge click to a human. (GitHub blocks
+`pr-submit` leaves the one required merge click to the user. (GitHub blocks
 approving your own PR, so the gate is the merge click, not a review approval —
 the button unlocks once checks pass.)
 
 Tracked Tasks use the same command. Delivery state records the user-owned
 exact-head merge request, but `pr-submit` does not install, advance, or inspect
-an end-to-end controller.
+the Task's Flow position.
 
 ## Orientation
 
@@ -31,13 +31,13 @@ re-derive what these already record.
 
 ## API
 
-`lf pr submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge.
+`lf pr submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the user who will merge. It does **not** arm auto-merge.
 
 ```
 lf pr submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
-Inside a managed Task worktree, `-c` completes the Task after the human merge
+Inside a managed Task worktree, `-c` completes the Task after the manual merge
 and `--next <slug>` rotates its serial PR chain after merge.
 
 **Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.
@@ -61,18 +61,15 @@ If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exis
 
 If those files are missing or stale, write title/body manually and pass `--title` + `--body`.
 
-**Title guidelines:** lowercase, concise, area prefix when focused.
-
-Examples:
-- `mobile: quote replies on iOS`
-- `cost: add analytics dashboard with timeseries API`
-- `fix worktree cleanup on branch delete`
-
-**Body:** markdown. Structure:
-
-1. **Usage** — code block showing how to try it or see it in action
-2. **Summary** — one paragraph on what changed and why
-3. **Changes** — optional bullet list for larger PRs
+Keep the title and opening summary focused on the benefit of this PR's actual
+change. Preserve command spelling and proper names; use an area prefix only
+when it helps recognition. Follow with minimal **What changes**, then **Why it
+matters** only if needed, and material limits. Keep automated test and lint results
+in **Checks** or CI. Put **Try it** last when useful: a user action and its visible
+result, never tests, test commands, or test results. Distinguish suggested steps
+from observed behavior and label simulations. Small changes may need only a summary
+and walkthrough. Reconcile changed scope instead of appending history. Loopflow adds
+Task identity and merge consequences; do not repeat or invent them.
 
 ### 3. Submit
 

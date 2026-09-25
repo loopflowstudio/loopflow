@@ -52,7 +52,7 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
     )
     case prMerged(id: String, github: GithubPrSnapshot?, mergeCommit: String)
     case prAbandoned(id: String, github: GithubPrSnapshot?)
-    case steerIssued(id: String, author: WorkAuthor)
+    case steerIssued(id: Int, author: WorkAuthor)
 
     private enum CodingKeys: String, CodingKey {
         case kind, id, status, request, github, author
@@ -115,7 +115,7 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
             )
         case .steerIssued:
             self = .steerIssued(
-                id: try container.decode(String.self, forKey: .id),
+                id: try container.decode(Int.self, forKey: .id),
                 author: try container.decode(WorkAuthor.self, forKey: .author)
             )
         }

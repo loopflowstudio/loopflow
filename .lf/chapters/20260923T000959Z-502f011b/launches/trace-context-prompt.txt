@@ -1,0 +1,237 @@
+Chapter 20260923T000959Z-502f011b; parent repository Run run_502f011b9d1f4596ba62eff0e54a8b0e, Task LOO-278. Proposed review 2026-10-21T00:09:59.226362+00:00.
+
+IMPORTANT HUMAN INSTRUCTION OVERRIDING THE SKILL INTERVIEW: Gate 1 is explicitly accepted in the live parent conversation. Do NOT open lf ask or any human session. Do not wait for human text. Return material questions/challenges to this parent in your final report. Pass this instruction verbatim to EVERY Project child. Proposal-only: no PM/Work/charter edits, no implementation, no commits/push, no files in your checkout. The parent alone writes archives. Do not rerun the completed manual review.
+
+This is the single bounded Project contribution for Intelligence. Shape a proposed consolidation called Trace & Context, reusing Trace Project identity 2f8390f7-6614-426c-84a8-fa5291358691 (Work proj_9fffbe63b7594bdc8f5719c61b25876d); propose retirement of Context as separate Project with obligations mapped explicitly. Do not launch any child Runs. Return exact definition/KR text, all eleven numbered old KR dispositions, existing Project dispositions, historical Work reconciliation, a small sequential opening Task frontier, parked triggers, dependencies, agree/challenge, parent questions and review date. No new IDs needed or authorized. A reasoned challenge to the consolidation is allowed.
+
+Accepted scoped brief: Own non-authoritative evidence supporting human-selected external portfolio execution and prompting diagnosis. Consider one Trace & Context bet, rather than automatically splitting into Execution Trace and Runtime Monitoring. The baseline HTML's one-Project recommendation supersedes the direction draft's candidate technical map as a starting option, still not acceptance. Exact context reliability/usability is the minimum; evidence never becomes execution authority. Disposition all 11 prior KRs, keep required context and honest missingness, park unsupported broad replay/optimization/monitoring promises with triggers. Cross-Wave execution mechanics remain Infrastructure; Product owns human presentation and adoption. No open PM Tasks does not mean the evidence bet is won.
+
+Infrastructure dependency: Reliability needs a fourteen-day population of attempted core planning/execution operations, distinguishing progress, intentional human waits, failures and missingness; truthful errors alone are not availability. Intelligence owns measurement; Infrastructure owns repair. Architecture reports latest loopflow.wave-agents design proposes Task-only durable execution and finite Wave/Project Runs, materially different from its old generic Work review. That decision is OPEN for parent Gate 2; do not hardcode either architecture as accepted or recreate old controllers in evidence tooling. Preserve causal source identity. Existing Project report /tmp/infra-reliability-child.log is readable.
+
+Use supplied baseline as completed evidence; inspect relevant code and current in-flight state read-only without repeating population audits or PM sync/auth. Current runs.rs and usage.rs read Home-local run_record bundles; wave memory run_events/own_spend claims are stale. Typed missingness must not turn absent required Loopflow context into a passing reconstructed Run; unavailable vendor cost can remain explicitly unavailable. Scope authored/provider-submitted context, not opaque vendor internals. Resolve whether Reliability measurement is acceptance evidence under the one bet rather than a second monitoring Project. No broad dashboard or success-scoring system.
+
+Read-only sources:
+# Gate 1 — accepted repository direction
+
+Loopflow exists to keep Cube, Etude, Kata, and Hootro moving. In each week at least three have durable Work that accurately states the human's desired next focus and observable forward momentum on at least one Task. The human selects priorities. Product dogfooding is external: those four projects are the proving ground. Desktop joins current Project/KR/Task planning to excellent open-Session organization. Account juggling and prompting evidence support that loop, not disconnected bets.
+
+Portfolio parallelism is desirable; intra-project parallelism stays low. Small = 1–2 active Tasks (Cube, Etude, Hootro), Medium = 2–4 (Kata), Big = 2–8 (Loopflow across Projects). These are company-specific review heuristics, not new Work kinds or execution constraints.
+
+Keep Product, Infrastructure, and Intelligence. Infrastructure owns Loopflow-on-Loopflow reliability: releases, auth, execution continuity, flow-driven Work advancement, and repository-wide architecture reduction/minimalism. Intelligence owns non-authoritative evidence that makes real Runs explainable and useful for diagnosing portfolio execution and improving prompting. Product owns external dogfood and the shared user contract, including Desktop planning plus open Sessions. List and engbot are stale structures to disposition, not next-chapter Waves. Favor excellent completion, fewer concurrent Loopflow commitments, and capacity for the external projects.
+
+Routing: loopflow.wave-agents belongs in Infrastructure / Architecture Minimalism. Loopflow self-hosting failures belong in Infrastructure Reliability or Intelligence evidence. Sessions design is validated enough to build on, not restart. Small/Medium/Big never enforce runtime behavior.
+
+Acceptance source: explicit instruction from the live parent conversation supplied to Run `run_502f011b9d1f4596ba62eff0e54a8b0e`. No new interview or human Session is required. New questions and challenges return to that parent. Gate 2 is not accepted.
+
+BASELINE RELEVANT LEDGER:
+[
+  {
+    "wave": "Intelligence",
+    "project": "Trace",
+    "verdict": "fail",
+    "promise": "A month of runs is 100% reconstructable \u2014 prompt, context, flow/skill shape, spawned work, cost, time, result \u2014 verified by 20/20 random spot-audits against the long-lived ledger.",
+    "evidence": "Among 82 settled records, 6 lacked context and 35 lacked a launch contract. Of 80 settled usage rows, 21 lacked tokens and 76 lacked cost.",
+    "gap": "A durable 20-run reconstructability audit after population coverage reaches 100%."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Trace",
+    "verdict": "fail",
+    "promise": "The trace readers survive the ledger they actually read: a month in which every lf runs, lf trace, and lf usage invocation on a real, migrated ledger succeeds, and none fails on a schema the migrations never produce.",
+    "evidence": "lf runs, lf usage, and doctor succeeded on 22 September. lf trace is no longer a command; its replacement is lf runs <run>.",
+    "gap": "Rewrite the stale contract and retain a month-long reader receipt series."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Trace",
+    "verdict": "fail",
+    "promise": "Token and cost evidence has one home and no unexplained silence: for a month, every agent-bearing run lands in the ledger carrying provider, tokens, and cost; lf doctor reports no gap-day and no silence longer than a working day; and no run's spend is attributed to a nested lf sharing its run_id.",
+    "evidence": "Twenty-one of 80 settled rows lacked tokens, 76 lacked cost, and doctor retained eight gap-days in the month.",
+    "gap": "Close measurement gaps and retain a full-month continuity record."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Trace",
+    "verdict": "fail",
+    "promise": "Any run from the last month replays against its recorded context, for debugging and for evals: 10/10 sampled runs replay unattended.",
+    "evidence": "Sixty-three records appear eligible for replay, but the durable event set contains zero replay operations.",
+    "gap": "Run and retain the required 10/10 unattended cohort."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Trace",
+    "verdict": "fail",
+    "promise": "The stats surface answers the standing questions \u2014 what runs hot, what it costs, how it trends \u2014 in one query, on a month of real history.",
+    "evidence": "lf usage returns raw per-Run counters but does not aggregate hotness, cost, or trends, and does not claim interval completeness.",
+    "gap": "One Project-owned cohort query covering hotness, cost, and trend behavior."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Context",
+    "verdict": "fail",
+    "promise": "For 30 consecutive days, every landed prompt, skill, flow, context-assembly, or chat-routing change cites the failing or costly run that motivated it and a follow-up run showing the intended behavior with no first-pass gate regression; zero uncited changes land.",
+    "evidence": "Three qualifying landings on 28 August, 1 September, and 22 September lacked motivating and follow-up Run identifiers.",
+    "gap": "A complete join from qualifying landings to motivating Run, follow-up Run, and first-pass gate result."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Context",
+    "verdict": "fail",
+    "promise": "For 20/20 sampled launches, the exact ordered provider context is reconstructable and every authored or dynamic component has a source, stable identity, content hash, token count, rendered order, and stated role; every launch for 30 consecutive days stays within its published total and per-layer budgets as Wave history and scratch grow.",
+    "evidence": "The 20-launch reconstruction audit passed completely. The conjunct still fails because no total or per-layer budgets are published and no 30-day compliance window exists.",
+    "gap": "Publish the budgets and record daily compliance."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Context",
+    "verdict": "unknown",
+    "promise": "Task intent survives handoffs: in 10/10 sampled multi-pass or restarted Tasks, a fresh agent receives the current human direction, full design, relevant Work observations, and current slice from durable worktree and launch context alone; no locally passing slice violates a recorded invariant or forbidden outcome.",
+    "evidence": "Durable Work binding, scratch capture, and restart behavior shipped on 28 August.",
+    "gap": "A named ten-Task handoff sample with fresh-agent and invariant results."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Context",
+    "verdict": "unknown",
+    "promise": "Across at least three same-repository, same-flow, same-provider:model cohorts spanning at least two repositories and containing at least five landed runs in each adjacent 30-day window, median provider input tokens per run are lower in the later window and first-pass gate pass rate is no lower.",
+    "evidence": "Usage spans many repositories but only about one direct 30-day window and does not join Runs to landed delivery or first-pass gates.",
+    "gap": "Three qualifying adjacent-window cohorts with delivery and gate joins."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Context",
+    "verdict": "unknown",
+    "promise": "Zero-config excellence repeats: 3/3 fresh repositories reach a landed PR without context configuration, and no context knob is added or required for 30 consecutive days.",
+    "evidence": "No audit names three fresh repositories, their landed PRs, and configuration state.",
+    "gap": "Three recorded zero-config repository journeys and a 30-day knob audit."
+  },
+  {
+    "wave": "Intelligence",
+    "project": "Context",
+    "verdict": "unknown",
+    "promise": "For seven consecutive days, every applicable shared Discord message is either folded into the owning Wave context within one cadence or remains visibly pending; zero audited launches receive an irrelevant shared message, and no Wave action requires another Wave raw transcript.",
+    "evidence": "Unified Wave chat and delivery reconciliation shipped on 1 September.",
+    "gap": "A seven-day message disposition, cadence, launch-relevance, and cross-Wave transcript audit."
+  }
+]
+EXACT FROZEN WAVE/PROJECT/KR/OPEN TASK LEDGER:
+{
+  "wave": {
+    "id": "cb366067-4821-4071-9393-82ff4b6d61d2",
+    "name": "intelligence",
+    "status": "ready",
+    "goal": "Loopflow gets sharper from evidence. Intelligence owns the information loop around agent work: context and trace.",
+    "repo": "/Users/jack/src/loopflow",
+    "active_tasks": 2,
+    "active_projects": 2,
+    "live": false,
+    "paused": false,
+    "enabled": false,
+    "endpoint": null,
+    "created_at": "2026-08-19T23:28:40Z",
+    "parent_wave_id": null,
+    "retired_at": null,
+    "superseded_by_wave_id": null,
+    "retirement_reason": null,
+    "home": {
+      "id": "home_39860354aaca640c2ccb50bf6ca609d8",
+      "route": "local",
+      "created_at": "2026-07-19T14:56:05Z",
+      "observed_at": "2026-07-19T14:56:05Z"
+    }
+  },
+  "charter": "sources/wave/intelligence/GOAL.md",
+  "pm_snapshot": "sources/intelligence-pm.json",
+  "pm_synced_at": 1790116739,
+  "projects": [
+    {
+      "id": "2f8390f7-6614-426c-84a8-fa5291358691",
+      "slug": "trace",
+      "name": "Trace",
+      "summary": "Every run explains and replays itself, locally. Any question about what happened, what it cost, and why is answerable on your own machine for the life of the system \u2014 and a run can be replayed, not just read. Personal deployments only: no remote telemetry",
+      "definition": "Every run explains and replays itself, locally. Any question about what\nhappened, what it cost, and why is answerable on your own machine for the\nlife of the system \u2014 and a run can be replayed, not just read. Personal\ndeployments only: no remote telemetry server, ever (a bound, not a gap).",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "A month of runs is 100% reconstructable \u2014 prompt, context, flow/skill shape, spawned work, cost, time, result \u2014 verified by 20/20 random spot-audits against the long-lived ledger.",
+          "holds": false
+        },
+        {
+          "text": "The trace readers survive the ledger they actually read: a month in which every `lf runs`, `lf trace`, and `lf usage` invocation on a real, migrated ledger succeeds, and none fails on a schema the migrations never produce.",
+          "holds": false
+        },
+        {
+          "text": "Token and cost evidence has one home and no unexplained silence: for a month, every agent-bearing run lands in the ledger carrying provider, tokens, and cost; `lf doctor` reports no gap-day and no silence longer than a working day; and no run's spend is attributed to a nested `lf` sharing its `run_id`.",
+          "holds": false
+        },
+        {
+          "text": "Any run from the last month replays against its recorded context, for debugging and for evals: 10/10 sampled runs replay unattended.",
+          "holds": false
+        },
+        {
+          "text": "The stats surface answers the standing questions \u2014 what runs hot, what it costs, how it trends \u2014 in one query, on a month of real history.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "1e3d8674-6fbf-4aa8-9bee-1da0fa70d1b7"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    },
+    {
+      "id": "0f37b71f-3c7c-43f4-b809-ca2c346ca5fa",
+      "slug": "context",
+      "name": "Context",
+      "summary": "Everything the model sees is one information system. The authored surface and the dynamic surface\u2014including Discord inputs, Wave memory, Work observations, and per-pass context\u2014stay deliberate, minimal, bounded, and evidence-justified.",
+      "definition": "Everything the model sees is one information system. The authored surface and the dynamic surface\u2014including Discord inputs, Wave memory, Work observations, and per-pass context\u2014stay deliberate, minimal, bounded, and evidence-justified.",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "For 30 consecutive days, every landed prompt, skill, flow, context-assembly, or chat-routing change cites the failing or costly run that motivated it and a follow-up run showing the intended behavior with no first-pass gate regression; zero uncited changes land.",
+          "holds": false
+        },
+        {
+          "text": "For 20/20 sampled launches, the exact ordered provider context is reconstructable and every authored or dynamic component has a source, stable identity, content hash, token count, rendered order, and stated role; every launch for 30 consecutive days stays within its published total and per-layer budgets as Wave history and scratch grow.",
+          "holds": false
+        },
+        {
+          "text": "Task intent survives handoffs: in 10/10 sampled multi-pass or restarted Tasks, a fresh agent receives the current human direction, full design, relevant Work observations, and current slice from durable worktree and launch context alone; no locally passing slice violates a recorded invariant or forbidden outcome.",
+          "holds": false
+        },
+        {
+          "text": "Across at least three same-repository, same-flow, same-provider:model cohorts spanning at least two repositories and containing at least five landed runs in each adjacent 30-day window, median provider input tokens per run are lower in the later window and first-pass gate pass rate is no lower.",
+          "holds": false
+        },
+        {
+          "text": "Zero-config excellence repeats: 3/3 fresh repositories reach a landed PR without context configuration, and no context knob is added or required for 30 consecutive days.",
+          "holds": false
+        },
+        {
+          "text": "For seven consecutive days, every applicable shared Discord message is either folded into the owning Wave context within one cadence or remains visibly pending; zero audited launches receive an irrelevant shared message, and no Wave action requires another Wave raw transcript.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "1e3d8674-6fbf-4aa8-9bee-1da0fa70d1b7"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    }
+  ],
+  "open_tasks": [],
+  "gap": null
+}
+Read full historical Task and runtime state at /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/sources/intelligence-status.json
+Read baseline /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/chapter-review.html
+Return a complete final Markdown report. This Run is proposal-only; stdout is captured by the Wave parent. Do not write any files in checkout.

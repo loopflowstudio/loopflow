@@ -27,10 +27,6 @@ struct Args {
     #[arg(long = "no-loopflow")]
     no_loopflow: bool,
 
-    /// Directions to apply (repeatable)
-    #[arg(long = "direction")]
-    directions: Vec<String>,
-
     /// Docs paths, globs, or directories to include
     #[arg(long = "docs", value_delimiter = ',')]
     docs: Vec<String>,
@@ -67,7 +63,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         message: None,
         operate: !args.no_loopflow,
         surface: args.surface.unwrap_or_default(),
-        directions: args.directions,
         docs: args.docs,
         files: Vec::new(),
         include_diff: args.diff,
@@ -78,9 +73,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         related_repos: Vec::new(),
     };
 
-    let mut gathered = gather_context(&opts)?;
-    let _ = drop_native_instruction_docs(gathered.components_mut(), &args.repo);
-    let prompt = format_prompt(PromptFormatMode::Full, gathered.components());
+    let mut components = gather_context(&opts)?;
+    let _ = drop_native_instruction_docs(&mut components, &args.repo);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     println!("{prompt}");
 
     Ok(())

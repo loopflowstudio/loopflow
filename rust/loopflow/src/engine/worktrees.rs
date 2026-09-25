@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
@@ -1415,17 +1415,22 @@ pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
 }
 
 pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), GitError> {
-    let output = Command::new("git")
+    let status = Command::new("git")
         .arg("-C")
         .arg(worktree)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
         .args(["push", "-u", "origin", branch])
-        .output()?;
-    if !output.status.success() {
+        // This push can outlive the CLI. Capture pipes would close on exit,
+        // killing Git with SIGPIPE before it records the upstream locally.
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git push -u origin {branch}"),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            stderr: format!("background push exited with {status}"),
         });
     }
     Ok(())

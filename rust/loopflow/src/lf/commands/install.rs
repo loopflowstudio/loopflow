@@ -37,6 +37,62 @@ use uuid::Uuid;
 use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
 
+mod published;
+pub use published::{latest, schedule};
+
+/// Bounds re-exec depth in the local-promotion delegation chain.
+///
+/// Local promotion hands the job between the candidate build and the machine's
+/// active install coordinator. When those two binaries are built from divergent
+/// revisions their routing rules can disagree — one sends the job to the
+/// coordinator, the other bounces it back to the candidate — and, absent a
+/// bound, they re-exec each other forever and fork-bomb the machine. This
+/// counter rides every promotion re-exec through the process environment (even
+/// across a non-cooperating older binary, which inherits and forwards it), so
+/// the chain fails closed with a legible diagnostic instead of running away.
+pub const INSTALL_PROMOTE_HOP_ENV: &str = "LF_INSTALL_PROMOTE_HOP";
+
+/// How many delegation re-execs to tolerate before declaring non-convergence.
+/// A healthy promotion converges in one hop; anything past a handful is two
+/// binaries disagreeing about who owns the switch.
+const MAX_PROMOTE_HOPS: u32 = 6;
+
+/// The current delegation depth, read from the inherited environment.
+fn current_promote_hop() -> u32 {
+    std::env::var(INSTALL_PROMOTE_HOP_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// The pure convergence decision: reject once the chain has re-exec'd past the
+/// bound. Split from the environment read so it is testable without touching
+/// process-global state.
+fn check_promote_hop(hop: u32) -> Result<u32> {
+    if hop >= MAX_PROMOTE_HOPS {
+        return Err(anyhow!(
+            "local promotion did not converge after {hop} delegation hops; the machine's \
+             active install coordinator and this candidate disagree on routing (usually because \
+             the active dev install was built from a divergent branch). Reset to a published \
+             install with `lf install`, then promote again."
+        ));
+    }
+    Ok(hop)
+}
+
+/// Fail closed if the promotion delegation chain is not converging. Called at
+/// the top of every `promote` entry so a routing disagreement between divergent
+/// builds terminates instead of fork-bombing.
+fn guard_promote_hop() -> Result<u32> {
+    check_promote_hop(current_promote_hop())
+}
+
+/// Stamp the next hop count on a promotion re-exec so the depth accumulates
+/// across the delegation chain.
+fn stamp_next_promote_hop(command: &mut Command, hop: u32) {
+    command.env(INSTALL_PROMOTE_HOP_ENV, (hop + 1).to_string());
+}
+
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -341,51 +397,6 @@ fn _read_executable_references(
          WHERE placement.enabled=1
            AND w.work_state='ready'
            AND w.retired_at IS NULL
-         UNION
-         SELECT 'project', p.id, 'project', w.repo
-         FROM work_placements placement
-         JOIN projects p ON p.id=placement.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
-         UNION
-         SELECT 'task', t.id, r.kickoff_flow, w.repo
-         FROM work_placements placement
-         JOIN tasks t ON t.id=placement.task_id
-         JOIN task_controller_state r ON r.task_id=t.id
-         JOIN projects p ON p.id=t.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND t.work_state='ready'
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
-         UNION
-         SELECT 'task', t.id, r.iterate_flow, w.repo
-         FROM work_placements placement
-         JOIN tasks t ON t.id=placement.task_id
-         JOIN task_controller_state r ON r.task_id=t.id
-         JOIN projects p ON p.id=t.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND t.work_state='ready'
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
-         UNION
-         SELECT 'task', t.id, r.gate_flow, w.repo
-         FROM work_placements placement
-         JOIN tasks t ON t.id=placement.task_id
-         JOIN task_controller_state r ON r.task_id=t.id
-         JOIN projects p ON p.id=t.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND t.work_state='ready'
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
          ORDER BY 1, 2, 3, 4",
     )?;
     let references = statement
@@ -396,12 +407,9 @@ fn _read_executable_references(
     references
 }
 
-fn _validate_executable_skill(skill: &crate::engine::Skill, catalog_root: &Path) -> Result<()> {
+fn _validate_executable_skill(skill: &crate::engine::Skill) -> Result<()> {
     if skill.content.is_none() {
         return Err(anyhow!("skill not found: {}", skill.name));
-    }
-    for direction in &skill.directions {
-        crate::engine::load_direction(direction, catalog_root)?;
     }
     Ok(())
 }
@@ -413,18 +421,15 @@ fn _validate_executable_steps(
     for step in steps {
         match step {
             crate::engine::ConcreteStep::Skill(skill) => {
-                _validate_executable_skill(&skill.skill, catalog_root)?;
+                _validate_executable_skill(&skill.skill)?;
             }
             crate::engine::ConcreteStep::Op(_) => {}
             crate::engine::ConcreteStep::Xor(branch) => {
                 if let Some(router) = &branch.router {
                     let router = crate::engine::load_skill(router, catalog_root)?;
-                    _validate_executable_skill(&router, catalog_root)?;
+                    _validate_executable_skill(&router)?;
                 }
                 for path in branch.paths.values() {
-                    for direction in &path.direction {
-                        crate::engine::load_direction(direction, catalog_root)?;
-                    }
                     let path_steps = crate::engine::flow::load_xor_path_items(path, catalog_root)?;
                     _validate_executable_steps(&path_steps, catalog_root)?;
                 }
@@ -526,32 +531,52 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
         }
     };
     let mut failures = Vec::new();
+    let mut validated = 0usize;
+    let mut absent = 0usize;
     for (work_kind, work_id, flow, catalog_root) in &references {
         let catalog_path = Path::new(catalog_root);
-        let result = if !catalog_path.is_dir() {
-            Err(anyhow!("catalog root does not exist"))
-        } else {
-            crate::engine::load_flow(flow, catalog_path)
-                .map_err(anyhow::Error::from)
-                .and_then(|loaded| {
-                    crate::engine::expand_flow(&loaded, catalog_path)
-                        .map_err(anyhow::Error::from)
-                        .and_then(|steps| _validate_executable_steps(&steps, catalog_path))
-                })
-        };
-        if let Err(error) = result {
-            failures.push(ExecutableFailure {
+        // A placed ref whose catalog root is gone — the worktree or checkout was
+        // cleaned up, but the durable Work row was never retired — can never run
+        // its flow again under *any* binary. It therefore says nothing about
+        // whether this candidate is safe, so it is out of scope for candidate
+        // compatibility. Excluding it (rather than failing the whole promotion)
+        // is not a loosening of the safety intent: every ref whose catalog root
+        // still exists is validated exactly as before, so a build that dropped or
+        // renamed a flow is still caught by every live worktree. We only stop
+        // treating "the world moved on" as "the candidate is broken."
+        if !catalog_path.is_dir() {
+            absent += 1;
+            continue;
+        }
+        let result = crate::engine::load_flow(flow, catalog_path)
+            .map_err(anyhow::Error::from)
+            .and_then(|loaded| {
+                crate::engine::expand_flow(&loaded, catalog_path)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|steps| _validate_executable_steps(&steps, catalog_path))
+            });
+        match result {
+            Ok(()) => validated += 1,
+            Err(error) => failures.push(ExecutableFailure {
                 work_kind: work_kind.clone(),
                 work_id: work_id.clone(),
                 flow: flow.clone(),
                 catalog_root: catalog_root.clone(),
                 reason: error.to_string(),
-            });
+            }),
         }
+    }
+    if absent > 0 {
+        // Never silent: a large count is a signal the registry has drifted from
+        // the filesystem and wants a `lf prune`/reconcile sweep.
+        eprintln!(
+            "note: skipped {absent} placed Work reference(s) whose catalog root is gone \
+             (dead worktrees); they cannot run and do not gate promotion"
+        );
     }
     if failures.is_empty() {
         ExecutableCompatibility::Compatible {
-            references: references.len(),
+            references: validated,
         }
     } else {
         ExecutableCompatibility::Incompatible { failures }
@@ -799,6 +824,47 @@ mod compatibility_tests {
         assert!(
             matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
             "{compatibility:?}"
+        );
+    }
+
+    #[test]
+    fn a_placed_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("loopflow.db");
+        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+
+        // A placed, ready wave whose repo (its catalog root) was deleted: the
+        // durable row outlived the checkout. Before the fix this failed the whole
+        // promotion with "catalog root does not exist"; it must not, because the
+        // ref can never execute again regardless of which binary is installed.
+        let conn = rusqlite::Connection::open(&store).unwrap();
+        let home_id: String = conn
+            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let gone = directory.path().join("deleted-worktree");
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at, work_state)
+             VALUES ('w-gone', 'gone', ?1, 0, 'ready')",
+            [gone.to_str().unwrap()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
+             VALUES ('w-gone', ?1, 1, 0)",
+            [home_id],
+        )
+        .unwrap();
+        // Fold the write into the main db file so the backup-API copy sees it.
+        conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")
+            .unwrap();
+        drop(conn);
+
+        let compatibility = _read_local_executable_compatibility(&store);
+        assert!(
+            matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
+            "a dead-worktree ref must be skipped, not fail promotion: {compatibility:?}"
         );
     }
 }
@@ -1665,7 +1731,11 @@ fn quiesce_switch_app(
     root: &Path,
     receipt: &mut crate::machine_install::SwitchReceipt,
 ) -> Result<()> {
-    let paths = app_executable_paths(&receipt.prior, receipt.activation.app.as_deref());
+    let paths = receipt
+        .prior
+        .as_ref()
+        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
+        .unwrap_or_default();
     receipt.app_was_running = !running_app_processes(&paths)?.is_empty();
     crate::machine_install::write_switch(root, receipt)?;
     quiesce_app_processes(&paths)
@@ -1684,7 +1754,7 @@ fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<
     let selection = if receipt.target_store_advance_started {
         &receipt.target
     } else {
-        &receipt.prior
+        receipt.prior.as_ref().context("no prior app to resume")?
     };
     verify_selected_app_bundle(app, &selection.artifact_set)?;
     let status = Command::new("/usr/bin/open")
@@ -2002,7 +2072,7 @@ fn bootstrap_published_install(
     root: &Path,
     artifacts: &PromotionArtifacts<'_>,
 ) -> Result<crate::machine_install::ActiveInstall> {
-    let repair = "run `uv run python scripts/install.py refresh`";
+    let repair = "run `lf install`";
     let store = crate::store::production_database_path();
     if !store.is_file() {
         return Err(anyhow!(
@@ -2112,10 +2182,10 @@ fn active_install_for_local_promotion(
     ])?;
     active
         .published_fallback
-        .verify(&required_machine_artifact_roles(artifacts.app_source.is_some()))
-        .with_context(|| {
-            "the complete published fallback is unavailable; run `uv run python scripts/install.py refresh`"
-    })?;
+        .verify(&required_machine_artifact_roles(
+            artifacts.app_source.is_some(),
+        ))
+        .with_context(|| "the complete published fallback is unavailable; run `lf install`")?;
     Ok(active)
 }
 
@@ -2292,7 +2362,7 @@ fn restore_before_local_advance(
         Err(anyhow!("disposable target cleanup failed"))
     };
     drop(lock);
-    let resume = resume_home_for_install_selection(paused, &receipt.prior);
+    let resume = resume_home_with_selection(paused, receipt.prior.as_ref(), None);
     let app = resume_switch_app(receipt);
     match (cleanup, clear, resume, app) {
         (Ok(()), Ok(()), Ok(()), Ok(())) => error,
@@ -2440,9 +2510,9 @@ fn promote_local_candidate(
     let mut switch = crate::machine_install::SwitchReceipt {
         schema_version: 1,
         id: switch_id,
-        prior: prior.selection.clone(),
+        prior: Some(prior.selection.clone()),
         target: target.clone(),
-        published_fallback: prior.published_fallback.clone(),
+        published_fallback: Some(prior.published_fallback.clone()),
         target_published_fallback: None,
         phase: crate::machine_install::SwitchPhase::Planned,
         recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
@@ -2670,6 +2740,7 @@ fn delegate_local_promotion(
     if fresh {
         command.arg("--fresh");
     }
+    stamp_next_promote_hop(&mut command, current_promote_hop());
     let status = command
         .status()
         .with_context(|| format!("run local promotion candidate {}", build.display()))?;
@@ -2719,6 +2790,7 @@ fn delegate_to_active_coordinator(
     if fresh {
         command.arg("--fresh");
     }
+    stamp_next_promote_hop(&mut command, current_promote_hop());
     let status = command.status().with_context(|| {
         format!(
             "run receipt-pinned install coordinator {}",
@@ -3011,11 +3083,16 @@ fn active_install_from_switch(
             .target_published_fallback
             .clone()
             .expect("validated published switch retains its target fallback"),
-        crate::machine_install::InstallSource::Development => receipt.published_fallback.clone(),
+        crate::machine_install::InstallSource::Development => receipt
+            .published_fallback
+            .clone()
+            .expect("validated development switch retains a published fallback"),
     };
     let mut retained = vec![published_fallback.clone()];
-    if receipt.published_fallback != published_fallback {
-        retained.push(receipt.published_fallback.clone());
+    if let Some(prior_fallback) = &receipt.published_fallback {
+        if prior_fallback != &published_fallback {
+            retained.push(prior_fallback.clone());
+        }
     }
     crate::machine_install::ActiveInstall {
         schema_version: 1,
@@ -3030,7 +3107,7 @@ fn settle_switch(
     receipt: &mut crate::machine_install::SwitchReceipt,
     active: &crate::machine_install::ActiveInstall,
 ) -> Result<()> {
-    receipt.published_fallback = active.published_fallback.clone();
+    receipt.published_fallback = Some(active.published_fallback.clone());
     receipt.phase = crate::machine_install::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
     crate::machine_install::write_switch(root, receipt)?;
@@ -3088,7 +3165,9 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         discard_unadvanced_disposable_store(&receipt)?;
         crate::machine_install::clear_switch(&root, &receipt.id)?;
         drop(lock);
-        resume_store_home(&receipt.prior, None)?;
+        if let Some(prior) = &receipt.prior {
+            resume_store_home(prior, None)?;
+        }
         resume_switch_app(&receipt)?;
         return Ok(());
     }
@@ -3125,7 +3204,11 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
             | crate::machine_install::SwitchPhase::Quiesced
             | crate::machine_install::SwitchPhase::Planned
     );
-    let mut paths = app_executable_paths(&receipt.prior, receipt.activation.app.as_deref());
+    let mut paths = receipt
+        .prior
+        .as_ref()
+        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
+        .unwrap_or_default();
     paths.extend(app_executable_paths(
         &receipt.target,
         receipt.activation.app.as_deref(),
@@ -3183,28 +3266,26 @@ fn promote_published_from_machine_install(
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     let root = crate::machine_install::root()?;
-    let prior = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Settled(active) => *active,
+    let mut prior = match crate::machine_install::read_state(&root)? {
+        crate::machine_install::MachineInstallState::Settled(active) => Some(*active),
         crate::machine_install::MachineInstallState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} became active while waiting for the promotion lock; rerun promotion to recover it",
                 receipt.id
             ))
         }
-        crate::machine_install::MachineInstallState::Legacy => {
-            return Err(anyhow!(
-                "machine install authority changed while waiting for the promotion lock; rerun promotion"
-            ))
-        }
+        crate::machine_install::MachineInstallState::Legacy => None,
     };
-    prior.selection.artifact_set.verify(&[
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ])?;
-    prior.published_fallback.verify(&[
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ])?;
+    if let Some(prior) = &prior {
+        prior.selection.artifact_set.verify(&[
+            crate::machine_install::ArtifactRole::Cli,
+            crate::machine_install::ArtifactRole::Daemon,
+        ])?;
+        prior.published_fallback.verify(&[
+            crate::machine_install::ArtifactRole::Cli,
+            crate::machine_install::ArtifactRole::Daemon,
+        ])?;
+    }
     let store_path = crate::store::production_database_path();
     let preview = read_binary_preview(candidate_binary)?;
     if preview.candidate.authority != MigrationAuthority::Published {
@@ -3224,23 +3305,28 @@ fn promote_published_from_machine_install(
         return Ok(());
     }
 
-    if matches!(preview.verdict, Verdict::Promote)
-        && active_install_matches_candidate(
-            &root,
-            &prior,
-            &artifacts,
-            candidate_binary,
-            &preview.candidate,
-            &preview.verdict,
-            &store_path,
-        )?
-    {
-        println!(
-            "published {} is already installed (store {})",
-            preview.candidate.display_version(),
-            prior.selection.store.display()
-        );
-        return Ok(());
+    if prior.is_none() && store_path.exists() {
+        prior = Some(bootstrap_published_install(&root, &artifacts)?);
+    }
+    if let Some(prior) = &prior {
+        if matches!(preview.verdict, Verdict::Promote)
+            && active_install_matches_candidate(
+                &root,
+                prior,
+                &artifacts,
+                candidate_binary,
+                &preview.candidate,
+                &preview.verdict,
+                &store_path,
+            )?
+        {
+            println!(
+                "published {} is already installed (store {})",
+                preview.candidate.display_version(),
+                prior.selection.store.display()
+            );
+            return Ok(());
+        }
     }
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
     let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
@@ -3262,9 +3348,9 @@ fn promote_published_from_machine_install(
     let mut switch = crate::machine_install::SwitchReceipt {
         schema_version: 1,
         id: switch_id,
-        prior: prior.selection.clone(),
+        prior: prior.as_ref().map(|prior| prior.selection.clone()),
         target: target.clone(),
-        published_fallback: prior.published_fallback.clone(),
+        published_fallback: prior.as_ref().map(|prior| prior.published_fallback.clone()),
         target_published_fallback: Some(target_published_fallback.clone()),
         phase: crate::machine_install::SwitchPhase::Planned,
         recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
@@ -3272,7 +3358,9 @@ fn promote_published_from_machine_install(
         target_store_advanced: false,
         active_selection_committed: false,
         coordinator: prior
-            .selection
+            .as_ref()
+            .map(|prior| &prior.selection)
+            .unwrap_or(&target)
             .artifact_set
             .artifact(&crate::machine_install::ArtifactRole::Cli)
             .expect("validated machine install has a CLI")
@@ -3292,7 +3380,12 @@ fn promote_published_from_machine_install(
         disposable_store_owned: false,
     };
     crate::machine_install::write_switch(&root, &switch)?;
-    let paused = match pause_home(&prior.selection.store) {
+    let paused = match pause_home(
+        prior
+            .as_ref()
+            .map(|prior| prior.selection.store.as_path())
+            .unwrap_or(&store_path),
+    ) {
         Ok(paused) => paused,
         Err(error) => {
             crate::machine_install::clear_switch(&root, &switch.id)?;
@@ -3326,7 +3419,9 @@ fn promote_published_from_machine_install(
     )?;
     switch.phase = crate::machine_install::SwitchPhase::Activated;
     crate::machine_install::write_switch(&root, &switch)?;
-    let mut retained = prior.retained_published_sets;
+    let mut retained = prior
+        .map(|prior| prior.retained_published_sets)
+        .unwrap_or_default();
     if !retained.iter().any(|set| set == &target_published_fallback) {
         retained.push(target_published_fallback.clone());
     }
@@ -3386,6 +3481,7 @@ pub fn promote(
             "--fresh requires --from-build during local promotion"
         ));
     }
+    guard_promote_hop()?;
     let root = crate::machine_install::root()?;
     let state = crate::machine_install::read_state(&root)?;
     if let crate::machine_install::MachineInstallState::Switching(receipt) = &state {
@@ -3504,33 +3600,7 @@ pub fn promote(
         }
         _ => {}
     }
-    let store_path = crate::store::production_database_path();
-    let preview = build_preview(&store_path);
-    render_human(&preview);
-
-    if let Verdict::Reject { reasons } = &preview.verdict {
-        return Err(anyhow!(
-            "promotion refused; lf, lfd, and the app are unchanged:\n  - {}",
-            reasons.join("\n  - ")
-        ));
-    }
-    if preview_only {
-        println!("  (preview only: no target changed)");
-        return Ok(());
-    }
-    let lock = crate::promotion_lock::acquire_exclusive()
-        .context("acquire the exclusive promotion lock")?;
-    if !matches!(
-        crate::machine_install::read_state(&root)?,
-        crate::machine_install::MachineInstallState::Legacy
-    ) {
-        return Err(anyhow!(
-            "machine install authority changed while waiting for the promotion lock; rerun promotion"
-        ));
-    }
-    bootstrap_published_install(&root, &artifacts)?;
-    drop(lock);
-    promote_published_from_machine_install(artifacts, &current, sync_skills, false)
+    promote_published_from_machine_install(artifacts, &current, sync_skills, preview_only)
 }
 
 /// Activate retained immutable bytes only when that binary's own preflight
@@ -3607,6 +3677,24 @@ fn rollback_from_store(
         return Err(error);
     }
     Ok((candidate, daemon_candidate))
+}
+
+#[cfg(test)]
+mod hop_guard_tests {
+    use super::{check_promote_hop, MAX_PROMOTE_HOPS};
+
+    #[test]
+    fn a_converging_chain_is_allowed_and_a_runaway_fails_closed() {
+        // Every hop below the bound proceeds — a healthy promotion converges in one.
+        for hop in 0..MAX_PROMOTE_HOPS {
+            assert_eq!(check_promote_hop(hop).unwrap(), hop);
+        }
+        // At the bound the delegation is declared non-convergent and fails closed,
+        // so two divergent builds can never fork-bomb the machine.
+        let error = check_promote_hop(MAX_PROMOTE_HOPS).unwrap_err().to_string();
+        assert!(error.contains("did not converge"), "diagnostic: {error}");
+        assert!(check_promote_hop(MAX_PROMOTE_HOPS + 1).is_err());
+    }
 }
 
 #[cfg(test)]

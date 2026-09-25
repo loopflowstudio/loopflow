@@ -17,7 +17,7 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf start <name>` → `lf chat --steer` / `lf status` |
+| Steer and inspect from terminal | `lf start <name>` → `lf chat` / `lf status` |
 | Run on another machine | `lf ssh <home-id> start <name>` ([Go Remote](#go-remote)) |
 
 ---
@@ -83,7 +83,7 @@ lf : "add type hints to utils.py"
 Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf task start <linear-project-id> "add OAuth login"
+lf task start --wave <wave> "add OAuth login"
 lf task status <issue-id>
 lf task steer <issue-id> "support passkeys too"
 lf task wait <issue-id> --until terminal
@@ -93,7 +93,7 @@ lf task wait <issue-id> --until terminal
 
 | Skill | What it does |
 |------|--------------|
-| `prompt` | Author or audit a skill, direction, Wave goal, or inline prompt |
+| `prompt` | Author or audit a skill, Wave goal, or inline prompt |
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `compress` | Simplify the implementation without changing behavior |
@@ -121,8 +121,8 @@ lf ship                                  # final Task gate → learnings → lan
 ```
 
 Flows automate skills within one bounded pass. Their YAML owns ordering and
-human gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
-belongs to Wave, Project, and Task runtimes.
+review gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
+belongs to Wave and Task execution.
 
 ### Custom skills
 
@@ -145,7 +145,7 @@ lf audit    # runs your custom skill
 ```
 
 The [Authoring guide](authoring.md) covers prompt contracts, evidence loops,
-Wave goals, and directions.
+and Wave goals.
 
 ### Shipping
 
@@ -158,8 +158,7 @@ lf pr land      # watch, repair CI, and return after GitHub merges
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
-branch and Task PR record when present; they do not require end-to-end
-controller state.
+branch and Task PR record when present; they do not require a live Task worker.
 
 ---
 
@@ -168,9 +167,9 @@ controller state.
 Ready to automate? Waves remain available continuously and choose another
 bounded pass when chat, child observations, crons, or a heartbeat wake them.
 
-`lf` skills are manual building blocks. A Wave is a named agent that reads its
-Linear Projects and tasks, starts durable Tasks, and supervises their
-results.
+`lf` skills are manual building blocks. A Wave is a durable operating context
+whose optional resident handles chat and recurring selection. Project
+operations and Task workers run independently of that resident.
 
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
 frontmatter sets machine config such as `owner:`, `home:`, `crons:`, and `pm:`), then open it in
@@ -199,7 +198,7 @@ shown in the [Sessions lifecycle](../README.md#sessions).
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.
-Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
+Once `wave/` files exist, `lf wave serve <name>` runs them and Loopflow picks them up.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
 

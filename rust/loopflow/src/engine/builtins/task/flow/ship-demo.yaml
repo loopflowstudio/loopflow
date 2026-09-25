@@ -1,4 +1,4 @@
-# Prove the result, demo it to the human, then settle the Task.
+# Prove the result, review the demo together, then settle the Task.
 - task-gate
 - step:
     id: review_demo

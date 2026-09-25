@@ -245,22 +245,25 @@ public enum ChatTurnError: Error, Equatable {
 public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let role: ChatRole
+    public let authorName: String?
     public let text: String
     public let status: Lifecycle
     public let items: [ConversationItem]
     public let createdAt: String
-    /// Body that produced an assistant span; nil for human turns.
+    /// Body that produced an assistant span; nil for user turns.
     public let body: BodyProvenance?
     public let activity: ChildControlActivity?
 
     private enum CodingKeys: String, CodingKey {
         case id, role, text, status, items, body, activity
         case createdAt = "created_at"
+        case authorName = "author_name"
     }
 
     public init(
         id: String,
         role: ChatRole,
+        authorName: String?,
         text: String,
         status: Lifecycle,
         items: [ConversationItem],
@@ -270,6 +273,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     ) throws {
         self.id = id
         self.role = role
+        self.authorName = authorName
         self.text = text
         self.status = status
         self.items = items
@@ -284,6 +288,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         try self.init(
             id: values.decode(String.self, forKey: .id),
             role: values.decode(ChatRole.self, forKey: .role),
+            authorName: values.decodeIfPresent(String.self, forKey: .authorName),
             text: values.decode(String.self, forKey: .text),
             status: values.decode(Lifecycle.self, forKey: .status),
             items: values.decode([ConversationItem].self, forKey: .items),
@@ -348,6 +353,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         return try ChatTurn(
             id: id,
             role: role,
+            authorName: authorName,
             text: grownText,
             status: status,
             items: grownItems,
@@ -372,7 +378,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     }()
 }
 
-/// One live increment to an open turn. Human chat carries it in
+/// One live increment to an open turn. Chat carries it in
 /// `message-delta`; the resident stream uses `turn-delta`. Mirrors Rust
 /// `TurnDelta`; the reader applies it with [`ChatTurn/absorbing(_:)`] against
 /// the turn named by `turnId`.

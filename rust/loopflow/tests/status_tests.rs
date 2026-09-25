@@ -2,6 +2,9 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
+#[path = "support/chapter.rs"]
+mod chapter;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
@@ -13,7 +16,7 @@ use loopflow::controller::wave::metrics::{
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
+use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
     Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
@@ -51,10 +54,20 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
             pm_snapshot_synced_at: updated_at.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
+        iteration: 0,
         abandon_intent: None,
         created_at: updated_at,
         updated_at,
     }
+}
+
+fn bind_chapter(store: &SqliteStore, wave: &Wave, project_id: &str) {
+    store
+        .save_chapter(
+            &chapter::current_chapter(wave.id(), wave.name(), project_id),
+            true,
+        )
+        .unwrap();
 }
 
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
@@ -64,16 +77,17 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "slug": project.plan.slug,
             "name": project.plan.name,
             "summary": "Keep status truthful.",
-            "definition": "Historical failures never impersonate current state.",
-            "flows": {"first": null, "loop": null, "finally": null},
+            "metric_targets": [],
+            "flows": {"recommended": null},
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
         }],
         "items": []
     });
-    SqliteStore::new(&home.join("loopflow.db"))
-        .expect("open status store")
+    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
+    bind_chapter(&store, wave, project.plan.id.as_str());
+    store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
@@ -207,6 +221,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
             pm_snapshot_synced_at: now.unix_timestamp() - 1,
         },
         wave_id: wave.id().clone(),
+        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -276,6 +291,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
+        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -283,6 +299,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     store
         .insert_project(&current)
         .expect("seed current Project");
+    bind_chapter(&store, &wave, current.plan.id.as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -298,8 +315,8 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
                 "slug": "auditability",
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
-                "definition": "Every product surface shows enough truth to trust the system.",
-                "flows": {"first": null, "loop": null, "finally": null},
+                "metric_targets": [],
+                "flows": {"recommended": null},
                 "krs": [{"text": "Every visible state carries its reason", "holds": false}],
                 "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
@@ -396,6 +413,8 @@ fn seed_previous_release_task_pr(home: &Path) {
         pr.merge_request().expect("explicit merge request").mode,
         PrMergeMode::User
     );
+    let wave = store.list_waves(None).unwrap().pop().unwrap();
+    bind_chapter(&store, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
@@ -414,28 +433,27 @@ fn seed_previous_release_task_pr(home: &Path) {
 }
 
 #[test]
-fn status_surfaces_keep_credential_failure_in_history() {
+fn project_operator_failures_remain_historical_without_reappearing_on_the_wave() {
     let home = tempfile::tempdir().expect("tempdir");
     let project = seed_credential_history(home.path());
-
     let status = status_json(home.path(), &["infrastructure"], None);
-    let runtime = &status["projects"][0]["runtime"];
-    assert_eq!(runtime["status"], "ready");
-    assert_eq!(runtime["reason"], "ready");
-    assert!(runtime.get("current").is_none());
+    assert!(status.get("projects").is_none());
     assert_eq!(
-        runtime["last_failure"]["message"],
+        status["chapter"]["source_project_id"],
+        project.plan.id.as_str()
+    );
+    assert_eq!(status["tasks"]["items"], serde_json::json!([]));
+    let human = status_human(home.path(), "infrastructure");
+    assert!(!human.contains("credential"));
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    assert_eq!(
+        store
+            .latest_project_failure(&project.id)
+            .unwrap()
+            .unwrap()
+            .message,
         "project runner failed: credential is missing"
     );
-    let human = status_human(home.path(), "infrastructure");
-    let current_line = human
-        .lines()
-        .find(|line| line.contains(&project.plan.slug))
-        .expect("Project current-state line");
-    assert!(current_line.contains("ready"));
-    assert!(!current_line.contains("credential"));
-    assert!(human.contains("last failure at "));
-    assert!(human.contains("project runner failed: credential is missing"));
 }
 
 /// The reproduced break: inside a resident wave, `LF_WAVE_ID` is a wave id, and
@@ -465,12 +483,9 @@ fn accepted_metric_evidence_is_identical_in_status_roadmap_and_text() {
         r#"---
 schema: 1
 id: task-loop-trust
-project_id: d19956b2-9955-437d-aea6-d91766231c77
 stage: graduated
 instrument: lifecycle-scorecard
 unit: ratio
-target:
-  at_least: 1
 window: 7d
 freshness: 6h
 ---
@@ -487,8 +502,8 @@ Count dispatched Task loops that settle without rescue.
             "slug": "loopflow-api",
             "name": "Loopflow API",
             "summary": "One product contract.",
-            "definition": "Keep the API coherent across every surface.",
-            "flows": {"first": null, "loop": null, "finally": null},
+            "metric_targets": [{"metric_id": "task-loop-trust", "target": {"kind": "at_least", "value": 1.0}}],
+            "flows": {"recommended": null},
             "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
             "initiative_ids": ["initiative-product"],
             "team_ids": ["team-product"]
@@ -506,8 +521,8 @@ Count dispatched Task loops that settle without rescue.
             payload: serde_json::to_string(&project_payload).expect("serialize PM snapshot"),
         })
         .expect("seed PM snapshot");
+    bind_chapter(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
     drop(sqlite);
-    install_metric_schema_if_draft(&home.path().join("loopflow.db"));
 
     let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");
     let mut observation = MetricObservation::Observed {
@@ -529,9 +544,11 @@ Count dispatched Task loops that settle without rescue.
     *observation_id = id;
     let runtime = tokio::runtime::Runtime::new().expect("metric runtime");
     runtime.block_on(async {
-        let store = open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
-            .await
-            .expect("open shared store");
+        let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(
+            home.path().join("loopflow.db"),
+        ))
+        .await
+        .expect("open shared store");
         store
             .register_metric_instrument(&contract.identity, &contract.instrument, now)
             .await
@@ -549,10 +566,8 @@ Count dispatched Task loops that settle without rescue.
     let roadmap = roadmap_json(home.path(), "product");
     let status_metric = &status["metric_portfolio"]["metrics"][0];
     assert_eq!(status_metric["name"], "Task loops earn trust");
-    assert_eq!(
-        status_metric["project_id"],
-        "d19956b2-9955-437d-aea6-d91766231c77"
-    );
+    assert_eq!(status_metric["identity"]["wave_id"], wave.id().as_str());
+    assert!(status_metric.get("project_id").is_none());
     assert_eq!(
         status_metric["target"],
         serde_json::json!({"kind": "at_least", "value": 1.0})
@@ -561,52 +576,18 @@ Count dispatched Task loops that settle without rescue.
     assert_eq!(status_metric["freshness"]["kind"], "fresh");
     assert_eq!(status_metric["evidence"]["kind"], "met");
     assert_eq!(status_metric["evidence"]["value"], 1.0);
-    assert_eq!(status["projects"][0]["project"]["krs"][0]["holds"], false);
+    assert_eq!(status["chapter"]["krs"][0]["holds"], false);
     assert_eq!(
         roadmap["waves"][0]["metric_portfolio"],
         status["metric_portfolio"]
     );
 
     let human = status_human(home.path(), "product");
-    assert!(human.contains("Loopflow API\n      Task loops earn trust  [met]"));
+    assert!(human.contains("Task loops earn trust  [met]"), "{human}");
     assert!(
         human.contains("Value 100.00% · Target >= 100.00% over 7d"),
         "{human}"
     );
-}
-
-fn install_metric_schema_if_draft(database: &Path) {
-    let connection = rusqlite::Connection::open(database).expect("open metric schema");
-    let installed = connection
-        .query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM sqlite_master
-                WHERE type='table' AND name='metric_observations'
-            )",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .expect("inspect metric schema");
-    if installed {
-        return;
-    }
-
-    let drafts = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
-    let migration = std::fs::read_dir(drafts)
-        .expect("metric migration drafts")
-        .map(|entry| entry.expect("metric migration draft").path())
-        .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.starts_with("project_metric_observations__") && name.ends_with(".sql")
-                })
-        })
-        .expect("project metric migration draft");
-    let sql = std::fs::read_to_string(migration).expect("read metric migration draft");
-    connection
-        .execute_batch(&sql)
-        .expect("install metric schema");
 }
 
 /// A wave that has done nothing reports an empty reading, not a missing one:
@@ -635,106 +616,97 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
 
 #[test]
 fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed_stale_project_work(home.path(), true);
+    for abandon_parent in [true, false] {
+        let home = tempfile::tempdir().expect("tempdir");
+        seed_stale_project_work(home.path(), abandon_parent);
+        let status = status_json(home.path(), &["product"], None);
+        let roadmap = roadmap_json(home.path(), "product");
+        let wave = &roadmap["waves"][0];
+        for view in [&status, wave] {
+            assert!(view.get("projects").is_none());
+            assert_eq!(view["chapter"]["source_project_slug"], "auditability");
+            assert_eq!(view["tasks"]["state"], "ok");
+            assert_eq!(view["tasks"]["items"].as_array().unwrap().len(), 1);
+            assert_eq!(view["tasks"]["items"][0]["task"]["identifier"], "PRD-52");
+            let unavailable = view["unavailable_tasks"].as_array().unwrap();
+            assert_eq!(unavailable.len(), 1);
+            assert_eq!(unavailable[0]["work_id"], PERSISTED_TASK_ID);
+            assert_eq!(unavailable[0]["task_identifier"], "W2-127");
+            assert_eq!(unavailable[0]["status"], "ready");
+            assert_eq!(unavailable[0]["owner"], "wave");
+            assert!(unavailable[0]["recovery"]
+                .as_str()
+                .unwrap()
+                .contains(PERSISTED_TASK_ID));
+        }
+        assert_eq!(wave["unavailable_tasks"], status["unavailable_tasks"]);
+    }
+}
 
-    let status = status_json(home.path(), &["product"], None);
-    let status_projects = status["projects"].as_array().expect("status projects");
-    assert_eq!(status_projects.len(), 1);
-    assert_eq!(status_projects[0]["project"]["slug"], "auditability");
-    assert_eq!(
-        status_projects[0]["tasks"][0]["task"]["identifier"],
-        "PRD-52"
-    );
-    assert_eq!(status["runs"]["state"], "ok");
-    assert_eq!(status["runs"]["items"].as_array().expect("runs").len(), 0);
-    let unavailable = status["unavailable_projects"]
-        .as_array()
-        .expect("status unavailable Projects");
-    assert_eq!(unavailable.len(), 1);
-    assert_eq!(
-        unavailable[0]["work_id"],
-        "proj_e972b70272fbb5e91c096ebe657f9f9b"
-    );
-    assert_eq!(
-        unavailable[0]["project_id"],
-        "f56c583c-c360-4dc4-ba12-4b5a02268623"
-    );
-    assert_eq!(unavailable[0]["project_slug"], "technical-architecture");
-    assert_eq!(unavailable[0]["status"], "abandoned");
-    assert_eq!(unavailable[0]["owner"], "wave");
-    assert_eq!(
-        unavailable[0]["reason"],
-        "Project is absent from the current PM snapshot"
-    );
-    assert_eq!(
-        unavailable[0]["recovery"],
-        "Settle the listed Tasks; Project Work is already abandoned"
-    );
-    let orphaned_tasks = unavailable[0]["tasks"].as_array().expect("orphaned Tasks");
-    assert_eq!(orphaned_tasks.len(), 1);
-    assert_eq!(
-        orphaned_tasks[0]["work_id"],
-        "task_40fbeeaadfbca5367aa7391432ae84ff"
-    );
-    assert_eq!(orphaned_tasks[0]["task_id"], "linear-task-w2-127");
-    assert_eq!(orphaned_tasks[0]["task_identifier"], "W2-127");
-    assert_eq!(orphaned_tasks[0]["status"], "ready");
-    assert_eq!(orphaned_tasks[0]["owner"], "wave");
-    assert_eq!(
-        orphaned_tasks[0]["reason"],
-        "Task's owning Project is absent from the current PM snapshot"
-    );
-    assert_eq!(
-        orphaned_tasks[0]["recovery"],
-        "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
-    );
-
-    let roadmap = roadmap_json(home.path(), "product");
-    let wave = &roadmap["waves"][0];
-    assert_eq!(wave["projects"]["state"], "ok");
-    let roadmap_projects = wave["projects"]["items"]
-        .as_array()
-        .expect("roadmap projects");
-    assert_eq!(roadmap_projects.len(), 1);
-    assert_eq!(roadmap_projects[0]["project"]["slug"], "auditability");
-    assert_eq!(
-        roadmap_projects[0]["tasks"][0]["task"]["identifier"],
-        "PRD-52"
-    );
-    assert_eq!(wave["unavailable_projects"], status["unavailable_projects"]);
+#[test]
+fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
+    for payload in [None, Some("{}"), Some(r#"{"projects": [], "items": []}"#)] {
+        let home = tempfile::tempdir().unwrap();
+        seed_stale_project_work(home.path(), false);
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        if let Some(payload) = payload {
+            conn.execute("UPDATE pm_snapshots SET payload=?1", [payload])
+                .unwrap();
+        } else {
+            conn.execute("DELETE FROM pm_snapshots", []).unwrap();
+        }
+        let status = status_json(home.path(), &["product"], None);
+        let roadmap = roadmap_json(home.path(), "product");
+        for view in [&status, &roadmap["waves"][0]] {
+            assert!(view["chapter"].is_null());
+            assert_eq!(view["tasks"]["state"], "unavailable");
+            assert_eq!(view["unavailable_tasks"].as_array().unwrap().len(), 1);
+            assert_eq!(view["unavailable_tasks"][0]["work_id"], PERSISTED_TASK_ID);
+        }
+    }
 }
 
 #[test]
 fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed_persisted_merge_request_without_copy(home.path());
+    for missing_provider_task in [false, true] {
+        let home = tempfile::tempdir().expect("tempdir");
+        seed_persisted_merge_request_without_copy(home.path());
+        if missing_provider_task {
+            let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            connection
+                .execute(
+                    "UPDATE pm_snapshots SET payload=json_set(payload, '$.items', json('[]'))",
+                    [],
+                )
+                .unwrap();
+        }
 
-    let status = status_json(home.path(), &["product"], None);
-    let status_task = &status["projects"][0]["tasks"][0];
-    assert_eq!(status_task["task"]["identifier"], "PRD-52");
-    assert_eq!(
-        status_task["prs"][0]["publication"]["presentation"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        status_task["prs"][0]["publication"]["merge"]["mode"],
-        "user"
-    );
+        let status = status_json(home.path(), &["product"], None);
+        let status_task = &status["tasks"]["items"][0];
+        assert_eq!(status_task["task"]["identifier"], "PRD-52");
+        assert_eq!(
+            status_task["prs"][0]["publication"]["presentation"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            status_task["prs"][0]["publication"]["merge"]["mode"],
+            "user"
+        );
 
-    let roadmap = roadmap_json(home.path(), "product");
-    let wave = &roadmap["waves"][0];
-    assert_eq!(wave["projects"]["state"], "ok");
-    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
-    assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
-    assert_eq!(
-        roadmap_task["active_pr"]["publication"]["presentation"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        roadmap_task["active_pr"]["publication"]["merge"]["mode"],
-        "user"
-    );
+        let roadmap = roadmap_json(home.path(), "product");
+        let wave = &roadmap["waves"][0];
+        assert_eq!(wave["tasks"]["state"], "ok");
+        let roadmap_task = &wave["tasks"]["items"][0];
+        assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
+        assert_eq!(
+            roadmap_task["active_pr"]["publication"]["presentation"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            roadmap_task["active_pr"]["publication"]["merge"]["mode"],
+            "user"
+        );
+    }
 }
 
 #[test]
@@ -743,7 +715,7 @@ fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
     seed_previous_release_task_pr(home.path());
 
     let status = status_json(home.path(), &["product"], None);
-    let status_task = &status["projects"][0]["tasks"][0];
+    let status_task = &status["tasks"]["items"][0];
     assert_eq!(status_task["task"]["identifier"], "PRD-52");
     assert_eq!(
         status_task["prs"][0]["publication"]["presentation"],
@@ -756,8 +728,8 @@ fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
 
     let roadmap = roadmap_json(home.path(), "product");
     let wave = &roadmap["waves"][0];
-    assert_eq!(wave["projects"]["state"], "ok");
-    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
+    assert_eq!(wave["tasks"]["state"], "ok");
+    let roadmap_task = &wave["tasks"]["items"][0];
     assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
     assert_eq!(
         roadmap_task["active_pr"]["publication"]["presentation"],
@@ -766,36 +738,5 @@ fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
     assert_eq!(
         roadmap_task["active_pr"]["publication"]["merge"]["mode"],
         "user"
-    );
-}
-
-#[test]
-fn active_project_removed_from_planning_reports_truthful_recovery() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed_stale_project_work(home.path(), false);
-
-    let status = status_json(home.path(), &["product"], None);
-    let unavailable = status["unavailable_projects"]
-        .as_array()
-        .expect("status unavailable Projects");
-
-    assert_eq!(unavailable.len(), 1);
-    assert_eq!(unavailable[0]["project_slug"], "technical-architecture");
-    assert_eq!(unavailable[0]["status"], "ready");
-    assert_eq!(unavailable[0]["owner"], "wave");
-    assert_eq!(
-        unavailable[0]["reason"],
-        "Project is absent from the current PM snapshot"
-    );
-    assert_eq!(
-        unavailable[0]["recovery"],
-        "lf project abandon technical-architecture --reason \"Project is absent from the current PM snapshot\""
-    );
-    assert_eq!(
-        unavailable[0]["tasks"]
-            .as_array()
-            .expect("preserved Task evidence")
-            .len(),
-        1
     );
 }

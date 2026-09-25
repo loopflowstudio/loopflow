@@ -62,7 +62,10 @@ fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn find_worktree_for_branch(repo: &Path, branch: &str) -> Result<Option<PathBuf>, GitError> {
+pub(crate) fn find_worktree_for_branch(
+    repo: &Path,
+    branch: &str,
+) -> Result<Option<PathBuf>, GitError> {
     let output = run_git(repo, &["worktree", "list", "--porcelain"])?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
@@ -574,7 +577,10 @@ pub fn pr_merge_squash_auto(repo: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
-/// Fetch origin/main_branch and fast-forward the local tracking branch.
+/// Fetch origin/main_branch and reset the local branch to that exact commit.
+///
+/// This release/relocation helper discards unpublished branch history. Ordinary
+/// checkout refreshes use `ops::checkout::refresh_main` to preserve local work.
 ///
 /// If `main_branch` is checked out in any worktree, that worktree is reset to
 /// `origin/main_branch` (dirty state is stashed first and popped afterward).

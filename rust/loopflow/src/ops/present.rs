@@ -1,7 +1,7 @@
 use crate::engine::platform::open_url_checked;
 use crate::ops::error::{OpsError, OpsResult};
 
-/// Where a pull request is opened for human review. The only surface today is
+/// Where a pull request is opened for review. The only surface today is
 /// the GitHub PR page in the default browser; a terminal diff or file browser
 /// would be added here as another arm without touching the publication path or
 /// any caller.

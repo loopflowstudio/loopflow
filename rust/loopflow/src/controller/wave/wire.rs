@@ -8,14 +8,13 @@
 //!   (the resident sends serially and awaits each response, so per-turn order
 //!   is the connection's order). The old in-process `TurnSink` vocabulary —
 //!   Opened / Text / Item / Finished — IS this wire, promoted to full
-//!   DTO discipline, plus the consumption markers (`TurnOpened.answers`,
-//!   `TurnSteered.answers` — the RESIDENT decides what a turn answers; the
+//!   DTO discipline, plus the consumption markers (`TurnOpened.answers` — the RESIDENT decides what a turn answers; the
 //!   listener validates against its queue fold and journals), the resident's
 //!   reported loop state, and the body's provider session id. The single writer stays
 //!   with the listener: the resident never touches journal files.
 //! - **Listener → resident**: the resident consumes its own wave's `/events`
 //!   subscription with `?inbox=true` — `inbox` SSE frames ([`InboxFrame`])
-//!   carry queued messages, typed Task observations, steer, and interrupt ops
+//!   carry queued messages, typed Task observations, and interrupt ops
 //!   (replayed pending queue on connect, then live).
 //!
 //! DTO discipline: every field is required or explicitly `Option` — no serde
@@ -67,6 +66,10 @@ pub enum ResidentDelta {
     TurnOpened { answers: Vec<String> },
     /// A prose fragment of the open turn.
     TurnText { text: String },
+    /// Relate this open assistant turn to the channel message it answers.
+    /// This is a Discord-shaped reply edge, not a consumption claim: the
+    /// message remains readable and the relation survives restart.
+    TurnReplyTo { message_id: String },
     /// A non-prose item (tool / command / file / thought) of the open turn.
     TurnItem { item: ConversationItem },
     /// The open turn finalized. The listener already holds the turn's content
@@ -75,17 +78,6 @@ pub enum ResidentDelta {
         status: Lifecycle,
         reason: Option<String>,
     },
-    /// Mid-turn consumption: the harness accepted these queued messages as
-    /// steering input, so the CURRENT turn answers them (journaled as
-    /// `TurnSteered.answers`). Validated like `TurnOpened.answers`.
-    TurnSteered { answers: Vec<String> },
-    /// The undo of a consumption claim: these message ids were declared
-    /// consumed (`TurnSteered`) but the vendor never received the input —
-    /// the harness send failed AFTER the claim was journaled. The listener
-    /// returns them to its pending fold so the next resident's replay
-    /// re-delivers them. The claim rides first, the undo is explicit:
-    /// at-most-once to the vendor, never a silent redelivery.
-    MessagesRequeued { ids: Vec<String> },
     /// A fresh body took the current logical playhead step.
     BodyStarted { body: BodyProvenance },
     /// The harness announced its provider session after the body opened.
@@ -205,6 +197,9 @@ mod tests {
             ResidentDelta::TurnText {
                 text: "thinking".into(),
             },
+            ResidentDelta::TurnReplyTo {
+                message_id: "msg-2".into(),
+            },
             ResidentDelta::TurnItem {
                 item: ConversationItem::Tool {
                     id: "t-1".into(),
@@ -218,12 +213,6 @@ mod tests {
                 status: Lifecycle::Completed,
                 reason: None,
             },
-            ResidentDelta::TurnSteered {
-                answers: vec!["msg-3".into()],
-            },
-            ResidentDelta::MessagesRequeued {
-                ids: vec!["msg-3".into()],
-            },
             ResidentDelta::LoopState {
                 to: ResidentStateTo::Failed,
                 reason: "harness disconnected".into(),
@@ -236,6 +225,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn resident_delta_fixture_round_trips() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/resident_deltas.json"
+        )))
+        .expect("resident delta fixture JSON");
+        let request: PostDeltasRequest =
+            serde_json::from_value(value.clone()).expect("resident delta fixture decodes");
+
+        assert_eq!(serde_json::to_value(request).unwrap(), value);
+    }
+
     /// No serde defaults: an absent REQUIRED field is a parse error, never a
     /// silent fill-in. Absent `Option` fields decode as `None` — explicitly
     /// Optional is the one sanctioned absence.
@@ -245,6 +247,7 @@ mod tests {
             serde_json::json!({ "kind": "turn_opened" }),
             serde_json::json!({ "kind": "turn_finished" }),
             serde_json::json!({ "kind": "turn_text" }),
+            serde_json::json!({ "kind": "turn_reply_to" }),
             serde_json::json!({ "kind": "loop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),
         ] {

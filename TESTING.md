@@ -110,6 +110,7 @@ Path → suite mapping:
 
 | Changed | Suite | Runs |
 |---------|-------|------|
+| any changed path | architecture | `uv run python scripts/check_architecture.py` |
 | `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
@@ -138,6 +139,19 @@ cd website && uv run python dev.py test -a     # Accessibility tests only
 cd website && uv run python dev.py sync-docs   # Refresh generated docs copy
 ```
 
+After changing `docs/architecture.md` or its website rendering, regenerate the
+portable HTML before gate and include it in the same change:
+
+```bash
+cd website
+uv run python dev.py sync-docs
+uv run python ../scripts/render_architecture_html.py
+uv run python ../scripts/render_architecture_html.py --check
+```
+
+The website suite checks that `docs/architecture.html` matches the rendered
+source. A Markdown-only edit can fail that check.
+
 ## Swift Tests
 
 Tests for the Swift package (models, protocols, shared logic).
@@ -147,6 +161,17 @@ swift test --package-path swift        # All Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
+
+In asynchronous terminal proofs, observe the surface after each wake-up before
+checking the deadline. A busy main actor can resume after the deadline even
+when the PTY produced its output in time; do not fail on a pre-sleep snapshot.
+
+SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
+Keep tests that reference Ghostty-only types or helpers inside
+`#if canImport(GhosttyKit)`. When changing terminal code or its tests, gate both
+configurations: run the focused SwiftPM tests and
+`uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
+the Xcode test target compiles.
 
 ## Loopflow UI Tests
 
@@ -211,6 +236,79 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+For shared repository discovery or CLI dispatch changes, include the PM and
+Wave consumers in the focused proof:
+
+```bash
+cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matrix --test global_commands
+```
+
+Preserve fixtures for registered Wave directories without Git metadata. Adding
+Git would hide the cached-PM context regression; global-command tests alone do
+not cover it.
+
+When changing Wave chat operations, include the parent module's HTTP and SSE
+tests. Selecting only `runner::tests` or steering-named tests misses them.
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
+```
+
+Retired operations must be rejected without journaling, while ordinary messages
+and bare interrupts retain their behavior.
+
+When changing Task controls, include the GitHub-cache integration tests as well
+as controller tests. Bare interrupts prove local control during GitHub outages;
+steering publishes to Linear and belongs with the mocked Linear boundary tests.
+
+```bash
+cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
+```
+
+When changing Linear response shapes, run the client tests and PM-operation
+consumers together. Team migration also reads issue comments; its fixtures must
+include the requested pagination metadata.
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+```
+
+Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
+fixture, restore it afterward, and serialize environment changes with
+`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests; keep Session
+spawning mocked. Reproduce executable-resolution failures with the compiled test
+binary, `LF_BIN` and `CARGO_BIN_EXE_lf` unset, and a PATH containing Git but no `lf`.
+
+For worktree creation or checkout-refresh changes, build the current CLI before
+running its Python behavior tests:
+
+```bash
+cargo build -p loopflow --bin lf
+LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
+```
+
+The background-push regression holds Git until the CLI exits, then verifies
+upstream tracking and a subsequent rebase. Immediate local pushes can hide
+broken pipes that interrupt Git after the remote ref moves; background children
+must use stdio that survives their parent's exit.
+
+Builtin skill Markdown is compiled into Rust. After editing it, run the builtin
+contract tests alongside the relevant behavior tests; PR renderer tests alone do
+not cover the prompts that generate their input. Update obsolete assertions to
+match the intended contract instead of restoring retired commands in the prose.
+
+```bash
+cargo test -p loopflow --lib engine::builtins::tests
+```
+
+Skill export tests use isolated homes and cover builtin/global definitions,
+personal agent directories and pruning. Repository `.lf/skills` are local
+execution overrides; they are not exported by `sync-skills`.
+
+```bash
+cargo test -p loopflow --lib engine::skills::tests
+```
+
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash
@@ -218,9 +316,47 @@ cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
-Fresh-store coverage exercises the live SQLite schema. Existing incompatible
-databases are rejected with a direct delete-and-recreate instruction; there is
-no historical upgrade chain.
+Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
+review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`
+to cover interactive skill launches. Keep prose contracts in builtin tests;
+launch tests should prove that the canonical document is included.
+For migration regressions, use the materialized Rust
+test path above: inspect historical fields at their migration boundary, then
+finish the upgrade and verify the current schema. When chapter triggers change,
+include Task controller consumers: worker claims now leave Started history even
+after a provider failure. Use CI's materialized migration graph for trigger
+changes; an ordinary draft build may omit the trigger. Installed development
+builds record draft checksums too: add a forward draft after the owning migration
+instead of rewriting an applied draft. Preserve populated historical fixtures.
+
+For manual migration proof in a shared checkout, materialize only in a disposable
+source copy that includes the current tracked and untracked inputs. Materialization
+can change package versions, the lockfile, registry and migration files; another
+Run can commit those temporary changes before cleanup. Keep the assigned checkout
+on its authoring schema and leave the live Home untouched. A copy without Git
+metadata cannot prove fixtures that require `git rev-parse HEAD`: run those in
+the assigned checkout when its schema suffices, and report that separate proof.
+Do not count a fixture setup failure as a passing materialized test.
+
+After removing a public concept, run `uv run python scripts/check_architecture.py`;
+retained tables and subprocesses still need their actual owners in the map.
+For architecture/README documentation changes, run
+`cd website && uv run python dev.py test -k 'portable_architecture or readme_index_sync'`.
+Keep README and docs/index openings identical and regenerate docs/architecture.html
+when its source changes. Retired Project surfaces also affect CLI fallback,
+builtin discovery, prompt goldens and storage settlement.
+
+For landing changes, prove same-head recovery and authoritative merge separately
+from commit creation. Exercise takeover while the old repair is still running;
+generation fencing alone does not stop its effects. Label simulated
+provider/GitHub proofs. Known live-proof limits belong in Infrastructure memory.
+
+Run CLI-backed Python tests only after the Rust build finishes; replacing their
+binary mid-test mixes migration frontiers in a single temporary Home.
+
+Fresh-store coverage exercises the live SQLite schema. Populated historical
+fixtures exercise the migration chain and verify retained facts. A fresh-store
+pass alone does not prove that an existing Home can upgrade without losing work.
 
 Run records have focused storage, harness, reducer, and reader checks:
 
@@ -230,6 +366,10 @@ cargo test -p loopflow journal
 cargo test -p loopflow store
 cargo test -p loopflow harness::conformance_tests
 ```
+
+When changing harness event mapping, run the recorded-trace conformance tests
+alongside the provider's unit tests. Keep trace expectations aligned with the
+event contract, including durable final-answer receipts and usage checkpoints.
 
 After Run-record or schema changes, run `lf runs --json`, `lf usage --json`, and
 `lf doctor --json` against a fresh local Home.
@@ -248,6 +388,50 @@ Long-running workflow tests for mechanical `lf` commands:
 tests/e2e/test_full_cycle.sh
 tests/e2e/test_rebase_conflict.sh
 ```
+
+Exercise Linear expiry and rejection through an installed development CLI:
+
+```bash
+# Inside a disposable Linux container, after candidate promotion:
+uv run tests/e2e/linear_oauth.py --lf /root/.local/bin/lf
+```
+
+Give the container `--add-host api.linear.app:127.0.0.1`, Python, Git, and
+`uv`. Install the published CLI/daemon fallback and promote the candidate with
+`lf install promote --from-build ...` first. That Home needs a registered
+repository and `tmux` so promotion can verify its daemon. Never mount a real
+Home or credentials into this container: the fixture replaces its Linear row
+and seeds planning data in the selected development store.
+
+The fixture serves synthetic Linear HTTPS on port 443 with a temporary CA
+trusted only by its CLI children. It enters through the installed launcher and
+asserts fresh planning, encrypted rotation, bounded replay, and rejected-refresh
+preservation with and without a snapshot. Its JSON receipt identifies the CLI
+digest and installation. This proves the installed Linux path against simulated
+provider responses; live Linear behavior and the operational reliability window
+remain separate evidence. No production endpoint override is needed.
+
+Exercise first installation and recovery inside a disposable Ubuntu container:
+
+```bash
+uv run --no-project --python 3.14 /fixture/install_bootstrap.py
+```
+
+Copy `tests/e2e/install_bootstrap.py`, `release/install.sh`, and a Linux candidate
+pair to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
+`/fixture/bin/{lf,lfd}`. Build the pair in a separate disposable source snapshot
+after `canonicalize_migrations.py --materialize-for-tests`, using release
+provenance and published migration authority only in that isolated build.
+The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
+runuser, and uv; run the proof as root without host Home mounts. Optionally copy
+a checksum-verified older released pair into `/fixture/prior` to exercise the
+external-installer transition.
+
+The script creates separate OS accounts and a local HTTPS release endpoint.
+It exercises the real CLI, verified shell installer, store creation, repeat
+installation, missing-daemon repair, checkout preservation, and recovery after
+a forced activation failure. Transport is simulated; this does not replace a
+public release-channel demo. Discard the container afterward.
 
 ## Nightly Package Tests
 
@@ -268,7 +452,6 @@ Nightly package artifacts are verification only. They are uploaded for 14 days a
 ```bash
 uv run python scripts/loopflow-dev.py run-debug     # build and launch Loopflow (macOS)
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
-uv run python scripts/verify_skill_sync.py --live  # sync a probe step, then invoke it through Claude and Codex
 ```
 
 When adding features that need manual verification, write or extend a script in `scripts/` rather than documenting a list of commands. One command to run, one environment to verify in.

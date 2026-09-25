@@ -36,6 +36,10 @@
       "text": "Dispatching one worker for the parser."
     },
     {
+      "kind": "turn_reply_to",
+      "message_id": "msg-5"
+    },
+    {
       "kind": "turn_item",
       "item": {
         "type": "tool",
@@ -56,18 +60,6 @@
       "body_id": "body-3",
       "outcome": "completed",
       "reason": "completed"
-    },
-    {
-      "kind": "turn_steered",
-      "answers": [
-        "msg-6"
-      ]
-    },
-    {
-      "kind": "messages_requeued",
-      "ids": [
-        "msg-6"
-      ]
     },
     {
       "kind": "loop_state",

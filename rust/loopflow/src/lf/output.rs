@@ -149,7 +149,6 @@ pub fn format_cost(value: f64) -> String {
 /// Build a reproducible lf command from run parameters.
 pub fn format_reproducible_command(
     skill: Option<&str>,
-    directions: &[String],
     wave: Option<&str>,
     docs: &[String],
     clipboard: bool,
@@ -159,9 +158,6 @@ pub fn format_reproducible_command(
     let mut parts = vec!["lf".to_string()];
     if let Some(s) = skill {
         parts.push(s.to_string());
-    }
-    for d in directions {
-        parts.push(format!("-d {}", d));
     }
     if let Some(w) = wave {
         parts.push(format!("--wave {}", w));
@@ -249,7 +245,7 @@ mod tests {
 
     #[test]
     fn format_reproducible_command_minimal() {
-        let cmd = format_reproducible_command(Some("debug"), &[], None, &[], false, false, None);
+        let cmd = format_reproducible_command(Some("debug"), None, &[], false, false, None);
         assert_eq!(cmd, "lf debug");
     }
 
@@ -257,7 +253,6 @@ mod tests {
     fn format_reproducible_command_full() {
         let cmd = format_reproducible_command(
             Some("implement"),
-            &["security".to_string()],
             Some("rust"),
             &["src/".to_string()],
             true,
@@ -266,7 +261,7 @@ mod tests {
         );
         assert_eq!(
             cmd,
-            "lf implement -d security --wave rust --docs src/ -c --no-loopflow -m claude:opus"
+            "lf implement --wave rust --docs src/ -c --no-loopflow -m claude:opus"
         );
     }
 }

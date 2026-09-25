@@ -117,6 +117,7 @@ struct RunContext {
     run_id: TraceId,
     process_id: ExecId,
     parent_process_id: Option<ExecId>,
+    started_at: i64,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
     /// File-journal directory. Written in any git checkout; None only when the
@@ -138,6 +139,13 @@ pub(crate) struct ExecProcessReceipt {
     pub exec_id: String,
     pub pid: u32,
     pub started_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessIdentityEvidence {
+    Live,
+    Dead,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -204,6 +212,52 @@ pub fn emit(repo_root: &Path, node: LfNode, event: LfEventType, fields: LfEventF
             "journal append failed"
         );
     }
+}
+
+pub fn with_runtime<T>(
+    repo_root: &Path,
+    command: &[String],
+    run: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let attribution = crate::work::wave::context::run_attribution(Some(repo_root));
+    if let Some(failure) = attribution.failure.as_deref() {
+        warn!(
+            error = failure,
+            "ambient wave identity failed validation; run attributed to no wave \
+             — pass --wave <name> to recover"
+        );
+    }
+    emit(
+        repo_root,
+        LfNode::Run,
+        LfEventType::Started,
+        LfEventFields {
+            wave_name: attribution.wave,
+            error: attribution.failure,
+            worktree: Some(repo_root.display().to_string()),
+            command: Some(command.to_vec()),
+            ..LfEventFields::default()
+        },
+    );
+    let result = run();
+    match &result {
+        Ok(_) => emit(
+            repo_root,
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        ),
+        Err(error) => emit(
+            repo_root,
+            LfNode::Run,
+            LfEventType::Errored,
+            LfEventFields {
+                error: Some(error.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
+    }
+    result
 }
 
 pub fn runs_root(worktree: &Path) -> PathBuf {
@@ -471,6 +525,8 @@ fn ensure_run_context(
         run_id,
         process_id,
         parent_process_id,
+        started_at: process_started_at(std::process::id())?
+            .ok_or_else(|| std::io::Error::other("current process start time is unavailable"))?,
         command: fields
             .command
             .as_ref()
@@ -625,6 +681,106 @@ fn current_context() -> Option<RunContext> {
     RUN_CONTEXT.with(|cell| cell.borrow().clone())
 }
 
+pub(crate) fn current_process_identity() -> Option<crate::durable::TaskWorkerOwner> {
+    current_context().map(|context| crate::durable::TaskWorkerOwner {
+        trace_id: context.run_id,
+        exec_id: context.process_id,
+        pid: std::process::id(),
+        started_at: context.started_at,
+    })
+}
+
+pub(crate) fn task_worker_owner_evidence(
+    owner: &crate::durable::TaskWorkerOwner,
+) -> ProcessIdentityEvidence {
+    let receipts = match read_exec_process_receipts_at(&crate::store::lf_home_dir()) {
+        Ok(receipts) => receipts,
+        Err(_) => return ProcessIdentityEvidence::Unknown,
+    };
+    let receipt = receipts.iter().find(|receipt| {
+        receipt.trace_id == owner.trace_id.as_str()
+            && receipt.exec_id == owner.exec_id.as_str()
+            && receipt.pid == owner.pid
+            && receipt.started_at == owner.started_at
+    });
+    if receipt.is_some() {
+        return match process_started_at(owner.pid) {
+            Ok(Some(started_at)) if (started_at - owner.started_at).abs() <= 3 => {
+                ProcessIdentityEvidence::Live
+            }
+            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
+            Err(_) => ProcessIdentityEvidence::Unknown,
+        };
+    }
+
+    let Ok(path) = crate::store::observability_database_path() else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    if !path.exists() {
+        return ProcessIdentityEvidence::Unknown;
+    }
+    let Ok(store) = SqliteStore::open_run_ledger_read_only(&path) else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    let Ok(events) = store.run_events_matching_exec(owner.exec_id.as_str()) else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    if events.iter().any(|event| {
+        event.run_id == owner.trace_id.as_str()
+            && event.process_id == owner.exec_id.as_str()
+            && event.node == "run"
+            && matches!(event.event.as_str(), "completed" | "errored" | "escalated")
+    }) {
+        ProcessIdentityEvidence::Dead
+    } else {
+        ProcessIdentityEvidence::Unknown
+    }
+}
+
+fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "etime="])
+        .output()?;
+    if !output.status.success() {
+        if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
+            return Ok(None);
+        }
+        return Err(std::io::Error::other(format!(
+            "process start-time query failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let elapsed = String::from_utf8_lossy(&output.stdout);
+    let seconds = elapsed_seconds(elapsed.trim())
+        .ok_or_else(|| std::io::Error::other("process start-time query returned invalid age"))?;
+    Ok(Some(
+        OffsetDateTime::now_utc()
+            .unix_timestamp()
+            .saturating_sub(i64::try_from(seconds).unwrap_or(i64::MAX)),
+    ))
+}
+
+fn elapsed_seconds(value: &str) -> Option<u64> {
+    let (days, clock) = match value.split_once('-') {
+        Some((days, clock)) => (days.parse().ok()?, clock),
+        None => (0_u64, value),
+    };
+    let parts = clock
+        .split(':')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    let clock = match parts.as_slice() {
+        [minutes, seconds] => minutes.checked_mul(60)?.checked_add(*seconds)?,
+        [hours, minutes, seconds] => hours
+            .checked_mul(3_600)?
+            .checked_add(minutes.checked_mul(60)?)?
+            .checked_add(*seconds)?,
+        _ => return None,
+    };
+    days.checked_mul(86_400)?.checked_add(clock)
+}
+
 fn set_context(context: RunContext) {
     RUN_CONTEXT.with(|cell| {
         *cell.borrow_mut() = Some(context);
@@ -696,7 +852,7 @@ fn write_exec_process_receipt(context: &RunContext) -> Result<(), std::io::Error
         trace_id: context.run_id.to_string(),
         exec_id: context.process_id.to_string(),
         pid,
-        started_at: OffsetDateTime::now_utc().unix_timestamp(),
+        started_at: context.started_at,
     };
     let bytes = serde_json::to_vec(&receipt).map_err(std::io::Error::other)?;
     let path = root.join(format!("{pid}.json"));
@@ -760,7 +916,7 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 mod tests {
     use super::{
         emit, events_path, read_events, runs_root, LfEvent, LfEventFields, LfEventType, LfNode,
-        TestLedgerGuard,
+        ProcessIdentityEvidence, TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
     use crate::id::{ExecId, TraceId, WaveId};
@@ -849,6 +1005,79 @@ mod tests {
 
         opened.expect("open explicit ledger");
         assert!(path.exists());
+    }
+
+    #[test]
+    fn exact_process_evidence_distinguishes_a_live_exec_from_its_completion() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Started,
+            started_fields(
+                &["lf".to_string(), "task".to_string()],
+                repo.path(),
+                "runtime",
+            ),
+        );
+        let owner = super::current_process_identity().expect("live Run identity");
+
+        assert_eq!(
+            super::task_worker_owner_evidence(&owner),
+            ProcessIdentityEvidence::Live
+        );
+
+        emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+        assert_eq!(
+            super::task_worker_owner_evidence(&owner),
+            ProcessIdentityEvidence::Dead
+        );
+    }
+
+    #[test]
+    fn a_killed_registered_exec_is_authoritatively_dead() {
+        let guard = journal_test_guard();
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn owned process");
+        let owner = crate::durable::TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: child.id(),
+            started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+        };
+        let receipt = super::ExecProcessReceipt {
+            schema_version: 1,
+            trace_id: owner.trace_id.to_string(),
+            exec_id: owner.exec_id.to_string(),
+            pid: owner.pid,
+            started_at: owner.started_at,
+        };
+        let root = guard.home().join(super::EXEC_PROCESS_ROOT);
+        std::fs::create_dir_all(&root).expect("create receipt directory");
+        std::fs::write(
+            root.join(format!("{}.json", owner.pid)),
+            serde_json::to_vec(&receipt).expect("serialize receipt"),
+        )
+        .expect("write receipt");
+
+        assert_eq!(
+            super::task_worker_owner_evidence(&owner),
+            ProcessIdentityEvidence::Live
+        );
+        child.kill().expect("kill owned process");
+        child.wait().expect("reap owned process");
+        assert_eq!(
+            super::task_worker_owner_evidence(&owner),
+            ProcessIdentityEvidence::Dead
+        );
     }
 
     #[test]

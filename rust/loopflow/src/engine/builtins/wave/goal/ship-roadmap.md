@@ -1,5 +1,5 @@
-Advance this Wave's objective through measurable Projects and concrete Tasks.
+Advance this Wave's objective through its current chapter plan and concrete Tasks.
 
-Clarify the portfolio, direct the next useful Project or Task, then judge the
-evidence. If no safe move remains, record the blocker instead of inventing
-work.
+Judge the chapter KR evidence, select the next useful Task, and incorporate
+what it proves. If no safe move remains, record the blocker instead of
+inventing work.

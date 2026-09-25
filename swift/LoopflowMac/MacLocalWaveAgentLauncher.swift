@@ -34,20 +34,20 @@ enum LocalWaveAgentLauncher {
         [lfPath, "stop", waveName]
     }
 
-    /// Start a filed Task through the same durable lifecycle command as the CLI.
-    /// `lf task run` owns Project Work startup, worktree placement, and the
-    /// Task process; the app does not reproduce any of those decisions.
+    /// Start a filed Task through the same bounded worker command as the CLI.
+    /// `lf task run` owns Project lookup, worktree placement, Flow selection,
+    /// and the Task worker; the app does not reproduce those decisions.
     static func runTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try controlLfPath()
         try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    /// Create and start one Task with the normal PM and worker lifecycle.
+    /// Create one Task, then start its normal bounded worker path.
     static func startTask(
         repoPath: String,
         title: String,
-        project: String,
+        wave: String,
         directive: String
     ) throws -> TaskStartReceipt {
         let origin = WaveOrigin.resolve(repoPath)
@@ -56,7 +56,7 @@ enum LocalWaveAgentLauncher {
             taskStartCommand(
                 lfPath: lfPath,
                 title: title,
-                project: project,
+                wave: wave,
                 directive: directive
             ),
             cwd: origin
@@ -64,15 +64,14 @@ enum LocalWaveAgentLauncher {
         return try taskStartReceipt(stdout)
     }
 
-    /// Restart existing Task Work without creating another worktree or
-    /// status record.
+    /// Resume existing Task Flow state without creating another worktree.
     static func resumeTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try controlLfPath()
         try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    /// Queue the audited Task interrupt. The Task runner decides how the live
+    /// Queue the audited Task interrupt. The Task worker decides how the live
     /// provider turn is stopped and records the receipt in the shared store.
     static func interruptTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
@@ -80,7 +79,7 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    /// Open the branch's PR for human review from `worktree`. This delegates to
+    /// Open the branch's PR for review from `worktree`. This delegates to
     /// `lf pr open` — the single presentation boundary — instead of building a
     /// GitHub URL and opening it here, so any later review-surface preference is
     /// honored in one place. Only an explicit user review action calls this;
@@ -101,11 +100,11 @@ enum LocalWaveAgentLauncher {
     static func taskStartCommand(
         lfPath: String,
         title: String,
-        project: String,
+        wave: String,
         directive: String
     ) -> [String] {
         [
-            lfPath, "task", "start", project, title,
+            lfPath, "task", "start", "--wave", wave, title,
             "--directive", directive,
             "--json",
         ]

@@ -47,3 +47,43 @@ it through `lf flow blocked`: did the Ghostty approval handoff make the next
 action clear, and what felt confusing, if anything? Another writing iteration
 cannot supply that evidence. No demo acceptance is claimed; the final exact
 human gate also remains required.
+
+## Human observation in Ask
+
+Jack's actual response, 2026-09-25:
+
+> The session is open? Im a little confused on what were demoing but i dont think anything about the handoff itself was necessarily any worse
+
+This supplies the previously missing observation. Jack expressed uncertainty
+about the session being open and the purpose of the demo; he did not report
+that the handoff itself was worse. This is not an affirmative finding that the
+next action was clear or that the demo passed.
+
+The Ask response clarified the exercise: initial approval starts work, Iterate
+carries direction into a second pass, and Ask returns human feedback to the
+waiting decision agent. Human Complete releases this Ask; the final Flow gate
+remains a separate approval.
+
+Human Complete returned this summary through the waiting `lf flow blocked`
+command, which exited successfully in decision Run
+`run_5586692baf53486e96c6176d2f3f7d5d`. The Ask identity was
+`ask_once_4aa034f190bc7fe22cd1764831999a5f52597de5f3c08d11c052913baa76f95b`.
+Readiness alone had left that command waiting. This records the actual return
+of feedback to the same decision Run, not an inference from the ready artifact.
+
+Reassessment: the writing obligations and the required human observation are
+now present. The reported confusion concerns the exercise's purpose; this
+feedback does not establish a runtime defect. The Ask explanation addressed
+that question, but Jack's understanding afterward remains unconfirmed. Advance
+can reach the declared final human demo gate to resolve that concern and request
+explicit confirmation. It cannot count this feedback as a successful clarity
+assessment or approve that gate.
+
+For the final review: this staged writing exercise demonstrates real fresh Runs,
+direction carried backward by Iterate, and human feedback returned through Ask
+Complete to the waiting decision Run. The final human gate is the next action.
+Its reviewer should explain those observations, surface Jack's reported
+confusion, and obtain his explicit confirmation before final Advance. The tool
+shell required an explicit development executable and saved binding; see
+decision-evidence.md for that transport limitation. No whole-branch acceptance
+is implied.

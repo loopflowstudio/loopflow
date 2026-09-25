@@ -885,7 +885,10 @@ fn probe_task_execution_boundary(boundary: &AgentExecutionBoundary) -> OpsResult
     Ok(())
 }
 
-async fn preflight_task_execution(repo: &Path, agent: &str) -> OpsResult<ProviderAccountId> {
+pub(crate) async fn preflight_task_execution(
+    repo: &Path,
+    agent: &str,
+) -> OpsResult<ProviderAccountId> {
     let boundary = task_execution_boundary(repo, agent)?;
     probe_task_execution_boundary(&boundary)?;
     let (harness, _) = parse_agent(agent);
@@ -930,7 +933,7 @@ fn select_task_worker_flow_from_project(
         .flows
         .as_ref()
         .and_then(|flows| flows.recommended.as_deref());
-    let selected = requested.or(recommended).unwrap_or("task-design");
+    let selected = requested.or(recommended).unwrap_or("feature");
     load_task_flow(repo, selected).map(|(name, _)| name)
 }
 
@@ -1002,14 +1005,7 @@ fn load_task_flow(repo: &Path, requested: &str) -> OpsResult<(String, Vec<Concre
     if steps.is_empty() {
         return Err(task_error(format!("Task flow {requested:?} has no steps")));
     }
-    if let Some(step) = steps
-        .iter()
-        .find(|step| !matches!(step, ConcreteStep::Skill(_) | ConcreteStep::Op(_)))
-    {
-        return Err(task_error(format!(
-            "Task flow {requested:?} contains unsupported step {step:?}"
-        )));
-    }
+
     Ok((definition.name, steps))
 }
 
@@ -2232,13 +2228,14 @@ pub(crate) async fn launch_task_process(
     let requires_provider = matches!(
         position.current_plan(),
         crate::engine::ConcreteStep::Skill(_)
-    );
+    ) && !position.has_pending_decision();
     let owner = crate::journal::current_process_identity().ok_or_else(|| {
         task_error("Task advancement requires a registered Loopflow process identity")
     })?;
     let claim = match store
         .claim_task_worker(
             &position.task_id,
+            &position.invocation.id,
             position.version,
             &owner,
             time::OffsetDateTime::now_utc(),
@@ -2253,15 +2250,41 @@ pub(crate) async fn launch_task_process(
                     wait_until_running(store, &task.id).await?;
                     return Ok(());
                 }
-                crate::journal::ProcessIdentityEvidence::Dead => store
-                    .reclaim_task_worker(
-                        &position.task_id,
-                        &claim,
-                        &owner,
-                        time::OffsetDateTime::now_utc(),
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?,
+                crate::journal::ProcessIdentityEvidence::Dead => {
+                    // A saved candidate still belongs to the old Run. Settle its
+                    // successful receipt before replacing that binding.
+                    let current = store
+                        .flow_position(&task.id)
+                        .await
+                        .map_err(|error| task_error(error.to_string()))?
+                        .ok_or_else(|| task_error("Task Flow disappeared during recovery"))?;
+                    if current.claim.as_ref() != Some(&claim) {
+                        return Err(task_error("Task worker changed during recovery; retry"));
+                    }
+                    if current.has_pending_decision() {
+                        crate::controller::task::recover_task_decision(store, task, &current)
+                            .await
+                            .map_err(|error| task_error(error.to_string()))?;
+                        if store
+                            .flow_position(&task.id)
+                            .await
+                            .map_err(|error| task_error(error.to_string()))?
+                            .is_none()
+                        {
+                            return Ok(());
+                        }
+                        return Box::pin(launch_task_process(store, task, None)).await;
+                    }
+                    store
+                        .reclaim_task_worker(
+                            &position.task_id,
+                            &claim,
+                            &owner,
+                            time::OffsetDateTime::now_utc(),
+                        )
+                        .await
+                        .map_err(|error| task_error(error.to_string()))?
+                }
                 crate::journal::ProcessIdentityEvidence::Unknown => {
                     return Err(task_error(format!(
                         "Task {} worker {} cannot be proven live or dead",
@@ -4532,6 +4555,53 @@ pub fn task_resume(issue: &str, reason: Option<String>) -> OpsResult<TaskControl
     block_on_task(async move { resume_task_async(&issue, reason).await })
 }
 
+pub fn task_verdict(
+    repo: &Path,
+    decision: crate::engine::transitions::FlowDecision,
+    summary: &str,
+) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    let verdict = crate::engine::transitions::FlowVerdict {
+        decision,
+        summary: summary.trim().to_string(),
+    };
+    block_on_task(async move {
+        let store = task_store().await?;
+        let task = task_for_checkout(&store, &repo)
+            .await?
+            .ok_or_else(|| task_error("this checkout has no Task"))?;
+        let run = std::env::var(crate::durable::RUN_ID_ENV)
+            .map_err(|_| task_error("a verdict requires the active loop review Run"))?;
+        let run =
+            crate::durable::RunId::parse(&run).map_err(|error| task_error(error.to_string()))?;
+        store
+            .record_flow_verdict(&task.id, &run, &verdict)
+            .await
+            .map_err(|error| task_error(error.to_string()))
+    })
+}
+
+pub fn task_advance(issue: &str) -> OpsResult<Task> {
+    let issue = issue.to_string();
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut task = store
+            .get_task_by_issue(&issue)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        if store
+            .flow_position(&task.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .is_some_and(|position| !position.is_human())
+        {
+            launch_task_process(&store, &mut task, None).await?;
+        }
+        Ok(task)
+    })
+}
+
 /// Async core of [`task_resume`], reusable from callers already inside a runtime.
 pub(crate) async fn resume_task_async(
     issue: &str,
@@ -4841,12 +4911,16 @@ mod tests {
                     ),
                     session_run_id: None,
                     ready_summary: Some("Ready for review".to_string()),
-                    step_index: 1,
-                    iteration: 0,
+                    cursor: crate::engine::ExecutionCursor {
+                        index: 1,
+                        iteration: 0,
+                        ..Default::default()
+                    },
                     version: 0,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
+
                     updated_at: time::OffsetDateTime::now_utc(),
                 },
             )

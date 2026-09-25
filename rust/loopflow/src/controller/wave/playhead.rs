@@ -445,6 +445,15 @@ struct LegacyStepPlan {
 enum StoredStep {
     Current(ConcreteStep),
     Legacy(LegacyStepPlan),
+    Uncaptured(UncapturedStep),
+}
+
+// Shipped XOR records held source references rather than branch content. Keep
+// their journal readable through the existing explicit-restart disposition.
+// The original references remain in the append-only journal, never reloaded.
+#[derive(Deserialize)]
+enum UncapturedStep {
+    Xor(crate::engine::flow::XorDef),
 }
 
 fn deserialize_steps<'de, D>(deserializer: D) -> Result<Vec<ConcreteStep>, D::Error>
@@ -457,6 +466,13 @@ where
             .map(|step| match step {
                 StoredStep::Current(step) => step,
                 StoredStep::Legacy(step) => legacy_step(step),
+                StoredStep::Uncaptured(UncapturedStep::Xor(branch)) => {
+                    legacy_step(LegacyStepPlan {
+                        name: branch.router.unwrap_or_else(|| "xor-route".into()),
+                        kind: StepKind::Xor,
+                        policy: OccurrencePolicy::default(),
+                    })
+                }
             })
             .collect()
     })
@@ -479,7 +495,7 @@ fn legacy_step(step: LegacyStepPlan) -> ConcreteStep {
         }),
         StepKind::Xor | StepKind::And | StepKind::Or | StepKind::Loop => {
             ConcreteStep::Xor(crate::engine::ConcreteXor {
-                router: Some(step.name),
+                router: crate::engine::Skill::named(&step.name),
                 paths: Default::default(),
                 flow_parents,
             })
@@ -539,10 +555,7 @@ fn step_ref_at(
             OccurrencePolicy::default(),
         ),
         ConcreteStep::Xor(branch) => (
-            branch
-                .router
-                .clone()
-                .unwrap_or_else(|| "xor-route".to_string()),
+            branch.router.name.clone(),
             StepKind::Xor,
             OccurrencePolicy::default(),
         ),
@@ -629,6 +642,7 @@ mod tests {
                 policy: OccurrencePolicy {
                     id: Some("review_kickoff".to_string()),
                     human: true,
+                    repeat: None,
                 },
                 flow_parents: Vec::new(),
             })],

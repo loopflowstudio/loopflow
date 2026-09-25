@@ -1,0 +1,22 @@
+- step:
+    id: implement
+    name: implement
+- compress
+- review-slice
+- step:
+    id: review_concepts
+    name: concept-review
+- step:
+    id: decide
+    name: loop-decide
+    repeat:
+      from: implement
+- step:
+    id: review_delivery
+    name: demo
+    human: true
+- step:
+    id: decide_delivery
+    name: loop-decide
+    repeat:
+      from: implement

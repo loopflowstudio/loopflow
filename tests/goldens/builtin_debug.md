@@ -73,6 +73,9 @@ approval without evidence.
 Answer the user in this conversation. Never open another
 session merely to reach them. Headless, `lf ask "<request>"` opens a durable
 session and waits for completion. Respect existing authorization.
+A `human: true` Flow step uses the same Session surface: Complete returns
+review feedback to the next step; a following loop-decide chooses navigation
+through its authored edge. Readiness alone does not release the caller.
 
 When asked about Loopflow state, use `lf ls --json`, `lf status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or

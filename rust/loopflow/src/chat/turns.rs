@@ -293,6 +293,11 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
+        TaskEventKind::FlowFinished { flow, summary, .. } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Flow {flow} finished"),
+            summary,
+        ),
         TaskEventKind::Steer { text, .. } => {
             activity(ChildActivityKind::StateChanged, "Task steer", text)
         }

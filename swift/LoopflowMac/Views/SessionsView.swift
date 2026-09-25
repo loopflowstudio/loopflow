@@ -314,24 +314,6 @@ final class SessionsStore: ObservableObject {
         }
     }
 
-    func decideFlow(_ id: String, approving: Bool, text: String) async -> Bool {
-        guard _index(id) != nil else { return false }
-        do {
-            try await query.resolveFlowSession(
-                id: id,
-                approving: approving,
-                text: text,
-                cwd: scope.repoPath
-            )
-            await refresh()
-            return true
-        } catch {
-            guard let latest = _index(id) else { return false }
-            sessions[latest].state = .failed(error.localizedDescription)
-            return false
-        }
-    }
-
     func complete(_ id: String) async -> Bool {
         guard _index(id) != nil else { return false }
         do {
@@ -948,18 +930,6 @@ private struct SplitDivider: View {
     }
 }
 
-private enum FlowResolutionAction {
-    case approve
-    case iterate
-
-    var title: String {
-        switch self {
-        case .approve: "Approve and continue"
-        case .iterate: "Iterate"
-        }
-    }
-}
-
 private struct SessionPaneView: View {
     let pane: PaneState
     let isFocused: Bool
@@ -968,8 +938,6 @@ private struct SessionPaneView: View {
     let store: MultiplexerStore
     @State private var bellRinging = false
     @State private var terminalTitle: String?
-    @State private var resolutionAction: FlowResolutionAction?
-    @State private var resolutionText = ""
     @State private var isCompleting = false
 
     private var item: SessionItem? {
@@ -1015,39 +983,6 @@ private struct SessionPaneView: View {
             bellRinging = false
             terminalTitle = nil
         }
-        .alert(
-            resolutionAction?.title ?? "Task decision",
-            isPresented: Binding(
-                get: { resolutionAction != nil },
-                set: { if !$0 { resolutionAction = nil } }
-            )
-        ) {
-            TextField(
-                resolutionAction == .approve ? "Verified summary" : "Direction",
-                text: $resolutionText
-            )
-            Button(resolutionAction?.title ?? "Continue") {
-                guard let action = resolutionAction, let item else { return }
-                let text = resolutionText.trimmingCharacters(in: .whitespacesAndNewlines)
-                resolutionAction = nil
-                Task { @MainActor in
-                    let decided = await sessions.decideFlow(
-                        item.id,
-                        approving: action == .approve,
-                        text: text
-                    )
-                    if decided {
-                        sessions.releaseSurface(item.id)
-                    }
-                }
-            }
-            .disabled(resolutionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("Cancel", role: .cancel) {
-                resolutionAction = nil
-            }
-        } message: {
-            Text("Approve advances the Task. Iterate returns it to autonomous work with your direction. Either action closes this review terminal.")
-        }
     }
 
     private var header: some View {
@@ -1073,29 +1008,6 @@ private struct SessionPaneView: View {
                 Image(systemName: "bell.fill")
                     .foregroundStyle(Color.statusWarning)
                     .accessibilityLabel("Session ready")
-            }
-            if let item, item.record.kind == .flow {
-                _headerButton(
-                    "checkmark.circle",
-                    label: "Approve and continue",
-                    id: "session-action-approve",
-                    help: item.record.state == .ready
-                        ? "Approve and continue the Task"
-                        : "The session agent has not marked this ready",
-                    disabled: item.record.state != .ready
-                ) {
-                    resolutionText = item.record.readySummary ?? "Approved by User"
-                    resolutionAction = .approve
-                }
-                _headerButton(
-                    "arrow.uturn.backward.circle",
-                    label: "Iterate",
-                    id: "session-action-iterate",
-                    help: "Iterate through autonomous Task work"
-                ) {
-                    resolutionText = ""
-                    resolutionAction = .iterate
-                }
             }
             _headerButton(
                 "rectangle.split.2x1",
@@ -1171,7 +1083,7 @@ private struct SessionPaneView: View {
     private var completionAction: some View {
         // Only over a live terminal: a placeholder pane (elsewhere, opening,
         // failed) leads with its own single action instead.
-        if let item, item.record.kind != .flow, item.surface != nil {
+        if let item, item.surface != nil {
             Button {
                 isCompleting = true
                 Task { @MainActor in
@@ -1206,7 +1118,7 @@ private struct SessionPaneView: View {
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
             }
             .buttonStyle(.plain)
-            .disabled(isCompleting || (item.record.kind == .ask && item.record.state != .ready))
+            .disabled(isCompleting || (item.record.kind != .interactive && item.record.state != .ready))
             .help(_completionHelp(item))
             .accessibilityLabel("Complete session")
             .accessibilityHint(_completionHelp(item))
@@ -1217,14 +1129,14 @@ private struct SessionPaneView: View {
 
     private func _completionHelp(_ item: SessionItem) -> String {
         switch item.record.kind {
-        case .ask where item.record.state != .ready:
+        case .ask where item.record.state != .ready, .flow where item.record.state != .ready:
             "The session agent has not marked this ready"
         case .ask:
             "Complete the conversation and resume its blocked caller"
         case .interactive:
             "Stop the provider and remove this Session; native history remains resumable"
         case .flow:
-            ""
+            "Complete the review and return feedback to the next Flow step"
         }
     }
 

@@ -51,31 +51,13 @@ final class SessionsInteractionTests: XCTestCase {
             }
 
             let complete = element(app, id: "session-action-complete")
-            let approve = element(app, id: "session-action-approve")
+            let approve = element(app, id: "session-action-advance")
             let iterate = element(app, id: "session-action-iterate")
-            switch fixture {
-            case .interactive, .ask:
-                XCTAssertTrue(complete.waitForExistence(timeout: 4))
-                XCTAssertTrue(complete.isEnabled)
-                XCTAssertFalse(approve.exists)
-                XCTAssertFalse(iterate.exists)
-                complete.click()
-            case .flow:
-                XCTAssertFalse(complete.exists)
-                XCTAssertTrue(approve.waitForExistence(timeout: 4))
-                XCTAssertTrue(approve.isEnabled)
-                XCTAssertTrue(iterate.exists)
-                XCTAssertTrue(iterate.isEnabled)
-                approve.click()
-                let summary = app.alerts.textFields.element(boundBy: 0)
-                XCTAssertTrue(summary.waitForExistence(timeout: 4))
-                summary.click()
-                summary.typeText("Verified fixture summary")
-                let confirmation = app.alerts.buttons["Approve and continue"]
-                XCTAssertTrue(confirmation.waitForExistence(timeout: 4))
-                XCTAssertTrue(confirmation.isEnabled)
-                confirmation.click()
-            }
+            XCTAssertTrue(complete.waitForExistence(timeout: 4))
+            XCTAssertTrue(complete.isEnabled)
+            XCTAssertFalse(approve.exists)
+            XCTAssertFalse(iterate.exists)
+            complete.click()
 
             XCTAssertTrue(waitForAbsence(app, id: "session-row-\(fixture.id)"))
             XCTAssertTrue(

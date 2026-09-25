@@ -101,7 +101,7 @@ launch a competing local worker to work around an unavailable Home.
 ## Uncertainty selects the flow, it never blocks
 
 Do not stop to ask permission before launching. If uncertain, launch the work
-with a Flow that contains the needed review gate, such as `task-design`,
+with a Flow that contains the needed review gate, such as `feature`,
 rather than blocking the channel. Confident work may use a straight-through
 Flow. Your launch judgment is *which Flow this Task worker should run*.
 

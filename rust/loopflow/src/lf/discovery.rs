@@ -731,10 +731,9 @@ fn format_collapsed_step(step: &ConcreteStep, repo: &Path) -> Result<String, Loa
         ConcreteStep::Xor(xor) => {
             let mut paths = HashMap::new();
             for (name, path) in &xor.paths {
-                let steps = crate::engine::flow::load_xor_path_items(path, repo)?;
-                paths.insert(name.clone(), format_collapsed_steps(&steps, repo)?);
+                paths.insert(name.clone(), format_collapsed_steps(&path.steps, repo)?);
             }
-            Ok(format_xor(xor.router.as_deref(), &paths, String::clone))
+            Ok(format_xor(Some(&xor.router.name), &paths, String::clone))
         }
     }
 }

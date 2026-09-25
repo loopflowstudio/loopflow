@@ -51,9 +51,7 @@ Steer, or resume a stopped process through the same Task Work:
 
 ```bash
 lf session open <session-id>
-lf session complete <interactive-or-ask-id>
-lf session approve <flowstep-id> "Verified summary"
-lf session iterate <flowstep-id> "Narrow the design"
+lf session complete <session-id>    # return saved review or Ask feedback
 lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123

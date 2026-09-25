@@ -120,9 +120,9 @@ lf build                                 # one code → reviewable Task slice
 lf ship                                  # final Task gate → learnings → land
 ```
 
-Flows automate skills within one bounded pass. Their YAML owns ordering and
-review gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
-belongs to Wave and Task execution.
+Flow YAML owns step order, interactive reviews (`human: true`), and explicit
+backward edges. A Flow with backward edges is a loopflow; it runs with or without
+a Task. `ship` and `deploy` supply explicitly selected delivery steps.
 
 ### Custom skills
 

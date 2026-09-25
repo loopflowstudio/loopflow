@@ -130,6 +130,36 @@ pub struct Cli {
 }
 
 impl Cli {
+    pub(crate) fn launch_options(&self) -> Self {
+        Self {
+            command: None,
+            list: self.list,
+            docs: self.docs.clone(),
+            clipboard: self.clipboard,
+            model: self.model.clone(),
+            account: self.account.clone(),
+            only_account: self.only_account.clone(),
+            account_lease_probe: self.account_lease_probe,
+            yolo: self.yolo,
+            interactive: self.interactive,
+            batch: self.batch,
+            tui: self.tui,
+            ide: self.ide,
+            chrome: self.chrome,
+            no_chrome: self.no_chrome,
+            diff_files: self.diff_files,
+            no_diff_files: self.no_diff_files,
+            diff: self.diff,
+            no_diff: self.no_diff,
+            max_turns: self.max_turns,
+            wave: self.wave.clone(),
+            task: self.task.clone(),
+            as_work: self.as_work.clone(),
+            bound_cwd: self.bound_cwd.clone(),
+            no_loopflow: self.no_loopflow,
+        }
+    }
+
     fn toggle_setting(enabled: bool, disabled: bool) -> Option<bool> {
         if enabled {
             Some(true)
@@ -677,6 +707,9 @@ pub enum Commands {
 
 #[derive(Args, Debug, Default)]
 pub struct AskArgs {
+    /// Named skill for the session
+    #[arg(long)]
+    pub skill: Option<String>,
     /// What the session should work through
     #[arg(trailing_var_arg = true, value_name = "QUESTION")]
     pub question: Vec<String>,
@@ -704,24 +737,12 @@ pub enum SessionCommand {
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
     },
-    /// Complete an interactive or ad-hoc Ask session
+    /// Complete a review, blocked Ask, or interactive session
     Complete { id: String },
     /// Mark the active session ready for your review
     Ready {
         #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
         summary: Vec<String>,
-    },
-    /// Approve a ready Task FlowStep and continue the Task
-    Approve {
-        id: String,
-        #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
-        summary: Vec<String>,
-    },
-    /// Iterate on a Task FlowStep with new direction
-    Iterate {
-        id: String,
-        #[arg(value_name = "DIRECTION", required = true, num_args = 1..)]
-        direction: Vec<String>,
     },
     /// Run the exact review skill in its durable terminal
     #[command(name = "serve-flow", hide = true)]
@@ -886,7 +907,13 @@ pub enum WaveCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Internal: run one claimed Task Flow boundary
+    /// Continue the saved Task Flow; complete an interactive review through its Session
+    Advance {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Internal: drive a Task Flow from its claimed boundary
     #[command(name = "__worker", hide = true)]
     Worker { task_id: crate::work::task::TaskId },
     /// Ensure tracked Task Work and its worktree without starting a worker
@@ -2802,12 +2829,39 @@ mod tests {
     }
 
     #[test]
+    fn navigation_belongs_to_flow_decisions() {
+        for args in [
+            vec!["lf", "task", "advance", "LOO-1", "--session", "review"],
+            vec!["lf", "task", "advance", "LOO-1", "--summary", "approved"],
+            vec!["lf", "session", "advance", "review", "approved"],
+            vec!["lf", "session", "iterate", "review", "revise"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+        assert!(Cli::try_parse_from(["lf", "task", "advance", "LOO-1"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["lf", "flow", "decide", "iterate", "revise implementation"])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_ok());
+    }
+
+    #[test]
     fn cli_separates_ask_completion_from_flow_decisions() {
         let ask = Cli::try_parse_from(["lf", "ask", "Review", "this", "branch"])
             .expect("parse human Ask");
         assert!(matches!(
             ask.command,
-            Some(Commands::Ask { ask }) if ask.question == ["Review", "this", "branch"]
+            Some(Commands::Ask { ask }) if ask.question == ["Review", "this", "branch"] && ask.skill.is_none()
+        ));
+
+        let ask =
+            Cli::try_parse_from(["lf", "ask", "--skill", "unblock", "Resolve", "this blocker"])
+                .expect("parse skill-selected Ask");
+        assert!(matches!(
+            ask.command,
+            Some(Commands::Ask { ask }) if ask.skill.as_deref() == Some("unblock")
+                && ask.question == ["Resolve", "this blocker"]
         ));
 
         let ready = Cli::try_parse_from(["lf", "session", "ready", "Ready for review"])
@@ -2819,33 +2873,9 @@ mod tests {
             }) if summary == ["Ready for review"]
         ));
 
-        let approve = Cli::try_parse_from(["lf", "session", "approve", "task_flow", "Verified"])
-            .expect("parse explicit FlowStep decision");
-        assert!(matches!(
-            approve.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Approve { id, summary }
-            }) if id == "task_flow" && summary == ["Verified"]
-        ));
-
-        let iterate = Cli::try_parse_from([
-            "lf",
-            "session",
-            "iterate",
-            "task_flow",
-            "Needs another pass",
-        ])
-        .expect("parse explicit FlowStep iteration");
-        assert!(matches!(
-            iterate.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Iterate { id, direction }
-            }) if id == "task_flow" && direction == ["Needs another pass"]
-        ));
-
         for args in [
             vec!["lf", "session", "ready"],
-            vec!["lf", "session", "approve", "task_flow"],
+            vec!["lf", "session", "advance", "task_flow"],
             vec!["lf", "session", "iterate", "task_flow"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());

@@ -308,7 +308,7 @@ mod tests {
         }
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
-            "User explicitly confirms",
+            "human feedback, revised artifact references, and remaining",
             "headless surface",
             "run `lf ask \"<exact request>\"`",
             "closing, detaching, provider exit, or lack of response",
@@ -382,7 +382,7 @@ mod tests {
         assert!(get_builtin_flow("task").is_none());
         assert!(get_builtin_flow("task-design")
             .expect("Task first flow")
-            .contains("- kickoff"));
+            .contains("name: kickoff"));
         let first = get_builtin_flow("task-design").expect("Task first flow");
         assert_eq!(first.matches("human: true").count(), 1);
         assert!(first.contains("id: review_kickoff"));

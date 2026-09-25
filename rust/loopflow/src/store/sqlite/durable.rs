@@ -16,6 +16,96 @@ use crate::work::task::{Task, TaskEventKind};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub fn record_flow_verdict(
+        &self,
+        task_id: &TaskId,
+        run_id: &RunId,
+        verdict: &crate::engine::transitions::FlowVerdict,
+    ) -> StoreResult<()> {
+        if verdict.summary.trim().is_empty() {
+            return Err(StoreError::InvalidData(
+                "review evidence cannot be empty".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_ready_work(&tx, &WorkRef::Task(task_id.clone()))?;
+        let mut position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        if position
+            .claim
+            .as_ref()
+            .and_then(|claim| claim.worker_run_id.as_ref())
+            != Some(run_id)
+            || position.current().policy.repeat.is_none()
+        {
+            return Err(StoreError::InvalidAuthority(
+                "only the current claimed loop reviewer may record a verdict".to_string(),
+            ));
+        }
+        let progress = &mut position.cursor.leaf_mut().progress;
+        if progress
+            .verdict
+            .as_ref()
+            .is_some_and(|saved| saved != verdict)
+        {
+            return Err(StoreError::InvalidAuthority(
+                "step already has a different decision".into(),
+            ));
+        }
+        progress.verdict = Some(verdict.clone());
+        tx.execute(
+            "UPDATE task_flow_positions SET review_json=?2 WHERE task_id=?1",
+            params![task_id.as_str(), serde_json::to_string(&position.cursor)?],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn record_flow_route(
+        &self,
+        task_id: &TaskId,
+        run_id: &RunId,
+        path: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_ready_work(&tx, &WorkRef::Task(task_id.clone()))?;
+        let mut position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        if position
+            .claim
+            .as_ref()
+            .and_then(|claim| claim.worker_run_id.as_ref())
+            != Some(run_id)
+        {
+            return Err(StoreError::InvalidAuthority(
+                "only the current claimed router may select a path".into(),
+            ));
+        }
+        let crate::engine::ConcreteStep::Xor(branch) = position.current_plan() else {
+            return Err(StoreError::InvalidAuthority(
+                "current Flow step is not a router".into(),
+            ));
+        };
+        if !branch.paths.contains_key(path) {
+            return Err(StoreError::InvalidData(format!(
+                "unknown Flow route {path:?}"
+            )));
+        }
+        let leaf = position.cursor.leaf_mut();
+        if leaf.route.as_deref().is_some_and(|saved| saved != path) {
+            return Err(StoreError::InvalidAuthority(
+                "step already has a different route".into(),
+            ));
+        }
+        leaf.route = Some(path.to_string());
+        tx.execute(
+            "UPDATE task_flow_positions SET review_json=?2 WHERE task_id=?1",
+            params![task_id.as_str(), serde_json::to_string(&position.cursor)?],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub(crate) fn task_issue_identifier(
         &self,
         external_issue_id: &str,
@@ -150,6 +240,7 @@ impl SqliteStore {
     pub fn claim_task_worker(
         &self,
         task_id: &TaskId,
+        expected_invocation: &str,
         expected_version: u64,
         owner: &TaskWorkerOwner,
         claimed_at: OffsetDateTime,
@@ -161,10 +252,10 @@ impl SqliteStore {
         let position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         if position.is_human() {
             return Err(StoreError::InvalidAuthority(
-                "Review Flow positions require an exact decision".to_string(),
+                "Review Flow positions wait for their Session to complete".to_string(),
             ));
         }
-        if position.version != expected_version {
+        if position.invocation.id != expected_invocation || position.version != expected_version {
             return Ok(TaskWorkerClaimOutcome::Stale {
                 actual_version: position.version,
             });
@@ -186,14 +277,15 @@ impl SqliteStore {
         let claim_json = serde_json::to_string(&claim)?;
         let changed = tx.execute(
             "UPDATE task_flow_positions
-             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4
+             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4, review_json=?6
              WHERE task_id=?1 AND position_version=?5 AND claim_json IS NULL",
             params![
                 task_id.as_str(),
                 i64::try_from(generation).map_err(invalid_durable)?,
                 claim_json,
                 claimed_at.unix_timestamp(),
-                i64::try_from(expected_version).map_err(invalid_durable)?
+                i64::try_from(expected_version).map_err(invalid_durable)?,
+                serde_json::to_string(&position.cursor)?
             ],
         )?;
         if changed != 1 {
@@ -241,7 +333,7 @@ impl SqliteStore {
         let replacement_json = serde_json::to_string(&replacement)?;
         if tx.execute(
             "UPDATE task_flow_positions
-             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4
+             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4, review_json=?7
              WHERE task_id=?1 AND position_version=?5 AND claim_json=?6",
             params![
                 task_id.as_str(),
@@ -249,7 +341,8 @@ impl SqliteStore {
                 replacement_json,
                 claimed_at.unix_timestamp(),
                 i64::try_from(position.version).map_err(invalid_durable)?,
-                expected_json
+                expected_json,
+                serde_json::to_string(&position.cursor)?
             ],
         )? != 1
         {
@@ -302,7 +395,7 @@ impl SqliteStore {
             "SELECT task_id, invocation_json, flow, step, node_id, human,
                     session_run_id, ready_summary, step_index, iteration,
                     position_version, worker_generation, claim_json, failure_json,
-                    updated_at
+                    updated_at, review_json
              FROM task_flow_positions WHERE human=1 ORDER BY updated_at, task_id",
         )?;
         let rows = statement.query_map([], |row| {
@@ -322,6 +415,7 @@ impl SqliteStore {
                 row.get::<_, Option<String>>(12)?,
                 row.get::<_, Option<String>>(13)?,
                 row.get::<_, i64>(14)?,
+                row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut positions = Vec::new();
@@ -342,6 +436,7 @@ impl SqliteStore {
                 claim_json,
                 failure_json,
                 updated_at,
+                review_json,
             ) = row?;
             positions.push(decode_flow_position(
                 TaskId::parse(&task_id).map_err(invalid_durable)?,
@@ -360,6 +455,7 @@ impl SqliteStore {
                     claim_json,
                     failure_json,
                     updated_at,
+                    review_json,
                 ),
             )?);
         }
@@ -909,6 +1005,7 @@ type StoredFlowPosition = (
     Option<String>,
     Option<String>,
     i64,
+    Option<String>,
 );
 
 pub(super) fn flow_position_in(
@@ -919,7 +1016,7 @@ pub(super) fn flow_position_in(
         .query_row(
             "SELECT invocation_json, flow, step, node_id, human, session_run_id, ready_summary,
                     step_index, iteration, position_version, worker_generation,
-                    claim_json, failure_json, updated_at
+                    claim_json, failure_json, updated_at, review_json
              FROM task_flow_positions WHERE task_id=?1",
             [task_id.as_str()],
             |row| {
@@ -938,6 +1035,7 @@ pub(super) fn flow_position_in(
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, i64>(13)?,
+                    row.get::<_, Option<String>>(14)?,
                 ))
             },
         )
@@ -970,9 +1068,9 @@ pub(super) fn set_flow_position_in(
             "INSERT INTO task_flow_positions (
                 task_id, invocation_json, flow, step, node_id, human, session_run_id,
                 ready_summary, step_index, iteration, position_version,
-                worker_generation, claim_json, failure_json, updated_at
+                worker_generation, claim_json, failure_json, updated_at, review_json
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, 0, NULL, ?11, ?12
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, 0, NULL, ?11, ?12, ?13
              )
              ON CONFLICT(task_id) DO NOTHING",
             params![
@@ -984,10 +1082,11 @@ pub(super) fn set_flow_position_in(
                 step.policy.human,
                 position.session_run_id.as_ref().map(RunId::as_str),
                 position.ready_summary,
-                i64::from(position.step_index),
-                i64::from(position.iteration),
+                i64::try_from(position.cursor.index).map_err(invalid_durable)?,
+                i64::from(position.cursor.iteration),
                 failure_json,
-                position.updated_at.unix_timestamp()
+                position.updated_at.unix_timestamp(),
+                serde_json::to_string(&position.cursor)?
             ],
         )?
     } else {
@@ -997,7 +1096,7 @@ pub(super) fn set_flow_position_in(
                  ready_summary=?8, step_index=?9, iteration=?10,
                  position_version=position_version + 1,
                  worker_generation=0, claim_json=NULL, failure_json=?11,
-                 updated_at=?12
+                 updated_at=?12, review_json=?14
              WHERE task_id=?1 AND position_version=?13 AND claim_json IS NULL",
             params![
                 task_id.as_str(),
@@ -1008,11 +1107,12 @@ pub(super) fn set_flow_position_in(
                 step.policy.human,
                 position.session_run_id.as_ref().map(RunId::as_str),
                 position.ready_summary,
-                i64::from(position.step_index),
-                i64::from(position.iteration),
+                i64::try_from(position.cursor.index).map_err(invalid_durable)?,
+                i64::from(position.cursor.iteration),
                 failure_json,
                 position.updated_at.unix_timestamp(),
-                i64::try_from(position.version).map_err(invalid_durable)?
+                i64::try_from(position.version).map_err(invalid_durable)?,
+                serde_json::to_string(&position.cursor)?
             ],
         )?
     };
@@ -1033,16 +1133,21 @@ pub(super) fn block_task_flow_in(
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
     let expected_json = serde_json::to_string(expected)?;
     let failure_json = serde_json::to_string(failure)?;
+    let mut position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
+    let leaf = position.cursor.leaf_mut();
+    leaf.progress.verdict = None;
+    leaf.route = None;
     if conn.execute(
         "UPDATE task_flow_positions
-         SET claim_json=NULL, failure_json=?2, updated_at=?3
+         SET claim_json=NULL, failure_json=?2, updated_at=?3, review_json=?6
          WHERE task_id=?1 AND position_version=?4 AND claim_json=?5",
         params![
             task_id.as_str(),
             failure_json,
             failure.observed_at.unix_timestamp(),
             i64::try_from(expected.position_version).map_err(invalid_durable)?,
-            expected_json
+            expected_json,
+            serde_json::to_string(&position.cursor)?
         ],
     )? != 1
     {
@@ -1058,15 +1163,21 @@ pub(super) fn release_task_worker_in(
 ) -> StoreResult<FlowPosition> {
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
     let expected_json = serde_json::to_string(expected)?;
+    let mut position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
+    let leaf = position.cursor.leaf_mut();
+    leaf.progress.verdict = None;
+    leaf.route = None;
     if conn.execute(
         "UPDATE task_flow_positions
-         SET claim_json=NULL, failure_json=NULL, updated_at=?2
+         SET claim_json=NULL, failure_json=NULL, updated_at=?2,
+             review_json=?5
          WHERE task_id=?1 AND position_version=?3 AND claim_json=?4",
         params![
             task_id.as_str(),
             OffsetDateTime::now_utc().unix_timestamp(),
             i64::try_from(expected.position_version).map_err(invalid_durable)?,
-            expected_json
+            expected_json,
+            serde_json::to_string(&position.cursor)?
         ],
     )? != 1
     {
@@ -1099,7 +1210,7 @@ pub(super) fn settle_task_worker_in(
              ready_summary=?8, step_index=?9, iteration=?10,
              position_version=position_version + 1,
              worker_generation=0, claim_json=NULL, failure_json=NULL,
-             updated_at=?11
+             updated_at=?11, review_json=?14
          WHERE task_id=?1 AND position_version=?12 AND claim_json=?13",
         params![
             task_id.as_str(),
@@ -1110,11 +1221,12 @@ pub(super) fn settle_task_worker_in(
             step.policy.human,
             next.session_run_id.as_ref().map(RunId::as_str),
             next.ready_summary,
-            i64::from(next.step_index),
-            i64::from(next.iteration),
+            i64::try_from(next.cursor.index).map_err(invalid_durable)?,
+            i64::from(next.cursor.iteration),
             next.updated_at.unix_timestamp(),
             i64::try_from(expected.position_version).map_err(invalid_durable)?,
-            expected_json
+            expected_json,
+            serde_json::to_string(&next.cursor)?
         ],
     )? != 1
     {
@@ -1150,6 +1262,61 @@ pub(super) fn finish_task_flow_in(
     Ok(())
 }
 
+fn decode_flow_progress(
+    json: Option<&str>,
+    failure: &mut Option<TaskFlowBlocker>,
+    observed_at: OffsetDateTime,
+) -> StoreResult<crate::engine::transitions::FlowProgress> {
+    let Some(json) = json else {
+        return Ok(Default::default());
+    };
+    let mut value: serde_json::Value = serde_json::from_str(json)?;
+    if let Some(node) = value
+        .get("node_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    {
+        let count = value
+            .get("completed_passes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        value = serde_json::json!({
+            "repeats": {node: count}, "direction": value.get("direction"),
+            "verdict": value.get("verdict"),
+        });
+    }
+    // Blocked was historically serialized as a navigation verdict. Preserve
+    // its evidence as a retryable stop without inventing a forward decision.
+    if value.pointer("/verdict/decision").and_then(|v| v.as_str()) == Some("blocked") {
+        let reason = value
+            .pointer("/verdict/summary")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| StoreError::InvalidData("blocked Flow verdict has no summary".into()))?;
+        let reason = if reason.trim().is_empty() {
+            "legacy Flow verdict is blocked without evidence"
+        } else {
+            reason
+        };
+        match failure {
+            Some(existing) if existing.reason != reason => {
+                existing
+                    .reason
+                    .push_str(&format!("\nLegacy Flow blocker: {reason}"));
+            }
+            Some(_) => {}
+            None => {
+                *failure = Some(TaskFlowBlocker {
+                    reason: reason.into(),
+                    restart_required: false,
+                    observed_at,
+                })
+            }
+        }
+        value["verdict"] = serde_json::Value::Null;
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
 fn decode_flow_position(
     task_id: TaskId,
     (
@@ -1167,31 +1334,52 @@ fn decode_flow_position(
         claim_json,
         failure_json,
         updated_at,
+        review_json,
     ): StoredFlowPosition,
 ) -> StoreResult<FlowPosition> {
+    let updated_at = OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid_durable)?;
+    let mut failure = failure_json
+        .map(|failure| serde_json::from_str::<TaskFlowBlocker>(&failure))
+        .transpose()?;
+    let root_index = usize::try_from(step_index).map_err(invalid_durable)?;
+    let root_iteration = u32::try_from(iteration).map_err(invalid_durable)?;
+    let saved = review_json
+        .as_deref()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .transpose()?;
+    let cursor = match saved {
+        Some(value) if value.get("index").is_some() => serde_json::from_value(value)?,
+        _ => crate::engine::ExecutionCursor {
+            index: root_index,
+            iteration: root_iteration,
+            progress: decode_flow_progress(review_json.as_deref(), &mut failure, updated_at)?,
+            ..Default::default()
+        },
+    };
+    if cursor.index != root_index || cursor.iteration != root_iteration {
+        return Err(StoreError::InvalidData(
+            "stored Flow cursor does not match its root projection".into(),
+        ));
+    }
     let position = FlowPosition {
+        cursor,
         task_id,
         invocation: serde_json::from_str(&invocation_json)?,
         session_run_id: session_run_id
             .map(|run_id| RunId::parse(&run_id).map_err(invalid_durable))
             .transpose()?,
         ready_summary,
-        step_index: u32::try_from(step_index).map_err(invalid_durable)?,
-        iteration: u32::try_from(iteration).map_err(invalid_durable)?,
         version: u64::try_from(position_version).map_err(invalid_durable)?,
         worker_generation: u64::try_from(worker_generation).map_err(invalid_durable)?,
         claim: claim_json
             .map(|claim| serde_json::from_str::<TaskWorkerClaim>(&claim))
             .transpose()?,
-        failure: failure_json
-            .map(|failure| serde_json::from_str::<TaskFlowBlocker>(&failure))
-            .transpose()?,
-        updated_at: OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid_durable)?,
+        failure,
+        updated_at,
     };
     validate_flow_position(&position.task_id, &position)?;
     let current = position
-        .invocation
-        .step_at(position.step_index, position.iteration)
+        .current_checked()
         .ok_or_else(|| StoreError::InvalidData("Flow position has no current step".to_string()))?;
     if current.flow != flow
         || current.step != step
@@ -1206,14 +1394,14 @@ fn decode_flow_position(
 }
 
 fn validate_flow_position(task_id: &TaskId, position: &FlowPosition) -> StoreResult<()> {
+    crate::engine::flow::validate_repeats(&position.invocation.steps).map_err(invalid_durable)?;
     if &position.task_id != task_id {
         return Err(StoreError::InvalidAuthority(
             "Flow position does not belong to this Task".to_string(),
         ));
     }
     let step = position
-        .invocation
-        .step_at(position.step_index, position.iteration)
+        .current_checked()
         .ok_or_else(|| StoreError::InvalidData("Flow position has no current step".to_string()))?;
     if step.flow.trim().is_empty() || step.step.trim().is_empty() {
         return Err(StoreError::InvalidData(
@@ -1379,6 +1567,10 @@ mod durable_store_tests {
         FlowPosition, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaimOutcome,
         TaskWorkerOwner,
     };
+    use crate::engine::execution::NestedCursor;
+    use crate::engine::flow::{ConcretePath, ConcreteXor};
+    use crate::engine::transitions::{FlowDecision, FlowVerdict};
+    use crate::engine::{ConcreteStep, ExecutionCursor, Skill};
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::store::sqlite::SqliteStore;
@@ -1478,8 +1670,7 @@ mod durable_store_tests {
             ),
             session_run_id: None,
             ready_summary: None,
-            step_index: 0,
-            iteration: 0,
+            cursor: Default::default(),
             version: 0,
             worker_generation: 0,
             claim: None,
@@ -1498,6 +1689,333 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn legacy_flow_decisions_preserve_pinned_progress() {
+        let (_dir, store, task_id) = store_with_task();
+        let mut position = autonomous_position(&task_id);
+        position.invocation = crate::controller::wave::playhead::QueuedInvocation::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+            "pursue",
+        )
+        .unwrap();
+        position.cursor.index = 4;
+        position.cursor.iteration = 5;
+        let position = store.set_flow_position(&task_id, &position).unwrap();
+        for (saved, expected) in [
+            ("continue", FlowDecision::Iterate),
+            ("complete", FlowDecision::Advance),
+            ("repeat", FlowDecision::Iterate),
+            ("next", FlowDecision::Advance),
+        ] {
+            for legacy_shape in [true, false] {
+                let verdict = serde_json::json!({"decision": saved, "summary": "saved proof"});
+                let json = if legacy_shape {
+                    serde_json::json!({"node_id": "decide", "completed_passes": 2,
+                        "direction": "previous direction", "verdict": verdict})
+                } else {
+                    serde_json::json!({"repeats": {"decide": 2},
+                        "direction": "previous direction", "verdict": verdict})
+                }
+                .to_string();
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE task_flow_positions SET review_json=?2 WHERE task_id=?1",
+                        rusqlite::params![task_id.as_str(), json],
+                    )
+                    .unwrap();
+                let recovered = store.flow_position(&task_id).unwrap().unwrap();
+                assert_eq!(recovered.invocation, position.invocation);
+                assert_eq!(recovered.cursor.index, position.cursor.index);
+                assert_eq!(recovered.cursor.iteration, position.cursor.iteration);
+                assert_eq!(recovered.cursor.progress.repeats["decide"], 2);
+                assert_eq!(
+                    recovered.cursor.progress.direction.as_deref(),
+                    Some("previous direction")
+                );
+                assert_eq!(
+                    recovered.cursor.progress.verdict.as_ref().unwrap().decision,
+                    expected
+                );
+                assert_eq!(
+                    recovered.cursor.progress.verdict.as_ref().unwrap().summary,
+                    "saved proof"
+                );
+                assert!(recovered.failure.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_blocked_verdict_stops_and_retries_without_advancing() {
+        for legacy_shape in [true, false] {
+            let (_dir, store, task_id) = store_with_task();
+            let mut position = autonomous_position(&task_id);
+            position.invocation = crate::controller::wave::playhead::QueuedInvocation::load(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+                "pursue",
+            )
+            .unwrap();
+            position.cursor.index = 4;
+            let position = store.set_flow_position(&task_id, &position).unwrap();
+            let verdict =
+                serde_json::json!({"decision": "blocked", "summary": "need a policy choice"});
+            let json = if legacy_shape {
+                serde_json::json!({"node_id": "decide", "completed_passes": 2,
+                    "direction": "previous direction", "verdict": verdict})
+            } else {
+                serde_json::json!({"repeats": {"decide": 2},
+                    "direction": "previous direction", "verdict": verdict})
+            }
+            .to_string();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE task_flow_positions SET review_json=?2 WHERE task_id=?1",
+                    rusqlite::params![task_id.as_str(), json],
+                )
+                .unwrap();
+            let blocked = store.flow_position(&task_id).unwrap().unwrap();
+            let failure = blocked.failure.as_ref().unwrap();
+            assert_eq!(failure.reason, "need a policy choice");
+            assert!(!failure.restart_required);
+            assert_eq!(failure.observed_at, blocked.updated_at);
+            assert!(!blocked.has_pending_decision());
+            assert_eq!(blocked.invocation, position.invocation);
+            assert_eq!(blocked.cursor.index, position.cursor.index);
+            assert_eq!(blocked.cursor.progress.repeats["decide"], 2);
+            assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), blocked);
+            let claimed = store
+                .claim_task_worker(
+                    &task_id,
+                    &blocked.invocation.id,
+                    blocked.version,
+                    &owner(303),
+                    time::OffsetDateTime::now_utc(),
+                )
+                .unwrap();
+            assert!(matches!(claimed, TaskWorkerClaimOutcome::Claimed(_)));
+            let retry = store.flow_position(&task_id).unwrap().unwrap();
+            assert!(retry.failure.is_none());
+            assert!(!retry.has_pending_decision());
+            assert_eq!(retry.cursor.index, blocked.cursor.index);
+            assert_eq!(retry.invocation, blocked.invocation);
+            assert_eq!(retry.cursor.progress, blocked.cursor.progress);
+        }
+    }
+
+    #[test]
+    fn loop_verdict_survives_recovery_and_rejects_unrelated_runs() {
+        let (_dir, store, task_id) = store_with_task();
+        let mut position = autonomous_position(&task_id);
+        position.invocation = crate::controller::wave::playhead::QueuedInvocation::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+            "feature",
+        )
+        .unwrap();
+        position.cursor.index = 6;
+        let position = store.set_flow_position(&task_id, &position).unwrap();
+        let first_owner = owner(301);
+        let claim = match store
+            .claim_task_worker(
+                &task_id,
+                &position.invocation.id,
+                position.version,
+                &first_owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+        {
+            crate::durable::TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            other => panic!("unexpected {other:?}"),
+        };
+        let run = RunId::new();
+        let bound = store
+            .bind_task_worker_run(&task_id, &claim, &run, &first_owner)
+            .unwrap();
+        let verdict = crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Iterate,
+            summary: "repair the missing case".into(),
+        };
+        let before = store.flow_position(&task_id).unwrap().unwrap();
+        assert!(store
+            .record_flow_verdict(&task_id, &RunId::new(), &verdict)
+            .is_err());
+        assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), before);
+        store.record_flow_verdict(&task_id, &run, &verdict).unwrap();
+        store.record_flow_verdict(&task_id, &run, &verdict).unwrap();
+        let different = crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Advance,
+            summary: "changed mind".into(),
+        };
+        let before = store.flow_position(&task_id).unwrap().unwrap();
+        assert!(store
+            .record_flow_verdict(&task_id, &run, &different)
+            .is_err());
+        assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), before);
+        let replacement = store
+            .reclaim_task_worker(
+                &task_id,
+                &bound,
+                &owner(302),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap();
+        let before = store.flow_position(&task_id).unwrap().unwrap();
+        assert!(store.record_flow_verdict(&task_id, &run, &verdict).is_err());
+        assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), before);
+        let recovered = store.flow_position(&task_id).unwrap().unwrap();
+        assert_eq!(recovered.cursor.progress.verdict, Some(verdict));
+        assert_eq!(recovered.claim, Some(replacement.clone()));
+        // A reported provider failure differs from a crash: its result cannot
+        // authorize a later retry, even though the review direction survives.
+        let released = store.release_task_worker(&task_id, &replacement).unwrap();
+        assert!(released.cursor.progress.verdict.is_none());
+    }
+
+    #[test]
+    fn nested_cursor_recovers_routes_and_verdicts_under_exact_worker_authority() {
+        for routing in [true, false] {
+            let (_dir, store, task_id) = store_with_task();
+            let mut position = autonomous_position(&task_id);
+            let body = crate::controller::wave::playhead::QueuedInvocation::load(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+                "pursue",
+            )
+            .unwrap()
+            .steps;
+            let branch = ConcreteStep::Xor(ConcreteXor {
+                router: Skill::named("nested-router"),
+                paths: ["chosen", "other"]
+                    .into_iter()
+                    .map(|name| {
+                        (
+                            name.into(),
+                            ConcretePath {
+                                description: name.into(),
+                                steps: body.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
+                flow_parents: Vec::new(),
+            });
+            let steps = if routing { vec![branch] } else { body };
+            position.invocation.steps = vec![ConcreteStep::Xor(ConcreteXor {
+                router: Skill::named("outer-router"),
+                paths: [(
+                    "outer".into(),
+                    ConcretePath {
+                        description: "outer".into(),
+                        steps,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                flow_parents: Vec::new(),
+            })];
+            position.cursor.iteration = 7;
+            position.cursor.progress.repeats.insert("root".into(), 3);
+            let mut leaf = ExecutionCursor {
+                index: if routing { 0 } else { 4 },
+                iteration: 2,
+                ..Default::default()
+            };
+            leaf.progress.repeats.insert("decide".into(), 1);
+            leaf.progress.direction = Some("preserved direction".into());
+            position.cursor.child = Some(Box::new(NestedCursor::Xor {
+                selected: "outer".into(),
+                cursor: leaf,
+            }));
+            let position = store.set_flow_position(&task_id, &position).unwrap();
+            assert_eq!(position.current().iteration, 7);
+            assert_eq!(
+                position.current().step,
+                if routing {
+                    "nested-router"
+                } else {
+                    "loop-decide"
+                }
+            );
+            let saved = store.set_flow_position(&task_id, &position).unwrap();
+            assert_eq!(saved.cursor, position.cursor);
+            let worker = owner(501);
+            let TaskWorkerClaimOutcome::Claimed(claim) = store
+                .claim_task_worker(
+                    &task_id,
+                    &saved.invocation.id,
+                    saved.version,
+                    &worker,
+                    time::OffsetDateTime::now_utc(),
+                )
+                .unwrap()
+            else {
+                panic!("worker must be claimed")
+            };
+            let run = RunId::new();
+            let bound = store
+                .bind_task_worker_run(&task_id, &claim, &run, &worker)
+                .unwrap();
+            let verdict = FlowVerdict {
+                decision: FlowDecision::Iterate,
+                summary: "next pass".into(),
+            };
+            if routing {
+                let before = store.flow_position(&task_id).unwrap().unwrap();
+                assert!(store
+                    .record_flow_route(&task_id, &RunId::new(), "chosen")
+                    .is_err());
+                assert!(store.record_flow_route(&task_id, &run, "missing").is_err());
+                assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), before);
+                store.record_flow_route(&task_id, &run, "chosen").unwrap();
+                store.record_flow_route(&task_id, &run, "chosen").unwrap();
+                let before = store.flow_position(&task_id).unwrap().unwrap();
+                assert!(store.record_flow_route(&task_id, &run, "other").is_err());
+                assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), before);
+            } else {
+                store.record_flow_verdict(&task_id, &run, &verdict).unwrap();
+                assert!(store.record_flow_route(&task_id, &run, "chosen").is_err());
+            }
+            let pending = store.flow_position(&task_id).unwrap().unwrap();
+            assert!(pending.has_pending_decision());
+            assert_eq!(pending.cursor.progress, saved.cursor.progress);
+            let replacement = store
+                .reclaim_task_worker(
+                    &task_id,
+                    &bound,
+                    &owner(502),
+                    time::OffsetDateTime::now_utc(),
+                )
+                .unwrap();
+            let recovered = store.flow_position(&task_id).unwrap().unwrap();
+            assert_eq!(recovered.cursor, pending.cursor);
+            assert!(store.record_flow_route(&task_id, &run, "chosen").is_err());
+            assert!(store.record_flow_verdict(&task_id, &run, &verdict).is_err());
+            assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), recovered);
+            let cleared = if routing {
+                store
+                    .block_task_flow(
+                        &task_id,
+                        &replacement,
+                        &TaskFlowBlocker {
+                            reason: "router failed after publishing".into(),
+                            restart_required: false,
+                            observed_at: time::OffsetDateTime::now_utc(),
+                        },
+                    )
+                    .unwrap()
+            } else {
+                store.release_task_worker(&task_id, &replacement).unwrap()
+            };
+            assert_eq!(cleared.cursor, saved.cursor);
+            assert!(!cleared.has_pending_decision());
+        }
+    }
+
+    #[test]
     fn human_session_runtime_survives_a_store_round_trip() {
         let (_dir, store, work) = store_with_task();
         let run_id = RunId::new();
@@ -1512,8 +2030,11 @@ mod durable_store_tests {
             ),
             session_run_id: Some(run_id.clone()),
             ready_summary: Some("Ready for review".to_string()),
-            step_index: 1,
-            iteration: 2,
+            cursor: crate::engine::ExecutionCursor {
+                index: 1,
+                iteration: 2,
+                ..Default::default()
+            },
             version: 0,
             worker_generation: 0,
             claim: None,
@@ -1543,12 +2064,14 @@ mod durable_store_tests {
             .enumerate()
             .map(|(index, store)| {
                 let work = work.clone();
+                let position = position.clone();
                 let barrier = barrier.clone();
                 thread::spawn(move || {
                     barrier.wait();
                     store
                         .claim_task_worker(
                             &work,
+                            &position.invocation.id,
                             position.version,
                             &owner(1_000 + u32::try_from(index).unwrap()),
                             time::OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap(),
@@ -1588,6 +2111,7 @@ mod durable_store_tests {
         let claim = match store
             .claim_task_worker(
                 &work,
+                &position.invocation.id,
                 position.version,
                 &owner(101),
                 time::OffsetDateTime::now_utc(),
@@ -1602,7 +2126,7 @@ mod durable_store_tests {
             .bind_task_worker_run(&work, &claim, &worker_run_id, &owner(102))
             .unwrap();
         let mut next = store.flow_position(&work).unwrap().unwrap();
-        next.step_index = 1;
+        next.cursor.index = 1;
         next.claim = None;
         next.updated_at = time::OffsetDateTime::now_utc();
 
@@ -1639,6 +2163,7 @@ mod durable_store_tests {
         let claim = match store
             .claim_task_worker(
                 &work,
+                &position.invocation.id,
                 position.version,
                 &owner(111),
                 time::OffsetDateTime::now_utc(),
@@ -1667,7 +2192,7 @@ mod durable_store_tests {
         assert_eq!(events[0].kind, TaskEventKind::Started);
         assert!(matches!(
             &events[1].kind,
-            TaskEventKind::Progress { summary } if summary == "finished"
+            TaskEventKind::FlowFinished { summary, .. } if summary == "finished"
         ));
     }
 
@@ -1680,6 +2205,7 @@ mod durable_store_tests {
         let first = match store
             .claim_task_worker(
                 &work,
+                &position.invocation.id,
                 position.version,
                 &owner(201),
                 time::OffsetDateTime::now_utc(),
@@ -1721,6 +2247,7 @@ mod durable_store_tests {
         let retried = match store
             .claim_task_worker(
                 &work,
+                &position.invocation.id,
                 position.version,
                 &owner(205),
                 time::OffsetDateTime::now_utc(),

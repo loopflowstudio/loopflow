@@ -224,7 +224,7 @@ struct SessionsStoreTests {
         ])
     }
 
-    @Test("A ready FlowStep stays visible until its decision")
+    @Test("A ready review stays visible until completion")
     func readyDoesNotDisappear() throws {
         let store = SessionsStore(scope: .repo("/tmp/repo"))
         store.reconcile(try records([session(id: "review", state: "ready")]))
@@ -234,7 +234,7 @@ struct SessionsStoreTests {
         #expect(store.sessions.first?.record.readySummary == "Ready for review")
     }
 
-    @Test("Only a FlowStep decision removes a ready FlowStep")
+    @Test("Completing a review removes its Session")
     func resolutionNamesTheSession() async throws {
         let calls = SessionCalls()
         let store = SessionsStore(
@@ -242,8 +242,8 @@ struct SessionsStoreTests {
             query: RegistryQuery { args, cwd in
                 await calls.append(args)
                 #expect(cwd == "/tmp/repo")
-                if args == ["session", "approve", "review", "Ready for review"] {
-                    return "Task FlowStep approved"
+                if args == ["session", "complete", "review"] {
+                    return "Review feedback returned"
                 }
                 #expect(args == ["session", "list", "--json"])
                 return "[]"
@@ -251,16 +251,12 @@ struct SessionsStoreTests {
         )
         store.reconcile(try records([session(id: "review", state: "ready")]))
 
-        let decided = await store.decideFlow(
-            "review",
-            approving: true,
-            text: "Ready for review"
-        )
+        let decided = await store.complete("review")
 
         #expect(decided)
         #expect(store.sessions.isEmpty)
         #expect(await calls.values == [
-            ["session", "approve", "review", "Ready for review"],
+            ["session", "complete", "review"],
             ["session", "list", "--json"],
         ])
     }

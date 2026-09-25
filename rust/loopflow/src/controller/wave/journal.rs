@@ -1661,6 +1661,45 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_xor_journal_preserves_history_and_requires_explicit_restart() {
+        let (_tmp, path) = open_tmp();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        for router in [serde_json::Value::Null, serde_json::json!("choose-design")] {
+            let step = serde_json::json!({"Xor": {
+                "router": router,
+                "paths": {"prototype": {"flow": "deleted-prototype", "skill": null,
+                    "description": "Runnable prototype"}},
+                "flow_parents": ["feature"]
+            }});
+            let playhead = serde_json::json!({"v": 1, "seq": 1,
+                "at": "2026-09-22T00:00:00Z", "kind": {
+                    "type": "playhead_changed", "event": {"kind": "definition_reset"},
+                    "playhead": {"stack": [{"id": "old-wave", "flow": "wave",
+                        "steps": [step.clone()], "cursor": 0, "iteration": 3,
+                        "queue": [{"id": "old-queued", "flow": "feature", "steps": [step]}]
+                    }], "active": null}
+                }
+            });
+            let message = serde_json::json!({"v": 1, "seq": 2,
+                "at": "2026-09-22T00:01:00Z", "kind": user_message(2, "Keep later feedback")});
+            let raw = format!("{playhead}\n{message}\n");
+            std::fs::write(&path, &raw).unwrap();
+
+            let (journal, events) = Journal::open(&path).unwrap();
+            assert_eq!(events.len(), 2);
+            assert_eq!(journal.next_seq(), 3);
+            let EventKind::PlayheadChanged { playhead, .. } = &events[0].kind else {
+                panic!("first event must retain the historical playhead")
+            };
+            assert!(!playhead.has_executable_definition());
+            assert_eq!(playhead.legacy_flow_intents(), ["feature"]);
+            assert_eq!(playhead.current().unwrap().iteration, 3);
+            assert_eq!(read_events(&path).len(), 2);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+        }
+    }
+
+    #[test]
     fn unreadable_complete_record_is_not_destroyed_as_a_torn_tail() {
         let (_tmp, path) = open_tmp();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();

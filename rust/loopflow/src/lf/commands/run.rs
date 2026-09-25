@@ -30,6 +30,30 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     launch_prompt(&built, cli)
 }
 
+pub(crate) fn run_saved(
+    skill: &Skill,
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+) -> Result<()> {
+    let mut built = build_prompt_at(
+        Some(&skill.name),
+        message,
+        cli,
+        repo.to_path_buf(),
+        false,
+        None,
+        PromptLaunchContext {
+            skill: Some(skill.clone()),
+            user_name: crate::engine::config::launch_user_name()?,
+            ..Default::default()
+        },
+    )?;
+    built.subjects = cli.work_subject_selector().into_iter().collect();
+    print_context_header(&built, cli);
+    launch_prompt(&built, cli)
+}
+
 #[doc(hidden)]
 pub fn run_bound(
     skill: Option<&str>,
@@ -37,21 +61,7 @@ pub fn run_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<()> {
-    let message = match message.filter(|message| !message.trim().is_empty()) {
-        Some(message) => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>\n\n{}",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-            message,
-        ),
-        None => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-        ),
-    };
+    let message = bound_message(binding, message);
     let resolved_skill = skill
         .map(crate::ops::human_session::active_flow_skill)
         .transpose()?
@@ -66,6 +76,24 @@ pub fn run_bound(
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
+}
+
+pub(crate) fn bound_message(binding: &crate::ops::WorkBinding, message: Option<&str>) -> String {
+    match message.filter(|message| !message.trim().is_empty()) {
+        Some(message) => format!(
+            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>\n\n{}",
+            binding.work.kind(),
+            binding.work.id(),
+            binding.context,
+            message,
+        ),
+        None => format!(
+            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
+            binding.work.kind(),
+            binding.work.id(),
+            binding.context,
+        ),
+    }
 }
 
 struct PromptBuild {
@@ -192,14 +220,20 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let start = Instant::now();
     let repo_root = crate::repo::working_directory()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
+    let saved = skill
+        .map(crate::ops::human_session::active_flow_skill)
+        .transpose()?
+        .flatten();
+    let native = saved.is_none();
     build_prompt_at(
         skill,
         message,
         cli,
         repo_root,
-        true,
+        native,
         None,
         PromptLaunchContext {
+            skill: saved,
             user_name: crate::engine::config::launch_user_name()?,
             ..Default::default()
         },
@@ -735,6 +769,7 @@ fn begin_run_capture(
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
     crate::ops::human_session::publish_run_binding(&capture.run_id())?;
+    crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)
 }
 

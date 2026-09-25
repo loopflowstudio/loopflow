@@ -17,6 +17,7 @@ pub mod prompt;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;
+pub mod transitions;
 pub mod wave_home;
 pub mod worktree;
 pub mod worktrees;
@@ -35,14 +36,13 @@ pub use config::{
 };
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use execution::{
-    advance_cursor_after_wait, current_flow_parents, current_skill, xor_verdict_path,
-    ExecutionContext, ExecutionCursor, ExecutionSkill, FlowEngine, FlowOutcome, FlowProgress,
-    NestedCursor, SkillExecutor, SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
+    current_skill, ExecutionContext, ExecutionCursor, FlowEngine, FlowOutcome, NestedCursor,
+    SkillExecutor, SkillOutcome, StepProgress,
 };
 pub use flow::{
     available_flow_names, expand_flow, find_skill_source_path, human_occurrence_ids, load_flow,
-    load_goal, load_skill, render_goal, ConcreteOp, ConcreteSkill, ConcreteStep, ConcreteXor, Flow,
-    Goal, GoalRenderContext, OccurrencePolicy, Op, Skill, Step, XorDef, XorPath,
+    load_goal, load_skill, render_goal, ConcreteOp, ConcretePath, ConcreteSkill, ConcreteStep,
+    ConcreteXor, Flow, Goal, GoalRenderContext, OccurrencePolicy, Op, Skill, Step, XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

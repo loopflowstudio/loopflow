@@ -215,18 +215,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Decide one Task FlowStep and release its controller.
-    public func resolveFlowSession(
-        id: String,
-        approving: Bool,
-        text: String,
-        cwd: String? = nil
-    ) async throws {
-        let verb = approving ? "approve" : "iterate"
-        _ = try await run(["session", verb, id, text], cwd)
-    }
-
-    /// Complete one interactive or ad-hoc Ask session.
+    /// Complete an interactive conversation, Flow review, or blocked Ask.
     public func completeSession(
         id: String,
         cwd: String? = nil

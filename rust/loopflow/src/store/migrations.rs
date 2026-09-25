@@ -4657,6 +4657,58 @@ mod tests {
     }
 
     #[test]
+    fn task_loop_review_preserves_existing_human_and_claimed_positions() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_loop_review");
+        conn.execute_batch(
+            "INSERT INTO task_flow_positions (
+                task_id, invocation_json, flow, step, node_id, human, session_run_id,
+                ready_summary, step_index, iteration, position_version,
+                worker_generation, claim_json, updated_at
+            ) VALUES
+                ('human', '{\"id\":\"pinned-human\"}', 'task-design', 'review-design', 'review', 1,
+                 'run-human', 'approved scope', 1, 3, 7, 0, NULL, 100),
+                ('worker', '{\"id\":\"pinned-worker\"}', 'slice', 'implement', NULL, 0,
+                 NULL, NULL, 0, 2, 8, 4, '{\"generation\":4}', 101);",
+        )
+        .unwrap();
+        let before: Vec<String> = conn
+            .prepare(
+                "SELECT json_array(task_id, invocation_json, session_run_id, ready_summary,
+                step_index, iteration, position_version, worker_generation, claim_json)
+             FROM task_flow_positions ORDER BY task_id",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("task_loop_review"))
+            .unwrap();
+        let after: Vec<String> = conn
+            .prepare(
+                "SELECT json_array(task_id, invocation_json, session_run_id, ready_summary,
+                step_index, iteration, position_version, worker_generation, claim_json)
+             FROM task_flow_positions ORDER BY task_id",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM task_flow_positions WHERE review_json IS NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+    }
+
+    #[test]
     fn task_worker_claim_preserves_old_positions_as_explicit_restart_boundaries() {
         let conn = open();
         apply_before_current_draft(&conn, "task_worker_claim");

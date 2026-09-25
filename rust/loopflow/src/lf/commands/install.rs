@@ -414,10 +414,7 @@ fn _validate_executable_skill(skill: &crate::engine::Skill) -> Result<()> {
     Ok(())
 }
 
-fn _validate_executable_steps(
-    steps: &[crate::engine::ConcreteStep],
-    catalog_root: &Path,
-) -> Result<()> {
+fn _validate_executable_steps(steps: &[crate::engine::ConcreteStep]) -> Result<()> {
     for step in steps {
         match step {
             crate::engine::ConcreteStep::Skill(skill) => {
@@ -425,13 +422,9 @@ fn _validate_executable_steps(
             }
             crate::engine::ConcreteStep::Op(_) => {}
             crate::engine::ConcreteStep::Xor(branch) => {
-                if let Some(router) = &branch.router {
-                    let router = crate::engine::load_skill(router, catalog_root)?;
-                    _validate_executable_skill(&router)?;
-                }
+                _validate_executable_skill(&branch.router)?;
                 for path in branch.paths.values() {
-                    let path_steps = crate::engine::flow::load_xor_path_items(path, catalog_root)?;
-                    _validate_executable_steps(&path_steps, catalog_root)?;
+                    _validate_executable_steps(&path.steps)?;
                 }
             }
         }
@@ -553,7 +546,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
             .and_then(|loaded| {
                 crate::engine::expand_flow(&loaded, catalog_path)
                     .map_err(anyhow::Error::from)
-                    .and_then(|steps| _validate_executable_steps(&steps, catalog_path))
+                    .and_then(|steps| _validate_executable_steps(&steps))
             });
         match result {
             Ok(()) => validated += 1,

@@ -185,6 +185,8 @@ struct DTOFixtureTests {
         #expect(tasks[2].reference.workspace == nil)
         #expect(tasks[2].reference.issueUrl == nil)
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
+        // Start evidence is required: a prepared checkout is not started work.
+        #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
         #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf pm sync") == true)
         #expect(!roadmap.waves[1].wave.enabled)
     }

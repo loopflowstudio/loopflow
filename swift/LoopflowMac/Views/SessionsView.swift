@@ -95,15 +95,6 @@ struct SessionItem: Identifiable, Equatable {
 
     var id: String { record.id }
 
-    var statusLabel: String {
-        switch record.state {
-        case .waiting: "WAITING"
-        case .active: "ACTIVE"
-        case .ready: "READY"
-        case .closed: "CLOSED"
-        }
-    }
-
     var surface: SessionRecord? {
         switch state {
         case .prepared, .live: record
@@ -346,12 +337,7 @@ struct SessionsView: View {
                     .padding(Spacing.sm)
             }
             HStack(spacing: 0) {
-                WorkspaceNavigator(model: model, onOpenSession: openSession, sessionStatus: { record in
-                    guard let item = store.sessions.first(where: { $0.id == record.id }) else {
-                        return record.state.rawValue.uppercased()
-                    }
-                    return _status(item, pane: _pane(for: record.id))
-                }, onConversation: { work in
+                WorkspaceNavigator(model: model, onOpenSession: openSession, onConversation: { work in
                     model.select(work)
                     startConversation()
                 }, onNewShell: {
@@ -359,13 +345,13 @@ struct SessionsView: View {
                     multiplexer.newShell()
                     navigation.content = .terminals
                 }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask)
-                    .frame(width: 300)
+                    .frame(width: 272)
                 Divider()
                 VStack(spacing: 0) {
                     if let crumb = model.workspace.breadcrumb(
                         selection: model.selection,
                         sessionId: navigation.selectedSessionId
-                    ), crumb.session != nil || crumb.task != nil {
+                    ) {
                         WorkspaceBreadcrumbBar(
                             model: model, crumb: crumb,
                             onOpenSession: openSession, onMonitor: showMonitor
@@ -382,10 +368,13 @@ struct SessionsView: View {
                         .accessibilityHidden(!terminalsVisible)
                         VStack(spacing: 0) {
                             HSplitView {
-                                WorkSurfaceView(model: model)
+                                WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
+                                                onNewSession: newTaskSession)
                                     .frame(minWidth: 300, maxWidth: .infinity)
-                                WorkActivityView(model: model)
-                                    .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
+                                if navigation.showsActivity {
+                                    WorkActivityView(model: model)
+                                        .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
+                                }
                             }
                         }
                         .background(palette.background)
@@ -399,6 +388,7 @@ struct SessionsView: View {
             }
         }
         .background(palette.background)
+        .tint(palette.accent)
         .environment(model)
         .overlay {
             if terminalsVisible {
@@ -407,11 +397,8 @@ struct SessionsView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
-            guard let source = notification.object as? MultiplexerStore else { return }
+            guard notification.object is MultiplexerStore else { return }
             layoutRevision += 1
-            if source === multiplexer {
-                rememberTaskPane()
-            }
         }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard let records else { return }
@@ -459,29 +446,18 @@ struct SessionsView: View {
             store.surfaces.focus(.session(record.id))
         }
         store.beginPaneLoad(record.id)
-        rememberTaskPane()
         Task { @MainActor in await store.select(record.id) }
     }
 
+    /// A Task with exactly one open Session drills into that Session; zero or
+    /// several open the Task overview, which names each conversation.
     private func openTask(_ work: WorkReference) {
-        model.select(work)
-        if let saved = navigation.taskPanes[work.id],
-           let pane = workspaces.workspace(for: saved.path).multiplexer.layout.pane(for: saved.pane.id),
-           pane == saved.pane {
-            worktreeLayout.select(saved.path)
-            multiplexer.setFocusedPane(saved.pane.id)
-            navigation.content = .terminals
-            if case .shell = multiplexer.focusedPane.content {
-                store.surfaces.focus(.shell(saved.pane.id))
-            } else if case .session(let id) = multiplexer.focusedPane.content {
-                navigation.selectedSessionId = id
-                store.surfaces.focus(.session(id))
-            }
-            if case .monitor = multiplexer.focusedPane.content {
-                model.observeActiveRuns()
-            }
+        let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
+            .first { $0.id.work == work }?.sessions ?? []
+        if sessions.count == 1, let session = sessions.first {
+            openSession(session)
         } else {
-            showMonitor(work.id)
+            model.select(work)
         }
     }
 
@@ -497,50 +473,45 @@ struct SessionsView: View {
         navigation.selectedSessionId = nil
         navigation.content = .terminals
         multiplexer.showMonitor(taskId: taskId)
-        rememberTaskPane()
         model.observeActiveRuns()
-    }
-
-    private func rememberTaskPane() {
-        guard navigation.content == .terminals,
-              let work = model.selection, work.kind == .task,
-              let path = worktreeLayout.focusedPath else { return }
-        if case .monitor(let id) = multiplexer.focusedPane.content, id != work.id { return }
-        if case .session(let id) = multiplexer.focusedPane.content,
-           model.workspace.subject(for: id) != work { return }
-        guard multiplexer.focusedPane.content != .empty else { return }
-        navigation.taskPanes[work.id] = (path, multiplexer.focusedPane)
-    }
-
-    private func _pane(for sessionId: String) -> PaneState? {
-        guard let record = store.sessions.first(where: { $0.id == sessionId })?.record else { return nil }
-        if case .shell(let id) = store.localTerminal(for: record),
-           let path = workspaces.path(containingShell: id) {
-            return workspaces.workspace(for: path).multiplexer.layout.pane(for: id)
-        }
-        return workspaces.workspace(for: record.cwd).multiplexer.pane(forSessionId: sessionId)
-    }
-
-    private func _status(_ item: SessionItem, pane: PaneState?) -> String {
-        let visible = pane.map { pane in
-            worktreeLayout.layout.slots.contains { slot in
-                guard let path = slot.path else { return false }
-                return workspaces.workspace(for: path).multiplexer.layout.pane(for: pane.id) != nil
-            }
-        } ?? false
-        return sessionRowStatus(item, hasOpenPane: visible)
     }
 
     private func startConversation() {
         guard let conversationScope = model.conversationScope else { return }
+        launch(conversationScope, in: navigation)
+    }
+
+    /// `navigation` belongs to the repository that requested the launch; a
+    /// launch that finishes after the human switched repositories must not
+    /// redirect the repository now on screen.
+    private func launch(_ scope: ConversationScope, in navigation: WorkspaceNavigation) {
         do {
             let lf = try LocalWaveAgentLauncher.controlLfPath()
-            worktreeLayout.select(conversationScope.repoPath)
+            worktreeLayout.select(scope.repoPath)
             navigation.content = .terminals
-            multiplexer.newShell(command: ConversationLaunch(scope: conversationScope).arguments(lf: lf))
+            multiplexer.newShell(command: ConversationLaunch(scope: scope).arguments(lf: lf))
         } catch {
             launchError = error.localizedDescription
         }
+    }
+
+    /// An independent conversation with Task context in the Task's checkout.
+    /// Resolving the checkout prepares Task Work only; it never starts the
+    /// managed Flow or replaces another Session.
+    private func newTaskSession(_ taskId: String) async throws {
+        guard let found = model.task(id: taskId) else { return }
+        let origin = navigation
+        let issue = found.task.task.identifier
+        let worktree: String
+        if let workspace = found.task.reference.workspace, workspace.localExists == true {
+            worktree = workspace.worktree
+        } else {
+            let repo = store.repoPath
+            worktree = try await Task.detached(priority: .userInitiated) {
+                try LocalWaveAgentLauncher.prepareTask(repoPath: repo, issue: issue)
+            }.value
+        }
+        launch(.task(repo: worktree, id: issue), in: origin)
     }
 
     private func _destroySurface(in pane: PaneState) {
@@ -1243,20 +1214,6 @@ private struct MonitorFocusTarget: NSViewRepresentable {
                 window?.makeFirstResponder(nil)
             }
         }
-    }
-}
-
-/// Sidebar badge: VIEWING means this window shows the terminal in a pane,
-/// RUNNING means a live surface is retained without a visible pane, and
-/// ELSEWHERE means another client (Warp, another window, SSH) holds it.
-func sessionRowStatus(_ item: SessionItem, hasOpenPane: Bool) -> String {
-    if hasOpenPane, item.surface != nil { return "VIEWING" }
-    return switch item.state {
-    case .pending: item.statusLabel
-    case .elsewhere: "ELSEWHERE"
-    case .opening, .prepared: "OPENING…"
-    case .live: item.record.kind == .interactive ? "RUNNING" : item.statusLabel
-    case .failed: "RETRY"
     }
 }
 

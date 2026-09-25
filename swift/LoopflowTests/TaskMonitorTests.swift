@@ -127,8 +127,10 @@ struct TaskMonitorTests {
         window.contentView = NSHostingView(rootView: view)
         defer { window.contentView = nil }
         try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-monitor-session").button().tap()
+        // A Task with one open Session drills straight into that Session.
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
         try await settle(window)
+        #expect(model.navigation.selectedSessionId == "monitor-session")
         #expect(window.firstResponder === terminals[0])
         let draft = "draft-survives-monitor"
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
@@ -144,12 +146,16 @@ struct TaskMonitorTests {
         window.setContentSize(NSSize(width: 1100, height: 650))
         try await settle(window)
         store.toggleZoom(monitor.id)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-monitor-session").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
         try await settle(window)
         #expect(window.firstResponder === terminals[0])
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-available").button().tap()
+        // A started Task without Sessions opens its overview; terminals stay retained.
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
         try await settle(window)
-        #expect(store.focusedPane.content == .monitor(taskId: "issue-available"))
+        #expect(model.navigation.content == .details)
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(window.firstResponder !== terminals[0])
+        #expect(store.layout.allPanes.filter { $0.content == .shell } == shells)
         try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
         try await settle(window)
         #expect(store.focusedPaneId == shells[0].id)

@@ -19,7 +19,7 @@ struct TaskDirectiveEditorTests {
         model.select(.task(id: "issue-review"))
         let selected = try #require(model.task(id: "issue-review"))
         let original = selected.task.task.description
-        #expect(throws: Never.self) { try WorkSurfaceView(model: model).inspect().find(button: "Edit directive") }
+        #expect(throws: Never.self) { try WorkSurfaceView(model: model).inspect().find(button: "Edit description") }
         let editor = TaskDirectiveEditor(model: model, task: selected.task, wave: selected.wave.wave)
         #expect(try editor.inspect().find(ViewType.TextEditor.self).input() == original)
         let draft = "--Keep the human's wording\nIncluding `code`, $variables and \"quotes\"."
@@ -44,7 +44,45 @@ struct TaskDirectiveEditorTests {
         #expect(model.task(id: "issue-review")?.task.task.description == authoritative)
         #expect(model.task(id: "issue-review")?.task.task.completed == false)
         #expect(model.roadmap.errorMessage == nil)
-        #expect(throws: Never.self) { try WorkSurfaceView(model: model).inspect().find(text: authoritative) }
+        // Description renders as Markdown: inline code loses its backticks,
+        // authored line breaks stay.
+        let rendered = "--Keep the human's wording\nIncluding code, $variables and \"quotes\".\nProvider-normalized."
+        #expect(throws: Never.self) { try WorkSurfaceView(model: model).inspect().find(text: rendered) }
+    }
+
+    @Test("Description blocks come from the Markdown parser without losing source text")
+    func descriptionMarkdownBlocks() throws {
+        let source = """
+        # Outcome
+        First line
+        second line with [link](https://example.com)
+
+        - outer **bold**
+          - inner `code`
+        1. one
+        2. two
+
+        > quoted
+
+        ```swift
+        let n = 1
+        ```
+
+        | A | B |
+        | - | - |
+        | 1 | 2 |
+        """
+        let blocks = MarkdownBlocks.blocks(source)
+        let text = blocks.map { String($0.text.characters) }
+        #expect(blocks.map(\.kind) == [.heading(1), .paragraph, .paragraph, .paragraph, .paragraph, .paragraph,
+                                       .quote, .code, .row(header: true), .row(header: false)])
+        #expect(text == ["Outcome", "First line\nsecond line with link", "outer bold", "inner code",
+                         "one", "two", "quoted", "let n = 1", "A", "1"])
+        #expect(blocks.map(\.marker) == [nil, nil, "•", "•", "1.", "2.", nil, nil, nil, nil])
+        #expect(blocks.map(\.depth) == [0, 0, 1, 2, 1, 1, 0, 0, 0, 0])
+        #expect(blocks[8].cells.map { String($0.characters) } == ["A", "B"])
+        #expect(blocks[1].text.runs.contains { $0.link == URL(string: "https://example.com") })
+        #expect(blocks[3].text.runs.contains { $0.inlinePresentationIntent == .code })
     }
 
     @Test("A polling response started before Save cannot restore the old directive")

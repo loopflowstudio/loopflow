@@ -32,7 +32,10 @@ struct WorkspaceNavigationProofTests {
             planning["rank"] = Double(index)
             planning["completed"] = false
             task["task"] = planning
-            task["runtime"] = NSNull()
+            var runtime = try #require(task["runtime"] as? [String: Any])
+            runtime["work_id"] = "scroll-work-\(index)"
+            runtime["started"] = true
+            task["runtime"] = runtime
             return task
         }
         waves[0]["tasks"] = evidence
@@ -156,7 +159,14 @@ struct WorkspaceNavigationProofTests {
         let draft = "named-session-draft"
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-first").button().tap()
+        // Two open Sessions: the Task row opens its overview, which names each.
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        #expect(model.navigation.content == .details)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(window.firstResponder !== terminals[0])
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-issue").link().labelView().text().string() == "W2-131")
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "first")
         #expect(window.firstResponder === terminals[0])
@@ -183,7 +193,7 @@ struct WorkspaceNavigationProofTests {
         #expect(model.navigation.content == .details)
         #expect(model.navigation.selectedSessionId == nil)
         #expect(window.firstResponder !== terminals[0])
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-first").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
         try await settle(window)
         #expect(window.firstResponder === terminals[0])
 
@@ -629,6 +639,20 @@ struct WorkspaceNavigationProofTests {
             model.navigation.presentation = presentation
             model.navigation.content = presentation == .full ? .details : .terminals
             try await settle(window)
+            if model.navigation.content == .details {
+                #expect(!model.navigation.showsActivity)
+                #expect(throws: (any Error).self) {
+                    try view.inspect().find(viewWithAccessibilityIdentifier: "podium-activity")
+                }
+                try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-activity").button().tap()
+                try await settle(window)
+                #expect(throws: Never.self) {
+                    try view.inspect().find(viewWithAccessibilityIdentifier: "podium-activity")
+                }
+                try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-activity").button().tap()
+                try await settle(window)
+                #expect(!model.navigation.showsActivity)
+            }
             if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
                 let path = URL(fileURLWithPath: directory)
                     .appendingPathComponent("\(presentation.rawValue)-\(switchBeforeCompletion).png")
@@ -642,6 +666,16 @@ struct WorkspaceNavigationProofTests {
             if model.navigation.content != .terminals {
                 #expect(!terminals.contains { window.firstResponder === $0 })
             }
+        }
+        if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
+            model.navigation.presentation = .compact
+            model.select(.wave(id: "wave-1"))
+            try await settle(window)
+            _ = try SnapshotService().snapshotWindow(window, to: URL(fileURLWithPath: directory)
+                .appendingPathComponent("wave-\(switchBeforeCompletion).png"))
+            model.select(.task(id: "issue-review"))
+            model.navigation.content = .terminals
+            try await settle(window)
         }
         model.setRepoPath("/src/context")
         host.rootView = SessionsView(model: model, repoPath: "/src/context", workspaces: registry, query: query)

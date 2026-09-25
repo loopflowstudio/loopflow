@@ -118,11 +118,10 @@
   history. `lf roadmap --all` must not inherit a launching process's Wave.
 - A worktree owns its terminal layout. The window owns native terminal
   surfaces; never mount one surface into two outer worktree slots.
-- Retained Task pane choices include content identity: a reused pane ID can
-  contain another Task's Session. Monitor selects its own AppKit responder;
-  setting first responder to nil can return input to a visible terminal.
-  Focusing a direct Session belonging to another Task must not overwrite the
-  selected Task's saved choice; compare its shared subject before saving.
+- Task selection derives from shared Session membership (one open Session
+  enters it; otherwise the overview), never from a remembered pane ID: a reused
+  pane can contain another Task's Session. Monitor selects its own AppKit
+  responder; setting first responder to nil can return input to a visible terminal.
 - Conversation subject and terminal location are independent: use typed Work
   binding for context and actual provider-client terminal identity for local
   attachment. A matching cwd does not establish either relationship.

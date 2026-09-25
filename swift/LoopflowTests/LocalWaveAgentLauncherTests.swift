@@ -93,6 +93,17 @@ struct LocalWaveAgentLauncherTests {
         ))
     }
 
+    @Test("New session prepares Task Work without running its Flow and uses the returned checkout")
+    func taskPrepareUsesReceiptWorktree() throws {
+        #expect(LocalWaveAgentLauncher.taskPrepareCommand(lfPath: "/bin/lf", issue: "LOO-291")
+            == ["/bin/lf", "task", "prepare", "LOO-291", "--json"])
+        let worktree = try LocalWaveAgentLauncher.taskPrepareWorktree("""
+        {"id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
+        """)
+        #expect(worktree == "/src/loopflow.main-view-task")
+        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskPrepareWorktree("not json") }
+    }
+
     // MARK: - Bundled binary boundary
 
     @Test("a missing bundled helper never falls through to PATH")

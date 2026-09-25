@@ -62,7 +62,8 @@
       "status": "done",
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "wave",
@@ -112,7 +113,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -162,7 +164,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -212,7 +215,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "user",
@@ -262,7 +266,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -312,7 +317,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "user",

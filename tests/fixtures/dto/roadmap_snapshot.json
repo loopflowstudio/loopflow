@@ -113,7 +113,8 @@
               "status": "ready",
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
-              "provider": "claude"
+              "provider": "claude",
+              "started": false
             },
             "next_move": {
               "owner": "task",
@@ -164,7 +165,8 @@
               "status": "ready",
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
-              "provider": "claude"
+              "provider": "claude",
+              "started": true
             },
             "next_move": {
               "owner": "user",
@@ -284,7 +286,8 @@
               "status": "done",
               "reason": "done",
               "updated_at": "2026-07-14T21:00:00Z",
-              "provider": "claude"
+              "provider": "claude",
+              "started": true
             },
             "next_move": {
               "owner": "wave",

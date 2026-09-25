@@ -99,7 +99,7 @@ struct DesktopPerformanceTests {
         window.contentView = NSHostingView(rootView: view)
         window.orderFront(nil)
         defer { window.contentView = nil; window.close() }
-        try await wait(window, render: true) { hasRendered(window, "session-row-perf-session-0") }
+        try await wait(window, render: true) { hasRendered(window, "workspace-task-perf-task-0") }
         let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
         let picker = try navigator.inspect().find(ViewType.Picker.self)
         let search = try navigator.inspect().find(ViewType.TextField.self)
@@ -123,7 +123,7 @@ struct DesktopPerformanceTests {
             }, ready: { hasRendered(window, "workspace-wave-wave-1") && !hasRendered(window, "workspace-task-perf-task-0") })
             try await sample("expand", population, attempt, journal, window, action: {
                 try disclosure.tap()
-            }, ready: { hasRendered(window, "workspace-task-perf-task-0") && hasRendered(window, "session-row-perf-session-0") })
+            }, ready: { hasRendered(window, "workspace-task-perf-task-0") && hasRendered(window, "workspace-session-count-perf-task-0") })
             try await sample("compact", population, attempt, journal, window, action: {
                 try picker.select(value: WorkspacePresentation.compact)
             }, ready: { hasRendered(window, "workspace-task-perf-task-0") && !hasRendered(window, "workspace-wave-wave-1") })
@@ -208,7 +208,11 @@ struct DesktopPerformanceTests {
             })
             let monitorPane = multiplexer.focusedPaneId
             try await sample("monitor_empty", population, attempt, journal, window, action: {
+                // A Task without Sessions opens its overview; Monitor is explicit.
                 openTask(.task(id: "perf-task-1"))
+                try view.inspect().find(ViewType.Button.self, where: {
+                    try $0.accessibilityIdentifier() == "task-show-monitor-perf-task-1"
+                }).tap()
             }, ready: { !model.isRefreshingActiveRuns && hasRendered(window, "monitor-empty-perf-task-1") })
             try await sample("session_return", population, attempt, journal, window, action: {
                 navigator.onOpenSession(first)
@@ -218,7 +222,7 @@ struct DesktopPerformanceTests {
                       terminals[2].surface == surfaces[2],
                       model.navigation.selectedSessionId == first.id,
                       multiplexer.focusedPane.content == .session(id: first.id) else { return false }
-                return hasRendered(window, "session-row-perf-session-0")
+                return hasRendered(window, "breadcrumb-session")
             }, input: {
                 try send(window, "\n")
                 try await wait(window) { terminalText(surfaces[0]).components(separatedBy: draft).count >= 3 }
@@ -374,6 +378,7 @@ struct DesktopPerformanceTests {
             task["reference"] = reference
             var runtime = try #require(task["runtime"] as? [String: Any])
             runtime["work_id"] = "perf-work-\(index)"
+            runtime["started"] = true
             task["runtime"] = runtime
             return task
         }

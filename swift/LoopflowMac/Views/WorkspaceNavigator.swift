@@ -5,22 +5,19 @@ struct WorkspaceNavigator: View {
     @Bindable var model: PodiumModel
     let onOpenSession: (SessionRecord) -> Void
     let onOpenTask: ((WorkReference) -> Void)?
-    let sessionStatus: (SessionRecord) -> String
     let onConversation: ((WorkReference?) -> Void)?
     let onNewShell: (() -> Void)?
     let onShowTerminals: (() -> Void)?
-    private let palette = LoopflowPalette.deepWine
+    @Environment(\.palette) private var palette
     @State private var scrollPosition: ScrollPosition
 
     init(model: PodiumModel, onOpenSession: @escaping (SessionRecord) -> Void,
-         sessionStatus: @escaping (SessionRecord) -> String = { $0.state.rawValue.capitalized },
          onConversation: ((WorkReference?) -> Void)? = nil,
          onNewShell: (() -> Void)? = nil, onShowTerminals: (() -> Void)? = nil,
          onOpenTask: ((WorkReference) -> Void)? = nil) {
         self.model = model
         self.onOpenSession = onOpenSession
         self.onOpenTask = onOpenTask
-        self.sessionStatus = sessionStatus
         self.onConversation = onConversation
         self.onNewShell = onNewShell
         self.onShowTerminals = onShowTerminals
@@ -43,75 +40,95 @@ struct WorkspaceNavigator: View {
     var body: some View {
         @Bindable var navigation = model.navigation
         let rows = rows
-        let repositories = repositories
         VStack(spacing: 0) {
-            HStack {
-                TextField("Find work or Sessions", text: $navigation.search)
-                    .textFieldStyle(.plain)
-                    .accessibilityIdentifier("workspace-search")
-                Menu {
-                    Picker("Presentation", selection: $navigation.presentation) {
-                        ForEach(WorkspacePresentation.allCases, id: \.self) { presentation in
-                            Text(presentation.rawValue).tag(presentation)
-                        }
-                    }
-                    if let onShowTerminals {
-                        Divider()
-                        Button("Show retained terminals", action: onShowTerminals)
-                            .accessibilityIdentifier("workspace-return-terminals")
-                    }
-                } label: { Image(systemName: "line.3.horizontal.decrease") }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .accessibilityLabel("Outline presentation")
-                .accessibilityIdentifier("workspace-presentation")
-            }
-            .padding(12)
-            .background(Color.loopflowBurgundy)
+            header
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
-                    ForEach(repositories, id: \.self) { repo in
-                        let selected = model.repoPath.map { model.repoIdentity($0) == model.repoIdentity(repo) } ?? false
-                        let omitRoot = repositories.count == 1 && selected && navigation.presentation != .full
-                            && !navigation.repositoryCollapsed && model.roadmap.value != nil
-                            && model.roadmap.errorMessage == nil
-                        if !omitRoot { repositoryRow(repo, selected: selected) }
-                        if selected && (!navigation.repositoryCollapsed || !navigation.search.isEmpty) {
-                            ForEach(rows) { row in
-                                outlineRow(row)
-                                    .padding(.leading, omitRoot ? 0 : 14)
-                            }
-                            if rows.isEmpty, !model.roadmap.isLoading, !model.sessions.isLoading,
-                               model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil {
-                                Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
-                                    .foregroundStyle(palette.textSecondary).padding(8)
-                            }
-                        }
-                    }
-                    // Before a repository is selected, keep mandatory boundaries
-                    // visible even if planning has not supplied its roots yet.
-                    if model.repoPath == nil {
-                        ForEach(rows.filter { $0.session != nil }) { row in outlineRow(row) }
+                    ForEach(rows) { row in outlineRow(row) }
+                    if model.repoPath != nil, rows.isEmpty, !model.roadmap.isLoading, !model.sessions.isLoading,
+                       model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil {
+                        Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
+                            .foregroundStyle(palette.textSecondary).padding(8)
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                .padding(.vertical, 8)
             }
             .scrollPosition($scrollPosition)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in navigation.listScrollOffset = offset }
+            // Search sits below the data so the repository heads its outline.
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "magnifyingglass").foregroundStyle(palette.textSecondary)
+                TextField("Find work or Sessions", text: $navigation.search)
+                    .textFieldStyle(.plain)
+                    .accessibilityIdentifier("workspace-search")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
         }
         .font(Typography.body(12))
         .foregroundStyle(palette.text)
         .tint(palette.text)
         .buttonStyle(.plain)
-        .background(palette.surface)
-        .environment(\.colorScheme, .dark)
-        .environment(\.palette, palette)
+        .background(palette.surfaceMuted)
         .contextMenu { repositoryActions }
         .accessibilityIdentifier("workspace-navigator")
+    }
+
+    /// The repository heads its own outline: one scope, switched in place.
+    private var header: some View {
+        @Bindable var navigation = model.navigation
+        return HStack(spacing: Spacing.sm) {
+            Menu {
+                ForEach(repositories, id: \.self) { repo in
+                    Button(URL(fileURLWithPath: repo).lastPathComponent) { selectRepository(repo) }
+                        .accessibilityIdentifier("workspace-repository-\(repo)")
+                }
+                if !repositoryActionsEmpty {
+                    Divider()
+                    repositoryActions
+                }
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
+                        ?? "Choose repository")
+                        .font(Typography.sectionTitle(20))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(model.repoPath ?? "Choose a repository")
+            .accessibilityLabel("Repository")
+            .accessibilityIdentifier("workspace-repository")
+            Spacer(minLength: 0)
+            Menu {
+                Picker("Presentation", selection: $navigation.presentation) {
+                    ForEach(WorkspacePresentation.allCases, id: \.self) { presentation in
+                        Text(presentation.rawValue).tag(presentation)
+                    }
+                }
+                if let onShowTerminals {
+                    Divider()
+                    Button("Show retained terminals", action: onShowTerminals)
+                        .accessibilityIdentifier("workspace-return-terminals")
+                }
+            } label: { Image(systemName: "line.3.horizontal.decrease") }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel("Outline presentation")
+            .accessibilityIdentifier("workspace-presentation")
+        }
+        .foregroundStyle(palette.text)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(palette.surfaceMuted)
     }
 
     @ViewBuilder private var forReadErrors: some View {
@@ -132,33 +149,9 @@ struct WorkspaceNavigator: View {
         }
     }
 
-    private func repositoryRow(_ repo: String, selected: Bool) -> some View {
-        HStack(spacing: 4) {
-            Button {
-                if selected { model.navigation.repositoryCollapsed.toggle() }
-                else { selectRepository(repo) }
-            } label: {
-                Image(systemName: selected && !model.navigation.repositoryCollapsed ? "chevron.down" : "chevron.right")
-                    .frame(width: 16, height: 26)
-            }
-            .accessibilityLabel("Toggle repository \(repo)")
-            Button { selectRepository(repo) } label: {
-                Text(URL(fileURLWithPath: repo).lastPathComponent)
-                    .font(Typography.caption(12).weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }
-            .help(repo)
-            .accessibilityIdentifier("workspace-repository-\(repo)")
-        }
-        .contextMenu {
-            Button("Open repository") { selectRepository(repo) }
-            if selected { repositoryActions }
-        }
-    }
-
     private func outlineRow(_ row: WorkspaceOutlineRow) -> some View {
         HStack(spacing: 4) {
-            if case .work(let subject, true) = row.content {
+            if case .work(let subject, true, _) = row.content {
                 let key = subject.key
                 Button { model.navigation.toggle(key) } label: {
                     Image(systemName: model.navigation.isExpanded(key) ? "chevron.down" : "chevron.right")
@@ -167,13 +160,17 @@ struct WorkspaceNavigator: View {
                 .accessibilityLabel("Toggle \(row.title)")
                 .accessibilityIdentifier("workspace-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
             } else {
-                Image(systemName: row.session == nil ? "minus" : "terminal")
-                    .foregroundStyle(palette.textSecondary).frame(width: 16)
+                if row.session != nil {
+                    Image(systemName: "terminal")
+                        .foregroundStyle(palette.textSecondary).frame(width: 16)
+                } else {
+                    Color.clear.frame(width: 16, height: 1)
+                }
             }
             Button {
                 switch row.content {
                 case .session(let session): onOpenSession(session)
-                case .work(let subject, _):
+                case .work(let subject, _, _):
                     if subject.key.work.kind == .task, let onOpenTask {
                         onOpenTask(subject.key.work)
                     } else {
@@ -189,7 +186,8 @@ struct WorkspaceNavigator: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.title)
                             .font(row.workKey?.work.kind == .wave ? Typography.sectionTitle(18) : Typography.body(12))
-                            .lineLimit(2)
+                            .lineLimit(row.workKey?.work.kind == .task ? 1 : 2)
+                            .truncationMode(.tail)
                         if let detail = row.detail {
                             Text(detail).font(Typography.caption(11))
                                 .foregroundStyle(palette.textSecondary).lineLimit(2)
@@ -199,17 +197,21 @@ struct WorkspaceNavigator: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
+            .help(row.title)
             .accessibilityIdentifier(identifier(row))
-            if let session = row.session {
-                Text(sessionStatus(session)).font(Typography.caption(10)).foregroundStyle(palette.textSecondary)
+            if let key = row.workKey, !row.inlineSessions.isEmpty {
+                sessionCount(row.inlineSessions, work: key.work)
             }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
-        .background(isSelected(row) ? Color.loopflowBurgundy : Color.clear,
+        .background(isSelected(row) ? palette.accent.opacity(0.10) : Color.clear,
                     in: RoundedRectangle(cornerRadius: CornerRadius.md))
         .padding(.leading, CGFloat(row.depth) * 14)
         .contextMenu {
+            ForEach(row.inlineSessions) { session in
+                Button("Open \(session.title)") { onOpenSession(session) }
+            }
             if let key = row.workKey { subjectActions(key.work, title: row.title) }
             ForEach(row.ancestors, id: \.key) { ancestor in
                 subjectActions(ancestor.key.work, title: ancestor.title)
@@ -219,9 +221,30 @@ struct WorkspaceNavigator: View {
         }
     }
 
+    /// Exact open conversations on a Task, by name. Clicking the count inspects
+    /// the Task overview without entering any one of them.
+    private func sessionCount(_ sessions: [SessionRecord], work: WorkReference) -> some View {
+        let names = sessions.map(\.title).joined(separator: ", ")
+        return Button { model.select(work) } label: {
+            HStack(spacing: 2) {
+                Image(systemName: "bubble.left")
+                Text("\(sessions.count)")
+            }
+            .font(Typography.caption(10))
+            .foregroundStyle(palette.textSecondary)
+        }
+        .help(names)
+        .accessibilityLabel("\(sessions.count) open \(sessions.count == 1 ? "Session" : "Sessions"): \(names). Inspect Task")
+        .accessibilityIdentifier("workspace-session-count-\(work.id)")
+    }
+
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
         Button("Inspect \(title)") { model.select(work) }
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
+    }
+
+    private var repositoryActionsEmpty: Bool {
+        onConversation == nil && onNewShell == nil && onShowTerminals == nil
     }
 
     @ViewBuilder private var repositoryActions: some View {
@@ -244,7 +267,11 @@ struct WorkspaceNavigator: View {
 
     private func isSelected(_ row: WorkspaceOutlineRow) -> Bool {
         if let session = row.session { return model.navigation.selectedSessionId == session.id }
-        return model.navigation.selectedSessionId == nil && row.workKey?.work == model.selection
+        // A Task row carrying the open Session inline keeps its location visible.
+        if let selected = model.navigation.selectedSessionId {
+            return row.inlineSessions.contains { $0.id == selected }
+        }
+        return row.workKey?.work == model.selection
     }
 
     private func warning(_ text: String) -> some View {

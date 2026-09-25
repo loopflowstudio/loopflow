@@ -205,13 +205,18 @@ running diagrams. Read real comments/counts through the planning boundary.
 1. Shared naming contract: implemented and reviewed in
    [cycle 1](implementation-cycle/cycle-01-review.md), including name carry-over
    and agent Run-ID resolution. Flow-specific behavioral proof remains.
-2. **This slice:** reconcile and review named native Sessions with the shared continuation runtime; implemented in
-   [cycle 2](implementation-cycle/cycle-02-implement.md) — shared exact Flow
-   membership recorded at Run capture, native breadcrumb drill-down and inline
-   rename/readback. Remote rename remains source-only proof.
-3. Next: replace the existing frame, Wave and Task presentation with accepted A/C;
-   integrate actual Flow definitions/occurrences, all three Task situations,
-   comments and real controls. No per-view runtime inference.
+2. Named native Sessions reconciled with the shared continuation runtime:
+   [cycle 2](implementation-cycle/cycle-02-implement.md) and its review — exact
+   Flow membership, breadcrumb drill-down and inline rename. Remote rename
+   remains source-only proof.
+3. **This slice:** calmer frame, Wave plan and basic Task overview —
+   [cycle 3](implementation-cycle/cycle-03-implement.md). Repository-headed
+   sidebar with bottom search; started-work membership from shared
+   `runtime.started`; inline Session counts; Wave objective → Current KRs →
+   full Task plan; Task title once with New session; Markdown Description;
+   one-Session Task drills into it. Remaining: real Flow definition/pinned
+   diagram with both return edges and queue → land, Task situations, comments
+   read, restart/pause controls.
 4. Demonstrate the configured app, measure and review the complete experience.
 
 | Done when | Required observation |

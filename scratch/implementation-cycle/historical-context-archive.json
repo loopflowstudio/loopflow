@@ -13,5 +13,70 @@
     "archive": "scratch/main-view-task-history-archive.txt",
     "bytes": 69147,
     "sha256": "361f5e4c6b4ecd220623d00bd4d984ec30473882a1a2b2356948e3c0dec874fd"
+  },
+  "scratch/review-slice-iteration10-followup.md": {
+    "archive": "scratch/review-slice-iteration10-followup.txt",
+    "bytes": 8616,
+    "sha256": "019fca3850678859f622bebb42e683a2d80b5c8ac847ff9124f59691b9164f18"
+  },
+  "scratch/review-slice-iteration10.md": {
+    "archive": "scratch/review-slice-iteration10.txt",
+    "bytes": 7413,
+    "sha256": "b4bdd8935f81844a953d05f08d6b4a963253739d01d0d957360b5d60cffb0989"
+  },
+  "scratch/review-slice-iteration11.md": {
+    "archive": "scratch/review-slice-iteration11.txt",
+    "bytes": 7751,
+    "sha256": "c54aa279cb49c0fc2e8dec849013c8e99981a4273001af4ca1a491ab7d798a44"
+  },
+  "scratch/review-slice-iteration12.md": {
+    "archive": "scratch/review-slice-iteration12.txt",
+    "bytes": 6765,
+    "sha256": "ef70dde2d76fa457b9bf5a92d1367e851b0a125dde0d7006cdf468472062f801"
+  },
+  "scratch/review-slice-iteration13.md": {
+    "archive": "scratch/review-slice-iteration13.txt",
+    "bytes": 6070,
+    "sha256": "538e49cc0ed9e71e0a988791e95158f51549b3ee4e662b38ec44633d49db7ff5"
+  },
+  "scratch/review-slice-iteration14.md": {
+    "archive": "scratch/review-slice-iteration14.txt",
+    "bytes": 8060,
+    "sha256": "f6fa75aef6788eec626a07fa90d87fc0e8c3dc0dc7018d1b3d7f9fb5d08a4232"
+  },
+  "scratch/review-slice-iteration15.md": {
+    "archive": "scratch/review-slice-iteration15.txt",
+    "bytes": 9418,
+    "sha256": "9ca89cbe7e04f2b3bf5372c486336969f65495fe976b9fe7e95882eb6f0a1feb"
+  },
+  "scratch/review-slice-iteration16.md": {
+    "archive": "scratch/review-slice-iteration16.txt",
+    "bytes": 7460,
+    "sha256": "a07c2cd940b5d1fda21a00fe4336cbc58428f072460001beeb9ae4079b24d30c"
+  },
+  "scratch/review-slice-iteration17.md": {
+    "archive": "scratch/review-slice-iteration17.txt",
+    "bytes": 7026,
+    "sha256": "545e05c55424e69b2bf50180d32b177ccd9ffd6f5f03a15bdba88db204e7cf9e"
+  },
+  "scratch/review-slice-iteration18.md": {
+    "archive": "scratch/review-slice-iteration18.txt",
+    "bytes": 9575,
+    "sha256": "f11f0f947b391b98183b9e75eb8f46202f08d8a77eef4c98ff6662594a287ce7"
+  },
+  "scratch/review-slice-iteration19.md": {
+    "archive": "scratch/review-slice-iteration19.txt",
+    "bytes": 6836,
+    "sha256": "0276674acec2083ca9d45ee024df30ac0eba6004becd7f018003300a478f319a"
+  },
+  "scratch/review-slice-iteration20.md": {
+    "archive": "scratch/review-slice-iteration20.txt",
+    "bytes": 9248,
+    "sha256": "17da4035732a1d3ecaa4aa1d3057e30f1a2e3a14a0b3553603c6f47758e8ed1d"
+  },
+  "scratch/review-slice-iteration7-independent.md": {
+    "archive": "scratch/review-slice-iteration7-independent.txt",
+    "bytes": 8315,
+    "sha256": "0ff5a0eb537cd770392a90f8f085812d5841e1c3dc2233117417e3d72a4ab503"
   }
 }

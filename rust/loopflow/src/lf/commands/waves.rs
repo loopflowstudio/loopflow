@@ -172,6 +172,10 @@ pub struct TaskRuntimeSnapshot {
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
+    /// Durable evidence that work began: a launched Run, a worker report or
+    /// finished Flow, or a published PR. `false` means none is recorded, not
+    /// proof that nothing ever ran; preparing a checkout never sets it.
+    pub started: bool,
 }
 
 /// A Task's derived operating condition. Sessions own review actions; this state
@@ -875,6 +879,7 @@ fn snapshot_task_runtime(
     execution: &crate::ops::task_execution::TaskExecutionSnapshot,
     task: &Task,
     status: WorkStatus,
+    started: bool,
 ) -> TaskRuntimeSnapshot {
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
     let (provider, _) = crate::engine::config::parse_agent(config.agent());
@@ -888,6 +893,7 @@ fn snapshot_task_runtime(
         status,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
+        started,
     }
 }
 
@@ -1061,8 +1067,12 @@ async fn snapshot_task_detail(
         Some(task) => {
             let execution = crate::ops::task_execution::task_execution(store, &task.id).await?;
             let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
+            let started = store.task_started(&task.id).await?
+                || prs
+                    .iter()
+                    .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
             (
-                Some(snapshot_task_runtime(&execution, task, status)),
+                Some(snapshot_task_runtime(&execution, task, status, started)),
                 Some(execution),
             )
         }
@@ -2400,6 +2410,7 @@ mod tests {
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
+            started: true,
         };
         let next_move = NextMove {
             owner: NextMoveOwner::Task,
@@ -2505,6 +2516,7 @@ mod tests {
                         reason: "terminal".into(),
                         updated_at: "2026-07-21T00:00:00Z".into(),
                         provider: "codex".into(),
+                        started: true,
                     };
                     let terminal = derive_task_condition(
                         Some(&runtime),

@@ -54,11 +54,7 @@ final class PodiumModel {
     }
 
     var workspace: WorkspaceProjection {
-        WorkspaceProjection(
-            roadmaps: visibleRoadmaps, sessions: sessions.value ?? [],
-            activeWorktrees: Set((processActivity.value?.nodes ?? [])
-                .filter { $0.kind == .providerProcess }.compactMap(\.worktree))
-        )
+        WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: sessions.value ?? [])
     }
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {
         didSet {

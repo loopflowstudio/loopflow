@@ -20,12 +20,16 @@ struct WorkspaceBreadcrumbBar: View {
             }
             if let task = crumb.task {
                 separator
-                Button(task.task.task.name) { model.select(task.id.work) }
-                    .buttonStyle(.link)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(task.task.task.name)
-                    .accessibilityIdentifier("breadcrumb-task")
+                // The Task overview shows its title once below; inside a
+                // Session the ancestor carries the title to navigate upward.
+                if crumb.session != nil {
+                    Button(task.task.task.name) { model.select(task.id.work) }
+                        .buttonStyle(.link)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(task.task.task.name)
+                        .accessibilityIdentifier("breadcrumb-task")
+                }
                 if let url = task.task.reference.issueUrl {
                     Link(task.task.task.identifier, destination: url)
                         .foregroundStyle(palette.textSecondary)
@@ -39,26 +43,24 @@ struct WorkspaceBreadcrumbBar: View {
                 sessionCrumb(session)
             }
             Spacer(minLength: 0)
-            if let task = crumb.task {
-                if crumb.session == nil {
-                    Menu("Sessions") {
-                        ForEach(crumb.siblings) { record in
-                            Button(record.title) { onOpenSession(record) }
-                        }
-                    }
-                    .fixedSize()
-                    .disabled(crumb.siblings.isEmpty)
-                    .accessibilityIdentifier("task-sessions-\(task.task.id)")
+            if model.navigation.content == .details {
+                Button {
+                    model.navigation.showsActivity.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
                 }
+                .help(model.navigation.showsActivity ? "Hide Activity" : "Show Activity")
+                .accessibilityLabel(model.navigation.showsActivity ? "Hide Activity" : "Show Activity")
+                .accessibilityIdentifier("workspace-toggle-activity")
+            }
+            if let task = crumb.task {
                 Button("Monitor") { onMonitor(task.task.id) }
                     .accessibilityIdentifier("task-show-monitor-\(task.task.id)")
-                if crumb.session == nil {
-                    Button("Inspect") { model.select(task.id.work) }
-                }
             }
         }
-        .font(.system(size: 12))
+        .font(Typography.body(12))
         .padding(8)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
     }
 
     private var separator: some View {

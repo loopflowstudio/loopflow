@@ -201,7 +201,14 @@ fn observing_and_preparing_a_task_are_not_execution() {
             .filter(|event| event.kind == loopflow::work::task::TaskEventKind::Started)
             .count()
     };
+    // The shared evidence the desktop sidebar consumes.
+    let started = || {
+        runtime
+            .block_on(task.store.task_started(&task.task.id))
+            .unwrap()
+    };
     assert_eq!(starts(), 0);
+    assert!(!started(), "a prepared, unrun Task is not started");
     let read = run_lf(
         repo.path(),
         home.path(),
@@ -263,6 +270,10 @@ fn observing_and_preparing_a_task_are_not_execution() {
         0,
         "publishing and reading an unopened review only prepares its Run"
     );
+    assert!(
+        !started(),
+        "an unopened review's prepared Run is not execution"
+    );
 
     write_skill(repo.path(), "first-work", "Do this proof-owned work.");
     let bin = TempDir::new().unwrap();
@@ -292,6 +303,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
             1,
             "independent execution records the existing Started event once"
         );
+        assert!(started(), "a launched Run is durable start evidence");
     }
 }
 

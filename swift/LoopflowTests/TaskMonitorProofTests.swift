@@ -13,7 +13,7 @@ import GhosttyKit
 @Suite("Task Monitor integration proof", .serialized)
 @MainActor
 struct TaskMonitorProofTests {
-    @Test("Focusing another Task's pane cannot replace the selected Task's saved choice")
+    @Test("Focusing another Task's pane cannot redirect returning to the selected Task")
     func paneFocusPreservesTaskChoice() async throws {
         _ = NSApplication.shared
         let query = try query()
@@ -35,7 +35,6 @@ struct TaskMonitorProofTests {
         let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
         navigator.onOpenSession(try #require(model.sessions.value?.first))
         try await settle(window)
-        try #require(model.navigation.taskPanes["issue-review"]?.pane.id == ownPane)
         multiplexer.setFocusedPane(otherPane)
         try await settle(window)
         let openTask = try #require(navigator.onOpenTask)
@@ -43,6 +42,14 @@ struct TaskMonitorProofTests {
         try await settle(window)
         #expect(multiplexer.focusedPaneId == ownPane)
         #expect(model.navigation.selectedSessionId == "monitor-review")
+
+        // The Task ancestor goes upward even though the Task has one Session.
+        try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().tap()
+        try await settle(window)
+        #expect(model.navigation.content == .details)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(multiplexer.focusedPaneId == ownPane)
     }
 
     @Test("Returning to a Task never restores another Task's Session in a reused pane")

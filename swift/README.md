@@ -47,8 +47,10 @@ Right-click a row to inspect its subject or ancestors, start a scoped conversati
 or open an ordinary terminal. Right-click the outline background for repository
 actions. **Show retained terminals** restores the existing pane layout. Search,
 scroll, presentation, expansion and selection survive repository switches within
-the window. Selecting a Task restores its last pane, initially **Monitor**;
-selecting a Session opens its exact terminal through the shared Session action.
+the window. Selecting a Task with exactly one open Session enters that Session;
+otherwise it opens the Task overview, which names each conversation. Monitor is
+an explicit breadcrumb control. Selecting a Session opens its exact terminal
+through the shared Session action.
 Use **Inspect** or the row's context menu for details. Presentation changes never
 start a provider or resolve a Session.
 

@@ -208,7 +208,7 @@ struct SessionsStoreTests {
         store.reconcile(try records([session(id: "review", state: "ready")]))
 
         #expect(store.sessions.map(\.id) == ["review"])
-        #expect(store.sessions.first?.statusLabel == "READY")
+        #expect(store.sessions.first?.record.state == .ready)
         #expect(store.sessions.first?.record.readySummary == "Ready for review")
     }
 

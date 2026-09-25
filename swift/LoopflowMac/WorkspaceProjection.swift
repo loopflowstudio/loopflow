@@ -12,6 +12,14 @@ struct WorkspaceTask: Identifiable {
     let id: WorkspaceNodeKey
     let task: RoadmapTask
     let sessions: [SessionRecord]
+
+    /// Shared durable evidence that work began. Inspection, a prepared
+    /// checkout, or a live process in the checkout never supplies it.
+    var started: Bool { task.runtime?.started == true }
+
+    /// The started working set. A Task with open Sessions stays reachable even
+    /// when its start predates recorded evidence.
+    var inWorkingSet: Bool { !sessions.isEmpty || (started && !task.task.completed) }
 }
 
 enum WorkspacePresentation: String, CaseIterable {
@@ -32,7 +40,7 @@ struct WorkspaceProjection {
     let waves: [WorkspaceWave]
     let unmatchedSessions: [SessionRecord]
 
-    init(roadmaps: [WaveRoadmap], sessions: [SessionRecord], activeWorktrees: Set<String> = []) {
+    init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
         var matched = Set<String>()
         func attached(to work: WorkReference?) -> [SessionRecord] {
             guard let work else { return [] }
@@ -53,11 +61,8 @@ struct WorkspaceProjection {
                     matched.formUnion(records.map(\.id))
                     return records
                 }(),
-                tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.compactMap { task in
+                tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.map { task in
                     let records = attached(to: task.runtime.map { .task(id: $0.workId) })
-                    let providerInCheckout = task.reference.workspace.map { activeWorktrees.contains($0.worktree) } ?? false
-                    guard !task.task.completed || !records.isEmpty || providerInCheckout
-                        || task.reference.workspace?.localExists == true else { return nil }
                     return WorkspaceTask(
                         id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
                         task: task, sessions: records
@@ -126,7 +131,7 @@ struct WorkspaceOutlineSubject {
 /// Disposable visible rows. Planning and Session identities remain the source.
 struct WorkspaceOutlineRow: Identifiable {
     enum Content {
-        case work(WorkspaceOutlineSubject, hasChildren: Bool)
+        case work(WorkspaceOutlineSubject, hasChildren: Bool, sessions: [SessionRecord])
         case session(SessionRecord)
     }
 
@@ -142,14 +147,14 @@ struct WorkspaceOutlineRow: Identifiable {
 
     var id: ID {
         switch content {
-        case .work(let subject, _): .work(subject.key)
+        case .work(let subject, _, _): .work(subject.key)
         case .session(let session): .session(session.id)
         }
     }
 
     var title: String {
         switch content {
-        case .work(let subject, _): subject.title
+        case .work(let subject, _, _): subject.title
         case .session(let session): session.title
         }
     }
@@ -160,8 +165,14 @@ struct WorkspaceOutlineRow: Identifiable {
     }
 
     var workKey: WorkspaceNodeKey? {
-        guard case .work(let subject, _) = content else { return nil }
+        guard case .work(let subject, _, _) = content else { return nil }
         return subject.key
+    }
+
+    /// Open Sessions presented inline on a Task row rather than as leaves.
+    var inlineSessions: [SessionRecord] {
+        guard case .work(_, _, let sessions) = content else { return [] }
+        return sessions
     }
 }
 
@@ -188,9 +199,11 @@ extension WorkspaceProjection {
             ))
         }
         func appendWork(_ subject: WorkspaceOutlineSubject, detail: String? = nil, depth: Int,
-                        ancestors: [WorkspaceOutlineSubject], hasChildren: Bool) {
+                        ancestors: [WorkspaceOutlineSubject], hasChildren: Bool,
+                        sessions: [SessionRecord] = []) {
             rows.append(WorkspaceOutlineRow(
-                content: .work(subject, hasChildren: hasChildren), detail: detail, depth: depth,
+                content: .work(subject, hasChildren: hasChildren, sessions: sessions),
+                detail: detail, depth: depth,
                 ancestors: ancestors
             ))
         }
@@ -201,7 +214,8 @@ extension WorkspaceProjection {
                 complete = planningReadable && wave.roadmap.unavailableTasks.isEmpty
             } else { complete = false }
             let flat = presentation == .sessions
-            let waveHasChildren = !wave.tasks.isEmpty || !wave.sessions.isEmpty
+            let workingSet = wave.tasks.filter(\.inWorkingSet)
+            let waveHasChildren = !workingSet.isEmpty || !wave.sessions.isEmpty
             let omitWave = flat || (presentation == .compact && waves.count == 1 && complete
                 && waveHasChildren && expanded(wave.id))
             let waveStart = rows.count
@@ -210,22 +224,21 @@ extension WorkspaceProjection {
                 let waveDepth = omitWave ? 0 : 1
                 for session in wave.sessions { appendSession(session, depth: waveDepth, ancestors: [waveSubject]) }
                 let ancestors = [waveSubject]
-                for task in wave.tasks {
+                for task in workingSet {
                     let taskSubject = WorkspaceOutlineSubject(key: task.id, title: task.task.task.name)
                     let taskMatches = matches(taskSubject.title) || matches(task.task.task.identifier)
                         || matches(waveSubject.title)
                         || task.sessions.contains(where: { matches($0.title) || matches($0.detail) })
                     guard taskMatches else { continue }
-                    if !flat {
-                        appendWork(taskSubject, detail: task.task.task.identifier, depth: waveDepth,
-                                   ancestors: ancestors, hasChildren: !task.sessions.isEmpty)
-                    }
-                    if flat || expanded(task.id) {
+                    if flat {
                         for session in task.sessions {
-                            appendSession(session, depth: flat ? 0 : waveDepth + 1,
-                                          ancestors: ancestors + [taskSubject],
+                            appendSession(session, depth: 0, ancestors: ancestors + [taskSubject],
                                           include: matches(task.task.task.identifier))
                         }
+                    } else {
+                        // Open Sessions ride the Task row as a count and names.
+                        appendWork(taskSubject, depth: waveDepth, ancestors: ancestors,
+                                   hasChildren: false, sessions: task.sessions)
                     }
                 }
             }
@@ -271,6 +284,7 @@ struct SessionRenameDraft: Equatable {
 final class WorkspaceNavigation {
     enum Content { case overview, details, terminals }
     var content: Content = .overview
+    var showsActivity = false
     var presentation: WorkspacePresentation = .compact
     var selectedSessionId: String? {
         didSet {
@@ -288,7 +302,6 @@ final class WorkspaceNavigation {
     var selection: WorkReference?
     var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
-    var taskPanes: [String: (path: String, pane: PaneState)] = [:]
 
     func isExpanded(_ key: WorkspaceNodeKey) -> Bool {
         !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !collapsed.contains(key)

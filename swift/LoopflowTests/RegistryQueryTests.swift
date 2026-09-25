@@ -257,7 +257,8 @@ struct RegistryQueryTests {
                   "status": "ready",
                   "reason": "ready",
                   "updated_at": "2026-07-06T00:00:00Z",
-                  "provider": "codex"
+                  "provider": "codex",
+                  "started": true
                 },
                 "directive": null,
                 "next_move": {

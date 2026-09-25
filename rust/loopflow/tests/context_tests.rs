@@ -683,6 +683,7 @@ fn assert_work_prompt_omits_unselected_wave_turn(skill: &str) {
     let assistant_text = format!("unrelated Wave answer before {skill}");
     let (mut journal, _) = Journal::open(&journal_path(repo, "goals")).unwrap();
     journal.append(|_| EventKind::UserMessage {
+        author_name: None,
         id: MessageId("msg-1".to_string()),
         op: MessageOp::Message,
         text: user_text.clone(),

@@ -118,7 +118,7 @@ explicit account lease for that command.
 
 ## Move a Wave without changing its identity
 
-Wave identity is a UUID. The human locator is `(canonical repository, slug)`.
+Wave identity is a UUID. The readable Wave locator is `(canonical repository, slug)`.
 A bare slug may be ambiguous across repositories and is not mutation authority.
 
 ```bash

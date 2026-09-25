@@ -2178,6 +2178,7 @@ fn launch_skill_agent(
             resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
+            user_name: crate::engine::config::launch_user_name()?,
             cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
@@ -2221,7 +2222,7 @@ fn launch_skill_agent(
     capture.record_input("initial", &prepared.config.task_prompt);
 
     let mut launch = prepared.config;
-    launch.env = env.cloned().unwrap_or_default();
+    launch.env.extend(env.cloned().unwrap_or_default());
     let process = ProcessConfig {
         auto: true,
         stream: true,

@@ -35,7 +35,7 @@ targets or freshness.
 and advancing), **Waiting**, **Available**, **Later**. It overlays live evidence
 on the Linear-backed plan. Each Task carries one semantic condition — clear,
 waiting, blocked, or unknown — while `lf session list` is the separate list of
-unresolved human conversations. Add `--all` for the machine-wide projection.
+unresolved conversations. Add `--all` for the machine-wide projection.
 
 `lf activity` orders durable Work creation, Run, Task PR, and Steer facts.
 Filter with `--wave`, `--project`, or `--task`; filters apply before `--limit`.
@@ -90,7 +90,7 @@ Both contain only OS-live process trees; completed calls disappear. Run
 `lf prune --dry-run` before cleanup. Plain `lf prune` removes stale Exec
 receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
 `lf ci` reads the local ledger, not GitHub: it reports how
-much of CI repair happened without a human.
+much of CI repair happened without a person.
 
 ## Steer
 
@@ -101,7 +101,7 @@ lf --wave <wave> wave/operate "ship the parser fix first"
 lf chat --follow                              # replay and tail the conversation
 lf task steer INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf task interrupt INF-123                     # end this turn and re-read direction
-lf session list --json                        # unresolved human Sessions
+lf session list --json                        # unresolved Sessions
 lf session open <session-id> --json           # recover one exact conversation
 lf ask list --user --json                     # requested sessions needing attention
 lf ask open ask_...                            # open one Ask session
@@ -113,16 +113,16 @@ comments without starting execution. Task interrupt ends the active turn so
 advancement re-reads direction. Publication and transport acceptance do not
 prove that the agent applied the correction. See [The Agent API](agent-api.md#steer).
 
-`lf ask` is a synchronous boundary with a human. It opens an ordinary TUI Run
+`lf ask` is a synchronous boundary with a person. It opens an ordinary TUI Run
 against the caller's exact checkout, enters the Sessions surface, and blocks
-the caller until the human completes the conversation.
+the caller until the user completes the conversation.
 Use `lf --as <work> : "<prompt>"` when only another agent perspective is needed.
 
-A human Task node persists the exact `FlowPosition` and provider Run between
+A Task review node persists the exact `FlowPosition` and provider Run between
 autonomous steps. Opening it stops the exact background client and resumes the
 provider-native conversation for the authored `lf --as task:<id>` Skill. The
 agent may mark the session ready, but that does not remove it or advance
-anything. Human Approve advances the playhead; Iterate returns to autonomous
+anything. Approve advances the playhead; Iterate returns to autonomous
 work with new direction; closing or provider exit never advances it.
 
 ## The Mac app
@@ -150,9 +150,9 @@ tmux attach -r -t <name>    # read-only look inside one
 ```
 
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
-resolve every unresolved human Session.
+resolve every unresolved Session.
 Use `lf task steer` for durable Task direction,
-`lf --as` for another agent perspective, and `lf ask` for a new human boundary.
+`lf --as` for another agent perspective, and `lf ask` for a new review boundary.
 
 ## Next
 

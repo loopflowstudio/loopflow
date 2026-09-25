@@ -34,7 +34,7 @@ excluded by the pinned Ghostty build.
 Opening Loopflow to a repository leads with its Sessions queue. Select a session
 to resume its provider-native terminal in the focused Ghostty pane; selecting it again
 jumps back to that pane. Each pane owns one native libghostty surface. Sessions
-include native interactive provider Runs, Task human FlowSteps, and `lf ask`
+include native interactive provider Runs, Task review FlowSteps, and `lf ask`
 calls made by ordinary Runs. Rows use the real prompt or Task title plus the
 actual provider, Skill, or Run detail. The row badge names the terminal's real
 state: **VIEWING** (in a pane here), **RUNNING** (live, view closed),
@@ -49,9 +49,9 @@ The green **Complete** action stops an interactive provider client and removes
 its Session from the queue while retaining provider-native history. Closing a
 pane only hides the view: the terminal and its provider client keep running
 (the row shows RUNNING) and reopen exactly as left. An Ask agent
-can mark itself ready, but the row and terminal remain until the human completes
+can mark itself ready, but the row and terminal remain until the user completes
 the conversation. Task FlowSteps instead expose Approve and Iterate. Closing
-or detaching either human boundary never resolves it.
+or detaching either review boundary never resolves it.
 
 Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
@@ -106,7 +106,7 @@ mirror the same source-linked transcript and open Discord to reply; they never
 create a parallel local thread. Prior backing epochs remain selectable and
 read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
-decisions, deliveries, and human-level failures remain visible. The detail pane
+decisions, deliveries, and actionable failures remain visible. The detail pane
 reads Projects, Tasks, decisions, PR delivery, and Task conditions from `lf
 status --json`.
 
@@ -122,7 +122,7 @@ codebase tree, and registry health.
 
 ## Product ownership
 
-- **Wave Chat** owns the human conversation, the active Wave turn, and
+- **Wave Chat** owns the conversation, the active Wave turn, and
   Send and bare Interrupt controls.
 - **Projects and Tasks** appear in the Wave work map. Linear owns their planning
   identity; Loopflow's registry owns their runtime state.
@@ -130,7 +130,7 @@ codebase tree, and registry health.
   reports through its Project Work; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
-  Lifecycle mutations remain `lf task run/resume/interrupt`; human nodes use
+  Lifecycle mutations remain `lf task run/resume/interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not

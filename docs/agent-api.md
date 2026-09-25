@@ -1,7 +1,7 @@
 # The Agent API
 
 `lf` is the API agents call to launch, steer, and observe other agents. There
-is no SDK and no central server. The verbs are the same binary humans type;
+is no SDK and no central server. The verbs are the same binary you use;
 every read surface takes `--json`; and every launched agent receives the
 operating contract (`LOOPFLOW.md`) in its context, so it already knows these
 verbs when it starts.
@@ -26,7 +26,7 @@ asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.
 It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
-while `lf ask` parks the Run at a durable human session in its own checkout.
+while `lf ask` parks the Run at a durable session in its own checkout.
 
 A Wave directing a task is the internal case:
 
@@ -136,13 +136,13 @@ lands it:
 
 ```bash
 lf pr publish    # make work visible mid-stream; the agent's default verb
-lf pr submit     # done, a human clicks merge
+lf pr submit     # done, a person clicks merge
 lf pr arm        # request exact-head auto-merge and return
 lf pr land       # watch, repair CI, and return only after merge
 ```
 
 `lf pr open` is the one presenting verb — it opens a browser. Agents reach for
-it only when a human asked to see the PR.
+it only when a person asked to see the PR.
 
 ## Observe
 
@@ -181,9 +181,9 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Route git, worktrees, and PRs through `lf`; never raw `git worktree`.
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
-- Answer present humans in turn text; use typed Work observations for durable
+- Answer the user in the current conversation; use typed Work observations for durable
   coordination, ordinary `lf --as` Runs for another agent perspective, and
-  `lf ask` only for a new human session.
+  `lf ask` only for a new session.
 - Write repo-specific learnings into `.lf/` and commit them with the work.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.

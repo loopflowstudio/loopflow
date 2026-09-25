@@ -3,7 +3,7 @@
 //! A direct, composable capability — no resident, no governance loop, no
 //! playhead, no Run record. Given a wave and the recent conversation, it runs a
 //! single chat-surface turn and returns a reply **only when one is warranted**.
-//! A channel may be humans talking to each other, so most turns should produce
+//! A channel may be people talking to each other, so most turns should produce
 //! nothing: an empty turn maps to `None` and the caller posts nothing. The
 //! judgment of whether to reply lives in the `wave/chat` skill, not here.
 //!
@@ -185,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_turn_is_silence_not_a_reply() {
-        // Humans talking to each other: the turn produces nothing.
+        // People talking to each other: the turn produces nothing.
         let reply = reply_prepared(prepared(), &scripted(vec![completed(Lifecycle::Completed)]))
             .await
             .expect("the turn completes");

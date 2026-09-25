@@ -1934,6 +1934,7 @@ mod tests {
             derive_delivery_id(&edit_b, 0, &[])
         );
         let comment = WebhookEvent::Comment {
+            author_name: None,
             issue_id: "i-1".into(),
             comment_id: "c-1".into(),
             revision: None,

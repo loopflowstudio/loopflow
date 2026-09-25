@@ -10,7 +10,7 @@ pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 /// Headless preamble — the only surface that needs one (no user is present).
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
 
-/// Shared contract for every surface with a human in the current conversation.
+/// Shared contract for every surface with someone participating in the current conversation.
 pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
 
 /// Live chat channel (e.g. Discord): a person is reading, so the reply is a
@@ -242,7 +242,7 @@ mod tests {
         let design = get_builtin_skill("design").expect("design skill");
         for contract in [
             "## Surface",
-            "**Human present:**",
+            "**Interactive:**",
             "**Headless:**",
             "without claiming User confirmation",
         ] {
@@ -257,7 +257,7 @@ mod tests {
             "--flow <chosen-flow>",
             "lf task prepare <issue> --json",
             "lf task run <issue> --flow <chosen-flow>",
-            "Use the human-selected Flow",
+            "Use the Flow the user selected",
         ] {
             assert!(
                 launch_plan.contains(contract),
@@ -280,7 +280,7 @@ mod tests {
                 "{name} does not define reviewer modes"
             );
             assert!(
-                skill.contains("**Human reviewer:**"),
+                skill.contains("**Interactive reviewer:**"),
                 "{name} does not define attended behavior"
             );
             assert!(

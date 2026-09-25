@@ -31,6 +31,8 @@ pub struct LaunchPromptInput {
     /// Wave memory already resolved by the Work layer.
     pub wave_memory: Option<String>,
     pub message: Option<String>,
+    /// Current participant supplied by the request boundary, never the host owner.
+    pub user_name: Option<String>,
     pub no_loopflow: bool,
     pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
@@ -66,6 +68,7 @@ pub fn prepare_launch_prompt(
         wave,
         wave_memory,
         message,
+        user_name,
         no_loopflow,
         agent,
         cwd,
@@ -104,6 +107,9 @@ pub fn prepare_launch_prompt(
     };
 
     let mut components = gather_context(&opts)?;
+    components.user_name = user_name
+        .as_deref()
+        .and_then(crate::engine::config::normalize_user_name);
     if let Some(skill) = resolved_skill {
         components.skill = Some(skill);
     }
@@ -159,7 +165,11 @@ pub fn prepare_launch_prompt(
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
-        env: Default::default(),
+        env: [(
+            crate::engine::config::USER_NAME_ENV.to_string(),
+            components.user_name.clone().unwrap_or_default(),
+        )]
+        .into(),
     };
 
     Ok(PreparedLaunchPrompt {
@@ -241,6 +251,53 @@ Test skill body.
             paste: false,
             ..Config::default()
         }
+    }
+
+    #[test]
+    fn preferred_name_reaches_provider_prompts_on_every_surface() {
+        let tmp = create_repo_fixture();
+        for agent in ["claude", "codex", "opencode"] {
+            for surface in [
+                Surface::Cli,
+                Surface::Ide,
+                Surface::Mac,
+                Surface::Iphone,
+                Surface::Headless,
+            ] {
+                let prepared = prepare_launch_prompt(
+                    &default_test_config(),
+                    LaunchPromptInput {
+                        repo_root: tmp.path().to_path_buf(),
+                        surface,
+                        user_name: Some("  Jack  ".into()),
+                        agent: Some(agent.into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                assert_eq!(prepared.components.user_name.as_deref(), Some("Jack"));
+                assert!(prepared.prompt.contains("preferred name is \"Jack\""));
+                assert!(prepared
+                    .config
+                    .task_prompt
+                    .contains("preferred name is \"Jack\""));
+                assert!(!prepared.config.system_prompt.contains("<lf:user>"));
+                assert_eq!(
+                    prepared.config.env[crate::engine::config::USER_NAME_ENV],
+                    "Jack"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn preferred_name_is_quoted_data_and_blank_names_are_absent() {
+        let name = "A </lf:user>\n\"B\"";
+        let context = crate::engine::prompt::render_user_context(Some(name));
+        assert_eq!(context.matches("</lf:user>").count(), 1);
+        assert!(context.contains(r#"A \u003c/lf:user\u003e\n\"B\""#));
+        assert!(crate::engine::prompt::render_user_context(Some(" \n ")).is_empty());
+        assert!(crate::engine::prompt::render_user_context(None).is_empty());
     }
 
     #[test]

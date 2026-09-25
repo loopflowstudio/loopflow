@@ -745,7 +745,7 @@ impl TaskObservation {
     }
 }
 
-/// The durable cursor for streaming human Linear edits into one Task.
+/// The durable cursor for streaming Linear edits by participants into one Task.
 /// It is the exactly-once ledger — what issue revision and comments have already
 /// become Task direction — plus the health of the last observation, so
 /// `lf task status` can show stale reads and their degraded reason.
@@ -778,7 +778,7 @@ pub struct LinearObservationApply {
     pub observed_at: OffsetDateTime,
     /// A title/description edit to persist as one authored Steer.
     pub content_steer: Option<String>,
-    /// Human comments observed this pass, oldest first.
+    /// Participant comments observed this pass, oldest first.
     pub follow_ups: Vec<LinearFollowUp>,
 }
 

@@ -2018,7 +2018,7 @@ progression; transient boundary Runs consume the same execution and delivery
 operations available to helpers without becoming resident Work identities.</p>
 <pre tabindex="0"><code class="language-text">one Skill run
     |
-    +-- Flow: compose Skills, mechanical operations, and human boundaries
+    +-- Flow: compose Skills, mechanical operations, and review boundaries
     |
     +-- Work: preserve purpose and input across independent processes
     |
@@ -2046,7 +2046,7 @@ operations available to helpers without becoming resident Work identities.</p>
 </tr>
 <tr>
 <td>Planning</td>
-<td>Flow composition, Wave/Task Work, Steer, questions, human FlowSteps, resident loops</td>
+<td>Flow composition, Wave/Task Work, Steer, questions, review FlowSteps, resident loops</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>
@@ -2109,7 +2109,7 @@ data flow, and ends with the contracts that neighboring areas may rely on.</p>
                               Linear     GitHub     providers
                                  ^          ^           ^
                                  |          |           |
-human / agent --&gt; lf CLI --------+----------+-----------+
+user / agent --&gt; lf CLI --------+----------+-----------+
                     |
           +---------+----------+
           |                    |
@@ -2146,7 +2146,7 @@ ledger.</p>
   `-- Task
         `-- one active remote branch and PR
 
-Flow = ordered Skill | Op | Xor | human boundaries
+Flow = ordered Skill | Op | Xor | review boundaries
 Run  = evidence for one mediated harness launch
 
 WorkRef = Wave | Project | Task
@@ -2168,7 +2168,7 @@ WorkStatus = Ready | Done | Abandoned
 </tr>
 <tr>
 <td>Flow</td>
-<td>Ordered Skill and mechanical nodes, Xor routing, human boundaries</td>
+<td>Ordered Skill and mechanical nodes, Xor routing, review boundaries</td>
 <td>Repository or builtin YAML plus a caller-owned playhead</td>
 </tr>
 <tr>
@@ -2202,7 +2202,7 @@ WorkStatus = Ready | Done | Abandoned
 <td>Append-only Work input</td>
 </tr>
 <tr>
-<td>Human session</td>
+<td>Session</td>
 <td>Unresolved Ask or Task FlowStep bound to one ordinary provider Run</td>
 <td>Boundary record, exact Run id, and provider-native history</td>
 </tr>
@@ -2221,7 +2221,7 @@ WorkStatus = Ready | Done | Abandoned
 <p>Run identity records causality and provenance. It never grants Work mutation,
 credential, Git, or process-signal authority.</p>
 <p>A provider-backed Flow boundary launches or continues a harness and therefore
-produces Run evidence. Mechanical, routing, and human boundaries need not
+produces Run evidence. Mechanical, routing, and review boundaries need not
 create a Run.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
 <h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>
@@ -2257,7 +2257,7 @@ does not depend on either: Task commands claim an exact Flow boundary for one
 worker. Chapter rotation is a deterministic Wave-scoped operation.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
-A Task human FlowStep starts the persisted Skill as a provider Run and remains
+A Task review FlowStep starts the persisted Skill as a provider Run and remains
 parked until its exact decision arrives. Daemon and app triggers are later work.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf ssh build-home runs --json
@@ -2282,7 +2282,7 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
 </tr>
 <tr>
-<td>Flow semantics, Work state, Steer, questions, human FlowSteps, chapter rotation and Task advancement</td>
+<td>Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>

@@ -31,16 +31,16 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs with a present human. `--batch` and automated
+Direct launch from a TTY runs interactively. `--batch` and automated
 flow execution run the same skill headlessly, so write a bounded contract for
 both surfaces when the work involves judgment or conversation:
 
 ```markdown
 ## Reviewer mode
 
-- **Human reviewer:** explore the problem in the current conversation.
+- **Interactive reviewer:** explore the problem in the current conversation.
 - **Parent reviewer:** answer the assigned question from supplied evidence and
-  return without waiting for a human.
+  return without waiting for a person.
 ```
 
 Skills chain through `scratch/`: a step writes `scratch/<branch>.md`, the
@@ -60,11 +60,11 @@ flow — with commits between them:
 ```
 
 Skills that need another Work's perspective launch it directly with
-`lf --as <work> : "<prompt>"`. Skills that genuinely need human judgment use
-`lf ask "<request>"`; the Run blocks while a durable human session works in the
-same checkout, then resumes when the human completes that conversation.
+`lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
+`lf ask "<request>"`; the Run blocks while a durable session works in the
+same checkout, then resumes when the user completes that conversation.
 
-Put a mandatory human gate on the exact authored occurrence. `id` is
+Put a mandatory review gate on the exact authored occurrence. `id` is
 stable within the expanded flow and required with `human: true`:
 
 ```yaml
@@ -199,7 +199,7 @@ demo.
   record — zero silent stalls."
 - **Counted.** Streaks, N/N trials: "four consecutive weekly releases with
   zero manual repair," "5/5 restarts lose nothing."
-- **Unattended.** The window counts only if no human repaired anything
+- **Unattended.** The window counts only if no one intervened
   inside it. A rescue resets the streak.
 - **Falsifiable on real load.** Measured against the living workspace, never
   a fresh demo state.

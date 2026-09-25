@@ -24,7 +24,7 @@ Write reviewer-friendly PR copy with agent judgment. Use ops only for execution.
    lf pr publish --title "<title>" --body "<body>"
    ```
    `lf pr open` does the same publish and then opens the PR for review; use it
-   only when a human explicitly asked to see the PR.
+   only when a person explicitly asked to see the PR.
 
 ## Authorship
 

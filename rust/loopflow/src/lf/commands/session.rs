@@ -51,7 +51,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let text = required_text(summary, "ready summary")?;
             let store = open_shared_store().await?;
             crate::ops::human_session::mark_ready(&store, &text).await?;
-            println!("Session is ready for human action.");
+            println!("Session is ready for your review.");
             Ok(())
         }
         SessionCommand::Approve { id, summary } => {

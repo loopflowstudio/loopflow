@@ -5,7 +5,7 @@ import Testing
 // flow: clarify reads the repo and writes a design note, pursue builds and hits
 // a red test, mutate opens the PR, and a child project asks for a decision.
 //
-// What a human must see: the wave's prose and the decision. What must disappear:
+// What readers must see: the wave's prose and the decision. What must disappear:
 // twenty-odd tool calls, shell commands, file edits, thoughts, and the
 // `task/clarify` / `task/pursue` / `task/mutate` phase structure.
 
@@ -21,6 +21,7 @@ private func turn(
     try ChatTurn(
         id: id,
         role: role,
+        authorName: nil,
         text: text,
         status: status,
         items: items,
@@ -104,7 +105,7 @@ struct WaveChatTranscriptTests {
     }
 
     /// task/pursue: an expected red test is execution evidence, not another
-    /// command card in the human conversation.
+    /// command card in the conversation.
     @Test func backendFailuresDoNotBecomeChatCards() throws {
         let pursue = try turn(
             id: "turn-3",
@@ -195,7 +196,7 @@ struct WaveChatTranscriptTests {
     @Test func streamingProseStaysWholeWithNoSteps() throws {
         let streaming = try turn(
             id: "turn-22979",
-            text: "I’m using `wave/mutate` to judge the accepted human controls. "
+            text: "I’m using `wave/mutate` to judge the accepted controls. "
                 + "The receipts show both are incorporated. Product’s objective, "
                 + "portfolio, KRs, and memory remain unchanged.",
             items: [command("c0", "lf pm show")],
@@ -216,7 +217,7 @@ struct WaveChatTranscriptTests {
         #expect(!isConversational(childActivity(.stateChanged)))
     }
 
-    /// The whole transcript: what a human sees of a long-running task.
+    /// The whole transcript: the displayed view of a long-running task.
     @Test func theVisibleThreadIsSpeechAndDecisions() throws {
         let thread = [
             try turn(id: "turn-1", role: .user, text: "make wave chat human-first"),

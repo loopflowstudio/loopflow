@@ -50,7 +50,7 @@ enum Integration {
 
 /// Prepare one PR: commit, rebase onto main, clear scratch, mark it ready, and
 /// finalize per `finalize`. `arm` requests auto-merge; `submit` assigns the PR
-/// for a human to merge. Neither rotates the worktree. Returns the resulting PR,
+/// for the reviewer to merge. Neither rotates the worktree. Returns the resulting PR,
 /// or `None` for a local merge or direct Task completion over an already-merged
 /// PR.
 fn prepare_pr(

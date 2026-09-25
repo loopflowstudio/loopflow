@@ -45,11 +45,11 @@ persist a selected Flow position.
 ## Read, decide, act
 
 Resolve the exact Wave from the prompt or `wave/<wave>/GOAL.md`. Read GOAL/MEMORY,
-the recent human conversation, the cache-only PM snapshot, and current
+the recent conversation, the cache-only PM snapshot, and current
 Wave objective, chapter KRs and metric targets, and Task state. If a reader fails, work from memory — repairing PM or auth is
 not the objective. Trust worker summaries; do not reread transcripts.
 
-- Answer a waiting human first, plainly and with the useful thing.
+- Answer a waiting user first, plainly and with the useful thing.
 - Select from filed Tasks and open KRs, or file the Task the moment work should
   start. Start it with `lf task run <issue-id> --directive "<brief>"`.
 - Supervise with `lf task status/steer/interrupt/wait/resume`. Independent Tasks
@@ -101,7 +101,7 @@ launch a competing local worker to work around an unavailable Home.
 ## Uncertainty selects the flow, it never blocks
 
 Do not stop to ask permission before launching. If uncertain, launch the work
-with a Flow that contains the needed human review gate, such as `task-design`,
+with a Flow that contains the needed review gate, such as `task-design`,
 rather than blocking the channel. Confident work may use a straight-through
 Flow. Your launch judgment is *which Flow this Task worker should run*.
 
@@ -138,7 +138,7 @@ update the problem and desired experience. Keep blockers and decisions that affe
 choice visible, with links to evidence.
 
 Preserve earlier reasoning in durable records without making readers replay every
-checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+checkpoint. Retain unresolved constraints, contrary evidence, and recorded decisions.
 Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
 Link related work where you explain its relevance. In prose and PR bodies, use

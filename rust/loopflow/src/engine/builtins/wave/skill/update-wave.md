@@ -76,7 +76,7 @@ update the problem and desired experience. Keep blockers and decisions that affe
 choice visible, with links to evidence.
 
 Preserve earlier reasoning in durable records without making readers replay every
-checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+checkpoint. Retain unresolved constraints, contrary evidence, and recorded decisions.
 Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
 Link related work where you explain its relevance. In prose and PR bodies, use

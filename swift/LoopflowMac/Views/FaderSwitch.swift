@@ -46,7 +46,7 @@ enum FaderPhase: Equatable {
 }
 
 /// Collapse exact process activity and a waiting Session into one phase.
-/// A human-owed stop wins over sibling activity: one red task turns its wave's
+/// A stop awaiting review wins over sibling activity: one red task turns its wave's
 /// whole column red. `agentRunning` distinguishes a spun-up-but-quiet agent
 /// (starting) from no agent at all (off).
 enum ConsoleSignal {

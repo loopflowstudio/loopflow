@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use crate::id::WaveId;
 use crate::repository::{CanonicalRepo, CanonicalRepoError};
 
-/// A Wave's mutable human address inside one canonical repository.
+/// A Wave's mutable readable address inside one canonical repository.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WaveLocator {
     repo: CanonicalRepo,

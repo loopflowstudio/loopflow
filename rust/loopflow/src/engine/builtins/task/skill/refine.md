@@ -8,7 +8,7 @@ Iteratively refine text through structured feedback.
 
 The launch prompt identifies the reviewer for this exercise.
 
-- **Human reviewer:** use contrasting options to learn their preferences, then
+- **Interactive reviewer:** use contrasting options to learn their preferences, then
   apply what they choose.
 - **Parent reviewer:** diagnose the refinement axis, generate contrasting
   options internally, and select the strongest version using the source text,
@@ -117,7 +117,7 @@ probe: if every option shares the same hidden assumption, it teaches nothing.
 
 ## Questions to ask
 
-Ask these only when a human reviewer is present:
+Ask these only when an interactive reviewer is present:
 
 - "Which feels closer to what you want? What specifically makes it better?"
 - "Is this too formal/casual? Too detailed/vague?"

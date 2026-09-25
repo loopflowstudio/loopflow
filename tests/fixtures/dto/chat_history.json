@@ -36,6 +36,7 @@
       "turn": {
         "id": "turn-7",
         "role": "user",
+        "author_name": "Jack",
         "text": "Keep the saved thread visible while reconnecting.",
         "status": "completed",
         "items": [],

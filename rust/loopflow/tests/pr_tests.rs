@@ -1020,7 +1020,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     assert!(position.is_human());
     let position = runtime
         .block_on(task.store.set_flow_position(&task.task.id, position))
-        .expect("persist human review boundary");
+        .expect("persist review boundary");
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
@@ -1031,7 +1031,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
             .block_on(task.store.flow_position(&task.task.id))
             .unwrap(),
         Some(position),
-        "resume preserves the exact human review boundary"
+        "resume preserves the exact review boundary"
     );
 
     let persisted = runtime

@@ -1,6 +1,6 @@
 //! `lf reply <wave> [message]` — the L2 chat-reply capability as a one-shot
 //! command. Observes the given message(s) for the wave and prints a reply *only
-//! if one is warranted* (a channel may be humans talking to each other). No
+//! if one is warranted* (a channel may be people talking to each other). No
 //! listener, no resident, no governance loop — a direct capability an operator
 //! can invoke, and the same one an independent Discord responder composes.
 

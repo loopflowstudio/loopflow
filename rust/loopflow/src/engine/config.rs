@@ -11,6 +11,45 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::error::LoadError;
 
+/// Request participant carried across foreground launches, including SSH.
+/// An empty value explicitly means unknown; it must not fall back to the host.
+pub const USER_NAME_ENV: &str = "LF_USER_NAME";
+
+#[derive(Debug, Deserialize)]
+struct UserConfig {
+    name: Option<String>,
+}
+
+/// Read the explicitly chosen name from personal configuration only.
+pub fn load_user_name() -> Result<Option<String>, LoadError> {
+    let Some(config) = load_yaml_file(&global_config_path())? else {
+        return Ok(None);
+    };
+    let Some(user) = config.get("user").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
+        LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
+    })?;
+    Ok(user.name.as_deref().and_then(normalize_user_name))
+}
+
+/// Resolve a direct invocation's participant before execution moves Homes.
+pub fn launch_user_name() -> Result<Option<String>, LoadError> {
+    match std::env::var(USER_NAME_ENV) {
+        Ok(name) => Ok(normalize_user_name(&name)),
+        Err(std::env::VarError::NotPresent) => load_user_name(),
+        Err(error) => Err(LoadError::InvalidFlow(format!(
+            "Invalid {USER_NAME_ENV}: {error}"
+        ))),
+    }
+}
+
+pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 /// Agent used when neither the caller, config, nor skill chooses one.
 pub fn default_agent() -> &'static str {
     "codex"
@@ -113,7 +152,7 @@ pub enum LaunchTarget {
 pub struct SessionConfig {
     #[serde(default)]
     pub launch: LaunchTarget,
-    /// Home-local terminal application used to present detached human sessions.
+    /// Home-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
 }

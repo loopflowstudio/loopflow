@@ -16,13 +16,13 @@ lf prompt: tighten wave/infra/GOAL.md
 
 The launch prompt identifies the reviewer for this exercise.
 
-- **Human reviewer:** read any named file, state the contract you see, and ask
+- **Interactive reviewer:** read any named file, state the contract you see, and ask
   only about choices whose answers materially change behavior, scope, or
   authority. Write reversible improvements as decisions land.
 - **Parent reviewer:** treat the supplied directive, quoted user language, and
   existing asset as intent. Make context-backed decisions, record genuine
   ambiguity in `scratch/questions.md`, and use the review protocol to return the
-  exact proposed content. Do not wait for an unavailable human or claim their
+  exact proposed content. Do not wait for an unavailable reviewer or claim their
   confirmation.
 
 ## Choose the artifact
@@ -51,7 +51,7 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
 ## Workflow
 
 1. **Resolve the target.** Infer the artifact kind from the named path or
-   request. Read the existing file when present. If a human request leaves two
+   request. Read the existing file when present. If a user request leaves two
    materially different targets possible, ask one focused question; otherwise
    choose the narrower artifact and proceed.
 
@@ -123,7 +123,7 @@ Write `scratch/security-audit.md` with evidence, severity, and reproduction.
 
 Give procedural skills numbered work and a concrete output. Give exploratory
 skills room to follow evidence without turning “explore” into permission to
-change unrelated code. Skills that may run with a present human must also
+change unrelated code. Skills that may run interactively must also
 define bounded behavior for a headless parent reviewer.
 
 ## Wave goal contract
@@ -162,5 +162,5 @@ ceremony to ordinary deterministic work.
 - Success, insufficiency, boundaries, and proof are explicit where they matter.
 - Observations cannot be silently rewritten to save a hypothesis.
 - Unexpected evidence has a named consequence.
-- Output is useful to the next human or agent.
+- Output is useful to the next reader or agent.
 - Repeated runs can stop without inventing work.

@@ -30,7 +30,7 @@ pub struct WorkActivityEntry {
     pub recorded_at: i64,
     pub summary: String,
     pub work: WorkRef,
-    /// Current human label: Wave name, Project slug, or Task identifier.
+    /// Current display label: Wave name, Project slug, or Task identifier.
     pub subject: String,
     pub fact: WorkActivityFact,
 }

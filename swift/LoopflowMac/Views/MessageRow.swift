@@ -7,7 +7,7 @@ import Loopflow
 /// prose with fenced-code segmentation and a blinking cursor while it streams.
 ///
 /// Tool calls, shell commands, and file edits never render here. Turn and child
-/// failures have their own human-level presentation; the raw execution record
+/// failures have their own user-facing presentation; the raw execution record
 /// stays in the journal.
 ///
 /// Recovered and rebuilt from the conversations `MessageRow` (git 45ab5d36e^),

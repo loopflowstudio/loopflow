@@ -12,9 +12,9 @@ pm:
 
 ## Objective
 
-Loopflow keeps Cube, Etude, Kata, and Hootro moving on work selected by the human.
+Loopflow keeps Cube, Etude, Kata, and Hootro moving on explicitly selected work.
 In every chapter week, at least three have durable Work accurately stating the
-human's desired next focus and verifiable material progress on at least one Task.
+requested next focus and verifiable material progress on at least one Task.
 Product owns external usefulness and the shared user contract across CLI, Mac,
 iOS, agent turns, and workers. Desktop joins current Project/KR/Task intent to
 excellent native Session organization, consuming shared planning, identity, and
@@ -34,7 +34,7 @@ Projects do not own memory, cadence, or child projects.
 ## Process
 
 Read the accepted chapter and synced Projects. Company Dogfood judges complete
-weekly coverage of Cube, Etude, Kata, and Hootro; missing human focus remains
+weekly coverage of Cube, Etude, Kata, and Hootro; missing requested focus remains
 unknown. Sessions, planning churn, runtime settlement, and Loopflow self-hosting
 alone earn no credit for external progress. External Work stays in its own repository.
 
@@ -43,7 +43,7 @@ and native Sessions. Open with LOO-251; use LOO-280 in the same serial slot only
 when its real configured proof is blocked by the Xcode/Ghostty build gap. Follow
 with LOO-284 and the scoped planning/Session integration. Publish measured budgets
 before scoring and retain configured UI/Ask caller-release proof. Keep LOO-185
-parked until human-selected Discord use is blocked by provisioning friction.
+parked until explicitly requested Discord use is blocked by provisioning friction.
 
 Keep one serial implementation slot per Project and preserve capacity for the
 external products. Wave, Project, and Task remain durable Work. Long-lived

@@ -673,7 +673,7 @@ struct SessionsView: View {
             ContentUnavailableView(
                 "No sessions",
                 systemImage: "checkmark.circle",
-                description: Text("Interactive runs and human handoffs appear here until completed.")
+                description: Text("Interactive runs and requests for your input appear here until completed.")
             )
             .frame(maxWidth: .infinity)
             .padding(.top, Spacing.xl)

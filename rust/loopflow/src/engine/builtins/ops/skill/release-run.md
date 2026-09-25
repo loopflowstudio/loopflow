@@ -67,7 +67,7 @@ durable intermediate implements this restart rule.
 
 ## Guardrails
 
-- The version comes from the human or wave config. Don't decide it.
+- The version comes from the user or wave config. Don't decide it.
 - Be concrete in release notes: include real shipped changes, not vague summaries.
 - If required data is missing (tags/gh auth/workflows), state exactly what command failed and what to run.
 

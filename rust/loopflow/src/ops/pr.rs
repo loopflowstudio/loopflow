@@ -726,7 +726,7 @@ pub(crate) enum PrObservation {
     /// The PR number 404s — its ref was deleted remotely. The caller keeps its
     /// cached settled/working state; the merge (if any) is already persisted.
     NotFound,
-    /// A quota, network, or GitHub failure. `reason` is human-facing; the caller
+    /// A quota, network, or GitHub failure. `reason` is user-facing; the caller
     /// preserves its cached state and surfaces the reason as degraded freshness.
     Degraded { reason: String },
 }
@@ -808,7 +808,7 @@ fn is_missing_pr(stderr: &str) -> bool {
     lower.contains("http 404")
 }
 
-/// Turn a failed `gh api` read into a concise, human-facing degraded reason. The
+/// Turn a failed `gh api` read into a concise, user-facing degraded reason. The
 /// quota case is called out by name because exhausted API budgets are a
 /// recurring dogfood failure.
 fn classify_pr_read_failure(number: u32, stderr: &str) -> String {

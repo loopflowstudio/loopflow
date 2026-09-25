@@ -158,7 +158,7 @@ hosting must not become a prerequisite for Task or Project progress.
 
 At checkpoint `11fa65881`, Project execution and Task first/loop/finally policy
 are removed. `task_flow_positions` holds the saved invocation, cursor, worker
-claim, human Session evidence, and unsafe blocker. The executor advances that
+claim, review Session evidence, and unsafe blocker. The executor advances that
 position directly; Task's synthetic Wave Playhead/body/event adapter is gone.
 A worker currently settles one boundary and launches another worker for the
 next autonomous boundary. This is narrower than the design's one worker running
@@ -171,12 +171,12 @@ post-completion trigger policy remain unresolved.
 ### Preserve these boundaries
 
 - Compile expanded definitions at invocation creation. Resume autonomous and
-  human Skills from saved content, even when source changes or disappears.
+  review Skills from saved content, even when source changes or disappears.
   Catalog validation belongs to new selection, not recovery of a saved Flow.
-- Invocation identity must participate in claims and human Session tokens.
+- Invocation identity must participate in claims and review Session tokens.
   Version and worker generation fence distinct races; restart may reuse their
   numbers, so neither alone identifies the invocation. Validate the launch
-  capability before preparation side effects. Never reconstruct a newer human
+  capability before preparation side effects. Never reconstruct a newer review
   position for a late child.
 - Worker settlement belongs to Task transactions that atomically fence the
   cursor and write timestamps/events without overwriting newer Task facts.
@@ -185,7 +185,7 @@ post-completion trigger policy remain unresolved.
   position unchanged, and accepted evidence appears once.
 - Interruption retains the cursor; nonfinal completion advances once; final
   completion keeps the last valid cursor until the transaction removes the row.
-  Task completion must never inherit Wave root wraparound. Human Approve and
+  Task completion must never inherit Wave root wraparound. Approve and
   Iterate compare exact saved evidence and clear Session binding on transition.
 - Ordinary provider errors remain Run evidence and release the exact claim.
   Unsafe persisted state uses `TaskFlowBlocker`; a missing executable definition
@@ -231,7 +231,7 @@ Run or settle the broader cutover obligations below; no full CI pass is claimed.
 LOO-286 retains the configured CLI/Home/app proof: a real finite Project Run;
 concurrent Task starts converging on one owned worker; actual provider death and
 same-cursor replacement; late-result rejection; helpers unable to settle; and
-exact human continuation across app close/reopen with the optional service
+exact session continuation across app close/reopen with the optional service
 stopped. Repeat Flow selection after changing planning input and prove the old
 worker recorded no successor intent. Capture receipts, Run ids, invocation,
 version/generation, Session token, process evidence, and truthful failure/wait
@@ -242,13 +242,13 @@ The later slice review's approval does not settle all retained counterexamples.
 Source inspection during this curation still finds `work_domain_state` dropping
 Task controller progress; `task_worker_claim` copies only existing position rows.
 Its test explicitly expects no row for controller-only progress and retains the
-old human row for a newer controller cursor. Historical Project positions are
+old review row for a newer controller cursor. Historical Project positions are
 also discarded. Preserve/dispose that evidence explicitly before claiming
 lossless cutover; the green migration test does not establish that contract.
 Wave startup now stops at historical definitions and exposes explicit restart,
 which repairs the earlier silent reset at the source level.
 
-Recorded focused cursor/store/human/DTO checks and static analysis passed in the
+Recorded focused cursor/store/review/DTO checks and static analysis passed in the
 compression checkpoints. The earlier full library run had two environment-shared
 failures that passed only in isolation; no subsequent full-green run, configured
 provider recovery, or desktop proof is recorded. This curation ran no behavioral
@@ -260,7 +260,7 @@ architecture checks are supporting evidence, never acceptance on their own.
 Two one-way deletions removed competing execution authority: `a7044e2b5`
 (2026-07-18) removed Session/body leases; `5f7f66833` (2026-08-25) removed the
 Invocation/Epoch/Basis stack and the four-day-old `run_liveness` reconciler
-introduced by `521ae7d3f`. Durable Work, attributed Runs, Steers, exact human
+introduced by `521ae7d3f`. Durable Work, attributed Runs, Steers, exact review
 boundaries, and process evidence survived. `fa0186c4d` (2026-08-28) separated
 Work from optional controllers but left launch/recovery dependencies. Prompt
 fallback was added (`d76118b7b`), deleted (`309575f8e`), and restored
@@ -269,7 +269,7 @@ operation; deleting recovery prose alone has already failed once.
 
 The app repeatedly replaced control rooms and Ask/attention models; shared
 records survived. Keep UI as projection and trigger. Preserve last-good evidence
-and missingness, use real Runs and human Sessions, and never invent a synthetic
+and missingness, use real Runs and review Sessions, and never invent a synthetic
 controller Session or app scheduler. Historical generic `advance_work` proposals
 in the research are superseded by Task-only execution; they are not a mandate
 to restore Wave/Project cursor symmetry.
@@ -309,7 +309,7 @@ launch lock nor establishes a deployed execution cutover.
 - **Sample execution and lifecycle once per Task detail.** TaskExecutionSnapshot
   projects the existing FlowPosition/claim/process evidence for status,
   conditions, actions, and roadmap. Current non-idle evidence wins over dirty
-  progress and next-launch configuration failure. An unresolved human boundary
+  progress and next-launch configuration failure. An unresolved review boundary
   still yields a waiting condition on terminal Work. Keep lifecycle, worker
   evidence, and UI condition distinct; remove parallel derived Session booleans.
   Run attribution does not acquire advancement or process-control authority.
@@ -388,7 +388,7 @@ reported main-rebase failure or its preservation obligations.
   and custom `LF_INSTALL_DIR`, but no source WorkingDirectory or Python. The
   accepted cadence is login plus weekly by default (Monday 09:00), with daily
   09:00, hourly, or five-minute clock intervals available explicitly through
-  `lf install schedule [weekly|daily|hourly|5min]`. The human clarified that
+  `lf install schedule [weekly|daily|hourly|5min]`. The clarified requirement is that
   cadence is positional, without `--every`. Calendar scheduling should coalesce
   sleeping intervals. The concurrent scheduling receipt records a public-CLI
   cadence matrix and static passes with simulated launchctl; match final proof
@@ -545,7 +545,7 @@ local configuration, optional provider connection and later PM setup. Today's
 - **Execution authority changed on the Task-worker branch.** The former
   resident session, lifecycle/gate epochs, mutable Flow pins, and parent Turn
   Basis are historical models. Use the Task execution section above for current
-  ownership, human decisions, failure evidence, and migration constraints.
+  ownership, recorded decisions, failure evidence, and migration constraints.
 - **Performance evidence preserves missingness at every boundary** (learned
   2026-07-21). A provider receipt absent, one missing field, and a reported
   zero are distinct facts; the first accepted per-Turn receipt wins and a
@@ -560,11 +560,11 @@ local configuration, optional provider connection and later PM setup. Today's
 
 - **Three nouns, distinguished by kind, not size.** Wave = durable operating context (memory, cadence, budget, chat, project selection). Project = one measured bet inside exactly one wave, a definition plus KRs. Task = a concrete change. No project trees, no orphan projects.
 - **Where each noun lives.** Wave = `wave/<wave>/` (`GOAL.md` + `MEMORY.md`). Project = a Linear Project under that Wave's Initiative. Task = a Linear Issue under exactly one Project. Local Project and roadmap mirrors are deleted; SQLite is a read model, not a second authoring surface.
-- **Native Linear hierarchy (shipped, jack-heart/infra): Wave → Linear *Initiative*, Project → Linear *Project*, Task → Linear *Issue*.** Supersedes the label model below. The wave anchors on `pm.linear_initiative`; `lf pm init` creates the Initiative, migrates each legacy `project:<slug>`-labeled issue into a native Linear Project (moving it via `move_item_to_project`), writes `linear_initiative`, and drops `pm.linear_project` **only** once every legacy task carried exactly one recognized label. A task with zero or >1 recognized labels is left behind, `pm.linear_project` is retained, and the `unmigrated` count is reported so a human assigns the label and re-runs `pm init`. Project **definition + KRs live in Linear Project `content`** (`## Definition` / `## KRs` checkbox Markdown), the one-line summary in `description`; Loopflow parses them into typed `PmProject { slug, summary, definition, krs: Vec<PmKr{text,holds}> }` rather than leaking the storage convention. `holds` is a human/loop `[x]` judgment, not derived evidence. A **duplicate or empty derived slug is a hard drift error** (silently choosing one would weaken exactly-one-wave). Seeding is **restart-safe**: `pm init` writes a transient `pm.linear_seed_pending` marker after creating the Initiative and before seeding Projects, resumes only the missing Projects on re-run, and clears the marker on clean completion. Linear permits a Project in many Initiatives; Loopflow enforces exactly-one-*wave* at its own layer and leaves unrelated associations alone. No local Project cache survives as an alternate source of truth.
+- **Native Linear hierarchy (shipped, jack-heart/infra): Wave → Linear *Initiative*, Project → Linear *Project*, Task → Linear *Issue*.** Supersedes the label model below. The wave anchors on `pm.linear_initiative`; `lf pm init` creates the Initiative, migrates each legacy `project:<slug>`-labeled issue into a native Linear Project (moving it via `move_item_to_project`), writes `linear_initiative`, and drops `pm.linear_project` **only** once every legacy task carried exactly one recognized label. A task with zero or >1 recognized labels is left behind, `pm.linear_project` is retained, and the `unmigrated` count is reported so the operator assigns the label and re-runs `pm init`. Project **definition + KRs live in Linear Project `content`** (`## Definition` / `## KRs` checkbox Markdown), the one-line summary in `description`; Loopflow parses them into typed `PmProject { slug, summary, definition, krs: Vec<PmKr{text,holds}> }` rather than leaking the storage convention. `holds` is an explicit `[x]` judgment, not derived evidence. A **duplicate or empty derived slug is a hard drift error** (silently choosing one would weaken exactly-one-wave). Seeding is **restart-safe**: `pm init` writes a transient `pm.linear_seed_pending` marker after creating the Initiative and before seeding Projects, resumes only the missing Projects on re-run, and clears the marker on clean completion. Linear permits a Project in many Initiatives; Loopflow enforces exactly-one-*wave* at its own layer and leaves unrelated associations alone. No local Project cache survives as an alternate source of truth.
 - **Superseded — label model (PR #852):** one Linear project per wave, Loopflow projects as `project:<slug>` issue labels. Was the incremental-migration bridge; the native hierarchy above replaces it and reads legacy labels only as migration input.
 - **Open (native hierarchy):** standing quality-frontier projects have no natural Linear completion date; the API allows date-less projects, so leaving frontier bets undated is a product convention, not a schema blocker — don't force a target date on them.
 - **Vocabulary discipline.** Say "Linear project" for the Linear object, "project" for a Loopflow measured bet. No fourth noun — "space" and "provider container" were considered and rejected as user-facing words.
-- **`sync --plan` diagnoses; it never guesses.** It reports renamed/stranded Linear projects, unassigned tasks, and labels naming no local project. Ambiguous task moves stay in the plan output for a human.
+- **`sync --plan` diagnoses; it never guesses.** It reports renamed/stranded Linear projects, unassigned tasks, and labels naming no local project. Ambiguous task moves stay in the plan output for review.
 - **Open question:** `lf pm doctor` and `lf pm sync --plan` are byte-for-byte identical (both call `pm_sync` with `plan: true`). `doctor` earns its keep only as a memorable read-only verb. Collapsing it is a product-surface call, deliberately left to Jack.
 
 ## Earlier follow-ups (reselect through the accepted chapter)

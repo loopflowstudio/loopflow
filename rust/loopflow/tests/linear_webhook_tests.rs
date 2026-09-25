@@ -36,6 +36,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         actor_id: Some("user-human".to_string()),
     };
     let comment = |id: &str, author: &str| WebhookEvent::Comment {
+        author_name: Some(if author == VIEWER { "Maya" } else { "Jack" }.to_string()),
         issue_id: issue_id.clone(),
         comment_id: id.to_string(),
         revision: None,
@@ -93,7 +94,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         .expect("comment redelivery");
     assert_eq!(outcome, WebhookOutcome::Comment { delivered: false });
 
-    // A human using Loopflow's authenticated account also reaches the worker.
+    // Someone using Loopflow's authenticated account also reaches the worker.
     let outcome = rt
         .block_on(ingest_event(
             &task.store,
@@ -109,6 +110,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         .block_on(ingest_event(
             &task.store,
             WebhookEvent::Comment {
+                author_name: None,
                 issue_id: "issue-unknown".to_string(),
                 comment_id: "c-x".to_string(),
                 revision: None,
@@ -125,4 +127,6 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     assert_eq!(steers.len(), 3);
     assert!(steers[0].text.contains("New title"));
     assert!(steers[1].text.contains("please prioritize"));
+    assert!(steers[1].text.contains("by \"Jack\""));
+    assert!(steers[2].text.contains("by \"Maya\""));
 }

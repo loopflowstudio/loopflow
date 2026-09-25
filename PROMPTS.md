@@ -24,7 +24,7 @@ The guide reaches each audience deliberately:
 
 | Surface | Who reads it | When |
 | --- | --- | --- |
-| `PROMPTS.md` and `/docs/prompts` | Human and agent prompt authors | While creating or auditing prompt assets |
+| `PROMPTS.md` and `/docs/prompts` | Prompt authors | While creating or auditing prompt assets |
 | `lf prompt` | Customer prompt authors with an idea or existing file | On demand; the bundled skill carries the compressed authoring method |
 | `LOOPFLOW.md` | Every standard Loopflow run | Once per launch; universal execution invariants only |
 | Selected skill or goal | The agent doing that kind of work | At execution time; specialized doctrine only |
@@ -67,8 +67,8 @@ produces: scratch/something.md | code changes | verdict
 ```
 
 Skill frontmatter configures the work, not its launch surface. Direct TTY
-invocations have a present human; automated and `--batch` invocations are
-headless. Put a required User gate on the exact flow occurrence instead:
+invocations run interactively; automated and `--batch` invocations are
+headless. Put a required review gate on the exact flow occurrence instead:
 
 ```yaml
 - step:
@@ -222,11 +222,21 @@ Not every prompt needs every section. Short prompts can skip Goal if the opening
 
 ## Voice
 
+**Names in artifacts, “you” in sessions.** Prompts should model the writing
+they ask for. Saved Tasks, PRs, designs, memory, reports, and decision summaries
+name the people they describe: “Jack chose the prototype path.” Session replies
+address the person directly: “You chose the prototype path.” Transcript storage
+does not turn conversation into an artifact; extracting a summary does. Output
+templates should ask for named decisions, not “human reasoning” or ambiguous
+“your feedback.” Preserve unknown authorship instead of guessing a name from
+an account, machine, or assignment. Generic instructions can name a role when
+needed; authored prose should read like something its readers would write.
+
 **Direct and imperative.** "Run tests." "Read the diff." Not "You should run tests" or "It's a good idea to read the diff."
 
 **No identity framing.** Don't tell the agent what it is. "You are a code reviewer..." or "Your role is to..." assigns identity. Just instruct. Using "you" is fine—"Run tests and verify you see green" is direct and clear.
 
-**Write for humans and agents alike.** The same words should make sense whether read by a person or executed by an LLM. "Identify where architecture and product intent are misaligned" works for both. "Think about what the user might want" doesn't.
+**Write for people and agents alike.** The same words should make sense whether read by a person or executed by an LLM. "Identify where architecture and product intent are misaligned" works for both. "Think about what the user might want" doesn't.
 
 **Opinionated, not balanced.** If there's a right way, say so. "The best reduction isn't deleting a function—it's reshaping a structure so three special cases become one."
 
@@ -370,7 +380,7 @@ Action goals can include light process for system navigation. Perspective goals 
 
 **Loopflow system concepts are fine:** `wave/`, `scratch/`, frontmatter, areas, flows—these are part of how loopflow works and belong in goals.
 
-**Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for humans on mobile, LLMs using browser tools, or any other user type."
+**Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for people on mobile and agents using browser tools."
 
 The goal should work for any codebase using loopflow, not just the one where it was written.
 
@@ -392,11 +402,11 @@ Two modes for the same concern:
 
 **Big prompts (`-big`)**: Strategic assessment for steering.
 - Broad: look at the whole codebase or system
-- Produce documentation for human review
+- Produce documentation for review
 - Identify highest-leverage changes
 - "What should we focus on?"
 
-## Outputs for humans
+## Outputs for readers
 
 **Write for the reader's next decision.** Someone returning from vacation should
 understand what matters before opening tools. Name the reader, what they already know,
@@ -441,7 +451,7 @@ resist entropy.
 Opening lines that work:
 - "Does this work? Ship or iterate?"
 - "Simplify code touched by this branch while preserving user behavior."
-- "Look at this codebase through a user's eyes—human or digital."
+- "Look at this codebase through its users' eyes."
 - "Investigate the approach in the current diff and consider alternatives."
 
 Opening lines that don't work:
@@ -458,7 +468,7 @@ Before committing a prompt:
 - [ ] Success, insufficient outcomes, boundaries, and proof are explicit when
       ambiguity would change the result
 - [ ] No identity framing ("You are...", "Your role is...")
-- [ ] Language works for both human readers and LLM executors
+- [ ] Language works for both readers and agents
 - [ ] Workflow steps are concrete and numbered
 - [ ] Uncertain work separates observations from hypotheses and says what to do
       when evidence contradicts the plan

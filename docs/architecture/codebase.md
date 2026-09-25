@@ -18,7 +18,7 @@ complexity.
 | Territory | Main paths | Approx. LOC | Owns |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | command grammar, dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, human sessions, PR, Git, release, metrics, PM |
+| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, sessions, PR, Git, release, metrics, PM |
 | Prompt and process engine | `rust/loopflow/src/engine/`, `src/harness/` | 29,300 | Skill/Flow discovery, prompt assembly, provider subprocess streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task PR identity, planning-provider models |
 | Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
@@ -76,7 +76,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | --- | --- |
 | `lf <skill>`, `lf flow` | direct execution and composition |
 | `lf wave`, `project`, `task`, `work` | planning and Work coordination |
-| `lf ask`, `session` | durable human Sessions and resolution |
+| `lf ask`, `session` | durable Sessions and resolution |
 | `lf wt`, `commit`, `rebase`, `pr`, `ci` | worktree and delivery operations |
 | `lf runs`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |

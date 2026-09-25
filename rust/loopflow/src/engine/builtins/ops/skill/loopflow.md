@@ -13,13 +13,13 @@ At the beginning of every User turn, and again after any Session mutation, run:
 lf session list --json
 ```
 
-Treat that command as the only current unresolved human-work state. Never rely
+Treat that command as the only current unresolved work awaiting review. Never rely
 on Session content remembered from an earlier turn or embedded in the launch
 prompt.
 
 The list is scoped to the repository this conversation runs in: worktrees
-collapse to their main checkout, and human steps from other repositories are hidden.
-Add `--all` to see every repository's human steps on this machine. The same
+collapse to their main checkout, and review steps from other repositories are hidden.
+Add `--all` to see every repository's review steps on this machine. The same
 repository scope governs `lf ls` and `lf roadmap` (both take `--all`); `lf
 status` is already single-Wave and repo-resolved.
 
@@ -30,7 +30,7 @@ states plainly.
 
 Normal Loopflow inspection commands remain available here. Questions for this
 present User stay in this conversation. A separate Work perspective is an
-ordinary `lf --as <work> : "<prompt>"` Run. `lf ask` creates a new human session,
+ordinary `lf --as <work> : "<prompt>"` Run. `lf ask` creates a new session,
 so do not use it merely to reach the User already here.
 
 ## Launching work
@@ -58,7 +58,7 @@ lf task run <existing-issue> --flow <chosen-flow>
 Stdin becomes the durable Task description; `--directive` supplies worker
 direction and does not replace that brief.
 
-Use an explicit human-selected `--flow`; otherwise use the Wave chapter's current
+Use an explicit `--flow` the user selected; otherwise use the Wave chapter's current
 recommendation. Read the actual Flow before describing its review gates. Do not
 infer policy from obsolete fix/feature flags or first/loop/finally settings.
 
@@ -68,7 +68,7 @@ its current internal Project is resolved automatically.
 
 ## Existing-design handoff
 
-When the human asks to file a Task and run a Flow from an existing design,
+When the user asks to file a Task and run a Flow from an existing design,
 keep the design separate. Reuse the Task if it is the same work; otherwise file
 a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
@@ -93,7 +93,7 @@ tree enters worker context; other assets remain on disk. Preserve material
 needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
-Use the human-selected Flow and inspect its contents when explaining where it
+Use the Flow the user selected and inspect its contents when explaining where it
 begins; otherwise use the Wave chapter recommendation. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Flow, and observed launch result. Verify

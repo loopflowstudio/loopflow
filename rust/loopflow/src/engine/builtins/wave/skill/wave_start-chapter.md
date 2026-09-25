@@ -2,7 +2,7 @@
 requires: a bound Wave or a proposed new Wave in the accepted direction
 produces: one fresh chapter plan, deterministic preview, agree or challenge upward
 ---
-Shape this Wave's next chapter from accepted human direction and dated evidence.
+Shape this Wave's next chapter from accepted user direction and dated evidence.
 The Wave is durable; its one internal Project is replaced every chapter. Users
 choose Waves and Tasks. Never propose a Project portfolio or delegate to a
 Project planning tier.
@@ -13,7 +13,7 @@ Read this exact Wave's GOAL.md, MEMORY.md, chapter review, and current
 `lf status <wave> --json`. The mandate and memory endure; chapter metric targets,
 KRs, Flow recommendations, and unopened backlog do not inherit authority.
 Use the parent's accepted direction when supplied. Return a material challenge
-to that parent instead of opening another human session. With a human present,
+to that parent instead of opening another session. In an interactive session,
 ask in the conversation. Standalone headless work without accepted direction
 uses `lf ask` for judgment before settling the proposal.
 
@@ -80,7 +80,7 @@ update the problem and desired experience. Keep blockers and decisions that affe
 choice visible, with links to evidence.
 
 Preserve earlier reasoning in durable records without making readers replay every
-checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+checkpoint. Retain unresolved constraints, contrary evidence, and recorded decisions.
 Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
 Link related work where you explain its relevance. In prose and PR bodies, use

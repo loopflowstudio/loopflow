@@ -71,7 +71,7 @@ impl OccurrencePolicy {
         }
         if self.human && self.id.is_none() {
             return Err(LoadError::InvalidFlow(
-                "human skill nodes require a stable id".to_string(),
+                "review steps require a stable id".to_string(),
             ));
         }
         Ok(())
@@ -1219,7 +1219,7 @@ mod tests {
         let flow = load_flow("outer", tmp.path()).unwrap();
         let items = expand_flow(&flow, tmp.path()).unwrap();
         let ConcreteStep::Skill(step) = &items[1] else {
-            panic!("nested human node must expand to a skill")
+            panic!("nested review node must expand to a skill")
         };
         assert_eq!(step.policy.id.as_deref(), Some("review_kickoff"));
         assert!(step.policy.human);

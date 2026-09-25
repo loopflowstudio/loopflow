@@ -239,9 +239,9 @@ The Mac composer and `lf chat "text"` post through the bot, visibly prefix the
 message with the Wave name, and preserve message or bare interrupt intent
 when the provider echo reaches the listener. The Open in Discord action stays
 beside the native composer. A provider failure never falls through to a hidden
-local message. Human and agent speech appears only after Discord returns its
-provider message id. Deterministic send intents, cursors, source links, and
-direct provider receipts remain durable; harness conversation and usage
+local message. A message appears only after Discord returns its provider message
+id, whether it came from a user or an agent. Deterministic send intents, cursors,
+source links, and direct provider receipts remain durable; harness conversation and usage
 evidence belongs to Home-local Run records.
 
 `home_id` is the portable binding owner (`lf home id`) and must match the Wave's
@@ -432,7 +432,7 @@ lf task run INF-125 --flow incident
 Task Work advances through one active remote branch and PR to `main`. Its chapter
 may recommend one Flow; `--flow` overrides it for this Task worker. Launch pins
 the complete Flow definition and exact position until it completes or parks at
-a human boundary. Completion clears that Flow state and leaves the Task open
+a review boundary. Completion clears that Flow state and leaves the Task open
 for a later worker or explicit delivery command. After a merge or abandonment,
 Loopflow rotates the worktree onto the next branch. The Task inherits the
 wave's `GOAL.md` and `MEMORY.md` plus its current chapter KRs and metric targets.

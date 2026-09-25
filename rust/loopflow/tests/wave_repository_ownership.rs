@@ -282,7 +282,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(!human_list
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
-    // `--all` brings beta's repository back into the human listing.
+    // `--all` brings beta's repository back into the readable listing.
     let human_all = String::from_utf8(lf_output(&home, &repo_a, &["ls", "--all"]).stdout).unwrap();
     assert!(human_all
         .lines()

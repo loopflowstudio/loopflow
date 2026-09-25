@@ -512,7 +512,7 @@ async fn settle_claimed_task_position(
             .current()
             .policy
             .id
-            .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
+            .ok_or_else(|| anyhow!("Task review step has no stable node id"))?;
         checkpoint_worktree_before_human(task, &node_id).await;
         crate::ops::human_session::prepare(store, task, &next).await?;
         return Ok(());
@@ -584,15 +584,15 @@ pub(crate) async fn decide_human_flow_step(
 ) -> Result<()> {
     let text = text.trim();
     if text.is_empty() {
-        anyhow::bail!("human flow settlement text cannot be empty");
+        anyhow::bail!("review decision text cannot be empty");
     }
     if !crate::ops::human_session::token_is_current(store, token).await? {
-        anyhow::bail!("human flow session is stale");
+        anyhow::bail!("review session is stale");
     }
     let expected = store
         .flow_position(&token.task_id)
         .await?
-        .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
+        .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
     let mut task = load_task(store, &token.task_id).await?;
     let mut position = expected.clone();
     let step = position.current();
@@ -603,7 +603,7 @@ pub(crate) async fn decide_human_flow_step(
         || step.iteration != token.iteration
         || step.flow != token.flow
     {
-        anyhow::bail!("human flow session no longer matches the Task Flow position");
+        anyhow::bail!("review session no longer matches the Task Flow position");
     }
 
     let (iterate_direction, flow_completed) = match decision {
@@ -619,7 +619,7 @@ pub(crate) async fn decide_human_flow_step(
             position.iteration = iteration;
             (
                 Some(format!(
-                    "Human requested another iteration on flow node {}: {text}",
+                    "Another iteration was requested for step {}: {text}",
                     token.node_id
                 )),
                 false,
@@ -675,7 +675,7 @@ pub(crate) async fn ensure_flow_position(
             .current()
             .policy
             .id
-            .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
+            .ok_or_else(|| anyhow!("Task review step has no stable node id"))?;
         checkpoint_worktree_before_human(&task, &node_id).await;
         crate::ops::human_session::prepare(store, &task, &candidate).await?;
     }
@@ -692,7 +692,7 @@ fn preceding_autonomous_step(invocation: &QueuedInvocation, current: u32) -> Res
             matches!(step, crate::engine::ConcreteStep::Skill(skill) if !skill.policy.human)
         })
         .map(|(index, _)| index as u32)
-        .ok_or_else(|| anyhow!("human Task flow node has no preceding autonomous skill"))
+        .ok_or_else(|| anyhow!("Task review step has no preceding autonomous skill"))
 }
 
 fn finish_task_flow_turn(position: &mut FlowPosition, status: Lifecycle) -> Result<bool> {
@@ -738,18 +738,18 @@ fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &
     }
 }
 
-/// A human FlowStep can outlive this machine's uptime; nothing the Task produced
+/// A review FlowStep can outlive this machine's uptime; nothing the Task produced
 /// may exist only in the local worktree while it waits. Failure to checkpoint
 /// (offline, no remote) must never block the park itself.
 async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
     if let Err(error) = crate::ops::checkpoint_task_worktree(
         task.worktree.clone(),
         task.plan.identifier.clone(),
-        format!("checkpoint: park at human node {node_id}"),
+        format!("checkpoint: park at review node {node_id}"),
     )
     .await
     {
-        tracing::warn!(task = %task.id, %error, "Task parks at a human node without a pushed checkpoint");
+        tracing::warn!(task = %task.id, %error, "Task parks at a review node without a pushed checkpoint");
     }
 }
 
@@ -1125,7 +1125,7 @@ mod planning_tests {
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
         // The Task worktree must never be the real checkout: parking at a
-        // human node checkpoint-commits the worktree, and a test must not
+        // review node checkpoint-commits the worktree, and a test must not
         // commit or push the developer's repo.
         let worktree = tempfile::tempdir().unwrap().keep();
         let git = |args: &[&str]| {
@@ -1178,8 +1178,8 @@ mod planning_tests {
             plan: ProjectPlan {
                 id: LinearProjectId::new("human-task-project").unwrap(),
                 slug: "human-task-proof".to_string(),
-                name: "Human Task proof".to_string(),
-                prompt_context: "Prove durable human flow nodes.".to_string(),
+                name: "Review Task proof".to_string(),
+                prompt_context: "Prove durable review steps.".to_string(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
@@ -1193,7 +1193,7 @@ mod planning_tests {
             plan: TaskPlan {
                 id: LinearIssueId::new("human-task-issue").unwrap(),
                 identifier: "TEST-1".to_string(),
-                title: "Human Task proof".to_string(),
+                title: "Review Task proof".to_string(),
                 description: "Stop at review_kickoff.".to_string(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
@@ -1414,6 +1414,7 @@ mod planning_tests {
                 title: task.plan.title.clone(),
                 description: task.plan.description.clone(),
                 comments: vec![crate::pm::IssueComment {
+                    author_name: None,
                     id: "c-1".into(),
                     revision: Some(comment_revision.into()),
                     body: body.into(),
@@ -1468,6 +1469,7 @@ mod planning_tests {
             1
         );
         let event = crate::webhook::WebhookEvent::Comment {
+            author_name: None,
             issue_id: task.plan.id.as_str().into(),
             comment_id: "c-1".into(),
             revision: Some("2026-09-24T00:00:00Z".into()),

@@ -40,7 +40,7 @@ impl GitOperationId {
 ///
 /// `id` is the only authority: an exact match on `LF_GIT_OPERATION_ID`
 /// authorizes a recovery child to continue or abort. Everything else is
-/// evidence for a human reading this record during an incident — `root_pid`
+/// evidence for whoever reads this record during an incident — `root_pid`
 /// names the owner in refusals, and the trace ids link it to the journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GitOperationOwner {

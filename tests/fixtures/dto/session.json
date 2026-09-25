@@ -9,7 +9,7 @@
   "detail": "review-design",
   "cwd": "/src/loopflow.task",
   "state": "ready",
-  "ready_summary": "The design now matches the human's intent.",
+  "ready_summary": "The design now reflects Jack's requested changes.",
   "open_argv": [
     "lf",
     "session",

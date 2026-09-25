@@ -128,7 +128,7 @@ wave/                     # Wave goals and memory (persists)
 
 ## For agents
 
-Every human docs URL serves HTML. The reviewed Markdown source remains
+Every documentation URL serves HTML. The reviewed Markdown source remains
 available to agents: append `.md` to the URL (`/docs/waves.md`) or request the
 canonical URL with `Accept: text/markdown`. The curated index is
 [/llms.txt](/llms.txt); the complete corpus in one file is

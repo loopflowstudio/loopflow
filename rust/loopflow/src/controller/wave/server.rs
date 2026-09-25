@@ -23,7 +23,7 @@
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
 //!   passes 12; absent means the whole thread.
-//! - `GET /events` → SSE, the served mind's thread. Human subscriptions replay
+//! - `GET /events` → SSE, the served mind's thread. Client subscriptions replay
 //!   the most recent 12 turns by default; optional `?limit=N` overrides that
 //!   tail while every subsequent turn still streams live. Resident inbox
 //!   subscriptions remain complete.
@@ -37,7 +37,7 @@
 //!     under the same id — each frame replaces the client's previous state
 //!     for that id (upsert, never append-if-seen).
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
-//!     is an [`InboxFrame`] — a resident-directed human message, typed Task or
+//!     is an [`InboxFrame`] — a resident-directed chat message, typed Task or
 //!     Project observation, promotion wake, or control op. The pending queue
 //!     (journaled inputs not yet named in any `answers`) replays on
 //!     connect, then live ops stream; a bare interrupt rides live-only with
@@ -54,9 +54,10 @@
 //!   - `GET /resident/context` → `{playhead, provider_session}` — the
 //!     pre-turn snapshot and optional typed provider thread; serving it drains
 //!     pending child observations first.
-//! - `POST /messages {id?, op, text}` → `{message, state, epoch}`. `op` is
+//! - `POST /messages {id?, op, text, author_name?}` → `{message, state, epoch}`. `op` is
 //!   required — `"message"` (observed on the channel) or `"interrupt"`
 //!   (cancel the open turn with empty text; a no-op while idle).
+//!   `author_name` is display data captured by the sender; absence stays unknown.
 //!   A message requires text; an interrupt requires empty text (400
 //!   otherwise). A local epoch journals immediately; a Discord epoch uses
 //!   `id` as an enforced provider nonce and returns the source-bearing provider
@@ -264,6 +265,7 @@ struct PostMessage {
     id: Option<String>,
     op: MessageOp,
     text: String,
+    author_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -640,7 +642,13 @@ async fn messages_handler(
                 .map(str::to_string)
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             return match discord
-                .post_authored(&state.runtime, body.op, body.text.trim(), &request_id)
+                .post_authored(
+                    &state.runtime,
+                    body.op,
+                    body.text.trim(),
+                    &request_id,
+                    body.author_name.as_deref(),
+                )
                 .await
             {
                 Ok(message) => Json(PostMessageResponse {
@@ -667,7 +675,10 @@ async fn messages_handler(
             };
         }
     }
-    let turn = match state.runtime.try_deliver_authored(body.op, body.text) {
+    let turn = match state
+        .runtime
+        .try_deliver(body.op, body.text, body.author_name)
+    {
         Ok(turn) => turn,
         Err(error) => {
             let status = match &error {
@@ -693,7 +704,7 @@ async fn messages_handler(
     .into_response()
 }
 
-/// The served mind's thread as SSE. Human subscriptions open with epoch and
+/// The served mind's thread as SSE. Client subscriptions open with epoch and
 /// backing health, then carry source-bearing `message` frames and plain
 /// `message-delta` increments. Resident inbox subscriptions keep the private
 /// `turn`/`turn-delta` wire. Both emit `resync` when a turn broadcast lags so
@@ -820,7 +831,7 @@ async fn events_handler(
             .chain(inbox_replay)
             .chain(chat_tail_replay),
     );
-    // The resident keeps private turn frames; human chat converts the same
+    // The resident keeps private turn frames; chat converts the same
     // broadcasts into source-bearing messages. Both make lag an explicit
     // `resync`, never a silent drop.
     let live_turns: BoxedEventStream = if include_inbox {
@@ -1286,6 +1297,16 @@ mod tests {
         ));
         let response: PostMessageResponse =
             serde_json::from_str(fixture).expect("decode post message response fixture");
+        assert_eq!(
+            response
+                .message
+                .as_ref()
+                .unwrap()
+                .turn
+                .author_name
+                .as_deref(),
+            Some("Jack")
+        );
         let encoded = serde_json::to_string(&response).expect("encode post message response");
         let decoded: PostMessageResponse =
             serde_json::from_str(&encoded).expect("re-decode post message response");

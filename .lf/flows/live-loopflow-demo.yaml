@@ -1,0 +1,19 @@
+# Bounded real-provider transport demonstration for LOO-295.
+- step:
+    id: approve_walkthrough
+    name: live-loopflow/review
+    human: true
+- step:
+    id: write_walkthrough
+    name: live-loopflow/write
+- step:
+    id: decide_walkthrough
+    name: loop-decide
+    repeat:
+      from: write_walkthrough
+- step:
+    id: demonstrate_walkthrough
+    name: demo
+    human: true
+    repeat:
+      from: write_walkthrough

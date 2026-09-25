@@ -265,6 +265,8 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionC
 /// that is exactly the stranding this resolver exists to prevent, so the
 /// control override is deliberately skipped: `LF_BIN` (the current Home), then
 /// the installed `lf` on `PATH`, then this executable, then the bare name.
+/// An uninstalled development process continues through its own executable:
+/// PATH's installed artifact owns a different Home and cannot read its IDs.
 pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
     if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
         return bin;
@@ -273,6 +275,15 @@ pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return PathBuf::from(trimmed);
+        }
+    }
+    if !crate::build_info::provenance().is_release()
+        && crate::machine_install::selection_for_current_executable()
+            .is_ok_and(|selection| selection.is_none())
+    {
+        let development = resolve_lf_binary();
+        if development.is_absolute() {
+            return development;
         }
     }
     if let Some(installed) = which_on_path(Path::new("lf")) {
@@ -490,7 +501,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY; export LF_USER_NAME=\"\"";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_FLOW_STEP LF_HUMAN_SESSION LF_HUMAN_SESSION_RUN_BIND LF_RUN_DIR LF_RUN_CONTEXT LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY; export LF_USER_NAME=\"\"";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {

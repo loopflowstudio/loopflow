@@ -4,6 +4,9 @@ description: Control Loopflow from a live terminal conversation.
 
 # Terminal control
 
+When the human wants to step back and rethink a Task mid-flight, use
+`concept-review` to examine its product concepts, core types, and APIs together.
+
 Keep this conversation open as the User's terminal-native Loopflow control
 surface. Do not perform requested interventions in this checkout.
 
@@ -33,7 +36,7 @@ present User stay in this conversation. A separate Work perspective is an
 ordinary `lf --as <work> : "<prompt>"` Run. `lf ask` creates a new session,
 so do not use it merely to reach the User already here.
 
-## Launching work
+## Launching and advancing work
 
 Inspect whether the requested work already has a Task, prepared context, or
 running worker before filing or launching. Write a Task title and opening from
@@ -65,6 +68,25 @@ infer policy from obsolete fix/feature flags or first/loop/finally settings.
 Chapter planning edits use `lf wave update-plan`; chapter replacement uses
 `lf wave new-chapter` with its preview and resumable receipt. Select the Wave;
 its current internal Project is resolved automatically.
+
+Select from the installed catalog: `feature` runs design review, repeats
+implement → compress → review-slice → concept-review → loop-decide, then parks
+at a human demo when the decision is Advance. Demo completion returns feedback
+to a second loop-decide with its own edge to implement. For an
+already-approved design, `pursue` starts at implementation. Check installed help
+when the catalog or CLI version is unclear.
+
+For an existing invocation or an exact review:
+
+```bash
+lf task advance <issue>
+lf session complete <session-id>
+```
+
+Complete ends the exact review when the User asks to proceed and returns its
+saved feedback to the next step. The following loop-decide owns navigation.
+The `advance` skill resolves the next action from a review, Task, or unbound
+design. State what actually started after checking status.
 
 ## Existing-design handoff
 

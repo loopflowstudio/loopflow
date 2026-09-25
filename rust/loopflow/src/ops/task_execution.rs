@@ -35,7 +35,20 @@ pub(crate) async fn task_execution(
         .as_ref()
         .and_then(|position| position.claim.as_ref())
         .map(|claim| task_worker_owner_evidence(&claim.owner));
-    Ok(project_execution(position.as_ref(), evidence))
+    let mut snapshot = project_execution(position.as_ref(), evidence);
+    if position.is_none() {
+        if let Some(crate::work::task::TaskEventKind::FlowFinished { flow, .. }) = store
+            .task_events_after(task_id, 0)
+            .await?
+            .into_iter()
+            .rev()
+            .map(|event| event.kind)
+            .find(|kind| matches!(kind, crate::work::task::TaskEventKind::FlowFinished { .. }))
+        {
+            snapshot.reason = format!("Flow {flow} finished; no further steps are scheduled");
+        }
+    }
+    Ok(snapshot)
 }
 
 fn project_execution(
@@ -121,12 +134,16 @@ mod tests {
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
             session_run_id: None,
             ready_summary: None,
-            step_index: 0,
-            iteration: 0,
+            cursor: crate::engine::ExecutionCursor {
+                index: 0,
+                iteration: 0,
+                ..Default::default()
+            },
             version: 1,
             worker_generation: 0,
             claim: None,
             failure: None,
+
             updated_at: OffsetDateTime::now_utc(),
         };
         assert_eq!(

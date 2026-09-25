@@ -5,22 +5,25 @@ use anyhow::{bail, Context};
 
 use crate::durable::WorkRef;
 use crate::lf::SessionCommand;
-use crate::ops::human_session::{FlowDecision, OpenMode, SessionKind, SessionRecord, SessionState};
+use crate::ops::human_session::{OpenMode, SessionKind, SessionRecord, SessionState};
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let session_id = match command {
-        SessionCommand::Approve { id, .. } | SessionCommand::Iterate { id, .. } => Some(id),
+        SessionCommand::Complete { id } => Some(id),
         _ => None,
     };
     let Some(session_id) = session_id else {
         return runtime.block_on(run_async(command));
     };
     let store = runtime.block_on(open_shared_store())?;
-    let worktree = runtime.block_on(crate::ops::human_session::decision_worktree(
+    let Some(worktree) = runtime.block_on(crate::ops::human_session::completion_worktree(
         &store, session_id,
-    ))?;
+    ))?
+    else {
+        return runtime.block_on(run_async(command));
+    };
     let argv = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&worktree, &argv, || runtime.block_on(run_async(command)))
 }
@@ -53,12 +56,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             crate::ops::human_session::mark_ready(&store, &text).await?;
             println!("Session is ready for your review.");
             Ok(())
-        }
-        SessionCommand::Approve { id, summary } => {
-            decide_flow(id, FlowDecision::Approve, summary, "approval summary").await
-        }
-        SessionCommand::Iterate { id, direction } => {
-            decide_flow(id, FlowDecision::Iterate, direction, "iteration direction").await
         }
         SessionCommand::ServeFlow {
             task_id,
@@ -134,29 +131,8 @@ async fn complete(id: &str) -> anyhow::Result<()> {
                 .ready_summary
                 .expect("completed Ask Session has a ready summary")
         ),
-        SessionKind::Flow => unreachable!("FlowStep Sessions cannot complete"),
+        SessionKind::Flow => println!("Review completed; feedback returned to the Flow."),
     }
-    Ok(())
-}
-
-async fn decide_flow(
-    id: &str,
-    decision: FlowDecision,
-    args: &[String],
-    label: &str,
-) -> anyhow::Result<()> {
-    let text = required_text(args, label)?;
-    let store = open_shared_store().await?;
-    crate::ops::human_session::decide(&store, id, decision, &text).await?;
-    println!(
-        "{}",
-        match decision {
-            FlowDecision::Approve => "Task FlowStep approved; the Task may continue.",
-            FlowDecision::Iterate => {
-                "Task FlowStep returned to autonomous work for another iteration."
-            }
-        }
-    );
     Ok(())
 }
 

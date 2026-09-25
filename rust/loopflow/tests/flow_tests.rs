@@ -266,6 +266,8 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
+    write_skill(repo, "skill-a", "First captured skill.");
+    write_skill(repo, "skill-b", "Second captured skill.");
     write_flow(repo, "publish", "- skill-a\n- skill-b");
     write_flow(repo, "parent", "- review\n- publish");
 

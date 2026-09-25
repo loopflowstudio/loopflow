@@ -275,8 +275,10 @@ cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | t
 
 Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
 fixture, restore it afterward, and serialize environment changes with
-`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests; keep Session
-spawning mocked. Reproduce executable-resolution failures with the compiled test
+`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
+in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
+also resolves the executable for their open command, even with spawning mocked.
+Reproduce executable-resolution failures with the compiled test
 binary, `LF_BIN` and `CARGO_BIN_EXE_lf` unset, and a PATH containing Git but no `lf`.
 
 For worktree creation or checkout-refresh changes, build the current CLI before

@@ -50,18 +50,109 @@ pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
             .transpose()
             .map_err(|error| anyhow!("invalid Task worker claim: {error}"))?
             .ok_or_else(|| anyhow!("Task boundary launch is missing its worker claim"))?;
-    let failure_claim = launch_claim.clone();
-    let result = run_task_with(
-        store.clone(),
-        task_id.clone(),
-        Box::new(crate::harness::default_create_harness),
+    drive_task(
+        store,
+        task_id,
         launch_claim,
+        Box::new(crate::harness::default_create_harness),
     )
-    .await;
-    if let Err(error) = &result {
-        record_claimed_failure(&store, &task_id, &failure_claim, error).await;
+    .await
+}
+
+async fn drive_task(
+    store: SharedStore,
+    task_id: TaskId,
+    mut launch_claim: TaskWorkerClaim,
+    create_harness: crate::harness::CreateHarness,
+) -> Result<()> {
+    let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if attachment_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut account =
+        take_task_launch_env(crate::ops::TASK_ACCOUNT_ID_ENV, "Task provider account id")?;
+    loop {
+        let before = store
+            .flow_position(&task_id)
+            .await?
+            .ok_or_else(|| anyhow!("Task has no active Flow"))?;
+        if before.claim.as_ref() != Some(&launch_claim) {
+            anyhow::bail!("Task driver launch claim is stale");
+        }
+        // A Flow may start with an operation or a recovered verdict, so the
+        // launch can legitimately have no provider route yet.
+        if account.is_none()
+            && before.current().kind != StepKind::Op
+            && !before.has_pending_decision()
+        {
+            let task = load_task(&store, &task_id).await?;
+            let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
+            match crate::ops::task::preflight_task_execution(&task.worktree, config.agent()).await {
+                Ok(route) => account = Some(route.to_string()),
+                Err(error) => {
+                    let error = anyhow!(error.to_string());
+                    record_claimed_failure(&store, &task_id, &launch_claim, &error).await;
+                    return Err(error);
+                }
+            }
+        }
+        if let Some(account) = &account {
+            std::env::set_var(crate::ops::TASK_ACCOUNT_ID_ENV, account);
+        }
+        let result = run_task_with(
+            store.clone(),
+            task_id.clone(),
+            &create_harness,
+            launch_claim.clone(),
+            &mut attachment_rx,
+        )
+        .await;
+        if let Err(error) = &result {
+            if let Some(claim) = store
+                .flow_position(&task_id)
+                .await?
+                .and_then(|p| p.claim)
+                .filter(|claim| {
+                    claim.invocation_id == launch_claim.invocation_id
+                        && claim.position_version == launch_claim.position_version
+                        && claim.generation == launch_claim.generation
+                })
+            {
+                record_claimed_failure(&store, &task_id, &claim, error).await;
+            }
+            return result;
+        }
+        let Some(next) = store.flow_position(&task_id).await? else {
+            return Ok(());
+        };
+        if next.invocation.id != launch_claim.invocation_id
+            || next.is_human()
+            || next.failure.is_some()
+            || (next.cursor == before.cursor)
+        {
+            return Ok(());
+        }
+        let owner = crate::journal::current_process_identity()
+            .ok_or_else(|| anyhow!("Task driver has no process identity"))?;
+        match store
+            .claim_task_worker(
+                &task_id,
+                &next.invocation.id,
+                next.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await?
+        {
+            crate::durable::TaskWorkerClaimOutcome::Claimed(claim) => launch_claim = claim,
+            _ => return Ok(()),
+        }
     }
-    result
 }
 
 pub async fn run_worker(task_id: TaskId) -> Result<()> {
@@ -132,8 +223,9 @@ fn task_run_spec(
 async fn run_task_with(
     store: SharedStore,
     task_id: TaskId,
-    create_harness: crate::harness::CreateHarness,
+    create_harness: &crate::harness::CreateHarness,
     launch_claim: TaskWorkerClaim,
+    attachment_rx: &mut mpsc::UnboundedReceiver<String>,
 ) -> Result<()> {
     let mut task = load_task(&store, &task_id).await?;
     let wave = owning_wave(&store, &task).await?;
@@ -144,6 +236,9 @@ async fn run_task_with(
         .ok_or_else(|| anyhow!("Task {} has no Flow position", task.id))?;
     if flow.claim.as_ref() != Some(&launch_claim) {
         anyhow::bail!("Task boundary launch claim is stale");
+    }
+    if flow.has_pending_decision() {
+        return recover_task_decision(&store, &mut task, &flow).await;
     }
     if flow.current().kind == StepKind::Op {
         return run_task_op_boundary(store, task, wave, project, flow, launch_claim).await;
@@ -211,15 +306,6 @@ async fn run_task_with(
     harness.send_input(&prepared.turn.input).await?;
     drop(prepared);
 
-    let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
-    std::thread::spawn(move || {
-        for line in std::io::stdin().lock().lines() {
-            let Ok(line) = line else { break };
-            if attachment_tx.send(line).is_err() {
-                break;
-            }
-        }
-    });
     println!(
         "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
         task.plan.identifier
@@ -263,7 +349,7 @@ async fn run_task_with(
                     &store, &work, harness.as_mut(), &mut interrupt_cursor,
                 ).await;
             }
-            line = attachment_rx.recv() => {
+            line = attachment_rx.recv(), if !attachment_rx.is_closed() => {
                 if let Some(line) = line {
                     handle_attachment(
                         &store,
@@ -349,7 +435,20 @@ async fn run_task_with(
                             )
                             .await;
                         }
-                        let flow_completed = finish_task_flow_turn(&mut flow, status)?;
+                        flow = store.flow_position(&task.id).await?
+                            .ok_or_else(|| anyhow!("Task Flow disappeared during its worker"))?;
+                        if flow.claim.as_ref() != Some(&bound_claim) {
+                            anyhow::bail!("Task worker was replaced before settlement");
+                        }
+                        let flow_completed = match finish_task_flow_turn(&mut flow, status) {
+                            Ok(completed) => completed,
+                            Err(error) => {
+                                return finish_claimed_failure(
+                                    &store, &task, &bound_claim, harness.as_mut(),
+                                    &error.to_string(), false, capture.as_ref(),
+                                ).await;
+                            }
+                        };
                         let latest = load_task(&store, &task.id).await?;
                         task.pm_writeback = latest.pm_writeback;
                         let _ = harness.stop().await;
@@ -426,11 +525,19 @@ async fn run_task_op_boundary(
     let bound_claim = store
         .bind_task_worker_run(&task.id, &launch_claim, &capture.run_id(), &owner)
         .await?;
-    let flow_completed = match run_task_flow_op(&task, &mut flow).await {
+    let outcome = run_task_flow_op(&task, &mut flow).await;
+    let flow_completed = match outcome {
         Ok(completed) => completed,
         Err(error) => {
             finish_capture(Some(&capture), "failed");
-            fail_claimed_boundary(&store, &task, &bound_claim, &error.to_string(), true).await?;
+            fail_claimed_boundary(
+                &store,
+                &task,
+                &bound_claim,
+                &error.to_string(),
+                step.policy.repeat.is_none(),
+            )
+            .await?;
             return Err(error);
         }
     };
@@ -453,6 +560,60 @@ async fn run_task_op_boundary(
         },
     );
     result
+}
+
+/// Settle a saved candidate before reclaim replaces its original Run binding.
+pub(crate) async fn recover_task_decision(
+    store: &SharedStore,
+    task: &mut Task,
+    position: &FlowPosition,
+) -> Result<()> {
+    let claim = position
+        .claim
+        .as_ref()
+        .ok_or_else(|| anyhow!("saved Task decision has no originating claim"))?;
+    let run_id = claim
+        .worker_run_id
+        .as_ref()
+        .ok_or_else(|| anyhow!("saved Task decision has no originating Run"))?;
+    let (directory, _) = crate::run_record::resolve_manifest(
+        &crate::store::observability_home_dir(),
+        run_id.as_str(),
+    )?;
+    let snapshot = crate::run_record::read_run_snapshot(&directory)?;
+    match snapshot.status() {
+        "completed" => {}
+        "failed" | "interrupted" => {
+            let reason = format!("saved Task decision Run {run_id} {}", snapshot.status());
+            store
+                .block_task_flow(
+                    &task.id,
+                    claim,
+                    &crate::durable::TaskFlowBlocker {
+                        reason: reason.clone(),
+                        restart_required: false,
+                        observed_at: time::OffsetDateTime::now_utc(),
+                    },
+                )
+                .await?;
+            anyhow::bail!(reason);
+        }
+        _ => anyhow::bail!(
+            "saved Task decision is waiting for Run {run_id}; its completion is not recorded"
+        ),
+    }
+    let mut next = position.clone();
+    let completed = finish_task_flow_turn(&mut next, Lifecycle::Completed)?;
+    finish_claimed_task_boundary(
+        store,
+        task,
+        &mut next,
+        claim,
+        Lifecycle::Completed,
+        completed,
+        "Recovered the completed decision Run",
+    )
+    .await
 }
 
 async fn finish_claimed_task_boundary(
@@ -517,13 +678,6 @@ async fn settle_claimed_task_position(
         crate::ops::human_session::prepare(store, task, &next).await?;
         return Ok(());
     }
-    let mut next_task = store
-        .get_task(&task.id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {} disappeared after boundary settlement", task.id))?;
-    crate::ops::task::launch_task_process(store, &mut next_task, None)
-        .await
-        .map_err(|error| anyhow!(error.to_string()))?;
     Ok(())
 }
 
@@ -539,20 +693,46 @@ async fn prepare_task_flow_step(
     let steers = store.task_steers(&task.id).await?;
     let seeded_steer_id = steers.last().map_or(0, |steer| steer.id);
     let interrupt_id = store.latest_interrupt_id(&work).await?;
-    let crate::engine::ConcreteStep::Skill(skill) = flow.current_plan() else {
-        anyhow::bail!("Task flow step {} is not a skill", flow.current().step);
-    };
+    let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
+        .ok_or_else(|| anyhow!("Task Flow step is not a skill"))?;
     let pr = store
         .active_task_pr(&task.id)
         .await?
         .ok_or_else(|| anyhow!("Task {} has no active PR", task.id))?;
     let project = owning_project(store, task).await?;
-    let seed = format!(
+    let mut seed = format!(
         "{}\n\n{}",
         task_seed(task, &project.plan, &pr, wave_name, &steers),
         crate::ops::task::task_workspace_context(task, &pr)
             .map_err(|error| anyhow!(error.to_string()))?
     );
+    if let Some(direction) = flow.cursor.leaf().progress.direction.as_ref() {
+        seed.push_str(&format!(
+            "\n\nPrevious step feedback or iteration direction:\n{direction}"
+        ));
+    }
+    if let Some(repeat) = &skill.policy.repeat {
+        let edge = skill
+            .policy
+            .id
+            .as_deref()
+            .expect("a repeat occurrence has an id");
+        let traversals = flow
+            .cursor
+            .leaf()
+            .progress
+            .repeats
+            .get(edge)
+            .copied()
+            .unwrap_or(0);
+        seed.push_str(&format!(
+            "\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.",
+            u64::from(traversals) + 1, repeat.from,
+        ));
+        seed.push_str(
+            "\n\nBefore finishing, run `lf flow decide iterate \"<remaining work, direction, and evidence>\"` or `lf flow decide advance \"<whole-design proof>\"`. Advance requires the obligations of this decision, not just the latest slice, and leaves later review steps intact. If blocked, run `lf flow blocked \"<reason, attempted direction, and evidence>\"`; this requests an Ask running unblock and waits for human completion. Reread its summary and changed artifacts, then reassess; completing the Ask supplies evidence rather than a navigation decision. Record the decision after edits and verification; missing decisions block advancement.",
+        );
+    }
     let mut prepared = crate::lf::commands::run::prepare_harness_turn_from_skill_at(
         &skill.skill,
         &seed,
@@ -576,16 +756,10 @@ async fn prepare_task_flow_step(
     })
 }
 
-pub(crate) async fn decide_human_flow_step(
+pub(crate) async fn complete_human_flow_step(
     store: &SharedStore,
     token: &crate::ops::human_session::FlowSessionToken,
-    decision: crate::ops::human_session::FlowDecision,
-    text: &str,
 ) -> Result<()> {
-    let text = text.trim();
-    if text.is_empty() {
-        anyhow::bail!("review decision text cannot be empty");
-    }
     if !crate::ops::human_session::token_is_current(store, token).await? {
         anyhow::bail!("review session is stale");
     }
@@ -593,6 +767,14 @@ pub(crate) async fn decide_human_flow_step(
         .flow_position(&token.task_id)
         .await?
         .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
+    let text = expected
+        .ready_summary
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| {
+            anyhow!("review is not ready; its agent must run `lf session ready` first")
+        })?;
     let mut task = load_task(store, &token.task_id).await?;
     let mut position = expected.clone();
     let step = position.current();
@@ -606,26 +788,9 @@ pub(crate) async fn decide_human_flow_step(
         anyhow::bail!("review session no longer matches the Task Flow position");
     }
 
-    let (iterate_direction, flow_completed) = match decision {
-        crate::ops::human_session::FlowDecision::Approve => {
-            let completed = finish_task_flow_turn(&mut position, Lifecycle::Completed)?;
-            (None, completed)
-        }
-        crate::ops::human_session::FlowDecision::Iterate => {
-            let cursor = preceding_autonomous_step(&position.invocation, step.index)?;
-            let iteration = step.iteration + 1;
-            task.updated_at = time::OffsetDateTime::now_utc();
-            position.step_index = cursor;
-            position.iteration = iteration;
-            (
-                Some(format!(
-                    "Another iteration was requested for step {}: {text}",
-                    token.node_id
-                )),
-                false,
-            )
-        }
-    };
+    position.cursor.leaf_mut().progress.direction = Some(text.to_string());
+    let flow_completed = finish_task_flow_turn(&mut position, Lifecycle::Completed)?;
+    task.updated_at = time::OffsetDateTime::now_utc();
 
     if flow_completed {
         store
@@ -636,19 +801,9 @@ pub(crate) async fn decide_human_flow_step(
     position.session_run_id = None;
     position.ready_summary = None;
     position.updated_at = time::OffsetDateTime::now_utc();
-    match iterate_direction {
-        Some(direction) => {
-            crate::ops::linear_observe::publish_task_steer(store, &task, &direction).await?;
-            store
-                .iterate_human_task_boundary(&task, &expected, &position)
-                .await?;
-        }
-        None => {
-            store
-                .approve_human_task_boundary(&task, &expected, &position, text)
-                .await?;
-        }
-    }
+    store
+        .complete_human_task_boundary(&task, &expected, &position, text)
+        .await?;
     Ok(())
 }
 
@@ -682,31 +837,14 @@ pub(crate) async fn ensure_flow_position(
     Ok(candidate)
 }
 
-fn preceding_autonomous_step(invocation: &QueuedInvocation, current: u32) -> Result<u32> {
-    invocation.steps
-        .iter()
-        .enumerate()
-        .take(current as usize)
-        .rev()
-        .find(|(_, step)| {
-            matches!(step, crate::engine::ConcreteStep::Skill(skill) if !skill.policy.human)
-        })
-        .map(|(index, _)| index as u32)
-        .ok_or_else(|| anyhow!("Task review step has no preceding autonomous skill"))
-}
-
 fn finish_task_flow_turn(position: &mut FlowPosition, status: Lifecycle) -> Result<bool> {
     match status {
-        Lifecycle::Interrupted => Ok(false),
-        Lifecycle::Completed => {
-            // A completed Task Flow has no next position. Keep the last valid
-            // cursor until the claimed transaction removes the invocation.
-            if position.step_index as usize + 1 == position.invocation.steps.len() {
-                return Ok(true);
-            }
-            position.step_index += 1;
+        Lifecycle::Interrupted => {
+            position.cursor.leaf_mut().progress.verdict = None;
+            position.cursor.leaf_mut().route = None;
             Ok(false)
         }
+        Lifecycle::Completed => position.cursor.finish(&position.invocation.steps),
         _ => anyhow::bail!("Task flow turn ended with unexpected status {status:?}"),
     }
 }
@@ -759,12 +897,16 @@ fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowPosition> {
         invocation: QueuedInvocation::load(&task.worktree, selected_flow)?,
         session_run_id: None,
         ready_summary: None,
-        step_index: 0,
-        iteration: 0,
+        cursor: crate::engine::ExecutionCursor {
+            index: 0,
+            iteration: 0,
+            ..Default::default()
+        },
         version: 0,
         worker_generation: 0,
         claim: None,
         failure: None,
+
         updated_at: time::OffsetDateTime::now_utc(),
     })
 }
@@ -964,36 +1106,22 @@ fn progress_summary(text: &str) -> String {
 #[cfg(test)]
 struct TestLfBinGuard {
     previous: Option<std::ffi::OsString>,
-    previous_db: Option<std::ffi::OsString>,
-    _home: tempfile::TempDir,
-    _lock: std::sync::MutexGuard<'static, ()>,
+    ledger: crate::journal::TestLedgerGuard,
 }
 
 #[cfg(test)]
 impl TestLfBinGuard {
     fn pin() -> Self {
-        let lock = crate::journal::test_env_lock();
+        let ledger = crate::journal::TestLedgerGuard::new();
         let previous = std::env::var_os("LF_BIN");
-        let previous_db = std::env::var_os("LF_DB_PATH");
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("LF_DB_PATH", home.path().join("loopflow.db"));
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        Self {
-            previous,
-            previous_db,
-            _home: home,
-            _lock: lock,
-        }
+        Self { previous, ledger }
     }
 }
 
 #[cfg(test)]
 impl Drop for TestLfBinGuard {
     fn drop(&mut self) {
-        match &self.previous_db {
-            Some(value) => std::env::set_var("LF_DB_PATH", value),
-            None => std::env::remove_var("LF_DB_PATH"),
-        }
         match &self.previous {
             Some(value) => std::env::set_var("LF_BIN", value),
             None => std::env::remove_var("LF_BIN"),
@@ -1004,16 +1132,15 @@ impl Drop for TestLfBinGuard {
 #[cfg(test)]
 mod planning_tests {
     use super::{
-        completed_boundary_failure, execution_blocker_at_handoff, preceding_autonomous_step,
-        task_seed, unhandled_failure_receipt,
+        completed_boundary_failure, execution_blocker_at_handoff, task_seed,
+        unhandled_failure_receipt,
     };
     use crate::chat::types::Lifecycle;
-    use crate::controller::wave::playhead::{QueuedInvocation, StepKind};
+    use crate::controller::wave::playhead::StepKind;
     use crate::durable::{
         Author, FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
     };
     use crate::engine::agent::AgentConfig;
-    use crate::engine::OccurrencePolicy;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::{ExecId, TraceId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -1035,30 +1162,435 @@ mod planning_tests {
         interrupts: usize,
     }
 
-    fn step(name: &str, id: Option<&str>, human: bool) -> crate::engine::ConcreteStep {
-        crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
-            skill: crate::engine::Skill::named(name),
-            policy: OccurrencePolicy {
-                id: id.map(str::to_string),
-                human,
-            },
-            flow_parents: Vec::new(),
-        })
+    #[tokio::test]
+    async fn feature_repeats_the_whole_slice_then_stops_for_delivery() {
+        let (_, task, _) = human_task_fixture().await;
+        let mut position = super::start_task_flow(&task, "feature").unwrap();
+        assert_eq!(position.current().step, "kickoff");
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        assert!(position.is_human());
+        assert_eq!(position.current().step, "review-design");
+        position.cursor.progress.direction = Some("Design clarified with the human".into());
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        for pass in 0..10 {
+            for expected in ["implement", "compress", "review-slice", "concept-review"] {
+                assert_eq!(position.current().step, expected);
+                assert!(
+                    !super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap()
+                );
+            }
+            assert_eq!(position.current().step, "loop-decide");
+            position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
+                decision: if pass < 9 {
+                    crate::engine::transitions::FlowDecision::Iterate
+                } else {
+                    crate::engine::transitions::FlowDecision::Advance
+                },
+                summary: if pass < 9 {
+                    "repair the demonstrated gap"
+                } else {
+                    "all design claims demonstrated"
+                }
+                .into(),
+            });
+            assert!(!super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap());
+        }
+        assert!(position.is_human());
+        assert_eq!(position.current().step, "demo");
+        assert_eq!(position.cursor.iteration, 9);
+        assert!(position.cursor.progress.verdict.is_none());
+        position.cursor.progress.direction = Some("Human requested a delivery correction".into());
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        assert_eq!(position.current().step, "loop-decide");
+        assert!(position.cursor.progress.verdict.is_none());
+        assert_eq!(position.cursor.iteration, 9);
+        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Iterate,
+            summary: "Human requested a delivery correction".into(),
+        });
+        assert!(!super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap());
+        assert_eq!(position.current().step, "implement");
+        assert_eq!(
+            position.cursor.progress.direction.as_deref(),
+            Some("Human requested a delivery correction")
+        );
+        for _ in 0..4 {
+            super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        }
+        assert_eq!(position.current().step, "loop-decide");
+        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Iterate,
+            summary: "Continue the human-requested revision".into(),
+        });
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        assert_eq!(position.current().step, "implement");
+        assert_eq!(position.cursor.progress.repeats["decide"], 10);
+    }
+
+    #[tokio::test]
+    async fn loop_requires_a_decision_and_discards_it_on_interrupt() {
+        let (_, task, _) = human_task_fixture().await;
+        let mut position = super::start_task_flow(&task, "feature").unwrap();
+        position.cursor.index = 6;
+        assert!(
+            super::finish_task_flow_turn(&mut position, Lifecycle::Completed)
+                .unwrap_err()
+                .to_string()
+                .contains("requires a decision")
+        );
+        assert_eq!(position.cursor.index, 6);
+        let review = &mut position.cursor.progress;
+        review.verdict = Some(crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Advance,
+            summary: "discard on interrupt".into(),
+        });
+        assert!(!super::finish_task_flow_turn(&mut position, Lifecycle::Interrupted).unwrap());
+        assert_eq!(position.cursor.index, 6);
+        assert!(position.cursor.progress.verdict.is_none());
+    }
+
+    struct SliceHarness {
+        store: SharedStore,
+        task_id: TaskId,
+        events: tokio::sync::mpsc::UnboundedSender<crate::chat::types::ConversationEvent>,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<(String, RunId)>>>,
+        restart: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Harness for SliceHarness {
+        async fn start(&mut self, config: &AgentConfig) -> anyhow::Result<()> {
+            let position = self.store.flow_position(&self.task_id).await?.unwrap();
+            let run = position.claim.unwrap().worker_run_id.unwrap();
+            assert_eq!(
+                config.env.get(crate::durable::RUN_ID_ENV),
+                Some(&run.to_string())
+            );
+            Ok(())
+        }
+
+        async fn send_input(&mut self, content: &str) -> anyhow::Result<()> {
+            let position = self.store.flow_position(&self.task_id).await?.unwrap();
+            if self.restart {
+                let owner = position.claim.as_ref().unwrap().owner.clone();
+                let mut replacement = position.clone();
+                replacement.invocation.id = "replacement-invocation".into();
+                replacement.version = 0;
+                replacement.claim = None;
+                let task = super::load_task(&self.store, &self.task_id).await?;
+                self.store
+                    .restart_task_flow(&task, "fixture-checkpoint")
+                    .await?;
+                let replacement = self
+                    .store
+                    .set_flow_position(&self.task_id, replacement)
+                    .await?;
+                self.store
+                    .claim_task_worker(
+                        &self.task_id,
+                        &replacement.invocation.id,
+                        replacement.version,
+                        &owner,
+                        time::OffsetDateTime::now_utc(),
+                    )
+                    .await?;
+                anyhow::bail!("late provider failure from the replaced invocation");
+            }
+            let step = position.current();
+            let routing = matches!(position.current_plan(), crate::engine::ConcreteStep::Xor(_));
+            let run = position.claim.unwrap().worker_run_id.unwrap();
+            self.seen
+                .lock()
+                .unwrap()
+                .push((step.step.clone(), run.clone()));
+            if position.cursor.iteration > 0 {
+                assert!(content.contains("repair the demonstrated gap"));
+            }
+            if routing {
+                assert!(content.contains("lf flow route"));
+                self.store
+                    .record_flow_route(&self.task_id, &run, "selected")
+                    .await?;
+            }
+            if step.policy.repeat.is_some() {
+                self.store
+                    .record_flow_verdict(
+                        &self.task_id,
+                        &run,
+                        &crate::engine::transitions::FlowVerdict {
+                            decision: if position.cursor.iteration == 0 {
+                                crate::engine::transitions::FlowDecision::Iterate
+                            } else {
+                                crate::engine::transitions::FlowDecision::Advance
+                            },
+                            summary: "repair the demonstrated gap".into(),
+                        },
+                    )
+                    .await?;
+            }
+            self.events
+                .send(crate::chat::types::ConversationEvent::TurnCompleted {
+                    turn_id: "fixture-turn".into(),
+                    status: Lifecycle::Completed,
+                })?;
+            Ok(())
+        }
+
+        async fn interrupt(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn stop(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
     }
 
     #[test]
-    fn iterate_skips_prior_human_nodes_when_returning_to_autonomous_work() {
-        let invocation = QueuedInvocation {
-            id: "human-iterate-proof".to_string(),
-            flow: "proof".to_string(),
-            steps: vec![
-                step("kickoff", None, false),
-                step("first-review", Some("first_review"), true),
-                step("second-review", Some("second_review"), true),
-            ],
-        };
+    fn task_decision_recovery_requires_the_original_successful_run() {
+        let guard = super::TestLfBinGuard::pin();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            for routing in [false, true] {
+                for status in ["completed", "failed", "interrupted", "running", "missing"] {
+                    let (store, mut task, _) = human_task_fixture().await;
+                    let mut flow = super::start_task_flow(&task, "pursue").unwrap();
+                    flow.invocation.steps.truncate(5);
+                    flow.cursor.index = 4;
+                    if routing {
+                        flow.cursor.index = 0;
+                        flow.invocation.steps = vec![crate::engine::ConcreteStep::Xor(
+                            crate::engine::ConcreteXor {
+                                router: crate::engine::Skill::named("xor-route"),
+                                paths: std::collections::HashMap::from([(
+                                    "done".into(),
+                                    crate::engine::ConcretePath {
+                                        description: "finish".into(),
+                                        steps: vec![],
+                                    },
+                                )]),
+                                flow_parents: vec![],
+                            },
+                        )];
+                    }
+                    let flow = store.set_flow_position(&task.id, flow).await.unwrap();
+                    let owner = TaskWorkerOwner {
+                        trace_id: TraceId::new(),
+                        exec_id: ExecId::new(),
+                        pid: 303,
+                        started_at: 1_700_000_000,
+                    };
+                    let TaskWorkerClaimOutcome::Claimed(claim) = store
+                        .claim_task_worker(
+                            &task.id,
+                            &flow.invocation.id,
+                            flow.version,
+                            &owner,
+                            time::OffsetDateTime::now_utc(),
+                        )
+                        .await
+                        .unwrap()
+                    else {
+                        panic!("recovery claim")
+                    };
+                    let capture = crate::run_record::CaptureHandle::begin_at(
+                        guard.ledger.home(),
+                        crate::run_record::RunSpec {
+                            harness: "proof".into(),
+                            model: None,
+                            surface: "headless".into(),
+                            cwd: task.worktree.clone(),
+                            repo: None,
+                            worktree: None,
+                            skill: Some("loop-decide".into()),
+                            subjects: vec![],
+                        },
+                    )
+                    .unwrap();
+                    let run = if status == "missing" {
+                        RunId::new()
+                    } else {
+                        capture.run_id()
+                    };
+                    store
+                        .bind_task_worker_run(&task.id, &claim, &run, &owner)
+                        .await
+                        .unwrap();
+                    if routing {
+                        store
+                            .record_flow_route(&task.id, &run, "done")
+                            .await
+                            .unwrap();
+                    } else {
+                        store
+                            .record_flow_verdict(
+                                &task.id,
+                                &run,
+                                &crate::engine::transitions::FlowVerdict {
+                                    decision: crate::engine::transitions::FlowDecision::Advance,
+                                    summary: "candidate, not completion".into(),
+                                },
+                            )
+                            .await
+                            .unwrap();
+                    }
+                    if !matches!(status, "running" | "missing") {
+                        capture.finish(status).unwrap();
+                    }
+                    let saved = store.flow_position(&task.id).await.unwrap().unwrap();
+                    let result = super::recover_task_decision(&store, &mut task, &saved).await;
+                    let after = store.flow_position(&task.id).await.unwrap();
+                    if status == "completed" {
+                        result.unwrap();
+                        assert!(after.is_none());
+                        assert!(super::recover_task_decision(&store, &mut task, &saved)
+                            .await
+                            .is_err());
+                    } else {
+                        assert!(result.is_err());
+                        let after = after.unwrap();
+                        assert_eq!(after.cursor.index, saved.cursor.index);
+                        if matches!(status, "failed" | "interrupted") {
+                            assert!(!after.has_pending_decision());
+                            assert!(after.failure.unwrap().reason.contains(status));
+                            assert!(after.claim.is_none());
+                        } else {
+                            assert_eq!(after, saved);
+                        }
+                    }
+                }
+            }
+        });
+    }
 
-        assert_eq!(preceding_autonomous_step(&invocation, 2).unwrap(), 0);
+    #[test]
+    fn driver_runs_fresh_slice_turns_until_the_flow_finishes() {
+        let guard = super::TestLfBinGuard::pin();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (store, task, _) = runtime.block_on(human_task_fixture());
+        crate::journal::with_runtime(&task.worktree, &["task-driver-proof".into()], || {
+            runtime.block_on(async {
+                use crate::pm::test_server::{self, json_response};
+                use serde_json::json;
+                let (url, _) = test_server::spawn((0..11).map(|_| json_response(
+                    axum::http::StatusCode::OK,
+                    json!({"data": {"issue": {
+                        "updatedAt": "2026-09-24T00:00:00Z", "title": task.plan.title,
+                        "description": task.plan.description,
+                        "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+                    }}}),
+                )).collect()).await;
+                store.upsert_provider_token(&crate::store::ProviderToken {
+                    provider: "linear".into(), access_token: "fixture-token".into(),
+                    refresh_token: None, oauth_client_id: None, expires_at: None,
+                    login: None, updated_at: 1, credential_type: crate::store::CredentialType::OAuth,
+                }).await.unwrap();
+                let definitions = task.worktree.join(".lf/flows");
+                std::fs::create_dir_all(&definitions).unwrap();
+                std::fs::write(definitions.join("nested-slice.yaml"), "- xor:\n    paths:\n      selected:\n        flow: saved-body\n        description: pursue the approved design\n").unwrap();
+                std::fs::write(definitions.join("saved-body.yaml"), "- step:\n    name: implement\n    id: work\n- compress\n- review-slice\n- concept-review\n- step:\n    name: loop-decide\n    id: decide\n    repeat:\n      from: work\n").unwrap();
+                let flow = super::start_task_flow(&task, "nested-slice").unwrap();
+                // Delete the sources before routing: every possible path was captured.
+                std::fs::remove_file(definitions.join("nested-slice.yaml")).unwrap();
+                std::fs::remove_file(definitions.join("saved-body.yaml")).unwrap();
+                let flow = store.set_flow_position(&task.id, flow).await.unwrap();
+                let owner = crate::journal::current_process_identity().unwrap();
+                let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(
+                    &task.id, &flow.invocation.id, flow.version, &owner, time::OffsetDateTime::now_utc(),
+                ).await.unwrap() else { panic!("driver claim") };
+                let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+                let create: crate::harness::CreateHarness = Box::new({
+                    let store = store.clone();
+                    let task_id = task.id.clone();
+                    let seen = seen.clone();
+                    move |_, _, events| Ok(Box::new(SliceHarness {
+                        store: store.clone(), task_id: task_id.clone(), events, seen: seen.clone(), restart: false,
+                    }))
+                });
+                // The simulated provider uses a preflighted fixture route.
+                std::env::set_var(crate::ops::TASK_ACCOUNT_ID_ENV, "fixture-account");
+                crate::ops::pm::PM_TEST_CONTEXT.scope(crate::ops::pm::PmTestContext {
+                    path: guard.ledger.home().join("fixture.db"), store: store.clone(), graphql_url: url,
+                }, super::drive_task(store.clone(), task.id.clone(), claim, create)).await.unwrap();
+                let turns = seen.lock().unwrap().clone();
+                assert_eq!(turns.iter().map(|(step, _)| step.as_str()).collect::<Vec<_>>(),
+                    ["xor-route", "implement", "compress", "review-slice", "concept-review", "loop-decide", "implement", "compress", "review-slice", "concept-review", "loop-decide"]);
+                assert_eq!(turns.iter().map(|(_, run)| run).collect::<std::collections::HashSet<_>>().len(), 11);
+                assert!(store.flow_position(&task.id).await.unwrap().is_none());
+                let execution = crate::ops::task_execution::task_execution(&store, &task.id).await.unwrap();
+                assert!(execution.reason.contains("Flow nested-slice finished"));
+
+                // Recover a completed decision Run before replacing its claim.
+                // Settlement consumes its saved result without another provider.
+                let mut flow = super::start_task_flow(&task, "pursue").unwrap();
+                flow.invocation.steps.truncate(5);
+                flow.cursor.index = 4;
+                let flow = store.set_flow_position(&task.id, flow).await.unwrap();
+                let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(
+                    &task.id, &flow.invocation.id, flow.version, &owner, time::OffsetDateTime::now_utc(),
+                ).await.unwrap() else { panic!("recovery fixture claim") };
+                let capture = crate::run_record::CaptureHandle::begin_at(
+                    guard.ledger.home(), crate::run_record::RunSpec {
+                        harness: "proof".into(), model: None, surface: "headless".into(),
+                        cwd: task.worktree.clone(), repo: None, worktree: None,
+                        skill: Some("loop-decide".into()), subjects: vec![],
+                    },
+                ).unwrap();
+                let run = capture.run_id();
+                store.bind_task_worker_run(&task.id, &claim, &run, &owner).await.unwrap();
+                store.record_flow_verdict(&task.id, &run, &crate::engine::transitions::FlowVerdict {
+                    decision: crate::engine::transitions::FlowDecision::Advance,
+                    summary: "saved whole-design proof".into(),
+                }).await.unwrap();
+                capture.finish("completed").unwrap();
+                let saved = store.flow_position(&task.id).await.unwrap().unwrap();
+                super::recover_task_decision(&store, &mut task.clone(), &saved).await.unwrap();
+                assert!(store.flow_position(&task.id).await.unwrap().is_none());
+
+                // A late error cannot release a replacement invocation's claim,
+                // even when restart reuses its version and generation.
+                let flow = super::start_task_flow(&task, "pursue").unwrap();
+                let flow = store.set_flow_position(&task.id, flow).await.unwrap();
+                let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(
+                    &task.id, &flow.invocation.id, flow.version, &owner, time::OffsetDateTime::now_utc(),
+                ).await.unwrap() else { panic!("late failure fixture claim") };
+                let create: crate::harness::CreateHarness = Box::new({
+                    let store = store.clone();
+                    let task_id = task.id.clone();
+                    move |_, _, events| Ok(Box::new(SliceHarness {
+                        store: store.clone(), task_id: task_id.clone(), events,
+                        seen: Default::default(), restart: true,
+                    }))
+                });
+                let (url, _) = test_server::spawn(vec![json_response(
+                    axum::http::StatusCode::OK,
+                    json!({"data": {"issue": {
+                        "updatedAt": "2026-09-24T00:00:00Z", "title": task.plan.title,
+                        "description": task.plan.description,
+                        "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+                    }}}),
+                )]).await;
+                std::env::set_var(crate::ops::TASK_ACCOUNT_ID_ENV, "fixture-account");
+                let error = crate::ops::pm::PM_TEST_CONTEXT.scope(crate::ops::pm::PmTestContext {
+                    path: guard.ledger.home().join("fixture.db"), store: store.clone(), graphql_url: url,
+                }, super::drive_task(store.clone(), task.id.clone(), claim.clone(), create)).await.unwrap_err();
+                assert!(error.to_string().contains("late provider failure"));
+                let replacement = store.flow_position(&task.id).await.unwrap().unwrap();
+                assert!(replacement.failure.is_none());
+                let replacement_claim = replacement.claim.expect("replacement worker remains claimed");
+                assert_eq!(replacement_claim.position_version, claim.position_version);
+                assert_eq!(replacement_claim.generation, claim.generation);
+                assert_ne!(replacement_claim.invocation_id, claim.invocation_id);
+                Ok(())
+            })
+        }).unwrap();
     }
 
     #[async_trait::async_trait]
@@ -1230,7 +1762,7 @@ mod planning_tests {
         store.create_project(&project).await.unwrap();
         store.create_task(&task, &pr).await.unwrap();
         let mut flow = super::start_task_flow(&task, "task-design").unwrap();
-        flow.step_index = 1;
+        flow.cursor.index = 1;
         (store, task, flow)
     }
 
@@ -1251,6 +1783,7 @@ mod planning_tests {
         let claim = match store
             .claim_task_worker(
                 &task.id,
+                &initial.invocation.id,
                 initial.version,
                 &owner,
                 time::OffsetDateTime::now_utc(),
@@ -1347,7 +1880,7 @@ mod planning_tests {
     #[tokio::test]
     async fn prebind_task_failure_releases_its_claim_without_shared_failure_state() {
         let (store, task, mut flow) = human_task_fixture().await;
-        flow.step_index = 0;
+        flow.cursor.index = 0;
         let position = store.set_flow_position(&task.id, flow).await.unwrap();
         let owner = TaskWorkerOwner {
             trace_id: TraceId::new(),
@@ -1358,6 +1891,7 @@ mod planning_tests {
         let claim = match store
             .claim_task_worker(
                 &task.id,
+                &position.invocation.id,
                 position.version,
                 &owner,
                 time::OffsetDateTime::now_utc(),
@@ -1515,6 +2049,7 @@ mod planning_tests {
         let stale_claim = match store
             .claim_task_worker(
                 &task.id,
+                &first.invocation.id,
                 first.version,
                 &owner,
                 time::OffsetDateTime::now_utc(),
@@ -1532,11 +2067,14 @@ mod planning_tests {
             .await
             .unwrap();
 
+        let create_harness: crate::harness::CreateHarness =
+            Box::new(|_, _, _| panic!("stale child must fail before creating a harness"));
         let error = super::run_task_with(
             store.clone(),
             task.id.clone(),
-            Box::new(|_, _, _| panic!("stale child must fail before creating a harness")),
+            &create_harness,
             stale_claim,
+            &mut tokio::sync::mpsc::unbounded_channel().1,
         )
         .await
         .unwrap_err();
@@ -1642,8 +2180,8 @@ mod planning_tests {
         assert_eq!(flow.current().index, 1);
         assert_eq!(flow.current().kind, StepKind::Op);
         assert!(super::run_task_flow_op(&task, &mut flow).await.unwrap());
-        assert_eq!(flow.step_index, 1);
-        assert_eq!(flow.iteration, 0);
+        assert_eq!(flow.cursor.index, 2);
+        assert_eq!(flow.cursor.iteration, 0);
     }
 
     #[tokio::test]
@@ -1735,7 +2273,7 @@ mod planning_tests {
             flow: step.flow,
             node_id: step.policy.id.unwrap(),
             skill: planned.skill.clone(),
-            iteration: position.iteration,
+            iteration: position.cursor.iteration,
         }
     }
 
@@ -1770,7 +2308,7 @@ mod planning_tests {
         let step = replacement.current();
         replacement.invocation = crate::durable::test_flow_invocation(
             &step.flow,
-            replacement.step_index,
+            replacement.cursor.index as u32,
             &step.step,
             step.policy.id.as_deref(),
             true,
@@ -1780,16 +2318,9 @@ mod planning_tests {
             .await
             .unwrap();
 
-        for decision in [
-            crate::ops::human_session::FlowDecision::Approve,
-            crate::ops::human_session::FlowDecision::Iterate,
-        ] {
-            assert!(
-                super::decide_human_flow_step(&store, &stale, decision, "obsolete decision")
-                    .await
-                    .is_err()
-            );
-        }
+        assert!(super::complete_human_flow_step(&store, &stale)
+            .await
+            .is_err());
         let current = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(current.invocation.id, replacement.invocation.id);
         assert_eq!(current.version, replacement.version);
@@ -1814,6 +2345,7 @@ mod planning_tests {
         let claim = match store
             .claim_task_worker(
                 &task.id,
+                &initial.invocation.id,
                 initial.version,
                 &owner,
                 time::OffsetDateTime::now_utc(),
@@ -1855,7 +2387,7 @@ mod planning_tests {
         let (store, mut task, _) = human_task_fixture().await;
         let mut position = super::start_task_flow(&task, "task-design").unwrap();
         position.invocation.steps.truncate(1);
-        position.iteration = 3;
+        position.cursor.iteration = 3;
         let position = store.set_flow_position(&task.id, position).await.unwrap();
         let owner = TaskWorkerOwner {
             trace_id: TraceId::new(),
@@ -1866,6 +2398,7 @@ mod planning_tests {
         let claim = match store
             .claim_task_worker(
                 &task.id,
+                &position.invocation.id,
                 position.version,
                 &owner,
                 time::OffsetDateTime::now_utc(),
@@ -1883,7 +2416,7 @@ mod planning_tests {
         let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
         let completed = super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         assert!(completed);
-        assert_eq!(position.iteration, 3);
+        assert_eq!(position.cursor.iteration, 3);
         super::finish_claimed_task_boundary(
             &store,
             &mut task,
@@ -1906,99 +2439,164 @@ mod planning_tests {
         );
     }
 
+    async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {
+        let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
+        position.ready_summary = Some(feedback.into());
+        store.set_flow_position(&task.id, position).await.unwrap();
+    }
+
     #[tokio::test]
-    async fn approving_a_human_node_advances_the_task_without_an_ask() {
+    #[allow(clippy::await_holding_lock)] // serializes LF_BIN while assembling the real next prompt
+    async fn nested_review_returns_feedback_before_the_outer_decision() {
+        let _lf_bin = super::TestLfBinGuard::pin();
+        use crate::engine::transitions::{FlowDecision, FlowVerdict};
+        use crate::engine::{ConcretePath, ConcreteStep, ConcreteXor, Skill};
+        let (store, task, _) = human_task_fixture().await;
+        let mut flow = super::start_task_flow(&task, "pursue").unwrap();
+        let body = flow.invocation.steps.clone();
+        let suffix = body[0].clone();
+        flow.invocation.steps = vec![
+            ConcreteStep::Xor(ConcreteXor {
+                router: Skill::named("xor-route"),
+                paths: [(
+                    "work".into(),
+                    ConcretePath {
+                        description: "implementation and review".into(),
+                        steps: body,
+                    },
+                )]
+                .into(),
+                flow_parents: vec![],
+            }),
+            suffix,
+        ];
+        flow.cursor.route = Some("work".into());
+        super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
+        for _ in 0..4 {
+            super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
+        }
+        flow.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
+            decision: FlowDecision::Advance,
+            summary: "ready to demonstrate".into(),
+        });
+        super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
+        assert!(flow.is_human());
+        assert_eq!(flow.current().step, "demo");
+        let token = park_human_task(&store, &task, &flow).await;
+        assert!(super::complete_human_flow_step(&store, &token)
+            .await
+            .is_err());
+        let notes = task.worktree.join("scratch/search");
+        std::fs::create_dir_all(&notes).unwrap();
+        let observation = "The human lost their place when clearing a search. Agreed: keep results on one screen. Next: implement clearing without a navigation change and prove focus stays in the search field.";
+        std::fs::write(
+            notes.join("feedback.md"),
+            format!("# Search feedback\n\n{observation}\n\nDesign: [search design](design.md)\n"),
+        )
+        .unwrap();
+        let design =
+            "The search field and results share one screen; clearing preserves keyboard focus.";
+        std::fs::write(notes.join("design.md"), design).unwrap();
+        let feedback = "See scratch/search/feedback.md and scratch/search/design.md; implement the agreed search interaction";
+        ready_review(&store, &task, feedback).await;
+        let mut ordinary = flow.cursor.clone();
+        ordinary.leaf_mut().progress.direction = Some(feedback.into());
+        ordinary.finish(&flow.invocation.steps).unwrap();
+        super::complete_human_flow_step(&store, &token)
+            .await
+            .unwrap();
+        let mut saved = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(saved.cursor, ordinary);
+        assert_eq!(saved.current().step, "loop-decide");
+        assert_eq!(saved.cursor.iteration, 0);
+        assert_eq!(
+            saved.cursor.leaf().progress.direction.as_deref(),
+            Some(feedback)
+        );
+        let prepared = super::prepare_task_flow_step(&store, &task, "human-task-proof", &saved)
+            .await
+            .unwrap();
+        assert!(prepared.turn.input.contains(feedback));
+        assert!(prepared.turn.input.contains(observation));
+        assert!(prepared.turn.input.contains(design));
+        assert!(saved.cursor.leaf().progress.verdict.is_none());
+        assert!(super::complete_human_flow_step(&store, &token)
+            .await
+            .is_err());
+        assert_eq!(store.flow_position(&task.id).await.unwrap().unwrap(), saved);
+        saved.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
+            decision: FlowDecision::Iterate,
+            summary: "Implement scratch/search/design.md using the findings and proof in scratch/search/feedback.md".into(),
+        });
+        super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap();
+        assert_eq!(saved.current().step, "implement");
+        assert_eq!(saved.cursor.iteration, 1);
+        let implementation =
+            super::prepare_task_flow_step(&store, &task, "human-task-proof", &saved)
+                .await
+                .unwrap();
+        assert!(implementation.turn.input.contains(observation));
+        assert!(implementation.turn.input.contains(design));
+        assert!(implementation
+            .turn
+            .input
+            .contains("Implement scratch/search/design.md"));
+        assert_eq!(
+            std::fs::read_to_string(notes.join("design.md")).unwrap(),
+            design
+        );
+        for _ in 0..4 {
+            super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap();
+        }
+        saved.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
+            decision: FlowDecision::Advance,
+            summary: "revision demonstrated".into(),
+        });
+        super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap();
+        store.set_flow_position(&task.id, saved).await.unwrap();
+        let later = park_human_task(&store, &task, &flow).await;
+        assert_ne!(later.iteration, token.iteration);
+        ready_review(&store, &task, "the interaction works").await;
+        super::complete_human_flow_step(&store, &later)
+            .await
+            .unwrap();
+        let mut saved = store.flow_position(&task.id).await.unwrap().unwrap();
+        saved.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
+            decision: FlowDecision::Advance,
+            summary: "human feedback and proof agree".into(),
+        });
+        super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap();
+        assert_eq!(saved.cursor.index, 1);
+        assert!(saved.cursor.child.is_none());
+    }
+
+    #[tokio::test]
+    async fn completing_a_final_review_finishes_the_flow() {
         let (store, task, flow) = human_task_fixture().await;
         let token = park_human_task(&store, &task, &flow).await;
-
-        super::decide_human_flow_step(
-            &store,
-            &token,
-            crate::ops::human_session::FlowDecision::Approve,
-            "design approved",
-        )
-        .await
-        .unwrap();
-
+        ready_review(&store, &task, "design clarified").await;
+        super::complete_human_flow_step(&store, &token)
+            .await
+            .unwrap();
         assert!(store.flow_position(&task.id).await.unwrap().is_none());
         assert!(!crate::ops::human_session::token_is_current(&store, &token)
             .await
             .unwrap());
-        assert!(store
-            .recent_task_events(&task.id, 10)
-            .await
-            .unwrap()
-            .iter()
-            .any(|event| matches!(
-                &event.kind,
-                TaskEventKind::Progress { summary } if summary == "design approved"
-            )));
+        assert!(store.recent_task_events(&task.id, 10).await.unwrap().iter().any(|event|
+            matches!(&event.kind, TaskEventKind::FlowFinished { summary, .. } if summary == "design clarified")
+        ));
     }
 
     #[tokio::test]
-    async fn iterating_a_human_node_returns_to_autonomous_work_with_a_steer() {
+    async fn concurrent_review_completions_settle_once() {
         let (store, task, flow) = human_task_fixture().await;
         let token = park_human_task(&store, &task, &flow).await;
-
-        crate::ops::linear_observe::tests::with_posted_comment(
-            &store,
-            &task,
-            "narrow the design",
-            super::decide_human_flow_step(
-                &store,
-                &token,
-                crate::ops::human_session::FlowDecision::Iterate,
-                "narrow the design",
-            ),
-        )
-        .await
-        .unwrap();
-
-        let position = store.flow_position(&task.id).await.unwrap().unwrap();
-        assert_eq!(position.current().step, "kickoff");
-        assert_eq!(position.iteration, 1);
-        assert!(!position.is_human());
-        assert!(store
-            .task_steers(&task.id)
-            .await
-            .unwrap()
-            .iter()
-            .any(|steer| steer.text.contains("narrow the design")));
-    }
-
-    #[tokio::test]
-    async fn concurrent_human_decisions_settle_once() {
-        let (store, task, flow) = human_task_fixture().await;
-        let token = park_human_task(&store, &task, &flow).await;
-        let approve_store = store.clone();
-        let approve_token = token.clone();
-        let iterate_store = store.clone();
-        let iterate_token = token.clone();
-
-        let (approve, iterate) = crate::ops::linear_observe::tests::with_posted_comment(
-            &store,
-            &task,
-            "iterate",
-            async {
-                tokio::join!(
-                    super::decide_human_flow_step(
-                        &approve_store,
-                        &approve_token,
-                        crate::ops::human_session::FlowDecision::Approve,
-                        "approve",
-                    ),
-                    super::decide_human_flow_step(
-                        &iterate_store,
-                        &iterate_token,
-                        crate::ops::human_session::FlowDecision::Iterate,
-                        "iterate",
-                    ),
-                )
-            },
-        )
-        .await;
-
-        assert_ne!(approve.is_ok(), iterate.is_ok());
+        ready_review(&store, &task, "review feedback").await;
+        let (first, second) = tokio::join!(
+            super::complete_human_flow_step(&store, &token),
+            super::complete_human_flow_step(&store, &token),
+        );
+        assert_ne!(first.is_ok(), second.is_ok());
         assert!(!crate::ops::human_session::token_is_current(&store, &token)
             .await
             .unwrap());

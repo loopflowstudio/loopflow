@@ -1430,7 +1430,7 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn session_launch_tui_opencode_uses_the_stored_zen_credential() {
+    async fn session_launch_tui_preserves_native_oauth_and_routes_stored_api_keys() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
@@ -1441,6 +1441,7 @@ mod tests {
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "OPENCODE_API_KEY",
+            "CODEX_ACCESS_TOKEN",
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
@@ -1449,6 +1450,7 @@ mod tests {
         std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
+        std::env::remove_var("CODEX_ACCESS_TOKEN");
 
         let bin = temp.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1503,6 +1505,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
+
+        // The native CLI rejects an ordinary OAuth token in this agent-identity
+        // variable. A prior `lf auth status` must not poison a working login.
+        let codex = temp.path().join("bin/codex");
+        std::fs::write(
+            &codex,
+            "#!/bin/sh\nif [ \"${CODEX_ACCESS_TOKEN+x}\" = x ]; then exit 1; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&codex, std::fs::metadata(&opencode).unwrap().permissions())
+            .unwrap();
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: Provider::Codex.as_str().to_string(),
+                access_token: "ordinary-chatgpt-oauth".to_string(),
+                refresh_token: None,
+                oauth_client_id: None,
+                expires_at: None,
+                login: Some("codex@example.com".to_string()),
+                updated_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                credential_type: CredentialType::OAuth,
+            })
+            .await
+            .unwrap();
+        launch_session(LaunchTarget::Tui, "codex", None, temp.path(), "review it").unwrap();
     }
 
     #[test]

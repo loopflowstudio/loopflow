@@ -49,9 +49,10 @@ lf task run DES-123 --directive "fix the flaky test" # keep one Task through mer
 lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
 
-`--task` and `--wave` run one named skill about existing Work
-without advancing its Flow position. The most specific selector is the
-Run subject: a Task implies its Wave. Broader
+`--task` and `--wave` run a named skill or Flow about existing Work
+without advancing its managed Flow position. A direct bound Flow has its own
+invocation; attribution does not claim the Task worker's cursor. The most
+specific selector is the Run subject: a Task implies its Wave. Broader
 selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
 Markdown snapshot. Wave binding uses its repository. Several Runs may concern the same Work
@@ -122,6 +123,9 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
 | `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
+| [`concept-review`](concept-review.md) | Rewrite the intended usage, then simplify product concepts, core types, and APIs together or after review-slice |
+| `loop-decide` | Assess a pass's progress and evidence to choose Advance, Iterate, or human help |
+| `unblock` | Resolve stalled work with the human inside an Ask Session, using concept-review by default |
 | `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
@@ -244,7 +248,9 @@ Run a named flow (chains of skills):
 
 ```bash
 lf <flow>
-lf ship -w feature-branch
+lf flow feature
+lf --wave designer flow feature  # ordinary invocation about this Wave
+lf task run DES-123 --flow feature
 ```
 
 | Flag | Description |
@@ -256,17 +262,26 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
+A **loopflow** is a Flow with one or more backward edges. Use the same commands:
+`lf feature` or `lf task run ISSUE --flow feature`. Managed Task execution adds
+its work context and Task authority. Running a Flow about a Wave needs no
+Wave-owned Flow lifecycle. See [Flow decisions and recovery](#flow-decisions-and-recovery)
+for the protocol and current verification limits, and [authoring](authoring.md)
+for composition limitations.
+
 ### Builtin Flows
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → code → review-slice → demo |
+| `build` | kickoff → code → review-slice → concept-review → demo |
 | `code` | implement → compress |
 | `pair` | design → code |
 | `design` | author one exact design at a User gate |
 | `launch-plan` | keep one coherent core here and launch independent follow-up Tasks |
-| `task-design` | kickoff → review-design |
-| `slice` | code → review-slice → publish/refresh Task PR |
+| `feature` | task-design → pursue (default Task Flow) |
+| `task-design` | kickoff → human review-design |
+| `pursue` | repeat implement → compress → review-slice → concept-review → loop-decide, then human demo |
+| `slice` | code → review-slice (publishes PR) → concept-review |
 | `ship` | task-gate → record-learnings → op: pr land -c |
 | `ship-demo` | task-gate → demo review → record-learnings → op: pr land -c |
 | `deploy` | gate → op: pr land |
@@ -306,13 +321,12 @@ lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --flow incident
 lf task status DES-123
+lf task advance DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
-lf ask "Review this proof with me"                    # block on a session
-lf session list --json                                # unresolved Sessions
-lf session open task_...:flow:node:0 --json           # exact native provider resume
-lf session complete <ask-id>                          # finish an ad-hoc Ask
-lf session approve <flowstep-id> "Verified"           # approve a Task FlowStep
-lf session iterate <flowstep-id> "Narrow the design"
+lf ask "Review this proof with me"                    # block on a human session
+lf session list --json                                # unresolved human Sessions
+lf session open <session-id> --json                  # reopen the exact boundary
+lf session complete <session-id>                     # return review or Ask feedback
 lf task steer DES-123 "rename the flag"
 lf task steer DES-123 "take the smaller approach"
 lf task interrupt DES-123                             # end the active turn
@@ -342,8 +356,10 @@ Task Work has stable identities and small state:
 PR state, Flow position, and Run evidence stay separate. `task prepare` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
 identity without starting execution. `task run` uses that same substrate,
-selects a Flow when none is active, and ensures the exact next boundary has one
-Task worker. Each autonomous boundary starts a fresh provider Run from durable
+selects a Flow when none is active, and starts its mechanical driver.
+`task advance` drives an existing Flow until human input, a blocker, interruption,
+or completion; repeated calls report the active driver. A human review waits
+for its exact Session to be completed. Each autonomous boundary starts a fresh provider Run from durable
 Task facts; no provider transcript or resident Task process is required.
 `resume` preserves the Work, selected Flow, Steers, worktree, branch, and PR
 while starting a fresh worker.
@@ -365,8 +381,92 @@ overrides that recommendation when it selects the next worker's Flow. The
 selected Flow definition is persisted immutably for that invocation, so edits
 to repository Flow YAML cannot change a Task already in progress. When the
 Flow completes, Loopflow deletes its position and leaves the Task ready. The
-next worker chooses afresh; PR delivery and Task completion remain explicit
-commands rather than an implied next lifecycle phase.
+next explicit `task run` chooses afresh. With no recommendation, `feature` runs
+design review, then implement → compress → review-slice → concept-review → loop-decide.
+Iterate returns to implement; Advance reaches `demo human:true`. Completing demo
+passes its feedback to a second loop-decide whose explicit edge also targets
+implement. This outer loop can apply a revised design and demonstrate it again.
+`pursue` starts at implementation. `task-design` finishes when its interactive
+design review is completed. Existing pinned invocations retain their definition;
+obsolete human navigation policies require starting a new invocation.
+PR delivery and Task completion
+remain explicit commands rather than an implied lifecycle phase.
+
+### Flow decisions and recovery
+
+```sh
+lf feature                         # start an ordinary invocation
+lf flow resume <invocation>         # continue its saved position
+lf flow resume <invocation> --retry  # retry a recorded failure at the same step
+lf task run DES-123 --flow feature  # start the Task's managed invocation
+lf task advance DES-123             # continue that Task's saved Flow
+```
+
+A **loopflow** is a Flow with one or more backward edges. Each edge names an
+earlier occurrence. There is no pass limit. Steps outside a backward edge's body
+do not repeat when that edge is taken. Advance enters the remaining steps;
+Iterate traverses the declared section again. A slice is a unit of work within
+a pass. Task binding adds context and Task authority.
+
+The dedicated `loop-decide` step compares the previous direction with the pass's
+evidence after both reviews. Its exact Run records one navigation decision:
+
+```sh
+lf flow decide advance "Evidence that this boundary's obligations are satisfied"
+lf flow decide iterate "Remaining work, next action, and the proof to collect"
+lf flow blocked "What stalled, what was tried, and what needs human judgment"
+```
+
+The reviews supply evidence; concept-review does not own navigation. Blocked is
+a stopped execution outcome, separate from Advance/Iterate. Meaningful learning
+counts as progress; repeating a failure without new evidence calls for help.
+
+`lf flow blocked` keys one Ask to the exact invocation, occurrence, and pass;
+duplicate calls join it and retries recover its saved completion. Its Session
+runs `unblock`, using concept-review with the human by default or addressing a
+specific missing input. Human Complete returns the summary and shared artifact
+changes to loop-decide for reassessment. It supplies evidence, not a navigation decision.
+If the blocker remains unresolved, report it instead of opening identical Asks.
+Invalid or missing decisions remain visible blockers.
+A candidate decision takes effect only after its Run succeeds. Inspect any
+operation's effects before choosing `--retry`, since an interrupted operation
+may already have changed external state.
+
+Ordinary invocations print an ID and save their captured definition and position
+on the current Home. Resume that ID to retain direction, accepted decisions,
+and the exact boundary; invoking the Flow name again starts a new invocation.
+Task continuation uses its saved definition too. Source edits apply to newly
+selected invocations. Completion runs only the declared suffix; it grants no
+implicit merge or Task-completion authority.
+
+For source development, `scripts/dev-lf flow resume <invocation-id>` continues
+through the development binary and its Home. Its Session reopen commands use
+that same binary; the installed `lf` on PATH may have different saved state.
+
+An unreadable ordinary position reports its saved file without hiding other
+Sessions. Keep that file for recovery; `lf flow <name>` starts a fresh invocation.
+Historical Wave XOR journals remain readable, but their uncaptured branches
+require explicit `lf wave <name> --restart-flow` to compile new execution state.
+
+A `human:true` step appears as a Flow Session. The reviewer saves feedback and
+revised artifacts, then calls `lf session ready "feedback and remaining work"`.
+The human ends the conversation with `lf session complete <session-id>`.
+Completion returns feedback to the next step. A following loop-decide interprets
+it and records Advance or Iterate against its own authored edge. Human reviews
+have no implicit revision target. Closing the provider, marking ready, or
+reopening a Session does not complete it.
+Already finished invocations report completion rather than starting again.
+
+Ordinary and Task Flows capture all XOR routers and branch definitions at
+invocation creation. A router records its exact choice with `lf flow route PATH`;
+failed Runs discard that candidate. Nested paths and review completion use the
+same cursor transition. Recovery fixtures prove these paths locally; live
+provider/desktop review completion → decision → implementation → Ask → reassessment remains a
+separate demonstration.
+
+The `advance` skill also resolves these actions from an ordinary coding
+conversation: complete an exact review, resume a Task, or prepare work from an
+approved design. It reports the actual Task state after the handoff.
 
 Every Task-owned PR keeps its authored title, naming the benefit of that PR.
 Loopflow places the canonical Task name and Linear link after the opening
@@ -409,25 +509,39 @@ complete, hide, or release anything. The user runs `lf session complete
 provider client, removes the Session from the Sessions list, and resumes the caller
 with the ready summary and any filesystem changes.
 
-A Task review FlowStep uses the same surface. It persists its exact playhead and
-starts one ordinary provider Run for its authored Skill:
+Choose the skill for the human Session when the request needs a particular
+kind of conversation:
+
+```bash
+lf ask --skill unblock "Two passes repeated the same failure; reconsider the direction"
+```
+
+Ask owns the Session and wait; `unblock` guides the conversation inside it,
+using concept-review by default. The selected skill name is saved with the Ask
+so reopening keeps that choice. Completing this conversation returns
+direction to the blocked caller for reassessment. The
+`lf flow blocked` command uses this path and retains the Ask result
+across retries of the same decision boundary.
+
+A human FlowStep in an ordinary or Task-managed Flow uses the same Session
+surface. Its saved invocation owns the exact boundary and captured Skill:
 
 ```bash
 lf session list --json                              # unresolved Sessions
 lf session open <session-id> --json                 # prepare/recover attachment
-lf session ready "Ready for review"                 # agent state; stays visible
-lf session approve <session-id> "Verified summary"  # approve the FlowStep
-lf session iterate <session-id> "Narrow the design"
+lf session ready "Feedback and remaining work"      # agent state; stays visible
+lf session complete <session-id>                    # human ends the review
 ```
 
-The FlowStep session runs `lf --tui --as task:<id> <skill>`. Closing, provider
-exit, or agent readiness never means approval; the persisted Task playhead
-remains waiting. Loopflow.app lists the same sessions and exposes the FlowStep
-decision controls. Selecting a Session already open in the app returns to its
+Task FlowStep Sessions retain Task attribution; ordinary Flow Sessions retain
+their invocation's context. Closing, provider exit, or agent readiness never
+completes a review; the saved boundary remains waiting. Loopflow.app lists Sessions
+and exposes Complete for ready reviews. Selecting a Session already open in the app returns to its
 live terminal. If its client is active elsewhere, **Move here** explicitly
 stops that client and resumes provider-native history in the selected pane.
-Closing a pane keeps the live terminal available in the Sessions list; Complete
-ends the Session.
+Closing a pane keeps the live terminal available in the Sessions list. Complete
+finishes the conversation. Flow reviews return feedback to the next step;
+Asks return feedback to their blocked caller.
 
 Sessions may use a detached PTY cradle to let the first provider client
 start before the desktop is present. That cradle is not Session identity,

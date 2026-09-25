@@ -287,8 +287,12 @@ mod tests {
         assert!(!rendered.contains("\nFLOWS\n"));
         assert!(!rendered.contains("\nSKILLS\n"));
         assert!(rendered.contains("build                      flow"));
-        assert!(rendered.contains("written   kickoff → code → review-slice → demo"));
-        assert!(rendered.contains("collapsed kickoff → implement → compress → review-slice → demo"));
+        assert!(
+            rendered.contains("written   kickoff → code → review-slice → concept-review → demo")
+        );
+        assert!(rendered.contains(
+            "collapsed kickoff → implement → compress → review-slice → concept-review → demo"
+        ));
         assert!(rendered.contains("code                       flow\n    implement → compress\n"));
         assert!(!rendered
             .lines()

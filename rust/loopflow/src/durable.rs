@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::controller::wave::playhead::QueuedInvocation;
+use crate::controller::wave::playhead::{QueuedInvocation, StepKind, StepRef};
+use crate::engine::{ConcreteStep, OccurrencePolicy};
 use crate::id::{ExecId, TraceId, WaveId};
 
 /// The exact active Run named by an in-Run process.
@@ -132,8 +133,7 @@ pub struct FlowPosition {
     pub invocation: QueuedInvocation,
     pub session_run_id: Option<RunId>,
     pub ready_summary: Option<String>,
-    pub step_index: u32,
-    pub iteration: u32,
+    pub cursor: crate::engine::ExecutionCursor,
     pub version: u64,
     pub worker_generation: u64,
     pub claim: Option<TaskWorkerClaim>,
@@ -143,20 +143,57 @@ pub struct FlowPosition {
 }
 
 impl FlowPosition {
+    pub fn has_pending_decision(&self) -> bool {
+        let leaf = self.cursor.leaf();
+        (self.current().policy.repeat.is_some() && leaf.progress.verdict.is_some())
+            || (matches!(self.current_plan(), crate::engine::ConcreteStep::Xor(_))
+                && leaf.route.is_some())
+    }
+
     pub fn work(&self) -> WorkRef {
         WorkRef::Task(self.task_id.clone())
     }
 
     pub fn current_plan(&self) -> &crate::engine::ConcreteStep {
-        self.invocation
-            .steps
-            .get(self.step_index as usize)
+        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
+        steps
+            .get(cursor.index)
             .expect("a persisted Flow position always selects a validated step")
     }
 
+    pub fn current_checked(&self) -> Option<crate::controller::wave::playhead::StepRef> {
+        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
+        let (step, kind, policy) = match steps.get(cursor.index)? {
+            ConcreteStep::Skill(skill) => (
+                skill.skill.name.clone(),
+                StepKind::Skill,
+                skill.policy.clone(),
+            ),
+            ConcreteStep::Op(op) => (
+                op.item.display_name(),
+                StepKind::Op,
+                OccurrencePolicy::default(),
+            ),
+            ConcreteStep::Xor(branch) => (
+                branch.router.name.clone(),
+                StepKind::Xor,
+                OccurrencePolicy::default(),
+            ),
+        };
+        Some(StepRef {
+            invocation_id: self.invocation.id.clone(),
+            flow: self.invocation.flow.clone(),
+            step,
+            kind,
+            policy,
+            index: u32::try_from(self.cursor.index).ok()?,
+            total: u32::try_from(self.invocation.steps.len()).ok()?,
+            iteration: self.cursor.iteration,
+        })
+    }
+
     pub fn current(&self) -> crate::controller::wave::playhead::StepRef {
-        self.invocation
-            .step_at(self.step_index, self.iteration)
+        self.current_checked()
             .expect("a persisted Flow position always selects a validated step")
     }
 
@@ -186,6 +223,7 @@ pub(crate) fn test_flow_invocation(
                 policy: crate::engine::OccurrencePolicy {
                     id: target.then(|| node_id.map(str::to_string)).flatten(),
                     human: target && human,
+                    repeat: None,
                 },
                 flow_parents: Vec::new(),
             })

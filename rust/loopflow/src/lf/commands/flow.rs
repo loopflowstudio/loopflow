@@ -1,16 +1,14 @@
-use crate::engine::flow::load_xor_path_items;
+use crate::engine::transitions::{FlowDecision, FlowVerdict};
 use crate::engine::{
-    expand_flow, human_occurrence_ids, xor_verdict_path, ConcreteStep, ConcreteXor,
-    ExecutionContext, ExecutionSkill, Flow, FlowEngine, FlowOutcome, FlowProgress, SkillExecutor,
-    SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
+    expand_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
+    Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
-use crate::ops::{commit_workflow, CommitOptions, NullProgress};
+use crate::ops::{commit_workflow, flow_run, CommitOptions, NullProgress};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 /// Run a flow: print pipeline header, then execute each skill sequentially.
@@ -18,6 +16,16 @@ pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
     execute(&flow.name, &items, None, message, cli, repo)
+}
+
+pub fn run_bound(
+    flow: &Flow,
+    message: Option<&str>,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+) -> Result<()> {
+    let message = crate::lf::commands::run::bound_message(binding, message);
+    run(flow, Some(&message), cli, &binding.cwd)
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
@@ -83,25 +91,21 @@ fn execute(
         fields(LfEventFields::default()),
     );
     let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", flow_name);
-    let executor = CliFlowExecutor {
-        cli,
-        message,
-        repo: repo.to_path_buf(),
-    };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("failed to build flow runtime")?;
-    let result = runtime
-        .block_on(FlowEngine::new(executor).run(items, 0))
-        .map(|outcome| match outcome {
-            FlowOutcome::Completed | FlowOutcome::Waiting => (),
-        });
+    let record = flow_run::create(flow_name, items, repo, message, cli)?;
+    eprintln!(
+        "Flow invocation {} — resume with lf flow resume {}",
+        record.id, record.id
+    );
+    let result = drive_saved(&record.id, cli);
     match &result {
-        Ok(()) => journal::emit(
+        Ok(outcome) => journal::emit(
             repo,
             LfNode::Flow,
-            LfEventType::Completed,
+            if *outcome == FlowOutcome::Completed {
+                LfEventType::Completed
+            } else {
+                LfEventType::Escalated
+            },
             fields(LfEventFields::default()),
         ),
         Err(err) => journal::emit(
@@ -114,7 +118,173 @@ fn execute(
             }),
         ),
     }
-    result
+    report_outcome(result?)
+}
+
+fn report_outcome(outcome: FlowOutcome) -> Result<()> {
+    match outcome {
+        FlowOutcome::Completed => Ok(()),
+        FlowOutcome::Waiting => {
+            anyhow::bail!("Flow is waiting for human input; open its Flow Session")
+        }
+        FlowOutcome::Blocked(reason) => anyhow::bail!("Flow is blocked: {reason}"),
+    }
+}
+
+pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result<()> {
+    match command {
+        "decide" => {
+            let decision = match args.first().map(String::as_str) {
+                Some("advance") => FlowDecision::Advance,
+                Some("iterate") => FlowDecision::Iterate,
+                _ => anyhow::bail!("usage: lf flow decide advance|iterate SUMMARY"),
+            };
+            let summary = args[1..].join(" ");
+            anyhow::ensure!(
+                !summary.trim().is_empty(),
+                "decision requires evidence or direction"
+            );
+            if let Some(token) = flow_run::token()? {
+                let run = active_run_id()?;
+                flow_run::record_decision(&token, &run, &FlowVerdict { decision, summary })?;
+            } else {
+                crate::ops::task::task_verdict(repo, decision, &summary)?;
+            }
+            println!("Decision recorded; it takes effect when this Run finishes successfully.");
+            Ok(())
+        }
+        "route" => {
+            anyhow::ensure!(args.len() == 1, "usage: lf flow route PATH");
+            let run = active_run_id()?;
+            if let Some(token) = flow_run::token()? {
+                flow_run::record_route(&token, &run, &args[0])?;
+            } else {
+                let runtime = tokio::runtime::Runtime::new()?;
+                runtime.block_on(async {
+                    let store = std::sync::Arc::new(
+                        crate::store::open_existing_store()
+                            .await
+                            .ok_or_else(|| anyhow!("no Loopflow registry"))?,
+                    );
+                    let task = crate::ops::task::task_for_checkout(&store, repo)
+                        .await?
+                        .ok_or_else(|| anyhow!("no Task in this checkout"))?;
+                    store.record_flow_route(&task.id, &run, &args[0]).await?;
+                    Ok::<_, anyhow::Error>(())
+                })?;
+            }
+            println!("Route recorded; it takes effect when this Run finishes successfully.");
+            Ok(())
+        }
+        "blocked" => {
+            let reason = args.join(" ");
+            anyhow::ensure!(!reason.trim().is_empty(), "usage: lf flow blocked REASON");
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async {
+                let store = std::sync::Arc::new(crate::store::open_existing_store().await
+                    .ok_or_else(|| anyhow!("no Loopflow registry on this Home"))?);
+                let run_id = active_run_id()?;
+                let key = if let Some(token) = flow_run::token()? {
+                    flow_run::require_active(&token, &run_id)?
+                } else {
+                    let task = crate::ops::task::task_for_checkout(&store, repo).await?
+                        .ok_or_else(|| anyhow!("no current Flow decision"))?;
+                    let position = store.flow_position(&task.id).await?
+                        .ok_or_else(|| anyhow!("Task has no current Flow"))?;
+                    anyhow::ensure!(position.claim.as_ref().and_then(|c| c.worker_run_id.as_ref()) == Some(&run_id)
+                        && !position.is_human(), "this Run does not own the Task decision");
+                    anyhow::ensure!(matches!(position.current_plan(), ConcreteStep::Skill(s) if s.policy.repeat.is_some()),
+                        "this step does not own a loop decision");
+                    format!("task:{}:{}:{}", task.id, position.invocation.id, position.cursor.boundary_key())
+                };
+                let summary = crate::ops::human_session::ask_once(&store, &key, &reason, Some("unblock")).await?;
+                println!("Session complete: {summary}\nReassess the current evidence before choosing Advance or Iterate. This returned feedback, not a navigation decision.");
+                Ok(())
+            })
+        }
+        "resume" => {
+            anyhow::ensure!(
+                args.len() == 1 || (args.len() == 2 && args[1] == "--retry"),
+                "usage: lf flow resume INVOCATION [--retry]"
+            );
+            let record = flow_run::read(&args[0])?;
+            if args.len() == 2 {
+                let _driver = flow_run::driver_lock(&record.id)?;
+                flow_run::retry(&record.id)?;
+            }
+            let argv = std::env::args().collect::<Vec<_>>();
+            journal::with_runtime(&record.cwd, &argv, || {
+                report_outcome(drive_saved(&record.id, cli)?)
+            })
+        }
+        _ => anyhow::bail!("unknown Flow control {command}"),
+    }
+}
+
+fn active_run_id() -> Result<crate::durable::RunId> {
+    crate::durable::RunId::parse(
+        &std::env::var(crate::durable::RUN_ID_ENV)
+            .context("this operation requires the active decision Run")?,
+    )
+    .map_err(Into::into)
+}
+
+fn drive_saved(id: &str, cli: &Cli) -> Result<FlowOutcome> {
+    let _driver = flow_run::driver_lock(id)?;
+    flow_run::recover(id)?;
+    let mut record = flow_run::read(id)?;
+    if record.finished {
+        println!("Flow {} is already finished.", record.flow);
+        return Ok(FlowOutcome::Completed);
+    }
+    if let Some(reason) = &record.failure {
+        anyhow::bail!("Flow {} is blocked: {reason}", record.id);
+    }
+    let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &record.flow);
+    let mut launch = cli.launch_options();
+    launch.wave = record.wave.clone();
+    launch.task = record.task.clone();
+    launch.as_work = record.as_work.clone();
+    if launch.model.is_none() {
+        launch.model = record.model.clone();
+    }
+    launch.bound_cwd = Some(record.cwd.clone());
+    let executor = CliFlowExecutor {
+        cli: &launch,
+        message: record.message.as_deref(),
+        repo: record.cwd.clone(),
+        invocation: id.to_owned(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let outcome = runtime
+        .block_on(FlowEngine::new(executor).run_with_cursor(&record.steps, &mut record.cursor));
+    match outcome {
+        Ok(FlowOutcome::Completed) => {
+            flow_run::update(id, |run| {
+                run.finished = true;
+                run.active = None;
+                Ok(())
+            })?;
+            Ok(FlowOutcome::Completed)
+        }
+        Ok(FlowOutcome::Waiting) => Ok(FlowOutcome::Waiting),
+        Ok(FlowOutcome::Blocked(reason)) => {
+            flow_run::update(id, |run| {
+                run.failure = Some(reason.clone());
+                Ok(())
+            })?;
+            anyhow::bail!("Flow {id} blocked: {reason}")
+        }
+        Err(error) => {
+            flow_run::update(id, |run| {
+                run.failure = Some(error.to_string());
+                Ok(())
+            })?;
+            Err(error)
+        }
+    }
 }
 
 fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep], repo: &Path) -> Result<()> {
@@ -164,30 +334,18 @@ fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>>
         )]),
         ConcreteStep::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
         ConcreteStep::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
-        ConcreteStep::Xor(branch) => {
-            render_branch_item("xor", branch, TEMP_XOR_ROUTE_STEP_NAME, repo)
-        }
+        ConcreteStep::Xor(branch) => render_branch_item("xor", branch, repo),
     }
 }
 
-fn render_branch_item(
-    kind: &str,
-    branch: &ConcreteXor,
-    default_router: &str,
-    repo: &Path,
-) -> Result<Vec<String>> {
-    render_branch_pipeline(
-        kind,
-        branch.router.as_deref().unwrap_or(default_router),
-        &branch.paths,
-        repo,
-    )
+fn render_branch_item(kind: &str, branch: &ConcreteXor, repo: &Path) -> Result<Vec<String>> {
+    render_branch_pipeline(kind, &branch.router.name, &branch.paths, repo)
 }
 
 fn render_branch_pipeline(
     kind: &str,
     router: &str,
-    paths: &std::collections::HashMap<String, crate::engine::XorPath>,
+    paths: &std::collections::HashMap<String, crate::engine::ConcretePath>,
     repo: &Path,
 ) -> Result<Vec<String>> {
     let mut lines = vec![format!("[{kind} via {router}]")];
@@ -198,8 +356,7 @@ fn render_branch_pipeline(
         let path = paths
             .get(key)
             .expect("branch path key collected from map should exist");
-        let nested_items = load_xor_path_items(path, repo)?;
-        let nested = render_pipeline_lines(&nested_items, repo)?;
+        let nested = render_pipeline_lines(&path.steps, repo)?;
         let branch_prefix = tree_prefix(index, paths.len());
         if nested.is_empty() {
             lines.push(format!("{branch_prefix} {key}"));
@@ -248,129 +405,98 @@ struct CliFlowExecutor<'a> {
     cli: &'a Cli,
     message: Option<&'a str>,
     repo: PathBuf,
+    invocation: String,
 }
 
 #[async_trait]
 impl SkillExecutor for CliFlowExecutor<'_> {
-    fn repo_root(&self) -> &Path {
-        &self.repo
-    }
-
     async fn run_skill(
         &self,
-        skill: &ExecutionSkill,
+        skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
-        if skill.skill.policy.human
-            && !crate::lf::commands::run::is_interactive_run(
-                self.cli,
-                Some(&skill.invoke_as),
-                self.message,
-            )
-        {
-            let node_id = skill
-                .skill
-                .policy
-                .id
-                .as_deref()
-                .expect("validated review step has an id");
-            anyhow::bail!(
-                "review step {node_id} requires an attached User surface; run it through durable Task Work to park it as a session"
+        if skill.policy.human {
+            let id = &self.invocation;
+            let (token, completed) = flow_run::begin_boundary(id)?;
+            if completed {
+                return flow_run::finish_boundary(&token, None);
+            }
+            eprintln!(
+                "Flow {id} is waiting at {}. Open its Flow Session with lf session.",
+                skill.skill.name
             );
+            return Ok(SkillOutcome::Waiting);
         }
         if let Some(progress) = ctx.progress {
-            print_skill_progress(progress, &skill.display_name);
+            print_skill_progress(progress, &skill.skill.name);
         } else {
-            print_nested_skill_progress(&skill.display_name);
+            print_nested_skill_progress(&skill.skill.name);
         }
 
-        run_skill_with_journal(
+        let (token, completed) = flow_run::begin_boundary(&self.invocation)?;
+        if completed {
+            return flow_run::finish_boundary(&token, None);
+        }
+        let encoded = serde_json::to_string(&token)?;
+        let _token = EnvVarGuard::set(flow_run::FLOW_STEP_ENV, &encoded);
+        let mut message = self.message.unwrap_or_default().to_string();
+        if let Some(direction) = &ctx.direction {
+            message.push_str(&format!(
+                "\n\nPrevious step feedback or iteration direction:\n{direction}"
+            ));
+        }
+        if skill.policy.repeat.is_some() {
+            message.push_str("\n\nRecord this occurrence's decision with `lf flow decide advance \"evidence\"` or `lf flow decide iterate \"next action and proof\"`. If progress is stalled, use `lf flow blocked \"reason, attempted direction, evidence, and question\"`; it opens one Ask running unblock and returns the human's summary. Reassess afterward. Invalid commands return correction feedback; correct the decision here without replaying implementation. A recorded decision is accepted only after this Run succeeds.");
+        }
+        let mut launch = self.cli.launch_options();
+        launch.batch = true;
+        launch.interactive = false;
+        launch.tui = false;
+        launch.ide = false;
+        let result = run_skill_with_journal(
             &self.repo,
-            &skill.display_name,
-            ctx.progress.map(|progress| progress.index),
+            &skill.skill.name,
+            ctx.progress.map(|p| p.index),
             || {
-                if let Some(prompt) = skill.temporary_content.as_deref() {
-                    let _guard = write_temp_skill(&self.repo, &skill.invoke_as, prompt)?;
-                    crate::lf::commands::run::run(
-                        Some(skill.invoke_as.as_str()),
-                        self.message,
-                        self.cli,
-                    )?;
-                } else {
-                    crate::lf::commands::run::run(
-                        Some(skill.invoke_as.as_str()),
-                        self.message,
-                        self.cli,
-                    )?;
-                }
-                commit_skill_work(&self.repo, &skill.display_name)?;
-                if skill.skill.policy.human {
-                    confirm_present_human_review(
-                        skill
-                            .skill
-                            .policy
-                            .id
-                            .as_deref()
-                            .expect("validated review node has an id"),
-                        &mut std::io::stdin().lock(),
-                        &mut std::io::stderr().lock(),
-                    )?;
-                }
+                crate::lf::commands::run::run_saved(
+                    &skill.skill,
+                    Some(&message),
+                    &launch,
+                    &self.repo,
+                )?;
+                commit_skill_work(&self.repo, &skill.skill.name)?;
                 Ok(())
             },
+        );
+        let verdict = flow_run::finish_boundary(
+            &token,
+            result.as_ref().err().map(ToString::to_string).as_deref(),
         )?;
-        Ok(SkillOutcome::Completed)
+        result?;
+        Ok(verdict)
     }
 
-    async fn run_op(&self, ops: &crate::engine::ConcreteOp, ctx: ExecutionContext) -> Result<()> {
-        if let Some(progress) = ctx.progress {
-            let colors = Colors::new();
-            eprintln!(
-                "{dim}[{current}/{total}]{reset} {bold}op:{reset} {cmd}",
-                dim = colors.dim,
-                reset = colors.reset,
-                bold = colors.bold,
-                current = progress.index + 1,
-                total = progress.total,
-                cmd = ops.item.display_name(),
-            );
-        } else {
-            eprintln!("op: {}", ops.item.display_name());
+    async fn checkpoint(&self, cursor: &crate::engine::ExecutionCursor) -> Result<()> {
+        flow_run::checkpoint(&self.invocation, cursor)
+    }
+
+    async fn run_op(&self, ops: &crate::engine::ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
+        let name = format!("op: {}", ops.item.display_name());
+        let (token, completed) = flow_run::begin_boundary(&self.invocation)?;
+        if completed {
+            return Ok(());
         }
-        crate::ops::execute_flow_ops(&self.repo, &ops.item, &NullProgress)?;
-        Ok(())
-    }
-
-    async fn read_xor_verdict(&self, branch: &crate::engine::ConcreteXor) -> Result<String> {
-        crate::engine::flow::read_xor_verdict(&xor_verdict_path(&self.repo), branch)
-            .map_err(anyhow::Error::msg)
+        eprintln!("{name}");
+        let result = crate::ops::execute_flow_ops(&self.repo, &ops.item, &NullProgress);
+        flow_run::finish_boundary(
+            &token,
+            result.as_ref().err().map(ToString::to_string).as_deref(),
+        )?;
+        result.map_err(Into::into)
     }
 }
 
-fn confirm_present_human_review(
-    node_id: &str,
-    input: &mut impl BufRead,
-    output: &mut impl Write,
-) -> Result<()> {
-    write!(
-        output,
-        "Approve step {node_id} against its exact current content? [y/N] "
-    )?;
-    output.flush()?;
-    let mut response = String::new();
-    if input.read_line(&mut response)? == 0 {
-        anyhow::bail!("review step {node_id} exited without explicit User acceptance");
-    }
-    if matches!(
-        response.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes" | "accept"
-    ) {
-        return Ok(());
-    }
-    anyhow::bail!("review step {node_id} was not accepted by the User")
-}
-
-fn print_skill_progress(progress: FlowProgress, skill_name: &str) {
+fn print_skill_progress(progress: StepProgress, skill_name: &str) {
     let colors = Colors::new();
     eprintln!(
         "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
@@ -446,103 +572,22 @@ pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<bool> {
     };
     commit_workflow(repo, &options, &NullProgress).map_err(Into::into)
 }
-fn write_temp_skill(repo: &Path, name: &str, prompt: &str) -> Result<TempSkillGuard> {
-    let tmp_skill_dir = repo.join(".lf/skills");
-    std::fs::create_dir_all(&tmp_skill_dir)?;
-    let path = tmp_skill_dir.join(format!("{name}.md"));
-    let original_content = std::fs::read_to_string(&path).ok();
-    std::fs::write(&path, prompt)?;
-    Ok(TempSkillGuard {
-        path,
-        original_content,
-    })
-}
-
-struct TempSkillGuard {
-    path: PathBuf,
-    original_content: Option<String>,
-}
-
-impl Drop for TempSkillGuard {
-    fn drop(&mut self) {
-        let result = match &self.original_content {
-            Some(content) => std::fs::write(&self.path, content),
-            None => match std::fs::remove_file(&self.path) {
-                Ok(()) => Ok(()),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(err) => Err(err),
-            },
-        };
-
-        if let Err(err) = result {
-            eprintln!(
-                "failed to restore temporary skill {}: {}",
-                self.path.display(),
-                err
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        confirm_present_human_review, render_pipeline_lines, write_temp_skill, CliFlowExecutor,
-    };
-    use crate::engine::{
-        ConcreteSkill, ConcreteStep, ExecutionContext, ExecutionSkill, Flow, Skill, SkillExecutor,
-    };
+    use super::render_pipeline_lines;
+    use crate::engine::{ConcreteSkill, ConcreteStep, Flow, Skill};
     use crate::lf::Cli;
     use std::fs;
     use tempfile::tempdir;
-    use tempfile::TempDir;
-
-    #[test]
-    fn write_xor_route_skill_removes_temp_file_when_none_existed() {
-        let temp = TempDir::new().unwrap();
-        let skill_path = temp.path().join(".lf/skills/xor-route.md");
-
-        {
-            let _guard =
-                write_temp_skill(temp.path(), "xor-route", "temporary route prompt").unwrap();
-            assert_eq!(
-                fs::read_to_string(&skill_path).unwrap(),
-                "temporary route prompt"
-            );
-        }
-
-        assert!(
-            !skill_path.exists(),
-            "temporary xor-route skill should be removed after use"
-        );
-    }
-
-    #[test]
-    fn write_xor_route_skill_restores_existing_file() {
-        let temp = TempDir::new().unwrap();
-        let skills_dir = temp.path().join(".lf/skills");
-        fs::create_dir_all(&skills_dir).unwrap();
-        let skill_path = skills_dir.join("xor-route.md");
-        fs::write(&skill_path, "existing route prompt").unwrap();
-
-        {
-            let _guard =
-                write_temp_skill(temp.path(), "xor-route", "temporary route prompt").unwrap();
-            assert_eq!(
-                fs::read_to_string(&skill_path).unwrap(),
-                "temporary route prompt"
-            );
-        }
-
-        assert_eq!(
-            fs::read_to_string(&skill_path).unwrap(),
-            "existing route prompt"
-        );
-    }
 
     #[test]
     fn render_pipeline_lines_expands_xor_paths_on_separate_lines() {
         let temp = tempdir().unwrap();
+        let skills = temp.path().join(".lf/skills/tend");
+        fs::create_dir_all(&skills).unwrap();
+        for name in ["scan-waves", "assess", "play-chord", "review-chord"] {
+            fs::write(skills.join(format!("{name}.md")), format!("Fixture {name}")).unwrap();
+        }
         let flows_dir = temp.path().join(".lf/flows/tend");
         fs::create_dir_all(&flows_dir).unwrap();
         fs::write(
@@ -639,64 +684,85 @@ mod tests {
     }
 
     #[test]
-    fn present_human_flow_requires_a_typed_acceptance_after_the_session() {
-        let mut output = Vec::new();
-        confirm_present_human_review(
-            "review_design",
-            &mut std::io::Cursor::new("accept\n"),
-            &mut output,
-        )
-        .expect("typed acceptance settles the interactive review step");
-        assert!(String::from_utf8(output)
-            .unwrap()
-            .contains("exact current content"));
-
-        let declined = confirm_present_human_review(
-            "review_design",
-            &mut std::io::Cursor::new("no\n"),
-            &mut Vec::new(),
-        )
-        .expect_err("an explicit refusal cannot advance the node");
-        assert!(declined.to_string().contains("was not accepted"));
-
-        let closed = confirm_present_human_review(
-            "review_design",
-            &mut std::io::Cursor::new(Vec::<u8>::new()),
-            &mut Vec::new(),
-        )
-        .expect_err("raw session exit cannot advance the node");
-        assert!(closed
-            .to_string()
-            .contains("without explicit User acceptance"));
-    }
-
-    #[tokio::test]
-    async fn detached_human_flow_refuses_to_invent_user_acceptance() {
-        let repo = tempdir().unwrap();
+    fn ordinary_flow_parks_at_the_same_durable_review_after_recovery() {
+        let _lock = crate::journal::test_env_lock();
+        let home = tempdir().unwrap();
+        let _home = super::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _binary =
+            super::EnvVarGuard::set("LF_BIN", std::env::current_exe().unwrap().to_str().unwrap());
         let cli = Cli {
             batch: true,
             ..Cli::default()
         };
-        let executor = CliFlowExecutor {
-            cli: &cli,
-            message: None,
-            repo: repo.path().to_path_buf(),
-        };
-        let skill = ExecutionSkill::regular(ConcreteSkill {
-            skill: Skill::named("design"),
+        let steps = vec![ConcreteStep::Skill(ConcreteSkill {
+            skill: Skill::named("concept-review"),
             policy: crate::engine::OccurrencePolicy {
-                id: Some("review_design".to_string()),
+                id: Some("review".into()),
                 human: true,
+                repeat: None,
             },
-            flow_parents: vec!["design".to_string()],
-        });
+            flow_parents: vec![],
+        })];
+        let run = crate::ops::flow_run::create("proof", &steps, home.path(), None, &cli).unwrap();
+        assert_eq!(
+            super::drive_saved(&run.id, &cli).unwrap(),
+            crate::engine::FlowOutcome::Waiting
+        );
+        let before = crate::ops::flow_run::read(&run.id).unwrap();
+        let token = before.active.as_ref().unwrap().id.clone();
+        assert!(before.failure.is_none());
+        assert_eq!(crate::ops::flow_session::list().unwrap().len(), 1);
+        assert_eq!(
+            super::drive_saved(&run.id, &cli).unwrap(),
+            crate::engine::FlowOutcome::Waiting
+        );
+        let after = crate::ops::flow_run::read(&run.id).unwrap();
+        assert_eq!(after.active.unwrap().id, token);
+        assert_eq!(after.cursor, before.cursor);
+        assert!(!after.finished);
 
-        let error = executor
-            .run_skill(&skill, ExecutionContext { progress: None })
-            .await
-            .expect_err("a detached direct flow has no User acceptance context");
-
-        assert!(error.to_string().contains("durable Task Work"));
-        assert!(!repo.path().join("scratch").exists());
+        let boundary = crate::ops::flow_run::StepToken {
+            invocation: run.id.clone(),
+            boundary: token,
+        };
+        let review = crate::durable::RunId::new();
+        crate::ops::flow_run::update(&run.id, |saved| {
+            saved.active.as_mut().unwrap().run_id = Some(review.clone());
+            Ok(())
+        })
+        .unwrap();
+        crate::ops::flow_session::mark_ready(
+            &boundary,
+            &review,
+            "Design clarified; review finished",
+        )
+        .unwrap();
+        assert_eq!(
+            super::drive_saved(&run.id, &cli).unwrap(),
+            crate::engine::FlowOutcome::Waiting
+        );
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(crate::ops::flow_session::complete(&boundary))
+            .unwrap();
+        let completed = crate::ops::flow_run::read(&run.id).unwrap();
+        assert_eq!(completed.cursor, before.cursor);
+        assert!(completed.cursor.progress.verdict.is_none());
+        assert!(completed.active.unwrap().completed);
+        assert_eq!(
+            super::drive_saved(&run.id, &cli).unwrap(),
+            crate::engine::FlowOutcome::Completed
+        );
+        let finished = crate::ops::flow_run::read(&run.id).unwrap();
+        assert!(finished.finished);
+        assert_eq!(
+            finished.cursor.progress.direction.as_deref(),
+            Some("Design clarified; review finished")
+        );
+        assert!(finished.active.is_none());
+        assert_eq!(
+            super::drive_saved(&run.id, &cli).unwrap(),
+            crate::engine::FlowOutcome::Completed
+        );
     }
 }

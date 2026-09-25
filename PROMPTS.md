@@ -68,7 +68,7 @@ produces: scratch/something.md | code changes | verdict
 
 Skill frontmatter configures the work, not its launch surface. Direct TTY
 invocations run interactively; automated and `--batch` invocations are
-headless. Put a required review gate on the exact flow occurrence instead:
+headless. Put interactive review on the exact Flow occurrence instead:
 
 ```yaml
 - step:
@@ -98,6 +98,14 @@ An artifact reference must resolve where the next worker executes. Passing a
 path is not passing its contents. State how separate inputs reach the consumer
 before launch and which copy remains current. Name a missing transport mechanism
 instead of expanding the Task description into a document store.
+
+For working notes, prefer topic-named Markdown under `scratch/` that makes sense
+without the producing conversation or knowledge of the next skill. Preserve
+context, observations, accepted decisions, open questions, and the next useful
+action/proof. Link related artifacts and mark superseded conclusions. Handoff
+summaries name exact relevant paths and a short takeaway; consumers reconcile
+those notes with current requirements rather than treating filenames or prose
+recommendations as execution authority.
 
 Define the finish line before the procedure. A strong prompt makes five things
 computable:
@@ -407,6 +415,22 @@ Two modes for the same concern:
 - "What should we focus on?"
 
 ## Outputs for readers
+
+When rethinking how people use Loopflow, begin by rewriting the relevant usage
+documentation and skills. Show the intended commands, interactions, outcomes,
+and recovery before designing or changing the implementation. Let the proposed
+usage reveal the model the code needs. Mark unimplemented behavior as proposed
+and reconcile it with verified behavior before shipping. Preserve accepted
+requirements while exploring alternatives; a draft must not silently become
+permission to change scope. Keep clear guidance unchanged rather than requiring
+a rewrite for every review.
+
+Concept review starts with a concrete improvement in how people understand or
+use the product. Follow its consequences through types, APIs, and infrastructure;
+deletion is a possible gain, not a quota. After behavioral review, carry forward
+unresolved findings and identify any proof a proposed change invalidates. A
+cleaner explanation cannot make missing behavior complete. Use the decision
+protocol assigned to the current step, without inventing execution authority.
 
 **Write for the reader's next decision.** Someone returning from vacation should
 understand what matters before opening tools. Name the reader, what they already know,

@@ -1009,12 +1009,16 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
         session_run_id: None,
         ready_summary: None,
-        step_index: 1,
-        iteration: 0,
+        cursor: loopflow::engine::ExecutionCursor {
+            index: 1,
+            iteration: 0,
+            ..Default::default()
+        },
         version: 0,
         worker_generation: 0,
         claim: None,
         failure: None,
+
         updated_at: now,
     };
     assert!(position.is_human());

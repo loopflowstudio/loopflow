@@ -36,15 +36,16 @@ pub(crate) struct FlowSessionToken {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum HumanSessionToken {
-    Flow { token: Box<FlowSessionToken> },
-    Ask { id: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FlowDecision {
-    Approve,
-    Iterate,
+pub(crate) enum HumanSessionToken {
+    Flow {
+        token: Box<FlowSessionToken>,
+    },
+    Ask {
+        id: String,
+    },
+    StandaloneFlow {
+        token: crate::ops::flow_run::StepToken,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,11 +103,14 @@ struct AskSessionRecord {
     title: String,
     detail: String,
     prompt: String,
+    skill: Option<String>,
     cwd: PathBuf,
     model: String,
     session_run_id: Option<RunId>,
     ready_summary: Option<String>,
     status: AskSessionStatus,
+    #[serde(default)]
+    retain_completed: bool,
 }
 
 #[derive(Debug)]
@@ -123,13 +127,89 @@ enum SessionTarget {
     },
 }
 
-pub(crate) async fn ask(store: &SharedStore, question: &str) -> Result<String> {
+pub(crate) async fn ask(
+    store: &SharedStore,
+    question: &str,
+    skill: Option<&str>,
+) -> Result<String> {
+    let record = prepare_ask_record(store, question, skill).await?;
+    write_ask_record(&record)?;
+    if let Err(error) = launch_ask(&record).await {
+        let _ = fs::remove_file(ask_record_path(&record.id));
+        return Err(error);
+    }
+    report_ask_wait(&record.id);
+    wait_for_ask(&record.id).await
+}
+
+/// Reuse one Ask for an exact Flow boundary, including its completed result.
+pub(crate) async fn ask_once(
+    store: &SharedStore,
+    key: &str,
+    question: &str,
+    skill: Option<&str>,
+) -> Result<String> {
+    if key.trim().is_empty() {
+        bail!("Ask continuation key cannot be empty");
+    }
+    active_run_manifest()?;
+    let id = format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())));
+    let candidate = if read_ask_record(&id)?.is_none() {
+        let mut record = prepare_ask_record(store, question, skill).await?;
+        record.id = id.clone();
+        record.retain_completed = true;
+        Some(record)
+    } else {
+        None
+    };
+    // The server holds this lock through provider publication. Wait off the
+    // async runtime so concurrent callers can still finish their launches.
+    let lock_id = id.clone();
+    let launch_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
+    let record = match read_ask_record(&id)? {
+        Some(record) => record,
+        None => {
+            let record = candidate.ok_or_else(|| anyhow!("Ask {id} disappeared"))?;
+            write_ask_record(&record)?;
+            record
+        }
+    };
+    if matches!(record.status, AskSessionStatus::Completed { .. }) {
+        drop(launch_lock);
+        return wait_for_ask(&id).await;
+    }
+    if record.session_run_id.is_none() && !ask_launcher_is_running(&record.id).await? {
+        // Preserve the record on failure. A retry can start the same Session;
+        // a published native Run is reopened only through `lf session open`.
+        launch_ask(&record).await.with_context(|| {
+            format!("launch human Ask {id}; retry the same boundary to recover")
+        })?;
+    }
+    drop(launch_lock);
+    report_ask_wait(&id);
+    wait_for_ask(&id).await
+}
+
+fn report_ask_wait(id: &str) {
+    eprintln!(
+        "Waiting for human session {id}. Open it in Loopflow or with `lf session open {id}`."
+    );
+}
+
+async fn prepare_ask_record(
+    store: &SharedStore,
+    question: &str,
+    skill: Option<&str>,
+) -> Result<AskSessionRecord> {
     let question = question.trim();
     if question.is_empty() {
         bail!("question cannot be empty");
     }
     let manifest = active_run_manifest()?;
     let cwd = std::env::current_dir().context("resolve Ask working directory")?;
+    if let Some(skill) = skill {
+        crate::engine::load_skill(skill, &cwd).context("load Ask skill")?;
+    }
     let (work_selector, work) = match preferred_work_selector(&manifest) {
         Some(selector) => match crate::ops::resolve_work_binding(store, &cwd, &selector).await {
             Ok(binding) => (Some(selector), Some(binding.work)),
@@ -141,7 +221,7 @@ pub(crate) async fn ask(store: &SharedStore, question: &str) -> Result<String> {
         Some(model) => format!("{}:{model}", manifest.harness),
         None => manifest.harness.clone(),
     };
-    let record = AskSessionRecord {
+    Ok(AskSessionRecord {
         id: format!("ask_{}", uuid::Uuid::new_v4().simple()),
         parent_run_id: manifest.run_id,
         parent_run_dir: PathBuf::from(
@@ -154,22 +234,14 @@ pub(crate) async fn ask(store: &SharedStore, question: &str) -> Result<String> {
             .skill
             .unwrap_or_else(|| "Request for input".to_string()),
         prompt: question.to_string(),
+        skill: skill.map(str::to_string),
         cwd,
         model,
         session_run_id: None,
         ready_summary: None,
         status: AskSessionStatus::Waiting,
-    };
-    write_ask_record(&record)?;
-    if let Err(error) = launch_ask(&record).await {
-        let _ = fs::remove_file(ask_record_path(&record.id));
-        return Err(error);
-    }
-    eprintln!(
-        "Waiting for session {}. Open it in Loopflow or with `lf session open {}`.",
-        record.id, record.id
-    );
-    wait_for_ask(&record.id).await
+        retain_completed: false,
+    })
 }
 
 pub(crate) async fn prepare(
@@ -197,6 +269,7 @@ pub(crate) async fn prepare(
 pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     let mut sessions = list_flow_sessions(store).await?;
     sessions.extend(list_ask_sessions().await?);
+    sessions.extend(crate::ops::flow_session::list()?);
     let boundary_runs = boundary_run_ids(store).await?;
     sessions.extend(list_interactive_sessions(&boundary_runs)?);
     for session in &mut sessions {
@@ -268,6 +341,9 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     let run_id = active_run_id()?;
     let token = active_session_token()?;
     match token {
+        HumanSessionToken::StandaloneFlow { token } => {
+            crate::ops::flow_session::mark_ready(&token, &run_id, summary)?
+        }
         HumanSessionToken::Flow { token } => {
             let mut position = store
                 .flow_position(&token.task_id)
@@ -283,9 +359,14 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
             store.set_flow_position(&token.task_id, position).await?;
         }
         HumanSessionToken::Ask { id } => {
+            let lock_id = id.clone();
+            let _lock =
+                tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
             let mut record =
                 read_ask_record(&id)?.ok_or_else(|| anyhow!("session {id:?} no longer exists"))?;
-            if record.session_run_id.as_ref() != Some(&run_id) {
+            if !matches!(record.status, AskSessionStatus::Waiting)
+                || record.session_run_id.as_ref() != Some(&run_id)
+            {
                 bail!("session is stale");
             }
             record.ready_summary = Some(summary.to_string());
@@ -295,50 +376,42 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     Ok(())
 }
 
-pub(crate) async fn decide(
-    store: &SharedStore,
-    session_id: &str,
-    decision: FlowDecision,
-    text: &str,
-) -> Result<()> {
-    let text = text.trim();
-    if text.is_empty() {
-        bail!("FlowStep decision cannot be empty");
-    }
-    let target = find_session(store, session_id)
+async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition) -> Result<()> {
+    let token = flow_token(task, position)?;
+    crate::controller::task::complete_human_flow_step(store, &token).await?;
+    let mut task = store
+        .get_task(&token.task_id)
         .await?
-        .ok_or_else(|| session_not_found(session_id))?;
-    let (task, position) = match target {
-        SessionTarget::Interactive { .. } => {
-            bail!("Interactive Sessions use `lf session complete`")
-        }
-        SessionTarget::Ask(_) => bail!("Ad-hoc Ask Sessions use `lf session complete`"),
-        SessionTarget::Flow { task, position } => (task, position),
+        .ok_or_else(|| anyhow!("Task {} disappeared after review completion", token.task_id))?;
+    let launch = if store.flow_position(&task.id).await?.is_some() {
+        crate::ops::task::relaunch_inactive_process(store, &mut task)
+            .await
+            .map_err(|error| anyhow!(error.to_string()))
+    } else {
+        Ok(())
     };
-    let token = flow_token(&task, &position)?;
-    stop_flow_run(store, &task, &position).await;
-    crate::controller::task::decide_human_flow_step(store, &token, decision, text).await?;
-    let mut task = store.get_task(&token.task_id).await?.ok_or_else(|| {
-        anyhow!(
-            "Task {} disappeared after its FlowStep decision",
-            token.task_id
+    stop_flow_run(store, &task, position).await;
+    launch.with_context(|| {
+        format!(
+            "Review feedback saved; continue with `lf task advance {}`",
+            task.plan.identifier
         )
-    })?;
-    crate::ops::task::relaunch_inactive_process(store, &mut task)
-        .await
-        .map_err(|error| anyhow!(error.to_string()))
+    })
 }
 
-pub(crate) async fn decision_worktree(store: &SharedStore, session_id: &str) -> Result<PathBuf> {
+pub(crate) async fn completion_worktree(
+    store: &SharedStore,
+    session_id: &str,
+) -> Result<Option<PathBuf>> {
+    if let Some(token) = crate::ops::flow_session::parse_id(session_id)? {
+        return crate::ops::flow_session::worktree(&token).map(Some);
+    }
     match find_session(store, session_id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?
     {
-        SessionTarget::Flow { task, .. } => Ok(task.worktree.clone()),
-        SessionTarget::Interactive { .. } => {
-            bail!("Interactive Sessions use `lf session complete`")
-        }
-        SessionTarget::Ask(_) => bail!("Ad-hoc Ask Sessions use `lf session complete`"),
+        SessionTarget::Flow { task, .. } => Ok(Some(task.worktree.clone())),
+        SessionTarget::Interactive { .. } | SessionTarget::Ask(_) => Ok(None),
     }
 }
 
@@ -373,11 +446,13 @@ async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowPosition
     }
     .await;
     if let Err(error) = result {
-        eprintln!("warning: FlowStep decided but its provider client could not stop: {error:#}");
+        eprintln!("warning: Review completed but its provider client could not stop: {error:#}");
     }
 }
 
 async fn complete_ask(session_id: &str) -> Result<()> {
+    let lock_id = session_id.to_string();
+    let _lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
     let Some(mut record) = read_ask_record(session_id)? else {
         return Err(session_not_found(session_id));
     };
@@ -389,11 +464,16 @@ async fn complete_ask(session_id: &str) -> Result<()> {
             "Ask session {session_id:?} is not ready; its agent must run `lf session ready \"<summary>\"` first"
         )
     })?;
-    if let Some(run_id) = &record.session_run_id {
-        stop_native_run(run_id)?;
-    }
     record.status = AskSessionStatus::Completed { summary };
     write_ask_record(&record)?;
+    // The human's answer is durable before teardown can interrupt this caller
+    // or fail. A cleanup failure must not strand the waiting decision agent.
+    if let Some(run_id) = &record.session_run_id {
+        if let Err(error) = stop_native_run(run_id) {
+            tracing::warn!(session_id, %run_id, error = %format!("{error:#}"),
+                "Ask completion saved, but its native Session could not be stopped");
+        }
+    }
     Ok(())
 }
 
@@ -470,6 +550,11 @@ async fn serve_flow_locked(
     store.set_flow_position(&token.task_id, position).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for review skill")?;
+    if !token_is_current(&store, &token).await? {
+        let execution = crate::ops::task_execution::task_execution(&store, &token.task_id).await?;
+        println!("Review session finished. {}", execution.reason);
+        return Ok(());
+    }
     if status.success() {
         Ok(())
     } else {
@@ -488,26 +573,22 @@ async fn serve_ask_locked(id: &str, launch_lock: File) -> Result<()> {
     if !matches!(record.status, AskSessionStatus::Waiting) {
         bail!("session {id:?} is already resolved");
     }
-    let message = ask_message(&record);
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
-    let mut args = vec![
-        "--tui".to_string(),
-        "--model".to_string(),
-        record.model.clone(),
-        "--__cwd".to_string(),
-        record.cwd.display().to_string(),
-    ];
-    if let Some(selector) = &record.work_selector {
-        args.extend(["--as".to_string(), selector.clone()]);
+    if record.session_run_id.is_some() {
+        // Another launcher already published this Session. Do not replace or
+        // infer death of its native client; explicit open owns native resume.
+        return Ok(());
     }
-    args.extend([":".to_string(), message]);
+    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let mut command = tokio::process::Command::new(lf);
-    command.args(args).current_dir(&record.cwd).env(
-        HUMAN_SESSION_ENV,
-        serde_json::to_string(&HumanSessionToken::Ask {
-            id: record.id.clone(),
-        })?,
-    );
+    command
+        .args(ask_launch_args(&record))
+        .current_dir(&record.cwd)
+        .env(
+            HUMAN_SESSION_ENV,
+            serde_json::to_string(&HumanSessionToken::Ask {
+                id: record.id.clone(),
+            })?,
+        );
     let (mut child, run_id) = spawn_session_run(&mut command).await?;
     record.session_run_id = Some(run_id);
     record.ready_summary = None;
@@ -519,6 +600,25 @@ async fn serve_ask_locked(id: &str, launch_lock: File) -> Result<()> {
     } else {
         Err(anyhow!("session agent exited with {status}"))
     }
+}
+
+fn ask_launch_args(record: &AskSessionRecord) -> Vec<String> {
+    let mut args = vec![
+        "--tui".to_string(),
+        "--model".to_string(),
+        record.model.clone(),
+        "--__cwd".to_string(),
+        record.cwd.display().to_string(),
+    ];
+    if let Some(selector) = &record.work_selector {
+        args.extend(["--as".to_string(), selector.clone()]);
+    }
+    match &record.skill {
+        Some(skill) => args.extend(["skill".to_string(), skill.clone()]),
+        None => args.push(":".to_string()),
+    }
+    args.push(ask_message(record));
+    args
 }
 
 pub(crate) fn publish_run_binding(run_id: &RunId) -> Result<()> {
@@ -542,6 +642,9 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
+    if let Some(token) = crate::ops::flow_session::parse_id(session_id)? {
+        return crate::ops::flow_session::open(&token, mode, resume).await;
+    }
     let target = find_session(store, session_id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
@@ -603,6 +706,11 @@ pub(crate) async fn open(
 }
 
 pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<SessionRecord> {
+    if let Some(token) = crate::ops::flow_session::parse_id(session_id)? {
+        let session = crate::ops::flow_session::surface(&token)?;
+        crate::ops::flow_session::complete(&token).await?;
+        return Ok(session);
+    }
     let target = find_session(store, session_id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
@@ -626,47 +734,54 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
             complete_ask(session_id).await?;
             Ok(session)
         }
-        SessionTarget::Flow { .. } => {
-            bail!("Task FlowStep Sessions use `lf session approve` or `lf session iterate`")
+        SessionTarget::Flow {
+            ref task,
+            ref position,
+        } => {
+            let session = session_surface(store, &target).await?;
+            complete_flow(store, task, position).await?;
+            Ok(session)
         }
     }
 }
 
 async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
     if let Some(mut record) = read_ask_record(session_id)? {
-        if !matches!(record.status, AskSessionStatus::Waiting) {
-            bail!("session {session_id:?} is already complete");
-        }
-        if let Some(run_id) = &record.session_run_id {
-            if resume_native_run(
-                run_id,
-                &HumanSessionToken::Ask {
-                    id: record.id.clone(),
-                },
-            )? {
-                return Ok(());
+        loop {
+            if !matches!(record.status, AskSessionStatus::Waiting) {
+                bail!("session {session_id:?} is already complete");
             }
-            record.session_run_id = None;
-            record.ready_summary = None;
-            write_ask_record(&record)?;
-        }
-        let launch_lock = lock_session_launch(session_id)?;
-        record = read_ask_record(session_id)?
-            .ok_or_else(|| anyhow!("session {session_id:?} no longer exists"))?;
-        if let Some(run_id) = &record.session_run_id {
-            if resume_native_run(
-                run_id,
-                &HumanSessionToken::Ask {
-                    id: record.id.clone(),
-                },
-            )? {
-                return Ok(());
+            let observed_run = record.session_run_id.clone();
+            if let Some(run_id) = &observed_run {
+                // Native resume lasts for the conversation. Never hold the
+                // record lock while the human may mark ready or complete it.
+                if resume_native_run(
+                    run_id,
+                    &HumanSessionToken::Ask {
+                        id: record.id.clone(),
+                    },
+                )? {
+                    return Ok(());
+                }
             }
-            record.session_run_id = None;
-            record.ready_summary = None;
-            write_ask_record(&record)?;
+            let lock_id = session_id.to_string();
+            let launch_lock =
+                tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
+            record = read_ask_record(session_id)?
+                .ok_or_else(|| anyhow!("session {session_id:?} no longer exists"))?;
+            if !matches!(record.status, AskSessionStatus::Waiting) {
+                bail!("session {session_id:?} is already complete");
+            }
+            if record.session_run_id != observed_run {
+                drop(launch_lock);
+                continue;
+            }
+            if record.session_run_id.take().is_some() {
+                record.ready_summary = None;
+                write_ask_record(&record)?;
+            }
+            return serve_ask_locked(session_id, launch_lock).await;
         }
-        return serve_ask_locked(session_id, launch_lock).await;
     }
 
     let (task, mut position) = find_flow_session(store, session_id).await?;
@@ -712,6 +827,16 @@ async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
         .into_iter()
         .filter_map(|position| position.session_run_id)
         .collect::<HashSet<_>>();
+    for session in crate::ops::flow_session::list()? {
+        if let Some(token) = crate::ops::flow_session::parse_id(&session.id)? {
+            if let Some(id) = crate::ops::flow_run::read(&token.invocation)?
+                .active
+                .and_then(|b| b.run_id)
+            {
+                run_ids.insert(id);
+            }
+        }
+    }
     let directory = ask_session_directory();
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
@@ -844,7 +969,7 @@ fn session_not_found(id: &str) -> anyhow::Error {
     anyhow!("Session {id} was not found")
 }
 
-async fn spawn_session_run(
+pub(crate) async fn spawn_session_run(
     command: &mut tokio::process::Command,
 ) -> Result<(tokio::process::Child, RunId)> {
     let directory = ask_session_directory();
@@ -897,7 +1022,7 @@ fn session_run_is_resumable(dir: &Path, manifest: &RunManifest) -> Result<bool> 
     Ok(!crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?.is_empty())
 }
 
-fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Result<bool> {
+pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Result<bool> {
     let home = crate::store::observability_home_dir();
     let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
         Ok(value) => value,
@@ -948,7 +1073,7 @@ fn stop_native_run(run_id: &RunId) -> Result<()> {
     Ok(())
 }
 
-fn native_session_state(
+pub(crate) fn native_session_state(
     run_id: Option<&RunId>,
     ready_summary: Option<&str>,
 ) -> Result<SessionState> {
@@ -1115,7 +1240,7 @@ fn ask_surface(record: &AskSessionRecord) -> Result<SessionRecord> {
     })
 }
 
-fn human_open_argv(
+pub(crate) fn human_open_argv(
     remote_home: Option<&crate::durable::HomeId>,
     worktree: Option<&Path>,
     id: &str,
@@ -1176,7 +1301,7 @@ fn flow_token(task: &Task, position: &FlowPosition) -> Result<FlowSessionToken> 
             .id
             .expect("validated human position has a node id"),
         skill: planned.skill.clone(),
-        iteration: position.iteration,
+        iteration: position.cursor.iteration,
     })
 }
 
@@ -1188,21 +1313,21 @@ fn token_matches(token: &FlowSessionToken, position: &FlowPosition) -> bool {
         && step.flow == token.flow
         && step.policy.id.as_deref() == Some(token.node_id.as_str())
         && step.step == token.skill.name
-        && position.iteration == token.iteration
+        && position.cursor.iteration == token.iteration
 }
 
 fn flow_message(task: &Task, token: &FlowSessionToken) -> String {
     format!(
-        "<lf:human-session>\nThis `{skill}` Run is the writable session for Task {identifier} at `{node}`. Work with the user in this terminal. When your work is ready for their decision, run `lf session ready \"<concise summary>\"`. Ready does not approve, iterate, close, or advance the Task; only the user can approve or iterate on the session.\n</lf:human-session>",
+        "<lf:human-session>\nThis `{skill}` Run is the interactive review for Task {identifier}. Work with the user and save self-contained, topic-named notes under scratch/: feedback, agreed design changes, unresolved questions, and next useful action, with links to the current design and evidence. Put the exact note paths and a short takeaway in the ready summary. Run `lf session ready \"feedback, design changes, and remaining work\"` when the review is ready to end. The user completes it with `lf session complete {session}`. Completion returns feedback to the next Flow step; a following loop-decide owns Advance or Iterate. Do not record a navigation decision from this review.\n</lf:human-session>",
         skill = token.skill.name,
         identifier = task.plan.identifier,
-        node = token.node_id,
+        session = flow_token_id(token),
     )
 }
 
 fn ask_message(record: &AskSessionRecord) -> String {
     format!(
-        "{}\n\n<lf:human-session>\nThe originating Loopflow Run is blocked while you work with the user in this terminal. You are in the caller's checkout and may inspect or edit it. When the work is ready, run `lf session ready \"<concise summary>\"`. Ready keeps this session visible and does not resume the caller; the user completes it when the conversation is finished.\n</lf:human-session>",
+        "{}\n\n<lf:human-session>\nThe originating Loopflow Run is blocked while you work with the user in this terminal. You are in the caller's checkout and may inspect or edit it. Save useful findings and user decisions in self-contained topic notes under scratch/; include their exact paths and a short takeaway in the ready summary. When the work is ready, run `lf session ready \"<concise summary>\"`. Ready keeps this session visible and does not resume the caller; the user completes it when the conversation is finished.\n</lf:human-session>",
         record.prompt
     )
 }
@@ -1224,7 +1349,7 @@ async fn launch_flow(task: &Task, position: &FlowPosition) -> Result<()> {
         step.flow,
         node_id.to_string(),
         step.step,
-        position.iteration.to_string(),
+        position.cursor.iteration.to_string(),
     ];
     start_durable_session(&flow_background_name(position)?, &task.worktree, &argv, &[]).await
 }
@@ -1252,6 +1377,34 @@ async fn launch_ask(record: &AskSessionRecord) -> Result<()> {
 }
 
 #[cfg(not(test))]
+async fn ask_launcher_is_running(id: &str) -> Result<bool> {
+    let status = tokio::process::Command::new("tmux")
+        .args([
+            "has-session",
+            "-t",
+            &format!("={}", ask_background_name(id)),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .context("inspect human Ask launcher")?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => bail!("inspect human Ask launcher: tmux exited with {status}"),
+    }
+}
+
+#[cfg(test)]
+async fn ask_launcher_is_running(id: &str) -> Result<bool> {
+    Ok(tests::ASK_LAUNCHERS
+        .lock()
+        .unwrap()
+        .contains(&ask_background_name(id)))
+}
+
+#[cfg(not(test))]
 async fn start_durable_session(
     name: &str,
     cwd: &Path,
@@ -1263,15 +1416,28 @@ async fn start_durable_session(
 
 #[cfg(test)]
 async fn start_durable_session(
-    _name: &str,
+    name: &str,
     _cwd: &Path,
-    _argv: &[String],
+    argv: &[String],
     _env: &[(&str, &str)],
 ) -> Result<()> {
+    if !argv.iter().any(|arg| arg == "serve-ask") {
+        return Ok(());
+    }
+    if tests::FAILED_ASK_LAUNCHERS.lock().unwrap().contains(name) {
+        bail!("simulated Session launch failure");
+    }
+    if !tests::ASK_LAUNCHERS
+        .lock()
+        .unwrap()
+        .insert(name.to_string())
+    {
+        bail!("simulated duplicate Session launcher");
+    }
     Ok(())
 }
 
-fn flow_id(position: &FlowPosition) -> Result<String> {
+pub(crate) fn flow_id(position: &FlowPosition) -> Result<String> {
     let step = position.current();
     let node_id = step
         .policy
@@ -1280,7 +1446,7 @@ fn flow_id(position: &FlowPosition) -> Result<String> {
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
     Ok(format!(
         "{}:{}:{}:{}:{}",
-        position.task_id, position.invocation.id, step.flow, node_id, position.iteration
+        position.task_id, position.invocation.id, step.flow, node_id, position.cursor.iteration
     ))
 }
 
@@ -1291,7 +1457,7 @@ fn flow_token_id(token: &FlowSessionToken) -> String {
     )
 }
 
-fn lock_session_launch(id: &str) -> Result<File> {
+pub(crate) fn lock_session_launch(id: &str) -> Result<File> {
     let directory = ask_session_directory();
     fs::create_dir_all(&directory).context("create Session directory")?;
     let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
@@ -1321,7 +1487,7 @@ fn flow_background_name(position: &FlowPosition) -> Result<String> {
             crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
             _ => bail!("review flow position does not select a Skill"),
         },
-        iteration: position.iteration,
+        iteration: position.cursor.iteration,
     }))
 }
 
@@ -1342,6 +1508,9 @@ fn flow_token_background_name(token: &FlowSessionToken) -> String {
 }
 
 fn ask_background_name(id: &str) -> String {
+    if let Some(key) = id.strip_prefix("ask_once_") {
+        return format!("lf-human-once-{key}");
+    }
     format!(
         "lf-human-{}",
         id.trim_start_matches("ask_")
@@ -1452,7 +1621,9 @@ async fn wait_for_ask(id: &str) -> Result<String> {
         match record.status {
             AskSessionStatus::Waiting => tokio::time::sleep(Duration::from_millis(250)).await,
             AskSessionStatus::Completed { summary } => {
-                fs::remove_file(ask_record_path(id)).context("remove resolved session")?;
+                if !record.retain_completed {
+                    fs::remove_file(ask_record_path(id)).context("remove resolved session")?;
+                }
                 return Ok(summary);
             }
         }
@@ -1474,13 +1645,18 @@ pub(crate) fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
         .map_err(|_| anyhow!("active session token is not valid UTF-8"))?;
     let token: HumanSessionToken =
         serde_json::from_str(&raw).context("active session token is invalid")?;
-    let HumanSessionToken::Flow { token } = token else {
-        return Ok(None);
-    };
-    if token.skill.name != requested {
-        bail!("review session Skill does not match the requested Skill");
+    match token {
+        HumanSessionToken::StandaloneFlow { token } => {
+            crate::ops::flow_session::pinned_skill(&token, requested).map(Some)
+        }
+        HumanSessionToken::Flow { token } => {
+            if token.skill.name != requested {
+                bail!("review session Skill does not match the requested Skill");
+            }
+            Ok(Some(token.skill))
+        }
+        HumanSessionToken::Ask { .. } => Ok(None),
     }
-    Ok(Some(token.skill))
 }
 
 fn active_run_id() -> Result<RunId> {
@@ -1491,14 +1667,366 @@ fn active_run_id() -> Result<RunId> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+    use std::ffi::OsString;
+    use std::sync::{LazyLock, Mutex};
+    use std::time::Duration;
+
+    use clap::Parser;
+    use sha2::Digest;
+
     use super::{
-        active_flow_skill, concise_title, flow_background_name, flow_id, flow_token_id,
-        human_open_argv, preferred_work_selector, question_title, session_run_is_resumable,
-        token_matches, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
+        active_flow_skill, ask, ask_background_name, ask_launch_args, ask_once, ask_record_path,
+        complete_ask, concise_title, flow_background_name, flow_id, flow_token_id, human_open_argv,
+        list_ask_sessions, preferred_work_selector, question_title, read_ask_record, serve_ask,
+        session_run_is_resumable, token_matches, wait_for_ask, write_ask_record, AskSessionRecord,
+        AskSessionStatus, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
     };
-    use crate::durable::FlowPosition;
+    use crate::durable::{FlowPosition, RunId};
+    use crate::engine::{prepare_launch_prompt, Config, LaunchPromptInput, Surface};
+    use crate::lf::{Cli, Commands};
     use crate::run_record::{AttributionSource, RunManifest, SubjectAttribution};
+    use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
+
+    pub(super) static ASK_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
+        LazyLock::new(|| Mutex::new(HashSet::new()));
+    pub(super) static FAILED_ASK_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
+        LazyLock::new(|| Mutex::new(HashSet::new()));
+
+    struct AskHome {
+        home: tempfile::TempDir,
+        previous: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl AskHome {
+        fn new() -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let previous = [
+                "LF_HOME",
+                "LF_BIN",
+                "LF_DB_PATH",
+                "LF_CONTROL_HOME",
+                "LF_CONTROL_DB_PATH",
+                "LF_RUN_ID",
+                "LF_RUN_DIR",
+                "LF_RUN_CONTEXT",
+                "LF_HUMAN_SESSION",
+            ]
+            .into_iter()
+            .map(|name| {
+                let value = std::env::var_os(name);
+                std::env::remove_var(name);
+                (name, value)
+            })
+            .collect();
+            std::env::set_var("LF_HOME", home.path());
+            std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+            let manifest = RunManifest {
+                schema_version: 1,
+                run_id: RunId::new(),
+                parent_run_id: None,
+                created_at: time::OffsetDateTime::now_utc(),
+                harness: "codex".to_string(),
+                model: Some("test".to_string()),
+                surface: "headless".to_string(),
+                cwd: std::env::current_dir().unwrap(),
+                repo: None,
+                worktree: None,
+                skill: Some("loop-decide".to_string()),
+                subjects: Vec::new(),
+                launch: None,
+                context: None,
+                runtime_path: None,
+                runtime_digest: None,
+                host: "test".to_string(),
+                boot_id: None,
+            };
+            std::fs::write(
+                home.path().join("manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            std::env::set_var("LF_RUN_DIR", home.path());
+            std::env::set_var("LF_RUN_ID", manifest.run_id.as_str());
+            Self { home, previous }
+        }
+
+        async fn store(&self) -> SharedStore {
+            std::sync::Arc::new(
+                open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("registry.db")))
+                    .await
+                    .unwrap(),
+            )
+        }
+    }
+
+    impl Drop for AskHome {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+            ASK_LAUNCHERS.lock().unwrap().clear();
+            FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
+        }
+    }
+
+    async fn wait_until_asks(count: usize) -> Vec<super::SessionRecord> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let sessions = list_ask_sessions().await.unwrap();
+                if sessions.len() == count && ASK_LAUNCHERS.lock().unwrap().len() == count {
+                    return sessions;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn finish_simulated_ask(id: &str, summary: &str) {
+        let mut record = read_ask_record(id).unwrap().unwrap();
+        record.ready_summary = Some(summary.to_string());
+        write_ask_record(&record).unwrap();
+        complete_ask(id).await.unwrap();
+    }
+
+    #[test]
+    fn keyed_asks_join_recover_completion_and_keep_boundaries_independent() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let key = "/private/checkout/invocation/decision/visit-1";
+            let first = ask_once(&store, key, "Choose a policy", Some("unblock"));
+            let duplicate = ask_once(&store, key, "Changed retry text", Some("unblock"));
+            let independent =
+                ask_once(&store, "invocation/decision/visit-2", "Second choice", None);
+            let human = async {
+                let sessions = wait_until_asks(2).await;
+                for session in sessions {
+                    assert!(session.id.starts_with("ask_once_"));
+                    assert!(!session.id.contains("checkout"));
+                    let record = read_ask_record(&session.id).unwrap().unwrap();
+                    assert_eq!(record.parent_run_dir, home.home.path());
+                    assert_eq!(record.model, "codex:test");
+                    let summary = if record.prompt == "Second choice" {
+                        "second"
+                    } else {
+                        assert_eq!(record.skill.as_deref(), Some("unblock"));
+                        "first"
+                    };
+                    finish_simulated_ask(&session.id, summary).await;
+                }
+            };
+            let (first, duplicate, independent, ()) =
+                tokio::join!(first, duplicate, independent, human);
+            assert_eq!(first.unwrap(), "first");
+            assert_eq!(duplicate.unwrap(), "first");
+            assert_eq!(independent.unwrap(), "second");
+            assert!(list_ask_sessions().await.unwrap().is_empty());
+            // Completed recovery must not reload a now-missing selected skill.
+            assert_eq!(
+                ask_once(&store, key, "", Some("missing-skill"))
+                    .await
+                    .unwrap(),
+                "first"
+            );
+            assert_eq!(ASK_LAUNCHERS.lock().unwrap().len(), 2);
+        });
+    }
+
+    #[test]
+    fn keyed_ask_failed_launch_can_retry_the_preserved_record() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let key = "failed-launch-boundary";
+            let id = format!(
+                "ask_once_{}",
+                hex::encode(super::Sha256::digest(key.as_bytes()))
+            );
+            FAILED_ASK_LAUNCHERS
+                .lock()
+                .unwrap()
+                .insert(ask_background_name(&id));
+            let error = ask_once(&store, key, "Preserved question", None)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(&id));
+            assert_eq!(
+                read_ask_record(&id).unwrap().unwrap().prompt,
+                "Preserved question"
+            );
+            FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
+            let human = async {
+                let sessions = wait_until_asks(1).await;
+                assert_eq!(sessions[0].id, id);
+                finish_simulated_ask(&id, "Recovered").await;
+            };
+            let (result, ()) = tokio::join!(ask_once(&store, key, "replacement", None), human);
+            assert_eq!(result.unwrap(), "Recovered");
+            assert_eq!(wait_for_ask(&id).await.unwrap(), "Recovered");
+        });
+    }
+
+    #[test]
+    fn keyed_ask_does_not_replace_a_published_native_run() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let mut record = super::prepare_ask_record(&store, "Keep native ownership", None)
+                .await
+                .unwrap();
+            let key = "published-run-boundary";
+            record.id = format!(
+                "ask_once_{}",
+                hex::encode(super::Sha256::digest(key.as_bytes()))
+            );
+            record.retain_completed = true;
+            record.session_run_id = Some(RunId::new());
+            write_ask_record(&record).unwrap();
+            // No tmux launcher and no readable native manifest do not grant
+            // replacement authority. Even a delayed serve command must join.
+            serve_ask(&record.id).await.unwrap();
+            assert!(tokio::time::timeout(
+                Duration::from_millis(100),
+                ask_once(&store, key, "retry", None)
+            )
+            .await
+            .is_err());
+            let saved = read_ask_record(&record.id).unwrap().unwrap();
+            assert_eq!(saved.session_run_id, record.session_run_id);
+            assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
+            std::env::set_var("LF_RUN_ID", saved.session_run_id.as_ref().unwrap().as_str());
+            std::env::set_var(
+                HUMAN_SESSION_ENV,
+                serde_json::to_string(&HumanSessionToken::Ask {
+                    id: record.id.clone(),
+                })
+                .unwrap(),
+            );
+            super::mark_ready(&store, "Resolved").await.unwrap();
+            complete_ask(&record.id).await.unwrap();
+            assert!(super::mark_ready(&store, "Late readiness").await.is_err());
+            assert_eq!(wait_for_ask(&record.id).await.unwrap(), "Resolved");
+            assert!(list_ask_sessions().await.unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn reopening_ask_cannot_overwrite_a_concurrent_completion() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let mut record = super::prepare_ask_record(&store, "Keep the answer", None)
+                .await
+                .unwrap();
+            record.session_run_id = Some(RunId::new()); // Native history is absent.
+            record.ready_summary = Some("Accepted direction".into());
+            record.retain_completed = true;
+            write_ask_record(&record).unwrap();
+            let lock = super::lock_session_launch(&record.id).unwrap();
+            let mut reopening = Box::pin(super::open_boundary(&store, &record.id));
+            let progress = std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(reopening.as_mut(), cx))
+            })
+            .await;
+            assert!(progress.is_pending());
+            let untouched = read_ask_record(&record.id).unwrap().unwrap();
+            assert_eq!(untouched.session_run_id, record.session_run_id);
+            assert_eq!(untouched.ready_summary, record.ready_summary);
+
+            record.status = AskSessionStatus::Completed {
+                summary: "Accepted direction".into(),
+            };
+            write_ask_record(&record).unwrap();
+            drop(lock);
+
+            assert!(reopening
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("already complete"));
+            assert_eq!(
+                wait_for_ask(&record.id).await.unwrap(),
+                "Accepted direction"
+            );
+            assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn ask_completion_survives_native_cleanup_failure() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let mut record = super::prepare_ask_record(&store, "Resolve stalled progress", None)
+                .await
+                .unwrap();
+            let run_id = RunId::new();
+            let run_dir = home
+                .home
+                .path()
+                .join("runs")
+                .join("broken")
+                .join(run_id.as_str());
+            std::fs::create_dir_all(&run_dir).unwrap();
+            std::fs::write(run_dir.join("manifest.json"), b"invalid manifest").unwrap();
+            record.session_run_id = Some(run_id);
+            record.ready_summary = Some("Try the narrower proof".into());
+            record.retain_completed = true;
+            write_ask_record(&record).unwrap();
+
+            complete_ask(&record.id).await.unwrap();
+
+            let saved = read_ask_record(&record.id).unwrap().unwrap();
+            assert!(matches!(saved.status, AskSessionStatus::Completed { .. }));
+            assert_eq!(
+                wait_for_ask(&record.id).await.unwrap(),
+                "Try the narrower proof"
+            );
+            assert!(list_ask_sessions().await.unwrap().is_empty());
+            assert_eq!(
+                std::fs::read(run_dir.join("manifest.json")).unwrap(),
+                b"invalid manifest"
+            );
+        });
+    }
+
+    #[test]
+    fn ordinary_and_legacy_prompt_only_asks_still_remove_completed_records() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let human = async {
+                let sessions = wait_until_asks(1).await;
+                let id = &sessions[0].id;
+                let record = read_ask_record(id).unwrap().unwrap();
+                let mut legacy = serde_json::to_value(&record).unwrap();
+                legacy.as_object_mut().unwrap().remove("skill");
+                legacy.as_object_mut().unwrap().remove("retain_completed");
+                std::fs::write(ask_record_path(id), serde_json::to_vec(&legacy).unwrap()).unwrap();
+                let reopened = read_ask_record(id).unwrap().unwrap();
+                assert!(reopened.skill.is_none());
+                assert!(!reopened.retain_completed);
+                finish_simulated_ask(id, "Ordinary answer").await;
+                id.clone()
+            };
+            let (result, id) = tokio::join!(ask(&store, "Plain question", None), human);
+            assert_eq!(result.unwrap(), "Ordinary answer");
+            assert!(read_ask_record(&id).unwrap().is_none());
+        });
+    }
 
     fn position() -> FlowPosition {
         FlowPosition {
@@ -1512,12 +2040,16 @@ mod tests {
             ),
             session_run_id: None,
             ready_summary: None,
-            step_index: 1,
-            iteration: 3,
+            cursor: crate::engine::ExecutionCursor {
+                index: 1,
+                iteration: 3,
+                ..Default::default()
+            },
             version: 0,
             worker_generation: 0,
             claim: None,
             failure: None,
+
             updated_at: time::OffsetDateTime::now_utc(),
         }
     }
@@ -1535,7 +2067,7 @@ mod tests {
                 crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
                 _ => panic!("human position must select a Skill"),
             },
-            iteration: position.iteration,
+            iteration: position.cursor.iteration,
         };
 
         assert!(token_matches(&token, &position));
@@ -1551,7 +2083,7 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let mut position = position();
         let crate::engine::ConcreteStep::Skill(planned) =
-            &mut position.invocation.steps[position.step_index as usize]
+            &mut position.invocation.steps[position.cursor.index]
         else {
             panic!("human position must select a Skill")
         };
@@ -1564,7 +2096,7 @@ mod tests {
             flow: step.flow,
             node_id: step.policy.id.unwrap(),
             skill: planned_skill,
-            iteration: position.iteration,
+            iteration: position.cursor.iteration,
         };
         let previous = std::env::var_os(HUMAN_SESSION_ENV);
         std::env::set_var(
@@ -1591,6 +2123,98 @@ mod tests {
             "Review this branch"
         );
         assert!(question_title(&"x".repeat(100)).ends_with('…'));
+    }
+
+    #[test]
+    fn ask_skill_and_question_survive_reopening_and_reach_the_launch_prompt() {
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let checkout = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(checkout.path().join(".lf/skills")).unwrap();
+        std::fs::write(
+            checkout.path().join(".lf/skills/unblock.md"),
+            "Resolve the blocker with the human using the preserved evidence.",
+        )
+        .unwrap();
+        let record = AskSessionRecord {
+            id: "ask_skill_proof".to_string(),
+            parent_run_id: RunId::new(),
+            parent_run_dir: home.path().join("parent"),
+            work: None,
+            work_selector: None,
+            title: "Choose the delivery policy".to_string(),
+            detail: "concept-review".to_string(),
+            prompt: "Choose the delivery policy".to_string(),
+            skill: Some("unblock".to_string()),
+            cwd: checkout.path().to_path_buf(),
+            model: "claude:opus".to_string(),
+            session_run_id: None,
+            ready_summary: None,
+            status: AskSessionStatus::Waiting,
+            retain_completed: false,
+        };
+
+        let previous_home = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", home.path());
+        assert!(ask_record_path(&record.id).starts_with(home.path()));
+        write_ask_record(&record).unwrap();
+        let mut reopened = read_ask_record(&record.id).unwrap().unwrap();
+        reopened.ready_summary = Some("Discussed the policy".to_string());
+        write_ask_record(&reopened).unwrap();
+        let reopened = read_ask_record(&record.id).unwrap().unwrap();
+
+        // Existing records omit skill entirely; they still launch an inline Ask.
+        let mut legacy = serde_json::to_value(&record).unwrap();
+        legacy.as_object_mut().unwrap().remove("skill");
+        std::fs::write(
+            ask_record_path(&record.id),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+        let legacy = read_ask_record(&record.id).unwrap().unwrap();
+        match previous_home {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+
+        assert_eq!(reopened.skill.as_deref(), Some("unblock"));
+        assert_eq!(reopened.cwd, checkout.path());
+        let args = ask_launch_args(&reopened);
+        let cli = Cli::try_parse_from(std::iter::once("lf".to_string()).chain(args)).unwrap();
+        let Some(Commands::Skill { name, args }) = cli.command else {
+            panic!("selected Ask must use the ordinary skill command")
+        };
+        let prepared = prepare_launch_prompt(
+            &Config {
+                diff: false,
+                diff_files: false,
+                paste: false,
+                ..Config::default()
+            },
+            LaunchPromptInput {
+                repo_root: reopened.cwd.clone(),
+                cwd: Some(reopened.cwd),
+                skill: Some(name),
+                message: Some(args.join(" ")),
+                agent: Some(reopened.model),
+                surface: Surface::Cli,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .unwrap();
+        assert!(prepared
+            .prompt
+            .contains("Resolve the blocker with the human using the preserved evidence."));
+        assert!(prepared.prompt.contains("Choose the delivery policy"));
+        assert!(prepared
+            .prompt
+            .contains("Ready keeps this session visible and does not resume the caller"));
+        assert_eq!(prepared.config.cwd.as_deref(), Some(checkout.path()));
+
+        assert!(legacy.skill.is_none());
+        let args = ask_launch_args(&legacy);
+        let cli = Cli::try_parse_from(std::iter::once("lf".to_string()).chain(args)).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Inline { .. })));
     }
 
     #[test]

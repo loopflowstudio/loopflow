@@ -57,14 +57,22 @@ not the objective. Trust worker summaries; do not reread transcripts.
 - Keep coordination and small read-only decisions in the Wave.
 
 When reporting more than one Task, read `lf roadmap --wave <exact-wave> --json`
-and `lf status <exact-wave> --json` and render each as
-`[identifier](provider URL) — readable active PR/workspace slug — status/next owner`,
-filling the link from
-`task.identifier`/`reference.issue_url`, the slug from `active_pr.slug` (fall back
-to `reference.workspace.slug`), status from `runtime.status` or the roadmap
-`section`, next owner from `next_move.owner`. Never reconstruct a provider URL,
-branch, or slug from an identifier or title. Omit only a link or slug whose
-snapshot evidence is explicitly absent; keep the Task and its status/next owner.
+and `lf status <exact-wave> --json` and render operational rows as
+`[identifier · Task title](provider URL) — status; next action/owner`.
+
+Use this ID-first form in operational lists. In prose, use
+`[Task title · identifier](provider URL)` on first mention; shorten later
+references when unambiguous.
+
+Fill the link from `task.identifier` and `reference.issue_url`, and the readable
+title from `task.title`. Take status from `runtime.status` or the roadmap
+`section`, and next owner from `next_move.owner`. State the next action only
+when supported by current evidence; leave unknown state unknown. Include an
+active PR/workspace slug only when navigating that workspace is the job. In
+roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
+URL, branch, or slug from a title or identifier. If a link is absent, keep the
+readable title and available status without inventing a URL.
 
 ## Uncertainty selects the flow, it never blocks
 

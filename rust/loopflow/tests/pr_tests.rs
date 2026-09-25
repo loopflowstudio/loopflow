@@ -489,15 +489,17 @@ fn github_failure_leaves_publication_intent_observable() {
         .presentation
         .as_ref()
         .expect("reviewer-facing Task copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "Persist publication first");
     assert!(presentation.body.contains(
-        "> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
+        "> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
     ));
-    assert!(presentation.body.ends_with("The GitHub call will fail."));
+    assert!(presentation
+        .body
+        .starts_with("The GitHub call will fail.\n\n<!--"));
     assert!(publication.github.is_none());
     assert!(publication.merge.is_none());
 }
@@ -507,7 +509,7 @@ fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
     let home = tempfile::TempDir::new().expect("temp home");
     let gh = write_gh_script("[]", None);
     let agent = codex_script(
-        r###"{"title":"Prove Task PR transitions — explain review contract","body":"## Evaluate\n\n`cargo test -p loopflow task_pr_copy --lib`\n\nObserve one canonical Task title and an explicit merge disposition.\n\n## Why it matters\n\nReviewers can recover purpose and settlement behavior without reconstructing Task state.\n\n## What changed\n\nTask publication now combines generated review guidance with durable Task context."}"###,
+        r###"{"title":"Understand what merging this PR will do","body":"Reviewers can see what work remains without reconstructing Task state.\n\n## What changes\n\nPublication adds durable Task context.\n\n## Evaluate\n\nSuggested check: inspect the Task link and merge consequence."}"###,
     );
     let _env = EnvGuard::with_lf_home(
         &[("gh", gh.as_str()), ("codex", agent.as_str())],
@@ -544,23 +546,23 @@ fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
         .as_ref()
         .and_then(|publication| publication.presentation.as_ref())
         .expect("generated Task PR copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(
+        presentation.title,
+        "Understand what merging this PR will do"
+    );
     assert_eq!(
         presentation.body,
-        "<!-- loopflow:task-pr-context:start -->\n\
+        "Reviewers can see what work remains without reconstructing Task state.\n\n\
+<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
-> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\
+> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\
 > **PR lifecycle:** PR 1 is published for review; no Task settlement is requested.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
+## What changes\n\n\
+Publication adds durable Task context.\n\n\
 ## Evaluate\n\n\
-`cargo test -p loopflow task_pr_copy --lib`\n\n\
-Observe one canonical Task title and an explicit merge disposition.\n\n\
-## Why it matters\n\n\
-Reviewers can recover purpose and settlement behavior without reconstructing Task state.\n\n\
-## What changed\n\n\
-Task publication now combines generated review guidance with durable Task context."
+Suggested check: inspect the Task link and merge consequence."
     );
-    assert!(!presentation.title.contains("explain review contract"));
 }
 
 #[test]
@@ -605,7 +607,7 @@ fn task_pr_generation_does_not_require_a_controller() {
         .as_ref()
         .and_then(|publication| publication.presentation.as_ref())
         .expect("generated fix Task PR copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "generated title");
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
@@ -808,18 +810,17 @@ fn serial_task_pr_publication_restores_task_context() {
         .as_ref()
         .and_then(|publication| publication.presentation.as_ref())
         .expect("serial reviewer copy");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "Second delivery slice");
     assert!(presentation.body.starts_with(
-        "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
+        "Serial reviewer context\n\n<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 2 is published for review; no Task settlement is requested."
     ));
-    assert!(presentation.body.ends_with("Serial reviewer context"));
     let gh_calls = fs::read_to_string(gh_log).expect("read GitHub calls");
-    assert!(gh_calls.contains("--title INF-123: Prove Task PR transitions"));
-    assert!(gh_calls.contains("--body <!-- loopflow:task-pr-context:start -->"));
+    assert!(gh_calls.contains("--title Second delivery slice"));
+    assert!(gh_calls.contains("--body Serial reviewer context"));
 }
 
 #[test]

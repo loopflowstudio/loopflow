@@ -1015,6 +1015,15 @@ fn latest_land_disposition_wins_before_merge() {
         .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
+    let copy = preserved
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.presentation.as_ref())
+        .expect("refreshed reviewer copy");
+    assert_eq!(copy.title, "refresh published PR");
+    assert!(copy.body.starts_with("same head\n\n<!--"));
+    assert!(copy.body.contains("Merging PR 1 completes the Task."));
+    assert!(!copy.body.contains("no Task settlement is requested"));
     let preserved = preserved.merge_request().expect("preserved merge request");
     assert_eq!(preserved.after_merge, AfterMerge::CompleteTask);
     assert_eq!(preserved.head_sha, head);
@@ -1063,9 +1072,9 @@ fn latest_land_disposition_wins_before_merge() {
         .presentation
         .as_ref()
         .expect("Task identity survives refresh and land");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "test title");
     assert!(presentation.body.starts_with(
-        "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
+        "test body\n\n<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
@@ -1077,6 +1086,26 @@ fn latest_land_disposition_wins_before_merge() {
     assert_eq!(merge.head_sha, revised_head);
     assert_eq!(merge.after_merge, AfterMerge::ContinueTask);
     assert_eq!(merge.next_slug.as_deref(), Some("follow-up-proof"));
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some(presentation.title.clone()),
+            body: Some(presentation.body.clone()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("refresh continuing PR with its existing managed context");
+    let refreshed = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap();
+    let refreshed_copy = refreshed
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.presentation.as_ref())
+        .unwrap();
+    assert_eq!(refreshed_copy, presentation);
     let log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(log.contains(&format!(
         "pr merge 912 --squash --auto --match-head-commit {revised_head}"

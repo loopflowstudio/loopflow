@@ -61,18 +61,15 @@ If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exis
 
 If those files are missing or stale, write title/body manually and pass `--title` + `--body`.
 
-**Title guidelines:** lowercase, concise, area prefix when focused.
-
-Examples:
-- `mobile: quote replies on iOS`
-- `cost: add analytics dashboard with timeseries API`
-- `fix worktree cleanup on branch delete`
-
-**Body:** markdown. Structure:
-
-1. **Usage** — code block showing how to try it or see it in action
-2. **Summary** — one paragraph on what changed and why
-3. **Changes** — optional bullet list for larger PRs
+Keep the title and opening summary focused on the benefit of this PR's actual
+change. Preserve command spelling and proper names; use an area prefix only
+when it helps recognition. Follow with minimal **What changes**, then **Why it
+matters** only if needed, and material limits. Keep automated test and lint results
+in **Checks** or CI. Put **Try it** last when useful: a user action and its visible
+result, never tests, test commands, or test results. Distinguish suggested steps
+from observed behavior and label simulations. Small changes may need only a summary
+and walkthrough. Reconcile changed scope instead of appending history. Loopflow adds
+Task identity and merge consequences; do not repeat or invent them.
 
 ### 3. Submit
 

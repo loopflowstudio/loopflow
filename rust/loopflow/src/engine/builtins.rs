@@ -254,7 +254,10 @@ mod tests {
             "Do not create a manifest, receipt, marker, or new planning state",
             "Keep that core in this Task",
             "lf task start",
-            "--first slice",
+            "--flow <chosen-flow>",
+            "lf task prepare <issue> --json",
+            "lf task run <issue> --flow <chosen-flow>",
+            "Use the human-selected Flow",
         ] {
             assert!(
                 launch_plan.contains(contract),
@@ -473,17 +476,12 @@ mod tests {
             let skill = get_builtin_skill(name).expect("multi-Task output skill");
             assert!(skill.contains("lf roadmap"));
             assert!(skill.contains("lf status"));
-            assert!(skill.contains(
-                "[identifier](provider URL) — readable active PR/workspace slug — status/next owner"
-            ));
             assert!(skill.contains("task.identifier"));
             assert!(skill.contains("reference.issue_url"));
             assert!(skill.contains("active_pr.slug"));
             assert!(skill.contains("reference.workspace.slug"));
             assert!(skill.contains("runtime.status"));
             assert!(skill.contains("next_move.owner"));
-            assert!(skill.contains("reconstruct a provider URL"));
-            assert!(skill.contains("is explicitly absent"));
         }
     }
 

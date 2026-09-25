@@ -379,11 +379,11 @@ Flow completes, Loopflow deletes its position and leaves the Task ready. The
 next worker chooses afresh; PR delivery and Task completion remain explicit
 commands rather than an implied next lifecycle phase.
 
-Every Task-owned PR keeps the Linear Task name at the start of its title and a
-direct `Linear Task: [KEY](URL)` link in its body. Loopflow restores those
-anchors whenever it publishes, refreshes, submits, or lands the Task PR. If the
-cached PM snapshot has no provider URL, run `lf pm sync --wave <wave>` before
-publishing.
+Every Task-owned PR keeps its authored title, naming the benefit of that PR.
+Loopflow places the canonical Task name and Linear link after the opening
+summary and refreshes merge consequences from durable state on publication,
+submission, and landing. If the cached PM snapshot has no provider URL, run
+`lf pm sync --wave <wave>` before publishing.
 
 Task launch also resolves the execution boundary the work needs: the assigned
 worktree, Loopflow's pinned planning store, and network access for delivery.
@@ -836,21 +836,36 @@ does a PR whose auto-merge settlement is not armed. Only a current-head Auto
 merge request with Complete disposition records the terminal `lf pr land -c`
 intent.
 
-Task PR copy carries the Task contract before its reviewer-authored detail:
+Task PR copy leads with the benefit of its own change:
 
 ```markdown
-LOO-249: Make Task PR copy explain intent and lifecycle
+Understand what merging this PR will do
+
+Reviewers can see whether merging this change completes the Task or leaves
+follow-up work, without reconstructing its execution history.
 
 > [!NOTE]
-> **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/...)
+> **Task:** [Make Task PR copy explain intent and lifecycle · LOO-249](https://linear.app/...)
 > **PR lifecycle:** Merging PR 1 completes the Task.
+
+## Try it
+
+Read the opening summary, then follow the Task link in the note below it.
+You should be able to distinguish this PR's change from the broader Task and
+see whether merging completes the Task or leaves it open.
 ```
 
-The exact identifier, name, provider link, PR sequence, and merge disposition
-come from durable Task delivery state. Task lifecycle phase is intentionally absent.
-Generated or gate-authored prose adds the evaluation path, importance, and
-implementation-specific scope without repeating that context. Ordinary
-non-Task PR copy keeps its authored title and body unchanged.
+The opening summary is the first Markdown paragraph. Loopflow inserts its
+managed Task block after that paragraph, preserving the authored title and
+remaining body. Refresh replaces the block instead of accumulating history.
+The exact Task identifier, name, provider link, PR sequence, and merge
+consequence come from durable delivery state. Publication alone does not
+request Task settlement. Refreshing the same head preserves and describes an
+existing merge request; publishing a changed head clears superseded intent.
+Task lifecycle phase is intentionally absent.
+Generated or gate-authored prose describes this increment's meaningful changes
+and puts a useful **Try it** walkthrough last. Test and lint evidence belongs
+in **Checks** or CI, never in the walkthrough. Ordinary non-Task PR copy is unchanged.
 
 If a Task's work already merged and rotation left a provably empty unpublished
 successor, `lf pr land -c` completes over the merged PR without creating

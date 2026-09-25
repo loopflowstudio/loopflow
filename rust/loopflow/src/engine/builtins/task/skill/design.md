@@ -5,6 +5,19 @@ action_style: exploratory
 ---
 Help the User dream big, detail the idea, then shape one exact design artifact.
 
+## Task and design
+
+Treat the Task as the user's problem and desired experience. Explore possible
+solutions before choosing one; distinguish observations, proposed mechanisms,
+real constraints, and accepted decisions. The design owns architecture,
+implementation sequencing, and proof. A Task need not arrive with an
+implementation plan. Preserve its original problem when the solution changes.
+
+Continue an existing design and investigate its material gaps; a newly filed
+Task does not require restarting discovery. Keep accepted decisions binding
+and linked, preserve draft status and open questions, and honor the selected
+Flow. Launching a draft does not approve it.
+
 ## Orientation
 
 - Read `scratch/` and the repo agent guide. Continue an existing design instead of re-deriving it.
@@ -61,3 +74,41 @@ Tighten the artifact to:
 - **Measure** — only when a meaningful before/after quantity exists.
 
 For an additive series, describe the keystone fully and list the intended follow-ups precisely enough for `launch-plan` to encode. Do not file them yet. Before finishing, reread the artifact and present the consequential scope, keystone boundary, follow-ups, and open assumptions.
+
+## Existing-design handoff
+
+When the human asks to file a Task and run a Flow from an existing design,
+keep the design separate. Reuse the Task if it is the same work; otherwise file
+a short user-problem brief under the selected Project, with a design reference,
+its maturity, and open questions. Do not invent ownership.
+
+```bash
+lf pm task create --project <project> --title "<desired experience>" --notes "<brief; design reference and maturity>"
+lf task prepare <issue> --json
+# Copy the selected design and required evidence into the returned worktree's scratch/.
+lf task run <issue> --flow <chosen-flow>
+```
+
+Inspect the current context first: a design already in the Task worktree needs
+no transfer. For a separate source, copy the actual documents and supporting
+files before launch, preserve relative references, and check their contents in
+the destination. A path alone does not supply context. Preparation launches no
+worker; put any initial directive on preparation, since an already prepared
+Task rejects a new `run --directive`. Do not overwrite newer destination work.
+
+The destination becomes the working design; retain source provenance without
+maintaining competing active copies. Markdown under its recursive `scratch/`
+tree enters worker context; other assets remain on disk. Preserve material
+needed after scratch cleanup in durable documentation or existing records.
+Do not pipe the design into Task creation: stdin becomes the Task description.
+
+Use the human-selected Flow and inspect its contents when explaining where it
+begins; otherwise use the Project recommendation. Continue the design already
+present without treating its draft choices as approved. Report the Task link,
+destination design path, selected Flow, and observed launch result. Verify
+supplied context separately from worker startup.
+
+If implementation already exists in the source checkout, preserve it and its
+writer. Document transfer does not adopt a checkout; current preparation does
+not adopt an unbound existing branch/worktree. Report that gap before launching
+a competing implementation. No automatic scratch-transfer flag is available.

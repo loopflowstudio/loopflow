@@ -419,8 +419,9 @@ for a later worker or explicit delivery command. After a merge or abandonment,
 Loopflow rotates the worktree onto the next branch. The Task inherits the
 wave's `GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
 
-Each Task PR title starts with its Linear Task name, and its body links directly
-to the Linear issue. The anchors survive publication refreshes.
+Each Task PR keeps its own benefit-focused title. After the opening summary,
+Loopflow adds the canonical Task name, Linear link, and merge consequence.
+Publication refreshes that context without replacing the title or summary.
 
 The wave stays steerable while several independent tasks run — task events
 enter its inbox as typed observations and wake it once. Steering, status,

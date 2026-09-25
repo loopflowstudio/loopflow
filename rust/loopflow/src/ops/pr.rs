@@ -13,6 +13,7 @@ use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::{command_exists, stderr_from_output};
+use crate::work::task::AfterMerge;
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
@@ -40,7 +41,7 @@ pub struct PrInfo {
     pub head_sha: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PrCopy {
     pub title: String,
     pub body: String,
@@ -84,7 +85,7 @@ pub fn create_or_update_pr(
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
-    let task_context = crate::ops::task::task_pr_context(repo)?;
+    crate::ops::task::task_pr_context(repo)?;
 
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
@@ -122,11 +123,7 @@ pub fn create_or_update_pr(
     let published_head = rev_parse(repo, "HEAD")?;
     crate::ops::commit::push_with_upstream_if_needed(repo)?;
 
-    let copy = normalize_task_pr_copy(
-        resolve_pr_copy(repo, options, cached_copy, progress)?,
-        task_context.as_ref(),
-        &TaskPrCopyLifecycle::Published,
-    )?;
+    let copy = resolve_pr_copy(repo, options, cached_copy, progress)?;
     let current_branch_state = current_branch(repo)?;
     let current_head = rev_parse(repo, "HEAD")?;
     if current_branch_state.as_deref() != Some(branch.as_str()) || current_head != published_head {
@@ -146,6 +143,23 @@ pub fn create_or_update_pr(
         )));
     }
     crate::ops::commit::verify_remote_branch_head(repo, &branch, &published_head)?;
+    // A same-head refresh preserves an armed request. Read it under the mutation
+    // lock, after pushing has revoked any request for a superseded head.
+    let task_context = crate::ops::task::task_pr_context(repo)?;
+    let lifecycle = match task_context
+        .as_ref()
+        .and_then(|context| context.merge_request.as_ref())
+        .filter(|request| request.head_sha == published_head)
+    {
+        Some(request) if request.after_merge == AfterMerge::CompleteTask => {
+            TaskPrCopyLifecycle::Completes
+        }
+        Some(request) => TaskPrCopyLifecycle::Continues {
+            next_slug: request.next_slug.clone(),
+        },
+        None => TaskPrCopyLifecycle::Published,
+    };
+    let copy = normalize_task_pr_copy(copy, task_context.as_ref(), &lifecycle)?;
     let title = copy.title.trim();
     let body = copy.body.trim();
     crate::ops::task::request_task_pr_publication(repo, title, body)?;
@@ -212,10 +226,10 @@ pub(crate) fn normalize_task_pr_copy(
         ));
     }
 
-    let title = context.pr_title();
+    let title = copy.title;
     if title.chars().count() > GITHUB_PR_TITLE_MAX_CHARS {
         return Err(OpsError::Message(format!(
-            "Task identifier and name exceed GitHub's {GITHUB_PR_TITLE_MAX_CHARS}-character PR title limit"
+            "PR title exceeds GitHub's {GITHUB_PR_TITLE_MAX_CHARS}-character PR title limit"
         )));
     }
 
@@ -247,7 +261,25 @@ pub(crate) fn normalize_task_pr_copy(
     let body = if reviewer_context.is_empty() {
         managed
     } else {
-        format!("{managed}\n\n{reviewer_context}")
+        // The authored opening paragraph is the summary; keep it ahead of metadata.
+        let summary_end = reviewer_context
+            .split_inclusive('\n')
+            .take_while(|line| !line.trim().is_empty())
+            .map(str::len)
+            .sum();
+        let (summary, rest) = reviewer_context.split_at(summary_end);
+        let separator_len: usize = rest
+            .split_inclusive('\n')
+            .take_while(|line| line.trim().is_empty())
+            .map(str::len)
+            .sum();
+        let summary = summary.trim_end_matches('\n');
+        let details = &rest[separator_len..];
+        if details.is_empty() {
+            format!("{summary}\n\n{managed}")
+        } else {
+            format!("{summary}\n\n{managed}\n\n{details}")
+        }
     };
     Ok(PrCopy { title, body })
 }
@@ -257,16 +289,18 @@ fn _markdown_code(value: &str) -> String {
 }
 
 fn _strip_managed_task_context(body: &str) -> String {
-    let without_block = match (
-        body.find(TASK_PR_CONTEXT_START),
-        body.find(TASK_PR_CONTEXT_END),
-    ) {
-        (Some(start), Some(end)) if start < end => {
-            let after = end + TASK_PR_CONTEXT_END.len();
-            format!("{}\n{}", &body[..start], &body[after..])
-        }
-        _ => body.to_string(),
-    };
+    let mut without_block = body.to_string();
+    while let Some(start) = without_block.find(TASK_PR_CONTEXT_START) {
+        let Some(end) = without_block[start..].find(TASK_PR_CONTEXT_END) else {
+            break;
+        };
+        let after = start + end + TASK_PR_CONTEXT_END.len();
+        without_block = format!(
+            "{}\n\n{}",
+            without_block[..start].trim_end(),
+            without_block[after..].trim_start_matches(['\r', '\n'])
+        );
+    }
     without_block
         .lines()
         .filter(|line| !line.trim_start().starts_with("Linear Task:"))
@@ -611,8 +645,7 @@ pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
 pub(crate) fn enable_auto_merge(
     repo: &Path,
     number: u64,
-    title: Option<&str>,
-    body: Option<&str>,
+    copy: Option<&PrCopy>,
     head_sha: &str,
 ) -> OpsResult<()> {
     if auto_merge_enabled(repo, number)? {
@@ -635,11 +668,11 @@ pub(crate) fn enable_auto_merge(
         .arg("--auto")
         .arg("--match-head-commit")
         .arg(head_sha);
-    if let Some(title) = title {
-        command.arg("--subject").arg(title);
-    }
-    if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
-        command.arg("--body").arg(body);
+    if let Some(copy) = copy {
+        command.arg("--subject").arg(&copy.title);
+        if !copy.body.trim().is_empty() {
+            command.arg("--body").arg(&copy.body);
+        }
     }
     let output = command.current_dir(repo).output()?;
     if output.status.success() {
@@ -1177,12 +1210,6 @@ fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
     Ok(base_branch.to_string())
 }
 
-#[derive(Debug, Deserialize)]
-struct GeneratedPrCopy {
-    title: String,
-    body: String,
-}
-
 fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
     parse_json_copy(raw)
         .or_else(|| extract_fenced_json(raw).and_then(parse_json_copy))
@@ -1198,15 +1225,12 @@ fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
 }
 
 fn parse_json_copy(raw: &str) -> Option<PrCopy> {
-    let parsed: GeneratedPrCopy = serde_json::from_str(raw.trim()).ok()?;
-    let title = parsed.title.trim().to_string();
-    if title.is_empty() || is_placeholder_pr_copy(&title, &parsed.body) {
+    let mut copy: PrCopy = serde_json::from_str(raw.trim()).ok()?;
+    copy.title = copy.title.trim().to_string();
+    if copy.title.is_empty() || is_placeholder_pr_copy(&copy.title, &copy.body) {
         return None;
     }
-    Some(PrCopy {
-        title,
-        body: parsed.body,
-    })
+    Some(copy)
 }
 
 fn parse_labeled_copy(raw: &str) -> Option<PrCopy> {
@@ -1704,69 +1728,167 @@ mod tests {
             identifier: "LOO-249".to_string(),
             url: "https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string(),
             sequence: 1,
+            merge_request: None,
         }
     }
 
     #[test]
-    fn fix_task_pr_copy_uses_one_canonical_title_and_durable_context() {
+    fn task_pr_copy_preserves_title_and_summary_before_durable_context() {
         let copy = normalize_task_pr_copy(
             PrCopy {
-                title: "pr copy: explain the review contract".to_string(),
-                body: "## Evaluate\n\n`cargo test -p loopflow task_pr_copy`".to_string(),
+                title: "Understand what merging this PR will do".to_string(),
+                body: "Reviewers can see what work remains.\nThe summary can wrap.\n\n## Evaluate\n\nRecorded proof.".to_string(),
             },
             Some(&task_pr_context()),
             &TaskPrCopyLifecycle::Completes,
         )
         .expect("normalize Task PR copy");
 
-        assert_eq!(
-            copy.title,
-            "LOO-249: Make Task PR copy explain intent and lifecycle"
-        );
+        assert_eq!(copy.title, "Understand what merging this PR will do");
         assert_eq!(
             copy.body,
-            "<!-- loopflow:task-pr-context:start -->\n\
+            "Reviewers can see what work remains.\nThe summary can wrap.\n\n\
+<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
-> **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
+> **Task:** [Make Task PR copy explain intent and lifecycle · LOO-249](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
 > **PR lifecycle:** Merging PR 1 completes the Task.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
-## Evaluate\n\n`cargo test -p loopflow task_pr_copy`"
+## Evaluate\n\nRecorded proof."
         );
     }
 
     #[test]
-    fn feature_task_pr_copy_refreshes_lifecycle_without_duplicating_context() {
-        let published = normalize_task_pr_copy(
+    fn task_pr_copy_recognizes_whitespace_only_paragraph_separators() {
+        let render = |separator: &str| {
+            normalize_task_pr_copy(
+                PrCopy {
+                    title: "Keep review context readable".to_string(),
+                    body: format!(
+                        "Summary.{separator}    indented example\n\n## Evaluate\n\nProof."
+                    ),
+                },
+                Some(&task_pr_context()),
+                &TaskPrCopyLifecycle::Published,
+            )
+            .unwrap()
+        };
+        let expected = render("\n\n");
+        for separator in ["\n \t\n", "\r\n \r\n\r\n"] {
+            let copy = render(separator);
+            assert_eq!(copy, expected);
+            assert_eq!(
+                normalize_task_pr_copy(
+                    copy.clone(),
+                    Some(&task_pr_context()),
+                    &TaskPrCopyLifecycle::Published
+                )
+                .unwrap(),
+                copy
+            );
+        }
+    }
+
+    #[test]
+    fn task_pr_copy_refreshes_lifecycle_and_scope_without_accumulating_context() {
+        let mut context = task_pr_context();
+        let mut copy = PrCopy {
+            title: "Understand what merging this PR will do".to_string(),
+            body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewers can see what work remains.\n\n\n    lf status example\n\n## Evaluate\n\nRecorded proof.".to_string(),
+        };
+        for (lifecycle, expected) in [
+            (
+                TaskPrCopyLifecycle::Published,
+                "no Task settlement is requested.",
+            ),
+            (
+                TaskPrCopyLifecycle::Continues {
+                    next_slug: Some("follow-up-proof".to_string()),
+                },
+                "names `follow-up-proof` as the next serial PR.",
+            ),
+            (
+                TaskPrCopyLifecycle::Continues { next_slug: None },
+                "leaves the Task open for another serial PR.",
+            ),
+            (TaskPrCopyLifecycle::Completes, "completes the Task."),
+        ] {
+            copy = normalize_task_pr_copy(copy, Some(&context), &lifecycle).unwrap();
+            assert!(copy
+                .body
+                .starts_with("Reviewers can see what work remains.\n\n<!--"));
+            assert!(copy
+                .body
+                .ends_with("    lf status example\n\n## Evaluate\n\nRecorded proof."));
+            assert_eq!(
+                copy.body.matches("loopflow:task-pr-context:start").count(),
+                1
+            );
+            assert!(copy.body.contains(expected));
+            assert!(!copy.body.contains("Linear Task: [OLD-1]"));
+            assert_eq!(
+                normalize_task_pr_copy(copy.clone(), Some(&context), &lifecycle).unwrap(),
+                copy
+            );
+        }
+
+        context.sequence = 2;
+        context.title = "Find the next useful review action".to_string();
+        copy.title = "Find the remaining proof after a partial delivery".to_string();
+        copy.body = copy.body.replace(
+            "Reviewers can see what work remains.",
+            "Reviewers can find the proof still needed.",
+        );
+        let revised =
+            normalize_task_pr_copy(copy, Some(&context), &TaskPrCopyLifecycle::Published).unwrap();
+        assert_eq!(
+            revised.title,
+            "Find the remaining proof after a partial delivery"
+        );
+        assert!(revised
+            .body
+            .starts_with("Reviewers can find the proof still needed.\n\n<!--"));
+        assert!(revised
+            .body
+            .contains("Find the next useful review action · LOO-249"));
+        assert!(revised
+            .body
+            .contains("PR 2 is published for review; no Task settlement is requested."));
+        assert!(!revised.body.contains("completes the Task"));
+        assert!(!revised.body.contains("Make Task PR copy explain intent"));
+    }
+
+    #[test]
+    fn task_pr_copy_moves_existing_top_block_and_handles_summary_only() {
+        let context = task_pr_context();
+        let empty = normalize_task_pr_copy(
             PrCopy {
-                title: "ignored".to_string(),
-                body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewer proof."
-                    .to_string(),
+                title: "A specific change".to_string(),
+                body: String::new(),
             },
-            Some(&task_pr_context()),
+            Some(&context),
             &TaskPrCopyLifecycle::Published,
         )
-        .expect("publish Task PR copy");
-        let continued = normalize_task_pr_copy(
-            published,
-            Some(&task_pr_context()),
-            &TaskPrCopyLifecycle::Continues {
-                next_slug: Some("follow-up-proof".to_string()),
-            },
-        )
-        .expect("refresh Task PR copy");
-
+        .unwrap();
+        let legacy = PrCopy {
+            title: empty.title,
+            body: format!("{}\n\n{}\n\nSummary only.", empty.body, empty.body),
+        };
+        let moved = normalize_task_pr_copy(legacy, Some(&context), &TaskPrCopyLifecycle::Completes)
+            .unwrap();
+        assert!(moved.body.starts_with("Summary only.\n\n<!--"));
         assert_eq!(
-            continued
-                .body
-                .matches("loopflow:task-pr-context:start")
-                .count(),
+            moved.body.matches("loopflow:task-pr-context:start").count(),
             1
         );
-        assert!(continued.body.contains(
-            "Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
-        ));
-        assert!(continued.body.ends_with("Reviewer proof."));
-        assert!(!continued.body.contains("Linear Task: [OLD-1]"));
+        assert_eq!(
+            normalize_task_pr_copy(
+                moved.clone(),
+                Some(&context),
+                &TaskPrCopyLifecycle::Completes
+            )
+            .unwrap(),
+            moved
+        );
     }
 
     #[test]

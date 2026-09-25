@@ -69,6 +69,16 @@ Simplify code touched by this branch while preserving user behavior.
 
 ## Contract
 
+Match the contract to the artifact's maturity. An executable design or skill
+needs operational proof. An early Task needs a concrete user problem and
+recognizable success without preselecting an implementation. A Task can be
+ready for design while its solution is still unknown.
+
+An artifact reference must resolve where the next worker executes. Passing a
+path is not passing its contents. State how separate inputs reach the consumer
+before launch and which copy remains current. Name a missing transport mechanism
+instead of expanding the Task description into a document store.
+
 Define the finish line before the procedure. A strong prompt makes five things
 computable:
 
@@ -368,16 +378,43 @@ Two modes for the same concern:
 
 ## Outputs for humans
 
-Prompts are executed by agents, but outputs are read by humans. Keep both audiences in mind:
+**Write for the reader's next decision.** Someone returning from vacation should
+understand what matters before opening tools. Name the reader, what they already know,
+and what they need to decide. Put the benefit and current meaning first; let evidence
+support them below. The order used to investigate a change is rarely the right order for
+explaining it.
 
-- CLI commands should be copy-pasteable
-- Output formats should be scannable
-- Verdicts should be unambiguous
-- Design docs should stand alone
+Give each artifact a distinct job:
 
-When a prompt produces a test plan or demo procedure, produce a runnable script in `scripts/` — not a list of commands. Check `scripts/` first and extend existing scripts when possible. The bar: one command to run, one environment to verify in.
+- **Task:** the user's situation, problem, why it matters, and the experience they want. Observations and real constraints ground it. Solution ideas remain ideas until chosen.
+- **Design:** the chosen solution, alternatives and tradeoffs, architecture, boundaries, and proof. Turn the Task into an implementation decision without rewriting its original problem to fit the first solution.
+- **PR:** the benefit and actual change delivered by this increment. Start with a benefit-focused title and short summary, then minimal What changes, then Why it matters if needed. Keep automated test and lint evidence in Checks or CI. Finish with Try it when useful: a user walkthrough and its visible result. Tests never belong in that walkthrough.
+- **Status or report:** what changed, what needs attention, and the next decision or action supported by current evidence. Use readable titles and links; include execution identifiers only when needed to act.
 
-When in doubt about output format, optimize for the person who'll read it.
+“Join current Project/KR/Task planning to native Sessions” describes machinery. “Find
+planned work and its running conversations in one place” describes the intended
+experience. Keep the technical choices in the design, where they can be evaluated.
+
+Keep the current explanation current. When facts or scope change, reconcile the brief
+instead of appending another competing account. Preserve decisions and contrary evidence
+through durable links. History explains how we got here; it must not require every
+reader to reconstruct today's instructions.
+
+Templates establish reading order, not a quota of headings. Omit sections that repeat
+the summary. Technical work may benefit maintainers or operators; describe that concrete
+benefit without inventing a customer promise.
+
+Keep evidence and reproduction available without making them the entry requirement.
+Distinguish intended behavior, observed results, and remaining uncertainty. Extend an
+existing runnable demo when repeated execution warrants it; a simple check can remain a
+command with its expected result.
+
+Review the rendered output, including tool-added text. Hide the implementation details
+and ask whether the title and opening still explain the benefit. Then inspect the
+details for unsupported claims or lost constraints. Repeat with a changed scope or a
+second PR for the same Task; first drafts alone do not test whether the instructions
+resist entropy.
+
 
 ## Examples
 
@@ -408,6 +445,10 @@ Before committing a prompt:
 - [ ] Parallel search, when authorized and useful, preserves independent
       approach families and requires concrete returns
 - [ ] Candidate results face an adversarial audit of the named edge cases
+- [ ] Title and opening explain the benefit to a reader without the transcript
+- [ ] A second revision preserves current meaning, decisions, and contrary evidence
+- [ ] Referenced inputs are available in the consumer’s execution context
+- [ ] Rendered output, including tool-added text, preserves the reading order
 - [ ] Output format is specified if the prompt produces artifacts
 - [ ] Gate prompts have clear verdicts
 - [ ] Big prompts produce documentation, not just observations

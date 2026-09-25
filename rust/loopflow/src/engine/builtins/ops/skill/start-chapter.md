@@ -159,3 +159,34 @@ once, at the end.
 **Children as executors.** A Wave start that only transcribes the parent
 brief wastes the session; the brief stays provisional until scoped evidence
 and human direction confirm or challenge it.
+
+## Task briefs
+
+Write the Task from the user's perspective. Explain what they're trying to do, what
+gets in their way, and why it matters. Give it a title naming the problem or desired
+experience. Show what success would look like in a concrete moment of their work.
+Preserve the user's own language when it anchors intent.
+
+Ground the Task in observations, real constraints, and examples of success. Possible
+solutions can help explain the idea; mark what remains uncertain. The design doc develops
+the architecture, APIs, implementation sequence, and verification. A Task is ready for
+design when the problem is clear, even if the solution isn't. Link accepted decisions
+and keep them binding.
+
+Keep the Task useful to someone choosing what to work on now. As understanding changes,
+update the problem and desired experience. Keep blockers and decisions that affect that
+choice visible, with links to evidence.
+
+Preserve earlier reasoning in durable records without making readers replay every
+checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+Give follow-up Tasks independently useful outcomes, rather than implementation layers.
+
+Link related work where you explain its relevance. In prose and PR bodies, use
+`[Title · Task ID or PR number](known URL)` on first mention; shorten later references
+when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
+Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
+In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
+
+Apply these rules within the chapter’s existing proposal and acceptance boundaries.
+Preserve the accepted brief when applying it; record application history in the
+chapter record instead of prepending it to the Task.

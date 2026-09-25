@@ -175,32 +175,11 @@ fn prepare_pr(
     }
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
     let copy_state = read_worktree_state(&repo_root)?;
-    let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
-    let (pr_title, pr_body) = match (pr_title, pr_body) {
-        (Some(title), body) => {
-            let copy = normalize_task_pr_copy(
-                PrCopy {
-                    title,
-                    body: body.unwrap_or_default(),
-                },
-                task_context.as_ref(),
-                &copy_lifecycle,
-            )?;
-            (Some(copy.title), Some(copy.body))
-        }
-        (None, body) if task_context.is_none() => (None, body),
-        (None, body) => {
-            let copy = normalize_task_pr_copy(
-                PrCopy {
-                    title: String::new(),
-                    body: body.unwrap_or_default(),
-                },
-                task_context.as_ref(),
-                &copy_lifecycle,
-            )?;
-            (Some(copy.title), Some(copy.body))
-        }
-    };
+    let copy = normalize_task_pr_copy(
+        resolve_pr_copy(&repo_root, options, progress)?,
+        task_context.as_ref(),
+        &copy_lifecycle,
+    )?;
     let current_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
     if current_head != copy_head || read_worktree_state(&repo_root)? != copy_state {
         return Err(OpsError::Message(
@@ -231,19 +210,14 @@ fn prepare_pr(
     // any failure rollback atomic with respect to other Loopflow PR commands
     // and pushes in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
-    crate::ops::task::request_task_pr_publication(
-        &repo_root,
-        pr_title.as_deref().unwrap_or_default(),
-        pr_body.as_deref().unwrap_or_default(),
-    )?;
+    crate::ops::task::request_task_pr_publication(&repo_root, &copy.title, &copy.body)?;
     let created_pr = ensure_pr(
         &repo_root,
         pr_exists,
         &feature_branch,
         options.create_pr,
         &main_branch,
-        pr_title.as_deref(),
-        pr_body.as_deref(),
+        &copy,
     )?;
     let pr = match created_pr {
         Some(pr) => Some(pr),
@@ -266,8 +240,7 @@ fn prepare_pr(
     )?;
     if let Err(finalize_error) = finalize_remote(
         &repo_root,
-        pr_title.as_deref(),
-        pr_body.as_deref(),
+        &copy,
         finalize,
         pr.as_ref().map(|pr| pr.number),
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
@@ -356,33 +329,25 @@ fn resolve_pr_copy(
     repo_root: &Path,
     options: &LandOptions,
     progress: &impl Progress,
-) -> OpsResult<(Option<String>, Option<String>)> {
-    if options.local {
-        return Ok((options.pr_title.clone(), options.pr_body.clone()));
+) -> OpsResult<PrCopy> {
+    if options.local || options.pr_title.is_some() {
+        return Ok(PrCopy {
+            title: options.pr_title.clone().unwrap_or_default(),
+            body: options.pr_body.clone().unwrap_or_default(),
+        });
     }
 
-    let mut pr_title = options.pr_title.clone();
-    let mut pr_body = options.pr_body.clone();
-
-    if pr_title.is_some() {
-        return Ok((pr_title, pr_body));
-    }
-
-    if let Some(copy) = read_cached_pr_copy(repo_root, progress)? {
-        progress.status("Using cached PR copy from scratch/");
-        pr_title = Some(copy.title);
-        if pr_body.is_none() {
-            pr_body = Some(copy.body);
+    let mut copy = match read_cached_pr_copy(repo_root, progress)? {
+        Some(copy) => {
+            progress.status("Using cached PR copy from scratch/");
+            copy
         }
-        return Ok((pr_title, pr_body));
+        None => generate_pr_copy(repo_root, progress, options.agent.as_deref())?,
+    };
+    if let Some(body) = &options.pr_body {
+        copy.body = body.clone();
     }
-
-    let generated = generate_pr_copy(repo_root, progress, options.agent.as_deref())?;
-    pr_title = Some(generated.title);
-    if pr_body.is_none() {
-        pr_body = Some(generated.body);
-    }
-    Ok((pr_title, pr_body))
+    Ok(copy)
 }
 
 fn prepare_land(
@@ -462,15 +427,13 @@ fn finalize_local(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn ensure_pr(
     repo_root: &Path,
     pr_exists: bool,
     feature_branch: &str,
     create_pr: bool,
     base_branch: &str,
-    pr_title: Option<&str>,
-    pr_body: Option<&str>,
+    copy: &PrCopy,
 ) -> OpsResult<Option<PrInfo>> {
     if !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
@@ -478,16 +441,10 @@ fn ensure_pr(
 
     if !pr_exists {
         if create_pr {
-            let title = pr_title.ok_or_else(|| {
-                OpsError::Message(
-                    "no PR title provided; run `lf gate` or pass --title/--body".to_string(),
-                )
-            })?;
-            let body = pr_body.unwrap_or("");
             return crate::ops::pr::create_pr_from_pushed_branch(
                 repo_root,
-                title,
-                body,
+                &copy.title,
+                &copy.body,
                 base_branch,
             )
             .map(Some);
@@ -503,18 +460,14 @@ fn ensure_pr(
 
 fn finalize_remote(
     repo_root: &Path,
-    pr_title: Option<&str>,
-    pr_body: Option<&str>,
+    copy: &PrCopy,
     finalize: Finalize,
     number: Option<u64>,
     head_sha: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    if let Some(title) = pr_title {
-        let body = pr_body.unwrap_or("");
-        progress.status("Updating PR...");
-        update_pr_message(repo_root, title, body)?;
-    }
+    progress.status("Updating PR...");
+    update_pr_message(repo_root, &copy.title, &copy.body)?;
     mark_ready(repo_root)?;
 
     match finalize {
@@ -532,7 +485,7 @@ fn finalize_remote(
                 )
             })?;
             progress.status("Enabling auto-merge...");
-            crate::ops::pr::enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
+            crate::ops::pr::enable_auto_merge(repo_root, number, Some(copy), head_sha)?;
         }
         Finalize::UserMerge => {
             progress.status("Assigning PR for you to merge...");

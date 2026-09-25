@@ -1187,7 +1187,7 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
             return Ok(false);
         };
         let context = _task_pr_context_from_store(&store, &task).await?;
-        _validate_task_pr_copy(&context, title, body)?;
+        _validate_task_pr_copy(&context, body)?;
         let mut pr = store
             .active_task_pr(&task.id)
             .await
@@ -1242,18 +1242,15 @@ pub(crate) struct TaskPrContext {
     pub(crate) identifier: String,
     pub(crate) url: String,
     pub(crate) sequence: u32,
+    pub(crate) merge_request: Option<PrMergeRequest>,
 }
 
 impl TaskPrContext {
-    pub(crate) fn pr_title(&self) -> String {
-        format!("{}: {}", self.identifier.trim(), self.title.trim())
-    }
-
     pub(crate) fn task_link(&self) -> String {
         format!(
-            "[{} — {}]({})",
-            _markdown_link_text(self.identifier.trim()),
+            "[{} · {}]({})",
             _markdown_link_text(self.title.trim()),
+            _markdown_link_text(self.identifier.trim()),
             self.url
         )
     }
@@ -1309,6 +1306,13 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         identifier: task.plan.identifier.clone(),
         url: url.to_string(),
         sequence: pr.sequence,
+        merge_request: pr
+            .merge_request()
+            .filter(|request| {
+                pr.github().and_then(|github| github.head_sha.as_deref())
+                    == Some(request.head_sha.as_str())
+            })
+            .cloned(),
     })
 }
 
@@ -1328,13 +1332,7 @@ fn _missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
     ))
 }
 
-fn _validate_task_pr_copy(context: &TaskPrContext, title: &str, body: &str) -> OpsResult<()> {
-    let expected_title = context.pr_title();
-    if title != expected_title {
-        return Err(task_error(format!(
-            "Task PR title must be {expected_title:?}"
-        )));
-    }
+fn _validate_task_pr_copy(context: &TaskPrContext, body: &str) -> OpsResult<()> {
     let anchor = format!("**Task:** {}", context.task_link());
     if !body.lines().any(|line| {
         line.trim()

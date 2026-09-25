@@ -74,17 +74,25 @@ worktree, PR, memory, cadence, or child Project.
 
 When selecting, supervising, or reporting more than one Task, read `lf roadmap
 --wave <exact-wave> --json` for plan-wide rows and `lf status <exact-wave>
---json` for live execution. Render every Task with the shared reference:
+--json` for live execution. Render operational Task lists with the shared reference:
 
 ```markdown
-[identifier](provider URL) — readable active PR/workspace slug — status/next owner
+[identifier · Task title](provider URL) — status; next action/owner
 ```
 
-Fill the link from `task.identifier` and `reference.issue_url`; the slug from
-`active_pr.slug` (fall back to `reference.workspace.slug`); status from
-`runtime.status` or the roadmap `section`; next owner from `next_move.owner`.
-Never reconstruct a provider URL, branch, or slug from an identifier or title.
-Omit only a link or slug whose snapshot evidence is explicitly absent.
+Use this ID-first form in operational lists. In prose, use
+`[Task title · identifier](provider URL)` on first mention; shorten later
+references when unambiguous.
+
+Fill the link from `task.identifier` and `reference.issue_url`, and the readable
+title from `task.title`. Take status from `runtime.status` or the roadmap
+`section`, and next owner from `next_move.owner`. State the next action only
+when supported by current evidence; leave unknown state unknown. Include an
+active PR/workspace slug only when navigating that workspace is the job. In
+roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
+URL, branch, or slug from a title or identifier. If a link is absent, keep the
+readable title and available status without inventing a URL.
 
 ## Uncertainty selects the flow, it never blocks
 
@@ -98,3 +106,30 @@ the same Turn after it settles.
 Keep the operation to the one or two useful moves. It reads current PM/Task
 state, acts once, records evidence, and exits; there is no Project playhead or
 resident Project process.
+
+## Task briefs
+
+Write the Task from the user's perspective. Explain what they're trying to do, what
+gets in their way, and why it matters. Give it a title naming the problem or desired
+experience. Show what success would look like in a concrete moment of their work.
+Preserve the user's own language when it anchors intent.
+
+Ground the Task in observations, real constraints, and examples of success. Possible
+solutions can help explain the idea; mark what remains uncertain. The design doc develops
+the architecture, APIs, implementation sequence, and verification. A Task is ready for
+design when the problem is clear, even if the solution isn't. Link accepted decisions
+and keep them binding.
+
+Keep the Task useful to someone choosing what to work on now. As understanding changes,
+update the problem and desired experience. Keep blockers and decisions that affect that
+choice visible, with links to evidence.
+
+Preserve earlier reasoning in durable records without making readers replay every
+checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+Give follow-up Tasks independently useful outcomes, rather than implementation layers.
+
+Link related work where you explain its relevance. In prose and PR bodies, use
+`[Title · Task ID or PR number](known URL)` on first mention; shorten later references
+when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
+Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
+In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.

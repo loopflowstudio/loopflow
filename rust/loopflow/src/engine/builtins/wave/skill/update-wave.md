@@ -46,8 +46,10 @@ Whether you're cleaning up after a build, reconciling scratch analysis, or both:
 ## Bias: fold into MEMORY, don't drop
 
 `scratch/` is cleared on land. Anything left there is lost. Anything folded into
-`MEMORY.md` — or filed as a Linear task — survives. **Dropping content is a worse
-failure mode than duplicating it.**
+`MEMORY.md` — or filed as a Linear task — survives. Preserve decisions and evidence while synthesizing the current brief. Link
+history from durable records; do not stack competing narratives in a Task.
+Verify the destination before removing scratch, and never use worker steering
+merely to archive prose.
 
 Every scratch file with future-relevant content must land somewhere durable:
 
@@ -193,3 +195,30 @@ and a trimmed `scratch/`.
 **"No changes needed" is only valid when scratch/ is empty and Linear tasks
 already match reality.** If scratch has files, something must move into
 `MEMORY.md`, Linear tasks, or both.
+
+## Task briefs
+
+Write the Task from the user's perspective. Explain what they're trying to do, what
+gets in their way, and why it matters. Give it a title naming the problem or desired
+experience. Show what success would look like in a concrete moment of their work.
+Preserve the user's own language when it anchors intent.
+
+Ground the Task in observations, real constraints, and examples of success. Possible
+solutions can help explain the idea; mark what remains uncertain. The design doc develops
+the architecture, APIs, implementation sequence, and verification. A Task is ready for
+design when the problem is clear, even if the solution isn't. Link accepted decisions
+and keep them binding.
+
+Keep the Task useful to someone choosing what to work on now. As understanding changes,
+update the problem and desired experience. Keep blockers and decisions that affect that
+choice visible, with links to evidence.
+
+Preserve earlier reasoning in durable records without making readers replay every
+checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+Give follow-up Tasks independently useful outcomes, rather than implementation layers.
+
+Link related work where you explain its relevance. In prose and PR bodies, use
+`[Title · Task ID or PR number](known URL)` on first mention; shorten later references
+when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
+Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
+In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.

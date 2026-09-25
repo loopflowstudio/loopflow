@@ -5,6 +5,19 @@ default_agent: claude
 ---
 Research risks that could derail the work, then transform a wave item into a bold, well-considered design.
 
+## Task and design
+
+Treat the Task as the user's problem and desired experience. Explore possible
+solutions before choosing one; distinguish observations, proposed mechanisms,
+real constraints, and accepted decisions. The design owns architecture,
+implementation sequencing, and proof. A Task need not arrive with an
+implementation plan. Preserve its original problem when the solution changes.
+
+Continue an existing design and investigate its material gaps; a newly filed
+Task does not require restarting discovery. Keep accepted decisions binding
+and linked, preserve draft status and open questions, and honor the selected
+Flow. Launching a draft does not approve it.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:

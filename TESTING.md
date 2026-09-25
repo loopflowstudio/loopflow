@@ -282,6 +282,15 @@ upstream tracking and a subsequent rebase. Immediate local pushes can hide
 broken pipes that interrupt Git after the remote ref moves; background children
 must use stdio that survives their parent's exit.
 
+Builtin skill Markdown is compiled into Rust. After editing it, run the builtin
+contract tests alongside the relevant behavior tests; PR renderer tests alone do
+not cover the prompts that generate their input. Update obsolete assertions to
+match the intended contract instead of restoring retired commands in the prose.
+
+```bash
+cargo test -p loopflow --lib engine::builtins::tests
+```
+
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash

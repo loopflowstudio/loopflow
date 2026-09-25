@@ -2156,7 +2156,7 @@ fn wait_for_pr_merge(
             progress.status(&format!(
                 "Re-arming release PR #{pr_number} for exact-head auto-merge..."
             ));
-            crate::ops::pr::enable_auto_merge(repo, pr_number, None, None, head_sha)?;
+            crate::ops::pr::enable_auto_merge(repo, pr_number, None, head_sha)?;
         }
 
         if attempt.is_multiple_of(6) {

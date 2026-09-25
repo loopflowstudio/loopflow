@@ -54,6 +54,13 @@ artifact uniquely owns.
    - affected boundaries, edge cases, permissions, and exclusions;
    - the command, observation, or artifact that proves success.
 
+   Match proof to maturity: an early Task needs a concrete problem and
+   recognizable success; design chooses the implementation and operational proof.
+   Name the output's reader and their next decision. State how separate input
+   artifacts reach the consumer's execution context and which copy stays current;
+   a path alone does not deliver contents. Name a missing transfer mechanism
+   instead of using a Task description as a substitute document store.
+
 3. **Design the evidence loop.** For uncertain work, tell the agent to preserve
    observations separately from hypotheses, externalize the cheapest useful
    model, run the smallest safe check that separates leading explanations,
@@ -69,7 +76,12 @@ artifact uniquely owns.
    cheaply. Could it satisfy the words while missing the intent? Does a receipt
    such as “tests added” masquerade as the outcome? Does it know what to do when
    evidence contradicts the favored plan? Tighten the contract until the easy
-   loopholes close.
+   loopholes close. Check a real example: can someone without the transcript
+   understand the benefit and current problem before opening tools? Keep the
+   Task's problem distinct from the design's solution. Trace competing rules
+   through examples, handoffs, later edits, and mechanical rendering. Review a
+   second revision after scope changes, not just the first draft. Put resulting
+   guidance only in authorship surfaces that exercise it.
 
 6. **Deliver at the source.** Update the named customer file or return reviewed
    prompt text. Do not create a second copy in documentation. Summarize the

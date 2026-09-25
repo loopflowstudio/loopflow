@@ -5,6 +5,30 @@ Trace & Context in one measured bet: human-selected work is explainable from
 durable local evidence. No standalone Memory, Evals, or Runtime Monitoring
 Project is implied by the historical research.
 
+## Instruction ownership and design delivery (2026-09-25)
+
+- Customer operating guidance carries universal execution rules. Detailed Task,
+  placement and recovery procedures belong in the skills exercising them.
+  Generic model/API reduction advice now lives in builtin compress; maintainer
+  migration/updater constraints remain in repo guidance. Repo `.lf/skills` replace
+  local execution skills but are not exported to customers by skill sync.
+- `.lf/` document gathering is excluded, but branch diffs can include its changes.
+  The tracked chapter archive is historical evidence, not ambient prompt input.
+  Keep repeatable instructions in skills, conventions in the agent guide,
+  durable judgment in Wave memory and temporary designs in scratch. Do not
+  recreate retired root `.lf/` handoff notes or prompt directions.
+- Existing-design handoff prepares the Task, copies actual artifacts with their
+  relative references and draft status, then launches the selected Flow. Task
+  creation stdin is the problem brief. Worker startup alone cannot establish
+  delivery of context. Preserve newer destination edits and existing code ownership.
+  The [preserved handoff design](https://github.com/loopflowstudio/loopflow/blob/033e0758504390e5db9d254fed4964b0dd6da4bc/scratch/prs-and-tasks-handoff.md)
+  proposes scratch import; no automatic `--scratch` transfer or checkout adoption
+  was established by the authorship branch. Those remain separate design questions.
+- The former skill-sync probe expected retired repo-local exports and could
+  mutate personal skills before failing. Removed it; isolated-home Rust tests
+  prove current delivery. Prompt boundary tests must inspect the assembled
+  customer examples, not rely solely on a few forbidden vocabulary assertions.
+
 ## Current evidence boundary (2026-09-23)
 
 The [accepted chapter](../../.lf/chapters/20260923T000959Z-502f011b/start.md)

@@ -6,9 +6,12 @@ Keep the Wave's durable identity current and fold what the branch learned into m
 
 ## Read
 
-Read scratch, the diff, the exact Wave's GOAL/MEMORY, `lf status <wave> --json`,
-and the repo guide. Do not infer a different Wave. With no named Wave, preserve
-repo-specific learning in `.lf/` and record unresolved placement.
+Read scratch, the diff, the identified Wave's GOAL/MEMORY and the repo guide.
+Use `lf status <wave> --json` when chapter or Task state matters; memory curation
+alone needs no running Wave or PM connection. Do not infer a different Wave.
+With no named Wave, preserve actionable rules beside their code or in the local
+skill that exercises them; keep unresolved placement in the PR. Do not create
+root `.lf/` learning notes or make another copy of general customer guidance.
 
 ## Reconcile
 

@@ -955,8 +955,10 @@ curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/i
 ```
 
 The external installer verifies release assets and enters the same promotion
-transaction. The old `scripts/install.py refresh` and `pull-local-bin.sh` entrypoints
-have been removed.
+transaction. The hidden `scripts/install.py refresh` entrypoint remains for older
+installed CLIs: it delegates to the release installer without recursing into the
+old CLI. Keep it until those installed callers can upgrade without it. The old
+`pull-local-bin.sh` entrypoint has been removed.
 
 The scheduled job invokes the installed `lf install`, with stable tool paths and
 logs at `~/Library/Logs/Loopflow/refresh.log`. It runs at login and on the selected

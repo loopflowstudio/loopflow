@@ -94,6 +94,7 @@ directory:
 ```text
 <absolute-git-dir>/loopflow/rebase-owner.json
 <absolute-git-dir>/lf-pr-mutation.lock
+<absolute-git-dir>/lf-pr-landing.lock
 ```
 
 The open file descriptor is authority. JSON is a readable receipt. Process
@@ -123,6 +124,17 @@ recording, tests, or planning writes.
 repair, range healing, merge request, settlement, and serial rotation. A
 second mutation fails fast while that exact section is held.
 
+### Landing supervision
+
+`lf-pr-landing.lock` follows the supervisor's actual operation lifetime. A
+replacement waits while an old observation or repair is still running, even
+when its async waiter has been canceled. The file contains no state; the
+existing landing generation still fences database writes. Once the old
+operation returns, the replacement observes GitHub before deciding what to do.
+Joining an active landing updates the requested head and disposition while
+retaining the supervisor's checkout. Resuming a blocked landing can select the
+caller's current checkout.
+
 Raw Git commands do not participate in these advisory protocols. Loopflow can
 observe and diagnose their state, but cannot claim to have excluded them.
 
@@ -141,15 +153,31 @@ wait for required checks on H1
       |       |
     pass     fail
       |       |
-    merge   admit one repair for (G, H1)
+    merge   repair under supervisor G
               |
               v
-           new head H2 --> fresh check evidence
+           observe current head --> fresh check evidence
 ```
 
 A landing supervisor never transfers green checks from one head to another.
-One failed head may admit one repair. A moved head requires a new observation
-and check set. GitHub remains the final merge authority.
+A failure may need several repairs, including on the same head. Incidents
+record responses; the supervisor owns execution. A moved head requires a new
+observation and check set. GitHub remains the final merge authority.
+
+`PrLanding` owns the supervisor generation. `LandingSupervisor` names the
+process, placement, and heartbeat used both to claim and to retain that
+ownership. Incidents retain response provenance and timing across generations.
+
+Rerun `lf pr land` after resolving a blocker. It resumes the existing landing
+under a fresh supervisor generation, including when the SHA has not changed.
+The waiting CLI displays completed `ci-fix` conclusions from existing Run
+records for this worktree, including when lfd supervises the landing. Use
+`lf runs <run> --final` to inspect a conclusion separately.
+
+Watched repairs return `published` or `blocked` with a summary in their existing
+final answer. A blocked result names the required action. The watcher observes
+GitHub before returning it, so an already-merged PR still finishes successfully.
+Provider exit code zero alone does not mean the repair succeeded.
 
 After merge, bare `lf pr land` settles that PR and leaves the Task open.
 `lf pr land -c` completes the Task. `lf pr land --next <slug>` rotates the

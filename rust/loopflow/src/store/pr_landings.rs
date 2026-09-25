@@ -2,7 +2,7 @@
 
 use time::OffsetDateTime;
 
-use crate::pr_landing::{LandingClaim, PrLanding, PrLandingId};
+use crate::pr_landing::{LandingSupervisor, PrLanding, PrLandingId};
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -35,7 +35,7 @@ impl Store {
         &self,
         landing_id: &PrLandingId,
         expected_generation: u64,
-        claim: &LandingClaim,
+        claim: &LandingSupervisor,
         stale_before: OffsetDateTime,
     ) -> StoreResult<Option<PrLanding>> {
         let landing_id = landing_id.clone();

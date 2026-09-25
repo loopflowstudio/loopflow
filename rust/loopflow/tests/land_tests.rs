@@ -147,8 +147,16 @@ if [ "$1 $2" = "pr merge" ]; then
   touch "$auto_state"
   exit 0
 fi
+if [ "$1 $2" = "pr checks" ]; then
+  echo '[{{"name":"fixture-check","bucket":"fail","link":"https://example.com/check/1"}}]'
+  exit 1
+fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
+  if [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; then
+    echo "{{\"merged\":false,\"state\":\"open\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
+    exit 0
+  fi
   echo "{{\"merged\":true,\"state\":\"closed\",\"draft\":false,\"merge_commit_sha\":\"merge-head\",\"merged_at\":\"2026-08-21T00:00:00Z\",\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
   exit 0
 fi
@@ -1446,79 +1454,146 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 
 #[test]
 fn lf_pr_land_waits_for_authoritative_merged_observation() {
-    let repo = TestRepo::new();
-    let github_remote = "https://github.com/loopflowstudio/loopflow.git";
-    let local_remote = repo.bare_path().to_string_lossy().to_string();
-    let status = Command::new("git")
-        .args([
-            "config",
-            &format!("url.{local_remote}.insteadOf"),
-            github_remote,
-        ])
-        .current_dir(repo.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let status = Command::new("git")
-        .args(["remote", "set-url", "origin", github_remote])
-        .current_dir(repo.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let log_path = repo.bare_path().join("watched-gh.log");
-    let script = gh_watched_land_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
-    let worktree = repo.create_named_worktree("watched-land");
-    fs::write(worktree.join("feature.txt"), "feature").unwrap();
-    let status = Command::new("git")
-        .args(["add", "."])
-        .current_dir(&worktree)
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let status = Command::new("git")
-        .args(["commit", "-m", "feature work"])
-        .current_dir(&worktree)
-        .status()
-        .unwrap();
-    assert!(status.success());
+    for (repair, blocked) in [(false, false), (true, false), (true, true)] {
+        let repo = TestRepo::new();
+        let github_remote = "https://github.com/loopflowstudio/loopflow.git";
+        let local_remote = repo.bare_path().to_string_lossy().to_string();
+        let status = Command::new("git")
+            .args([
+                "config",
+                &format!("url.{local_remote}.insteadOf"),
+                github_remote,
+            ])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["remote", "set-url", "origin", github_remote])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let log_path = repo.bare_path().join("watched-gh.log");
+        let script = gh_watched_land_script(log_path.to_string_lossy().as_ref());
+        let codex = codex_app_server_script(
+            if blocked {
+                r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
+            } else {
+                r#"{"status":"published","summary":"Rebased the linked worktree; the same head can now merge."}"#
+            },
+            r#"if [ -n "$LF_TEST_REPAIR_PROOF" ]; then
+  echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
+  if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
+  "$LF_TEST_BIN" rebase --manual >"$LF_TEST_REBASE_LOG" 2>&1 || exit 1
+  if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
+    git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
+  fi
+fi"#,
+        );
+        let _env = EnvGuard::new(&[
+            ("gh", script.as_str()),
+            ("codex", codex.as_str()),
+            ("open", noop_open_script()),
+        ]);
+        let worktree = repo.create_named_worktree("watched-land");
+        fs::write(worktree.join("feature.txt"), "feature").unwrap();
+        fs::create_dir_all(worktree.join(".lf")).unwrap();
+        fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        let status = Command::new("git")
+            .args(["add", "."])
+            .current_dir(&worktree)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["commit", "-m", "feature work"])
+            .current_dir(&worktree)
+            .status()
+            .unwrap();
+        assert!(status.success());
 
-    let lf_home = repo.path().join("lf-home");
-    let database = lf_home.join("loopflow.db");
-    initialize_landing_store(&database);
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args([
-            "pr",
-            "land",
-            "--strict",
-            "--title",
-            "watched landing",
-            "--body",
-            "Observe GitHub before returning.",
-        ])
-        .current_dir(&worktree)
-        .env_remove("LF_GIT_OPERATION_ID")
-        .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_ID")
-        .env("LF_HOME", &lf_home)
-        .env("LF_DB_PATH", &database)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "lf pr land failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
-        "land returned without merged evidence: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    let gh_log = fs::read_to_string(log_path).unwrap();
-    assert!(
-        gh_log
-            .lines()
-            .any(|line| line.starts_with("api -H Accept:")),
-        "land never read the authoritative PR state: {gh_log}"
-    );
+        let lf_home = repo.path().join("lf-home");
+        let database = lf_home.join("loopflow.db");
+        initialize_landing_store(&database);
+        let repair_proof = repo.path().join(".git/landing-repair-proof");
+        let rebase_log = repo.bare_path().join("repair-rebase.log");
+        let repair_launches = repo.bare_path().join("repair-launches.log");
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args([
+                "pr",
+                "land",
+                "--strict",
+                "--title",
+                "watched landing",
+                "--body",
+                "Observe GitHub before returning.",
+            ])
+            .current_dir(&worktree)
+            .env_remove("LF_GIT_OPERATION_ID")
+            .env_remove("LF_TRACE_ID")
+            .env_remove("LF_PROCESS_ID")
+            .env("LF_HOME", &lf_home)
+            .env("LF_DB_PATH", &database)
+            .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("LF_TEST_REBASE_LOG", &rebase_log)
+            .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
+            .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
+            .env(
+                "LF_TEST_REPAIR_PROOF",
+                if repair {
+                    repair_proof.as_os_str()
+                } else {
+                    std::ffi::OsStr::new("")
+                },
+            )
+            .output()
+            .unwrap();
+        if blocked {
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr)
+                .contains("GitHub credential revoked; reconnect it before retrying."));
+            assert!(!repair_proof.exists());
+            assert_eq!(
+                fs::read_to_string(&repair_launches)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+            continue;
+        }
+        assert!(
+            output.status.success(),
+            "lf pr land failed: {}\nNested rebase: {}",
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(&rebase_log).unwrap_or_default(),
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
+            "land returned without merged evidence: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        if repair {
+            let repaired_head =
+                fs::read_to_string(&repair_proof).expect("repair wrote shared Git metadata");
+            let head = Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&worktree)
+                .output()
+                .unwrap();
+            assert_eq!(
+                repaired_head.trim(),
+                String::from_utf8_lossy(&head.stdout).trim()
+            );
+            assert!(String::from_utf8_lossy(&output.stderr).contains("Rebased the linked worktree"));
+        }
+        let gh_log = fs::read_to_string(log_path).unwrap();
+        assert!(
+            gh_log
+                .lines()
+                .any(|line| line.starts_with("api -H Accept:")),
+            "land never read the authoritative PR state: {gh_log}"
+        );
+    }
 }

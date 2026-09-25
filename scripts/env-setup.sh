@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: .lf/env-setup.sh [--check|--install] [--dry-run]
+Usage: scripts/env-setup.sh [--check|--install] [--dry-run]
 
 Idempotent loopflow maintainer environment setup.
 
@@ -104,7 +104,7 @@ ensure_brew_formula "cloudflared" "cloudflared" MISSING_TOOLS
 if [[ "$MODE" == "check" && -n "$MISSING_TOOLS" ]]; then
   echo
   echo "Missing tools:${MISSING_TOOLS}"
-  echo "Run: .lf/env-setup.sh --install"
+  echo "Run: scripts/env-setup.sh --install"
   exit 1
 fi
 

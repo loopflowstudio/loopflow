@@ -2396,6 +2396,49 @@ mod tests {
         sql[body_start..body_end].to_string()
     }
 
+    #[test]
+    fn landing_repair_counter_removal_preserves_supervision() {
+        let conn = open();
+        let name = "remove_landing_repair_counter";
+        apply_before_current_draft(&conn, name);
+        conn.execute_batch(
+            "INSERT INTO pr_landings (
+                id, repo, pr_number, worktree, branch, requested_head_sha,
+                observed_head_sha, state, generation, supervisor_placement,
+                supervisor_process_id, supervisor_heartbeat_at, repair_count,
+                blocked_reason, created_at, updated_at
+             ) VALUES (
+                'landing_history', 'owner/repo', 42, '/tmp/landing', 'repair',
+                'failed', 'repaired', 'blocked', 7, 'local', 123, 30, 4,
+                'credential revoked', 10, 40
+             );",
+        )
+        .unwrap();
+        let retained = columns(&conn, "pr_landings")
+            .into_iter()
+            .filter(|column| column != "repair_count")
+            .collect::<Vec<_>>();
+        let read_landing = || {
+            conn.query_row(
+                &format!("SELECT {} FROM pr_landings", retained.join(",")),
+                [],
+                |row| {
+                    (0..retained.len())
+                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                },
+            )
+            .unwrap()
+        };
+        let before = read_landing();
+
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+
+        assert_eq!(read_landing(), before);
+        assert!(!columns(&conn, "pr_landings").contains(&"repair_count".to_string()));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
     fn apply_current_work_schema(conn: &rusqlite::Connection) {
         if columns(conn, "tasks").contains(&"work_state".to_string()) {
             return;

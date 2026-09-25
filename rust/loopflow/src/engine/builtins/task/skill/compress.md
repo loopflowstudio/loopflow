@@ -3,80 +3,51 @@ requires: diff vs main
 produces: simpler code
 action_style: procedural
 ---
-Leave the codebase simpler than you found it. Delete what isn't needed. Flatten unnecessary abstractions.
+Simplify the branch's model and public interfaces. Delete what no longer earns its place.
 
-## Goal
+## Map the model
 
-The best reduction isn't deleting a function—it's reshaping a structure so three special cases become one.
+Read the current design and diff. Follow each changed concept through its
+core types, persistence, public API, clients/UI, tests and documentation.
+Write down who owns each fact and which representations merely copy it.
+Could a new reader explain the model and public contract in one screen?
 
-Simplicity compounds. Every line removed is a line that can't break, can't confuse, can't slow down the next change.
+Look for the structural reduction: one representation that removes several
+special cases. A rename leaves the old architecture intact when the same
+ownership boundary and adapters survive.
 
-The bar: could someone reading this code for the first time understand it faster after your changes?
+## Reduce from the owner outward
 
-## Workflow
+1. Remove duplicate concepts and facts from the core model. Derive what already
+   has an owner. Replace mutually exclusive optional fields with one explicit
+   choice. Retire state that only preserves obsolete launch inputs.
+2. Make persistence and public interfaces express that model. Remove unused
+   tables, fields, wrappers, aliases and fallback parsers. Do not add an adapter
+   to keep an internal caller using a retired shape; migrate the caller.
+3. Follow the change through clients, UI, wire types, fixtures, examples and
+   docs. Compare mirrored fields against actual behavior. Delete tests of
+   removed implementation details; retain proof of user-visible capability.
 
-1. **Reflect on the implementation**
-   What did building this reveal? Ask:
-   - Did the implementation fight the existing structure?
-   - Did we add workarounds that hint at a deeper problem?
-   - Is there a simpler design we only see now that it's built?
+Stay on the branch's model path, including direct owners and consumers outside
+its literal diff. Leave unrelated cleanup alone. Respect the full reviewed
+design and its deletion path, not just the latest slice.
 
-   If yes: this is the reduction opportunity. Don't just clean up around the edges—reshape toward the simpler design you now see.
+Preserve external contracts and installed callers that still need them. Removing
+an in-repo caller does not retire deployed copies. Follow repository migration
+rules for persisted data; require explicit evidence before deleting an upgrade
+path. Internal compatibility without a real consumer should disappear.
 
-2. **Review the diff**
-   The diff against main is in your context. Identify what was added, what was
-   changed, and whether the current slice still moves toward the complete
-   reviewed design.
+Prefer a coherent reduction across layers to isolated cosmetic changes. Do not
+invent work to satisfy a line-count target. If no meaningful reduction exists,
+report the model path and suspected redundancies inspected and stop.
 
-3. **Find reduction opportunities**
-   For each file touched, ask:
-   - What's unused now that this change landed?
-   - What abstraction exists only because the old code needed it?
-   - What duplication did this change create or reveal?
-   - Which old authority, type, writer, or path should now be unreachable?
-   - Did a locally convenient adapter leave two representations of one concept?
+## Verify
 
-4. **Reduce**
-   Apply changes directly. Prefer reshaping over deleting—a better structure beats surgical removal.
+If executable behavior changed, run the smallest existing behavioral proof for
+that change. Reuse passing evidence when content is unchanged; gate and CI own
+broader suites. If a behavior breaks, the reduction went too far. If a test only
+encodes a removed representation, update it to prove the retained behavior.
 
-5. **Verify**
-   If the reduction changed executable behavior, run the smallest existing
-   behavioral test that covers it. If only structure changed, do not rerun the
-   branch suite; gate owns that proof. If the focused test breaks, the
-   reduction went too far.
-
-## What to reduce
-
-**Reshape data structures.** A different representation can eliminate special cases.
-
-Example: Three optional fields that are mutually exclusive → one enum with three variants.
-
-**Rearrange APIs.** Change the interface so callers don't need conditionals.
-
-Example: `process(item, mode)` where every caller passes the same mode → `process(item)` with mode baked in.
-
-**Delete dead code.** Unused functions, unreachable branches, obsolete options.
-
-Example: A feature flag that's been `true` for six months → delete the flag and the `false` branch.
-
-**Collapse duplication.** Same pattern twice? Inline it or pick one location.
-
-Example: Two functions that differ by one line → one function with a parameter, or inline both if they're only called once.
-
-**Remove backwards-compatibility shims.** Old parameter names, deprecated re-exports, migration code for formats nothing uses anymore.
-
-Example: `def foo(x, old_name=None): x = x or old_name` → just `def foo(x):` if nothing uses `old_name`.
-
-## Scope
-
-**Stay in the diff.** If a file wasn't changed or used by this branch, don't touch it.
-
-**Reshape, don't layer.** Restructuring is good. Adding adapters, wrappers, or compatibility shims is not reducing—it's adding.
-
-**Preserve behavior.** Reduction changes structure, not functionality. If tests break, you changed behavior.
-
-**Be aggressive.** Question whether each abstraction earns its place. Question whether each option is used. Question whether the API surface is minimal. The default is "this can probably go"—make it prove otherwise.
-
-## Output
-
-Simpler code that passes tests. If nothing can be reduced, say so—not every diff has reduction opportunities.
+Report the model before and after, removed interfaces or representations,
+anything intentionally retained and why, and the focused proof. The outcome is
+simpler code with the same user-visible capability.

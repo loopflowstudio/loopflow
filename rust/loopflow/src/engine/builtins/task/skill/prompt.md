@@ -35,10 +35,18 @@ Put each instruction at the narrowest layer that exercises it:
 | Wave `GOAL.md` | Durable identity, bounds, cadence, and selection judgment | Chapter KRs, live metric contracts, task lists, implementation steps |
 | Inline prompt | One concrete request | Reusable doctrine that deserves a skill |
 | Repo agent doc | Conventions every task in this repository must follow | One feature's design or temporary context |
+| Wave `MEMORY.md` | Curated decisions, lessons, and evidence limits | A second plan or a transcript |
 
 Do not repeat Loopflow's ambient operating guidance in customer prompts. It is
 already supplied to standard runs. Add only the domain contract and method this
 artifact uniquely owns.
+
+Shared skills must work in a customer's repository without your source files,
+internal issue IDs, tool wrappers or secret-manager policy. Keep specialized
+procedures in the skills that perform them. Repo-local skills replace the named
+skill; they are not appended supplements or automatically exported to customers.
+Improve the shared skill for general lessons; keep local rules with their local
+consumer. Do not create miscellaneous `.lf/` learning notes.
 
 ## Workflow
 
@@ -86,6 +94,9 @@ artifact uniquely owns.
 6. **Deliver at the source.** Update the named customer file or return reviewed
    prompt text. Do not create a second copy in documentation. Summarize the
    behavioral change, not each wording edit.
+   When relocating instructions, inspect both the ordinary assembled prompt
+   and the receiving skill's standalone export. Prove the old audience no longer
+   pays for the procedure and the intended consumer can still execute it.
 
 ## Skill contract
 

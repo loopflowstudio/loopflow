@@ -50,7 +50,7 @@ DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 # stays stable across builds and macOS keeps previously granted permissions.
 DEV_SIGNING_IDENTITY = "Loopflow Dev"
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
-ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
+ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 MACHINE_INSTALL_STATE = Path.home() / ".lf-machine" / "install" / "active.json"

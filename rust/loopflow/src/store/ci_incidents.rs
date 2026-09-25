@@ -27,8 +27,8 @@ impl Store {
         .await
     }
 
-    /// Claim one unsettled incident for the current landing generation.
-    pub async fn claim_ci_incident(
+    /// Record a response by the supervisor; incidents do not admit repairs.
+    pub async fn record_ci_response(
         &self,
         identity: &str,
         landing_id: &PrLandingId,
@@ -38,7 +38,7 @@ impl Store {
         let identity = identity.to_string();
         let landing_id = landing_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_ci_incident(&identity, &landing_id, generation, responded_at)
+            store.record_ci_response(&identity, &landing_id, generation, responded_at)
         })
         .await
     }

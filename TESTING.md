@@ -162,6 +162,10 @@ swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by c
 swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
+In asynchronous terminal proofs, observe the surface after each wake-up before
+checking the deadline. A busy main actor can resume after the deadline even
+when the PTY produced its output in time; do not fail on a pre-sleep snapshot.
+
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
 `#if canImport(GhosttyKit)`. When changing terminal code or its tests, gate both
@@ -233,9 +237,15 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 ## Rust Tests
 
 For shared repository discovery or CLI dispatch changes, include the PM and
-Wave consumers in the focused proof. Follow
-[repository-context-check](.lf/skills/repository-context-check.md); global-command
-tests alone do not cover cached PM reads from registered directories without Git.
+Wave consumers in the focused proof:
+
+```bash
+cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matrix --test global_commands
+```
+
+Preserve fixtures for registered Wave directories without Git metadata. Adding
+Git would hide the cached-PM context regression; global-command tests alone do
+not cover it.
 
 When changing Wave chat operations, include the parent module's HTTP and SSE
 tests. Selecting only `runner::tests` or steering-named tests misses them.
@@ -291,6 +301,14 @@ match the intended contract instead of restoring retired commands in the prose.
 cargo test -p loopflow --lib engine::builtins::tests
 ```
 
+Skill export tests use isolated homes and cover builtin/global definitions,
+personal agent directories and pruning. Repository `.lf/skills` are local
+execution overrides; they are not exported by `sync-skills`.
+
+```bash
+cargo test -p loopflow --lib engine::skills::tests
+```
+
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash
@@ -299,12 +317,42 @@ uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after p
 ```
 
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
-review them before gate. For migration regressions, use the materialized Rust
+review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`
+to cover interactive skill launches. Keep prose contracts in builtin tests;
+launch tests should prove that the canonical document is included.
+For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
 include Task controller consumers: worker claims now leave Started history even
-after a provider failure. See [chapter CI proof](.lf/skills/ci-proof.md) for the
-associated ownership-map and documentation checks.
+after a provider failure. Use CI's materialized migration graph for trigger
+changes; an ordinary draft build may omit the trigger. Installed development
+builds record draft checksums too: add a forward draft after the owning migration
+instead of rewriting an applied draft. Preserve populated historical fixtures.
+
+For manual migration proof in a shared checkout, materialize only in a disposable
+source copy that includes the current tracked and untracked inputs. Materialization
+can change package versions, the lockfile, registry and migration files; another
+Run can commit those temporary changes before cleanup. Keep the assigned checkout
+on its authoring schema and leave the live Home untouched. A copy without Git
+metadata cannot prove fixtures that require `git rev-parse HEAD`: run those in
+the assigned checkout when its schema suffices, and report that separate proof.
+Do not count a fixture setup failure as a passing materialized test.
+
+After removing a public concept, run `uv run python scripts/check_architecture.py`;
+retained tables and subprocesses still need their actual owners in the map.
+For architecture/README documentation changes, run
+`cd website && uv run python dev.py test -k 'portable_architecture or readme_index_sync'`.
+Keep README and docs/index openings identical and regenerate docs/architecture.html
+when its source changes. Retired Project surfaces also affect CLI fallback,
+builtin discovery, prompt goldens and storage settlement.
+
+For landing changes, prove same-head recovery and authoritative merge separately
+from commit creation. Exercise takeover while the old repair is still running;
+generation fencing alone does not stop its effects. Label simulated
+provider/GitHub proofs. Known live-proof limits belong in Infrastructure memory.
+
+Run CLI-backed Python tests only after the Rust build finishes; replacing their
+binary mid-test mixes migration frontiers in a single temporary Home.
 
 Fresh-store coverage exercises the live SQLite schema. Populated historical
 fixtures exercise the migration chain and verify retained facts. A fresh-store
@@ -404,7 +452,6 @@ Nightly package artifacts are verification only. They are uploaded for 14 days a
 ```bash
 uv run python scripts/loopflow-dev.py run-debug     # build and launch Loopflow (macOS)
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
-uv run python scripts/verify_skill_sync.py --live  # sync a probe step, then invoke it through Claude and Codex
 ```
 
 When adding features that need manual verification, write or extend a script in `scripts/` rather than documenting a list of commands. One command to run, one environment to verify in.

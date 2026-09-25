@@ -1,12 +1,8 @@
 exclude:
 - uv.lock
-branch_names:
-  schema: '{user}.{name}.{ts}'
 pm:
   provider: linear
   linear_team: 3871bed0-8c95-4077-ab72-728327d615b3
-internal:
-  use_rust: true
 release:
   targets:
     default:
@@ -14,6 +10,8 @@ release:
       verify:
       - LOOPFLOW_REQUIRE_ORIGIN_MAIN=1 uv run python scripts/check_migrations.py
       prepare:
+      # Release cuts belong here; local migration proof uses an isolated source
+      # snapshot. See TESTING.md for shared-checkout and Git-fixture limits.
       - uv run python scripts/canonicalize_migrations.py {version} --release-cut
       completion: github-release
       publisher:

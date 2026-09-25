@@ -1606,17 +1606,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     fn skill_launch_seed_includes_loopflow_when_enabled() {
         let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, None);
         assert!(seed.contains("<lf:loopflow>"));
-        assert!(seed.contains("lf commit"));
+        assert!(seed.contains(crate::engine::builtins::LOOPFLOW_DOC));
         assert!(seed.contains("</lf:loopflow>"));
         assert_eq!(
             seed.matches("<lf:loopflow>").count(),
             1,
             "the skill seed carries the loopflow operating document once"
         );
-        assert!(seed.contains("Execute Here First"));
-        assert!(seed.contains("edit\n`wave/<name>/MEMORY.md`"));
-        assert!(!seed.contains("lf pm show"));
-        assert!(!seed.contains("--detach"));
     }
 
     #[test]

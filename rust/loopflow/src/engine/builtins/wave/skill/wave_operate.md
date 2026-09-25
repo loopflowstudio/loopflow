@@ -74,6 +74,30 @@ use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
 URL, branch, or slug from a title or identifier. If a link is absent, keep the
 readable title and available status without inventing a URL.
 
+## Recover or contribute to existing work
+
+Use `lf task prepare <issue> --json` to prepare without starting execution.
+A bounded `lf --task <issue> research "<question>"` runs in its existing worktree
+without advancing the Task Flow or acquiring a mutation lease. Give independent
+contributors distinct scratch paths, wait for the needed artifacts and inspect
+them before directing the Task. Contributors leave edits uncommitted. Do not
+checkpoint another active contribution's dirty files.
+
+If new evidence invalidates the current attempt, update the Task definition,
+wait for required contributions, then use
+`lf task restart <issue> "<changed direction>"`. It checkpoints and pushes the
+current tree, preserves identity/worktree/PR history, interrupts the exact Task
+worker if live, and starts the chapter's recommended Flow fresh. Reconcile old
+scratch as evidence. For dependent Tasks use `--stack-on <parent-task>`; each
+Task keeps one active PR. Honor explicitly selected Flows.
+
+When execution seems stuck, inspect `lf top` or `lf ps --json` before guessing.
+Idle time alone is not failure; never kill an unclaimed provider PID. Placement
+is durable: inspect `lf status <wave> --json`, change it through
+`lf work place wave <wave-id> <home-id>` only when that is the intended action,
+and use `lf ssh <home-id> start <wave>` to start at a remote placement. Do not
+launch a competing local worker to work around an unavailable Home.
+
 ## Uncertainty selects the flow, it never blocks
 
 Do not stop to ask permission before launching. If uncertain, launch the work

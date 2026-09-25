@@ -126,6 +126,11 @@ lf auth claude
 lf auth status
 ```
 
+OAuth client credentials resolve from environment first, with a Doppler fallback
+when configured. If this repository uses Doppler and credentials are missing,
+use `doppler run -- lf auth linear`. Otherwise follow the customer's secret
+manager and the exact missing variable names. Never print credential values.
+
 Account connection is an external side effect. A human must choose it and
 complete the provider flow. Never claim a provider is connected until
 `lf auth status` proves it. Direct skills can proceed with a local agent even
@@ -164,10 +169,10 @@ wave/<name>/GOAL.md
 ```
 
 Write the goal as a durable operating contract: objective, observable success,
-chapter priorities, boundaries, and when to stop or escalate. Do not
-create or edit `MEMORY.md`; the Wave runtime owns compiled memory. Runtime
-learnings arrive through `lf memory add` and `lf memory update`. Do not create
-Projects or Tasks in the goal body.
+boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
+in the chapter plan. Curate durable decisions in `wave/<name>/MEMORY.md` through
+the repository workflow; do not invent runtime memory commands or duplicate the
+plan in the goal body.
 
 Then offer Linear binding as above. Initialization provisions one internal
 Project for the first chapter. Subsequent chapters replace it through

@@ -33,6 +33,9 @@ GitHub and completes the Task only after an authoritative merge.
      ```
    - Focus on the most recent completed failed checks and their logs. Compare
      the failures with the rebased code; an old failure may already be fixed.
+   - If a previous repair conclusion is supplied, inspect its existing changes
+     and continue from them. The same head can recover through a check rerun;
+     do not manufacture a commit just to change its SHA.
 
 3. **Repair and verify**
    - Reproduce each failure locally and apply the smallest correct fix.
@@ -60,6 +63,9 @@ GitHub and completes the Task only after an authoritative merge.
    - If blocked, name the capability (provider, github-observation, secrets,
      publication) and exact next action. Do not claim an unpublished or unarmed
      repair is complete.
+   - When the landing supervisor supplies a final-answer format, use it. Its
+     `published` or `blocked` result tells the watcher whether to continue or
+     surface the required human action. Write it only in the final answer.
 
 ## Guardrails
 

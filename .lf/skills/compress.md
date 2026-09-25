@@ -100,6 +100,11 @@ core model and public contract in one screen?
    Apply changes directly. Reshape rather than layer. If a compatibility adapter
    seems useful, first try to delete the caller that requires it.
 
+   Installed updaters are external callers: an older `lf install` updates main
+   before invoking `scripts/install.py refresh`. Keep that entry point as a thin
+   delegate until those installed callers can upgrade without it. Deleting the
+   source caller does not retire copies already installed on users' machines.
+
 6. Verify.
 
    Run the smallest tests that exercise the changed model, then broaden. If a

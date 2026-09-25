@@ -29,6 +29,10 @@ fork reliable data again. `lf install` resolves one published tag, verifies its
 installer from `SHA256SUMS`, then returns every installed surface to the
 reliable published Home. Dev data is never imported into it.
 
+Older installed CLIs still call `scripts/install.py refresh` after updating
+main. That upgrade entry point delegates to `release/install.sh`, which verifies
+the published artifacts and promotes them through the same transaction.
+
 Published promotion stops before compilation while draft migrations remain.
 Local promotion applies their exact embedded graph only to the disposable Home.
 Promotion also snapshots the shared store, applies candidate migrations to the

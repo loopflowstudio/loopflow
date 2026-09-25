@@ -35,6 +35,26 @@ this file, and a compile-time test protects its load-bearing sections. The
 bundled `prompt` skill is self-contained; it does not depend on customer repos
 having this file.
 
+## Keep instructions with their consumer
+
+Builtin prompts ship to customers. Write them for a repository that has none of
+Loopflow's source files, internal issue IDs, tooling wrappers, or secret-manager
+policy. Universal guidance is the small execution floor; Task supervision,
+placement, authentication recovery and delivery procedures belong in the skills
+that perform them. Independently exported skills must carry their own method.
+
+Repo `.lf/skills` replace the selected skill locally; they do not append a small
+extension and are not included in customer skill exports. Improve a builtin when
+the lesson applies to customers. Keep repository-specific rules beside the code,
+in the relevant local skill, or in the repo guide when every task needs them.
+Curate durable decisions in the owning Wave's memory. Do not create standalone
+`.lf/` learning notes or a second copy of this guide.
+
+Verify delivery with assembled prompts from a neutral fixture repository and
+skill exports to a temporary home. An ordinary implementation prompt should
+omit specialized orchestration procedures; the selected control skill should
+contain them. A smaller prompt that strands the instructions is a regression.
+
 ## Structure
 
 Every prompt starts with YAML frontmatter:

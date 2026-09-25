@@ -5,6 +5,26 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## PR authorship and retired UX research (2026-09-25)
+
+- PR openings must explain the user's experienced change. “Try it” is a user
+  action and visible result; automated evidence belongs in Checks. Prompt,
+  cached copy, renderer and refresh behavior all participate in this contract.
+  The [authorship slice review](https://github.com/loopflowstudio/loopflow/blob/033e0758504390e5db9d254fed4964b0dd6da4bc/scratch/prs-and-tasks-review-slice.md)
+  records local proof and an agent reader exercise, not human reader validation
+  or a live handoff. The [frozen sample](https://github.com/loopflowstudio/loopflow/blob/033e0758504390e5db9d254fed4964b0dd6da4bc/scratch/prs-and-tasks-sample.json)
+  and [research](https://github.com/loopflowstudio/loopflow/blob/033e0758504390e5db9d254fed4964b0dd6da4bc/scratch/prs-and-tasks-research.md)
+  retain unresolved roadmap wording and PR #1276/#1277 overlap questions;
+  sampled rewrites are proposals, not shipped claims.
+- Chapter display switches to live state after a complete successful status read,
+  including no chapter. Cached authored content is fallback for a failed read
+  with a visible stale warning; history remains available independently.
+- Retired the local four-stage `ux-research` flow: every checked orientation path
+  was gone, and it treated scratch personas/guidelines as durable despite landing
+  cleanup. Future UI research should start from current Product code and a real
+  user question. Simulated personas generate hypotheses, not customer evidence;
+  enduring conclusions belong here after validation.
+
 ## Chapter decisions and review lessons (2026-09-23)
 
 - **Accepted direction lives in the sealed chapter**, not the provisional

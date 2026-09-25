@@ -345,7 +345,8 @@ mod tests {
         assert!(init.contains("Loopflow is not primarily a prompt launcher"));
         assert!(init.contains("Installed harnesses are a capability of this Home"));
         assert!(init.contains("team-wide repo configuration"));
-        assert!(init.contains("`MEMORY.md`; the Wave runtime owns compiled memory"));
+        assert!(init.contains("wave/<name>/MEMORY.md"));
+        assert!(!init.contains("lf memory"));
         assert!(!init.contains("git remote -v"));
         assert!(!init.contains("lf doctor --json"));
     }
@@ -354,7 +355,7 @@ mod tests {
     fn execution_context_grants_delegation_by_tier() {
         assert!(LOOPFLOW_DOC.contains("Execute Here First"));
         assert!(LOOPFLOW_DOC.contains("lf screenshot SOURCE -o OUTPUT"));
-        assert!(LOOPFLOW_DOC.contains("Do not invoke a GUI browser executable directly"));
+        assert!(LOOPFLOW_DOC.contains("never launch a GUI browser executable"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 

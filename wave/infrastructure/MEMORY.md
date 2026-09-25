@@ -2,6 +2,64 @@
 
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
+## Delivery and chapter implementation lessons (2026-09-25)
+
+Curated from the retired `.lf/prs-and-tasks.md` and chapter direction note.
+Current mechanics stay beside their code; these are constraints learned from
+implementation, not another chapter plan.
+
+- Preserve authored PR title and opening while adding one managed Task block.
+  Keep title/body together through copy resolution. A same-head publication must
+  display the persisted merge request, read under the mutation lock; publication
+  alone does not request settlement. Landing reads copy before clearing scratch;
+  publication consumes gate artifacts on its own path. Release re-arming retains
+  remote copy. Prove landing and release consumers when changing that shared path.
+- Chapter rotation owns one deterministic boundary. Preserve started Task
+  identity, expire untouched backlog and freeze predecessor metric targets,
+  readings and evaluation time. Activated retries consume frozen evidence; a
+  missing instrument must not prevent a later chapter dropping its target.
+- Enumerate fresh provider membership before cutover and recover omitted current
+  Projects/Tasks by stable identity. An unavailable read cannot be replaced by a
+  cached plan. After activation, retries retain the frozen boundary; external
+  reassignment remains unresolved, never authority to reclaim work. Settle a
+  lost cancellation response against provider state, not portfolio absence.
+- Task claims/retirement share SQLite authority; first execution survives Flow
+  resets as Task history. Generic Run history is Home-local. Status and roadmap
+  share the Task join, including stranded work; do not rebuild an operator tree
+  or duplicate routing fields to flatten it again.
+- Repo proof commands now live in TESTING.md instead of standalone local skills.
+  Installed-updater compatibility lives in docs/lf.md. The env setup helper is
+  `scripts/env-setup.sh`; `.lf/` holds executable configuration and chapter history,
+  not a catch-all for maintainer notes. Historical chapter records are retained.
+
+## PR landing recovery (branch evidence, 2026-09-25)
+
+[PR #1287](https://github.com/loopflowstudio/loopflow/pull/1287) follows Jack's
+direction: remove landing blockers rather than add receipt systems.
+
+- **Repair needs ordinary delivery authority.** Etude #187's repair stopped at
+  `lf rebase` with `Operation not permitted`: landing's Worktree-only override
+  defeated its unattended launch request. More rebases cannot fix that boundary.
+  The first denied path was not logged; shared Git metadata was the provider's
+  explanation, not a measured filesystem failure.
+- **Observe outcomes rather than require activity.** The same SHA can become
+  pending, passing, or merged. Neither a new commit nor an unused incident claim
+  proves progress. Incidents preserve history; one supervisor owns repair.
+  Preserve authoritative merge observations instead of requiring another read.
+- **Process success is not repair success.** Use the approved `published` or
+  `blocked` result in the existing final answer. Surface the exact human action
+  after reconciling GitHub; do not relaunch an impossible repair indefinitely.
+- **Fence running effects, not only database writes.** Canceling an async waiter
+  does not cancel its blocking repair. A replacement must wait for that operation
+  to finish. Active joins must retain the checkout whose supervisor lock is held.
+- **Local proof has a boundary.** Simulated provider/GitHub tests cover same-head
+  recovery, explicit blockers, and canceled-watcher takeover. Live provider
+  permissions, hosted recovery/interruption, and orphan-provider cleanup remain
+  unproven. Green-but-unmergeable PRs and the original Etude `-c` attribution
+  discrepancy remain unresolved; do not promote these tests into those claims.
+
+Current mechanics belong in [delivery documentation](../../docs/architecture/delivery.md).
+
 ## Chapter boundaries and preservation (2026-09-23)
 
 The [accepted chapter](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
@@ -128,7 +186,7 @@ Installed development builds record draft migration checksums too. The forward
 `drop_project_fingerprint` draft follows `work_domain_state`; rewriting the
 earlier draft would invalidate installed history. Preserve historical fixtures
 and prove remaining facts against a populated prior schema. This rule also
-lives in `.lf/skills/compress.md` where reductions exercise it.
+lives in TESTING.md with the migration proof commands.
 
 The compression receipt records passing planning-update, populated migration,
 sibling-observation, and CLI repository-matrix tests plus Clippy, formatting,

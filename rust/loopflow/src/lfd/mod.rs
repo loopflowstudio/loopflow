@@ -60,7 +60,7 @@ use crate::engine::worktrees::{
 use crate::harness::opencode_runtime::reap_orphaned_opencode_servers_at;
 use crate::id::WaveId;
 use crate::pr_landing::{
-    LandingClaim, LandingPlacement, PrLanding, PrLandingId, SUPERVISOR_STALE_AFTER,
+    LandingPlacement, LandingSupervisor, PrLanding, PrLandingId, SUPERVISOR_STALE_AFTER,
 };
 use crate::repository::RepoId;
 use crate::store::provider_deliveries::{DeliveryCompletion, DeliveryEventKind, DeliveryStatus};
@@ -318,7 +318,7 @@ async fn claim_landing_handler(
 ) -> Result<StatusCode, (StatusCode, String)> {
     authorize_wave_control(&state, &headers)?;
     let now = OffsetDateTime::now_utc();
-    let claim = LandingClaim {
+    let claim = LandingSupervisor {
         placement: LandingPlacement::Home {
             home_id: state.wave_host.home_id().clone(),
         },
@@ -372,7 +372,7 @@ async fn claim_recoverable_pr_landings(state: &LfdState, now: OffsetDateTime) ->
     };
     let mut claimed = Vec::new();
     for landing in recoverable {
-        let claim = LandingClaim {
+        let claim = LandingSupervisor {
             placement: LandingPlacement::Home {
                 home_id: state.wave_host.home_id().clone(),
             },
@@ -1711,7 +1711,7 @@ mod tests {
             .claim_pr_landing(
                 &landing.id,
                 landing.generation,
-                &LandingClaim {
+                &LandingSupervisor {
                     placement: LandingPlacement::Local,
                     process_id: 41,
                     heartbeat_at: now,

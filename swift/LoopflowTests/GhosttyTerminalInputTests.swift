@@ -32,13 +32,14 @@ struct GhosttyTerminalInputTests {
         var blocks = Array(repeating: ghostty_command_block_s(), count: 10)
         var count = 0
         let deadline = ContinuousClock.now + .seconds(3)
-        repeat {
+        while true {
             count = blocks.withUnsafeMutableBufferPointer {
                 ghostty_surface_command_blocks(surface, $0.baseAddress, $0.count)
             }
-            if count == 2 { break }
+            // Read once more after a delayed wake-up before declaring timeout.
+            if count == 2 || ContinuousClock.now >= deadline { break }
             try await Task.sleep(for: .milliseconds(20))
-        } while ContinuousClock.now < deadline
+        }
         try #require(count == 2)
         view.setFrameSize(view.frame.size)
         let size = ghostty_surface_size(surface)

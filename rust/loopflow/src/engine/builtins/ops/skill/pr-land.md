@@ -23,10 +23,12 @@ re-derive what these already record.
 
 `lf pr land` stages uncommitted changes, rebases, creates or updates the PR,
 requests exact-head auto-merge, and watches GitHub. Failing required checks get
-one bounded `ci-fix` agent per failed head. That agent rebases, repairs, verifies,
+`ci-fix` repairs until resolved. The agent rebases, repairs, verifies,
 then publishes and enables auto-merge with the original Task disposition. The
 watcher only observes and launches repairs; it returns after merge or an
-actionable durable block.
+actionable durable block. Rerun `lf pr land` after resolving a blocker; the same
+head can resume without an empty commit. Repair conclusions are retained in
+ordinary Runs (`lf runs <run> --final`).
 In a Task worktree, bare land settles one PR and keeps the Task open.
 
 Use `lf pr arm` for the one-shot prepare/request/return operation.

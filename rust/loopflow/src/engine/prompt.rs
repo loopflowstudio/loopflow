@@ -1917,29 +1917,38 @@ mod tests {
         assert!(!prompt.contains("lf chat"));
     }
 
-    /// A bare flow/skill run gets the universal execution floor, not wave or
-    /// project orchestration capabilities.
     #[test]
-    fn assembled_prompt_carries_only_universal_loopflow_guidance() {
-        let components = PromptComponents {
-            operate: true,
-            skill: Some(Skill::named("implement")),
-            ..Default::default()
-        };
+    fn assembled_prompts_deliver_procedures_to_the_owning_skill() {
+        let repo = init_repo();
+        for name in ["implement", "debug", "loopflow", "wave/operate"] {
+            let components = gather_context(&GatherContextOpts {
+                repo_root: repo.path().to_path_buf(),
+                skill: Some(name.to_string()),
+                operate: true,
+                ..Default::default()
+            })
+            .expect("assemble customer skill in a neutral repository");
+            let prompt = render_full_prompt(components);
+            assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+            assert!(prompt.contains("Execute Here First"));
+            assert!(prompt.contains("Evidence Loop"));
+            assert!(prompt.contains("all relevant recorded evidence"));
+            assert!(prompt.contains("lf pr land"));
+            assert!(!prompt.contains("scripts/dev-lf"));
+            assert!(!prompt.contains("LOO-267"));
 
-        let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-        assert!(prompt.contains("Execute Here First"));
-        assert!(prompt.contains("Evidence Loop"));
-        assert!(prompt.contains("all relevant recorded evidence"));
-        assert!(prompt.contains("Treat unexpected tool, test, or user output as a"));
-        assert!(prompt.contains("lf pr land"));
-        assert!(prompt.contains("edit\n`wave/<name>/MEMORY.md`"));
-        assert!(!prompt.contains("## Prompt layers"));
-        assert!(!prompt.contains("## Search portfolios"));
-        assert!(!prompt.contains("lf pm show"));
-        assert!(!prompt.contains("lf loop <flow>"));
-        assert!(!prompt.contains("tmux attach"));
+            let orchestrates = matches!(name, "loopflow" | "wave/operate");
+            for procedure in ["lf task restart", "lf work place", "lf ps --json"] {
+                assert_eq!(
+                    prompt.contains(procedure),
+                    orchestrates,
+                    "{name}: {procedure}"
+                );
+            }
+            if !orchestrates {
+                assert!(!prompt.contains("doppler run"), "{name}");
+            }
+        }
     }
 
     #[test]

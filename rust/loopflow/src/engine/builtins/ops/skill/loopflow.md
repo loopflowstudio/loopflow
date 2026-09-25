@@ -103,3 +103,55 @@ If implementation already exists in the source checkout, preserve it and its
 writer. Document transfer does not adopt a checkout; current preparation does
 not adopt an unbound existing branch/worktree. Report that gap before launching
 a competing implementation. No automatic scratch-transfer flag is available.
+
+## Placement and bounded contributions
+
+Use shared readers: `lf ls --json` for the repository, `lf status <wave> --json`
+for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
+Do not reconstruct their state from processes, checkouts or Linear alone.
+
+A Work names a stable Home authority. `owner`/`home` in GOAL only filter automatic
+startup; placement is changed through `lf work place wave <wave-id> <home-id>`.
+Use `lf home id`, then `lf start <wave>` locally or
+`lf ssh <home-id> start <wave>` at its placement. `lf ssh` runs the target's `lf`;
+its SSH route may change without moving Work. Foreground provider accounts can
+be forwarded; durable workers use credentials installed on their Home.
+
+Prepare a Task without launching it with `lf task prepare <issue> --json`.
+For one bounded contribution use `lf --task <issue> research "<question>"` or
+`lf --wave <wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
+selects one skill or inline prompt, never a multi-step Flow. Inside a Run it
+asserts the existing identity. A bounded Run does not advance the Work's Flow
+or claim exclusive ownership. Task execution uses its existing checkout.
+
+Task scratch Markdown enters each contribution at launch. Give independent
+contributions distinct paths, wait for the artifacts needed, and inspect their
+contents. A bounded contributor leaves edits uncommitted and never claims
+unrelated dirty files. Checkpoint only after the coherent contributions finish.
+Use `lf task run <issue> --flow <chosen-flow>` for managed pursuit. Dependent
+work starts as a separate Task with `--stack-on <parent-task>`; the child binds
+to the parent's active PR. Never create another branch for the same Task.
+
+When evidence invalidates the attempt, update the Task and wait for required
+contributions, then `lf task restart <issue> "<changed direction>"`. Restart
+checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
+and starts the chapter's recommended Flow fresh. It interrupts an exact live
+Task worker; independent bounded Runs remain independent. Reconcile prior
+scratch against the new evidence rather than treating it as approved design.
+An explicitly selected Flow governs even when it differs from that recommendation.
+
+## Diagnose execution and auth
+
+When work seems stuck, run `lf top` before guessing; redirected output gives one
+frame. `lf ps --json` is the parseable snapshot. These show OS-live call trees,
+normalized output rates, completed token usage, age, idle time, health and PIDs.
+Time alone never means dead. `lf prune --dry-run` shows cleanup candidates;
+plain prune removes dead receipts and registered orphan provider groups. Never
+kill an `unclaimed` PID: ownership is not proven.
+
+Inspect `lf auth status` before proposing an account repair. OAuth client
+credentials resolve from environment first, then Doppler when configured. For
+a repository using Doppler, give `doppler run -- lf auth <provider>` when those
+credentials are missing. Otherwise name the missing credential variables and
+follow the customer's secret manager. Never print values or run a secret getter
+bare. Do not change accounts or placement merely to make an inspection pass.

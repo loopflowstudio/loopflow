@@ -121,13 +121,8 @@ impl CiObservation {
     /// Whether this reading makes a `ci-fix` repair *legal*: the current head is
     /// failing a required check that a repair turn could actually act on.
     ///
-    /// This asks only about legality. Whether a repair has already fired for this
-    /// exact failure is a separate question with a separate owner — the durable
-    /// CI incident, keyed on the incident identity and claimed by one landing
-    /// generation. Those two questions used to be conflated in one mutable JSON
-    /// marker on this struct, which meant the wake was deduplicated by a value
-    /// re-derived on every reconcile and committed only once a body had already
-    /// been born.
+    /// The landing supervisor owns execution; CI incidents record responses
+    /// without limiting how often the current failure can be repaired.
     ///
     /// A head whose failures are *all* land-time preconditions is red and not
     /// repairable ([`CiCheck::land_time_precondition`]): waking a body there
@@ -192,7 +187,7 @@ pub struct CiIncident {
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,
     pub webhook_received_at: Option<OffsetDateTime>,
-    /// Landing generation that won repair admission for this exact incident.
+    /// Landing generation that most recently responded to this incident.
     pub claimed_landing_generation: Option<u64>,
     pub responded_at: Option<OffsetDateTime>,
     pub green_at: Option<OffsetDateTime>,

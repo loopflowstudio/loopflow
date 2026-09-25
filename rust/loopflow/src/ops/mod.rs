@@ -58,9 +58,10 @@ pub use rebase::{
     RebaseClass, RebaseOptions, RebasePlan, RebaseRecovery, RebaseStrategy, RebaseVerification,
 };
 pub use release::{
-    bump_version, generate_release, release_bump, release_check, release_notes, release_publish,
-    release_run, release_status, release_tag, MergedPr, ReleaseNotesDegradation,
-    ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome, ReleaseStatusResult,
+    bump_version, generate_release, preview_release_notes, release_bump, release_check,
+    release_notes, release_publish, release_run, release_status, release_tag, MergedPr,
+    ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome,
+    ReleaseStatusResult,
 };
 pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
 pub(crate) use run::{render_task_context, render_wave_context};

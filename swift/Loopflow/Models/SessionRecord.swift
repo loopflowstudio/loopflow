@@ -17,8 +17,6 @@ public enum SessionActionKind: String, Codable, Sendable, Hashable {
     case open
     case moveHere = "move_here"
     case complete
-    case approve
-    case iterate
 }
 
 /// Who chose a Session's title. Rust never lets a generated suggestion

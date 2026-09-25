@@ -29,15 +29,9 @@
         "unavailable_reason": null
       },
       {
-        "kind": "approve",
-        "label": "Approve and continue",
-        "help": "Approve and continue the Task",
-        "unavailable_reason": "The session agent has not marked this ready"
-      },
-      {
-        "kind": "iterate",
-        "label": "Iterate",
-        "help": "Return to autonomous Task work with your direction",
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Complete the review and return feedback to the next Flow step",
         "unavailable_reason": "The session agent has not marked this ready"
       }
     ],
@@ -220,15 +214,9 @@
         "unavailable_reason": null
       },
       {
-        "kind": "approve",
-        "label": "Approve and continue",
-        "help": "Approve and continue the Task",
-        "unavailable_reason": "The session agent has not marked this ready"
-      },
-      {
-        "kind": "iterate",
-        "label": "Iterate",
-        "help": "Return to autonomous Task work with your direction",
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Complete the review and return feedback to the next Flow step",
         "unavailable_reason": "The session agent has not marked this ready"
       }
     ],

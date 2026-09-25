@@ -41,10 +41,11 @@ pub(crate) struct RunSpec {
     pub flow: RunFlowMembership,
 }
 
-/// The exact managed Task Flow occurrence a Run executes.
+/// The exact managed Task or standalone Flow occurrence a Run executes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunFlowStep {
-    pub task_id: crate::work::task::TaskId,
+    pub task_id: Option<crate::work::task::TaskId>,
+    pub boundary_key: String,
     pub invocation_id: String,
     pub flow: String,
     pub step: String,
@@ -55,28 +56,44 @@ pub struct RunFlowStep {
 impl RunFlowStep {
     pub(crate) fn of(position: &crate::durable::FlowPosition) -> Self {
         Self {
-            task_id: position.task_id.clone(),
+            task_id: Some(position.task_id.clone()),
+            boundary_key: position.cursor.boundary_key(),
             invocation_id: position.invocation.id.clone(),
             flow: position.invocation.flow.clone(),
             step: position.current().step,
-            step_index: position.step_index,
-            iteration: position.iteration,
+            step_index: position.cursor.leaf().index as u32,
+            iteration: position.cursor.iteration,
         }
+    }
+
+    pub(crate) fn of_flow(run: &crate::ops::flow_run::FlowRun) -> anyhow::Result<Self> {
+        let step = match run.current_step()? {
+            crate::engine::ConcreteStep::Skill(skill) => skill.skill.name.clone(),
+            crate::engine::ConcreteStep::Op(op) => op.item.display_name(),
+            crate::engine::ConcreteStep::Xor(branch) => branch.router.name.clone(),
+        };
+        Ok(Self {
+            task_id: None,
+            boundary_key: run.cursor.boundary_key(),
+            invocation_id: run.id.clone(),
+            flow: run.flow.clone(),
+            step,
+            step_index: run.cursor.leaf().index as u32,
+            iteration: run.cursor.iteration,
+        })
     }
 
     /// Whether this occurrence is the Task's current Flow position.
     pub(crate) fn is_current(&self, position: Option<&crate::durable::FlowPosition>) -> bool {
         position.is_some_and(|position| {
-            position.task_id == self.task_id
+            Some(&position.task_id) == self.task_id.as_ref()
                 && position.invocation.id == self.invocation_id
-                && position.step_index == self.step_index
-                && position.iteration == self.iteration
+                && position.cursor.boundary_key() == self.boundary_key
         })
     }
 }
 
-/// Recorded when the Run is captured: a managed Flow step, or a Run outside
-/// any managed Flow. Manifests written before this field existed have none;
+/// Recorded when the Run is captured: a Flow step, or a Run outside a Flow. Manifests written before this field existed have none;
 /// readers treat that absence as unknown, never as independent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]

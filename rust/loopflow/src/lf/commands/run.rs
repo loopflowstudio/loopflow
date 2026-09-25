@@ -752,7 +752,7 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
-        flow: crate::run_record::RunFlowMembership::Independent,
+        flow: crate::ops::flow_run::capture_membership()?,
     };
     let capture = if let Some(id) = crate::ops::human_session::prepared_run_id()? {
         crate::run_record::CaptureHandle::start_prepared(

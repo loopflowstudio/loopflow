@@ -387,9 +387,8 @@ struct WorkspaceNavigationProofTests {
         #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
     }
 
-    @Test("Rejected Flow decisions retain their terminal and remain visible after polling",
-          .serialized, arguments: [true, false])
-    func rejectedFlowDecisionRetainsTerminal(approving: Bool) async throws {
+    @Test("Rejected Flow completion retains its terminal and remains visible after polling")
+    func rejectedFlowCompletionRetainsTerminal() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let registry = SessionsWorkspaceRegistry()
@@ -426,14 +425,14 @@ struct WorkspaceNavigationProofTests {
         try await settle(window)
         let store = workspace.sessionStore(repoPath: "/tmp", query: query)
         for _ in 0..<2 {
-            let accepted = await store.decideFlow("review-decision", approving: approving, text: "Reviewed")
+            let accepted = await store.complete("review-decision")
             #expect(!accepted)
             #expect(store.sessions.first?.state == .live)
             store.reconcile(try await query.sessions(cwd: "/tmp"))
             try await settle(window)
             #expect(store.sessions.first?.state == .live)
             #expect(throws: Never.self) { try view.inspect().find(text: "Decision rejected") }
-            for id in ["session-action-approve", "session-action-iterate"] {
+            for id in ["session-action-complete"] {
                 #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: id).button().isDisabled())
             }
             #expect(model.sessions.value?.map(\.id) == ["review-decision"])

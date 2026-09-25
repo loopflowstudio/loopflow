@@ -21,7 +21,8 @@ pub fn run(
 ) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
-    let bound_message = binding.map(|binding| crate::lf::commands::run::bound_message(binding, message));
+    let bound_message =
+        binding.map(|binding| crate::lf::commands::run::bound_message(binding, message));
     execute(
         &flow.name,
         &items,
@@ -444,7 +445,8 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                     &launch,
                     &self.repo,
                 )?;
-                if self.cli.task.is_none() && self.cli.wave.is_none() && self.cli.as_work.is_none() {
+                if self.cli.task.is_none() && self.cli.wave.is_none() && self.cli.as_work.is_none()
+                {
                     commit_skill_work(&self.repo, &skill.skill.name)?;
                 }
                 Ok(())

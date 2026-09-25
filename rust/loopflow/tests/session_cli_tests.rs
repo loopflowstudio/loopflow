@@ -114,6 +114,15 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         }
         command
     };
+    let prepared = command(env!("CARGO_BIN_EXE_lf"))
+        .args(["session", "open", &id, "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
     let output = command(env!("CARGO_BIN_EXE_lf"))
         .args(["session", "list", "--json", "--all"])
         .output()
@@ -141,6 +150,8 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     );
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["id"], id);
+}
+
 #[test]
 fn unopened_session_has_a_run_before_any_provider_is_started() {
     let home = tempfile::tempdir().unwrap();

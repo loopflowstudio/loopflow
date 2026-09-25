@@ -1,0 +1,38 @@
+{
+  "source_scope": "parent continuation integration; pre-compress, not full Task acceptance",
+  "head": "cf8c0013a50d8af1adffd655e949125ad5950fcc",
+  "sources": {
+    "rust/loopflow/src/bin/lf.rs": "e14baf407dae256693d9918f17b37903efe8ae936a64463ab759835e9c897e8c",
+    "rust/loopflow/src/controller/task/mod.rs": "4805003ca4940e53abae955ff8baf4a3cf051750cbc0360435b9b66095856c75",
+    "rust/loopflow/src/engine/builtins/task/flow/feature.yaml": "bebbc3635c0a6b998679fb439c19ad2d8644b701303651d2ddfc2c7009089118",
+    "rust/loopflow/src/lf/commands/flow.rs": "338da508c6c2d1961f43e3858c1bb146195684cb94f0b6bfdc16ed344977fd83",
+    "rust/loopflow/src/lf/commands/run.rs": "b2cd9b7739e150593d29672deaaaddf5ad86464f11feed9307c97db1d0feb0f0",
+    "rust/loopflow/src/ops/flow_run.rs": "31d027e8e5a3b567a21165b076c1df15423552ee7480ae81dee3b8fc70f28ed1",
+    "rust/loopflow/src/ops/flow_session.rs": "22e6951579809d4598755f8a6149a5d3c0f18bae0f15f6b0fdd4e1b22fc2d635",
+    "rust/loopflow/src/ops/human_session.rs": "6b01de353d6fb624884485927175e42cd85901d5e2297fee12602e696c6a374f",
+    "rust/loopflow/src/run_record.rs": "726c208bcbda14b0cecb4e66dd69348217fcaaae614b4da6cd76dfbfac9df1c1",
+    "rust/loopflow/tests/flow_tests.rs": "c9c5df8ca7845b3459eda1560e919e938d0eac0638b9a34fc71403b34b434185",
+    "rust/loopflow/tests/session_cli_tests.rs": "0d860d0a84054f944f2c3835ffa454989d91c71962376f157ad11c7366b26370",
+    "swift/Loopflow/Models/SessionRecord.swift": "416ab581314b7531fe689ea5ac289c25439ed5b0f974269c5a981d54e87bf6a2",
+    "swift/LoopflowMac/PodiumModel.swift": "360ad6ea406ba35eeb7c60bbcd8a2df09482429754cdb3def4eb9acd9f4bff9b",
+    "swift/LoopflowMac/Views/SessionsView.swift": "e2cbc2f40da16bf1a067b1c554246556c8b1d5d15d2317731764bec0e2fbad6a",
+    "swift/LoopflowMac/Views/WorkspaceBreadcrumbBar.swift": "246de755cea0c845de0b213ae815d89b91d78965340baed265a137ca078d7ea9",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "62f92c692d2255d7e1ee0aa0e725604069d3171c5921d04f5bfe1acdd2c8ad7b",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "efbcfe9f20c8008d848c670d59884c986f9b81841c5fbbf234dba31a9ff7a1b5",
+    "swift/README.md": "c1200325f3a8d740a620c9c41b95b7411d3d9f0ef8e3fbe1a86ed935d4ad82d7",
+    "tests/fixtures/dto/session.json": "a80a6af1876ae69431749cb986e4e35451e142a8fb235ffc9e28f71ceb9e9f50",
+    "tests/fixtures/dto/session_actions.json": "9fcf466643662dfb11f5d6e331a69be6582daae907630aeae99f7b0d4c99a26b",
+    "tests/fixtures/dto/session_memberships.json": "9d726ca2a5cf07441c29ee2b0a6bb2a6de55af51da3a1ddad3b6589768cb5352",
+    "tests/fixtures/dto/sessions.json": "8b4f0cc28b2a04b04ecd0bb36fdd78513d883ab4653d0362e4f3b41c0e952657"
+  },
+  "logs": {
+    "/tmp/loo291-continuation-flow-session.log": "365da4b78e7116c8170bf9919c611c4e9c001da3b325ba41434059f21d638cf8",
+    "/tmp/loo291-continuation-feature.log": "3d1507b851e7e9fab27fee989c1400574dbd80859a0cb82f3dc7842e6df336ae",
+    "/tmp/loo291-continuation-human2.log": "9d5221dc97f8230c5889cff63303a70a063427b2088f55a5b756234c23de38a6",
+    "/tmp/loo291-continuation-membership.log": "95be95308d0ed8d24230037f6d01626b4f849d77341bf8c5c20617682069bcfc",
+    "/tmp/loo291-continuation-cli.log": "4bd41bbc1fd57341cea7d8e2296069f5eee2411769aeb183f3288bfa4a3d01db",
+    "/tmp/loo291-continuation-bound-cli.log": "4b16064f8694684e9bcb32a1d2a7943e181d2707b938fd207c591018c6a35728",
+    "/tmp/loo291-continuation-swift.log": "452d2fdb6746f2149cafd7ed0df49f2e755f0ac18614b9858f608b01b146d1cc",
+    "/tmp/loo291-continuation-clippy2.log": "c8f1bc19af2e2c298133046bd42bf894e82da54e45688b0c53e10d0b6b4d15da"
+  }
+}

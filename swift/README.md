@@ -97,9 +97,9 @@ retry Complete after addressing the error. Undo does
 not restore a completed Session's pane, even if you hid it before completion. Closing a
 pane only hides the view: the terminal and its provider client keep running
 (the row shows RUNNING) and reopen exactly as left. An Ask agent
-can mark itself ready, but the row and terminal remain until the user completes
-the conversation. Task reviews expose Complete after their agent marks Ready.
-Rejected completion preserves the terminal and keeps its error visible through refresh.
+can mark itself ready, but the row and terminal remain until you complete
+the conversation. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
+Rejected completion also preserve the terminal and keep their error visible through refresh.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.

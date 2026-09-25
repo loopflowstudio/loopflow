@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1733,8 +1733,20 @@ fn _launch_agent_once(
 
     let mut cmd = Command::new(program);
     cmd.args(args);
-    if !launch.task_prompt.is_empty() {
-        cmd.arg(&launch.task_prompt);
+    if harness == "claude" && process.auto {
+        // Claude's text stdin carries large assembled context without
+        // argv limits. An anonymous file also avoids pipe backpressure at startup.
+        let mut input = tempfile::tempfile()?;
+        input.write_all(launch.task_prompt.as_bytes())?;
+        input.rewind()?;
+        cmd.stdin(Stdio::from(input));
+    } else {
+        if process.auto {
+            cmd.stdin(Stdio::null());
+        }
+        if !launch.task_prompt.is_empty() {
+            cmd.arg(&launch.task_prompt);
+        }
     }
 
     if let Some(ref cwd) = launch.cwd {
@@ -1863,7 +1875,6 @@ fn launch_batch(
     capture: Option<&AgentCapture>,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
-    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     let mut child = cmd.spawn()?;
@@ -1974,7 +1985,6 @@ fn launch_streaming(
     timeout: Option<Duration>,
     capture: Option<&AgentCapture>,
 ) -> Result<LaunchResult, CoreError> {
-    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 

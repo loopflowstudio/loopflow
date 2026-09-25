@@ -54,3 +54,12 @@ above remain separate completion inputs; do not invent them for this design pass
 
 - Membership is recorded on the Run manifest at capture (`RunSpec.flow`). Wave-resident flows, direct `lf --task X <flow>` runs, replays and Asks record `independent`: they are not occurrences of the Task's managed Flow. Pre-existing manifests project `unknown`.
 - A remote Flow Session's title is the step label with `title_source: unavailable`; reading the remote canonical name needs a routed read, not attempted here.
+
+## Observed provider transport follow-up — 2026-09-25
+
+The installed Codex driver left a Run waiting after turn/start was rejected with
+`input_too_large` (1,158,726 characters versus 1,048,576). Exact response and owned
+cleanup are recorded in `implementation-cycle/continuation-integration.md`.
+No provider turn ran. Propagating rejected turn-start responses remains a separate
+driver defect; the current dependency correction uses Claude's text-stdin path
+and does not claim that defect fixed. No Task was created for this observation.

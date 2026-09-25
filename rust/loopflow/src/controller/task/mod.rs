@@ -1138,15 +1138,6 @@ impl Drop for TestLfBinGuard {
             Some(value) => std::env::set_var("LF_BIN", value),
             None => std::env::remove_var("LF_BIN"),
         }
-        for (key, previous) in [
-            ("LF_HOME", &self.previous_home),
-            ("LF_CONTROL_HOME", &self.previous_control_home),
-        ] {
-            match previous {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-        }
     }
 }
 
@@ -1246,6 +1237,29 @@ mod planning_tests {
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         assert_eq!(position.current().step, "implement");
         assert_eq!(position.cursor.progress.repeats["decide"], 10);
+        // Final Advance is the only edge into queue and landing. This traverses
+        // the authored plan without invoking any publication operation.
+        for _ in 0..4 {
+            super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        }
+        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Advance,
+            summary: "Revision proved".into(),
+        });
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        assert_eq!(position.current().step, "demo");
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Advance,
+            summary: "Human feedback addressed".into(),
+        });
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        for expected in ["compress", "update-wave", "gate", "pr land -c"] {
+            assert_eq!(position.current().step, expected);
+            let finished =
+                super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+            assert_eq!(finished, expected == "pr land -c");
+        }
     }
 
     #[tokio::test]
@@ -2455,8 +2469,8 @@ mod planning_tests {
                 flow: flow.invocation.flow.clone(),
                 invocation_id: flow.invocation.id.clone(),
                 step: step.clone(),
-                step_index: flow.step_index,
-                iteration: flow.iteration,
+                step_index: flow.cursor.leaf().index as u32,
+                iteration: flow.cursor.iteration,
                 current: true,
             }
         );
@@ -2514,8 +2528,8 @@ mod planning_tests {
         )
         .unwrap();
         let mut next = super::start_task_flow(&task, "task-design").unwrap();
-        next.step_index = 0;
-        next.iteration = flow.iteration + 1;
+        next.cursor.index = 0;
+        next.cursor.iteration = flow.cursor.iteration + 1;
         next.version = flow.version;
         store.set_flow_position(&task.id, next).await.unwrap();
         let historical = listed(human_session::list(&store).await.unwrap());

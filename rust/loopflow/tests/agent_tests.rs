@@ -32,6 +32,32 @@ fn base_process() -> ProcessConfig {
 }
 
 #[test]
+fn claude_batch_reads_large_context_without_argv_limits() {
+    let _env = EnvGuard::new(&[(
+        "claude",
+        "#!/bin/sh\ncat > \"$LF_TEST_INPUT\"\nprintf 'received\\n'\n",
+    )]);
+    let directory = TempDir::new().expect("input directory");
+    let path = directory.path().join("input");
+    let prompt = "Preserve the entire context — including newlines.\n".repeat(30_000);
+    let launch = AgentConfig {
+        task_prompt: prompt.clone(),
+        env: BTreeMap::from([("LF_TEST_INPUT".into(), path.display().to_string())]),
+        ..base_launch()
+    };
+    for stream in [false, true] {
+        let process = ProcessConfig {
+            stream,
+            ..base_process()
+        };
+        let result = launch_agent(&launch, &process, &AgentCapabilities::default())
+            .expect("large context launch");
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), prompt);
+    }
+}
+
+#[test]
 fn launch_returns_exit_code() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
     let result = launch_agent(

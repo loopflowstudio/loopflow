@@ -224,8 +224,11 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
                 invocation: QueuedInvocation::load(repo.path(), "code").unwrap(),
                 session_run_id: None,
                 ready_summary: None,
-                step_index: 1,
-                iteration: 4,
+                cursor: loopflow::engine::ExecutionCursor {
+                    index: 1,
+                    iteration: 4,
+                    ..Default::default()
+                },
                 version: 0,
                 worker_generation: 0,
                 claim: None,
@@ -351,7 +354,59 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         Some(&path),
     );
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("requires an attached User surface"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Flow is waiting for human input"));
+    assert!(!home.path().join("prompts").exists());
+    let listed = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "list", "--all", "--json"],
+        Some(&path),
+    );
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let sessions: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let session = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"].as_str().unwrap().starts_with("flow:"))
+        .unwrap();
+    assert_eq!(session["work"]["id"], task.task.id.to_string());
+    assert_eq!(session["flow_membership"]["flow"], "review-contribution");
+    assert_eq!(session["flow_membership"]["current"], true);
+    let run_id = session["run_id"].as_str().unwrap();
+    let renamed = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "rename", run_id, "Contribution review", "--json"],
+        Some(&path),
+    );
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    let renamed: serde_json::Value = serde_json::from_slice(&renamed.stdout).unwrap();
+    assert_eq!(renamed["id"], session["id"]);
+    assert_eq!(renamed["title_source"], "human");
+    let opened = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "open", session["id"].as_str().unwrap(), "--json"],
+        Some(&path),
+    );
+    assert!(
+        opened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
+    assert_eq!(opened["title"], "Contribution review");
+    assert_eq!(opened["run_id"], run_id);
+    assert_eq!(opened["work"], session["work"]);
     assert!(!home.path().join("prompts").exists());
     assert_eq!(
         runtime

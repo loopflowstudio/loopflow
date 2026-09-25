@@ -609,7 +609,6 @@ fn require_bound_invocation(command: &Option<Commands>) -> anyhow::Result<()> {
         Some(Commands::Skill { .. } | Commands::Flow { .. } | Commands::External(_) | Commands::Inline { .. }) => Ok(()),
         _ => anyhow::bail!("Work selectors run a skill, flow or inline prompt; use `lf --task LOO-123 design`, `lf --task LOO-123 code` or `lf --wave product : \"question\"`"),
     }
-    Ok(())
 }
 
 struct CwdGuard(std::path::PathBuf);

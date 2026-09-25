@@ -212,6 +212,23 @@ pub(crate) fn token() -> Result<Option<StepToken>> {
         .transpose()
 }
 
+pub(crate) fn capture_membership() -> Result<crate::run_record::RunFlowMembership> {
+    use crate::run_record::{RunFlowMembership, RunFlowStep};
+    let Some(token) = token()? else {
+        return Ok(RunFlowMembership::Independent);
+    };
+    let run = read(&token.invocation)?;
+    let boundary = run
+        .active
+        .as_ref()
+        .ok_or_else(|| anyhow!("Flow has no active boundary"))?;
+    ensure!(boundary.id == token.boundary, "stale Flow step launch");
+    if boundary.run_id.is_some() {
+        return Ok(RunFlowMembership::Independent);
+    }
+    Ok(RunFlowMembership::Step(RunFlowStep::of_flow(&run)?))
+}
+
 pub(crate) fn bind_run(run_id: &RunId, run_dir: &Path) -> Result<()> {
     let Some(token) = token()? else { return Ok(()) };
     update(&token.invocation, |run| {
@@ -403,12 +420,15 @@ pub(crate) fn begin_boundary(id: &str) -> Result<(StepToken, bool)> {
             completed: false,
             ready_summary: None,
         });
+        let boundary_id = boundary.id.clone();
+        let completed = boundary.completed;
+        crate::ops::flow_session::prepare_run(run)?;
         Ok((
             StepToken {
                 invocation: id.into(),
-                boundary: boundary.id.clone(),
+                boundary: boundary_id,
             },
-            boundary.completed,
+            completed,
         ))
     })
 }
@@ -512,6 +532,7 @@ mod tests {
                     worktree: None,
                     skill: Some("loop-decide".into()),
                     subjects: vec![],
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap()

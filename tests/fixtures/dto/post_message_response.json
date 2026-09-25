@@ -5,6 +5,7 @@
     "turn": {
       "id": "turn-4",
       "role": "user",
+      "author_name": "Jack",
       "text": "Focus on the failing test first.",
       "status": "completed",
       "items": [],

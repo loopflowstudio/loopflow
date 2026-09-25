@@ -31,7 +31,7 @@ lf session list
 ```
 
 `ready` means the Task is nonterminal. Status reports `execution` separately:
-starting, running, waiting for human review, blocked, idle, or unknown. Read its
+starting, running, waiting for review, blocked, idle, or unknown. Read its
 reason and worker Run before recovery. Wave status and roadmap use that same
 execution evidence for their recommendations. Dirty files under a live worker
 are ongoing progress.
@@ -128,11 +128,11 @@ checkout has not moved.
 ## Status says `ready`, but the Task is waiting
 
 **Symptom:** Project or Task Work is `ready`, while its condition says it is
-waiting on a child, human FlowStep, CI, or merge.
+waiting on a child, review FlowStep, CI, or merge.
 
 Work status is deliberately small: `ready`, `done`, or `abandoned`. Task
-condition summarizes process liveness, human FlowStep, child progress, CI, and
-merge evidence; unresolved human conversations appear under Sessions.
+condition summarizes process liveness, review FlowStep, child progress, CI, and
+merge evidence; unresolved conversations appear under Sessions.
 Inspect the focused projection instead of inferring a control state from one
 field:
 
@@ -141,7 +141,7 @@ lf status <wave> --json
 lf task status INF-123 --json
 ```
 
-Resolve the named fact: open the human session, inspect the child, repair CI, merge, or
+Resolve the named fact: open the session, inspect the child, repair CI, merge, or
 resume the provider. There is no Run slot or PR-limit counter to clear.
 
 ## Context too large

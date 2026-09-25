@@ -46,12 +46,12 @@ selection. Follow the repo style guide.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
 - When progress requires another Work's perspective, launch an ordinary
-  `lf --as wave:<wave> : "<prompt>"` Run. When it requires human authority and
-  no human is present, run `lf ask "<exact request>"` and wait for the human to
+  `lf --as wave:<wave> : "<prompt>"` Run. When it requires user authorization and
+  no one is available in the session, run `lf ask "<exact request>"` and wait for the user to
   complete that conversation. Do not invent a provider-specific decision command.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for
-  `lf pr open` only when a human explicitly asked to see the PR for review.
+  `lf pr open` only when a person explicitly asked to see the PR for review.
 - Do not land or complete the Task from this loop. The pinned final flow owns
   its gate, learning record, and landing disposition.
 - File a concrete follow-up with `lf pm task create` when new work belongs later

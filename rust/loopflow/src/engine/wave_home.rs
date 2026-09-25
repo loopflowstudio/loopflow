@@ -4,7 +4,7 @@
 //!
 //! - `local` — the stable local marker.
 //! - `ssh://jack@host[:port]` — the canonical remote form, reachable over SSH.
-//! - `jack@host` — human shorthand that normalizes to `ssh://jack@host`.
+//! - `jack@host` — readable shorthand that normalizes to `ssh://jack@host`.
 //!
 //! The route is observation, never identity; `HomeId` remains stable when it
 //! changes. Reachability is operational evidence (see [`HomeState`]).

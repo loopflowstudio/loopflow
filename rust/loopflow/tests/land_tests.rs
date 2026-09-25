@@ -742,7 +742,7 @@ fn submit_and_land_make_no_presentation_attempt() {
     let marker = marker_dir.path().join("present.log");
     let open_script = counting_open_script(&marker);
 
-    // submit prepares the PR for a human to merge — and presents nothing.
+    // submit prepares the PR for the reviewer to merge — and presents nothing.
     let submit_repo = TestRepo::new();
     submit_repo.create_branch("feature");
     submit_repo.create_file("feature.txt", "feature");
@@ -852,7 +852,7 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     )
     .expect("submit");
 
-    // submit prepares but never merges — that click is the human's.
+    // submit prepares but never merges — that click belongs to the reviewer.
     let log = fs::read_to_string(&log_path).expect("read gh log");
     // Assigns the PR to the current user for a required, manual merge.
     assert!(log.contains("pr edit --add-assignee @me"));
@@ -899,7 +899,7 @@ fn submit_records_user_merge_for_a_managed_task() {
         },
         &NullProgress,
     )
-    .expect("managed Task submits for human review");
+    .expect("managed Task submits for review");
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -911,7 +911,7 @@ fn submit_records_user_merge_for_a_managed_task() {
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
-        "submit must prepare the Task PR for human review: {log}"
+        "submit must prepare the Task PR for review: {log}"
     );
     assert!(!log.contains("merge --auto"));
 }

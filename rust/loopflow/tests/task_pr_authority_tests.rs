@@ -175,7 +175,7 @@ fn submit_refuses_when_registry_missing_before_any_push() {
 
 /// A Task worktree whose registry exists but cannot be opened (inaccessible)
 /// must refuse before any push or `gh pr`. No ambient id is set — this is the
-/// human-in-a-Task-worktree shape — and the unreadable registry cannot be
+/// interactive Task-worktree shape — and the unreadable registry cannot be
 /// inspected to prove otherwise, so publication refuses. The
 /// `RegistryUnavailable::Incompatible` branch also covers schema-incompatible
 /// and locked stores.
@@ -544,7 +544,7 @@ fn managed_task_submit_assigns_for_human_review() {
         &land_options(true, "managed submit"),
         &NullProgress,
     )
-    .expect("managed Task submits for human review");
+    .expect("managed Task submits for review");
 
     assert!(
         remote_branch_exists(&repo, branch),
@@ -553,7 +553,7 @@ fn managed_task_submit_assigns_for_human_review() {
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
-        "submit must prepare the Task PR for a human merge, got log:\n{log}"
+        "submit must prepare the Task PR for manual merging, got log:\n{log}"
     );
     assert!(
         !log.contains("pr merge"),
@@ -596,7 +596,7 @@ fn ordinary_submit_still_assigns_for_review() {
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         log.contains("pr edit --add-assignee @me"),
-        "ordinary submit must assign the PR for a human merge, got log:\n{log}"
+        "ordinary submit must assign the PR for manual merging, got log:\n{log}"
     );
     assert!(
         !log.contains("merge --auto"),

@@ -29,6 +29,35 @@ struct WaveChatConnectionTests {
         return connection
     }
 
+    @Test("bare interrupts remain available when the name preference cannot be read")
+    func interruptDoesNotRequireNamePreference() async throws {
+        let response = "{\"message\":null,\"state\":\"interrupting\",\"epoch\":\(localEpochFrame)}"
+        let server = try LoopbackSSEServer(body: Data(response.utf8))
+        defer { server.stop() }
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let endpoint = WaveEndpoint.path(repoPath: repo.path, waveName: "ship")
+        try FileManager.default.createDirectory(
+            at: endpoint.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "127.0.0.1:\(server.port)".write(to: endpoint, atomically: true, encoding: .utf8)
+        let conn = WaveChatConnection(
+            repoPath: repo.path,
+            waveName: "ship",
+            loadUserName: { throw CocoaError(.fileReadCorruptFile) }
+        )
+        conn.start()
+        defer { conn.stop() }
+        for _ in 0..<100 where conn.phase == .idle {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        try await conn.send("", op: .interrupt)
+
+        #expect(conn.loopState == .interrupting)
+        #expect(conn.turns.isEmpty)
+    }
+
     private func localEpoch() -> ConversationEpoch {
         ConversationEpoch(
             id: "chat-epoch-1",
@@ -107,6 +136,7 @@ struct WaveChatConnectionTests {
         let saved = try ChatTurn(
             id: "turn-7",
             role: .user,
+            authorName: nil,
             text: "saved before restart",
             status: .completed,
             items: [],
@@ -191,6 +221,7 @@ struct WaveChatConnectionTests {
         let localTurn = try ChatTurn(
             id: "turn-2",
             role: .user,
+            authorName: nil,
             text: "local",
             status: .completed,
             items: [],

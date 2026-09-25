@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and typed control. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
+description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and typed control. Use when a repo contains `.lf/` or `wave/`, or when the user mentions loopflow, waves, or `lf`.
 ---
 
 # Operating Through Loopflow
@@ -10,13 +10,13 @@ description: Operate a repository through loopflow (`lf`) — persistent Wave, P
      that file changes. Agents launched BY loopflow receive the contract
      automatically; this skill teaches agents that arrived on their own. -->
 
-Loopflow is one binary, `lf`: the command humans type and the API agents call
+Loopflow is one binary, `lf`: the CLI for daily work and the API agents call
 to launch, steer, and observe other agents. It owns git, worktrees,
 delegation, and release plumbing in repos that use it. Route those operations
 through `lf`, not around it — doing them by hand breaks worktree placement,
 release state, and Run authority.
 
-Check availability; install only if the human asks:
+Check availability; install only if the user asks:
 
 ```bash
 lf --version || echo "not installed"
@@ -26,7 +26,7 @@ lf --version || echo "not installed"
 ## Caller Authority
 
 An external harness opened by a person acts as a Loopflow **User**. It may read
-status and use `lf chat` when the human asks it to inspect or steer a Wave. It
+status and use `lf chat` when the user asks it to inspect or steer a Wave. It
 does not become a Wave, Project, or Task worker.
 
 An agent launched by Loopflow is a Loopflow-launched internal participant. It
@@ -38,7 +38,7 @@ authority, and never impersonates the User in chat.
 ```bash
 lf commit -m "message" -p            # commit and push
 lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
-lf pr submit                         # done; a human clicks merge
+lf pr submit                         # done; the user clicks merge
 lf pr land                           # done; loopflow lands it hands-off
 lf pr land -c                        # land and complete the owning Task
 lf rebase --plan                     # show strategy; bare `lf rebase` applies it
@@ -46,8 +46,8 @@ lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
 ```
 
 Three commitment levels: **publish** (work in flight — the default "make a
-PR" verb), **submit** (done, a human lands it), **land** (done, loopflow
-lands it). `lf pr open` opens a browser — only when a human asked to see the
+PR" verb), **submit** (done, the user merges it), **land** (done, loopflow
+lands it). `lf pr open` opens a browser — only when a person asked to see the
 PR.
 
 Stay in the worktree loopflow placed for this run. Never use raw
@@ -64,7 +64,7 @@ can finish independently; never hand off the whole seed or the one blocker
 between you and completion.
 
 Use `lf task`, `lf project`, `lf wave`, and `lf pm` only when the active skill
-or the human explicitly asks for orchestration. Do not inspect planning state,
+or the user explicitly asks for orchestration. Do not inspect planning state,
 guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
@@ -80,7 +80,7 @@ last-hour provider throughput and live processes.
 
 ## Inspect
 
-When the human asks about Loopflow state, read the shared surfaces instead of
+When the user asks about Loopflow state, read the shared surfaces instead of
 reconstructing it from processes, worktrees, or Linear:
 
 ```bash
@@ -114,7 +114,12 @@ on their machine.
 
 ## Speak
 
-Answer a human message in turn text. Tasks, Projects, and Waves communicate
+Use names in persisted Tasks, PRs, docs, memory, and summaries; use “you” in
+session conversation. Stored transcripts keep their conversational wording;
+summaries extracted from them use names. Use known preferred names and preserve
+unknown attribution instead of guessing who made a request.
+
+Answer the user's message in turn text. Tasks, Projects, and Waves communicate
 through typed Work observations and targeted Ask/Answer exchanges.
 
 `lf chat` is the User surface. Work Steer is the live correction path. When the

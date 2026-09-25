@@ -121,7 +121,7 @@ lf ship                                  # final Task gate → learnings → lan
 ```
 
 Flows automate skills within one bounded pass. Their YAML owns ordering and
-human gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
+review gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
 belongs to Wave and Task execution.
 
 ### Custom skills

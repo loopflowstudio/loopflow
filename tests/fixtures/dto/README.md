@@ -18,7 +18,7 @@ condition, reason, and actions through the existing Wave Task row.
 session, its explicit readiness state, and its exact Home-local attach route.
 
 `task_condition_states.json` pins the Rust-owned Task condition fold for clean
-backlog, completion, external and human waits, local recovery blockers, and
+backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
 

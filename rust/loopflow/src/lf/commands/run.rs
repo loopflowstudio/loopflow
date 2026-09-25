@@ -84,6 +84,13 @@ struct PromptBuild {
     subjects: Vec<String>,
 }
 
+#[derive(Debug, Default)]
+struct PromptLaunchContext {
+    surface: Option<Surface>,
+    skill: Option<Skill>,
+    user_name: Option<String>,
+}
+
 /// A skill turn ready for a runner-owned provider surface.
 #[derive(Debug)]
 pub(crate) struct PreparedHarnessTurn {
@@ -165,7 +172,11 @@ fn prepare_runner_turn_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Step,
         )),
-        (surface_override, resolved_skill),
+        PromptLaunchContext {
+            surface: surface_override,
+            skill: resolved_skill,
+            user_name: None,
+        },
     )?;
     let input = std::mem::take(&mut built.agent_config.task_prompt);
     Ok(PreparedHarnessTurn {
@@ -181,7 +192,18 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let start = Instant::now();
     let repo_root = crate::repo::working_directory()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root, true, None, (None, None))
+    build_prompt_at(
+        skill,
+        message,
+        cli,
+        repo_root,
+        true,
+        None,
+        PromptLaunchContext {
+            user_name: crate::engine::config::launch_user_name()?,
+            ..Default::default()
+        },
+    )
 }
 
 fn build_bound_prompt_at(
@@ -204,7 +226,11 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        (None, resolved_skill),
+        PromptLaunchContext {
+            skill: resolved_skill,
+            user_name: crate::engine::config::launch_user_name()?,
+            ..Default::default()
+        },
     )
 }
 
@@ -215,9 +241,13 @@ fn build_prompt_at(
     repo_root: PathBuf,
     use_native_skill_launch: bool,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    launch_override: (Option<Surface>, Option<Skill>),
+    launch_context: PromptLaunchContext,
 ) -> Result<PromptBuild> {
-    let (surface_override, resolved_skill) = launch_override;
+    let PromptLaunchContext {
+        surface: surface_override,
+        skill: resolved_skill,
+        user_name,
+    } = launch_context;
     let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
     debug!(
@@ -281,6 +311,7 @@ fn build_prompt_at(
             wave,
             wave_memory,
             message: message.map(|value| value.to_string()),
+            user_name,
             no_loopflow: cli.no_loopflow,
             agent: cli.model.clone(),
             cwd: Some(repo_root.clone()),
@@ -350,6 +381,7 @@ fn build_prompt_at(
                 message,
                 prepared.components.operate,
                 wave_memory.as_deref(),
+                prepared.components.user_name.as_deref(),
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
@@ -431,6 +463,7 @@ fn skill_launch_seed(
     message: Option<&str>,
     loopflow: bool,
     wave_memory: Option<&str>,
+    user_name: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let system_components = PromptComponents {
@@ -440,6 +473,11 @@ fn skill_launch_seed(
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
     let mut seed = format!("{sigil}{skill_name}\n\n{}", system_sections.join("\n\n"));
+    let user_context = crate::engine::prompt::render_user_context(user_name);
+    if !user_context.is_empty() {
+        seed.push_str("\n\n");
+        seed.push_str(&user_context);
+    }
     if let Some(memory) = wave_memory {
         seed.push_str("\n\n");
         seed.push_str(memory);
@@ -478,7 +516,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
-    // Bare terminal control always stays in the TUI. Other human-present skills
+    // Bare terminal control always stays in the TUI. Other interactive skills
     // use explicit flags first, then the configured launch target.
     let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
         Some(LaunchTarget::Tui)
@@ -513,13 +551,15 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         } else {
             None
         };
+        let mut environment = built.agent_config.env.clone();
+        environment.extend(capture.environment());
         let result = launch_session_with_env(
             target,
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,
             &built.prompt,
-            &capture.environment(),
+            &environment,
             provider_session_id.as_deref(),
         );
         if let Some(provider_session) =
@@ -997,7 +1037,7 @@ mod tests {
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
         prepare_harness_turn_from_skill_at, prepare_wave_harness_turn, should_launch_via_skill,
-        skill_launch_seed, split_skill_args, PromptBuild,
+        skill_launch_seed, split_skill_args, PromptBuild, PromptLaunchContext,
     };
     use crate::durable::RunId;
     use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1029,6 +1069,131 @@ mod tests {
                     None => std::env::remove_var(key),
                 }
             }
+        }
+    }
+
+    #[test]
+    fn preferred_name_survives_fresh_launches_and_corrections() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["LF_HOME", "LF_USER_NAME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::remove_var("LF_USER_NAME");
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
+        );
+        let cli = Cli::parse_from(["lf", "--batch"]);
+
+        for name in ["Jack", "Jacqueline", "  "] {
+            std::fs::write(
+                home.path().join("config.yaml"),
+                format!("user:\n  name: '{name}'\n"),
+            )
+            .unwrap();
+            // Each assembly reloads personal config, including the correction.
+            for _ in 0..2 {
+                let built = build_bound_prompt_at(
+                    None,
+                    "choose the prototype path",
+                    &cli,
+                    repo.path(),
+                    None,
+                )
+                .unwrap();
+                assert_eq!(
+                    built.components.user_name.as_deref(),
+                    if name.trim().is_empty() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                );
+                let context = crate::engine::prompt::render_user_context(
+                    built.components.user_name.as_deref(),
+                );
+                assert_eq!(
+                    built.prompt.matches("<lf:user>").count(),
+                    usize::from(!context.is_empty())
+                );
+                assert!(built.agent_config.task_prompt.contains(&context));
+                assert!(!built
+                    .prompt
+                    .contains("preferred name is \"Repository Owner\""));
+            }
+        }
+        std::fs::remove_file(home.path().join("config.yaml")).unwrap();
+        let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+        assert!(built.components.user_name.is_none());
+    }
+
+    #[test]
+    fn preferred_name_uses_remote_caller_and_leaves_background_work_unattributed() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["LF_HOME", "LF_USER_NAME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "user:\n  name: Host Owner\n",
+        )
+        .unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        );
+        let cli = Cli::parse_from(["lf", "--batch"]);
+        for caller in ["Jack", ""] {
+            std::env::set_var("LF_USER_NAME", caller);
+            let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+            assert_eq!(
+                built.components.user_name.as_deref(),
+                if caller.is_empty() {
+                    None
+                } else {
+                    Some(caller)
+                }
+            );
+            assert!(!built.agent_config.task_prompt.contains("Host Owner"));
+            assert_eq!(built.agent_config.env["LF_USER_NAME"], caller);
+        }
+        std::env::set_var("LF_USER_NAME", "Jack");
+        let skill = Skill {
+            name: "proof".into(),
+            content: Some("Work from the Task directive.".into()),
+            agent: None,
+            default_agent: None,
+            action_style: None,
+        };
+        let background = prepare_harness_turn_from_skill_at(
+            &skill,
+            "anonymous Task",
+            "proof",
+            None,
+            repo.path(),
+        )
+        .unwrap();
+        assert!(!background.input.contains("<lf:user>"));
+        assert_eq!(background.config.env["LF_USER_NAME"], "");
+    }
+
+    #[test]
+    fn preferred_name_reaches_native_skill_handoffs() {
+        for harness in ["codex", "claude", "opencode"] {
+            let seed = skill_launch_seed(
+                harness,
+                Surface::Ide,
+                "design",
+                Some("prototype"),
+                true,
+                None,
+                Some("Jack"),
+            );
+            assert!(seed.contains("preferred name is \"Jack\""));
+            assert!(seed.contains("address them as \"you\""));
+            assert_eq!(seed.matches("<lf:user>").count(), 1);
         }
     }
 
@@ -1512,7 +1677,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             repo.path().to_path_buf(),
             true,
             None,
-            (None, None),
+            PromptLaunchContext::default(),
         )
         .unwrap();
 
@@ -1558,6 +1723,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             Some("build auth"),
             false,
             None,
+            None,
         );
         assert!(seed.starts_with("/implement\n\n"));
         // Orientation now lives in the skill body, not the seed.
@@ -1569,14 +1735,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     fn skill_launch_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, None);
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, None, None);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
     #[test]
     fn skill_launch_seed_interactive_surfaces_have_no_preamble() {
         for surface in [Surface::Cli, Surface::Ide, Surface::Mac] {
-            let seed = skill_launch_seed("claude", surface, "gate", None, false, None);
+            let seed = skill_launch_seed("claude", surface, "gate", None, false, None, None);
             assert!(seed.starts_with("/gate\n\n"));
             assert!(!seed.contains("Run mode"), "surface {surface:?}");
         }
@@ -1584,27 +1750,51 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn skill_launch_seed_omits_message_when_absent() {
-        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, None);
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, None, None);
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
     }
 
     #[test]
     fn skill_launch_seed_headless_includes_preamble() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            false,
+            None,
+            None,
+        );
         assert!(seed.contains("Run mode is headless"));
     }
 
     #[test]
     fn skill_launch_seed_omits_loopflow_when_disabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            false,
+            None,
+            None,
+        );
         assert!(!seed.contains("<lf:loopflow>"));
         assert!(!seed.contains("lf commit"));
     }
 
     #[test]
     fn skill_launch_seed_includes_loopflow_when_enabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, None);
+        let seed = skill_launch_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            true,
+            None,
+            None,
+        );
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains(crate::engine::builtins::LOOPFLOW_DOC));
         assert!(seed.contains("</lf:loopflow>"));
@@ -1625,6 +1815,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             Some("build auth"),
             false,
             Some(memory),
+            None,
         );
         let memory_pos = seed.find("<lf:wave-memory>").unwrap();
         let message_pos = seed.find("<lf:message>").unwrap();

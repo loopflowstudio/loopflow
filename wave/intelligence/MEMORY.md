@@ -1,7 +1,7 @@
 # intelligence wave memory
 
 Renamed from `memory` in July 2026. The accepted September chapter combines
-Trace & Context in one measured bet: human-selected work is explainable from
+Trace & Context in one measured bet: explicitly selected work is explainable from
 durable local evidence. No standalone Memory, Evals, or Runtime Monitoring
 Project is implied by the historical research.
 
@@ -81,7 +81,7 @@ research were not all accepted commitments. Current Task directives govern scope
 
 ## Prompt assembly reduction (branch evidence, 2026-09-24)
 
-- **Prompt directions are removed at the human's request.** The `task-viewer`
+- **Prompt directions are removed after an explicit request.** The `task-viewer`
   branch removes CLI switches, config/Skill/Flow fields, directory and fallback
   loaders, discovery/build generation, injection, and current authoring guidance.
   Do not restore an implicit skill fallback or compatibility selector. Ordinary

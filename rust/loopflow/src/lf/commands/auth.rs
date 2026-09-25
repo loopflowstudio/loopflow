@@ -38,7 +38,7 @@ use crate::store::{
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
-// Authorization-code flows wait on a human finishing a browser login; give
+// Authorization-code flows wait on the browser login to finish; give
 // them the ~10 minutes the OAuth authorization itself stays valid.
 const AUTH_CODE_FLOW_TIMEOUT_SECS: u64 = 600;
 #[cfg(test)]

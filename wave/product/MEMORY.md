@@ -33,7 +33,7 @@ they mean the Mac surface.
   accepted the plan; it did not authorize publication. The summer review judged
   39 KRs (2 hold, 16 do not, 21 unknown); the start freeze contains 42 because
   List adds three previously unreviewed claims. Those are different populations.
-- **Product value is external progress chosen by the human.** Current Work
+- **Product value is explicitly chosen external progress.** Current Work
   direction plus material Task progress in any three of Cube, Etude, Kata, and
   Hootro makes a successful week. An open Session, refreshed plan, settled Run,
   or Loopflow self-hosting repair is insufficient. Small/Medium/Big are company
@@ -80,14 +80,14 @@ they mean the Mac surface.
   cadence, Chat, and its Project portfolio. A Project owns definition, KRs, and
   Tasks. A Task owns its directive, worktree, and serial PR chain. Project and
   Task do not copy parent context or inherit recent Wave conversation.
-- **Steer is the one durable authored input.** Chat is its human Wave
+- **Steer is the one durable authored input.** Chat is its interactive Wave
   presentation, not a second mailbox or history truth. Radio, agent channels,
   machine bylines, and the database message bus are deleted.
-- **Another Work perspective is an ordinary Run; human interaction is a
+- **Another Work perspective is an ordinary Run; interactive work is a
   Session.** Launch `lf --as <work> : <question>` when another agent perspective
-  is useful. `lf ask` is reserved for a human boundary: it starts a provider
+  is useful. `lf ask` is reserved for a review boundary: it starts a provider
   Run in the caller's checkout and blocks until that Session is explicitly
-  completed. A declared human Task node persists its exact playhead and advances
+  completed. A declared Task review node persists its exact playhead and advances
   only through Approve or Iterate. There is no agent exchange row, answer lane,
   or dedicated answer controller.
 - **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
@@ -140,7 +140,7 @@ they mean the Mac surface.
   show delivered, queued, and working state instead of implying an immediate
   conversational reply.
 - App surfaces navigate, present, and Steer Work. A view, terminal, provider
-  process, or listener is never the source of Work or human-playhead truth.
+  process, or listener is never the source of Work or review-playhead truth.
 - A provider session is AgentInvocation continuity, not Work identity.
 - Home-local execution, Work continuity, provider history, and direct process
   control have separate owners. The current boundary is documented in
@@ -218,8 +218,8 @@ they mean the Mac surface.
 - **There is no agent messaging substrate.** Radio commands, channel identity,
   bus tables, cursors, retention, and subscriptions are gone. Durable Steers and
   Work state replace message delivery as product truth.
-- **Company Discord is the canonical human Wave Chat backing when configured
-  (settled 2026-07-21).** An inbound human message becomes one durable Wave
+- **Company Discord is the canonical Wave Chat backing when configured
+  (settled 2026-07-21).** An inbound user message becomes one durable Wave
   Steer and the Wave reply returns to the same channel. Restart catch-up,
   deduplication, self-echo rejection, and outbound receipts preserve one
   conversation. The active backing and conversation epoch are explicit: local
@@ -250,7 +250,7 @@ they mean the Mac surface.
   the old `labels: [String]` was dropped for the explicit `project` slug.
 - **Vocabulary:** *Run* = one Home-local launch record;
   *AgentInvocation* = one provider/process attempt;
-  *Session* = a provider-native conversation or unresolved human boundary;
+  *Session* = a provider-native conversation or unresolved review boundary;
   *Work* remains Wave, Project, or Task. *Exec* remains process evidence, not a
   fourth Work kind or Session identity.
 - **Plan render works end to end now** — `PmShowResult` carries `projects` +
@@ -289,8 +289,8 @@ they mean the Mac surface.
 
 ## Sessions projection and native resume (2026-08-30, revised 2026-09-22)
 
-- **`lf session list --json` is the sole unresolved-human-work projection.** It
-  merges ordinary interactive TUI Runs, ad-hoc human Asks, and Task human
+- **`lf session list --json` is the sole view of unresolved conversations.** It
+  merges ordinary interactive TUI Runs, ad-hoc Asks, and Task review
   FlowSteps into required-field `SessionRecord` values. The Mac app renders that
   projection and owns no second queue, title store, liveness model, or resolution
   state.
@@ -303,7 +303,7 @@ they mean the Mac surface.
   that client. Closing a pane or provider exit resolves nothing. Complete applies
   only to interactive Sessions and ready Asks; Approve and Iterate apply only to
   ready Task FlowSteps.
-- **tmux is only the first client's detached PTY cradle.** It lets a human-bound
+- **tmux is only the first client's detached PTY cradle.** It lets an interactive
   TUI start before a desktop exists, but it is not Session identity, readiness,
   presentation, liveness authority, or a resolution mechanism. A kernel advisory
   lock protects initial publication until provider history and the exact owned
@@ -317,7 +317,7 @@ they mean the Mac surface.
   Task worktrees never appear as portfolio roots.
 - **Work conditions remain non-actionable descriptions.** `lf status` and `lf
   roadmap` expose one Task condition: `clear`, `waiting`, `blocked`, or `unknown`.
-  Sessions alone open or resolve human work. NOW groups the same conditions, and
+  Sessions alone open or resolve work awaiting review. NOW groups the same conditions, and
   `lf usage` accepts the Wave/Project/Task drill shared by `lf runs` rather than
   inventing another hierarchy.
 - **Two configured-path proofs remain release evidence.** One promoted Ask must
@@ -343,14 +343,14 @@ they mean the Mac surface.
 - **Incomplete observation caused duplicate implementation.** Desktop launched
   two bound `implement` helpers into LOO-293 while its original worker was still
   producing output. `ready`, a completed launcher, and a missing `lf ps` row
-  cannot establish idle execution or resolved human work. Recover advancement
+  cannot establish idle execution or resolved review work. Recover advancement
   through idempotent Task controls; ordinary bound Runs remain intentional
   independent contributions with attribution but no Flow claim.
 - **Use the shared execution reason in every surface.** Task status, Wave
   conditions, roadmap, and action recommendations now project FlowPosition and
-  exact worker evidence. Running, starting, unknown, blocked, and human-waiting
+  exact worker evidence. Running, starting, unknown, blocked, and waiting for review
   evidence takes precedence over dirty files or a future-launch refusal.
-  Done/Abandoned Work can still retain an unresolved human boundary; preserve
+  Done/Abandoned Work can still retain an unresolved review boundary; preserve
   its waiting condition without reopening the Task. Runtime `project_id` is the
   owning Project; the unread duplicate `routing_project_id` is removed from Rust,
   Swift, and current fixtures.
@@ -361,7 +361,7 @@ they mean the Mac surface.
   stage diagram and labeled all-Run feed, stage/Run filters, Follow live, and
   completed history together. Watch includes passive native interactive output;
   terminal attachment, final-only output, or autonomous-only coverage cannot
-  satisfy acceptance. Existing Session controls own human decisions.
+  satisfy acceptance. Existing Session controls own review decisions.
 - **Preserve history at its owning transaction.** Exact invocation/stage/attempt
   bindings must survive FlowPosition replacement and completion. Do not join by
   skill name, infer completion from the cursor, or reconstruct an old plan from
@@ -370,7 +370,7 @@ they mean the Mac surface.
 - **Keep proof boundaries explicit.** The observation repair has source-binary
   discovery/prune evidence and isolated status/DTO tests; it does not demonstrate
   Watch or deployment to the older installed runtime. LOO-293 retains native
-  capture, bounded history/discovery, and configured live/human-demo obligations
+  capture, bounded history/discovery, and configured live/demo-review obligations
   in its current Linear directive. No duplicate follow-up or completion is
   warranted. Historical `f56f457a0`/`c3bd1fdb3` show Wave output and stage pills,
   not confirmation of the exact remembered Task screen.
@@ -414,9 +414,9 @@ they mean the Mac surface.
   saved as readable PNG before insertion. Retain temporary data through provider
   consumption. A path appearing is not proof of an image attachment: inspect
   the composer. Shell paste uses paths, not provider shortcuts.
-- The 2026-09-22 human demo confirmed retained Session switching, copy/image
+- The 2026-09-22 interactive demo confirmed retained Session switching, copy/image
   input, and explicit Warp handoff. A later demo exposed split paste misrouting;
-  the automated real-PTY correction passes but its final human confirmation is
+  the automated real-PTY correction passes but its final reviewer confirmation is
   still pending. Latest identity pass recorded 45 tests in four suites, then 24
   affected tests after review. These are prior-run receipts, not fresh update-wave
   validation or an all-provider matrix. Hosted UI initialization was canceled by
@@ -425,7 +425,7 @@ they mean the Mac surface.
 
 ### Shell command blocks and build fidelity (2026-09-22)
 
-- Human acceptance is **visible grouping before interaction plus one ordinary
+- Reviewer acceptance is **visible grouping before interaction plus one ordinary
   click anywhere in a completed command/output region selecting both**. Invisible
   OSC 133 metadata, triple-click gestures, or tooltips do not meet it. Warp is the
   benchmark: full-width groups, persistent separation, restrained tint and left
@@ -468,11 +468,11 @@ they mean the Mac surface.
 
 ### Shared viewing boundary
 
-Native launch plus explicit Move here remains the main path. The human wants
+Native launch plus explicit Move here remains the main path. The requested behavior is
 optional simultaneous Warp/Loopflow viewing: second attachment view-only, then
 explicit **Take control**. Earlier research recommending default tmux presentation
 is superseded. `4d5e96383` shared raw resume argv, not a live PTY; `90c871805` and
-`7889d65bc` established native presentation. The human separately reported tmux
+`7889d65bc` established native presentation. Separate feedback reported tmux
 color distortion and terminal bugs; those were not stated in the commit messages.
 
 Compare an opt-in tmux configuration with a transparent PTY relay before changing
@@ -566,7 +566,7 @@ here on top of PR #849's signed-test/release hardening.
   branch checkout. Repository discovery collapses linked worktrees to the
   canonical main checkout through the Git common directory; Task Work remains
   the only surface that presents its worktree.
-- **Human-bound provider clients resume natively.** Reuse `SessionRecord` and
+- **Interactive provider clients resume natively.** Reuse `SessionRecord` and
   `lf session open`; do not restore lfd terminal attachment, a tmux presentation
   path, or Ask-specific Swift plumbing.
 - The high-value review move was catching invented fields that duplicate existing

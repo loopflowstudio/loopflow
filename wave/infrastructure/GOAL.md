@@ -13,7 +13,7 @@ pm:
 Loopflow reliably advances its own work and delivers verified releases. Infrastructure
 owns self-hosting reliability, releases, auth, execution continuity, exact control
 authority, and repository-wide architecture reduction. Recovery preserves work,
-human decisions, history, and assigned-worktree isolation; failures are bounded,
+recorded decisions, history, and assigned-worktree isolation; failures are bounded,
 truthful, and actionable. Public concepts and APIs remain legible, with one owner
 and truth source for each responsibility.
 
@@ -40,7 +40,7 @@ Projects do not own memory, cadence, or child projects.
 Read the accepted chapter and synced Projects, then repair the demonstrated
 bottleneck in selected work. Reliability owns runtime/auth/release mechanics;
 Intelligence owns raw context and attempted-operation evidence; Product owns
-human presentation and external-outcome judgment. Architecture Minimalism owns
+interactive presentation and external-outcome judgment. Architecture Minimalism owns
 repository-wide reduction and Task execution authority, including List's retained
 safe-signaling, promotion-preservation, and exact-authority obligations.
 

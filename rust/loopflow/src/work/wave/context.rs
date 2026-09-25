@@ -1,7 +1,7 @@
 //! Durable Wave resolution and authored context.
 //!
 //! Resolution: explicit `--wave` (the caller passes it) > `LF_WAVE_ID` from a
-//! managed Work process. Human names resolve only inside the canonical
+//! managed Work process. Wave names resolve only inside the canonical
 //! repository; the UUID remains durable identity across locator changes.
 //!
 //! Wave state (journal, endpoint pointer, MEMORY.md) lives under the ORIGIN
@@ -445,7 +445,7 @@ mod tests {
     /// `run_attribution` keeps the classified failure instead of swallowing it.
     /// Absent context is `(None, None)` — worktree inference stays a legitimate
     /// fallback for it alone. A hand-set name resolves through the same scoped
-    /// registry as every human command; an unregistered name is stale context,
+    /// registry as every interactive command; an unregistered name is stale context,
     /// never self-authenticating identity.
     #[test]
     fn run_attribution_classifies_absent_context_and_hand_set_names() {

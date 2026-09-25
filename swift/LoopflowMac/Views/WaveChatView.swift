@@ -95,7 +95,8 @@ struct WaveChatView: View {
                         epoch: epoch,
                         cwd: repoPath
                     )
-                }
+                },
+                loadUserName: { try await query.userName() }
             )
             connection = conn
             conn.start()

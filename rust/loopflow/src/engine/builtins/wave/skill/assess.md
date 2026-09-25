@@ -47,12 +47,12 @@ be fine. Look past activity to actual progress toward finish lines.
    - **Silence** — A silent wave has no items, or its items didn't survive
      coherence review. That's healthy when nothing compelling exists to build.
      It's a problem when the area is changing and the wave isn't noticing.
-     Silent waves signal to the human: "add items here if you want work
+     Silent waves signal to the user: "add items here if you want work
      done in this area."
    - **Coherence** — Do the wave's remaining items still make sense? The
      codebase evolves between garden cycles. Items can go stale: finish lines
      moved, designs diverged, value diminished. Waves should reorganize
-     internally — this is a single beat, not a human review. Flag waves
+     internally — this is a single beat, not a review. Flag waves
      whose items look incoherent so play-chord can account for it.
 
 3. **Assess the chord.** Look across all waves:

@@ -16,7 +16,7 @@
 //!
 //! Three inputs feed the journal: the resident's wire deltas
 //! ([`WaveRuntime::apply_resident_delta`] — the old in-process `TurnSink`
-//! vocabulary, now arriving over `POST /resident/deltas`), human messages, and
+//! vocabulary, now arriving over `POST /resident/deltas`), chat messages, and
 //! typed registry inputs. All appends go through one lock, so journal order,
 //! cache order, and broadcast order agree — one writer appends and broadcasts.
 //! This module is vendor-free: the harness lives with the resident process,
@@ -292,7 +292,7 @@ pub struct WaveRuntime {
     resident_expected: AtomicBool,
 }
 
-/// A human-authored chat write either commits to the active local epoch or is
+/// A chat write from a participant either commits to the active local epoch or is
 /// rejected because its active authority is Discord.
 #[derive(Debug, thiserror::Error)]
 pub enum ChatWriteError {
@@ -665,12 +665,16 @@ impl WaveRuntime {
         })?;
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+        turn.author_name = source.author_name.clone();
         turn.created_at = event.at_rfc3339();
         self.commit_locked(&mut inner, turn);
         let pending = PendingMessage {
             id,
             op: input.op(),
-            text: format!("[{}]\n{}", source.uri(), text),
+            text: super::journal::attributed_message(
+                &format!("[{}]\n{}", source.uri(), text),
+                source.author_name.as_deref(),
+            ),
             source: Some(source.clone()),
         };
         inner.messages.insert(pending.id.clone(), pending.clone());
@@ -780,6 +784,7 @@ impl WaveRuntime {
                     message.author = Author::Bridge {
                         platform: "discord".to_string(),
                         user: source.author_id.clone(),
+                        name: source.author_name.clone(),
                     };
                 }
                 if message.is_own() {
@@ -794,7 +799,7 @@ impl WaveRuntime {
     }
 
     /// One durable chat trigger for a subscriber connect or resident restart.
-    /// The newest human/app-authored message without a completed `reply_to` edge
+    /// The newest participant/app-authored message without a completed `reply_to` edge
     /// is replayed even when a later unrelated bot post exists. The relation is
     /// channel history, not consumption: both messages remain readable. `seen`
     /// dedupes this trigger against the live inbox within one process.
@@ -1217,50 +1222,21 @@ impl WaveRuntime {
         turn
     }
 
-    /// Deliver one op from the thread door, uninterpreted by the caller:
-    /// the door validates SHAPE (op names, text presence) and hands the op
-    /// here; what an op *means* lives in this runtime and the loop's
-    /// scheduler. A bare interrupt (empty text) journals nothing
-    /// and appends no turn — `None`; every other delivery journals a
-    /// `UserMessage`, commits the user turn, and queues for the loop.
-    pub fn deliver(&self, op: MessageOp, text: String) -> Option<ChatTurn> {
-        self.try_deliver(op, text)
-            .expect("journal truth must accept a message before runtime delivery")
-    }
-
-    /// Deliver one human op only after its journal row is durable.
-    ///
-    /// The HTTP door uses this form so a failed write returns a non-success
-    /// response and leaves the transcript, pending queue, and live broadcasts
-    /// untouched. The caller may retry the same message.
-    ///
-    /// # Errors
-    /// The message's journal append could not be written and flushed.
-    pub fn try_deliver(
-        &self,
-        op: MessageOp,
-        text: String,
-    ) -> Result<Option<ChatTurn>, JournalAppendError> {
-        if op == MessageOp::Interrupt && text.trim().is_empty() {
-            self.deliver_interrupt();
-            return Ok(None);
-        }
-        self.try_deliver_message(text, op).map(Some)
-    }
-
     /// Deliver through the product write door, governed by the active epoch.
     /// A bare interrupt is a Wave control and remains available in either
-    /// backing; authored text never falls through to a local shadow thread.
+    /// backing and returns `None`. Text is journaled before updating the
+    /// transcript or broadcasting; an absent author name stays unknown.
     ///
     /// # Errors
     /// Discord-backed authored text is rejected at this local write boundary;
     /// the server routes it through the attached provider before calling here.
     /// Without a provider attachment, the active epoch owns its Open-in-Discord
     /// action. Local journal append failures leave every projection untouched.
-    pub fn try_deliver_authored(
+    pub fn try_deliver(
         &self,
         op: MessageOp,
         text: String,
+        author_name: Option<String>,
     ) -> Result<Option<ChatTurn>, ChatWriteError> {
         if op == MessageOp::Interrupt && text.trim().is_empty() {
             self.deliver_interrupt();
@@ -1272,22 +1248,19 @@ impl WaveRuntime {
         ) {
             return Err(ChatWriteError::OpenDiscord);
         }
-        self.try_deliver(op, text).map_err(ChatWriteError::from)
-    }
-
-    fn try_deliver_message(
-        &self,
-        text: String,
-        op: MessageOp,
-    ) -> Result<ChatTurn, JournalAppendError> {
         let mut inner = self.inner();
+        let author_name = author_name
+            .as_deref()
+            .and_then(crate::engine::config::normalize_user_name);
         let event = inner.journal.try_append(|seq| EventKind::UserMessage {
             id: MessageId(format!("msg-{seq}")),
             op,
             text: text.clone(),
+            author_name: author_name.clone(),
         })?;
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+        turn.author_name = author_name.clone();
         turn.created_at = event.at_rfc3339();
         let turn = self.commit_locked(&mut inner, turn);
         // Chat is a stream to observe: a message signals the resident to observe
@@ -1296,7 +1269,7 @@ impl WaveRuntime {
         let pending = PendingMessage {
             id,
             op,
-            text,
+            text: super::journal::attributed_message(&text, author_name.as_deref()),
             source: None,
         };
         inner.messages.insert(pending.id.clone(), pending.clone());
@@ -1304,7 +1277,7 @@ impl WaveRuntime {
         // Inbox broadcast still under the lock, so inbox order == journal
         // order — sending after release lets two deliveries invert.
         let _ = self.inbox_tx.send(InboxItem::Message(pending));
-        Ok(turn)
+        Ok(Some(turn))
     }
 
     #[cfg(test)]
@@ -1558,6 +1531,7 @@ impl WaveRuntime {
             "turn opened",
         );
         let open = ChatTurn {
+            author_name: None,
             id: turn_id,
             role: ChatRole::Assistant,
             text: String::new(),
@@ -1830,7 +1804,7 @@ fn turn_journal_seq(turn: &ChatTurn) -> Option<u64> {
     turn.id.strip_prefix("turn-")?.parse().ok()
 }
 
-/// The newest chat message (`msg-<seq>`, human or app-authored), used only to
+/// The newest chat message (`msg-<seq>`, participant or app-authored), used only to
 /// trigger one re-read of the channel after connect/restart. Observation and
 /// promotion inputs carry typed ids, so they never leak into this trigger.
 fn unanswered_chat_tail_locked(inner: &Inner) -> Vec<PendingMessage> {
@@ -1920,7 +1894,7 @@ fn build_discord_delivery(
     }
     // Replies carry an explicit Discord-shaped edge. Autonomous governance
     // turns have no edge and are posted top-level; chronology never decides
-    // that a bot turn answered a human message.
+    // that a bot turn answered a chat message.
     let sources = reply_to
         .and_then(|message_id| messages.get(message_id))
         .and_then(|message| message.source.clone())
@@ -1991,6 +1965,7 @@ mod tests {
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
+            author_name: None,
             id: String::new(),
             role: ChatRole::Assistant,
             text: text.to_string(),
@@ -2037,8 +2012,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let runtime = open_runtime(tmp.path());
         runtime
-            .deliver(MessageOp::Message, "what's the top task?".into())
-            .expect("human message");
+            .try_deliver(MessageOp::Message, "what's the top task?".into(), None)
+            .expect("journal write")
+            .expect("chat message");
         runtime.append_finalized_turn(progress_turn("The top task is LOO-258."), Vec::new());
 
         let all = runtime.read_channel(None);
@@ -2049,7 +2025,7 @@ mod tests {
         assert!(all[1].is_own());
         assert_eq!(all[1].content, "The top task is LOO-258.");
 
-        // Reading after the human turn's cursor skips it, keeping the own reply.
+        // Reading after the chat turn's cursor skips it, keeping the own reply.
         let cursor = all[0]
             .id
             .strip_prefix("turn-")
@@ -2065,10 +2041,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let runtime = open_runtime(tmp.path());
         runtime
-            .deliver(MessageOp::Message, "please answer this".into())
-            .expect("human message");
+            .try_deliver(MessageOp::Message, "please answer this".into(), None)
+            .expect("journal write")
+            .expect("chat message");
 
-        // This can be governance news that happened to finish after the human
+        // This can be governance news that happened to finish after the participant
         // message; chronology does not prove that it answered the message.
         runtime.append_finalized_turn(progress_turn("unrelated task finished"), Vec::new());
 
@@ -2082,8 +2059,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let runtime = open_runtime(tmp.path());
         runtime
-            .deliver(MessageOp::Message, "what is two plus two?".into())
-            .expect("human message");
+            .try_deliver(MessageOp::Message, "what is two plus two?".into(), None)
+            .expect("journal write")
+            .expect("chat message");
         let message_id = runtime.unanswered_chat_tail()[0].id.0.clone();
         runtime.apply_resident_delta(d_opened(&[]));
         runtime.apply_resident_delta(ResidentDelta::TurnReplyTo { message_id });
@@ -2178,7 +2156,8 @@ mod tests {
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
         let turn = rt
-            .deliver(MessageOp::Message, "how goes it?".into())
+            .try_deliver(MessageOp::Message, "how goes it?".into(), None)
+            .expect("journal write")
             .expect("user turn");
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
@@ -2234,7 +2213,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         for i in 0..5 {
-            rt.deliver(MessageOp::Message, format!("message {i}"))
+            rt.try_deliver(MessageOp::Message, format!("message {i}"), None)
+                .expect("journal write")
                 .expect("user turn");
         }
 
@@ -2247,7 +2227,8 @@ mod tests {
             vec!["message 3", "message 4"]
         );
 
-        rt.deliver(MessageOp::Message, "message 5".into())
+        rt.try_deliver(MessageOp::Message, "message 5".into(), None)
+            .expect("journal write")
             .expect("live user turn");
         assert_eq!(
             sub.turn_rx
@@ -2849,9 +2830,11 @@ mod tests {
         std::fs::create_dir_all(&origin).unwrap();
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
 
-        rt.deliver(MessageOp::Message, "to the wave".into())
+        rt.try_deliver(MessageOp::Message, "to the wave".into(), None)
+            .expect("journal write")
             .expect("user turn");
-        rt.deliver(MessageOp::Message, "to a".into());
+        rt.try_deliver(MessageOp::Message, "to a".into(), None)
+            .expect("journal write");
 
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
@@ -2895,7 +2878,8 @@ mod tests {
         assert_eq!(sub.pending[0].id, before);
         assert!(sub.inbox_rx.try_recv().is_err(), "no frames from before");
 
-        rt.deliver(MessageOp::Message, "after".into())
+        rt.try_deliver(MessageOp::Message, "after".into(), None)
+            .expect("journal write")
             .expect("user turn");
         rt.deliver_interrupt();
         let InboxItem::Message(live) = sub.inbox_rx.try_recv().expect("live frame") else {
@@ -2922,7 +2906,8 @@ mod tests {
             let rt = rt.clone();
             handles.push(std::thread::spawn(move || {
                 for i in 0..50 {
-                    rt.deliver(MessageOp::Message, format!("m-{writer}-{i}"))
+                    rt.try_deliver(MessageOp::Message, format!("m-{writer}-{i}"), None)
+                        .expect("journal write")
                         .expect("user turn");
                 }
             }));
@@ -2961,6 +2946,7 @@ mod tests {
             channel_id: "channel".into(),
         };
         let source = DiscordMessageSource {
+            author_name: None,
             binding: binding.clone(),
             message_id: "101".into(),
             author_id: "human".into(),
@@ -2995,7 +2981,7 @@ mod tests {
         assert_eq!(channel[0].content, "hello");
         assert!(matches!(
             &channel[0].author,
-            Author::Bridge { platform, user }
+            Author::Bridge { platform, user, .. }
                 if platform == "discord" && user == "human"
         ));
         assert!(reopened.pending_messages().is_empty());
@@ -3015,6 +3001,93 @@ mod tests {
     }
 
     #[test]
+    fn request_authors_survive_local_replay_without_rewriting_conversation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rt = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap();
+        for name in [Some("Jack"), Some("Maya"), None] {
+            rt.try_deliver(
+                MessageOp::Message,
+                "You chose the prototype path.".into(),
+                name.map(str::to_string),
+            )
+            .unwrap();
+        }
+        let live = rt.read_channel(None);
+        let turns = rt.thread_tail(None);
+        drop(rt);
+        let reopened = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap();
+        assert_eq!(reopened.read_channel(None), live);
+        assert_eq!(reopened.thread_tail(None), turns);
+        assert_eq!(
+            turns
+                .iter()
+                .map(|turn| turn.author_name.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("Jack"), Some("Maya"), None]
+        );
+        assert!(turns
+            .iter()
+            .all(|turn| turn.text == "You chose the prototype path."));
+        assert_eq!(
+            live[0].author,
+            Author::Human {
+                name: "Jack".into()
+            }
+        );
+        assert_eq!(
+            live[1].author,
+            Author::Human {
+                name: "Maya".into()
+            }
+        );
+        assert_eq!(
+            live[2].author,
+            Author::Human {
+                name: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn request_authors_keep_discord_ids_separate_from_display_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let binding = DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        let rt = open_discord_runtime(tmp.path(), &binding);
+        for (id, name) in [("101", Some("Jack")), ("102", Some("Maya")), ("103", None)] {
+            rt.try_deliver_discord(
+                "prototype".into(),
+                DiscordMessageSource {
+                    binding: binding.clone(),
+                    message_id: id.into(),
+                    author_id: format!("person-{id}"),
+                    author_name: name.map(str::to_string),
+                },
+            )
+            .unwrap();
+        }
+        let live = rt.read_channel(None);
+        drop(rt);
+        let reopened = open_discord_runtime(tmp.path(), &binding);
+        assert_eq!(reopened.read_channel(None), live);
+        for (message, (id, name)) in
+            live.iter()
+                .zip([("101", Some("Jack")), ("102", Some("Maya")), ("103", None)])
+        {
+            assert_eq!(
+                message.author,
+                Author::Bridge {
+                    platform: "discord".into(),
+                    user: format!("person-{id}"),
+                    name: name.map(str::to_string)
+                }
+            );
+        }
+    }
+
+    #[test]
     fn discord_chat_answer_is_planned_in_chunks_before_receipts() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let binding = DiscordChatBinding {
@@ -3027,6 +3100,7 @@ mod tests {
         rt.try_deliver_discord(
             "question".into(),
             DiscordMessageSource {
+                author_name: None,
                 binding: binding.clone(),
                 message_id: "101".into(),
                 author_id: "human".into(),
@@ -3140,7 +3214,7 @@ mod tests {
         assert_eq!(local_epoch.number, 1);
         assert_eq!(local_epoch.backing, ChatBacking::Local);
         local
-            .try_deliver_authored(MessageOp::Message, "local question".into())
+            .try_deliver(MessageOp::Message, "local question".into(), None)
             .expect("local write")
             .expect("local turn");
         let local_messages = local.chat_messages(None, None);
@@ -3168,7 +3242,7 @@ mod tests {
             crate::controller::wave::journal::read_events(&journal_path(tmp.path(), "ship"));
         let before_pending = discord.pending_messages();
         let error = discord
-            .try_deliver_authored(MessageOp::Message, "shadow message".into())
+            .try_deliver(MessageOp::Message, "shadow message".into(), None)
             .expect_err("Discord mode rejects Loopflow compose");
         assert!(matches!(error, ChatWriteError::OpenDiscord));
         let after =
@@ -3178,7 +3252,7 @@ mod tests {
         assert!(discord.chat_messages(None, None).is_empty());
 
         discord
-            .try_deliver_authored(MessageOp::Interrupt, String::new())
+            .try_deliver(MessageOp::Interrupt, String::new(), None)
             .expect("bare interrupt remains available");
         drop(discord);
         let reopened = open_discord_runtime(tmp.path(), &binding);
@@ -3204,6 +3278,7 @@ mod tests {
         let path = journal_path(tmp.path(), "ship");
         let (mut journal, _) = Journal::open(&path).expect("legacy journal");
         journal.append(|_| EventKind::UserMessage {
+            author_name: None,
             id: MessageId("legacy-message".into()),
             op: MessageOp::Message,
             text: "before epochs".into(),
@@ -3238,6 +3313,7 @@ mod tests {
         };
         let (mut journal, _) = Journal::open(&path).expect("legacy journal");
         journal.append(|_| EventKind::UserMessage {
+            author_name: None,
             id: MessageId("local-message".into()),
             op: MessageOp::Message,
             text: "local history".into(),
@@ -3246,6 +3322,7 @@ mod tests {
             id: MessageId("discord-message".into()),
             text: "provider history".into(),
             source: DiscordMessageSource {
+                author_name: None,
                 binding: binding.clone(),
                 message_id: "101".into(),
                 author_id: "human".into(),

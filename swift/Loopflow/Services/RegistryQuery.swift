@@ -125,6 +125,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(ActivitySnapshot.self, from: stdout)
     }
 
+    public func userName() async throws -> String? {
+        let stdout = try await run(["name", "--json"], nil)
+        return try Self.decode(String?.self, from: stdout)
+    }
+
     /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
     /// Filters are composed by `lf` before its bounded presentation window.
     public func workActivity(

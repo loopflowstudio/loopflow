@@ -1,14 +1,14 @@
 # lf Command Reference
 
-One binary, three audiences. `lf` launches prompts for humans, gives agents the
+One binary, three audiences. `lf` launches prompts for you, gives agents the
 verbs to run and steer other agents, and reads the executing Home's planning,
 process, journal, and Run evidence. Prefix a command with `lf ssh <home-id>` to
 run the same local operation on another Home.
 
 | You are | Start with | Deep dive |
 |---|---|---|
-| A human running prompts | [Basic Usage](#basic-usage), [Context Flags](#context-flags) | [Get Started](getting-started.md) |
-| A human operating waves | [Running Waves and Tasks](#running-waves-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
+| Running prompts | [Basic Usage](#basic-usage), [Context Flags](#context-flags) | [Get Started](getting-started.md) |
+| Operating waves | [Running Waves and Tasks](#running-waves-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
 | An agent driving other agents | [Running Waves and Tasks](#running-waves-and-tasks) | [The Agent API](agent-api.md) |
 | Watching the whole machine | [Reading This Home](#reading-this-home) | [Conducting](conducting.md) |
 
@@ -158,13 +158,13 @@ Ops skills — raw prompt logic around mechanical git, PR, and release commands:
 | Skill | What it does |
 |------|--------------|
 | `init` | Connect the repo to Homes, accounts, Waves, and task execution |
-| `start-chapter` / `review-chapter` | Open a new planning chapter with the human / close the old chapter's evidence record |
+| `start-chapter` / `review-chapter` | Open a new planning chapter with the user / close the old chapter's evidence record |
 | `loopflow-validate` | Validate flows and skills |
 | `commit-message` | Generate a commit message without committing |
 | `rebase-conflicts` | Resolve conflicts after the mechanical rebase stops |
 | `pr-message` | Generate a PR title and body without publishing |
 | `pr-publish` | Generate PR copy and call `lf pr publish` |
-| `pr-submit` | Prepare a PR for a human to land |
+| `pr-submit` | Prepare a PR for a person to land |
 | `pr-land` | Prepare and land a PR through Loopflow's git machinery |
 | `release-run` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
@@ -268,7 +268,7 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 | `task-design` | kickoff → review-design |
 | `slice` | code → review-slice → publish/refresh Task PR |
 | `ship` | task-gate → record-learnings → op: pr land -c |
-| `ship-demo` | task-gate → human demo review → record-learnings → op: pr land -c |
+| `ship-demo` | task-gate → demo review → record-learnings → op: pr land -c |
 | `deploy` | gate → op: pr land |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `incident` | restore → 5whys |
@@ -307,8 +307,8 @@ lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --flow incident
 lf task status DES-123
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
-lf ask "Review this proof with me"                    # block on a human session
-lf session list --json                                # unresolved human Sessions
+lf ask "Review this proof with me"                    # block on a session
+lf session list --json                                # unresolved Sessions
 lf session open task_...:flow:node:0 --json           # exact native provider resume
 lf session complete <ask-id>                          # finish an ad-hoc Ask
 lf session approve <flowstep-id> "Verified"           # approve a Task FlowStep
@@ -401,19 +401,19 @@ A skill that needs another Work's perspective launches an ordinary Run directly:
 lf --batch --as wave:<name> : "Which proof matters?"
 ```
 
-A headless Run that needs human judgment runs `lf ask "<request>"`. Loopflow
+A headless Run that needs a decision from the user runs `lf ask "<request>"`. Loopflow
 starts an ordinary TUI Run in the caller's exact checkout and waits. The session
 agent calls `lf session ready "<summary>"` when its work is ready; this does not
-complete, hide, or release anything. The human runs `lf session complete
+complete, hide, or release anything. The user runs `lf session complete
 <session-id>` when the conversation is finished. Completion stops the exact
 provider client, removes the Session from the Sessions list, and resumes the caller
 with the ready summary and any filesystem changes.
 
-A Task human FlowStep uses the same surface. It persists its exact playhead and
+A Task review FlowStep uses the same surface. It persists its exact playhead and
 starts one ordinary provider Run for its authored Skill:
 
 ```bash
-lf session list --json                              # unresolved human Sessions
+lf session list --json                              # unresolved Sessions
 lf session open <session-id> --json                 # prepare/recover attachment
 lf session ready "Ready for review"                 # agent state; stays visible
 lf session approve <session-id> "Verified summary"  # approve the FlowStep
@@ -429,7 +429,7 @@ stops that client and resumes provider-native history in the selected pane.
 Closing a pane keeps the live terminal available in the Sessions list; Complete
 ends the Session.
 
-Human sessions may use a detached PTY cradle to let the first provider client
+Sessions may use a detached PTY cradle to let the first provider client
 start before the desktop is present. That cradle is not Session identity,
 readiness storage, liveness authority, or the attachment surface. The boundary
 record owns resolution; the ordinary Run owns provider identity and history.
@@ -483,7 +483,7 @@ accounts; durable processes scrub forwarded authority before detaching.
 
 ## Speaking to Waves
 
-The **thread** is the human surface: durable, replayed, and owned by a running
+The **thread** is the user surface: durable, replayed, and owned by a running
 Wave. Typed Work observations carry Task progress directly to the Wave.
 
 ```bash
@@ -503,8 +503,8 @@ lf reply intelligence "Should this get an answer?"  # one reply decision, no lis
 A Wave's durable memory is the ordinary repository file `wave/<name>/MEMORY.md`
 — read and edit it directly.
 
-Managed Work processes default to their invoking Wave through `LF_WAVE_ID`. From a
-human shell, pass `--wave`; repository location does not identify one of the
+Managed Work processes default to their invoking Wave through `LF_WAVE_ID`. From an
+interactive shell, pass `--wave`; repository location does not identify one of the
 Waves sharing `main`.
 
 | Flag | Description |
@@ -715,7 +715,7 @@ mechanical git/PR operations. Tier skills add scoped delegation. Use
 lf debug -c    # include current clipboard text in the prompt
 ```
 
-### Launch Claude, Codex, or OpenCode with a present human
+### Launch Claude, Codex, or OpenCode interactively
 
 ```bash
 lf design                 # direct TTY → uses session.launch (default: tui)
@@ -725,7 +725,7 @@ lf : "fix the bug" --ide -m codex   # force the Codex app instead
 
 `--tui` opens Claude, Codex, or OpenCode in the terminal. `--ide` opens Claude
 or Codex in its app. Both override the repo default. Set `session.launch: ide`
-in `.lf/config.yaml` to make the app the default for direct human-present
+in `.lf/config.yaml` to make the app the default for direct interactive
 skills. Automated flow nodes and `--batch` remain headless.
 
 ### External skills
@@ -741,7 +741,7 @@ lf npx/explain-code                # already-cached skill (no network)
 
 The publish/submit/arm/land contract every launched agent receives is
 `rust/loopflow/src/engine/builtins/LOOPFLOW.md` — that file is canonical for
-agent-facing semantics; this section is the human reference.
+agent-facing semantics; this section is the user reference.
 
 ### lf pr publish
 
@@ -767,7 +767,7 @@ an error and presents nothing.
 ### lf pr open
 
 Publish (same as `lf pr publish`), then open the PR for review — the GitHub
-page in the browser. The explicit, human-initiated review action; agents use
+page in the browser. The explicit, user-initiated review action; agents use
 `publish`, `submit`, `arm`, or `land`. If launching the browser fails, only `open`
 fails — the PR is already published and its URL printed.
 

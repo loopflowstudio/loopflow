@@ -639,6 +639,7 @@ mod tests {
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
+            author_name: None,
             id: String::new(),
             role: ChatRole::Assistant,
             text: text.to_string(),
@@ -762,7 +763,7 @@ mod tests {
         let client = reqwest::Client::new();
         let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
-            .json(&serde_json::json!({ "op": "message", "text": "how's it going?" }))
+            .json(&serde_json::json!({ "op": "message", "text": "how's it going?", "author_name": "Jack" }))
             .send()
             .await
             .unwrap()
@@ -772,6 +773,7 @@ mod tests {
         let posted = body.message.expect("posted message").turn;
         assert_eq!(posted.role, ChatRole::User);
         assert_eq!(posted.text, "how's it going?");
+        assert_eq!(posted.author_name.as_deref(), Some("Jack"));
         assert_eq!(body.state, "idle");
 
         // The message is in the thread; the resident answers it at its next
@@ -779,9 +781,10 @@ mod tests {
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].role, ChatRole::User);
+        assert_eq!(thread[0].author_name.as_deref(), Some("Jack"));
     }
 
-    /// The thread door is the human's: `say` is not a wire op and machine
+    /// The thread accepts conversation: `say` is not a wire op and machine
     /// attribution fields are refused. Invalid operations and unknown fields
     /// are rejected before journaling.
     #[tokio::test]
@@ -1060,7 +1063,8 @@ mod tests {
     async fn events_inbox_scope_replays_pending_and_streams_ops() {
         let (base, runtime, _tmp) = boot().await;
         runtime
-            .deliver(MessageOp::Message, "queued before".into())
+            .try_deliver(MessageOp::Message, "queued before".into(), None)
+            .expect("journal write")
             .expect("user turn");
 
         let host = base.strip_prefix("http://").unwrap().to_string();
@@ -1448,7 +1452,7 @@ mod tests {
         (format!("http://{addr}"), runtime, tmp)
     }
 
-    /// The thread door is the thread's alone: a human message lands one
+    /// The thread door is the thread's alone: a chat message lands one
     /// copy in the served wave's journal, and no journal exists elsewhere.
     #[tokio::test]
     async fn a_message_is_recorded_once_in_the_waves_journal() {

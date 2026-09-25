@@ -384,7 +384,7 @@ private func compactTokens(_ tokens: Int) -> String {
 
 // MARK: - Codebase: growth over time, and the flame on disk
 
-/// Stacked by file extension. Lines are what a human counts; tokens are what a
+/// Stacked by file extension. Lines measure source size; tokens are what a
 /// run costs, and they disagree — a lockfile is cheap in lines and ruinous here.
 /// This plots the number the context budget spends.
 private struct CodebaseGrowthChart: View {

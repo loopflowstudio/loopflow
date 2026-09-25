@@ -174,7 +174,7 @@ pub struct TaskRuntimeSnapshot {
     pub provider: String,
 }
 
-/// A Task's derived operating condition. Sessions own human action; this state
+/// A Task's derived operating condition. Sessions own review actions; this state
 /// only lets Work surfaces explain whether the Task is clear, waiting on
 /// another actor, blocked, or unreadable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

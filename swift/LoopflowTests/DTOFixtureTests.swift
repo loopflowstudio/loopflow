@@ -249,7 +249,7 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .ready)
-        #expect(session.readySummary == "The design now matches the human's intent.")
+        #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
         ])

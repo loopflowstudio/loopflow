@@ -161,7 +161,7 @@ impl SqliteStore {
         let position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         if position.is_human() {
             return Err(StoreError::InvalidAuthority(
-                "human Flow positions require an exact decision".to_string(),
+                "Review Flow positions require an exact decision".to_string(),
             ));
         }
         if position.version != expected_version {
@@ -1222,7 +1222,7 @@ fn validate_flow_position(task_id: &TaskId, position: &FlowPosition) -> StoreRes
     }
     if step.policy.human && step.policy.id.is_none() {
         return Err(StoreError::InvalidData(
-            "human flow positions require a stable node id".to_string(),
+            "review flow positions require a stable node id".to_string(),
         ));
     }
     if position.claim.as_ref().is_some_and(|claim| {

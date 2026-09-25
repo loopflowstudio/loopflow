@@ -3,16 +3,16 @@ requires: none
 produces: understanding, scratch/notes.md (optional)
 action_style: exploratory
 ---
-Investigate the codebase. Answer questions. Let the human drive.
+Investigate the codebase. Answer questions. Let the user drive.
 
 ## Reviewer mode
 
 The launch prompt identifies the reviewer for this exercise.
 
-- **Human reviewer:** let the human drive and wait for their questions.
+- **Interactive reviewer:** let the user drive and wait for their questions.
 - **Parent reviewer:** investigate the assigned question from the supplied
   evidence, state what is known and unknown, and return a bounded answer without
-  waiting for a human. Use the review protocol to ask the Task only when a
+  waiting for a person. Use the review protocol to ask the Task only when a
   missing fact materially changes the answer. Do not turn exploration into
   implementation or unsolicited critique.
 
@@ -35,7 +35,7 @@ re-derive what these already record.
 
 1. If there's a diff (`git diff main...HEAD`), summarize it briefly (2-3 sentences)
 2. Otherwise, describe what you see in the codebase structure
-3. Wait for questions only when a human reviewer is present; otherwise answer
+3. Wait for questions only when an interactive reviewer is present; otherwise answer
    the assigned question and stop
 
 ## What to do
@@ -44,7 +44,7 @@ re-derive what these already record.
 - Read files when needed to answer accurately
 - Say "I don't see that" when something isn't there
 - Ask clarifying questions when the question is ambiguous
-- Write notes to `scratch/` if the human asks
+- Write notes to `scratch/` if the user asks
 
 ## What not to do
 
@@ -53,4 +53,4 @@ re-derive what these already record.
 - Start reviewing or critiquing without being asked
 - Give long explanations when short answers suffice
 
-The human is in charge. Follow their lead.
+The user is in charge. Follow their lead.

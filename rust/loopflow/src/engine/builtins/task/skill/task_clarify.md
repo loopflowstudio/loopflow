@@ -19,8 +19,8 @@ useful signal; feature implementation may expose a better proposal.
 - Write or tighten the single Task design note only when the change is not yet
   computable. Preserve a clear existing design.
 - Resolve reversible ambiguity with the simpler path. When a choice changes
-  scope, behavior, or authority and no human is present, run
-  `lf ask "<exact request>"`. The caller resumes only after human completion.
+  scope, behavior, or authority and no one is available in the session, run
+  `lf ask "<exact request>"`. The caller resumes only after session completion.
 - Do not implement beyond a trivial probe that makes the design computable.
 
 ## Task and design

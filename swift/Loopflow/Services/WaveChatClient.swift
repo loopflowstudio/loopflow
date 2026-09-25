@@ -570,6 +570,7 @@ public final class WaveChatConnection {
     private var loop: Task<Void, Never>?
     private let session: URLSession
     private let loadHistory: ChatHistoryLoader?
+    private let loadUserName: (@Sendable () async throws -> String?)?
     private let historyLimit: Int
     private let decoder = JSONDecoder()
 
@@ -580,12 +581,14 @@ public final class WaveChatConnection {
         waveName: String,
         session: URLSession? = nil,
         historyLimit: Int = 12,
-        loadHistory: ChatHistoryLoader? = nil
+        loadHistory: ChatHistoryLoader? = nil,
+        loadUserName: (@Sendable () async throws -> String?)? = nil
     ) {
         self.repoPath = repoPath
         self.waveName = waveName
         self.historyLimit = historyLimit
         self.loadHistory = loadHistory
+        self.loadUserName = loadUserName
         if let session {
             self.session = session
         } else {
@@ -628,9 +631,9 @@ public final class WaveChatConnection {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(
-            withJSONObject: ["id": UUID().uuidString, "op": op.rawValue, "text": trimmed]
-        )
+        var body: [String: Any] = ["id": UUID().uuidString, "op": op.rawValue, "text": trimmed]
+        if !trimmed.isEmpty, let name = try await loadUserName?() { body["author_name"] = name }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw WaveChatError.badStatus(-1)

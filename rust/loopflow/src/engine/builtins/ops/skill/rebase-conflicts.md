@@ -50,9 +50,9 @@ lf rebase --continue
 - **Files central to the branch's intent:** Preserve the branch's changes named by the conflict context and surrounding code.
 - **Files outside the branch's scope:** Accept main's version. The branch probably touched these incidentally.
 - **Both versions are valid:** Combine manually if both changes make sense.
-- **Ambiguous or high-risk conflicts:** Do not guess. Ask a present human in
+- **Ambiguous or high-risk conflicts:** Do not guess. Ask the user in
   conversation. In a headless Run, record the ambiguity and run
-  `lf ask "<exact request>"`; the human session shares the checkout and blocks
+  `lf ask "<exact request>"`; the session shares the checkout and blocks
   until explicit resolution.
 
 `lf rebase --continue` stages the resolved conflict paths and checks that this
@@ -77,7 +77,7 @@ lf rebase --abort
 ```
 
 Then:
-- human-present: explain the failure and ask the present User how to proceed
+- interactive: explain the failure and ask the present User how to proceed
 - headless: note what went wrong in `scratch/questions.md` and open one exact
-  `lf ask` human session; stop with the exact blocker when the required action
+  `lf ask` session; stop with the exact blocker when the required action
   cannot be performed through that shared checkout

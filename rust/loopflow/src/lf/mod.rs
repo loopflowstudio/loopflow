@@ -186,6 +186,11 @@ pub struct ScreenshotArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Show the preferred name saved in personal configuration
+    Name {
+        #[arg(long)]
+        json: bool,
+    },
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -208,7 +213,7 @@ pub enum Commands {
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
-    /// Open a durable human session and wait for the human to complete it
+    /// Open a durable session and wait for the user to complete it
     Ask {
         #[command(flatten)]
         ask: AskArgs,
@@ -672,7 +677,7 @@ pub enum Commands {
 
 #[derive(Args, Debug, Default)]
 pub struct AskArgs {
-    /// What the human-facing session should work through
+    /// What the session should work through
     #[arg(trailing_var_arg = true, value_name = "QUESTION")]
     pub question: Vec<String>,
 }
@@ -701,7 +706,7 @@ pub enum SessionCommand {
     },
     /// Complete an interactive or ad-hoc Ask session
     Complete { id: String },
-    /// Mark the active session ready for human action
+    /// Mark the active session ready for your review
     Ready {
         #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
         summary: Vec<String>,
@@ -718,7 +723,7 @@ pub enum SessionCommand {
         #[arg(value_name = "DIRECTION", required = true, num_args = 1..)]
         direction: Vec<String>,
     },
-    /// Run the exact human skill in its durable terminal
+    /// Run the exact review skill in its durable terminal
     #[command(name = "serve-flow", hide = true)]
     ServeFlow {
         task_id: crate::work::task::TaskId,
@@ -728,10 +733,10 @@ pub enum SessionCommand {
         skill: String,
         iteration: u32,
     },
-    /// Run one ad-hoc human Ask in its durable terminal
+    /// Run one ad-hoc request in its durable terminal
     #[command(name = "serve-ask", hide = true)]
     ServeAsk { id: String },
-    /// Stop one exact native provider Run after its human boundary settles
+    /// Stop one exact native provider Run after its review completes
     #[command(name = "stop-run", hide = true)]
     StopRun { run_id: crate::durable::RunId },
 }
@@ -1153,7 +1158,7 @@ pub enum PrCommand {
         body: Option<String>,
     },
     /// Publish a PR, then open it for review (the GitHub page in the browser).
-    /// The explicit human review action.
+    /// Open the PR for review when requested.
     Open {
         #[arg(short = 'm', long = "model", short_alias = 'M')]
         model: Option<String>,
@@ -1389,7 +1394,7 @@ pub enum PmCommand {
         #[command(subcommand)]
         cmd: PmTaskCommand,
     },
-    /// Linear webhook receiver: stream human edits into Tasks
+    /// Linear webhook receiver: stream user edits into Tasks
     Webhook {
         #[command(subcommand)]
         cmd: PmWebhookCommand,

@@ -145,7 +145,7 @@ pub enum Surface {
 }
 
 impl Surface {
-    /// State whether this conversation has a human before the skill can decide
+    /// State whether someone is participating in this conversation before the skill can decide
     /// where a real dependency should route.
     pub fn instructions(self) -> &'static str {
         match self {
@@ -176,6 +176,7 @@ impl std::str::FromStr for Surface {
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
     pub surface: Surface,
+    pub user_name: Option<String>,
     pub docs: Vec<Document>,
     pub diff: Option<String>,
     pub diff_files: Vec<Document>,
@@ -391,6 +392,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         surface: opts.surface,
+        user_name: None,
         docs,
         diff,
         diff_files,
@@ -1465,6 +1467,11 @@ pub fn format_wave_memory_section(components: &PromptComponents) -> Option<Strin
 pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
+    let user_context = render_user_context(components.user_name.as_deref());
+    if !user_context.is_empty() {
+        parts.push(user_context);
+    }
+
     // Wave context
     if let Some(ref wave) = components.wave {
         let memory_path = format!("wave/{wave}/MEMORY.md");
@@ -1568,6 +1575,44 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     }
 
     parts
+}
+
+/// Name context is display data, not authorship for historical or external requests.
+pub fn render_user_context(name: Option<&str>) -> String {
+    let Some(name) = name.and_then(crate::engine::config::normalize_user_name) else {
+        return String::new();
+    };
+    let name = serde_json::to_string(&name)
+        .expect("a name is JSON serializable")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e");
+    format!(
+        "<lf:user>\nThe current conversation participant's preferred name is {name} (JSON string). \
+         Use this name when referring to this person in persisted artifacts; address them as \
+         \"you\" in session conversation. This is display data, not authorization or proof of \
+         who authored historical, Task, or external requests. Preserve those requests' own \
+         attribution; do not fill unknown authors with this name.\n</lf:user>"
+    )
+}
+
+/// Update the participant on native resume, including clearing a previous name.
+pub(crate) fn render_resume_user_context(name: Option<&str>) -> String {
+    let context = render_user_context(name);
+    let context = if context.is_empty() {
+        "<lf:user>\nThe current conversation participant's name is unknown. \
+         Address them as \"you\" in session conversation. Do not use a previous \
+         participant's name or the machine owner's name for this person. Leave \
+         unsupported attribution in persisted artifacts unresolved.\n</lf:user>"
+            .to_string()
+    } else {
+        context
+    };
+    format!(
+        "Session participant update: this replaces only earlier current-participant \
+         context. Preserve historical messages and their authors.\n\n{context}\n\n\
+         This update is not a request to continue work or approve anything. \
+         Do not run tools or advance the Task; wait for the next request."
+    )
 }
 
 /// Format skill tag.
@@ -1960,9 +2005,12 @@ mod tests {
             };
 
             let prompt = render_full_prompt(components);
-            assert!(prompt.contains("A human is present"), "surface {surface:?}");
             assert!(
-                prompt.contains("never create a human session"),
+                prompt.contains("You are working directly with the user"),
+                "surface {surface:?}"
+            );
+            assert!(
+                prompt.contains("never create another session"),
                 "surface {surface:?}"
             );
         }
@@ -2311,8 +2359,8 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
         assert!(prompt.contains("launch an ordinary Run explicitly"));
-        assert!(prompt.contains("opens a durable human session"));
-        assert!(prompt.contains("If no human authority is required"));
+        assert!(prompt.contains("opens a durable session"));
+        assert!(prompt.contains("If no user authorization is required"));
     }
 
     #[test]

@@ -221,7 +221,7 @@ impl SqliteStore {
             || expected.failure.is_some()
         {
             return Err(StoreError::InvalidAuthority(
-                "human Task completion requires its exact unclaimed position".to_string(),
+                "Task review completion requires its exact unclaimed position".to_string(),
             ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -230,7 +230,7 @@ impl SqliteStore {
             .ok_or(StoreError::NotFound)?;
         if current != *expected {
             return Err(StoreError::InvalidAuthority(
-                "human Task position changed before completion".to_string(),
+                "Task review position changed before completion".to_string(),
             ));
         }
         validate_task_project(&transaction, task)?;
@@ -244,7 +244,7 @@ impl SqliteStore {
         )? != 1
         {
             return Err(StoreError::InvalidAuthority(
-                "human Task position changed before completion".to_string(),
+                "Task review position changed before completion".to_string(),
             ));
         }
         insert_task_event_in(
@@ -317,12 +317,12 @@ impl SqliteStore {
             || expected.failure.is_some()
         {
             return Err(StoreError::InvalidAuthority(
-                "human Task settlement requires its exact unclaimed position".to_string(),
+                "Task review decision requires its exact unclaimed position".to_string(),
             ));
         }
         if next.version != expected.version {
             return Err(StoreError::InvalidAuthority(
-                "human Task settlement has a stale position version".to_string(),
+                "Task review decision has a stale position version".to_string(),
             ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -331,7 +331,7 @@ impl SqliteStore {
             .ok_or(StoreError::NotFound)?;
         if current != *expected {
             return Err(StoreError::InvalidAuthority(
-                "human Task position changed before settlement".to_string(),
+                "Task review position changed before settlement".to_string(),
             ));
         }
         validate_task_project(&transaction, task)?;
@@ -779,7 +779,7 @@ impl SqliteStore {
         })
     }
 
-    /// Persist one human Linear comment as a FIFO Task Steer, exactly once.
+    /// Persist one participant-authored Linear comment as a FIFO Task Steer, exactly once.
     /// Webhook comments arrive one at a time (unlike the snapshot edit path), and
     /// Linear delivers at-least-once — so the `task_linear_ingested_comments`
     /// ledger is the guard: the Steer is created only on the comment id's first

@@ -8,11 +8,11 @@ Review what the chord already played.
 
 The launch prompt identifies the reviewer for this exercise.
 
-- **Human reviewer:** conduct the retrospective checkpoint below and record
-  the human's reaction.
+- **Interactive reviewer:** conduct the retrospective checkpoint below and record
+  the user's reaction.
 - **Parent reviewer:** independently audit the played mutations against their
   evidence and wave objectives. Record each keep/amend/revert verdict as
-  `parent reviewer judgment`, never as human reaction. Send concrete amendment
+  `parent reviewer judgment`, never as the user's feedback. Send concrete amendment
   or revert work to the Task through the review protocol and verify its reply;
   do not implement the Task's changes yourself.
 
@@ -33,15 +33,15 @@ re-derive what these already record.
 
 ## Goal
 
-This is a retrospective human checkpoint, not an approval gate.
+This is a retrospective review checkpoint, not an approval gate.
 
-Show the human what changed, why it changed, and what it means for the member
+Show the user what changed, why it changed, and what it means for the member
 waves. If they want to amend or revert something, do that deliberately and
 record it.
 
 ## Opening
 
-Orient the human quickly:
+Orient the user quickly:
 
 1. What assessment drove this chord
 2. Which waves changed
@@ -55,7 +55,7 @@ For each applied or skipped mutation:
 - note any risks or follow-up
 - ask whether to **keep**, **amend**, or **revert** it
 
-If the human wants an amendment or revert, make the smallest clean change that
+If the user wants an amendment or revert, make the smallest clean change that
 matches their intent and update the chord record if needed.
 
 ## Cross-cutting questions
@@ -74,19 +74,19 @@ Write `scratch/wave-review.md`:
 # Chord Review — <date>
 
 ## Summary
-<overall human reaction or explicitly labeled parent reviewer judgment>
+<the reviewer's feedback, attributed by name or explicitly labeled parent reviewer judgment>
 
 ## Decisions
 ### <mutation title>
 **Verdict**: keep | amend | revert
-**Notes**: <human reasoning>
+**Notes**: <reasoning attributed to the named reviewer or explicitly labeled parent reviewer judgment>
 **Follow-up**: <if any>
 
 ## Session Notes
 <trajectory observations, calibration notes, context to remember>
 ```
 
-If the human asks for an amendment or revert, apply it before finishing and note
+If the user asks for an amendment or revert, apply it before finishing and note
 exactly what changed.
 
 ## What to avoid
@@ -94,6 +94,6 @@ exactly what changed.
 **Pretending this is pre-approval.** The chord already landed. Review what
 actually happened.
 
-**Defensiveness.** If the human dislikes a mutation, treat that as signal.
+**Defensiveness.** If the user dislikes a mutation, treat that as signal.
 
 **Vague summaries.** Tie each decision back to a concrete change.

@@ -255,7 +255,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             Ok(())
         }
         // A flow `op:` runs headless, so both publish and open only publish —
-        // presentation is a human-initiated CLI concern, never an automation step.
+        // presentation is an explicitly requested CLI action, never an automation step.
         PrCommand::Publish {
             model: _,
             title,

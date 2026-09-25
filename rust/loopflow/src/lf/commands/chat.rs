@@ -1,4 +1,4 @@
-//! `lf chat` — the human conversing with a served mind's durable thread.
+//! `lf chat` — converse with a Wave through its durable thread.
 //!
 //! One door, `POST /messages` on the Wave server. Messages join the channel
 //! for its next pass. The Mac composer uses the same door.
@@ -219,7 +219,7 @@ pub(crate) async fn run_with_context(
     Ok(())
 }
 
-/// Replay and follow the resolved thread while stdin supplies human speech.
+/// Replay and follow the resolved thread while stdin supplies messages.
 async fn follow_with_context(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
     let Some(resolved) = resolve_target(
         target,
@@ -317,13 +317,14 @@ async fn handle_command(command: &str, endpoint: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Post one unattributed human act, shared by one-shot and followed chat.
+/// Capture the caller's name when posting, never from the listener's Home.
 async fn post_message(endpoint: &str, text: &str) -> Result<()> {
     let op = MessageOp::Message;
     let body = serde_json::json!({
         "id": uuid::Uuid::new_v4().to_string(),
         "op": op,
         "text": text,
+        "author_name": crate::engine::config::launch_user_name()?,
     });
     post_json(endpoint, "/messages", &body).await?;
     Ok(())
@@ -493,7 +494,7 @@ pub(crate) async fn resolve_target(
 pub(crate) async fn parent_wave(store: &SharedStore, own: &Wave) -> Result<Wave> {
     let parent_id = own.parent_wave_id().ok_or_else(|| {
         anyhow!(
-            "wave '{}' has no parent — it is a root wave; the human \
+            "wave '{}' has no parent — it is a root wave; the user \
              fall-through arrives with Decisions",
             own.name()
         )
@@ -576,7 +577,8 @@ mod tests {
         .expect("open wave journal");
         for index in 0..15 {
             runtime
-                .deliver(MessageOp::Message, format!("message {index}"))
+                .try_deliver(MessageOp::Message, format!("message {index}"), None)
+                .expect("journal write")
                 .expect("append message");
         }
 
@@ -605,6 +607,7 @@ mod tests {
         let (mut journal, _) =
             crate::controller::wave::journal::Journal::open(&path).expect("legacy journal");
         journal.append(|_| EventKind::UserMessage {
+            author_name: None,
             id: crate::controller::wave::journal::MessageId("legacy-message".into()),
             op: MessageOp::Message,
             text: "read me after migration".into(),
@@ -637,7 +640,7 @@ mod tests {
         )
         .expect("open local epoch");
         local
-            .try_deliver_authored(MessageOp::Message, "local history".into())
+            .try_deliver(MessageOp::Message, "local history".into(), None)
             .expect("write local message");
         drop(local);
 
@@ -836,7 +839,7 @@ mod tests {
             .expect("dropped publish exits 0");
     }
 
-    /// The same human act journals the same way on every surface: a plain
+    /// The same chat input journals the same way on every surface: a plain
     /// CLI message is unattributed and op `message`, exactly what the Mac
     /// composer sends.
     #[tokio::test]
@@ -875,7 +878,7 @@ mod tests {
     }
 
     /// `--parent` walks `parent_wave_id` and posts to the parent's live
-    /// server. The thread door refuses bylines; a human turn arrives plain.
+    /// server. The thread door refuses machine bylines; a user turn retains its source.
     #[tokio::test]
     async fn parent_targeting_reaches_the_parent_server_unattributed() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -919,8 +922,7 @@ mod tests {
             .expect("post");
         assert_eq!(refused.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
 
-        // A human standing in the child steers the parent: unattributed, like
-        // every human turn.
+        // A caller in the child can steer the parent through its ordinary chat door.
         post_json(
             &endpoint,
             "/messages",

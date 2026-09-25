@@ -72,7 +72,7 @@ operations available to helpers without becoming resident Work identities.
 ```text
 one Skill run
     |
-    +-- Flow: compose Skills, mechanical operations, and human boundaries
+    +-- Flow: compose Skills, mechanical operations, and review boundaries
     |
     +-- Work: preserve purpose and input across independent processes
     |
@@ -88,7 +88,7 @@ one Skill run
 | Area | What it adds | Start here |
 | --- | --- | --- |
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
-| Planning | Flow composition, Wave/Task Work, Steer, questions, human FlowSteps, resident loops | [Planning](architecture/planning.md) |
+| Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps, resident loops | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
 | Homes | Placement, `lfd`, Wave listeners, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
@@ -143,7 +143,7 @@ data flow, and ends with the contracts that neighboring areas may rely on.
                               Linear     GitHub     providers
                                  ^          ^           ^
                                  |          |           |
-human / agent --> lf CLI --------+----------+-----------+
+user / agent --> lf CLI --------+----------+-----------+
                     |
           +---------+----------+
           |                    |
@@ -184,7 +184,7 @@ Wave
   `-- Task
         `-- one active remote branch and PR
 
-Flow = ordered Skill | Op | Xor | human boundaries
+Flow = ordered Skill | Op | Xor | review boundaries
 Run  = evidence for one mediated harness launch
 
 WorkRef = Wave | Project | Task
@@ -194,14 +194,14 @@ WorkStatus = Ready | Done | Abandoned
 | Model | Represents | Primary truth |
 | --- | --- | --- |
 | Skill | Reusable instructions plus declared context needs | Repository override, builtin, or installed Markdown |
-| Flow | Ordered Skill and mechanical nodes, Xor routing, human boundaries | Repository or builtin YAML plus a caller-owned playhead |
+| Flow | Ordered Skill and mechanical nodes, Xor routing, review boundaries | Repository or builtin YAML plus a caller-owned playhead |
 | Run | Evidence from one mediated provider launch | One immutable Home-local record |
 | Wave | Durable operating context with goal, memory, cadence, chat, and chapter planning | Repository Wave files, local identity, Linear Initiative membership |
 | Project | One internal chapter plan inside exactly one Wave | Linear Project plus bounded local Work state |
 | Task | One concrete change, investigation, or document | Linear Issue, local delivery state, Git, GitHub |
 | Work | Shared durable planning state for one Wave, Project, or Task | Rows keyed directly by stable Work identity |
 | Steer | Ordered authored correction to Work | Append-only Work input |
-| Human session | Unresolved Ask or Task FlowStep bound to one ordinary provider Run | Boundary record, exact Run id, and provider-native history |
+| Session | Unresolved Ask or Task FlowStep bound to one ordinary provider Run | Boundary record, exact Run id, and provider-native history |
 | Home | Stable machine authority whose route may change | Home identity and observed SSH route |
 | Placement | Assignment of one Work to one Home | `(WorkRef, HomeId)` |
 
@@ -209,7 +209,7 @@ Run identity records causality and provenance. It never grants Work mutation,
 credential, Git, or process-signal authority.
 
 A provider-backed Flow boundary launches or continues a harness and therefore
-produces Run evidence. Mechanical, routing, and human boundaries need not
+produces Run evidence. Mechanical, routing, and review boundaries need not
 create a Run.
 
 ## Follow the common paths
@@ -258,7 +258,7 @@ does not depend on either: Task commands claim an exact Flow boundary for one
 worker. Chapter rotation is a deterministic Wave-scoped operation.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
-A Task human FlowStep starts the persisted Skill as a provider Run and remains
+A Task review FlowStep starts the persisted Skill as a provider Run and remains
 parked until its exact decision arrives. Daemon and app triggers are later work.
 
 ### Another machine
@@ -280,7 +280,7 @@ the behavior.
 | If you are changing… | Read |
 | --- | --- |
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
-| Flow semantics, Work state, Steer, questions, human FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
+| Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
 | daemons, remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |

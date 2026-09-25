@@ -26,10 +26,10 @@ gradients, electrical impulses, mechanical pressure. The brain integrates
 millions of these signals into a felt sense of what needs attention.
 
 This step reads five signal types across all waves and produces a
-health report. The report tells a human which waves need their thinking,
+health report. The report shows which waves need the reader's thinking,
 which can run autonomously, and which are silently failing.
 
-Success: a human reads the report and knows where to spend their next
+Success: the reader opens the report and knows where to spend their next
 hour. Not a status update — a triage.
 
 ## Signals
@@ -71,7 +71,7 @@ roll-up is useful for the report, but the actual dependency lives
 between items.
 
 Three sources write `needs:`:
-- Humans, when they know the dependency up front
+- Users, when they know the dependency up front
 - Build agents, when they hit a wall during implementation
 - The garden, when it keeps rediscovering the same blocking pattern
 
@@ -177,7 +177,7 @@ Interpret:
    |-------|---------|
    | quiet | No signal. Healthy silence or irrelevant dimension. |
    | warm | Something worth noting. Not urgent. |
-   | hot | Needs human attention. Will get worse if ignored. |
+   | hot | Needs <name>'s attention. Will get worse if ignored. |
 
 4. **Write the report.** Organize by signal intensity, not by wave.
    Hot signals first. A wave that's quiet on all five dimensions gets

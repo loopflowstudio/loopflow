@@ -38,7 +38,7 @@
 //! the resident reports `LoopState::Failed` over the wire and
 //! [`run_loop`] returns an error — the process exits nonzero and the
 //! LISTENER's supervisor owns revival (the process-level respawn ladder; a
-//! human message respawns immediately). A dead loop is a dead process —
+//! chat message respawns immediately). A dead loop is a dead process —
 //! there is no in-process limbo. The listener disappearing (send failure,
 //! inbox closed) ends the residency cleanly instead: `Ok(())`.
 
@@ -68,8 +68,8 @@ use crate::id::WaveId;
 use crate::store::{open_store, storage_config_from_env, Store};
 use crate::work::wave::config::{read_wave_config, WaveCronDef};
 
-/// How long an eventless Wave stays idle before a safety heartbeat. Human
-/// chat, child observations, and crons wake it immediately; the quiet cadence
+/// How long an eventless Wave stays idle before a safety heartbeat. Chat
+/// messages, child observations, and crons wake it immediately; the quiet cadence
 /// is deliberately coarse because every wake runs the full three-phase flow.
 pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
 
@@ -104,7 +104,7 @@ fn render_recent_channel(messages: &[crate::controller::wave::channel::Message])
                 Author::Bot => "you",
                 Author::Human { name } if !name.is_empty() => name.as_str(),
                 Author::Human { .. } => "user",
-                Author::Bridge { user, .. } => user.as_str(),
+                Author::Bridge { user, name, .. } => name.as_deref().unwrap_or(user.as_str()),
             };
             format!("{who}: {}", message.content)
         })
@@ -381,7 +381,7 @@ fn orchestration_discipline(wave: &str) -> String {
          - Keep turns centered on selection, direct progress, sequencing, and \
          authored reports.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
-         - A human message is steering: answer it directly and adjust course \
+         - A message from the user is steering: answer it directly and adjust course \
          before returning to the goal."
     )
 }
@@ -408,7 +408,7 @@ fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
 /// governance transcript. Every other destination (Local passes, and the
 /// machine wakes — evidence, promotion, cron, heartbeat — that also carry
 /// `answers`) stays headless: the destination, not the presence of answers, is
-/// the "a human is reading" signal.
+/// the active-reader signal.
 fn chat_surface_for(destination: &MessageDestination) -> Option<crate::engine::prompt::Surface> {
     matches!(destination, MessageDestination::Discord(_))
         .then_some(crate::engine::prompt::Surface::Chat)
@@ -1579,6 +1579,7 @@ mod tests {
 
     fn discord_source(id: &str) -> DiscordMessageSource {
         DiscordMessageSource {
+            author_name: None,
             binding: DiscordChatBinding {
                 guild_id: "guild".into(),
                 channel_id: "channel".into(),
@@ -1939,6 +1940,7 @@ mod tests {
         // its context (read includes our own messages) so it knows it answered.
         loop_.runtime.append_finalized_turn(
             ChatTurn {
+                author_name: None,
                 id: String::new(),
                 role: ChatRole::Assistant,
                 text: "earlier I said LOO-1".to_string(),
@@ -2554,7 +2556,7 @@ mod tests {
 
     /// The listener disappearing ends the residency CLEANLY: the subscription
     /// closes, `run_loop` returns Ok — the keeper is gone, nothing to
-    /// revive from this side (tmux/systemd restarts are the human's
+    /// revive from this side (tmux/systemd restarts are the operator's
     /// arrangement).
     #[tokio::test]
     async fn listener_death_ends_the_resident_cleanly() {

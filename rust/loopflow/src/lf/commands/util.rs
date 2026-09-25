@@ -251,11 +251,14 @@ pub(crate) fn resume_session_with_env(
     provider_session: &crate::run_record::ProviderSessionRef,
     extra_environment: &BTreeMap<String, String>,
 ) -> Result<()> {
+    let user_name = crate::engine::config::launch_user_name()?;
+    let context = crate::engine::prompt::render_resume_user_context(user_name.as_deref());
     let command = build_resume_session_command(
         harness,
         model,
         worktree,
         &provider_session.provider_session_id,
+        &context,
     )?;
     let mut environment = BTreeMap::from([
         (crate::durable::RUN_ID_ENV.to_string(), run_id.to_string()),
@@ -265,6 +268,10 @@ pub(crate) fn resume_session_with_env(
         ),
     ]);
     environment.extend(extra_environment.clone());
+    environment.insert(
+        crate::engine::config::USER_NAME_ENV.to_string(),
+        user_name.unwrap_or_default(),
+    );
     spawn_session_command_with_env(
         &command,
         &environment,
@@ -407,6 +414,7 @@ fn build_resume_session_command(
     model: Option<&str>,
     worktree: &Path,
     provider_session_id: &str,
+    context: &str,
 ) -> Result<SessionCommand> {
     let cwd = absolute_path(worktree);
     let worktree_arg = cwd.to_string_lossy().to_string();
@@ -420,6 +428,7 @@ fn build_resume_session_command(
                 args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
             }
             args.extend(["--resume".to_string(), provider_session_id.to_string()]);
+            args.extend(["--".to_string(), context.to_string()]);
             args
         }
         "codex" => {
@@ -431,7 +440,11 @@ fn build_resume_session_command(
                 args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
             }
             args.extend(codex_permission_args(Some(&cwd), false, false));
-            args.push(provider_session_id.to_string());
+            args.extend([
+                "--".to_string(),
+                provider_session_id.to_string(),
+                context.to_string(),
+            ]);
             args
         }
         "opencode" => {
@@ -443,6 +456,7 @@ fn build_resume_session_command(
             if let Some(model) = model {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
+            args.extend(["--prompt".to_string(), context.to_string()]);
             args
         }
         _ => {
@@ -1109,53 +1123,131 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
-    fn claude_resume_reopens_the_native_session_without_a_prompt() {
-        let command = build_resume_session_command(
-            "claude",
-            None,
-            &path(),
-            "01234567-89ab-cdef-0123-456789abcdef",
-        )
-        .expect("build resume");
-
-        assert_eq!(
-            command,
-            SessionCommand {
-                program: "claude".to_string(),
-                args: args(&["--resume", "01234567-89ab-cdef-0123-456789abcdef"]),
-                cwd: path(),
+    fn preferred_name_resume_context_reaches_every_provider_process() {
+        let temp = tempfile::tempdir().unwrap();
+        let provider = fake_provider(&temp, "for arg do printf '%s\\0' \"$arg\"; done > received");
+        for harness in ["claude", "codex", "opencode"] {
+            for name in [Some("Jack"), Some("Maya"), Some("A </lf:user>\nB"), None] {
+                let context = crate::engine::prompt::render_resume_user_context(name);
+                let command = build_resume_session_command(
+                    harness,
+                    None,
+                    temp.path(),
+                    "recorded-session",
+                    &context,
+                )
+                .unwrap();
+                let status = Command::new(&provider)
+                    .args(&command.args)
+                    .current_dir(temp.path())
+                    .status()
+                    .unwrap();
+                assert!(status.success());
+                let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
+                let arguments = received.split('\0').collect::<Vec<_>>();
+                assert!(arguments.contains(&"recorded-session"));
+                assert!(arguments.contains(&context.as_str()));
+                assert!(context.contains("Preserve historical messages and their authors"));
+                assert!(context.contains("wait for the next request"));
+                if name.is_none() {
+                    assert!(context.contains("name is unknown"));
+                    assert!(context.contains("Do not use a previous"));
+                }
             }
-        );
+        }
     }
 
+    #[cfg(unix)]
     #[test]
-    fn codex_and_opencode_resume_the_recorded_native_session() {
-        let codex = build_resume_session_command(
-            "codex",
-            None,
-            &path(),
-            "019c57d6-5c06-7a93-8000-0123456789ab",
+    fn preferred_name_resume_captures_opener_and_forwards_unknown() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_USER_NAME",
+            "LF_DB_PATH",
+            CONTROL_HOME_ENV,
+            CONTROL_DB_PATH_ENV,
+            "PATH",
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        for key in [
+            "LF_USER_NAME",
+            "LF_DB_PATH",
+            CONTROL_HOME_ENV,
+            CONTROL_DB_PATH_ENV,
+        ] {
+            std::env::remove_var(key);
+        }
+        let provider = fake_provider(&temp, "printf '%s\\0' \"$LF_USER_NAME\" \"$@\" > received");
+        std::fs::rename(provider, temp.path().join("opencode")).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(temp.path().to_path_buf()).chain(std::env::split_paths(&path)),
+            )
+            .unwrap(),
+        );
+        let capture = crate::run_record::CaptureHandle::begin_at(
+            temp.path(),
+            crate::run_record::RunSpec {
+                harness: "opencode".into(),
+                model: None,
+                surface: "tui".into(),
+                cwd: temp.path().to_path_buf(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+            },
         )
-        .expect("build Codex resume");
-        assert_eq!(codex.program, "codex");
-        assert_eq!(codex.args.first().map(String::as_str), Some("resume"));
-        assert_eq!(
-            codex.args.last().map(String::as_str),
-            Some("019c57d6-5c06-7a93-8000-0123456789ab")
-        );
-
-        let opencode =
-            build_resume_session_command("opencode", None, &path(), "ses_0123456789abcdef")
-                .expect("build OpenCode resume");
-        assert_eq!(
-            opencode,
-            SessionCommand {
-                program: "opencode".to_string(),
-                args: args(&["/tmp/loop flow", "--session", "ses_0123456789abcdef"]),
-                cwd: path(),
+        .unwrap();
+        let run_dir = capture.artifact_dir();
+        crate::run_record::write_provider_session(&run_dir, "ses_original", None).unwrap();
+        let session = crate::run_record::read_provider_session(&run_dir)
+            .unwrap()
+            .unwrap();
+        for (saved, forwarded, expected) in [
+            ("Jack", None, Some("Jack")),
+            ("Maya", None, Some("Maya")),
+            ("Host Owner", Some("Jack"), Some("Jack")),
+            ("Host Owner", Some(""), None),
+        ] {
+            std::fs::write(
+                temp.path().join("config.yaml"),
+                format!("user:\n  name: {saved}\n"),
+            )
+            .unwrap();
+            match forwarded {
+                Some(name) => std::env::set_var("LF_USER_NAME", name),
+                None => std::env::remove_var("LF_USER_NAME"),
             }
-        );
+            resume_session_with_env(
+                "opencode",
+                None,
+                temp.path(),
+                &capture.run_id(),
+                &run_dir,
+                &session,
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
+            let arguments = received.split('\0').collect::<Vec<_>>();
+            assert_eq!(arguments[0], expected.unwrap_or_default());
+            let context = crate::engine::prompt::render_resume_user_context(expected);
+            assert!(arguments.contains(&context.as_str()));
+            assert!(!received.contains("Host Owner"));
+            assert_eq!(
+                crate::run_record::read_provider_session(&run_dir)
+                    .unwrap()
+                    .unwrap(),
+                session
+            );
+        }
     }
 
     #[test]

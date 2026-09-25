@@ -661,7 +661,7 @@ fn push_rebased_branch(repo: &Path, branch: &str) -> OpsResult<()> {
 /// `fork_base..HEAD` preserve exactly the child-authored commits. If the base
 /// diverged from HEAD (the child was itself rewritten, or the base is
 /// unreachable), refuse rather than silently rewrite history, and name the
-/// commits since the common ancestor so a human can reconcile.
+/// commits since the common ancestor for manual reconciliation.
 fn resolve_fork_point(repo: &Path, options: &RebaseOptions) -> OpsResult<Option<String>> {
     let Some(base) = options.fork_base.as_deref() else {
         return Ok(None);

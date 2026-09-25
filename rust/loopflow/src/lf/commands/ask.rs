@@ -13,7 +13,7 @@ async fn run_async(args: &AskArgs) -> anyhow::Result<()> {
     let question = args.question.join(" ").trim().to_string();
     let store = open_shared_store().await?;
     let summary = crate::ops::human_session::ask(&store, &question).await?;
-    println!("Human session complete: {summary}");
+    println!("Session complete: {summary}");
     Ok(())
 }
 

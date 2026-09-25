@@ -2,7 +2,7 @@
 //!
 //! A Project coordinates Tasks from the owning Wave's clean
 //! control checkout. It owns no worktree, shipping branch, PR, permanent
-//! memory, cadence, human chat, or controller state.
+//! memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 

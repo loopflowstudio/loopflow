@@ -1,6 +1,6 @@
 # Loopflow Style Guide
 
-This is the governing document of the loopflow codebase. Humans and LLMs alike are expected to follow it.
+This is the governing document of the loopflow codebase. Contributors and agents alike are expected to follow it.
 
 ## Quick Reference
 
@@ -11,7 +11,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - Chapters replace that Project and its content; completed history stays readable
 - Started unfinished Tasks move with identity, worktree, PR, and Flow intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
-- Human and agent interfaces select Waves and Tasks; Project identity is internal
+- User and agent interfaces select Waves and Tasks; Project identity is internal
 - Definitions name the beneficiary and experienced improvement; KRs prove it
 
 **Python:**
@@ -38,6 +38,18 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - If a value does leak into output, say so and flag it for rotation — don't quote it again.
 
 ## Voice
+
+Use people's names in persisted artifacts: Tasks, PRs, designs, memory,
+reports, and decision summaries. Write “Jack requested the prototype path.”
+In session conversation, use “you”: “You requested the prototype path.”
+Storing a transcript does not change its wording; a summary written from it
+uses names. Refer to other participants by name. Use known preferred names,
+never infer authorship from a machine owner or account. Ask when a necessary
+name is missing, or record that attribution is unresolved.
+
+Write in language the user would use themselves. Never refer to a person as
+“the human.” Generic role labels belong in instructions where the role matters,
+not in place of known names in authored artifacts.
 
 The creator's flow is sacred. Every interaction either sustains it or breaks it.
 
@@ -108,7 +120,7 @@ When writing CLI code with Typer:
 When editing builtin skills (`engine/builtins/**`):
 - Skills must be self-contained: never reference repo-relative docs or files —
   the skill runs in repos that don't have them. Inline the compressed guidance;
-  the long form lives in this repo's docs for humans.
+  the long form lives in this repo's docs for readers.
 - Doctrine rides only where it's exercised: teach a rule in the skill that uses
   it, not in every context (LOOPFLOW.md is paid for on every run, everywhere).
 
@@ -472,4 +484,4 @@ and open Warp + Cursor. Reuses existing worktree if branch exists.
 
 Keep messages short—one sentence to one paragraph.
 
-Do not add AI attribution footers like "Generated with Claude Code" or "Co-Authored-By: Claude" to commits. The git history should read the same whether written by a human or AI.
+Do not add AI attribution footers like "Generated with Claude Code" or "Co-Authored-By: Claude" to commits. The git history should read the same whether written by a person or AI.

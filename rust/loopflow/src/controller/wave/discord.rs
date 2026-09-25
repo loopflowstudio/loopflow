@@ -563,7 +563,7 @@ impl DiscordAdapter {
                                 runtime
                                     .try_advance_discord_cursor(&self.binding, id.clone())
                                     .context("journal Discord cursor")?;
-                                // Ack a live human message instantly (<1s), long
+                                // Ack a live chat message instantly (<1s), long
                                 // before the reply is ready — the responsiveness
                                 // the channel actually feels.
                                 if human_input {
@@ -699,8 +699,8 @@ impl DiscordAdapter {
         }
     }
 
-    /// Returns `true` when the message was a human chat input (delivered to the
-    /// runtime) — the caller acks live human input with a pickup reaction.
+    /// Returns `true` when the message was a chat input (delivered to the
+    /// runtime) — the caller acks live chat input with a pickup reaction.
     fn accept_message(&self, runtime: &WaveRuntime, message: Message) -> Result<bool> {
         if !message_in_epoch(&message, &runtime.active_conversation_epoch())
             .context("validate Discord input epoch")?
@@ -711,7 +711,9 @@ impl DiscordAdapter {
             if self.reconcile_echo(runtime, &message)? {
                 return Ok(false);
             }
-            let Some((op, text)) = parse_authored_content(runtime.name(), &message.content) else {
+            let Some((op, text, author_name)) =
+                parse_authored_content(runtime.name(), &message.content)
+            else {
                 return Ok(false);
             };
             runtime
@@ -721,6 +723,7 @@ impl DiscordAdapter {
                         binding: self.binding.clone(),
                         message_id: message.id,
                         author_id: message.author.id,
+                        author_name,
                     },
                     op,
                 )
@@ -734,6 +737,7 @@ impl DiscordAdapter {
         {
             return Ok(false);
         }
+        let author_name = message.author.display_name();
         runtime
             .try_deliver_discord(
                 message.content,
@@ -741,6 +745,7 @@ impl DiscordAdapter {
                     binding: self.binding.clone(),
                     message_id: message.id,
                     author_id: message.author.id,
+                    author_name,
                 },
             )
             .context("journal Discord input")?;
@@ -818,7 +823,7 @@ impl DiscordAdapter {
                     .context("journal Discord send receipt")?;
                 posted_any = true;
             }
-            // Once the reply to a human message is delivered, flip its pickup
+            // Once the reply to a chat message is delivered, flip its pickup
             // reaction (👀) to done (✅). Best-effort; the send already landed.
             if posted_any {
                 if let Some(source_id) = &ack_source {
@@ -842,6 +847,7 @@ impl DiscordProjection {
         op: MessageOp,
         text: &str,
         request_id: &str,
+        author_name: Option<&str>,
     ) -> Result<WaveChatMessage, DiscordError> {
         let epoch = runtime.active_conversation_epoch();
         if epoch.backing.discord_binding().as_ref() != Some(&self.binding) {
@@ -850,7 +856,7 @@ impl DiscordProjection {
                 epoch.id, self.binding.guild_id, self.binding.channel_id
             )));
         }
-        let content = authored_content(runtime.name(), op, text);
+        let content = authored_content(runtime.name(), op, text, author_name);
         let actual = content.chars().count();
         if actual > MESSAGE_LIMIT {
             return Err(DiscordError::MessageTooLong {
@@ -877,21 +883,32 @@ impl DiscordProjection {
                 sent.id, sent.author.id
             )));
         }
-        let Some((sent_op, sent_text)) = parse_authored_content(runtime.name(), &sent.content)
+        let Some((sent_op, sent_text, sent_author)) =
+            parse_authored_content(runtime.name(), &sent.content)
         else {
             return Err(DiscordError::Binding(format!(
                 "authored message {} did not retain its Loopflow header",
                 sent.id
             )));
         };
-        if sent_op != op || sent_text != text {
+        if sent_op != op
+            || sent_text != text
+            || sent_author != author_name.and_then(crate::engine::config::normalize_user_name)
+        {
             return Err(DiscordError::Binding(format!(
                 "request id already committed a different Discord message {}",
                 sent.id
             )));
         }
-        project_message(&self.binding, &epoch, sent, ChatRole::User, sent_text)
-            .map_err(|error| DiscordError::Binding(error.to_string()))
+        project_message(
+            &self.binding,
+            &epoch,
+            sent,
+            ChatRole::User,
+            sent_text,
+            sent_author,
+        )
+        .map_err(|error| DiscordError::Binding(error.to_string()))
     }
 
     pub async fn history(
@@ -933,20 +950,25 @@ impl DiscordProjection {
                 {
                     return None;
                 }
-                let (role, text) = if message.author.id == self.bot_user_id {
+                let (role, text, author_name) = if message.author.id == self.bot_user_id {
                     if confirmed.contains(&message.id) {
-                        (ChatRole::Assistant, message.content.clone())
+                        (ChatRole::Assistant, message.content.clone(), None)
                     } else {
-                        let (_, text) = parse_authored_content(runtime.name(), &message.content)?;
-                        (ChatRole::User, text)
+                        let (_, text, author_name) =
+                            parse_authored_content(runtime.name(), &message.content)?;
+                        (ChatRole::User, text, author_name)
                     }
                 } else {
                     if message.author.bot == Some(true) {
                         return None;
                     }
-                    (ChatRole::User, message.content.clone())
+                    (
+                        ChatRole::User,
+                        message.content.clone(),
+                        message.author.display_name(),
+                    )
                 };
-                project_message(&self.binding, epoch, message, role, text).ok()
+                project_message(&self.binding, epoch, message, role, text, author_name).ok()
             })
             .collect::<Vec<_>>();
         if projected.len() > requested {
@@ -1002,8 +1024,16 @@ fn message_in_epoch(message: &Message, epoch: &ConversationEpoch) -> Result<bool
     Ok(timestamp >= started_at && ended_at.is_none_or(|ended_at| timestamp < ended_at))
 }
 
-fn authored_content(wave: &str, op: MessageOp, text: &str) -> String {
-    format!("{}\n{text}", authored_header(wave, op))
+fn authored_content(wave: &str, op: MessageOp, text: &str, author_name: Option<&str>) -> String {
+    let mut header = authored_header(wave, op);
+    if let Some(name) = author_name.and_then(crate::engine::config::normalize_user_name) {
+        header.truncate(header.len() - 3);
+        header.push_str(&format!(
+            " · author {}]**",
+            serde_json::to_string(&name).expect("name is serializable")
+        ));
+    }
+    format!("{header}\n{text}")
 }
 
 fn authored_header(wave: &str, op: MessageOp) -> String {
@@ -1015,14 +1045,27 @@ fn authored_header(wave: &str, op: MessageOp) -> String {
     format!("**[{wave} · Loopflow app{action}]**")
 }
 
-fn parse_authored_content(wave: &str, content: &str) -> Option<(MessageOp, String)> {
+fn parse_authored_content(
+    wave: &str,
+    content: &str,
+) -> Option<(MessageOp, String, Option<String>)> {
     for op in [MessageOp::Message, MessageOp::Interrupt] {
         let header = authored_header(wave, op);
         if let Some(text) = content
             .strip_prefix(&header)
             .and_then(|rest| rest.strip_prefix('\n'))
         {
-            return Some((op, text.to_string()));
+            return Some((op, text.to_string(), None));
+        }
+        let prefix = format!("{} · author ", &header[..header.len() - 3]);
+        if let Some(rest) = content.strip_prefix(&prefix) {
+            let (name, text) = rest.split_once("]**\n")?;
+            let name: String = serde_json::from_str(name).ok()?;
+            return Some((
+                op,
+                text.to_string(),
+                crate::engine::config::normalize_user_name(&name),
+            ));
         }
     }
     None
@@ -1035,17 +1078,38 @@ fn authored_nonce(request_id: &str) -> String {
     format!("lf-u-{}", &format!("{:x}", digest.finalize())[..16])
 }
 
+#[cfg(test)]
+#[test]
+fn request_authors_round_trip_through_discord_app_history() {
+    for name in [Some("Jack"), Some("Maya"), Some("A \"B\"\nC"), None] {
+        let content = authored_content(
+            "ship",
+            MessageOp::Message,
+            "You chose the prototype path.",
+            name,
+        );
+        let (op, text, parsed_name) = parse_authored_content("ship", &content).unwrap();
+        assert_eq!(op, MessageOp::Message);
+        assert_eq!(text, "You chose the prototype path.");
+        assert_eq!(parsed_name.as_deref(), name);
+    }
+    let old = "**[ship · Loopflow app]**\nanonymous request";
+    assert_eq!(parse_authored_content("ship", old).unwrap().2, None);
+}
+
 fn project_message(
     binding: &DiscordChatBinding,
     epoch: &ConversationEpoch,
     message: Message,
     role: ChatRole,
     text: String,
+    author_name: Option<String>,
 ) -> Result<WaveChatMessage> {
     let created_at =
         snowflake_timestamp(&message.id)?.format(&time::format_description::well_known::Rfc3339)?;
     let mut turn = ChatTurn::user(format!("discord-{}", message.id), text);
     turn.role = role;
+    turn.author_name = author_name;
     turn.created_at = created_at;
     Ok(WaveChatMessage {
         epoch_id: epoch.id.clone(),
@@ -1347,8 +1411,23 @@ struct ApiError {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct User {
     id: String,
+    global_name: Option<String>,
+    username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bot: Option<bool>,
+}
+
+impl User {
+    fn display_name(&self) -> Option<String> {
+        self.global_name
+            .as_deref()
+            .and_then(crate::engine::config::normalize_user_name)
+            .or_else(|| {
+                self.username
+                    .as_deref()
+                    .and_then(crate::engine::config::normalize_user_name)
+            })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1470,6 +1549,8 @@ mod tests {
             Message {
                 id: id.to_string(),
                 author: User {
+                    global_name: None,
+                    username: None,
                     id: format!("human-{id}"),
                     bot: None,
                 },
@@ -1599,6 +1680,8 @@ mod tests {
                 let message = Message {
                     id: id.to_string(),
                     author: User {
+                        global_name: None,
+                        username: None,
                         id: "bot".into(),
                         bot: Some(true),
                     },
@@ -1933,6 +2016,7 @@ mod tests {
             .try_deliver_discord(
                 "question".into(),
                 DiscordMessageSource {
+                    author_name: None,
                     binding: binding(),
                     message_id: "101".into(),
                     author_id: "human".into(),
@@ -1985,6 +2069,8 @@ mod tests {
         let echo = |id: &str| Message {
             id: id.into(),
             author: User {
+                global_name: None,
+                username: None,
                 id: "bot".into(),
                 bot: Some(true),
             },
@@ -2041,6 +2127,8 @@ mod tests {
             Message {
                 id: unrelated_bot_id.to_string(),
                 author: User {
+                    global_name: None,
+                    username: None,
                     id: "another-bot".into(),
                     bot: Some(true),
                 },
@@ -2311,20 +2399,21 @@ mod tests {
         .expect("runtime");
         adapter.attach(&runtime).expect("attach");
 
-        // The pickup ack the gateway arm posts on a live human message.
+        // The pickup ack the gateway arm posts on a live chat message.
         adapter.react("101", ACK_EMOJI).await;
 
-        // A human message is answered by the resident, then delivered.
+        // A chat message is answered by the resident, then delivered.
         runtime
             .try_deliver_discord(
                 "question".into(),
                 DiscordMessageSource {
+                    author_name: None,
                     binding: binding(),
                     message_id: "101".into(),
                     author_id: "human".into(),
                 },
             )
-            .expect("deliver human message");
+            .expect("deliver chat message");
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
             answers: Vec::new(),
         });
@@ -2355,7 +2444,7 @@ mod tests {
         let done = percent_encode_emoji(DONE_EMOJI);
         assert!(
             reactions.contains(&format!("PUT 101 {ack}")),
-            "pickup ack on the human message: {reactions:?}"
+            "pickup ack on the chat message: {reactions:?}"
         );
         assert!(
             reactions.contains(&format!("PUT 101 {done}")),

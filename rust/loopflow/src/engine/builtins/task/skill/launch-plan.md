@@ -52,7 +52,7 @@ update the problem and desired experience. Keep blockers and decisions that affe
 choice visible, with links to evidence.
 
 Preserve earlier reasoning in durable records without making readers replay every
-checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+checkpoint. Retain unresolved constraints, contrary evidence, and recorded decisions.
 Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
 Link related work where you explain its relevance. In prose and PR bodies, use
@@ -61,8 +61,8 @@ when unambiguous. State the relationship, such as builds on, supersedes, or veri
 Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
 In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
 
-For already designed work, select a Flow that continues that design. An
-explicit human Flow selection governs; otherwise use the Wave chapter recommendation.
+For already designed work, select a Flow that continues that design. The
+user's explicit Flow selection governs; otherwise use the Wave chapter recommendation.
 Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
@@ -71,7 +71,7 @@ follow-ups intentionally deferred.
 
 ## Existing-design handoff
 
-When the human asks to file a Task and run a Flow from an existing design,
+When the user asks to file a Task and run a Flow from an existing design,
 keep the design separate. Reuse the Task if it is the same work; otherwise file
 a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
@@ -96,7 +96,7 @@ tree enters worker context; other assets remain on disk. Preserve material
 needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
-Use the human-selected Flow and inspect its contents when explaining where it
+Use the Flow the user selected and inspect its contents when explaining where it
 begins; otherwise use the Wave chapter recommendation. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Flow, and observed launch result. Verify

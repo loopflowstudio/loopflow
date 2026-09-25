@@ -2128,7 +2128,7 @@ fn parse_github_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
 }
 
 /// A loopback URL is the provider CLI's local callback listener, never the
-/// page a human authorizes on. codex prints its `localhost:1455` server line
+/// page for authorizing access. codex prints its `localhost:1455` server line
 /// before the real authorization URL, and the first URL parsed wins the flow —
 /// treating loopback as a verification URL opened a dead "Not Found" tab and
 /// returned before the real URL was ever read.
@@ -3891,7 +3891,7 @@ mod tests {
     }
 
     /// `codex login` announces its localhost callback server before printing
-    /// the real authorization URL. The listener is not a page a human can
+    /// the real authorization URL. The listener is not a page someone can
     /// authorize on — taking it as the verification URL opened a dead
     /// "Not Found" tab and ended the flow before the real URL arrived.
     #[test]

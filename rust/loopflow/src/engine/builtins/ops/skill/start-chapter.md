@@ -2,7 +2,7 @@
 requires: latest chapter review when available; Task worktree for tracked application
 produces: accepted chapter plans, deterministic application receipts, publication status
 ---
-Open a new chapter from human direction. Waves endure; each Wave has exactly
+Open a new chapter from user direction. Waves endure; each Wave has exactly
 one current internal Project, replaced with fresh content at this boundary.
 The Wave owns its objective and instruments; chapter JSON owns metric_targets,
 KRs, and the Flow recommendation. Never create a second objective or inherit
@@ -18,11 +18,11 @@ Read the latest merged `.lf/chapters/<id>/start.md` and its review. Run
 review-chapter when the evidence is missing or stale. Read the Wave roster,
 GOAL/MEMORY, `lf status <wave> --json`, and `lf roadmap --json`.
 Lead with experienced improvements, remaining friction, active work, and gaps.
-Ask what mattered, surprised, or should become possible; reflect the human's
+Ask what mattered, surprised, or should become possible; reflect the user's
 language and unresolved tensions. Discuss any Wave boundary changes.
 
-**Gate 1:** the human explicitly accepts direction before scoped planning Runs.
-With a human present, ask in the conversation. Headless, use `lf ask` and wait
+**Gate 1:** the user explicitly accepts direction before scoped planning Runs.
+In an interactive session, ask in the conversation. Headless, use `lf ask` and wait
 for an explicit completed decision. Silence, elapsed time, or provider exit is
 not acceptance. Existing accepted direction remains valid; do not ask again.
 
@@ -39,7 +39,7 @@ unbound Run with its exact name and boundary. Children propose, return agree or
 challenge, and never mutate live planning. Do not launch Project planning Runs.
 
 Archive each complete proposal, exact JSON plan and dry-run receipt under the
-chapter directory. Reconcile challenges and show the human the consequential
+chapter directory. Reconcile challenges and show the user the consequential
 Wave objectives, fresh KRs and metric targets, inherited started Tasks, untouched backlog closures, new Tasks,
 and unresolved evidence. A failed/missing proposal stays explicit.
 
@@ -76,7 +76,7 @@ partial application is pending, never prose success. Seal `draft.md` as
 Curate durable lessons into Wave memory. Checkpoint the prior review, scoped
 reports, accepted plans, actual receipts and charter edits with `lf commit`.
 Obtain push authority unless already given, then use the selected PR workflow;
-default to `lf pr submit` for a human merge. Until merged, explicitly report
+default to `lf pr submit` for a manual merge. Until merged, explicitly report
 that operational application is complete but archive publication is pending.
 Corrections append dated observations; never rewrite earlier evidence.
 
@@ -98,7 +98,7 @@ update the problem and desired experience. Keep blockers and decisions that affe
 choice visible, with links to evidence.
 
 Preserve earlier reasoning in durable records without making readers replay every
-checkpoint. Retain unresolved constraints, contrary evidence, and human decisions.
+checkpoint. Retain unresolved constraints, contrary evidence, and recorded decisions.
 Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
 Link related work where you explain its relevance. In prose and PR bodies, use

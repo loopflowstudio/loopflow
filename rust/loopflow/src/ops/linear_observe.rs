@@ -1,6 +1,6 @@
 //! Turn a Linear issue read into durable Task direction.
 //!
-//! A human editing a Linear issue's title or description or adding a comment
+//! Someone editing a Linear issue's title or description or adding a comment
 //! appends an ordered Steer. This module maps one observation onto that input
 //! spine, and [`Store::apply_linear_observation`] persists it atomically.
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
@@ -19,7 +19,7 @@ use crate::work::task::{
     LinearFollowUp, LinearObservationApply, LinearObservationOutcome, Task, TaskLinearObservation,
 };
 
-/// Explicit steering is eligible even when published by an integration. Human
+/// Explicit steering is eligible even when published by an integration. Participant-authored
 /// comments include the account used by Loopflow; exclude writebacks by content.
 pub(crate) fn is_human_comment(comment: &IssueComment, _viewer_id: &str) -> bool {
     is_direction_comment(&comment.body, comment.author_id.as_deref())
@@ -49,7 +49,19 @@ pub(crate) async fn publish_task_steer(
     }
     let client = super::pm::issue_client(&task.worktree).await?;
     let marker = format!("<!-- loopflow-steer:{} -->", uuid::Uuid::new_v4());
-    let comment_id = publish_comment(&client, task.plan.id.as_str(), text, &marker).await?;
+    let name = crate::engine::config::launch_user_name()
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let text = match name {
+        Some(name) => format!(
+            "{text}\n\n<!-- loopflow-requester:{} -->",
+            serde_json::to_string(&name)
+                .expect("name is serializable")
+                .replace('<', "\\u003c")
+                .replace('>', "\\u003e")
+        ),
+        None => text.to_string(),
+    };
+    let comment_id = publish_comment(&client, task.plan.id.as_str(), &text, &marker).await?;
     refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
         "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
     )))?;
@@ -92,6 +104,37 @@ pub(crate) fn comment_revision_id(id: &str, revision: Option<&str>) -> String {
         Some(revision) => format!("{id}@{revision}"),
         None => id.to_string(),
     }
+}
+
+pub(crate) fn render_comment(
+    id: &str,
+    body: &str,
+    author_id: Option<&str>,
+    author_name: Option<&str>,
+) -> String {
+    // Explicit steering can be published through an integration account. Its
+    // recorded requester wins; an older anonymous steer stays anonymous.
+    let requester = if body.contains("<!-- loopflow-steer:") {
+        body.split_once("<!-- loopflow-requester:")
+            .and_then(|(_, rest)| rest.split_once(" -->"))
+            .and_then(|(name, _)| serde_json::from_str::<String>(name).ok())
+    } else {
+        author_name.map(str::to_string)
+    };
+    let attribution = requester
+        .as_deref()
+        .and_then(crate::engine::config::normalize_user_name)
+        .map(|name| {
+            format!(
+                " by {}",
+                serde_json::to_string(&name).expect("name is serializable")
+            )
+        })
+        .unwrap_or_default();
+    let source = author_id
+        .map(|id| format!(" (provider user {id})"))
+        .unwrap_or_default();
+    format!("Linear comment {id}{attribution}{source}:\n\n{body}")
 }
 
 fn content_steer_text(title: &str, description: &str) -> String {
@@ -143,7 +186,12 @@ pub(crate) fn plan_apply(
         .filter(|comment| is_human_comment(comment, viewer_id))
         .map(|comment| LinearFollowUp {
             comment_id: comment_revision_id(&comment.id, comment.revision.as_deref()),
-            text: format!("Linear comment {}:\n\n{}", comment.id, comment.body),
+            text: render_comment(
+                &comment.id,
+                &comment.body,
+                comment.author_id.as_deref(),
+                comment.author_name.as_deref(),
+            ),
         })
         .collect();
     LinearObservationApply {
@@ -238,8 +286,54 @@ pub(crate) mod tests {
 
     const VIEWER: &str = "user-loopflow";
 
+    #[test]
+    fn request_authors_survive_linear_direction_rendering() {
+        let comments = [
+            ("one", Some("Jack")),
+            ("two", Some("Maya")),
+            ("three", None),
+        ]
+        .into_iter()
+        .map(|(id, name)| IssueComment {
+            id: id.into(),
+            revision: None,
+            body: "prototype".into(),
+            author_id: Some(format!("person-{id}")),
+            author_name: name.map(str::to_string),
+        })
+        .collect();
+        let apply = plan_apply(
+            &task(),
+            observation("title", "body", comments),
+            VIEWER,
+            time::OffsetDateTime::now_utc(),
+            None,
+        );
+        assert!(apply.follow_ups[0]
+            .text
+            .contains("by \"Jack\" (provider user person-one)"));
+        assert!(apply.follow_ups[1]
+            .text
+            .contains("by \"Maya\" (provider user person-two)"));
+        assert!(!apply.follow_ups[2].text.contains(" by "));
+        let explicit =
+            "prototype\n<!-- loopflow-requester:\"Jack\" -->\n<!-- loopflow-steer:one -->";
+        let rendered =
+            super::render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
+        assert!(rendered.contains("by \"Jack\""));
+        assert!(!rendered.contains("Account Owner"));
+        let anonymous = super::render_comment(
+            "old",
+            "prototype\n<!-- loopflow-steer:old -->",
+            Some("publisher"),
+            Some("Account Owner"),
+        );
+        assert!(!anonymous.contains(" by "));
+    }
+
     fn comment(id: &str, body: &str, author: Option<&str>) -> IssueComment {
         IssueComment {
+            author_name: None,
             id: id.to_string(),
             revision: None,
             body: body.to_string(),

@@ -19,7 +19,7 @@
 //! Spawned by the listener with the endpoint and
 //! token in env, or attached by hand against the discovery files. On listener
 //! death the subscription ends and the resident exits cleanly — its keeper is
-//! gone; whether anything restarts the pair is the human's arrangement
+//! gone; whether anything restarts the pair is the operator's arrangement
 //! (tmux, systemd). On loop failure the resident reports
 //! `LoopState::Failed` over the wire and exits nonzero — the listener's
 //! supervisor owns the respawn ladder.

@@ -63,7 +63,7 @@ impl SseFrameParser {
 /// Follow one `/events` connection until it ends, handing every frame to
 /// `on_frame`. `query` is `""` for the mind's thread, or `"?inbox=true"` for
 /// the resident's scope. Returning [`ControlFlow::Break`] from `on_frame` closes
-/// the connection early — the human thread uses it to reconnect on a `resync`
+/// the connection early — the conversation thread uses it to reconnect on a `resync`
 /// frame. Connection failure and non-2xx are errors.
 pub async fn stream_events(
     endpoint: &str,

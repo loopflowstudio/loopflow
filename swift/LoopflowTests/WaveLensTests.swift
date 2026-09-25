@@ -97,7 +97,7 @@ struct WaveLensTests {
         #expect(WaveLensColor(.unknown) == .unknown)
     }
 
-    @Test("a human Task step is blue and wins over Project planning state")
+    @Test("a Task review step is blue and wins over Project planning state")
     func projectBlueWinsOverPlanningState() throws {
         let lens = WaveLens.forTasks(
             tasks: [try makeTask(state: "waiting", reason: "Waiting for your answer")]

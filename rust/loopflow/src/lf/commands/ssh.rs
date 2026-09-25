@@ -352,13 +352,16 @@ fn run_with_env(
     reject_detached_account_forwarding(account_lease.is_some(), cmd)?;
     let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
     let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
+    let user_name = crate::engine::config::launch_user_name()?.unwrap_or_default();
+    let mut extra_env = extra_env.to_vec();
+    extra_env.push((crate::engine::config::USER_NAME_ENV, &user_name));
     let preamble = build_preamble(
         &credentials,
         remote_handle.as_ref(),
         dest,
         repo,
         cmd,
-        extra_env,
+        &extra_env,
     );
     let outcome = run_ssh(dest, port, forward_agent, broker.as_ref(), &preamble)?;
     // `process::exit` skips destructors. Close the broker and remove its local
@@ -1045,6 +1048,36 @@ mod tests {
         assert!(preamble.contains(r#"export GH_TOKEN='a'\''b; rm -rf ~ #'"#));
         // The dangerous substring never appears unquoted at a statement start.
         assert!(!preamble.contains("\nrm -rf"));
+    }
+
+    #[test]
+    fn preferred_name_crosses_the_remote_shell_without_host_fallback() {
+        for name in ["Jack", "", "D'Angelo $(printf wrong)"] {
+            let cmd = vec![
+                "sh".into(),
+                "-c".into(),
+                "printf '%s' \"$LF_USER_NAME\"".into(),
+            ];
+            let preamble = build_preamble(
+                &Credentials::default(),
+                None,
+                "host",
+                ".",
+                &cmd,
+                &[(crate::engine::config::USER_NAME_ENV, name)],
+            );
+            let output = std::process::Command::new("bash")
+                .args(["-c", &preamble])
+                .env(crate::engine::config::USER_NAME_ENV, "Host Owner")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(String::from_utf8(output.stdout).unwrap(), name);
+        }
     }
 
     #[test]

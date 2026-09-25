@@ -294,7 +294,7 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
   }
 }"#;
 
-// Loopflow's own OAuth user. Its id lets the observer tell a human's edit or
+// Loopflow's own OAuth user. Its id lets the observer distinguish a participant's edit or
 // comment from Loopflow's own writeback, so ingestion never feeds itself.
 const VIEWER_QUERY: &str = r#"query Viewer {
   viewer {
@@ -333,10 +333,10 @@ const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: Stri
   }
 }"#;
 
-// One issue's human-editable content plus a `createdAt`-ordered page of its
-// comments. Each comment carries `user { id }` (the human author) but not
-// `botActor`, so an integration-authored comment decodes to a null author and is
-// never treated as human direction. `updatedAt` is the revision marker. The
+// One issue's editable content plus a `createdAt`-ordered page of its comments.
+// Each comment carries its author's ID and display name, but not `botActor`;
+// integration-authored comments have no user author. Explicit steering carries
+// separate requester metadata. `updatedAt` is the revision marker. The
 // reconciler orders delivery itself and dedupes against the cursor, so page
 // order only bounds how many comments one read can surface (OBSERVATION_COMMENT_PAGE).
 const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $comments: Int!) {
@@ -351,6 +351,8 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
         updatedAt
         user {
           id
+          displayName
+          name
         }
       }
       pageInfo { hasNextPage endCursor }
@@ -365,7 +367,11 @@ const ISSUE_COMMENTS_QUERY: &str = r#"query IssueComments($id: String!, $comment
         id
         body
         updatedAt
-        user { id }
+        user {
+          id
+          displayName
+          name
+        }
       }
       pageInfo {
         hasNextPage
@@ -396,7 +402,7 @@ const UPDATE_ATTACHMENT_MUTATION: &str = r#"mutation UpdateAttachment($id: Strin
 }"#;
 
 /// How many recent comments one observation reads. A Task accumulating more than
-/// this many unseen human comments between polls is not a real case; the cursor
+/// this many unseen participant comments between polls is not a real case; the cursor
 /// still refuses to double-deliver any it does see.
 const OBSERVATION_COMMENT_PAGE: u32 = 50;
 
@@ -1228,6 +1234,16 @@ impl LinearClient {
                 id: node.id,
                 revision: node.updated_at,
                 body: node.body,
+                author_name: node.user.as_ref().and_then(|user| {
+                    user.display_name
+                        .as_deref()
+                        .and_then(crate::engine::config::normalize_user_name)
+                        .or_else(|| {
+                            user.name
+                                .as_deref()
+                                .and_then(crate::engine::config::normalize_user_name)
+                        })
+                }),
                 author_id: node.user.map(|user| user.id),
             }));
             if !page.page_info.has_next_page {
@@ -1454,7 +1470,15 @@ struct CommentNode {
     #[serde(default)]
     body: String,
     #[serde(default)]
-    user: Option<IdNode>,
+    user: Option<CommentUser>,
+}
+
+#[derive(Deserialize)]
+struct CommentUser {
+    id: String,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1983,7 +2007,7 @@ mod tests {
                         "comments": {
                             "pageInfo": {"hasNextPage": false, "endCursor": null},
                             "nodes": [
-                                { "id": "c-1", "body": "please prioritize", "user": { "id": "user-human" } },
+                                { "id": "c-1", "body": "please prioritize", "user": { "id": "user-human", "displayName": "Jack", "name": "Jack F" } },
                                 { "id": "c-2", "body": "PR: https://x", "user": { "id": "user-loopflow" } },
                                 { "id": "c-3", "body": "integration note", "user": null }
                             ]
@@ -2006,18 +2030,21 @@ mod tests {
             observation.comments,
             vec![
                 IssueComment {
+                    author_name: Some("Jack".to_string()),
                     id: "c-1".to_string(),
                     revision: None,
                     body: "please prioritize".to_string(),
                     author_id: Some("user-human".to_string()),
                 },
                 IssueComment {
+                    author_name: None,
                     id: "c-2".to_string(),
                     revision: None,
                     body: "PR: https://x".to_string(),
                     author_id: Some("user-loopflow".to_string()),
                 },
                 IssueComment {
+                    author_name: None,
                     id: "c-3".to_string(),
                     revision: None,
                     body: "integration note".to_string(),
@@ -2034,18 +2061,34 @@ mod tests {
 
     #[tokio::test]
     async fn observe_issue_reads_every_comment_page_in_revision_order() {
-        let comment = |id, revision| json!({"id": id, "body": "advice", "updatedAt": revision, "user": {"id": "me"}});
-        let (url, _) = test_server::spawn(vec![
-            json_response(StatusCode::OK, json!({"data": {"issue": {
+        // Model GraphQL's field selection so a response fixture cannot supply
+        // author names that a continuation query forgot to request.
+        let app = axum::Router::new().route("/", axum::routing::post(|axum::Json(request): axum::Json<Value>| async move {
+            let first = request["variables"]["after"].is_null();
+            let (id, date, name) = if first {
+                ("newer", "2026-09-23T00:00:00Z", "Jack")
+            } else {
+                ("older", "2026-09-22T00:00:00Z", "Maya")
+            };
+            let mut user = json!({"id": format!("person-{id}")});
+            let query = request["query"].as_str().unwrap();
+            if query.contains("displayName") {
+                user["displayName"] = json!(name);
+            }
+            axum::Json(json!({"data": {"issue": {
                 "updatedAt": "2026-09-23T00:00:00Z", "title": "Task", "description": "",
-                "comments": {"nodes": [comment("newer", "2026-09-23T00:00:00Z")], "pageInfo": {"hasNextPage": true, "endCursor": "cursor-1"}}
-            }}})),
-            json_response(StatusCode::OK, json!({"data": {"issue": {"comments": {
-                "nodes": [comment("older", "2026-09-22T00:00:00Z")], "pageInfo": {"hasNextPage": false, "endCursor": null}
-            }}}})),
-        ]).await;
+                "comments": {
+                    "nodes": [{"id": id, "body": "advice", "updatedAt": date, "user": user}],
+                    "pageInfo": {"hasNextPage": first, "endCursor": if first { Some("cursor-1") } else { None }}
+                }
+            }}}))
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let client = LinearClient::with_base_url("fixture-token".into(), None, url);
         let observed = client.observe_issue("issue-1").await.unwrap();
+        server.abort();
         assert_eq!(
             observed
                 .comments
@@ -2057,6 +2100,14 @@ mod tests {
         assert_eq!(
             observed.comments[1].revision.as_deref(),
             Some("2026-09-23T00:00:00Z")
+        );
+        assert_eq!(
+            observed
+                .comments
+                .iter()
+                .map(|comment| comment.author_name.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Maya"), Some("Jack")]
         );
     }
 
@@ -2712,7 +2763,7 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "teams": { "nodes": [{
                     "id": "team-loo", "name": "Loopflow", "key": "LOO",
-                    "description": "Human-owned team notes."
+                    "description": "Maintainer-owned team notes."
                 }] } } }),
             ),
             json_response(
@@ -2723,7 +2774,7 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "teams": { "nodes": [{
                     "id": "team-loo", "name": "Loopflow", "key": "LOO",
-                    "description": "Human-owned team notes.\n\n<!-- loopflow-repository: loopflowstudio/loopflow -->"
+                    "description": "Maintainer-owned team notes.\n\n<!-- loopflow-repository: loopflowstudio/loopflow -->"
                 }] } } }),
             ),
         ])
@@ -2739,7 +2790,7 @@ mod tests {
         let requests = requests.lock().await;
         let update: Value = serde_json::from_str(&requests[1].body).unwrap();
         let description = update["variables"]["description"].as_str().unwrap();
-        assert!(description.starts_with("Human-owned team notes."));
+        assert!(description.starts_with("Maintainer-owned team notes."));
         assert!(description.contains("loopflowstudio/loopflow"));
     }
 
@@ -2770,7 +2821,7 @@ mod tests {
             StatusCode::OK,
             json!({ "data": { "teams": { "nodes": [{
                 "id": "team-loo", "name": "Loopflow", "key": "LOO",
-                "description": "Human-owned team notes."
+                "description": "Maintainer-owned team notes."
             }] } } }),
         )])
         .await;

@@ -74,7 +74,7 @@ with the Wave's durable Home placement; an OS-held lease prevents concurrent
 listeners across its checkouts.
 
 The shared `~/.lf/loopflow.db` stores the Wave UUID, its repository-scoped
-locator, and typed Project and Task observations. Human commands resolve the
+locator, and typed Project and Task observations. Interactive commands resolve the
 name only inside the invoking repository; a diagnostic bare-name lookup fails
 when several repositories own that name. A Wave can still run when that store
 does not exist, but child observations are unavailable. The live endpoint and

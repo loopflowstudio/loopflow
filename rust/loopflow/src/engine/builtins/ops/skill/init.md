@@ -12,14 +12,14 @@ Skills, flows, models, and launch preferences are secondary configuration.
 
 The launch prompt identifies the reviewer.
 
-- **Human reviewer:** ask one consequential question at a time. You may guide
+- **Interactive reviewer:** ask one consequential question at a time. You may guide
   interactive account connections and edit personal config only after the
-  human explicitly chooses them.
+  user explicitly chooses them.
 - **Parent reviewer:** inspect the same state, but make only repo-scoped,
   reversible changes through the review protocol with the Task. Never guess a
-  human preference. OAuth, personal config, placement, and external object
+  user preference. OAuth, personal config, placement, and external object
   creation require the present User. When absent, report the exact blocker and
-  next commands; do not manufacture a human session.
+  next commands; do not manufacture a session.
 
 Never expose credential values. Use Loopflow's auth commands; do not read
 tokens from dotfiles or environment variables.
@@ -68,6 +68,15 @@ Home, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
+In an interactive session, if the current participant's preferred name is
+missing, ask what name to use in saved artifacts. Record their explicit choice as `user.name` in personal
+configuration (`$LF_HOME/config.yaml`, or `~/.lf/config.yaml` when unset),
+preserving other settings. An explicit correction updates the same preference;
+blank or absent means unknown. Never infer it from an account, directory, or
+Git author, and never put a personal name in repo configuration.
+On SSH, preserve the destination owner's preference; the caller's preference
+belongs on the originating Home. In unattended work, leave an absent name unknown.
+
 At least one supported agent must be available: Claude Code, Codex, or
 OpenCode. If none is installed, stop with install commands and end with
 `lf init` as the retry. Do not run a package manager.
@@ -81,14 +90,14 @@ Resolve repo agent configuration conservatively:
 - Preserve a valid existing `agent` override.
 - Codex is the implicit default. An absent `agent` is valid even when this Home
   lacks Codex; report the local mismatch instead of changing repo policy.
-- Change `agent` or `supported_harnesses` only when the human explicitly wants
+- Change `agent` or `supported_harnesses` only when the user explicitly wants
   a team-wide policy. Ask whether the choice is repo-wide or Home-local before
   writing it.
 - A local harness mismatch affects where work can run. It does not invalidate
   the repository.
 
 Create `.lf/config.yaml` only when a real repo-scoped policy is missing and the
-human chooses one. Preserve every existing field. For example:
+user chooses one. Preserve every existing field. For example:
 
 ```yaml
 supported_harnesses:
@@ -106,7 +115,7 @@ works; never modify them for a parent reviewer.
 
 ## 3. Connect shared truth for the intended path
 
-Ask the human what they want to make operational now:
+Ask the user what they want to make operational now:
 
 1. an existing Wave,
 2. a new durable Wave,
@@ -131,7 +140,7 @@ when configured. If this repository uses Doppler and credentials are missing,
 use `doppler run -- lf auth linear`. Otherwise follow the customer's secret
 manager and the exact missing variable names. Never print credential values.
 
-Account connection is an external side effect. A human must choose it and
+Account connection is an external side effect. The user must choose it and
 complete the provider flow. Never claim a provider is connected until
 `lf auth status` proves it. Direct skills can proceed with a local agent even
 when Linear is absent; do not block that path on PM setup.
@@ -156,7 +165,7 @@ lf pm init --wave <wave>
 
 The first Wave establishes the repository Team and defaults its key from the
 repository name; `--team-key <KEY>` is an explicit override. Later Waves must
-reuse that binding. Choosing the initial repository Team requires the human's
+reuse that binding. Choosing the initial repository Team requires the user's
 choice. Do not invent another Team, Initiative, Project, or KR; an existing
 repository binding changes only through the repository-wide migration.
 
@@ -169,10 +178,10 @@ wave/<name>/GOAL.md
 ```
 
 Write the goal as a durable operating contract: objective, observable success,
-boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
-in the chapter plan. Curate durable decisions in `wave/<name>/MEMORY.md` through
-the repository workflow; do not invent runtime memory commands or duplicate the
-plan in the goal body.
+chapter priorities, boundaries, and when to stop or escalate. Do not
+create or edit `MEMORY.md`; the Wave runtime owns compiled memory. Runtime
+learnings arrive through `lf memory add` and `lf memory update`. Do not create
+Projects or Tasks in the goal body.
 
 Then offer Linear binding as above. Initialization provisions one internal
 Project for the first chapter. Subsequent chapters replace it through
@@ -210,7 +219,7 @@ author reusable behavior.
 The current Home is the default execution authority. Do not place or start a
 Wave merely to prove setup.
 
-If the human wants remote execution, explain the durable sequence and use the
+If the user wants remote execution, explain the durable sequence and use the
 actual ids observed from the commands:
 
 ```bash
@@ -273,7 +282,7 @@ If something remains unavailable, say exactly which authority is missing and
 the command that would establish it. Never hide a missing account, Home,
 Wave/PM binding, or agent behind "setup complete."
 
-On macOS, offer `lf desktop` as an optional human control surface after the
+On macOS, offer `lf desktop` as an optional interactive control surface after the
 selected path is proved. Do not launch it automatically.
 
 ## Conversation style

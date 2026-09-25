@@ -12,7 +12,7 @@
 //! re-resolving the endpoint each attempt — server restarts change ports.
 //!
 //! Output renders from the WIRE frames (never journal internals) as the
-//! conversation: what the human and Wave said. Decisions and delivery reports
+//! conversation: what participants and the Wave said. Decisions and delivery reports
 //! arrive as speech; tool calls, shell commands, file edits, thoughts, states,
 //! and turn boundaries stay out of chat.
 
@@ -471,7 +471,7 @@ mod tests {
             .is_empty());
     }
 
-    /// The human wire: a source-bearing `message` opens the turn, then plain
+    /// The conversation wire: a source-bearing `message` opens the turn, then plain
     /// `message-delta` increments grow it. A `resync` drops the reconstruction
     /// so the reconnect's source-bearing replay resumes it.
     #[test]
@@ -563,7 +563,7 @@ mod tests {
     /// The failure case this task exists to fix, in one transcript: a
     /// long-running `task` flow that clarifies, builds, hits a red test,
     /// recovers, and reports. The default view must read as what the wave SAID
-    /// and what needs a human — the twenty-odd tool calls and shell commands
+    /// and what needs attention — the twenty-odd tool calls and shell commands
     /// underneath it never become chat.
     #[test]
     fn a_long_running_task_reads_as_conversation_not_a_build_log() {
@@ -599,7 +599,7 @@ mod tests {
             }));
         };
 
-        // The human asks for the work.
+        // The participant requests the work.
         feed(
             &mut renderer,
             "message",
@@ -802,17 +802,21 @@ mod tests {
 
         for i in 0..20 {
             runtime
-                .deliver(
+                .try_deliver(
                     crate::controller::wave::journal::MessageOp::Message,
                     format!("old {i}"),
+                    None,
                 )
+                .expect("journal write")
                 .expect("older user turn");
         }
         runtime
-            .deliver(
+            .try_deliver(
                 crate::controller::wave::journal::MessageOp::Message,
                 "replayed".into(),
+                None,
             )
+            .expect("journal write")
             .expect("user turn");
         let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
@@ -840,10 +844,12 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         runtime
-            .deliver(
+            .try_deliver(
                 crate::controller::wave::journal::MessageOp::Message,
                 "live after subscribe".into(),
+                None,
             )
+            .expect("journal write")
             .expect("live user turn");
         for _ in 0..200 {
             if seen

@@ -79,7 +79,7 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    /// Open the branch's PR for human review from `worktree`. This delegates to
+    /// Open the branch's PR for review from `worktree`. This delegates to
     /// `lf pr open` — the single presentation boundary — instead of building a
     /// GitHub URL and opening it here, so any later review-surface preference is
     /// honored in one place. Only an explicit user review action calls this;

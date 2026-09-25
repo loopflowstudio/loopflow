@@ -14,13 +14,17 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Author {
-    /// A person. `name` is the platform handle where one exists, else empty.
+    /// A person. `name` is the captured preferred name, else empty.
     Human { name: String },
     /// The wave itself — its own posted replies. Reading these back is how the
     /// wave knows it has already answered.
     Bot,
     /// A message mirrored in from an external platform (e.g. Discord).
-    Bridge { platform: String, user: String },
+    Bridge {
+        platform: String,
+        user: String,
+        name: Option<String>,
+    },
 }
 
 /// One message in a wave's chat channel.
@@ -44,14 +48,14 @@ impl Message {
     /// Project one folded thread turn into a channel message. Returns the turn's
     /// journal sequence alongside it so a reader can advance its cursor.
     ///
-    /// A `User` turn is a human/bridged message; an `Assistant` turn is the
+    /// A `User` turn is a local or bridged message; an `Assistant` turn is the
     /// wave's own post. The runtime overlays bridged-author identity from the
     /// source record; a bare local read reports `Human`.
     pub(crate) fn from_turn(turn: ChatTurn) -> Option<(u64, Message)> {
         let seq = turn.id.strip_prefix("turn-")?.parse::<u64>().ok()?;
         let author = match turn.role {
             ChatRole::User => Author::Human {
-                name: String::new(),
+                name: turn.author_name.unwrap_or_default(),
             },
             ChatRole::Assistant => Author::Bot,
         };
@@ -80,6 +84,7 @@ mod tests {
             },
             Author::Bot,
             Author::Bridge {
+                name: None,
                 platform: "discord".to_string(),
                 user: "42".to_string(),
             },
@@ -102,6 +107,7 @@ mod tests {
         use crate::chat::turns::{ChatRole, ChatTurn};
         use crate::chat::types::Lifecycle;
         let assistant = ChatTurn {
+            author_name: None,
             id: "turn-3".to_string(),
             role: ChatRole::Assistant,
             text: "answered".to_string(),

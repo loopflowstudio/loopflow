@@ -1,12 +1,12 @@
 ---
 requires: code on branch
-produces: PR ready, assigned to a human to merge
+produces: PR ready, assigned to its reviewer to merge
 ---
-Submit the current branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until a human clicks merge.
+Submit the current branch for review and manual merge. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. The reviewer clicks merge.
 
-Use `pr-submit` (not `pr-land`) whenever a person should land the work by hand.
+Use `pr-submit` (not `pr-land`) whenever the user will merge the work.
 `pr-land` is for headless/auto runs where loopflow merges hands-off;
-`pr-submit` leaves the one required merge click to a human. (GitHub blocks
+`pr-submit` leaves the one required merge click to the user. (GitHub blocks
 approving your own PR, so the gate is the merge click, not a review approval —
 the button unlocks once checks pass.)
 
@@ -31,13 +31,13 @@ re-derive what these already record.
 
 ## API
 
-`lf pr submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge.
+`lf pr submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the user who will merge. It does **not** arm auto-merge.
 
 ```
 lf pr submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
-Inside a managed Task worktree, `-c` completes the Task after the human merge
+Inside a managed Task worktree, `-c` completes the Task after the manual merge
 and `--next <slug>` rotates its serial PR chain after merge.
 
 **Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.

@@ -5,20 +5,220 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use loopflow::chat::turns::BodyProvenance;
 use loopflow::chat::turns::ChatRole;
 use loopflow::chat::types::{ConversationItem, Lifecycle};
-use loopflow::controller::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
-use loopflow::controller::wave::playhead::BodyProvenance;
+use loopflow::controller::wave::journal::{
+    fold_thread, journal_path, read_events, EventKind, Journal, MessageOp,
+};
+use loopflow::controller::wave::recovery::{self, FlowDisposition};
 use loopflow::controller::wave::runtime::WaveRuntime;
 use loopflow::controller::wave::server::{self, ResidentDoor};
 use loopflow::controller::wave::state::LoopState;
 use loopflow::controller::wave::wire::ResidentDelta;
 
+#[test]
+fn historical_skip_preserves_failure_and_queued_continuations_on_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = journal_path(tmp.path(), "ship");
+    let saved = include_str!("../../../tests/fixtures/wave/queued-after-skip.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, saved).unwrap();
+
+    // No source catalog exists here: the journal must retain the captured work.
+    for _ in 0..2 {
+        let error = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap_err();
+        assert!(error.to_string().contains("lf wave recover ship"));
+        let fold = fold_thread(&read_events(&path));
+        let turns = &fold.turns;
+        let failed = turns.iter().find(|turn| turn.id == "turn-3").unwrap();
+        assert_eq!(failed.status, Lifecycle::Failed);
+        assert_eq!(failed.text, "Partial repair evidence");
+        let body = failed.body.as_ref().unwrap();
+        assert_eq!(body.body_id, "failed-body");
+        assert_eq!(body.session_id.as_deref(), Some("historical-session"));
+        assert_eq!(
+            body.termination_reason.as_deref(),
+            Some("provider disconnected")
+        );
+        assert_eq!(turns.last().unwrap().text, "Keep later feedback too");
+        assert_eq!(
+            fold.pending_messages
+                .iter()
+                .map(|message| message.id.0.as_str())
+                .collect::<Vec<_>>(),
+            ["msg-1"],
+            "only the historical failed claim returns to the governance queue"
+        );
+        assert!(fold.messages.keys().any(|id| id.0 == "msg-11"));
+
+        let view = fold.playhead.unwrap();
+        assert!(view.active.is_none());
+        assert_eq!(
+            view.stack
+                .iter()
+                .map(|frame| (frame.id.as_str(), frame.cursor, frame.iteration))
+                .collect::<Vec<_>>(),
+            [("root", 1, 2), ("nested", 1, 3)]
+        );
+        assert_eq!(view.stack[0].queue[0].id, "root-queued");
+        assert_eq!(
+            view.stack[1]
+                .queue
+                .iter()
+                .map(|invocation| invocation.id.as_str())
+                .collect::<Vec<_>>(),
+            ["nested-first", "nested-second"]
+        );
+        let loopflow::engine::ConcreteStep::Skill(skill) = &view.stack[1].queue[0].steps[0] else {
+            panic!("queued work retains its captured Skill")
+        };
+        assert_eq!(
+            skill.skill.content.as_deref(),
+            Some("Captured verify instructions")
+        );
+        assert_eq!(view.stack[1].cursor, 1);
+        assert_eq!(view.stack[0].id, "root");
+        assert!(std::fs::read_to_string(&path).unwrap().starts_with(saved));
+    }
+    assert_eq!(
+        read_events(&path)
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::WaveFlowDisposition { .. }))
+            .count(),
+        1,
+        "unresolved startup records one disposition across retries"
+    );
+}
+
+fn install_history(repo: &Path, saved: &str) -> std::path::PathBuf {
+    let path = journal_path(repo, "ship");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, saved).unwrap();
+    path
+}
+
+#[test]
+fn default_governance_cutover_is_recorded_once_before_new_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let original = include_str!("../../../tests/fixtures/wave/idle-default.jsonl");
+    let path = install_history(tmp.path(), original);
+    for _ in 0..2 {
+        let runtime = open_wave(tmp.path());
+        run_resident_turn(runtime, resident_turn_deltas());
+    }
+    let events = read_events(&path);
+    assert!(fold_thread(&events).playhead.is_none());
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::WaveFlowDisposition { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::PlayheadChanged { .. }))
+            .count(),
+        1,
+        "new governance never writes a playhead"
+    );
+    assert!(std::fs::read_to_string(path).unwrap().starts_with(original));
+}
+
+#[test]
+fn cutover_never_infers_active_provider_death_from_listener_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let original = include_str!("../../../tests/fixtures/wave/active-default.jsonl");
+    let path = install_history(tmp.path(), original);
+
+    for _ in 0..2 {
+        let error = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap_err();
+        assert!(error.to_string().contains("liveness is unknown"));
+        let report = recovery::inspect(tmp.path(), "ship").unwrap();
+        let record = report.record.unwrap();
+        assert!(
+            recovery::cancel(tmp.path(), "ship", record.source_seq, "discard")
+                .unwrap_err()
+                .to_string()
+                .contains("termination is unproven")
+        );
+        let events = read_events(&path);
+        let fold = fold_thread(&events);
+        assert_eq!(fold.open.len(), 1);
+        assert_eq!(
+            fold.playhead.unwrap().active.unwrap().body_id,
+            "unsettled-body"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, EventKind::WaveFlowDisposition { .. }))
+                .count(),
+            1
+        );
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .starts_with(original));
+    }
+}
+
+#[test]
+fn recovery_cli_cancels_only_the_reviewed_boundary() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let path = journal_path(repo.path(), "ship");
+    let saved = include_str!("../../../tests/fixtures/wave/queued-after-skip.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, saved).unwrap();
+    let invoke = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["wave", "recover", "ship"])
+            .args(args)
+            .current_dir(repo.path())
+            .output()
+            .unwrap()
+    };
+    let inspected = invoke(&[]);
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert_eq!(report["record"]["source_seq"], 11);
+    assert_eq!(
+        report["source"]["kind"]["playhead"]["stack"][1]["queue"][0]["id"],
+        "nested-first"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+    assert!(!invoke(&["--cancel", "10", "--reason", "stale selection"])
+        .status
+        .success());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+
+    let cancelled = invoke(&["--cancel", "11", "--reason", "Replan as Tasks"]);
+    assert!(
+        cancelled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cancelled.stderr)
+    );
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.starts_with(saved));
+    assert!(invoke(&["--cancel", "11", "--reason", "Replan as Tasks"])
+        .status
+        .success());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), after);
+}
+
 /// One complete resident turn, as the loop emits it after a pass: an
 /// item, the pass's reply text, then the finalized boundary.
 fn resident_turn_deltas() -> Vec<ResidentDelta> {
     vec![
-        ResidentDelta::TurnOpened { answers: vec![] },
+        ResidentDelta::TurnOpened {
+            answers: vec![],
+            body: None,
+        },
         ResidentDelta::TurnItem {
             item: ConversationItem::Command {
                 id: "item-0".into(),
@@ -56,29 +256,6 @@ fn turn_seq(id: &str) -> u64 {
 
 fn open_wave(repo: &Path) -> Arc<WaveRuntime> {
     WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
-}
-
-fn body_for_current(runtime: &WaveRuntime, body_id: &str) -> BodyProvenance {
-    let step = runtime
-        .playhead()
-        .and_then(|playhead| playhead.now)
-        .expect("current playhead step");
-    BodyProvenance {
-        body_id: body_id.to_string(),
-        invocation_id: step.invocation_id,
-        step_index: step.index,
-        flow: step.flow,
-        step: step.step,
-        iteration: step.iteration,
-        session_id: Some("session-1".to_string()),
-        harness: Some("codex".to_string()),
-        model: Some("gpt-5".to_string()),
-        host: "test-host".to_string(),
-        worktree: runtime.repo_root().display().to_string(),
-        started_at: "2026-07-09T12:00:00Z".to_string(),
-        ended_at: None,
-        termination_reason: None,
-    }
 }
 
 #[tokio::test]
@@ -181,38 +358,31 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
     assert_eq!(rt.loop_state(), LoopState::Idle, "janitor settled the loop");
 }
 
-#[tokio::test]
-async fn restart_interrupts_the_abandoned_body_without_advancing_the_playhead() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let first_step = {
-        let rt = open_wave(tmp.path());
-        let view = rt.ensure_playhead().expect("initialize playhead");
-        let first_step = view.now.expect("first step");
-        rt.start_body(body_for_current(&rt, "body-1"))
-            .expect("start body");
-        rt.apply_resident_delta(ResidentDelta::TurnOpened { answers: vec![] });
-        first_step
-    };
-
-    let rt = open_wave(tmp.path());
-    let playhead = rt.playhead().expect("replayed playhead");
-    assert!(playhead.active.is_none(), "abandoned body was closed");
-    assert_eq!(
-        playhead.now.expect("same logical step"),
-        first_step,
-        "a process crash retries instead of silently advancing"
-    );
-    let turn = rt
-        .thread_snapshot()
-        .pop()
-        .expect("recovered assistant turn");
-    assert_eq!(turn.status, Lifecycle::Failed);
-    let body = turn.body.expect("turn keeps body provenance");
-    assert_eq!(body.body_id, "body-1");
-    assert_eq!(
-        body.termination_reason.as_deref(),
-        Some("startup janitor: body abandoned by server restart")
-    );
+#[test]
+fn restart_preserves_an_attempt_without_recorded_termination() {
+    let tmp = tempfile::tempdir().unwrap();
+    let runtime = open_wave(tmp.path());
+    let body = BodyProvenance::for_wave(tmp.path());
+    runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+        answers: vec![],
+        body: Some(body.clone()),
+    });
+    drop(runtime);
+    let path = journal_path(tmp.path(), "ship");
+    let before = std::fs::read(&path).unwrap();
+    for _ in 0..2 {
+        let error = WaveRuntime::open("ship".into(), tmp.path().into()).unwrap_err();
+        assert!(error.to_string().contains("unknown provider liveness"));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(
+            fold_thread(&read_events(&path)).open[0]
+                .body
+                .as_ref()
+                .unwrap()
+                .body_id,
+            body.body_id
+        );
+    }
 }
 
 #[tokio::test]
@@ -246,7 +416,7 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
 }
 
 #[test]
-fn legacy_playhead_cutover_preserves_queued_flow_intent() {
+fn legacy_playhead_cutover_preserves_original_source_until_explicit_cancellation() {
     for step in [
         serde_json::json!({"name": "research", "kind": "skill", "human": false}),
         serde_json::json!({"Xor": {"router": null, "flow_parents": [],
@@ -264,33 +434,36 @@ fn legacy_playhead_cutover_preserves_queued_flow_intent() {
         let original = format!("{legacy}\n");
         std::fs::write(&path, &original).expect("write legacy journal");
 
-        let runtime =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
-        let before = runtime.playhead().expect("replayed legacy playhead");
-        assert_eq!(before.stack[0].queue[0].flow, "research");
+        let error = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap_err();
+        assert!(error.to_string().contains("lf wave recover ship"));
+        let before = recovery::inspect(tmp.path(), "ship").unwrap();
+        assert_eq!(before.source.as_ref(), Some(&legacy));
+        assert!(matches!(
+            before.record.unwrap().disposition,
+            FlowDisposition::Unresolved { .. }
+        ));
 
-        let error = runtime
-            .ensure_playhead()
-            .expect_err("explicit restart required");
-        assert!(error.to_string().contains("--restart-flow"));
-        assert_eq!(runtime.playhead().expect("legacy remains"), before);
+        recovery::cancel(tmp.path(), "ship", 1, "Move this work into Tasks").unwrap();
+        let after_cancel = std::fs::read_to_string(&path).unwrap();
+        recovery::cancel(tmp.path(), "ship", 1, "Move this work into Tasks").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), after_cancel);
+        assert!(after_cancel.starts_with(&original));
 
-        let after = runtime
-            .restart_legacy_playhead()
-            .expect("cut over playhead explicitly");
-        assert_ne!(after.stack[0].id, "old-wave");
-        assert_eq!(after.stack[0].queue.len(), 1);
-        assert_eq!(after.stack[0].queue[0].flow, "research");
-        let stable = runtime.ensure_playhead().expect("reuse converted playhead");
-        assert_eq!(stable.stack[0].id, after.stack[0].id);
-        assert!(std::fs::read_to_string(&path)
-            .unwrap()
-            .starts_with(&original));
-        drop(runtime);
-        let reopened = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap();
+        // A replacement never recompiles the old Flow or its queued source names.
+        std::fs::create_dir_all(tmp.path().join(".lf/flows")).unwrap();
+        std::fs::write(
+            tmp.path().join(".lf/flows/wave.yaml"),
+            "- source-does-not-exist\n",
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let runtime = open_wave(tmp.path());
+            run_resident_turn(runtime, resident_turn_deltas());
+            assert!(fold_thread(&read_events(&path)).playhead.is_none());
+        }
         assert_eq!(
-            reopened.ensure_playhead().unwrap().stack[0].id,
-            after.stack[0].id
+            recovery::inspect(tmp.path(), "ship").unwrap().source,
+            Some(legacy)
         );
     }
 }

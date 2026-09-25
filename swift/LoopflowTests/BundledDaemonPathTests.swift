@@ -1,6 +1,4 @@
-// End-to-end checks that local Wave processes can find user-installed binaries
-// like tmux, which GUI-launched apps lose access to because their inherited PATH
-// is /usr/bin:/bin:/usr/sbin:/sbin.
+// GUI-launched tools inherit the user-installed binary search paths.
 
 import Foundation
 import Testing
@@ -11,59 +9,6 @@ struct BundledDaemonPathTests {
     // macOS GUI apps inherit this when launched from the Dock or Finder.
     private static let guiPath = "/usr/bin:/bin:/usr/sbin:/sbin"
 
-    @Test("tmux resolves under the enriched PATH a GUI-launched resident would see")
-    func tmuxResolvesUnderEnrichedPath() throws {
-        guard isToolInstalledSomewhere("tmux") else { return }
-
-        let enriched = GUIProcessEnvironment.enrichedPath(from: Self.guiPath)
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["-i", "PATH=\(enriched)", "tmux", "-V"]
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-
-        let output = String(
-            data: stdout.fileHandleForReading.readDataToEndOfFile(),
-            encoding: .utf8
-        ) ?? ""
-
-        #expect(process.terminationStatus == 0)
-        #expect(output.contains("tmux"))
-    }
-
-    // Reproduces the exact failure mode local tmux processes hit in production:
-    // `/usr/bin/env tmux ...` uses the GUI-minimal environment, so `env` can't
-    // find tmux and exits 127. With
-    // GUIProcessEnvironment.enriched applied, the same invocation succeeds.
-    @Test("env tmux works with enriched env, fails with the bare GUI env")
-    func envTmuxReproducesAndFixes() throws {
-        guard isToolInstalledSomewhere("tmux") else { return }
-
-        let guiEnv = ["PATH": Self.guiPath]
-
-        let bare = try spawnAndWait(
-            "/usr/bin/env",
-            args: ["tmux", "-V"],
-            env: guiEnv
-        )
-        #expect(bare.exit == 127, "expected env to fail to resolve tmux under the GUI PATH alone")
-        #expect(bare.stderr.contains("tmux"), "expected stderr to mention tmux; got: \(bare.stderr)")
-
-        let enriched = try spawnAndWait(
-            "/usr/bin/env",
-            args: ["tmux", "-V"],
-            env: GUIProcessEnvironment.enriched(guiEnv)
-        )
-        #expect(enriched.exit == 0, "tmux should resolve under enriched env; stderr: \(enriched.stderr)")
-        #expect(enriched.stdout.contains("tmux"))
-    }
-
     @Test("enrichment is idempotent and preserves existing PATH entries")
     func enrichmentIsIdempotent() {
         let once = GUIProcessEnvironment.enrichedPath(from: Self.guiPath)
@@ -72,31 +17,6 @@ struct BundledDaemonPathTests {
         #expect(once == twice)
         #expect(once.contains("/usr/bin"))
         #expect(once.contains("/opt/homebrew/bin"))
-    }
-
-    // A non-interactive shell does not read user profiles, so PATH comes from
-    // Loopflow's process environment. Prove local launch commands inherit the
-    // enriched path.
-    @Test("bash --noprofile --norc -c 'exec tmux' works with enriched env, fails with bare GUI env")
-    func nonInteractiveShellResolvesTmux() throws {
-        guard isToolInstalledSomewhere("tmux") else { return }
-
-        let guiEnv = ["PATH": Self.guiPath]
-
-        let bare = try spawnAndWait(
-            "/bin/bash",
-            args: ["--noprofile", "--norc", "-c", "exec tmux -V"],
-            env: guiEnv
-        )
-        #expect(bare.exit != 0, "expected the bare GUI environment to miss tmux")
-
-        let enriched = try spawnAndWait(
-            "/bin/bash",
-            args: ["--noprofile", "--norc", "-c", "exec tmux -V"],
-            env: GUIProcessEnvironment.enriched(guiEnv)
-        )
-        #expect(enriched.exit == 0, "tmux should resolve under enriched env; stderr: \(enriched.stderr)")
-        #expect(enriched.stdout.contains("tmux"))
     }
 
     @Test("enriched env preserves non-PATH keys and upgrades PATH")
@@ -109,47 +29,4 @@ struct BundledDaemonPathTests {
         #expect(result["PATH"]?.contains("/opt/homebrew/bin") == true)
     }
 
-    private func isToolInstalledSomewhere(_ tool: String) -> Bool {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
-            "\(home)/.local/bin",
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-        ]
-        return candidates.contains {
-            FileManager.default.isExecutableFile(atPath: "\($0)/\(tool)")
-        }
-    }
-
-    private struct SpawnResult {
-        let exit: Int32
-        let stdout: String
-        let stderr: String
-    }
-
-    private func spawnAndWait(
-        _ executable: String,
-        args: [String],
-        env: [String: String]
-    ) throws -> SpawnResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = args
-        process.environment = env
-
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-
-        try process.run()
-        process.waitUntilExit()
-
-        return SpawnResult(
-            exit: process.terminationStatus,
-            stdout: String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
-            stderr: String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        )
-    }
 }

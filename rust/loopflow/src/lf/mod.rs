@@ -385,13 +385,6 @@ pub enum Commands {
         /// Wave name
         name: String,
     },
-    /// Internal resident primitive: execute one expanded top-level flow step.
-    #[command(name = "__flow-step", hide = true)]
-    FlowStep {
-        flow: String,
-        index: usize,
-        seed: String,
-    },
 
     /// Linear-backed Task work and bounded workers
     Task {
@@ -872,8 +865,15 @@ pub enum WaveCommand {
         name: String,
         #[arg(long)]
         force: bool,
-        #[arg(long)]
-        restart_flow: bool,
+    },
+    /// Inspect historical Wave Flow work, or explicitly cancel its saved continuation
+    Recover {
+        name: String,
+        /// Cancel exactly this journal source sequence without executing its work
+        #[arg(long, requires = "reason")]
+        cancel: Option<u64>,
+        #[arg(long, requires = "cancel")]
+        reason: Option<String>,
     },
     /// Replace the plan, carry started Tasks, and retire unopened backlog
     NewChapter {

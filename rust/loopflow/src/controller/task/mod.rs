@@ -7,8 +7,8 @@ use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child::ChildRef;
-use crate::controller::wave::playhead::{QueuedInvocation, StepKind};
 use crate::durable::{FlowPosition, Steer, TaskWorkerClaim, WorkRef};
+use crate::engine::invocation::{QueuedInvocation, StepKind};
 use crate::harness::{drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -1136,11 +1136,11 @@ mod planning_tests {
         unhandled_failure_receipt,
     };
     use crate::chat::types::Lifecycle;
-    use crate::controller::wave::playhead::StepKind;
     use crate::durable::{
         Author, FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
     };
     use crate::engine::agent::AgentConfig;
+    use crate::engine::invocation::StepKind;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::{ExecId, TraceId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};

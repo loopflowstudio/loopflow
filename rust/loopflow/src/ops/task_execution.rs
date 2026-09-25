@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::controller::wave::playhead::StepRef;
 use crate::durable::{FlowPosition, RunId, TaskId};
+use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
 use crate::store::{SharedStore, StoreResult};
 

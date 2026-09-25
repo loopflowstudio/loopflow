@@ -1,6 +1,6 @@
 //! Turn vocabulary: `ChatTurn`, the wire type Loopflow consumes.
 //!
-//! The wave's loop runs each turn as a bounded `wave` child inside
+//! The wave's loop runs each turn as a bounded `wave/operate` harness attempt inside
 //! the RESIDENT process (see [`crate::controller::wave::runner`]) and reports it as
 //! resident wire deltas ([`crate::controller::wave::wire`]), folded by the listener's
 //! runtime into journaled, broadcast turns.
@@ -14,9 +14,54 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::controller::wave::playhead::{now_rfc3339, BodyProvenance};
 use crate::work::project::{ProjectEventKind, ProjectObservation};
 use crate::work::task::{TaskEventKind, TaskObservation};
+
+/// One governance attempt. Optional Flow coordinates preserve historical evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BodyProvenance {
+    pub body_id: String,
+    pub invocation_id: Option<String>,
+    pub step_index: Option<u32>,
+    pub flow: Option<String>,
+    pub step: String,
+    pub iteration: Option<u32>,
+    pub session_id: Option<String>,
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    pub host: String,
+    pub worktree: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub termination_reason: Option<String>,
+}
+
+impl BodyProvenance {
+    pub fn for_wave(cwd: &std::path::Path) -> Self {
+        Self {
+            body_id: uuid::Uuid::new_v4().to_string(),
+            invocation_id: None,
+            step_index: None,
+            flow: None,
+            step: "wave/operate".into(),
+            iteration: None,
+            session_id: None,
+            harness: None,
+            model: None,
+            host: gethostname::gethostname().to_string_lossy().to_string(),
+            worktree: cwd.to_string_lossy().to_string(),
+            started_at: now_rfc3339(),
+            ended_at: None,
+            termination_reason: None,
+        }
+    }
+}
+
+pub fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("the current UTC time is representable as RFC 3339")
+}
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

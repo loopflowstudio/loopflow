@@ -537,7 +537,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             }
         }
 
-        // Let other command shortcuts through to the terminal (e.g., tmux prefix)
+        // Let other command shortcuts through to the terminal
         let key = translateKey(event)
         return ghostty_surface_key(surface, key)
     }

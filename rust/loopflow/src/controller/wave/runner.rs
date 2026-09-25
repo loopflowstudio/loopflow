@@ -4,8 +4,8 @@
 //! This runs inside the resident process (the internal half of
 //! `lf wave <name>`,
 //! see [`crate::controller::wave::resident`]) — never in the listener. A turn is one
-//! `wave` flow (a single `operate` turn) played through the live Harness
-//! boundary. Phases reuse one provider session while the resident lives;
+//! `wave/operate` attempt through the live Harness boundary. Attempts reuse
+//! one provider session while the resident lives;
 //! GOAL.md, memory, and the chat journal preserve continuity across resident
 //! restarts.
 //! Everything the loop does surfaces as [`ResidentDelta`]s sent through
@@ -15,9 +15,10 @@
 //! # Scheduling
 //! Input is the wave's `/events?inbox=true` subscription, parsed into
 //! [`InboxItem`]s by the resident:
-//! - **Message while idle** → a pass starts now; the `TurnOpened` delta's
-//!   `answers` names the message plus anything already queued.
-//! - **Message while a pass runs** → queues for the next body.
+//! - **Work observation** → a governance pass starts when idle; `TurnOpened`
+//!   claims the queued observation IDs. Observations during a pass queue.
+//! - **Chat message** → an independent `wave/chat` reply, including during
+//!   governance; it never enters the governance queue.
 //! - **Interrupt while a pass runs** → the child stops and the turn closes
 //!   `Interrupted`. An idle interrupt is a no-op.
 //! - **Heartbeat**: idle for [`HEARTBEAT_IDLE`] with an empty queue → a
@@ -55,9 +56,9 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
+use crate::chat::turns::BodyProvenance;
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::controller::wave::journal::{MessageDestination, MessageId, PendingMessage};
-use crate::controller::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
+use crate::controller::wave::journal::{MessageId, PendingMessage};
 use crate::controller::wave::resident::ListenerClient;
 use crate::controller::wave::runtime::InboxItem;
 use crate::controller::wave::supervisor::sleep_until_opt;
@@ -70,7 +71,7 @@ use crate::work::wave::config::{read_wave_config, WaveCronDef};
 
 /// How long an eventless Wave stays idle before a safety heartbeat. Chat
 /// messages, child observations, and crons wake it immediately; the quiet cadence
-/// is deliberately coarse because every wake runs the full three-phase flow.
+/// is deliberately coarse because every wake runs a bounded governance attempt.
 pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// Consecutive failed turns before the loop itself is declared failed and
@@ -112,10 +113,7 @@ fn render_recent_channel(messages: &[crate::controller::wave::channel::Message])
         .join("\n")
 }
 
-fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &str) {
-    let Some(capture) = capture else {
-        return;
-    };
+fn finish_capture(capture: &crate::run_record::CaptureHandle, outcome: &str) {
     if let Err(error) = capture.finish(outcome) {
         tracing::warn!(%error, %outcome, "failed to finalize Run record");
     }
@@ -248,11 +246,11 @@ pub(crate) fn cron_prompt(due: &[WaveCronDef]) -> String {
 /// a 30-minute timeout.
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
-    /// Idle window before a heartbeat `wave`.
+    /// Idle window before a heartbeat attempt.
     pub heartbeat_idle: Duration,
     /// Per-pass wall-clock timeout.
     pub pass_timeout: Duration,
-    /// Maximum agent turns forwarded to each phase run.
+    /// Maximum agent turns per harness turn.
     pub max_turns: Option<u32>,
 }
 
@@ -386,32 +384,14 @@ fn orchestration_discipline(wave: &str) -> String {
     )
 }
 
-fn lf_command() -> std::process::Command {
-    if let Ok(path) = std::env::current_exe() {
-        return std::process::Command::new(path);
-    }
-    std::process::Command::new("lf")
-}
-
-fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
+fn body_provenance(cwd: &Path) -> BodyProvenance {
     let configured = crate::engine::load_config_or_default(Some(cwd));
     let agent = configured.agent();
     let (harness, model) = crate::engine::parse_agent(agent);
-    let mut body = BodyProvenance::for_step(step, cwd);
+    let mut body = BodyProvenance::for_wave(cwd);
     body.harness = Some(harness);
     body.model = model;
     body
-}
-
-/// A pass bound for a live Discord channel speaks to a person reading there, so
-/// it runs on the chat surface — a plain, addressed reply instead of a headless
-/// governance transcript. Every other destination (Local passes, and the
-/// machine wakes — evidence, promotion, cron, heartbeat — that also carry
-/// `answers`) stays headless: the destination, not the presence of answers, is
-/// the active-reader signal.
-fn chat_surface_for(destination: &MessageDestination) -> Option<crate::engine::prompt::Surface> {
-    matches!(destination, MessageDestination::Discord(_))
-        .then_some(crate::engine::prompt::Surface::Chat)
 }
 
 fn provider_session_id_for_harness(
@@ -435,33 +415,6 @@ enum LoopEnd {
     Failed(String),
 }
 
-/// What an inbox item means for the body now running (see
-/// [`WaveLoop::inbox_action`]). The caller owns teardown — that is the only
-/// part the two pass loops legitimately do differently.
-enum InboxAction {
-    /// Tear the body down; `skip` advances the playhead anyway.
-    Interrupt { skip: bool },
-    /// Not interrupt-shaped: deliver to the live body or queue for the next.
-    Deliver(Box<InboxItem>),
-    /// The listener hung up: tear down and end the loop.
-    ListenerGone,
-}
-
-/// What a fired pass-timeout means (see [`WaveLoop::timeout_action`]).
-enum TimeoutAction {
-    /// The loop already ended mid-fetch: tear down and return.
-    End,
-    /// The pass is out of time.
-    Expire,
-}
-
-/// How a pass child is spawned — a seam so tests can substitute a stub
-/// process for the real `lf -b wave` invocation.
-#[cfg(test)]
-type SpawnPass = Box<
-    dyn Fn(&Path, &StepRef, &str, Option<u32>) -> std::io::Result<tokio::process::Child> + Send,
->;
-
 use crate::harness::CreateHarness as CreateBodyHarness;
 
 type PrepareBodyHarness = Box<
@@ -475,16 +428,9 @@ type PrepareBodyHarness = Box<
         + Send,
 >;
 
-enum BodyBackend {
-    /// Product path: one live vendor session is the body now playing.
-    Harness {
-        prepare: PrepareBodyHarness,
-        create: CreateBodyHarness,
-    },
-    /// Test and composite-step fallback. Composite flow nodes still own their
-    /// internal execution until they become first-class playhead frames.
-    #[cfg(test)]
-    Process(SpawnPass),
+struct BodyHarness {
+    prepare: PrepareBodyHarness,
+    create: CreateBodyHarness,
 }
 
 /// Run the wave loop until the listener disappears (`Ok`) or the
@@ -504,7 +450,7 @@ pub async fn run_loop(
     let planning = wave_planning(&wave).await?;
     let prepare_origin = origin_repo.clone();
     let prepare_resident = resident_repo.clone();
-    let backend = BodyBackend::Harness {
+    let backend = BodyHarness {
         prepare: Box::new(move |skill, message, wave, max_turns, surface| {
             crate::lf::commands::run::prepare_wave_harness_turn(
                 skill,
@@ -567,7 +513,7 @@ async fn run_loop_with(
     origin_repo: PathBuf,
     wave: String,
     config: LoopConfig,
-    backend: BodyBackend,
+    backend: BodyHarness,
     planning: Option<WavePlanning>,
 ) -> Result<()> {
     let mut wave_loop = WaveLoop {
@@ -576,7 +522,6 @@ async fn run_loop_with(
         origin_repo,
         wave,
         config,
-        queue: Vec::new(),
         evidence_queue: Vec::new(),
         seen: HashSet::new(),
         backend,
@@ -589,10 +534,6 @@ async fn run_loop_with(
     };
 
     while wave_loop.end.is_none() {
-        if !wave_loop.queue.is_empty() {
-            wave_loop.start_queued_pass(&mut inbox_rx).await;
-            continue;
-        }
         if !wave_loop.evidence_queue.is_empty() {
             wave_loop.start_evidence_pass(&mut inbox_rx).await;
             continue;
@@ -628,8 +569,7 @@ struct WaveLoop {
     origin_repo: PathBuf,
     wave: String,
     config: LoopConfig,
-    backend: BodyBackend,
-    queue: Vec<PendingMessage>,
+    backend: BodyHarness,
     evidence_queue: Vec<PendingMessage>,
     seen: HashSet<MessageId>,
     consecutive_failures: u32,
@@ -697,13 +637,13 @@ impl WaveLoop {
                     self.evidence_queue.push(message);
                 }
             }
-            InboxItem::Interrupt | InboxItem::Skip => {}
+            InboxItem::Interrupt => {}
         }
     }
 
     /// Observe a chat message through the shared chat-reply capability and post
-    /// only its deliberate reply. Not a governance pass: it never touches the
-    /// playhead or publishes provider/tool activity. Nothing is consumed — the
+    /// only its deliberate reply. It neither changes the governance turn nor
+    /// publishes provider/tool activity. Nothing is consumed — the
     /// pass reads the channel incl. its own prior replies; a posted reply records
     /// an explicit channel edge so restart replay does not re-observe that
     /// message. The `seen` set dedupes the live/replay race within one process.
@@ -723,29 +663,23 @@ impl WaveLoop {
                 return;
             }
         };
-        let prepared = match &self.backend {
-            BodyBackend::Harness { prepare, .. } => {
-                let skill = match crate::engine::load_skill("wave/chat", &self.origin_repo) {
-                    Ok(skill) => skill,
-                    Err(err) => {
-                        tracing::warn!(
-                            error = %format!("{err:#}"),
-                            "failed to load chat observe skill"
-                        );
-                        return;
-                    }
-                };
-                prepare(
-                    &skill,
-                    &conversation,
-                    &self.wave,
-                    self.config.max_turns,
-                    Some(crate::engine::prompt::Surface::Chat),
-                )
+        let skill = match crate::engine::load_skill("wave/chat", &self.origin_repo) {
+            Ok(skill) => skill,
+            Err(err) => {
+                tracing::warn!(
+                    error = %format!("{err:#}"),
+                    "failed to load chat observe skill"
+                );
+                return;
             }
-            #[cfg(test)]
-            BodyBackend::Process(_) => return,
         };
+        let prepared = (self.backend.prepare)(
+            &skill,
+            &conversation,
+            &self.wave,
+            self.config.max_turns,
+            Some(crate::engine::prompt::Surface::Chat),
+        );
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(err) => {
@@ -753,13 +687,9 @@ impl WaveLoop {
                 return;
             }
         };
-        let reply = match &self.backend {
-            BodyBackend::Harness { create, .. } => {
-                crate::controller::wave::chat_reply::reply_prepared(prepared, create).await
-            }
-            #[cfg(test)]
-            BodyBackend::Process(_) => return,
-        };
+        let reply =
+            crate::controller::wave::chat_reply::reply_prepared(prepared, &self.backend.create)
+                .await;
         let reply = match reply {
             Ok(reply) => reply,
             Err(err) => {
@@ -771,30 +701,16 @@ impl WaveLoop {
         let Some(reply) = reply else {
             return;
         };
-        self.send(vec![
-            ResidentDelta::TurnOpened {
-                answers: Vec::new(),
-            },
-            ResidentDelta::TurnReplyTo {
-                message_id: message.id.0,
-            },
-            ResidentDelta::TurnText { text: reply },
-            ResidentDelta::TurnFinished {
-                status: Lifecycle::Completed,
-                reason: None,
-            },
-        ])
+        self.send(vec![ResidentDelta::ChatReply {
+            message_id: message.id.0,
+            text: reply,
+        }])
         .await;
     }
 
     async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        self.run_pass(
-            HEARTBEAT_PROMPT.to_string(),
-            Vec::new(),
-            MessageDestination::Local,
-            inbox_rx,
-        )
-        .await;
+        self.run_pass(HEARTBEAT_PROMPT.to_string(), Vec::new(), inbox_rx)
+            .await;
     }
 
     async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
@@ -817,226 +733,70 @@ impl WaveLoop {
             self.cron_last_fired.insert(cron_key(cron), now);
         }
         let prompt = cron_prompt(&due);
-        self.run_pass(prompt, Vec::new(), MessageDestination::Local, inbox_rx)
-            .await;
-    }
-
-    async fn start_queued_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        let messages = take_destination_prefix(&mut self.queue);
-        self.start_message_pass(messages, inbox_rx).await;
+        self.run_pass(prompt, Vec::new(), inbox_rx).await;
     }
 
     async fn start_evidence_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
         let messages = std::mem::take(&mut self.evidence_queue);
-        self.start_message_pass(messages, inbox_rx).await;
-    }
-
-    async fn start_message_pass(
-        &mut self,
-        messages: Vec<PendingMessage>,
-        inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
-    ) {
         let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
-        let destination = messages
-            .first()
-            .map(PendingMessage::destination)
-            .unwrap_or(MessageDestination::Local);
         let content = messages
             .iter()
             .map(|m| m.text.clone())
             .collect::<Vec<_>>()
             .join("\n\n");
-        self.run_pass(content, answers, destination, inbox_rx).await;
+        self.run_pass(content, answers, inbox_rx).await;
     }
 
     async fn run_pass(
         &mut self,
         wake: String,
         answers: Vec<MessageId>,
-        destination: MessageDestination,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
-        let mut answers = answers.into_iter().map(|id| id.0).collect::<Vec<_>>();
-        let mut invocation: Option<(String, u32)> = None;
-        loop {
-            let context = match self.fetch_context().await {
-                Some(context) => context,
-                None => return,
-            };
-            let Some(step) = context.playhead.now else {
-                self.fail("playhead has no current step").await;
-                return;
-            };
-            let planned_skill = context
-                .playhead
-                .stack
-                .last()
-                .and_then(|invocation| invocation.steps.get(invocation.cursor as usize))
-                .and_then(|planned| match planned {
-                    crate::engine::ConcreteStep::Skill(skill) => Some(skill.skill.clone()),
-                    _ => None,
-                });
-            let key = (step.invocation_id.clone(), step.iteration);
-            if invocation.as_ref().is_some_and(|expected| expected != &key) {
-                return;
-            }
-            invocation.get_or_insert(key);
-            let completed_index = step.index;
-            let metric_context =
-                wave_metric_context(self.planning.as_ref(), &self.origin_repo, &self.wave).await;
-            let seed = wave_pass_seed(
-                &self.resident_repo,
-                &self.origin_repo,
-                &self.wave,
-                &wake,
-                &metric_context,
-            );
-            let live_skill = step.kind == StepKind::Skill
-                && matches!(&self.backend, BodyBackend::Harness { .. });
-            if live_skill {
-                let Some(skill) = planned_skill else {
-                    self.fail("playhead Skill has no persisted Skill definition")
-                        .await;
-                    return;
-                };
-                self.run_harness_pass(step, skill, seed, answers, &destination, inbox_rx)
-                    .await;
-            } else {
-                self.run_process_pass(step, seed, answers, inbox_rx).await;
-            }
-            if self.end.is_some() {
-                return;
-            }
-            let next = match self.fetch_context().await {
-                Some(context) => context.playhead.now,
-                None => return,
-            };
-            let Some(next) = next else { return };
-            let same_iteration = invocation.as_ref().is_some_and(|(id, iteration)| {
-                id == &next.invocation_id && *iteration == next.iteration
-            });
-            if !same_iteration || next.index == completed_index {
-                return;
-            }
-            answers = Vec::new();
-        }
-    }
-
-    async fn run_process_pass(
-        &mut self,
-        step: StepRef,
-        seed: String,
-        answers: Vec<String>,
-        inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
-    ) {
-        let body = body_provenance(&step, &self.resident_repo);
-        let body_id = body.body_id.clone();
-        self.open_body(body, answers).await;
-        if self.end.is_some() {
+        if self.fetch_context().await.is_none() {
             return;
         }
-
-        let child = match &self.backend {
-            BodyBackend::Harness { .. } => {
-                spawn_wave_step(&self.resident_repo, &step, &seed, self.config.max_turns)
-            }
-            #[cfg(test)]
-            BodyBackend::Process(spawn) => {
-                spawn(&self.resident_repo, &step, &seed, self.config.max_turns)
-            }
-        };
-        let child = match child {
-            Ok(child) => child,
+        let answers = answers.into_iter().map(|id| id.0).collect();
+        let skill = match crate::engine::load_skill("wave/operate", &self.origin_repo) {
+            Ok(skill) => skill,
             Err(err) => {
-                self.finish_failed_pass(
-                    &body_id,
-                    &format!("failed to spawn {} / {}: {err:#}", step.flow, step.step),
-                )
-                .await;
+                self.open_body(body_provenance(&self.resident_repo), answers)
+                    .await;
+                self.finish_failed_pass(&format!("failed to load wave/operate: {err:#}"))
+                    .await;
                 return;
             }
         };
-        let mut wait_task = tokio::spawn(async move { child.wait_with_output().await });
-        let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        loop {
-            tokio::select! {
-                biased;
-                item = inbox_rx.recv() => {
-                    match self.inbox_action(item) {
-                        InboxAction::Interrupt { skip } => {
-                            self.interrupt_child(&body_id, &mut wait_task, skip).await;
-                            return;
-                        }
-                        InboxAction::Deliver(item) => self.on_inbox(*item).await,
-                        InboxAction::ListenerGone => {
-                            wait_task.abort();
-                            return;
-                        }
-                    }
-                }
-                _ = &mut timeout => {
-                    match self.timeout_action() {
-                        TimeoutAction::End => {
-                            wait_task.abort();
-                            return;
-                        }
-                        TimeoutAction::Expire => {
-                            wait_task.abort();
-                            self.finish_timed_out_pass(&body_id).await;
-                            return;
-                        }
-                    }
-                }
-                result = &mut wait_task => {
-                    match result {
-                        Ok(output) => self.on_pass_output(&body_id, output).await,
-                        Err(err) => {
-                            self.finish_failed_pass(
-                                &body_id,
-                                &format!("wave wait task failed: {err:#}"),
-                            )
-                                .await;
-                        }
-                    }
-                    return;
-                }
-            }
-        }
+        let metric_context =
+            wave_metric_context(self.planning.as_ref(), &self.origin_repo, &self.wave).await;
+        let seed = wave_pass_seed(
+            &self.resident_repo,
+            &self.origin_repo,
+            &self.wave,
+            &wake,
+            &metric_context,
+        );
+        self.run_harness_pass(skill, seed, answers, inbox_rx).await;
     }
 
     async fn run_harness_pass(
         &mut self,
-        step: StepRef,
         skill: crate::engine::Skill,
         seed: String,
         answers: Vec<String>,
-        destination: &MessageDestination,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
-        let mut body = body_provenance(&step, &self.resident_repo);
-        let surface = chat_surface_for(destination);
-        // Record what the pass actually ran on: a Discord-destined pass renders
-        // the chat surface, so the Run provenance must say so, not "headless".
-        let surface_label = match surface {
-            Some(crate::engine::prompt::Surface::Chat) => "chat",
-            _ => "headless",
-        };
-        let prepared = match &self.backend {
-            BodyBackend::Harness { prepare, .. } => {
-                prepare(&skill, &seed, &self.wave, self.config.max_turns, surface)
-            }
-            #[cfg(test)]
-            BodyBackend::Process(_) => unreachable!("live skill requires a harness backend"),
-        };
+        let mut body = body_provenance(&self.resident_repo);
+        let prepared =
+            (self.backend.prepare)(&skill, &seed, &self.wave, self.config.max_turns, None);
         let mut prepared = match prepared {
             Ok(prepared) => prepared,
             Err(err) => {
-                let body_id = body.body_id.clone();
                 self.open_body(body, answers).await;
-                self.finish_failed_pass(
-                    &body_id,
-                    &format!("failed to prepare {} / {}: {err:#}", step.flow, step.step),
-                )
+                self.finish_failed_pass(&format!(
+                    "failed to prepare {} / {}: {err:#}",
+                    "wave", "wave/operate"
+                ))
                 .await;
                 return;
             }
@@ -1047,11 +807,11 @@ impl WaveLoop {
             crate::run_record::RunSpec {
                 harness: prepared.harness.clone(),
                 model: prepared.model.clone(),
-                surface: surface_label.to_string(),
+                surface: "headless".into(),
                 cwd: self.resident_repo.clone(),
                 repo: Some(self.origin_repo.clone()),
                 worktree: Some(self.resident_repo.clone()),
-                skill: Some(step.step.clone()),
+                skill: Some("wave/operate".into()),
                 subjects: vec![crate::run_record::SubjectAttribution::declared(format!(
                     "wave:{}",
                     self.wave
@@ -1059,50 +819,41 @@ impl WaveLoop {
             },
             &prepared.context,
         ) {
-            Ok(capture) => Some(capture),
+            Ok(capture) => capture,
             Err(err) => {
-                let body_id = body.body_id.clone();
                 self.open_body(body, answers).await;
-                self.finish_failed_pass(
-                    &body_id,
-                    &format!("failed to publish Run manifest: {err}"),
-                )
-                .await;
+                self.finish_failed_pass(&format!("failed to publish Run manifest: {err}"))
+                    .await;
                 return;
             }
         };
-        if let Some(capture) = &capture {
-            capture.record_input("initial", &prepared.input);
-            prepared.config.env.extend(capture.environment());
-            capture.mark_spawn_requested();
-        }
+        capture.record_input("initial", &prepared.input);
+        prepared.config.env.extend(capture.environment());
+        capture.mark_spawn_requested();
 
+        let body_id = body.body_id.clone();
+        self.open_body(body, answers).await;
+        if self.end.is_some() {
+            finish_capture(&capture, "interrupted");
+            return;
+        }
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (raw_tx, mut raw_rx) = mpsc::unbounded_channel();
-        let harness = match &self.backend {
-            BodyBackend::Harness { create, .. } => {
-                create(&prepared.harness, ApprovalPolicy::AutoApprove, event_tx)
-            }
-            #[cfg(test)]
-            BodyBackend::Process(_) => unreachable!("live skill requires a harness backend"),
-        };
+        let harness =
+            (self.backend.create)(&prepared.harness, ApprovalPolicy::AutoApprove, event_tx);
         let mut harness = match harness {
             Ok(harness) => harness,
             Err(err) => {
-                finish_capture(capture.as_ref(), "failed");
-                let body_id = body.body_id.clone();
-                self.open_body(body, answers).await;
-                self.finish_failed_pass(
-                    &body_id,
-                    &format!("failed to create {} harness: {err:#}", prepared.harness),
-                )
+                finish_capture(&capture, "failed");
+                self.finish_failed_pass(&format!(
+                    "failed to create {} harness: {err:#}",
+                    prepared.harness
+                ))
                 .await;
                 return;
             }
         };
-        if capture.is_some() {
-            harness.set_raw_provider_sender(Some(raw_tx));
-        }
+        harness.set_raw_provider_sender(Some(raw_tx));
         let resume_session_id =
             provider_session_id_for_harness(self.provider_session.as_ref(), &prepared.harness);
         if resume_session_id.is_none() {
@@ -1110,92 +861,81 @@ impl WaveLoop {
         }
         harness.set_provider_session_id(resume_session_id);
         if let Err(err) = harness.start(&prepared.config).await {
-            finish_capture(capture.as_ref(), "failed");
-            let body_id = body.body_id.clone();
-            self.open_body(body, answers).await;
-            self.finish_failed_pass(
-                &body_id,
-                &format!("failed to start {} harness: {err:#}", prepared.harness),
-            )
+            finish_capture(&capture, "failed");
+            self.finish_failed_pass(&format!(
+                "failed to start {} harness: {err:#}",
+                prepared.harness
+            ))
             .await;
             return;
         }
-        body.session_id = harness.provider_session_id();
-        if let Some(capture) = &capture {
-            capture.set_provider_session_id(body.session_id.clone());
-        }
-        if let Some(session_id) = &body.session_id {
+        let session_id = harness.provider_session_id();
+        capture.set_provider_session_id(session_id.clone());
+        if let Some(session_id) = &session_id {
             self.provider_session = Some(ProviderSessionRef {
                 harness: prepared.harness.clone(),
                 session_id: session_id.clone(),
             });
         }
-        let mut body_session_id = body.session_id.clone();
-        let body_id = body.body_id.clone();
-        self.open_body(body, answers).await;
-        if self.end.is_some() {
-            let _ = harness.stop().await;
-            finish_capture(capture.as_ref(), "interrupted");
-            return;
+        let mut body_session_id = session_id.clone();
+        if let Some(session_id) = session_id {
+            self.send(vec![ResidentDelta::BodySessionUpdated {
+                body_id: body_id.clone(),
+                session_id,
+            }])
+            .await;
         }
         if let Err(err) = harness.send_input(&prepared.input).await {
             let _ = harness.stop().await;
-            finish_capture(capture.as_ref(), "failed");
-            self.finish_failed_pass(
-                &body_id,
-                &format!(
-                    "failed to start {} / {} turn: {err:#}",
-                    step.flow, step.step
-                ),
-            )
+            finish_capture(&capture, "failed");
+            self.finish_failed_pass(&format!(
+                "failed to start {} / {} turn: {err:#}",
+                "wave", "wave/operate"
+            ))
             .await;
             return;
         }
 
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut raw_open = capture.is_some();
+        let mut raw_open = true;
         loop {
             tokio::select! {
                 biased;
                 item = inbox_rx.recv() => {
-                    match self.inbox_action(item) {
-                        InboxAction::Interrupt { skip } => {
-                            self.interrupt_harness(&body_id, harness.as_mut(), skip).await;
-                            finish_capture(capture.as_ref(), "interrupted");
+                    match item {
+                        Some(InboxItem::Interrupt) => {
+                            self.interrupt_harness(harness.as_mut()).await;
+                            finish_capture(&capture, "interrupted");
                             return;
                         }
-                        InboxAction::Deliver(item) => self.on_inbox(*item).await,
-                        InboxAction::ListenerGone => {
+                        Some(item) => self.on_inbox(item).await,
+                        None => {
+                            self.end = Some(LoopEnd::ListenerGone);
                             let _ = harness.stop().await;
-                            finish_capture(capture.as_ref(), "interrupted");
+                            finish_capture(&capture, "interrupted");
                             return;
                         }
                     }
                 }
                 raw = raw_rx.recv(), if raw_open => {
-                    match (raw, capture.as_ref()) {
-                        (Some(raw), Some(capture)) => capture.record_raw(raw.stream, &raw.line),
-                        (None, _) => raw_open = false,
-                        _ => {}
+                    match raw {
+                        Some(raw) => capture.record_raw(raw.stream, &raw.line),
+                        None => raw_open = false,
                     }
                 }
                 event = event_rx.recv() => {
                     let Some(event) = event else {
                         let _ = harness.stop().await;
-                        self.finish_failed_pass(&body_id, "harness event stream closed").await;
-                        finish_capture(capture.as_ref(), "failed");
+                        self.finish_failed_pass("harness event stream closed").await;
+                        finish_capture(&capture, "failed");
                         return;
                     };
-                    if let Some(capture) = &capture {
-                        capture.record_conversation(event.clone());
-                    }
+                    capture.record_conversation(event.clone());
                     if body_session_id.is_none() {
                         tokio::task::yield_now().await;
                         if let Some(session_id) = harness.provider_session_id() {
                             body_session_id = Some(session_id.clone());
-                            if let Some(capture) = &capture {
-                                capture.set_provider_session_id(Some(session_id.clone()));
-                            }
+                            capture.set_provider_session_id(Some(session_id.clone()));
                             self.provider_session = Some(ProviderSessionRef {
                                 harness: prepared.harness.clone(),
                                 session_id: session_id.clone(),
@@ -1222,22 +962,14 @@ impl WaveLoop {
                             } else {
                                 "failed"
                             };
-                            self.finish_harness_pass(
-                                &body_id,
-                                &step,
-                                status,
-                                harness.as_mut(),
-                            ).await;
-                            finish_capture(capture.as_ref(), outcome);
+                            self.finish_harness_pass(status, harness.as_mut()).await;
+                            finish_capture(&capture, outcome);
                             return;
                         }
                         ConversationEvent::Error { code, message, .. } => {
                             let _ = harness.stop().await;
-                            self.finish_failed_pass(
-                                &body_id,
-                                &format!("{code}: {message}"),
-                            ).await;
-                            finish_capture(capture.as_ref(), "failed");
+                            self.finish_failed_pass(&format!("{code}: {message}")).await;
+                            finish_capture(&capture, "failed");
                             return;
                         }
                         ConversationEvent::TurnStarted { .. }
@@ -1250,40 +982,35 @@ impl WaveLoop {
                     }
                     if self.end.is_some() {
                         let _ = harness.stop().await;
-                        finish_capture(capture.as_ref(), "interrupted");
+                        finish_capture(&capture, "interrupted");
                         return;
                     }
                 }
                 _ = &mut timeout => {
-                    match self.timeout_action() {
-                        TimeoutAction::End => {
-                            let _ = harness.stop().await;
-                            finish_capture(capture.as_ref(), "interrupted");
-                            return;
-                        }
-                        TimeoutAction::Expire => {
-                            let _ = harness.interrupt().await;
-                            let _ = harness.stop().await;
-                            self.finish_timed_out_pass(&body_id).await;
-                            finish_capture(capture.as_ref(), "interrupted");
-                            return;
-                        }
+                    if self.end.is_none() {
+                        let _ = harness.interrupt().await;
+                        let _ = harness.stop().await;
+                        self.finish_timed_out_pass().await;
+                    } else {
+                        let _ = harness.stop().await;
                     }
+                    finish_capture(&capture, "interrupted");
+                    return;
                 }
             }
         }
     }
 
     async fn open_body(&mut self, body: BodyProvenance, answers: Vec<String>) {
-        self.send(vec![
-            ResidentDelta::BodyStarted { body },
-            ResidentDelta::TurnOpened { answers },
-        ])
+        self.send(vec![ResidentDelta::TurnOpened {
+            answers,
+            body: Some(body),
+        }])
         .await;
     }
 
     /// The interrupt protocol: announce, tear the body down, close the pass.
-    /// Only the teardown differs between a harness session and a child process.
+    /// The harness is stopped before the listener closes its turn.
     async fn announce_interrupt(&mut self) {
         self.send(vec![ResidentDelta::LoopState {
             to: ResidentStateTo::Interrupting,
@@ -1292,169 +1019,65 @@ impl WaveLoop {
         .await;
     }
 
-    async fn interrupt_harness(&mut self, body_id: &str, harness: &mut dyn Harness, skip: bool) {
+    async fn interrupt_harness(&mut self, harness: &mut dyn Harness) {
         self.announce_interrupt().await;
         let _ = harness.interrupt().await;
         let _ = harness.stop().await;
-        self.finish_interrupted_pass(body_id, skip).await;
+        self.finish_interrupted_pass().await;
     }
 
-    /// Interrupt controls end the current body; messages wait for the next pass.
-    fn inbox_action(&mut self, item: Option<InboxItem>) -> InboxAction {
-        match item {
-            Some(InboxItem::Interrupt) => InboxAction::Interrupt { skip: false },
-            Some(InboxItem::Skip) => InboxAction::Interrupt { skip: true },
-            Some(item) => InboxAction::Deliver(Box::new(item)),
-            None => {
-                self.end = Some(LoopEnd::ListenerGone);
-                InboxAction::ListenerGone
-            }
-        }
-    }
-
-    fn timeout_action(&self) -> TimeoutAction {
-        if self.end.is_some() {
-            TimeoutAction::End
-        } else {
-            TimeoutAction::Expire
-        }
-    }
-
-    async fn finish_timed_out_pass(&mut self, body_id: &str) {
-        self.finish_failed_pass(
-            body_id,
-            &format!(
-                "wave timed out after {}s",
-                self.config.pass_timeout.as_secs()
-            ),
-        )
+    async fn finish_timed_out_pass(&mut self) {
+        self.finish_failed_pass(&format!(
+            "wave timed out after {}s",
+            self.config.pass_timeout.as_secs()
+        ))
         .await;
     }
 
-    async fn finish_harness_pass(
-        &mut self,
-        body_id: &str,
-        step: &StepRef,
-        status: Lifecycle,
-        harness: &mut dyn Harness,
-    ) {
+    async fn finish_harness_pass(&mut self, status: Lifecycle, harness: &mut dyn Harness) {
         let _ = harness.stop().await;
         match status {
             Lifecycle::Completed => {
                 if let Err(err) =
-                    finish_resident_skill_work(&self.resident_repo, &self.wave, &step.step).await
+                    finish_resident_skill_work(&self.resident_repo, &self.wave, "wave/operate")
+                        .await
                 {
-                    self.finish_failed_pass(
-                        body_id,
-                        &format!("failed to deliver {}: {err:#}", step.step),
-                    )
+                    self.finish_failed_pass(&format!(
+                        "failed to deliver {}: {err:#}",
+                        "wave/operate"
+                    ))
                     .await;
                     return;
                 }
                 self.consecutive_failures = 0;
-                self.finish_pass(body_id, StepOutcome::Completed, None)
-                    .await;
+                self.finish_pass(Lifecycle::Completed, None).await;
             }
-            Lifecycle::Interrupted => self.finish_interrupted_pass(body_id, false).await,
-            Lifecycle::Failed => {
-                self.finish_failed_pass(body_id, "harness turn failed")
-                    .await
-            }
+            Lifecycle::Interrupted => self.finish_interrupted_pass().await,
+            Lifecycle::Failed => self.finish_failed_pass("harness turn failed").await,
             Lifecycle::Pending | Lifecycle::Running => {
-                self.finish_failed_pass(body_id, "harness ended without a terminal status")
+                self.finish_failed_pass("harness ended without a terminal status")
                     .await;
             }
         }
     }
 
-    async fn on_pass_output(
-        &mut self,
-        body_id: &str,
-        result: std::io::Result<std::process::Output>,
-    ) {
-        match result {
-            Ok(output) if output.status.success() => {
-                self.consecutive_failures = 0;
-                self.ship_output(output).await;
-                self.finish_pass(body_id, StepOutcome::Completed, None)
-                    .await;
-            }
-            Ok(output) => {
-                self.ship_output(output).await;
-                self.finish_failed_pass(body_id, "wave step exited nonzero")
-                    .await;
-            }
-            Err(err) => {
-                self.finish_failed_pass(body_id, &format!("wave wait failed: {err:#}"))
-                    .await;
-            }
-        }
-    }
-
-    async fn ship_output(&mut self, output: std::process::Output) {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let text = match (stdout.trim(), stderr.trim()) {
-            ("", "") => String::new(),
-            (out, "") => out.to_string(),
-            ("", err) => err.to_string(),
-            (out, err) => format!("{out}\n\nstderr:\n{err}"),
-        };
-        if !text.is_empty() {
-            self.send(vec![ResidentDelta::TurnText { text }]).await;
-        }
-    }
-
-    async fn interrupt_child(
-        &mut self,
-        body_id: &str,
-        wait_task: &mut tokio::task::JoinHandle<std::io::Result<std::process::Output>>,
-        skip: bool,
-    ) {
-        self.announce_interrupt().await;
-        wait_task.abort();
-        self.finish_interrupted_pass(body_id, skip).await;
-    }
-
-    /// Every terminal end of a body, and the only place the pair is built: the
-    /// turn closes and the playhead's body closes with it. The outcome picks
-    /// the turn's lifecycle — a skip is an interrupted turn whose playhead
-    /// advances anyway — and names itself when the caller has nothing to add.
-    async fn finish_pass(&mut self, body_id: &str, outcome: StepOutcome, reason: Option<String>) {
-        let status = match outcome {
-            StepOutcome::Completed => Lifecycle::Completed,
-            StepOutcome::Skipped | StepOutcome::Interrupted => Lifecycle::Interrupted,
-            StepOutcome::Failed => Lifecycle::Failed,
-        };
-        let reason = reason.unwrap_or_else(|| outcome.name().to_string());
-        self.send(vec![
-            ResidentDelta::TurnFinished {
-                status,
-                reason: (status != Lifecycle::Completed).then(|| reason.clone()),
-            },
-            ResidentDelta::BodyFinished {
-                body_id: body_id.to_string(),
-                outcome,
-                reason,
-            },
-        ])
-        .await;
+    async fn finish_pass(&mut self, status: Lifecycle, reason: Option<String>) {
+        self.send(vec![ResidentDelta::TurnFinished { status, reason }])
+            .await;
         self.idle_since = Instant::now();
     }
 
-    async fn finish_interrupted_pass(&mut self, body_id: &str, skip: bool) {
+    async fn finish_interrupted_pass(&mut self) {
         self.consecutive_failures = 0;
-        let (outcome, reason) = if skip {
-            (StepOutcome::Skipped, "skipped by user")
-        } else {
-            (StepOutcome::Interrupted, "interrupted by user")
-        };
-        self.finish_pass(body_id, outcome, Some(reason.to_string()))
-            .await;
+        self.finish_pass(
+            Lifecycle::Interrupted,
+            Some("interrupted by user".to_string()),
+        )
+        .await;
     }
 
-    async fn finish_failed_pass(&mut self, body_id: &str, reason: &str) {
-        self.finish_pass(body_id, StepOutcome::Failed, Some(reason.to_string()))
+    async fn finish_failed_pass(&mut self, reason: &str) {
+        self.finish_pass(Lifecycle::Failed, Some(reason.to_string()))
             .await;
         self.consecutive_failures += 1;
         if self.consecutive_failures >= MAX_CONSECUTIVE_PASS_FAILURES {
@@ -1517,46 +1140,9 @@ impl WaveLoop {
     }
 }
 
-fn take_destination_prefix(queue: &mut Vec<PendingMessage>) -> Vec<PendingMessage> {
-    let destination = queue
-        .first()
-        .expect("a queued pass starts with a message")
-        .destination();
-    let split = queue
-        .iter()
-        .position(|message| message.destination() != destination)
-        .unwrap_or(queue.len());
-    let remaining = queue.split_off(split);
-    std::mem::replace(queue, remaining)
-}
-
-fn spawn_wave_step(
-    cwd: &Path,
-    step: &StepRef,
-    seed: &str,
-    max_turns: Option<u32>,
-) -> std::io::Result<tokio::process::Child> {
-    let mut command = tokio::process::Command::from(lf_command());
-    command.arg("-b");
-    if let Some(max_turns) = max_turns {
-        command.arg("--max-turns").arg(max_turns.to_string());
-    }
-    command
-        .arg("__flow-step")
-        .arg(&step.flow)
-        .arg(step.index.to_string())
-        .arg(seed)
-        .current_dir(cwd)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
-    command.spawn()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controller::wave::journal::MessageOp;
     use std::sync::{Arc, Mutex};
 
     use crate::chat::turns::{ChatRole, ChatTurn};
@@ -1567,15 +1153,6 @@ mod tests {
     use crate::controller::wave::server::{self, ResidentDoor};
     use crate::controller::wave::state::LoopState;
     use async_trait::async_trait;
-
-    fn queued_message(id: &str, source: Option<DiscordMessageSource>) -> PendingMessage {
-        PendingMessage {
-            id: MessageId(id.into()),
-            op: MessageOp::Message,
-            text: id.into(),
-            source,
-        }
-    }
 
     fn discord_source(id: &str) -> DiscordMessageSource {
         DiscordMessageSource {
@@ -1623,35 +1200,6 @@ mod tests {
             crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap(),
             head
         );
-    }
-
-    #[test]
-    fn discord_chat_batches_only_the_fifo_prefix_for_one_destination() {
-        let mut queue = vec![
-            queued_message("discord-1", Some(discord_source("1"))),
-            queued_message("discord-2", Some(discord_source("2"))),
-            queued_message("local", None),
-            queued_message("discord-3", Some(discord_source("3"))),
-        ];
-
-        let first = take_destination_prefix(&mut queue);
-        assert_eq!(
-            first
-                .iter()
-                .map(|message| message.id.0.as_str())
-                .collect::<Vec<_>>(),
-            vec!["discord-1", "discord-2"]
-        );
-        assert_eq!(
-            queue
-                .iter()
-                .map(|message| message.id.0.as_str())
-                .collect::<Vec<_>>(),
-            vec!["local", "discord-3"]
-        );
-        let second = take_destination_prefix(&mut queue);
-        assert_eq!(second[0].id.0, "local");
-        assert_eq!(queue[0].id.0, "discord-3");
     }
 
     /// The rig: a REAL listener (runtime + router with the resident door)
@@ -1753,31 +1301,96 @@ mod tests {
         config: LoopConfig,
         script: &'static str,
     ) -> TestLoop {
+        init_test_git_repo(tmp.path());
         let seeds = Arc::new(Mutex::new(Vec::new()));
-        let spawn_seeds = seeds.clone();
+        let recorded = seeds.clone();
         let (pass_tx, pass_rx) = mpsc::unbounded_channel();
-        let spawn_pass: SpawnPass = Box::new(move |cwd, _step, seed, _max_turns| {
-            spawn_seeds.lock().unwrap().push(seed.to_string());
-            let _ = pass_tx.send(seed.to_string());
-            let mut command = tokio::process::Command::new("sh");
-            command
-                .arg("-c")
-                .arg(script)
-                .current_dir(cwd)
+        let cwd = tmp.path().to_path_buf();
+        let backend = BodyHarness {
+            prepare: Box::new(move |_skill, seed, _wave, max_turns, _surface| {
+                Ok(crate::lf::commands::run::PreparedHarnessTurn {
+                    config: crate::engine::AgentConfig {
+                        cwd: Some(cwd.clone()),
+                        max_turns,
+                        ..Default::default()
+                    },
+                    input: seed.into(),
+                    context: crate::trace::PreparedTurnContext::from_prompts("", seed),
+                    harness: "test".into(),
+                    model: None,
+                })
+            }),
+            create: Box::new(move |_, _, events| {
+                Ok(Box::new(ScriptHarness {
+                    script,
+                    events,
+                    task: None,
+                    cwd: None,
+                    seeds: recorded.clone(),
+                    passes: pass_tx.clone(),
+                }))
+            }),
+        };
+        boot_backend(tmp, config, backend, seeds, pass_rx, None).await
+    }
+
+    /// Replace only the provider; exercise the production harness and wire path.
+    struct ScriptHarness {
+        script: &'static str,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        task: Option<tokio::task::JoinHandle<()>>,
+        cwd: Option<PathBuf>,
+        seeds: Arc<Mutex<Vec<String>>>,
+        passes: mpsc::UnboundedSender<String>,
+    }
+
+    #[async_trait]
+    impl Harness for ScriptHarness {
+        async fn start(&mut self, config: &crate::engine::AgentConfig) -> Result<()> {
+            self.cwd = config.cwd.clone();
+            Ok(())
+        }
+        async fn send_input(&mut self, input: &str) -> Result<()> {
+            let child = tokio::process::Command::new("sh")
+                .args(["-c", self.script])
+                .current_dir(self.cwd.as_ref().unwrap())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
-            command.spawn()
-        });
-        boot_backend(
-            tmp,
-            config,
-            BodyBackend::Process(spawn_pass),
-            seeds,
-            pass_rx,
-            None,
-        )
-        .await
+                .kill_on_drop(true)
+                .spawn()?;
+            self.seeds.lock().unwrap().push(input.into());
+            self.passes.send(input.into()).unwrap();
+            let events = self.events.clone();
+            self.task = Some(tokio::spawn(async move {
+                let output = child.wait_with_output().await.unwrap();
+                let _ = events.send(ConversationEvent::TextDelta {
+                    turn_id: "test".into(),
+                    content: String::from_utf8_lossy(&output.stdout).into(),
+                });
+                let _ = events.send(ConversationEvent::TurnCompleted {
+                    turn_id: "test".into(),
+                    status: if output.status.success() {
+                        Lifecycle::Completed
+                    } else {
+                        Lifecycle::Failed
+                    },
+                });
+            }));
+            Ok(())
+        }
+        async fn interrupt(&mut self) -> Result<()> {
+            self.stop().await
+        }
+        async fn stop(&mut self) -> Result<()> {
+            if let Some(task) = self.task.take() {
+                task.abort();
+                let _ = task.await;
+            }
+            Ok(())
+        }
+        fn provider_session_id(&self) -> Option<String> {
+            Some("test-session".into())
+        }
     }
 
     /// Both halves of a live loop over whichever body the test wants: the
@@ -1787,7 +1400,7 @@ mod tests {
     async fn boot_backend(
         tmp: tempfile::TempDir,
         config: LoopConfig,
-        backend: BodyBackend,
+        backend: BodyHarness,
         seeds: Arc<Mutex<Vec<String>>>,
         passes: mpsc::UnboundedReceiver<String>,
         planning: Option<WavePlanning>,
@@ -1798,7 +1411,7 @@ mod tests {
     async fn boot_backend_backed(
         tmp: tempfile::TempDir,
         config: LoopConfig,
-        backend: BodyBackend,
+        backend: BodyHarness,
         seeds: Arc<Mutex<Vec<String>>>,
         passes: mpsc::UnboundedReceiver<String>,
         planning: Option<WavePlanning>,
@@ -1895,7 +1508,7 @@ mod tests {
         let recorded_surfaces = prepare_surfaces.clone();
         let recorded_seeds = prepare_seeds.clone();
         let harness_inputs = Arc::new(Mutex::new(Vec::new()));
-        let backend = BodyBackend::Harness {
+        let backend = BodyHarness {
             prepare: Box::new(move |skill, seed, _wave, max_turns, surface| {
                 recorded_skills
                     .lock()
@@ -1951,6 +1564,7 @@ mod tests {
                 activity: None,
             },
             Vec::new(),
+            None,
         );
 
         loop_
@@ -2002,15 +1616,13 @@ mod tests {
                 .any(|seed| seed.contains("you: earlier I said LOO-1")),
             "the observe pass must see its own prior reply in the read context"
         );
-        // Observe is instantaneous: the governance playhead never advanced.
-        assert_eq!(
+        assert!(
             loop_
                 .runtime
-                .playhead()
-                .and_then(|playhead| playhead.now)
-                .map(|step| step.iteration),
-            Some(0),
-            "an observe pass must not advance the operate loop"
+                .thread_snapshot()
+                .iter()
+                .all(|turn| turn.body.is_none()),
+            "chat observation creates no governance attempt"
         );
     }
 
@@ -2217,7 +1829,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn one_wake_runs_one_full_wave_flow_then_idles() {
+    async fn one_wake_runs_one_governance_attempt_then_idles() {
         let mut loop_ = boot(Duration::from_secs(600), "echo done").await;
 
         wake_governance(&loop_.runtime, "first wake");
@@ -2226,7 +1838,7 @@ mod tests {
         assert_eq!(
             loop_.pass_count(),
             1,
-            "a completed Wave flow waits instead of starting another iteration"
+            "a completed governance attempt waits for the next wake"
         );
 
         wake_governance(&loop_.runtime, "second wake");
@@ -2234,7 +1846,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn typed_promotion_wake_runs_one_child_flow_without_user_speech() {
+    async fn typed_promotion_wake_runs_one_attempt_without_user_speech() {
         let mut loop_ = boot(Duration::from_secs(600), "echo promoted").await;
         let wake = crate::work::wave::PromotionWake {
             parent_wave_id: crate::id::WaveId::new(),
@@ -2247,12 +1859,12 @@ mod tests {
             "a replayed promotion signal is deduplicated before scheduling"
         );
         assert_eq!(wake_of(&loop_.next_seed().await), wake.prompt());
-        wait_for("one promoted Wave flow", || loop_.pass_count() == 1).await;
+        wait_for("one promoted Wave attempt", || loop_.pass_count() == 1).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             loop_.pass_count(),
             1,
-            "one promotion fact starts one single-step Wave flow"
+            "one promotion fact starts one governance attempt"
         );
 
         let events = loop_.journal_events();
@@ -2309,25 +1921,6 @@ mod tests {
 
         // Garbage never fires.
         assert!(next_cron_fire("not-a-cron", None, now).is_none());
-    }
-
-    #[test]
-    fn only_a_discord_destination_selects_the_chat_surface() {
-        use crate::controller::wave::journal::DiscordChatBinding;
-        use crate::engine::prompt::Surface;
-
-        // A person is reading a Discord channel → chat surface.
-        assert_eq!(
-            chat_surface_for(&MessageDestination::Discord(DiscordChatBinding {
-                guild_id: "g".into(),
-                channel_id: "c".into(),
-            })),
-            Some(Surface::Chat)
-        );
-        // Local passes and every machine wake (evidence, promotion, cron,
-        // heartbeat) route through Local → headless, even when they carry
-        // answers.
-        assert_eq!(chat_surface_for(&MessageDestination::Local), None);
     }
 
     #[test]
@@ -2437,7 +2030,7 @@ mod tests {
         let attempts = Arc::new(Mutex::new(0_u32));
         let prepare_attempts = attempts.clone();
         let (attempt_tx, mut attempt_rx) = mpsc::unbounded_channel();
-        let backend = BodyBackend::Harness {
+        let backend = BodyHarness {
             prepare: Box::new(move |_skill, _seed, _wave, _max_turns, _surface| {
                 let mut attempts = prepare_attempts.lock().expect("attempts lock");
                 *attempts += 1;
@@ -2519,12 +2112,33 @@ mod tests {
         wake_governance(&loop_.runtime, "start");
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
         wait_for("turning", || loop_.runtime.loop_state().name() == "turning").await;
+        let claims = started_answers(&loop_.journal_events()).pop().unwrap();
 
         loop_.runtime.deliver_interrupt();
         wait_for("idle again", || {
             loop_.runtime.loop_state() == LoopState::Idle
         })
         .await;
+        assert!(loop_
+            .runtime
+            .thread_snapshot()
+            .last()
+            .unwrap()
+            .body
+            .as_ref()
+            .unwrap()
+            .ended_at
+            .is_some());
+        assert_eq!(
+            loop_
+                .runtime
+                .pending_messages()
+                .into_iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            claims,
+            "interruption leaves unfinished work available for retry"
+        );
 
         // The turn is a well-formed interrupted record, and the journal
         // walked Turning → Interrupting → Idle.

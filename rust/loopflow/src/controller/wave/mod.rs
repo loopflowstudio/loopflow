@@ -54,6 +54,7 @@ pub mod journal;
 pub mod metrics;
 pub(crate) mod placement;
 pub mod playhead;
+pub mod recovery;
 pub mod relocate;
 
 pub(crate) mod registry;
@@ -115,7 +116,7 @@ impl<F> ListenerSignals<F> {
 /// whether the resident endpoint/token were present in env, which meant any
 /// process holding a parent's env — a tmux child, a promoted Wave — booted
 /// the wrong half by accident.
-pub fn run(name: &str, force: bool, restart_flow: bool) -> Result<()> {
+pub fn run(name: &str, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
@@ -129,7 +130,6 @@ pub fn run(name: &str, force: bool, restart_flow: bool) -> Result<()> {
             force,
             true,
             None,
-            restart_flow,
             ListenerSignals::new(None, shutdown_signal()),
         )
         .await
@@ -299,7 +299,6 @@ pub(crate) async fn run_listener(
         force,
         spawn_resident,
         discord_token,
-        false,
         ListenerSignals::new(None, shutdown),
     )
     .await
@@ -308,7 +307,6 @@ pub(crate) async fn run_listener(
 /// Run a listener and publish the exact point at which its endpoint becomes
 /// attachable. The Home host uses this instead of polling the discovery file;
 /// direct `lf wave` callers need no startup receiver.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_listener_with_startup<F>(
     repo_root: PathBuf,
     wave: String,
@@ -316,7 +314,6 @@ pub(crate) async fn run_listener_with_startup<F>(
     force: bool,
     spawn_resident: bool,
     discord_token: Option<SecretString>,
-    restart_legacy_flow: bool,
     signals: ListenerSignals<F>,
 ) -> Result<()>
 where
@@ -435,9 +432,6 @@ where
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
     let runtime = WaveRuntime::open_with_backing(wave.clone(), repo_root.clone(), chat_backing)?;
-    if restart_legacy_flow {
-        runtime.restart_legacy_playhead()?;
-    }
     if let Some(adapter) = discord_adapter.as_ref() {
         adapter.attach(&runtime)?;
     }
@@ -653,7 +647,7 @@ mod tests {
 
     /// Inject a finalized assistant turn, as a completed loop turn would land.
     fn narrate(runtime: &WaveRuntime, text: &str) {
-        runtime.append_finalized_turn(progress_turn(text), Vec::new());
+        runtime.append_finalized_turn(progress_turn(text), Vec::new(), None);
     }
 
     /// Boot just the HTTP surface over a runtime we control, without a
@@ -739,6 +733,7 @@ mod tests {
 
         // The open turn counts as the newest turn in the tail.
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         runtime.apply_resident_delta(ResidentDelta::TurnText {
@@ -1003,9 +998,126 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(context.get("playhead").is_some());
+        assert!(context.get("playhead").is_none());
         assert!(context.get("provider_session").is_some());
         assert!(context.get("in_flight").is_none());
+    }
+
+    /// Capture actual listener frames for the Swift streaming and failure contract.
+    #[tokio::test]
+    async fn governance_attempt_frames_match_client_fixture() {
+        let (base, _runtime, _tmp) = boot().await;
+        let mut stream = SseClient::connect(&base).await;
+        stream
+            .states_until(|states| states.contains(&"idle".to_string()))
+            .await;
+        let client = reqwest::Client::new();
+        for (id, status, reason, text) in [
+            (
+                "failed-attempt",
+                Lifecycle::Failed,
+                Some("failed to prepare wave/operate: model unavailable"),
+                "",
+            ),
+            (
+                "later-attempt",
+                Lifecycle::Completed,
+                None,
+                "Scheduled work completed.",
+            ),
+            (
+                "interrupted-attempt",
+                Lifecycle::Interrupted,
+                Some("interrupted by user"),
+                "Work in progress.",
+            ),
+        ] {
+            let mut body =
+                crate::chat::turns::BodyProvenance::for_wave(std::path::Path::new("/fixture"));
+            body.body_id = id.into();
+            body.host = "fixture-host".into();
+            body.harness = Some("codex".into());
+            body.model = Some("fixture-model".into());
+            let mut deltas = vec![ResidentDelta::TurnOpened {
+                answers: Vec::new(),
+                body: Some(body),
+            }];
+            if status != Lifecycle::Failed {
+                deltas.push(ResidentDelta::BodySessionUpdated {
+                    body_id: id.into(),
+                    session_id: format!("session-{id}"),
+                });
+                deltas.push(ResidentDelta::TurnText { text: text.into() });
+            }
+            deltas.push(ResidentDelta::TurnFinished {
+                status,
+                reason: reason.map(str::to_string),
+            });
+            client
+                .post(format!("{base}/resident/deltas"))
+                .header(RESIDENT_TOKEN_HEADER, "test-token")
+                .json(&crate::controller::wave::wire::PostDeltasRequest { deltas })
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        let turns = stream
+            .frames_until(|turns| {
+                turns
+                    .last()
+                    .is_some_and(|turn| turn.status == Lifecycle::Interrupted)
+            })
+            .await;
+        assert_eq!(
+            turns
+                .iter()
+                .filter(|turn| turn.status != Lifecycle::Running)
+                .count(),
+            3
+        );
+        let messages: Vec<serde_json::Value> = dechunk(&stream.raw)
+            .split("\n\n")
+            .filter(|frame| frame.lines().any(|line| line == "event: message"))
+            .map(|frame| {
+                let data = frame
+                    .lines()
+                    .find_map(|line| line.strip_prefix("data: "))
+                    .unwrap();
+                let mut message: serde_json::Value = serde_json::from_str(data).unwrap();
+                let turn = &mut message["turn"];
+                // Only wall-clock values vary; IDs, source and payload are the actual wire.
+                turn["created_at"] = "2026-09-25T12:00:00Z".into();
+                turn["body"]["started_at"] = "2026-09-25T12:00:00Z".into();
+                if !turn["body"]["ended_at"].is_null() {
+                    turn["body"]["ended_at"] = "2026-09-25T12:00:01Z".into();
+                }
+                message
+            })
+            .collect();
+        let actual = serde_json::to_value(messages).unwrap();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/dto/wave_attempt_messages.json");
+        if std::env::var_os("UPDATE_GOLDENS").is_some() {
+            std::fs::write(
+                &path,
+                format!("{}\n", serde_json::to_string_pretty(&actual).unwrap()),
+            )
+            .unwrap();
+        }
+        let expected: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            client
+                .get(format!("{base}/playhead"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::NOT_FOUND
+        );
     }
 
     #[tokio::test]
@@ -1261,6 +1373,7 @@ mod tests {
 
         // A turn is mid-flight before the client connects.
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         runtime.apply_resident_delta(ResidentDelta::TurnText {
@@ -1324,6 +1437,7 @@ mod tests {
 
         // A turn opens → `turning` arrives live; finalization → `idle`.
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         let states = client.states_until(|s| s.len() >= 2).await;
@@ -1341,6 +1455,7 @@ mod tests {
     async fn conversation_includes_the_open_running_turn() {
         let (base, runtime, _tmp) = boot().await;
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         runtime.apply_resident_delta(ResidentDelta::TurnText {
@@ -1382,6 +1497,7 @@ mod tests {
         {
             let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
             runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+                body: None,
                 answers: Vec::new(),
             });
             runtime.apply_resident_delta(ResidentDelta::TurnText {

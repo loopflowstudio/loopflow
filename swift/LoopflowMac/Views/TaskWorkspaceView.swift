@@ -5,16 +5,12 @@ import SwiftUI
 
 struct TaskTerminal: Identifiable, Hashable {
     let id: String
-    let taskId: String
-    let issueIdentifier: String
-    let worktree: String
     let title: String
-    let tmuxName: String
 }
 
 @MainActor
 final class TaskTerminalStore: ObservableObject {
-    static let shared = TaskTerminalStore()
+    let surfaces = GhosttySurfacePool()
 
     @Published private var tabsByTask: [String: [TaskTerminal]] = [:]
     @Published private var selectedTabByTask: [String: String] = [:]
@@ -30,26 +26,11 @@ final class TaskTerminalStore: ObservableObject {
     }
 
     @discardableResult
-    func addTerminal(
-        taskId: String,
-        issueIdentifier: String,
-        worktree: String
-    ) async throws -> TaskTerminal {
+    func addTerminal(taskId: String) -> TaskTerminal {
         let number = tabs(for: taskId).count + 1
-        let token = UUID().uuidString.lowercased().prefix(8)
-        let taskToken = taskId
-            .lowercased()
-            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
-            .prefix(18)
-        let tmuxName = "lf-task-ui-\(taskToken)-\(token)"
-        try await TmuxSession(sessionName: tmuxName, worktreePath: worktree).ensureBaseSession()
         let tab = TaskTerminal(
             id: "terminal-\(UUID().uuidString.lowercased())",
-            taskId: taskId,
-            issueIdentifier: issueIdentifier,
-            worktree: worktree,
-            title: "Shell \(number)",
-            tmuxName: tmuxName
+            title: "Shell \(number)"
         )
         tabsByTask[taskId, default: []].append(tab)
         selectedTabByTask[taskId] = tab.id
@@ -62,7 +43,7 @@ final class TaskTerminalStore: ObservableObject {
     }
 
     func close(_ tab: TaskTerminal, taskId: String) {
-        TmuxSessionRegistry.shared.killSession(named: tab.tmuxName)
+        surfaces.release(.taskTerminal(tab.id))
         tabsByTask[taskId]?.removeAll { $0.id == tab.id }
         if selectedTabByTask[taskId] == tab.id {
             selectedTabByTask[taskId] = tabs(for: taskId).last?.id
@@ -133,7 +114,6 @@ struct TaskWorkspaceView: View {
                 case .terminal:
                     TaskTerminalWorkspaceView(
                         taskId: runtime.workId,
-                        issueIdentifier: task.identifier,
                         worktree: workspace.worktree,
                         store: terminalStore
                     )
@@ -354,13 +334,10 @@ struct TaskWorkspaceView: View {
 
 private struct TaskTerminalWorkspaceView: View {
     let taskId: String
-    let issueIdentifier: String
     let worktree: String
     @ObservedObject var store: TaskTerminalStore
 
     @Environment(\.palette) private var palette
-    @State private var error: String?
-    @State private var preparing = false
 
     private var tabs: [TaskTerminal] { store.tabs(for: taskId) }
     private var selected: TaskTerminal? { store.selectedTab(for: taskId) }
@@ -391,54 +368,30 @@ private struct TaskTerminalWorkspaceView: View {
                     }
                 }
                 Button {
-                    Task { await addTerminal() }
+                    store.addTerminal(taskId: taskId)
                 } label: {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(.borderless)
                 .help("New Task terminal")
-                .disabled(preparing)
             }
             .padding(Spacing.sm)
             Divider()
-            if let error {
-                ContentUnavailableView(
-                    "Terminal unavailable",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(error)
-                )
-            } else if let selected {
+            if let selected {
                 GhosttyTerminalView(
                     workingDirectory: worktree,
-                    argv: ["tmux", "attach-session", "-t", selected.tmuxName],
-                    terminal: .taskTerminal(selected.id)
+                    terminal: .taskTerminal(selected.id),
+                    surfacePool: store.surfaces
                 )
                 .id(selected.id)
                 .background(LoopflowPalette.dark.background)
-            } else if preparing {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task(id: taskId) {
             guard tabs.isEmpty else { return }
-            await addTerminal()
+            store.addTerminal(taskId: taskId)
         }
     }
 
-    @MainActor
-    private func addTerminal() async {
-        preparing = true
-        defer { preparing = false }
-        do {
-            _ = try await store.addTerminal(
-                taskId: taskId,
-                issueIdentifier: issueIdentifier,
-                worktree: worktree
-            )
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
 }
 #endif

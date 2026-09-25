@@ -445,8 +445,11 @@ that same binary; the installed `lf` on PATH may have different saved state.
 
 An unreadable ordinary position reports its saved file without hiding other
 Sessions. Keep that file for recovery; `lf flow <name>` starts a fresh invocation.
-Historical Wave XOR journals remain readable, but their uncaptured branches
-require explicit `lf wave <name> --restart-flow` to compile new execution state.
+Inspect historical Wave continuations with `lf wave recover <name>`. Custom or
+uncaptured work stays unresolved until explicitly cancelled with
+`--cancel <source-seq> --reason <text>`; recovery preserves its original journal
+and never recompiles it from today's Flow catalog. Attempts without recorded
+termination remain unresolved.
 
 A `human:true` step appears as a Flow Session. The reviewer saves feedback and
 revised artifacts, then calls `lf session ready "feedback and remaining work"`.

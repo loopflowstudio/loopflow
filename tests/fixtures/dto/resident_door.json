@@ -6,43 +6,6 @@
     "wave": "ship"
   },
   "context_response": {
-    "playhead": {
-      "stack": [
-        {
-          "id": "inv-code-1",
-          "flow": "code",
-          "steps": [
-            { "name": "implement", "kind": "skill" },
-            { "name": "compress", "kind": "skill" },
-            { "name": "compress", "kind": "skill" },
-            { "name": "gate", "kind": "skill" }
-          ],
-          "cursor": 1,
-          "iteration": 2,
-          "queue": []
-        }
-      ],
-      "active": null,
-      "now": {
-        "invocation_id": "inv-code-1",
-        "flow": "code",
-        "step": "compress",
-        "kind": "skill",
-        "index": 1,
-        "total": 4,
-        "iteration": 2
-      },
-      "next": {
-        "invocation_id": "inv-code-1",
-        "flow": "code",
-        "step": "compress",
-        "kind": "skill",
-        "index": 2,
-        "total": 4,
-        "iteration": 2
-      },
-      "return_to": null
-    },
     "provider_session": {
       "harness": "codex",
       "session_id": "thread_01HNX7XYZ0AZ1B2C3D4E5F6G7H"

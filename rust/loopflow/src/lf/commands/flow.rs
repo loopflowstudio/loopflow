@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
-    execute(&flow.name, &items, None, message, cli, repo)
+    execute(&flow.name, &items, message, cli, repo)
 }
 
 pub fn run_bound(
@@ -49,39 +49,16 @@ pub fn validate(name: &str, repo: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Run exactly one expanded top-level step. The resident owns the cursor and
-/// invokes this hidden primitive once per body, so a body boundary maps to
-/// a product step instead of an entire flow.
-pub fn run_step(flow: &str, index: usize, message: &str, cli: &Cli, repo: &Path) -> Result<()> {
-    let definition = crate::engine::load_flow(flow, repo)?;
-    let items = expand_flow(&definition, repo)?;
-    let item = items
-        .get(index)
-        .cloned()
-        .ok_or_else(|| anyhow!("flow '{flow}' has no step at index {index}"))?;
-    execute(
-        &definition.name,
-        std::slice::from_ref(&item),
-        Some(index as u32),
-        Some(message),
-        cli,
-        repo,
-    )
-}
-
 /// Execute expanded steps on a fresh runtime, bracketed by flow journal events.
-/// `index` names the single step when the caller is running one body's worth.
 fn execute(
     flow_name: &str,
     items: &[ConcreteStep],
-    index: Option<u32>,
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
 ) -> Result<()> {
     let fields = |extra: LfEventFields| LfEventFields {
         flow: Some(flow_name.to_string()),
-        index,
         ..extra
     };
     journal::emit(

@@ -3,7 +3,7 @@ import Foundation
 // Live client for a wave's chat server. A running `lf wave <name>` publishes its
 // loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
 // consumes the unified `GET /events` SSE stream (epoch, backing-health,
-// message, message-delta, state, and playhead frames), and posts messages back.
+// message, message-delta, and state frames), and posts messages back.
 // When the pointer file is absent or the server refuses the connection, the
 // connection settles into `.notRunning` and keeps polling so it attaches when
 // the wave starts.
@@ -564,8 +564,6 @@ public final class WaveChatConnection {
     /// Last loop state seen — sent once on subscribe, again on every
     /// transition, and echoed by `POST /messages` responses.
     public private(set) var loopState: WaveLoopState = .idle
-    /// Durable invocation stack, current step, local queue, and return point.
-    public private(set) var playhead: PlayheadView?
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
     private let session: URLSession
@@ -739,7 +737,6 @@ public final class WaveChatConnection {
         // the saved snapshot painted and upsert replay frames by id; connecting
         // cannot repair a partial or unavailable read.
         loopState = .idle
-        playhead = nil
         if historyState == nil {
             historyState = .available
         }
@@ -770,12 +767,6 @@ public final class WaveChatConnection {
         if event == "state" {
             guard let state = WaveLoopState(rawValue: data) else { return }
             loopState = state
-            return
-        }
-        if event == "playhead" {
-            guard let json = data.data(using: .utf8),
-                  let snapshot = try? decoder.decode(PlayheadView.self, from: json) else { return }
-            playhead = snapshot
             return
         }
         if event == "epoch" {

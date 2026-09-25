@@ -39,52 +39,13 @@ public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-public enum PlayheadStepKind: String, Codable, Sendable, Hashable {
-    case skill, op, and, xor, or, loop
-}
-
-public struct PlayheadStepPlan: Codable, Sendable, Hashable {
-    public let name: String
-    public let kind: PlayheadStepKind
-}
-
-public struct QueuedInvocation: Codable, Sendable, Hashable, Identifiable {
-    public let id: String
-    public let flow: String
-    public let steps: [PlayheadStepPlan]
-}
-
-public struct InvocationState: Codable, Sendable, Hashable, Identifiable {
-    public let id: String
-    public let flow: String
-    public let steps: [PlayheadStepPlan]
-    public let cursor: Int
-    public let iteration: Int
-    public let queue: [QueuedInvocation]
-}
-
-public struct PlayheadStepRef: Codable, Sendable, Hashable {
-    public let invocationId: String
-    public let flow: String
-    public let step: String
-    public let kind: PlayheadStepKind
-    public let index: Int
-    public let total: Int
-    public let iteration: Int
-
-    private enum CodingKeys: String, CodingKey {
-        case flow, step, kind, index, total, iteration
-        case invocationId = "invocation_id"
-    }
-}
-
 public struct BodyProvenance: Codable, Sendable, Hashable {
     public let bodyId: String
-    public let invocationId: String
-    public let stepIndex: Int
-    public let flow: String
+    public let invocationId: String?
+    public let stepIndex: Int?
+    public let flow: String?
     public let step: String
-    public let iteration: Int
+    public let iteration: Int?
     public let sessionId: String?
     public let harness: String?
     public let model: String?
@@ -103,19 +64,6 @@ public struct BodyProvenance: Codable, Sendable, Hashable {
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case terminationReason = "termination_reason"
-    }
-}
-
-public struct PlayheadView: Codable, Sendable, Hashable {
-    public let stack: [InvocationState]
-    public let active: BodyProvenance?
-    public let now: PlayheadStepRef?
-    public let next: PlayheadStepRef?
-    public let returnTo: PlayheadStepRef?
-
-    private enum CodingKeys: String, CodingKey {
-        case stack, active, now, next
-        case returnTo = "return_to"
     }
 }
 

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::controller::wave::playhead::{QueuedInvocation, StepKind, StepRef};
+use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
 use crate::engine::{ConcreteStep, OccurrencePolicy};
 use crate::id::{ExecId, TraceId, WaveId};
 
@@ -161,7 +161,7 @@ impl FlowPosition {
             .expect("a persisted Flow position always selects a validated step")
     }
 
-    pub fn current_checked(&self) -> Option<crate::controller::wave::playhead::StepRef> {
+    pub fn current_checked(&self) -> Option<crate::engine::invocation::StepRef> {
         let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
         let (step, kind, policy) = match steps.get(cursor.index)? {
             ConcreteStep::Skill(skill) => (
@@ -192,7 +192,7 @@ impl FlowPosition {
         })
     }
 
-    pub fn current(&self) -> crate::controller::wave::playhead::StepRef {
+    pub fn current(&self) -> crate::engine::invocation::StepRef {
         self.current_checked()
             .expect("a persisted Flow position always selects a validated step")
     }

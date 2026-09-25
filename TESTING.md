@@ -278,8 +278,16 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
 in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
+Fixtures selecting a private `LF_HOME` must also clear and restore
+`LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
+control authority, and Run lookup otherwise reads outside the fixture's Home.
 Reproduce executable-resolution failures with the compiled test
-binary, `LF_BIN` and `CARGO_BIN_EXE_lf` unset, and a PATH containing Git but no `lf`.
+binary, `LF_BIN`, `LF_CONTROL_BIN`, and `CARGO_BIN_EXE_lf` unset, and a PATH
+containing Git but no `lf`.
+
+When editing the repeated Task body, exercise every step on two passes and
+saved-decision recovery. Keep loop-decide after work and review so navigation
+cannot skip a later review.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
 running its Python behavior tests:

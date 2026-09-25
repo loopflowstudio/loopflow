@@ -51,11 +51,7 @@ struct WaveDetailPane: View {
     @State private var historyReference: String?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
-    // A shared singleton is externally owned, so it observes as an @ObservedObject.
-    // Wrapping it in @StateObject installs StateObject's create-and-own lifecycle
-    // during the first body pass, which fires the singleton's publisher mid-eval —
-    // an AttributeGraph dependency cycle at cold invocation and sheet presentation.
-    @ObservedObject private var terminalStore = TaskTerminalStore.shared
+    @StateObject private var terminalStore = TaskTerminalStore()
 
     var body: some View {
         VStack(spacing: 0) {

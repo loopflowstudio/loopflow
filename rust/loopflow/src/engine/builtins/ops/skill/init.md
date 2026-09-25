@@ -178,10 +178,10 @@ wave/<name>/GOAL.md
 ```
 
 Write the goal as a durable operating contract: objective, observable success,
-chapter priorities, boundaries, and when to stop or escalate. Do not
-create or edit `MEMORY.md`; the Wave runtime owns compiled memory. Runtime
-learnings arrive through `lf memory add` and `lf memory update`. Do not create
-Projects or Tasks in the goal body.
+boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
+in the chapter plan. Curate durable decisions in `wave/<name>/MEMORY.md` through
+the repository workflow; do not invent runtime memory commands or duplicate the
+plan in the goal body.
 
 Then offer Linear binding as above. Initialization provisions one internal
 Project for the first chapter. Subsequent chapters replace it through

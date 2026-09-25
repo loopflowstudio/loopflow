@@ -5,17 +5,17 @@ status, a single decision-agent skill, and this ownership:
 
 > unblock is the lf session that gets asked by the ask
 
-`decide` runs after the pass's work and reviews. It compares intended progress
+`loop-decide` runs after the pass's work and reviews. It compares intended progress
 with observed results, keeping new knowledge distinct from code churn. A pass
 that made no meaningful progress reports Blocked. `Ask` creates the human
 Session; `unblock` is its skill. It uses concept-review by default, narrowing
 to a specific question when the missing input is known. Human completion
-returns the summary and shared artifacts to decide; no navigation or separate
+returns the summary and shared artifacts to loop-decide; no navigation or separate
 Flow gate is approved by completing that Ask.
 
 ## Remaining integration
 
-- Wire the dedicated decide occurrence after concept-review in pursue; remove
+- Wire the dedicated loop-decide occurrence after concept-review in pursue; remove
   decision ownership from the concept-review prompt at that point. Preserve the
   review-slice → concept-review order in finite flows.
 - Rename the public navigation outcomes Advance/Iterate and separate Blocked
@@ -50,7 +50,7 @@ These are source-review scenarios, not live provider/Session proof.
 
 ## Bounded implementation evidence
 
-Added the canonical decide/unblock skills and synced them, with the updated
+Added the canonical loop-decide/unblock skills and synced them, with the updated
 concept-review skill, to the personal Codex skill directory. The standard Codex
 metadata/body export validates for all three; Loopflow's builtin discovery test
 also passes. The Ask skill-selection contribution passes its persistence/prompt

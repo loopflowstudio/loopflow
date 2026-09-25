@@ -2,7 +2,7 @@
 
 Status: the implementation below predates the accepted decision/Ask refinement.
 Next/Repeat become Advance/Iterate; Blocked belongs to execution outcomes rather
-than the navigation decision enum. The `decide` skill follows work and review
+than the navigation decision enum. The `loop-decide` skill follows work and review
 steps and owns the decision. Reporting Blocked opens one Ask whose Session runs
 `unblock`; human completion returns its summary for decision reassessment.
 `unblock` uses concept-review by default. Preserve this distinction when

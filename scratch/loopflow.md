@@ -26,7 +26,7 @@ loopflow. Keep the Flow type and its entry points. The term describes the edges
 in the definition; it introduces no separate execution mode or setup requirement.
 Ordinary execution constraints still apply, including exact human approval.
 
-By default, finishing a step proceeds to the next step. One `decide` skill owns
+By default, finishing a step proceeds to the next step. One `loop-decide` skill owns
 the decision step: Advance follows the forward edge; Iterate takes the declared
 backward edge with direction for another pass. Work and review agents supply
 evidence, not a decision file. A process exit is not a decision. A human gate
@@ -47,13 +47,13 @@ design → human design review → implement → compress → review-slice
                                   ↑                       ↓
                                   │                 concept-review
                                   │                       ↓
-                                  └── Iterate ──────── decide
+                                  └── Iterate ──────── loop-decide
                                                        ↓ Advance
                                                 human demo → delivery
 
-decide reports Blocked → Ask Session running unblock → human Complete
+loop-decide reports Blocked → Ask Session running unblock → human Complete
                                (uses concept-review)          ↓
-                                                    decide reassesses
+                                                    loop-decide reassesses
 ```
 
 The initial steps occur once, the declared edge repeats the chosen section,
@@ -140,3 +140,22 @@ Task binding must not change the meaning of the definition.
 
 The existing Task-only fixture passes do not meet this proof. The current edits
 add concept-review and documentation; they do not implement this redesign yet.
+
+## Future direction
+
+The human suggested loop-decide could eventually be a jev-agent. Preserve the
+small decision contract so a future agent implementation can change independently
+of Flow topology, persistence, and Ask behavior. This is a future direction, not
+an additional implementation requirement for this branch.
+
+## Current integration checkpoint (2026-09-25)
+
+The earlier implementation-difference bullets above are the redesign baseline.
+The shared reducer now runs ordinary and Task backward edges. `loop-decide`
+owns typed decisions, Blocked connects to keyed Ask/unblock, and ordinary human
+boundaries project as Flow Sessions. Design and delivery revision targets are
+explicit backward edges. Ordinary invocation positions are saved under the
+current Home and can be resumed. See `protocol-review.md` for current types,
+repaired counterexamples, and the unresolved Wave/XOR/live-transport acceptance
+gaps. These gaps remain part of the full design; this checkpoint is not shipment
+or permission to narrow the accepted scope.

@@ -15,7 +15,8 @@ obsolete Wave machinery.
 The human describes Wave playhead as mostly old code that should probably be
 deleted, though a similar capability may return someday. Treat deletion as a
 candidate simplification. Do not retain or extend it for hypothetical future
-use. This review has not authorized or performed an implementation rewrite.
+use. The human subsequently authorized straightforward deletion and
+simplification alongside this work, while deferring investigation of unused UI.
 
 ## Proposed usage and skill guidance
 
@@ -75,12 +76,9 @@ Separate remaining findings:
 - Ordinary XOR captures a selected body but loads router/branch content when
   entered. Whole-invocation definition pinning remains incomplete wherever
   those paths are supported.
-- docs/authoring.md still assigns decisions to concept-review and documents
-  continue/complete/blocked via lf task verdict. docs/lf.md mixes that older
-  baseline with the newer protocol. Reconcile them with the usage above before
-  shipment; do not present the current implementation as approved.
-
-## Smallest next review and proof
+- The authoring and CLI docs mixed the old Task-only verdict protocol with
+  the new protocol. This review removes those instructions, assigns decisions
+  to loop-decide, and retains explicit Task XOR and pinning limitations.
 
 ## Deletion opportunities and proposed disposition
 
@@ -88,8 +86,10 @@ Human direction: aggressively identify cleanup enabled by this change. A large
 deletion may become a bounded follow-up, but deferral must name what disappears,
 why it is separate, and the proof that closes it. Future usefulness is not a
 reason to preserve unused machinery. Apply this scrutiny to new branch code as
-well as inherited code. The dispositions below are review recommendations;
-no runtime edits or external Tasks have been created.
+well as inherited code. Broader dispositions below remain recommendations.
+Local cleanup removes the redundant flow_session::revision_target wrapper;
+callers use the shared human_revision_target directly. No external Tasks have
+been created. Wave and UI removal remain follow-up proposals.
 
 | Candidate | Delete or consolidate | Proposed disposition and proof |
 | --- | --- | --- |
@@ -120,14 +120,26 @@ instructions and duplicated semantics touched by LOO-295 belong in its review.
 
 ## Next proof
 
-Before a deletion design, inventory the live Wave interpreter callers, shared
-Task types, and persisted journal facts. Propose removal of the old interpreter
-while retaining the actual Wave operating/cadence behavior and Task recovery.
-Do not introduce a replacement Wave Flow lifecycle solely to make deletion fit.
-The possible future return of this capability is not a present requirement.
+Defer the Wave/UI usage inventory. Its future deletion work must preserve
+Wave operating/cadence behavior and Task recovery without introducing a
+replacement Wave Flow lifecycle solely to make deletion fit.
+
+The next product choice is the pass budget after human revision. The current
+reducer retains per-edge counts for the entire invocation. If loop-decide
+uses its seven backward traversals, Advances to demo, and the human requests
+another implementation pass, loop-decide has no remaining Iterate allowance.
+The human demo edge has its own counter; it does not replenish loop-decide's.
+This is source-observed behavior, not an accepted decision that human revision
+must share the original autonomous allowance. Decide whether a new human
+revision starts a fresh bounded work cycle before changing persisted counters.
 
 Task acceptance still needs the concrete interaction and recovery proof:
 initial steps once, backward traversal with direction, later forward completion,
 exact human approval, and Blocked → Ask → reassessment. Preserve stale-decision
 rejection and saved-result recovery. Existing fixture reports are in
 protocol-review.md; no tests or live runtime demo were run during this review.
+
+Local cleanup verification: cargo fmt --all -- --check, all-target Clippy with
+warnings denied, and git diff --check passed. The Rust edit only removes a
+forwarding function; no behavior change or new test is claimed. Source review
+confirmed the caller uses the same shared revision-target function directly.

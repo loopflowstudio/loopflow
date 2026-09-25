@@ -229,6 +229,17 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
+    /// Give one Session a human-assigned name and return the authoritative
+    /// record. A Run ID reaches the Ask or Flow boundary that owns it.
+    public func renameSession(
+        id: String,
+        name: String,
+        cwd: String? = nil
+    ) async throws -> SessionRecord {
+        let stdout = try await run(["session", "rename", "--json", "--", id, name], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
     /// Complete an interactive conversation, Flow review, or blocked Ask.
     public func completeSession(
         id: String,

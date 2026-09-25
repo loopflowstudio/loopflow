@@ -1,0 +1,9 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 33.58s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 1 test
+test lf::commands::install::compatibility_tests::local_candidate_schema_is_validated_on_an_isolated_copy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1589 filtered out; finished in 2.10s
+

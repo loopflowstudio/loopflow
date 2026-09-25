@@ -388,7 +388,7 @@ struct DesktopPerformanceTests {
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": "/src/loopflow", "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(kind: "interactive", state: "active"),
-             "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let active = try JSONSerialization.data(withJSONObject: [
             "discovery": "ready", "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],

@@ -52,6 +52,7 @@ fn prepare(home: &Path) -> RunId {
             worktree: None,
             skill: None,
             subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Independent,
         },
         None,
     )

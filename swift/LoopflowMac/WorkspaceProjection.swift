@@ -70,6 +70,35 @@ struct WorkspaceProjection {
         unmatchedSessions = sessions.filter { !matched.contains($0.id) }
     }
 
+    /// The drill-down trail for the selected Work or Session. A Session's
+    /// siblings share its parent subject; the final crumb chooses among them.
+    func breadcrumb(selection: WorkReference?, sessionId: String?) -> WorkspaceBreadcrumb? {
+        if let sessionId {
+            for wave in waves {
+                if let session = wave.sessions.first(where: { $0.id == sessionId }) {
+                    return WorkspaceBreadcrumb(wave: wave, task: nil, session: session, siblings: wave.sessions)
+                }
+                if let task = wave.tasks.first(where: { $0.sessions.contains { $0.id == sessionId } }),
+                   let session = task.sessions.first(where: { $0.id == sessionId }) {
+                    return WorkspaceBreadcrumb(wave: wave, task: task, session: session, siblings: task.sessions)
+                }
+            }
+            if let session = unmatchedSessions.first(where: { $0.id == sessionId }) {
+                return WorkspaceBreadcrumb(wave: nil, task: nil, session: session, siblings: [session])
+            }
+        }
+        guard let selection else { return nil }
+        for wave in waves {
+            if wave.id.work == selection {
+                return WorkspaceBreadcrumb(wave: wave, task: nil, session: nil, siblings: wave.sessions)
+            }
+            if let task = wave.tasks.first(where: { $0.id.work == selection }) {
+                return WorkspaceBreadcrumb(wave: wave, task: task, session: nil, siblings: task.sessions)
+            }
+        }
+        return nil
+    }
+
     func subject(for sessionId: String) -> WorkReference? {
         for wave in waves {
             if wave.sessions.contains(where: { $0.id == sessionId }) { return wave.id.work }
@@ -79,6 +108,14 @@ struct WorkspaceProjection {
         }
         return nil
     }
+}
+
+/// Wave → Task → Session. Missing ancestry stays missing rather than guessed.
+struct WorkspaceBreadcrumb {
+    let wave: WorkspaceWave?
+    let task: WorkspaceTask?
+    let session: SessionRecord?
+    let siblings: [SessionRecord]
 }
 
 struct WorkspaceOutlineSubject {
@@ -219,6 +256,15 @@ extension WorkspaceProjection {
     }
 }
 
+/// An in-place Session name edit. It belongs to exactly one Session; a
+/// completion for another Session can never touch it.
+struct SessionRenameDraft: Equatable {
+    let sessionId: String
+    var text: String
+    var error: String?
+    var submitting = false
+}
+
 /// Per-window/repository navigation; independent of terminal layout and liveness.
 @MainActor
 @Observable
@@ -226,7 +272,16 @@ final class WorkspaceNavigation {
     enum Content { case overview, details, terminals }
     var content: Content = .overview
     var presentation: WorkspacePresentation = .compact
-    var selectedSessionId: String?
+    var selectedSessionId: String? {
+        didSet {
+            // Leaving a Session abandons an unsubmitted edit; a submitted one
+            // still settles against its own Session.
+            if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
+                self.renaming = nil
+            }
+        }
+    }
+    var renaming: SessionRenameDraft?
     var repositoryCollapsed = false
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""

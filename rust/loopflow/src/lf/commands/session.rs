@@ -5,6 +5,7 @@ use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
 use crate::ops::human_session::{OpenMode, SessionKind, SessionRecord, SessionState};
+use crate::run_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
@@ -49,6 +50,12 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             open(id, *json, mode).await
         }
         SessionCommand::Complete { id } => complete(id).await,
+        SessionCommand::Rename {
+            id,
+            name,
+            suggest,
+            json,
+        } => rename(id, name, *suggest, *json).await,
         SessionCommand::Ready { summary } => {
             let text = required_text(summary, "ready summary")?;
             let store = open_shared_store().await?;
@@ -138,6 +145,28 @@ async fn complete(id: &str) -> anyhow::Result<()> {
                 .expect("completed Ask Session has a ready summary")
         ),
         SessionKind::Flow => println!("Review completed; feedback returned to the Flow."),
+    }
+    Ok(())
+}
+
+async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow::Result<()> {
+    let requested = required_text(name, "Session name")?;
+    let source = if suggest {
+        SessionTitleSource::Generated
+    } else {
+        SessionTitleSource::Human
+    };
+    let store = open_shared_store().await?;
+    let session = crate::ops::human_session::rename(&store, id, &requested, source).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&session)?);
+    } else if suggest && session.title_source == SessionTitleSource::Human {
+        println!(
+            "Session {} keeps its human-assigned name {:?}.",
+            session.id, session.title
+        );
+    } else {
+        println!("Session {} is named {:?}.", session.id, session.title);
     }
     Ok(())
 }

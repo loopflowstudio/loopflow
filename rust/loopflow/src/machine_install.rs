@@ -842,6 +842,28 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     }
 }
 
+/// Find a retained development Home without changing its data or machine selection.
+pub fn retained_development_home(root: &Path, id: &str) -> Result<InstallSelection> {
+    for entry in fs::read_dir(root.join("receipts"))? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let receipt: SwitchReceipt = serde_json::from_slice(&fs::read(&path)?)?;
+        if receipt.target.installation_id == id
+            && receipt.phase == SwitchPhase::Settled
+            && receipt.target.source == InstallSource::Development
+        {
+            receipt.validate()?;
+            if !receipt.target.store.is_file() {
+                return Err(anyhow!("retained Home {} is missing its store", id));
+            }
+            return Ok(receipt.target);
+        }
+    }
+    Err(anyhow!("no retained development installation named {id}"))
+}
+
 pub fn read_state(root: &Path) -> Result<MachineInstallState> {
     let switch_path = root.join(SWITCH_FILE);
     if path_exists(&switch_path)? {
@@ -1838,6 +1860,7 @@ mod tests {
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
+        fs::write(&development.store, b"retained chapter and Task history").unwrap();
         let mut receipt = switch(
             published.clone(),
             development.clone(),
@@ -1849,10 +1872,11 @@ mod tests {
         receipt.target_store_advance_started = true;
         receipt.target_store_advanced = true;
         receipt.active_selection_committed = true;
-        let active = active(development.clone(), published.artifact_set);
+        let active_state = active(development.clone(), published.artifact_set);
 
         write_switch(&root, &receipt).unwrap();
-        settle_switch(&root, &receipt, &active).unwrap();
+        settle_switch(&root, &receipt, &active_state).unwrap();
+
         assert!(matches!(
             read_state(&root).unwrap(),
             MachineInstallState::Settled(found) if found.selection == development
@@ -1860,7 +1884,35 @@ mod tests {
         assert!(!root.join(SWITCH_FILE).exists());
         assert!(root.join("receipts/switch-test.json").is_file());
 
-        settle_switch(&root, &receipt, &active).unwrap();
+        settle_switch(&root, &receipt, &active_state).unwrap();
+        // A later installation must not make the previous Home unreachable.
+        let later = selection(directory.path(), "later", InstallSource::Development);
+        let later_active = active(later.clone(), active_state.published_fallback.clone());
+        let mut next = switch(
+            development.clone(),
+            later.clone(),
+            active_state.published_fallback.clone(),
+        );
+        next.id = "switch-later".to_string();
+        write_switch(&root, &next).unwrap();
+        next.phase = SwitchPhase::Settled;
+        next.recovery_owner = RecoveryOwner::Candidate;
+        next.target_store_advance_started = true;
+        next.target_store_advanced = true;
+        next.active_selection_committed = true;
+        write_switch(&root, &next).unwrap();
+        settle_switch(&root, &next, &later_active).unwrap();
+        let restored = retained_development_home(&root, &development.installation_id).unwrap();
+        assert_eq!(restored, development);
+        assert_eq!(
+            fs::read(&restored.store).unwrap(),
+            b"retained chapter and Task history"
+        );
+        assert!(
+            matches!(read_state(&root).unwrap(), MachineInstallState::Settled(found) if found.selection == later)
+        );
+        assert!(retained_development_home(&root, "missing").is_err());
+        assert!(retained_development_home(&root, &published.installation_id).is_err());
     }
 
     #[test]

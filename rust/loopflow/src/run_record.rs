@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -37,6 +38,51 @@ pub(crate) struct RunSpec {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
+    pub flow: RunFlowMembership,
+}
+
+/// The exact managed Task Flow occurrence a Run executes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunFlowStep {
+    pub task_id: crate::work::task::TaskId,
+    pub invocation_id: String,
+    pub flow: String,
+    pub step: String,
+    pub step_index: u32,
+    pub iteration: u32,
+}
+
+impl RunFlowStep {
+    pub(crate) fn of(position: &crate::durable::FlowPosition) -> Self {
+        Self {
+            task_id: position.task_id.clone(),
+            invocation_id: position.invocation.id.clone(),
+            flow: position.invocation.flow.clone(),
+            step: position.current().step,
+            step_index: position.step_index,
+            iteration: position.iteration,
+        }
+    }
+
+    /// Whether this occurrence is the Task's current Flow position.
+    pub(crate) fn is_current(&self, position: Option<&crate::durable::FlowPosition>) -> bool {
+        position.is_some_and(|position| {
+            position.task_id == self.task_id
+                && position.invocation.id == self.invocation_id
+                && position.step_index == self.step_index
+                && position.iteration == self.iteration
+        })
+    }
+}
+
+/// Recorded when the Run is captured: a managed Flow step, or a Run outside
+/// any managed Flow. Manifests written before this field existed have none;
+/// readers treat that absence as unknown, never as independent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RunFlowMembership {
+    Step(RunFlowStep),
+    Independent,
 }
 
 /// Replayable, provider-facing inputs for one ordinary headless launch.
@@ -123,6 +169,7 @@ pub struct RunManifest {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
+    pub flow: Option<RunFlowMembership>,
     pub launch: Option<RunLaunchRequest>,
     pub context: Option<RunContextRef>,
     pub runtime_path: Option<PathBuf>,
@@ -942,6 +989,111 @@ pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()
     }
 }
 
+/// Who chose a Session's current title. A human name is never replaced by a
+/// generated suggestion. `Unavailable` is never stored: the canonical name
+/// lives on another Home and the reader only has a local display label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTitleSource {
+    Generated,
+    Human,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionName {
+    pub title: String,
+    pub source: SessionTitleSource,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SessionNameRecord {
+    schema_version: u32,
+    title: String,
+    source: SessionTitleSource,
+}
+
+const SESSION_TITLE_MAX_CHARS: usize = 80;
+
+/// The stored Session name, or `None` while the Run still has its seed name.
+pub(crate) fn read_session_name(dir: &Path) -> std::io::Result<Option<SessionName>> {
+    let bytes = match fs::read(dir.join("session-name.json")) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let record: SessionNameRecord =
+        serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    if record.schema_version != SCHEMA_VERSION {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unsupported Session name schema",
+        ));
+    }
+    Ok(Some(SessionName {
+        title: record.title,
+        source: record.source,
+    }))
+}
+
+/// Store a Session name and return the name now in effect. A generated
+/// suggestion leaves an existing human name unchanged, including when the two
+/// writes race: both read and replace under one lock.
+pub(crate) fn write_session_name(
+    dir: &Path,
+    title: &str,
+    source: SessionTitleSource,
+) -> std::io::Result<SessionName> {
+    if source == SessionTitleSource::Unavailable {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "a Session name is either generated or human-assigned",
+        ));
+    }
+    let title = title.trim();
+    if title.is_empty() || title.contains(['\n', '\r']) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Session name must be one non-empty line",
+        ));
+    }
+    if title.chars().count() > SESSION_TITLE_MAX_CHARS {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Session name must be at most {SESSION_TITLE_MAX_CHARS} characters"),
+        ));
+    }
+    read_manifest(dir)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join(".session-name.lock"))?;
+    lock.lock_exclusive()?;
+    if let Some(current) = read_session_name(dir)? {
+        if source == SessionTitleSource::Generated && current.source == SessionTitleSource::Human {
+            return Ok(current);
+        }
+    }
+    let staging = dir.join(format!(".session-name-{}.staging", Uuid::new_v4()));
+    write_private_exclusive(
+        &staging,
+        &serde_json::to_vec_pretty(&SessionNameRecord {
+            schema_version: SCHEMA_VERSION,
+            title: title.to_string(),
+            source,
+        })
+        .map_err(std::io::Error::other)?,
+    )?;
+    fs::rename(staging, dir.join("session-name.json"))?;
+    sync_dir(dir)?;
+    Ok(SessionName {
+        title: title.to_string(),
+        source,
+    })
+}
+
 pub(crate) fn provider_session_is_resolved(dir: &Path) -> std::io::Result<bool> {
     match fs::read(dir.join("session-resolution.json")) {
         Ok(bytes) => {
@@ -1338,6 +1490,9 @@ impl CaptureHandle {
         manifest.worktree = spec.worktree;
         manifest.skill = spec.skill;
         manifest.subjects = spec.subjects;
+        // Preparation is the owning transaction for a human Flow step's
+        // membership; a launch cannot reassign the prepared occurrence.
+        manifest.flow = manifest.flow.or(Some(spec.flow));
         (manifest.runtime_path, manifest.runtime_digest) = runtime_identity();
         manifest.host = gethostname::gethostname().to_string_lossy().into_owned();
         manifest.boot_id = boot_id();
@@ -1645,6 +1800,7 @@ impl RunCapture {
             worktree: spec.worktree,
             skill: spec.skill,
             subjects: spec.subjects,
+            flow: Some(spec.flow),
             launch,
             context: context_ref,
             runtime_path,
@@ -1912,7 +2068,7 @@ fn verified_parent(lf_home: &Path, run_id: RunId) -> Option<RunId> {
     (manifest.run_id == run_id).then_some(run_id)
 }
 
-fn record_dir(lf_home: &Path, run_id: &RunId) -> Option<PathBuf> {
+pub(crate) fn record_dir(lf_home: &Path, run_id: &RunId) -> Option<PathBuf> {
     let prefix = run_id.as_str().strip_prefix("run_")?.get(..2)?;
     Some(lf_home.join("runs").join(prefix).join(run_id.as_str()))
 }
@@ -2279,7 +2435,67 @@ mod tests {
             worktree: Some(cwd.to_path_buf()),
             skill: Some("implement".to_string()),
             subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Independent,
         }
+    }
+
+    #[test]
+    fn human_session_names_survive_generated_suggestions() {
+        use super::{read_session_name, write_session_name, SessionTitleSource};
+        let home = tempfile::tempdir().unwrap();
+        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
+        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        assert_eq!(read_session_name(&dir).unwrap(), None);
+
+        let suggested =
+            write_session_name(&dir, " Release outcomes ", SessionTitleSource::Generated).unwrap();
+        assert_eq!(suggested.title, "Release outcomes");
+        let human = write_session_name(&dir, "Launch notes", SessionTitleSource::Human).unwrap();
+        assert_eq!(human.source, SessionTitleSource::Human);
+        let kept = write_session_name(&dir, "Better guess", SessionTitleSource::Generated).unwrap();
+        assert_eq!(kept, human);
+        assert_eq!(read_session_name(&dir).unwrap(), Some(human));
+
+        for invalid in ["   ", "two\nlines", "x".repeat(81).as_str()] {
+            let error = write_session_name(&dir, invalid, SessionTitleSource::Human).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        }
+        assert_eq!(
+            read_session_name(&dir).unwrap().unwrap().title,
+            "Launch notes"
+        );
+    }
+
+    #[test]
+    fn racing_suggestions_never_replace_a_human_name() {
+        use super::{read_session_name, write_session_name, SessionTitleSource};
+        let home = tempfile::tempdir().unwrap();
+        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
+        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(9));
+        let writers = (0..9)
+            .map(|index| {
+                let dir = dir.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let (title, source) = if index == 4 {
+                        ("Human name".to_string(), SessionTitleSource::Human)
+                    } else {
+                        (format!("suggestion {index}"), SessionTitleSource::Generated)
+                    };
+                    for _ in 0..20 {
+                        write_session_name(&dir, &title, source).unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        let name = read_session_name(&dir).unwrap().unwrap();
+        assert_eq!(name.title, "Human name");
+        assert_eq!(name.source, SessionTitleSource::Human);
     }
 
     #[test]

@@ -9,7 +9,7 @@ struct WorkspaceNavigator: View {
     let onConversation: ((WorkReference?) -> Void)?
     let onNewShell: (() -> Void)?
     let onShowTerminals: (() -> Void)?
-    @Environment(\.palette) private var palette
+    private let palette = LoopflowPalette.deepWine
     @State private var scrollPosition: ScrollPosition
 
     init(model: PodiumModel, onOpenSession: @escaping (SessionRecord) -> Void,
@@ -36,8 +36,8 @@ struct WorkspaceNavigator: View {
     }
 
     private var repositories: [String] {
-        Set(model.allRepos.map(\.path) + model.visibleRoadmaps.map { $0.wave.repo }
-            + [model.repoPath].compactMap { $0 }).sorted()
+        Set((model.allRepos.map(\.path) + model.visibleRoadmaps.map { $0.wave.repo }
+            + [model.repoPath].compactMap { $0 }).map { model.repoIdentity($0) }).sorted()
     }
 
     var body: some View {
@@ -67,6 +67,7 @@ struct WorkspaceNavigator: View {
                 .accessibilityIdentifier("workspace-presentation")
             }
             .padding(12)
+            .background(Color.loopflowBurgundy)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
@@ -102,9 +103,13 @@ struct WorkspaceNavigator: View {
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in navigation.listScrollOffset = offset }
         }
-        .font(.system(size: 12))
+        .font(Typography.body(12))
+        .foregroundStyle(palette.text)
+        .tint(palette.text)
         .buttonStyle(.plain)
         .background(palette.surface)
+        .environment(\.colorScheme, .dark)
+        .environment(\.palette, palette)
         .contextMenu { repositoryActions }
         .accessibilityIdentifier("workspace-navigator")
     }
@@ -139,6 +144,7 @@ struct WorkspaceNavigator: View {
             .accessibilityLabel("Toggle repository \(repo)")
             Button { selectRepository(repo) } label: {
                 Text(URL(fileURLWithPath: repo).lastPathComponent)
+                    .font(Typography.caption(12).weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }
             .help(repo)
@@ -175,21 +181,33 @@ struct WorkspaceNavigator: View {
                     }
                 }
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.title).lineLimit(2)
-                    if let detail = row.detail { Text(detail).foregroundStyle(palette.textSecondary).lineLimit(2) }
+                HStack(spacing: Spacing.sm) {
+                    if let work = row.workKey?.work, work.kind == .wave,
+                       let wave = model.rosterWave(id: work.id) {
+                        WaveLensView(lens: wave.lens)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.title)
+                            .font(row.workKey?.work.kind == .wave ? Typography.sectionTitle(18) : Typography.body(12))
+                            .lineLimit(2)
+                        if let detail = row.detail {
+                            Text(detail).font(Typography.caption(11))
+                                .foregroundStyle(palette.textSecondary).lineLimit(2)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier(identifier(row))
             if let session = row.session {
-                Text(sessionStatus(session)).foregroundStyle(palette.textSecondary)
+                Text(sessionStatus(session)).font(Typography.caption(10)).foregroundStyle(palette.textSecondary)
             }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
-        .background(isSelected(row) ? palette.surfaceMuted : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+        .background(isSelected(row) ? Color.loopflowBurgundy : Color.clear,
+                    in: RoundedRectangle(cornerRadius: CornerRadius.md))
         .padding(.leading, CGFloat(row.depth) * 14)
         .contextMenu {
             if let key = row.workKey { subjectActions(key.work, title: row.title) }

@@ -476,6 +476,52 @@ final class PodiumModel {
         }
     }
 
+    func beginSessionRename(_ record: SessionRecord) {
+        guard navigation.renaming?.sessionId != record.id else { return }
+        navigation.renaming = SessionRenameDraft(sessionId: record.id, text: record.title)
+    }
+
+    /// Submit the current rename. Success publishes Rust's authoritative
+    /// record; rejection keeps the typed name and its error. Either outcome
+    /// settles only the Session and repository that started it.
+    func commitSessionRename() async {
+        guard let repo = repoPath, let draft = navigation.renaming, !draft.submitting else { return }
+        let owner = navigation
+        let target = draft.sessionId
+        owner.renaming?.submitting = true
+        owner.renaming?.error = nil
+        do {
+            let record = try await query.renameSession(id: target, name: draft.text, cwd: repo)
+            // A read started before the rename must not restore the old name.
+            sessionsGeneration &+= 1
+            replaceSession(record, repo: repo)
+            if owner.renaming?.sessionId == target { owner.renaming = nil }
+        } catch {
+            guard owner.renaming?.sessionId == target else { return }
+            owner.renaming?.submitting = false
+            owner.renaming?.error = error.localizedDescription
+        }
+    }
+
+    func cancelSessionRename() {
+        guard navigation.renaming?.submitting == false else { return }
+        navigation.renaming = nil
+    }
+
+    private func replaceSession(_ record: SessionRecord, repo: String) {
+        let replace = { (records: [SessionRecord]) in
+            records.map { $0.id == record.id ? record : $0 }
+        }
+        switch sessionReadings[repo] {
+        case .available(let records):
+            sessionReadings[repo] = .available(replace(records))
+        case .unavailable(let records, let reason):
+            sessionReadings[repo] = .unavailable(lastGood: records.map(replace), reason: reason)
+        case .loading, nil:
+            break
+        }
+    }
+
     func sessionResolved(_ id: String, repo: String) {
         // A pre-resolution read must not resurrect the completed human boundary.
         // Resolution may finish after the human has switched repositories.

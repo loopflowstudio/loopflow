@@ -1,0 +1,30 @@
+[
+  {
+    "viewport": [
+      1400,
+      780
+    ],
+    "exact_draft_through_zoom": true,
+    "companion_monitor_restore": true,
+    "no_implicit_launch_or_transfer": true,
+    "location_badges_removed": true,
+    "repo_scope_and_return": true,
+    "search_at_bottom_and_scoped": true,
+    "slash_restores_search": true,
+    "js_errors": []
+  },
+  {
+    "viewport": [
+      1100,
+      720
+    ],
+    "exact_draft_through_zoom": true,
+    "companion_monitor_restore": true,
+    "no_implicit_launch_or_transfer": true,
+    "location_badges_removed": true,
+    "repo_scope_and_return": true,
+    "search_at_bottom_and_scoped": true,
+    "slash_restores_search": true,
+    "js_errors": []
+  }
+]

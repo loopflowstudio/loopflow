@@ -335,6 +335,7 @@ lf ask "Review this proof with me"                    # block on a human session
 lf session list --json                                # unresolved human Sessions
 lf session open <session-id> --json                  # reopen the exact boundary
 lf session complete <session-id>                     # return review or Ask feedback
+lf session rename <session-id> "Release notes"        # suggestions preserve human names
 lf task steer DES-123 "rename the flag"
 lf task steer DES-123 "take the smaller approach"
 lf task interrupt DES-123                             # end the active turn
@@ -1127,6 +1128,19 @@ repository, source checkout, Python, uv, or Homebrew. An already-current,
 complete release skips asset downloads; missing or stale artifacts are repaired.
 Use `lf rebase` for checkout updates and your project's own tools for dependency
 setup.
+
+To restore a retained development Home while promoting a local build:
+
+```bash
+local-bin/lf install promote --from-build local-bin/lf --reuse-home local-<id> \
+  --cli-target ~/.local/bin/lf --daemon-source local-bin/lfd --daemon-target ~/.local/bin/lfd \
+  --app-source local-bin/Loopflow.app --app-target /Applications/Loopflow.app --preview
+```
+
+Remove `--preview` to apply. `--reuse-home` reads the prior installation receipt
+and preserves that Home's chapter bindings, Tasks and Runs. `--fresh` instead
+forks published data into a new development Home; it does not carry history from
+another development installation.
 
 For an older `lf` whose install command requires a source checkout, upgrade once
 with the external installer, then use `lf install` for subsequent updates:

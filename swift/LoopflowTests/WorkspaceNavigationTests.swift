@@ -8,6 +8,23 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkspaceNavigationTests {
+    @Test("Repository path spellings share one outline root")
+    func repositoryAliasesShareRoot() async throws {
+        let source = try ReadingSource(
+            roadmap: roadmapJSON().replacingOccurrences(of: "\"/src/loopflow\"", with: "\"/src/loopflow/\""),
+            sessions: sessionsJSON())
+        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.navigation.presentation = .full
+        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let roots = try view.inspect().findAll(ViewType.Button.self) {
+            (try? $0.accessibilityIdentifier().hasPrefix("workspace-repository-")) == true
+        }
+        #expect(roots.count == 1)
+        #expect(try roots.first?.accessibilityIdentifier() == "workspace-repository-/src/loopflow")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human")
+    }
+
     @Test("Compression promotes leaves without changing identity or hiding upcoming Tasks")
     func compressedOutlinePreservesIdentity() throws {
         var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
@@ -442,7 +459,7 @@ struct WorkspaceNavigationTests {
         {"id":"\(id)", "run_id": "\(id)","kind":"interactive","work":\(workJSON),"title":"\(id)",
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(id == "project" ? "\"wave-1\"" : "null"),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: state.rawValue)),
-         "ready_summary":null,"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
+         "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
         """.utf8))
     }
 }

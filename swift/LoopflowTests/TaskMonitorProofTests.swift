@@ -233,11 +233,11 @@ struct TaskMonitorProofTests {
         [{"id":"monitor-review","run_id":"monitor-review","kind":"interactive",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Review Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"terminal_ids":[],"open_argv":["/bin/cat"]},
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]},
          {"id":"monitor-other","run_id":"monitor-other","kind":"interactive",
           "work":{"kind":"task","id":"ts_now00000000000000000000000000000"},
           "title":"Other Task Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         var active = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/active_runs.json"))) as? [String: Any])
         var run = try #require((active["runs"] as? [[String: Any]])?.first)

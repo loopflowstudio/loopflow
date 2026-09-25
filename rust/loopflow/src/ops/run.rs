@@ -523,6 +523,7 @@ mod tests {
                     worktree: None,
                     skill: Some("implement".into()),
                     subjects,
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap();

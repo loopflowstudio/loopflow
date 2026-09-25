@@ -290,7 +290,7 @@ private func session(id: String, state: String, kind: String = "flow", replacing
       "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
-      "terminal_ids": [],
+      "title_source": "generated", "flow_membership": {"kind": "independent"}, "terminal_ids": [],
       "open_argv": ["lf", "session", "open", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """

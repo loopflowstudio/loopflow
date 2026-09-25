@@ -341,3 +341,234 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         }
     }
 }
+
+fn prepare_ask(home: &std::path::Path, id: &str, title: &str) -> (String, std::path::PathBuf) {
+    let sessions = home.join("human-sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let record = serde_json::json!({
+        "id": id,
+        "parent_run_id": "run_00000000000000000000000000000002",
+        "parent_run_dir": home.join("parent"),
+        "work": null, "work_selector": null,
+        "title": title, "detail": "proof", "prompt": "Do not launch",
+        "cwd": env!("CARGO_MANIFEST_DIR"), "model": "codex",
+        "session_run_id": null, "ready_summary": null, "status": "waiting"
+    });
+    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
+    let opened = run(home, &["session", "open", id, "--json"]);
+    assert!(opened.status.success(), "{opened:?}");
+    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
+    let run_id = opened["run_id"].as_str().unwrap().to_string();
+    let dir = home.join("runs").join(&run_id[4..6]).join(&run_id);
+    (run_id, dir)
+}
+
+fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
+    let output = run(home, &["session", "list", "--all", "--json"]);
+    assert!(output.status.success(), "{output:?}");
+    let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    sessions
+        .into_iter()
+        .find(|session| session["id"] == id)
+        .unwrap_or_else(|| panic!("Session {id} is not listed"))
+}
+
+fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let output = run(
+        home,
+        &[&["session", "rename"][..], args, &["--json"]].concat(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn session_names_are_shared_and_human_names_win() {
+    let home = tempfile::tempdir().unwrap();
+    let id = "ask_naming-proof";
+    let (run_id, dir) = prepare_ask(home.path(), id, "Which release target?");
+    let seeded = listed(home.path(), id);
+    assert_eq!(seeded["title"], "Which release target?");
+    assert_eq!(seeded["title_source"], "generated");
+
+    let suggested = rename(home.path(), &[id, "Release", "target", "--suggest"]);
+    assert_eq!(suggested["title"], "Release target");
+    assert_eq!(suggested["title_source"], "generated");
+    let named = rename(home.path(), &[id, "Launch notes"]);
+    assert_eq!(named["title"], "Launch notes");
+    assert_eq!(named["title_source"], "human");
+    assert_eq!(named["run_id"], run_id.as_str());
+
+    let later = run(
+        home.path(),
+        &["session", "rename", id, "Better guess", "--suggest"],
+    );
+    assert!(later.status.success(), "{later:?}");
+    assert!(String::from_utf8_lossy(&later.stdout).contains("keeps its human-assigned name"));
+    let blank = run(home.path(), &["session", "rename", id, "  "]);
+    assert!(!blank.status.success());
+    let missing = run(home.path(), &["session", "rename", "missing-session", "x"]);
+    assert_eq!(
+        String::from_utf8_lossy(&missing.stderr).trim(),
+        "Error: Session missing-session was not found"
+    );
+
+    let readback = listed(home.path(), id);
+    assert_eq!(readback["title"], "Launch notes");
+    assert_eq!(readback["title_source"], "human");
+    let reopened = run(home.path(), &["session", "open", id, "--json"]);
+    let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
+    assert_eq!(reopened["title"], "Launch notes");
+    // Naming touches only the Run's name record, never provider state.
+    assert!(!dir.join("provider-clients").exists());
+    assert!(!dir.join("events.jsonl").exists());
+    assert!(dir.join("prepared").exists());
+}
+
+#[test]
+fn raw_sessions_are_named_by_a_stable_word_pair() {
+    let home = tempfile::tempdir().unwrap();
+    // A prepared Run with no skill, detached from its Ask and given native
+    // history, lists as a raw interactive Session.
+    let (run_id, dir) = prepare_ask(home.path(), "ask_raw-proof", "Unused seed");
+    std::fs::remove_file(home.path().join("human-sessions/ask_raw-proof.json")).unwrap();
+    std::fs::write(
+        dir.join("provider-session.json"),
+        serde_json::json!({
+            "schema_version": 1, "provider_session_id": "ses_raw-proof", "account_id": null
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let first = listed(home.path(), &run_id);
+    assert_eq!(first["kind"], "interactive");
+    assert_eq!(first["title_source"], "generated");
+    let title = first["title"].as_str().unwrap();
+    let (magical, musical) = title.split_once('-').expect("magical-musical pair");
+    assert!(!magical.is_empty() && !musical.is_empty() && !musical.contains('-'));
+    assert_eq!(listed(home.path(), &run_id)["title"], title);
+    assert!(!dir.join("session-name.json").exists());
+
+    let named = rename(home.path(), &[&run_id, "Morning", "triage"]);
+    assert_eq!(named["title"], "Morning triage");
+    assert_eq!(listed(home.path(), &run_id)["title_source"], "human");
+}
+
+#[cfg(unix)]
+#[test]
+fn boundary_names_follow_run_ids_and_replacement_runs() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("human-sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    let id = "ask_rename-replacement";
+    let record = serde_json::json!({
+        "id": id,
+        "parent_run_id": "run_00000000000000000000000000000002",
+        "parent_run_dir": home.path().join("parent"),
+        "work": null, "work_selector": null,
+        "title": "Which release target?", "detail": "proof", "prompt": "Local proof",
+        "cwd": home.path(), "model": "opencode",
+        "session_run_id": null, "ready_summary": null, "status": "waiting"
+    });
+    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
+    let prepared = run(home.path(), &["session", "open", id, "--json"]);
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let first_run = prepared["run_id"].as_str().unwrap().to_string();
+    let first_dir = home
+        .path()
+        .join("runs")
+        .join(&first_run[4..6])
+        .join(&first_run);
+
+    // The operating instruction passes the Session's own `$LF_RUN_ID`, which
+    // names the boundary's Run rather than the boundary. It must reach the
+    // boundary even before provider history exists.
+    let suggested = rename(home.path(), &[&first_run, "Release target", "--suggest"]);
+    assert_eq!(suggested["id"], id);
+    assert_eq!(suggested["kind"], "ask");
+    assert_eq!(suggested["title"], "Release target");
+    let named = rename(home.path(), &[id, "Launch notes"]);
+    assert_eq!(named["title_source"], "human");
+
+    // A consumed launch that never produced provider history is replaced by a
+    // new Run on the next open. The human name belongs to the Session.
+    std::fs::remove_file(first_dir.join("prepared")).unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("opencode");
+    std::fs::write(
+        &provider,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$LF_RESUME_PROOF\"\nprintf '%s\\n' 'message=created id=ses_rename-proof' >&2\nread -r input\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let evidence = home.path().join("launched");
+    let mut opened = command(home.path(), &["session", "open", id])
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("LF_RESUME_PROOF", &evidence)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !evidence.exists() && Instant::now() < deadline && opened.try_wait().unwrap().is_none() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let started = evidence.exists();
+    // Leave the provider waiting while the agent-facing rename runs inside it.
+    let replacement = std::fs::read_to_string(&evidence).unwrap_or_default();
+    let inside = command(
+        home.path(),
+        &[
+            "session",
+            "rename",
+            &replacement,
+            "Better guess",
+            "--suggest",
+            "--json",
+        ],
+    )
+    .env("LF_RUN_ID", &replacement)
+    .output()
+    .unwrap();
+    let _ = opened
+        .stdin
+        .take()
+        .map(|mut stdin| stdin.write_all(b"done\n"));
+    let opened = opened.wait_with_output().unwrap();
+    assert!(started, "fixture provider did not start: {opened:?}");
+    assert!(opened.status.success(), "{opened:?}");
+    assert_ne!(replacement, first_run);
+
+    assert!(inside.status.success(), "{inside:?}");
+    let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
+    assert_eq!(inside["id"], id);
+    assert_eq!(inside["kind"], "ask");
+    assert_eq!(inside["run_id"], replacement.as_str());
+    assert_eq!(inside["title"], "Launch notes");
+    assert_eq!(inside["title_source"], "human");
+
+    let readback = listed(home.path(), id);
+    assert_eq!(readback["run_id"], replacement.as_str());
+    assert_eq!(readback["title"], "Launch notes");
+    assert_eq!(readback["title_source"], "human");
+    // The boundary's Run never appears as a second, interactive Session.
+    let all: Vec<serde_json::Value> =
+        serde_json::from_slice(&run(home.path(), &["session", "list", "--all", "--json"]).stdout)
+            .unwrap();
+    assert_eq!(all.len(), 1, "{all:?}");
+}

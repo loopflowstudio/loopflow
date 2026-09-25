@@ -741,6 +741,17 @@ pub enum SessionCommand {
     },
     /// Complete a review, blocked Ask, or interactive session
     Complete { id: String },
+    /// Rename a Session; a human name is never replaced by a suggestion
+    Rename {
+        id: String,
+        #[arg(value_name = "NAME", required = true, num_args = 1..)]
+        name: Vec<String>,
+        /// Propose an agent-generated name; keeps a human-assigned name
+        #[arg(long)]
+        suggest: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Mark the active session ready for your review
     Ready {
         #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
@@ -1138,6 +1149,9 @@ pub enum InstallCommand {
         /// Abandon an incompatible disposable Home and fork published data again.
         #[arg(long, requires = "from_build")]
         fresh: bool,
+        /// Reuse a retained development installation and its existing Home data.
+        #[arg(long, requires = "from_build", conflicts_with = "fresh")]
+        reuse_home: Option<String>,
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
         cli_target: PathBuf,
@@ -2921,6 +2935,24 @@ mod tests {
             Cli::try_parse_from(["lf", "session", "open", "run_123", "--replace", "--try",])
                 .is_err()
         );
+
+        let rename = Cli::try_parse_from([
+            "lf",
+            "session",
+            "rename",
+            "run_123",
+            "Release",
+            "notes",
+            "--suggest",
+        ])
+        .expect("parse Session rename");
+        assert!(matches!(
+            rename.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Rename { id, name, suggest: true, json: false }
+            }) if id == "run_123" && name == ["Release", "notes"]
+        ));
+        assert!(Cli::try_parse_from(["lf", "session", "rename", "run_123"]).is_err());
 
         let complete = Cli::try_parse_from(["lf", "session", "complete", "run_123"])
             .expect("parse interactive completion");

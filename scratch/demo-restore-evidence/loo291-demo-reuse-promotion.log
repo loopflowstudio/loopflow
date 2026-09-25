@@ -1,0 +1,10 @@
+Promotion preflight (candidate 0.12.20+d5d2b37d2.dirty, validation-only)
+  shared store   /Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea/loopflow.db
+  candidate      knows through 0.12.20.001_release
+  store frontier 0.12.20.001_release (candidate recognizes it exactly)
+  lifecycles     32 executable reference(s) resolve
+  VERDICT: promote (no migration to apply)
+Could not find service "com.loopflow.lfd" in domain for port
+Could not find service "com.loopflow.lfd" in domain for port
+promoted local 0.12.20+d5d2b37d2.dirty: /Users/jack/.local/bin/lf -> /Users/jack/.lf/bin/lf-1027adf3e6ed0e1cedabac41c24343fd4930040ab1fe591c5226897cb8eaaf6f (store /Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea/loopflow.db)
+synced skills (0 written, 0 pruned)

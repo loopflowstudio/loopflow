@@ -1,0 +1,43 @@
+{
+  "recorded_on": "2026-09-25",
+  "governing_design": "../main-view-task.md",
+  "selection": {
+    "frame": "A",
+    "task_header": "A",
+    "flow": "C",
+    "navigation": "Wave → Task → named Session"
+  },
+  "scope": "Executable website reference; captured planning, simulated execution and Sessions. Not native implementation or configured runtime proof.",
+  "files": {
+    "mockups.html": "51a62aa69730fe4e0014ec27a223a9047cea4958e1fbef51b0fac4aaca66355e",
+    "current-plan.js": "9a244935ef358de6e6e6b0f41af7c0dd039e86eaaa920603fca9316ef3448751",
+    "current-data.js": "6c8c6626fc19835124100db8e34b8912308442d7c880d3496d0d379bebad5a86",
+    "large-population.js": "eb351897a9ad8385b2f4660a0507c3a0c27058ffdbba87cf45033c918a653e43",
+    "flow-options.js": "79f4da36b03da19a18fa4d1130794ca2a1f1e3e8a5a4a4afbb853bb216302e41",
+    "flow-options.css": "e93ef74d7b9906d303ccde7b947c9fe402b0876890a26ec85a33e29b230b58d5",
+    "task-execution.js": "91c2b3ddcc13db2ba79decb3df3538c758f8eb42b3e6157917956026fb30f360",
+    "task-execution.css": "cd254af203e3ae0c884a56009f9f923267d776abd84a50dfdded3868e8452af2",
+    "task2-study.html": "c5c6507cfe9e9dae5fdd91484bbf6d051e1b69b9e1e754b8e2900612eb29f4e9",
+    "task-sessions.js": "12845cf13cd83a312c9fec633e996c809e555922b0419e0be7e1498dba7b23ef",
+    "task-sessions.css": "57e2c64098c07820e07ba329d094748a7de774d3e5e3ecd4f24b914871e8d51c",
+    "task3-fixture.js": "e020863497873f178576c841e9bd602f9b721eff94ce41fd1f64ea1ff137e991",
+    "task3-study.html": "5ccd2d05d4be88de65d40475f14abd6e40c895696eec7bbcf1dc5b8ab6910241",
+    "flow-study.html": "827753a32e29d751bb9e2750700202c4b988c1756b34231ecb3c63f06771ace0",
+    "current-data-evidence/source.json": "89613cda58f73b2f67a09481aea806340ffe2350648cf42fa694b50b3ded9fae",
+    "flow-references/sibling-flow-source.json": "dec1401cb5a6880ab4c9b5ee778da5dd3bb72ac44c4449863309ea4c2b32e566"
+  },
+  "checks": [
+    "New session beside title in Task 1/2/3; exactly one action",
+    "Named drill-down and parent navigation",
+    "Flow versus independent membership fixture",
+    "Description only on Task",
+    "Session selection and draft retention",
+    "Inline rename and cancel preserve Session identity/draft"
+  ],
+  "remaining_runtime_work": [
+    "Recover historical name generator; seed skill or random name",
+    "Persist title/provenance and shared rename; add operating guidance",
+    "Project exact Flow membership and real comments",
+    "Native retained-surface and configured behavior proof"
+  ]
+}

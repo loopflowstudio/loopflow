@@ -196,8 +196,10 @@ fn task_run_spec(
     harness: String,
     model: Option<String>,
     surface: &str,
-    skill: Option<String>,
+    position: &FlowPosition,
 ) -> crate::run_record::RunSpec {
+    let step = position.current();
+    let skill = (step.kind != StepKind::Op).then_some(step.step);
     crate::run_record::RunSpec {
         harness,
         model,
@@ -217,6 +219,9 @@ fn task_run_spec(
                 task.plan.identifier
             )),
         ],
+        flow: crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
+            position,
+        )),
     }
 }
 
@@ -261,7 +266,7 @@ async fn run_task_with(
             prepared.turn.harness.clone(),
             prepared.turn.model.clone(),
             "headless",
-            Some(flow.current().step),
+            &flow,
         ),
         &prepared.turn.context,
     )?;
@@ -515,7 +520,7 @@ async fn run_task_op_boundary(
             "loopflow".to_string(),
             None,
             "operation",
-            None,
+            &flow,
         ),
         &context,
     )?;
@@ -2410,6 +2415,116 @@ mod planning_tests {
             .unwrap();
         assert_eq!(restarted.session_run_id.as_ref(), Some(run_id));
         assert_eq!(restarted.version, settled.version);
+    }
+
+    #[tokio::test]
+    async fn flow_sessions_are_named_through_their_run_and_keep_exact_membership() {
+        use crate::ops::human_session::{self, SessionFlowMembership, SessionKind};
+        use crate::run_record::{RunFlowMembership, RunFlowStep, SessionTitleSource};
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, task, mut flow) = human_task_fixture().await;
+        human_session::prepare_flow_run(&task, &mut flow).unwrap();
+        let flow = store.set_flow_position(&task.id, flow).await.unwrap();
+        let run_id = flow.session_run_id.clone().unwrap();
+        let step = flow.current().step;
+        let (_, manifest) = crate::run_record::resolve_manifest(
+            &crate::store::observability_home_dir(),
+            run_id.as_str(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.flow,
+            Some(RunFlowMembership::Step(RunFlowStep::of(&flow)))
+        );
+
+        let listed = |sessions: Vec<human_session::SessionRecord>| {
+            sessions
+                .into_iter()
+                .find(|session| session.run_id == run_id)
+                .expect("the Flow Run is listed")
+        };
+        let session = listed(human_session::list(&store).await.unwrap());
+        assert_eq!(session.kind, SessionKind::Flow);
+        assert_eq!(
+            (session.title.as_str(), session.title_source),
+            (step.as_str(), SessionTitleSource::Generated)
+        );
+        assert_eq!(
+            session.flow_membership,
+            SessionFlowMembership::Step {
+                flow: flow.invocation.flow.clone(),
+                invocation_id: flow.invocation.id.clone(),
+                step: step.clone(),
+                step_index: flow.step_index,
+                iteration: flow.iteration,
+                current: true,
+            }
+        );
+
+        // The agent's `$LF_RUN_ID` reaches the Flow boundary before any
+        // provider history exists.
+        let suggested = human_session::rename(
+            &store,
+            run_id.as_str(),
+            "Kickoff review",
+            SessionTitleSource::Generated,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (suggested.id.as_str(), suggested.title.as_str()),
+            (session.id.as_str(), "Kickoff review")
+        );
+        human_session::rename(
+            &store,
+            &session.id,
+            "Launch design",
+            SessionTitleSource::Human,
+        )
+        .await
+        .unwrap();
+        let kept = human_session::rename(
+            &store,
+            run_id.as_str(),
+            "Better guess",
+            SessionTitleSource::Generated,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (kept.title.as_str(), kept.title_source),
+            ("Launch design", SessionTitleSource::Human)
+        );
+        assert!(
+            human_session::rename(&store, &session.id, " ", SessionTitleSource::Human)
+                .await
+                .is_err()
+        );
+
+        // Once the Flow moves on, the same Run keeps its human name and is
+        // truthfully historical, never relabeled Independent.
+        let (dir, _) = crate::run_record::resolve_manifest(
+            &crate::store::observability_home_dir(),
+            run_id.as_str(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("provider-session.json"),
+            r#"{"schema_version":1,"provider_session_id":"ses_flow-proof","account_id":null}"#,
+        )
+        .unwrap();
+        let mut next = super::start_task_flow(&task, "task-design").unwrap();
+        next.step_index = 0;
+        next.iteration = flow.iteration + 1;
+        next.version = flow.version;
+        store.set_flow_position(&task.id, next).await.unwrap();
+        let historical = listed(human_session::list(&store).await.unwrap());
+        assert_eq!(historical.kind, SessionKind::Interactive);
+        assert_eq!(historical.title, "Launch design");
+        assert!(matches!(
+            historical.flow_membership,
+            SessionFlowMembership::Step { current: false, step: ref recorded, .. } if *recorded == step
+        ));
     }
 
     #[tokio::test]

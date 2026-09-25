@@ -14,3 +14,43 @@
 - LOO-293 and its worktree remain open. Integrating shared Monitor primitives does not establish completion of its remaining behavior.
 
 Current evidence: [Wave integration](wave-integration.md). Historical decisions remain in the design and earlier review receipts; they do not override the latest hierarchy amendment.
+
+
+## Implementation handoff — 2026-09-25
+
+[Current design](main-view-task.md) supersedes historical visual proposals.
+No unanswered visual question blocks the first native slice. New session belongs
+beside the Task title; Session names are automatic and editable. Skill invocation
+supplies the initial name; raw Sessions use the historical magical musical animal
+generator. Operating guidance may improve generated names while preserving human
+names. No new naming model call is needed.
+
+Technical investigations, to resolve in the existing owners during implementation:
+- Locate/recover the historical name generator. Current Rust/Swift/Python source
+  search did not locate it. `ops/human_session.rs::session_title` currently derives
+  interactive titles from context, then skill/cwd or harness; it is not the accepted
+  durable generated/manual naming behavior. Resolve title storage/provenance and
+  a shared rename operation for Interactive, Ask and Flow Sessions; do not create
+  a second Session registry or teach a command before it exists.
+- Project exact active/historical Flow membership and occurrence through shared
+  Run/Session evidence. The current Session DTO lacks this relationship. Unknown
+  membership must not be rendered Independent. Verify pinned Flow definitions,
+  authoring search and pause/restart semantics before enabling native controls.
+- Read actual comment count/thread through the planning boundary; fixture zero
+  is not evidence of an empty Linear thread. Do not rewrite existing descriptions.
+- Confirm unstarted Task checkout preparation supports an independent Session
+  without starting its managed Flow. Recover read/launch errors without inventing
+  started-work or resetting a retained terminal.
+
+The human-selected external trial/edit and performance acceptance obligations
+above remain separate completion inputs; do not invent them for this design pass.
+
+## Cycle 1 naming assumptions — 2026-09-25
+
+- History contains a `magical-musical` generator (commit 309575f8e) but no animal list; restored it verbatim rather than inventing animals.
+- Ask Sessions keep their bounded question as the generated seed (neither a skill nor raw); Flow Sessions now seed from the step skill instead of the Task title.
+
+## Cycle 2 Flow membership assumptions — 2026-09-25
+
+- Membership is recorded on the Run manifest at capture (`RunSpec.flow`). Wave-resident flows, direct `lf --task X <flow>` runs, replays and Asks record `independent`: they are not occurrences of the Task's managed Flow. Pre-existing manifests project `unknown`.
+- A remote Flow Session's title is the step label with `title_source: unavailable`; reading the remote canonical name needs a routed read, not attempted here.

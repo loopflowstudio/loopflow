@@ -388,6 +388,7 @@ mod tests {
                     worktree: Some(home.path().to_path_buf()),
                     skill: Some("implement".to_string()),
                     subjects: vec![SubjectAttribution::declared(format!("task:{task}"))],
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap();
@@ -424,6 +425,7 @@ mod tests {
                 worktree: Some(home.path().to_path_buf()),
                 skill: Some("review-chapter".to_string()),
                 subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -441,6 +443,7 @@ mod tests {
                     worktree: Some(home.path().to_path_buf()),
                     skill: Some("project/review-chapter".to_string()),
                     subjects: Vec::new(),
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
                 RunLaunchRequest {
                     system_prompt: "system".to_string(),

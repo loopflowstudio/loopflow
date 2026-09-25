@@ -13,7 +13,10 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::{FlowPosition, RunId, WorkRef, WorkStatus};
 use crate::engine::Skill;
-use crate::run_record::{preferred_work_selector, ProviderSessionRef, RunManifest, RUN_DIR_ENV};
+use crate::run_record::{
+    preferred_work_selector, ProviderSessionRef, RunManifest, SessionName, SessionTitleSource,
+    RUN_DIR_ENV,
+};
 use crate::store::SharedStore;
 use crate::work::task::{Task, TaskId};
 
@@ -174,12 +177,87 @@ pub struct SessionRecord {
     pub work_path: Option<String>,
     pub actions: Vec<SessionAction>,
     pub title: String,
+    pub title_source: SessionTitleSource,
+    pub flow_membership: SessionFlowMembership,
     pub detail: String,
     pub cwd: String,
     pub state: SessionState,
     pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
     pub terminal_ids: Vec<String>,
+}
+
+/// Whether a Session's conversation is an occurrence of its Task's managed
+/// Flow. Membership comes only from the Flow position or the Run's recorded
+/// capture, never from matching Task, checkout, provider, or skill.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionFlowMembership {
+    /// `current` is false once the Flow has moved past this occurrence.
+    Step {
+        flow: String,
+        invocation_id: String,
+        step: String,
+        step_index: u32,
+        iteration: u32,
+        current: bool,
+    },
+    Independent,
+    Unknown {
+        reason: String,
+    },
+}
+
+impl SessionFlowMembership {
+    fn of_position(position: &FlowPosition) -> Self {
+        Self::Step {
+            flow: position.invocation.flow.clone(),
+            invocation_id: position.invocation.id.clone(),
+            step: position.current().step,
+            step_index: position.step_index,
+            iteration: position.iteration,
+            current: true,
+        }
+    }
+}
+
+/// Project a Run's recorded membership, checking whether its Flow has moved on.
+async fn run_flow_membership(
+    store: &SharedStore,
+    manifest: Option<&RunManifest>,
+    run_id: &RunId,
+) -> SessionFlowMembership {
+    let Some(manifest) = manifest else {
+        return SessionFlowMembership::Unknown {
+            reason: format!("Run {run_id} is not recorded on this Home"),
+        };
+    };
+    match &manifest.flow {
+        None => SessionFlowMembership::Unknown {
+            reason: format!("Run {run_id} predates recorded Flow membership"),
+        },
+        Some(crate::run_record::RunFlowMembership::Independent) => {
+            SessionFlowMembership::Independent
+        }
+        Some(crate::run_record::RunFlowMembership::Step(step)) => {
+            match store.flow_position(&step.task_id).await {
+                Ok(position) => SessionFlowMembership::Step {
+                    flow: step.flow.clone(),
+                    invocation_id: step.invocation_id.clone(),
+                    step: step.step.clone(),
+                    step_index: step.step_index,
+                    iteration: step.iteration,
+                    current: step.is_current(position.as_ref()),
+                },
+                Err(error) => SessionFlowMembership::Unknown {
+                    reason: format!(
+                        "Flow position for Task {} is unavailable: {error}",
+                        step.task_id
+                    ),
+                },
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -363,6 +441,9 @@ pub(crate) fn prepare_flow_run(task: &Task, position: &mut FlowPosition) -> Resu
                 "task:{}",
                 task.id
             ))],
+            flow: crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
+                position,
+            )),
         },
         None,
     )?);
@@ -389,6 +470,8 @@ fn prepare_ask_run(record: &mut AskSessionRecord) -> Result<()> {
                 .map(crate::run_record::SubjectAttribution::declared)
                 .into_iter()
                 .collect(),
+            // An Ask is a human boundary requested by a Run, never a Flow step.
+            flow: crate::run_record::RunFlowMembership::Independent,
         },
         Some(record.parent_run_id.clone()),
     )?);
@@ -408,6 +491,7 @@ async fn prepare_boundary(store: &SharedStore, id: &str) -> Result<()> {
     if let Some(mut record) = read_ask_record(id)? {
         if record.session_run_id.is_none() {
             prepare_ask_run(&mut record)?;
+            carry_session_name(session_id, observed_run.as_ref(), record.session_run_id.as_ref())?;
             write_ask_record(&record)?;
         }
     } else if let Some((task, mut position)) = find_flow_session_optional(store, id).await? {
@@ -971,7 +1055,8 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
     let launch_lock = lock_session_launch(session_id)?;
     let (task, mut position) = find_flow_session(store, session_id).await?;
     let token = flow_token(&task, &position)?;
-    if let Some(run_id) = &position.session_run_id {
+    let previous = position.session_run_id.clone();
+    if let Some(run_id) = &previous {
         if resume_native_run(
             run_id,
             &HumanSessionToken::Flow {
@@ -986,10 +1071,42 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
         }
     }
     prepare_flow_run(&task, &mut position)?;
+    carry_session_name(
+        session_id,
+        previous.as_ref(),
+        position.session_run_id.as_ref(),
+    )?;
     let run_id = session_run_id(session_id, position.session_run_id.as_ref())?;
     store.set_flow_position(&task.id, position).await?;
     serve_flow_locked(store.clone(), token, launch_lock).await?;
     Ok(run_id)
+}
+
+/// A replacement Run continues the same Session, so it keeps that Session's
+/// name. Copy it before the boundary publishes the new Run.
+fn carry_session_name(
+    session_id: &str,
+    previous: Option<&RunId>,
+    next: Option<&RunId>,
+) -> Result<()> {
+    let (Some(previous), Some(next)) = (previous, next) else {
+        return Ok(());
+    };
+    if previous == next {
+        return Ok(());
+    }
+    let (Some(from), Some(to)) = (local_session_run_dir(previous), local_session_run_dir(next))
+    else {
+        return Ok(());
+    };
+    let Some(name) =
+        crate::run_record::read_session_name(&from).context("read replaced Session name")?
+    else {
+        return Ok(());
+    };
+    crate::run_record::write_session_name(&to, &name.title, name.source)
+        .with_context(|| format!("carry Session {session_id} name to its replacement Run"))?;
+    Ok(())
 }
 
 fn run_is_prepared(run_id: &RunId) -> Result<bool> {
@@ -1024,12 +1141,21 @@ async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
             }
         }
     }
-    let directory = ask_session_directory();
-    let entries = match fs::read_dir(&directory) {
+    run_ids.extend(
+        ask_records()?
+            .into_iter()
+            .filter_map(|record| record.session_run_id),
+    );
+    Ok(run_ids)
+}
+
+fn ask_records() -> Result<Vec<AskSessionRecord>> {
+    let entries = match fs::read_dir(ask_session_directory()) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(run_ids),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error).context("read session directory"),
     };
+    let mut records = Vec::new();
     for entry in entries {
         let entry = entry.context("read session entry")?;
         let Some(id) = entry
@@ -1040,11 +1166,9 @@ async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
         else {
             continue;
         };
-        if let Some(run_id) = read_ask_record(&id)?.and_then(|record| record.session_run_id) {
-            run_ids.insert(run_id);
-        }
+        records.extend(read_ask_record(&id)?);
     }
-    Ok(run_ids)
+    Ok(records)
 }
 
 async fn list_interactive_sessions(
@@ -1077,6 +1201,13 @@ async fn interactive_surface(
     };
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let work = crate::run_record::attributed_work(store, manifest).await;
+    let name = session_name(
+        Some(dir),
+        manifest
+            .skill
+            .clone()
+            .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
+    )?;
     Ok(SessionRecord {
         id: manifest.run_id.to_string(),
         run_id: manifest.run_id.clone(),
@@ -1085,7 +1216,9 @@ async fn interactive_surface(
         work_path: session_work_path(store, work.as_ref()).await?,
         work,
         actions: session_actions(SessionKind::Interactive, state),
-        title: session_title(dir, manifest),
+        title: name.title,
+        title_source: name.source,
+        flow_membership: run_flow_membership(store, Some(manifest), &manifest.run_id).await,
         detail: match &manifest.model {
             Some(model) => format!("{}:{model}", manifest.harness),
             None => manifest.harness.clone(),
@@ -1139,58 +1272,142 @@ async fn session_work_path(store: &SharedStore, work: Option<&WorkRef>) -> Resul
     Ok(Some(labels.join(" / ")))
 }
 
-fn session_title(dir: &Path, manifest: &RunManifest) -> String {
-    let context = fs::read(dir.join("context.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-    let task = context
-        .as_ref()
-        .and_then(|value| value.pointer("/context/task"));
-    let text = task
-        .and_then(|task| task.get("text"))
-        .and_then(serde_json::Value::as_str);
-    let user_message = task
-        .and_then(|task| task.get("assets"))
-        .and_then(serde_json::Value::as_array)
-        .and_then(|assets| {
-            assets.iter().rev().find(|asset| {
-                asset.get("kind").and_then(serde_json::Value::as_str) == Some("user_message")
-            })
-        })
-        .and_then(|asset| {
-            let start = asset.get("byte_start")?.as_u64()? as usize;
-            let end = asset.get("byte_end")?.as_u64()? as usize;
-            text?.get(start..end)
-        });
-    concise_title(user_message.or(text))
-        .or_else(|| {
-            manifest.skill.as_ref().map(|skill| {
-                format!(
-                    "{} · {}",
-                    skill,
-                    manifest
-                        .cwd
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                )
-            })
-        })
-        .unwrap_or_else(|| manifest.harness.clone())
+/// The stored name, else the seed: the invoked skill for skill Sessions, the
+/// question for Asks, or a stable `magical-musical` pair for raw Sessions.
+fn session_name(dir: Option<&Path>, seed: String) -> Result<SessionName> {
+    let stored = match dir {
+        Some(dir) => crate::run_record::read_session_name(dir).context("read Session name")?,
+        None => None,
+    };
+    Ok(stored.unwrap_or(SessionName {
+        title: seed,
+        source: SessionTitleSource::Generated,
+    }))
 }
 
-fn concise_title(text: Option<&str>) -> Option<String> {
-    let title = text?.lines().map(str::trim).find(|line| !line.is_empty())?;
-    if title.starts_with("<lf:") {
-        return None;
-    }
-    let mut chars = title.chars();
-    let truncated = chars.by_ref().take(80).collect::<String>();
-    Some(if chars.next().is_some() {
-        format!("{}…", truncated.trim_end())
+fn local_session_run_dir(run_id: &RunId) -> Option<PathBuf> {
+    crate::run_record::record_dir(&crate::store::observability_home_dir(), run_id)
+}
+
+/// Rename a Session through its Run and return the authoritative record.
+/// `Generated` is an agent suggestion; it never replaces a human-assigned name.
+/// The id may be the Session's own `$LF_RUN_ID`: an Ask or Flow Run names its
+/// boundary, and naming needs no provider history.
+pub(crate) async fn rename(
+    store: &SharedStore,
+    session_id: &str,
+    title: &str,
+    source: SessionTitleSource,
+) -> Result<SessionRecord> {
+    let mut target = find_named_session(store, session_id)
+        .await?
+        .ok_or_else(|| session_not_found(session_id))?;
+    // A boundary may replace its Run while opening. Serialize with that
+    // preparation and name the Run it publishes, not the one it replaced.
+    let _launch_lock = if matches!(target, NamedSession::Boundary(_)) {
+        let id = named_surface(store, &target).await?.id;
+        let lock = lock_session_launch(&id)?;
+        target = NamedSession::Boundary(Box::new(
+            find_session(store, &id)
+                .await?
+                .ok_or_else(|| session_not_found(&id))?,
+        ));
+        Some(lock)
     } else {
-        truncated
-    })
+        None
+    };
+    let session = named_surface(store, &target).await?;
+    if let NamedSession::Boundary(boundary) = &target {
+        if let SessionTarget::Flow { position, .. } = boundary.as_ref() {
+            let placement = store.placement(&position.work()).await?;
+            let home = store
+                .home_by_id(&placement.home_id)
+                .await?
+                .ok_or_else(|| anyhow!("Session Home {} is unavailable", placement.home_id))?;
+            if home.route != "local" {
+                let prefix = &session.open_argv[..session.open_argv.len().saturating_sub(3)];
+                bail!(
+                "Session {} runs on Home {}; rename it there with `{} session rename '{}' <name>`",
+                session.id,
+                placement.home_id,
+                prefix.join(" "),
+                session.id
+            );
+            }
+        }
+    }
+    let dir = local_session_run_dir(&session.run_id)
+        .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
+    crate::run_record::write_session_name(&dir, title, source)
+        .map_err(|error| anyhow!("cannot rename Session {}: {error}", session.id))?;
+    named_surface(store, &target).await
+}
+
+enum NamedSession {
+    Interactive {
+        dir: PathBuf,
+        manifest: Box<RunManifest>,
+    },
+    Boundary(Box<SessionTarget>),
+}
+
+async fn named_surface(store: &SharedStore, target: &NamedSession) -> Result<SessionRecord> {
+    match target {
+        NamedSession::Interactive { dir, manifest } => {
+            interactive_surface(store, dir, manifest).await
+        }
+        NamedSession::Boundary(target) => session_surface(store, target).await,
+    }
+}
+
+async fn find_named_session(store: &SharedStore, id: &str) -> Result<Option<NamedSession>> {
+    if let Some(target) = find_boundary_for_run(store, id).await? {
+        return Ok(Some(NamedSession::Boundary(Box::new(target))));
+    }
+    match crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), id) {
+        Ok((dir, manifest)) => {
+            if !crate::run_record::has_interactive_history(&dir, &manifest)? {
+                bail!("Run {} is not an interactive Session", manifest.run_id);
+            }
+            if crate::run_record::provider_session_is_resolved(&dir)? {
+                bail!("Session {} is resolved", manifest.run_id);
+            }
+            return Ok(Some(NamedSession::Interactive {
+                dir,
+                manifest: Box::new(manifest),
+            }));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(anyhow!("Session record unavailable: {error}")),
+    }
+    Ok(find_session(store, id)
+        .await?
+        .map(|target| NamedSession::Boundary(Box::new(target))))
+}
+
+/// The waiting Ask or Flow boundary whose linked Run is `run_id`.
+async fn find_boundary_for_run(store: &SharedStore, run_id: &str) -> Result<Option<SessionTarget>> {
+    for record in ask_records()? {
+        if record.session_run_id.as_ref().map(RunId::as_str) == Some(run_id)
+            && matches!(record.status, AskSessionStatus::Waiting)
+        {
+            return Ok(Some(SessionTarget::Ask(record)));
+        }
+    }
+    for position in store.human_task_flow_positions().await? {
+        if position.session_run_id.as_ref().map(RunId::as_str) != Some(run_id) {
+            continue;
+        }
+        let task = store
+            .get_task(&position.task_id)
+            .await?
+            .ok_or_else(|| anyhow!("Task {} disappeared", position.task_id))?;
+        return Ok(Some(SessionTarget::Flow {
+            task: Box::new(task),
+            position,
+        }));
+    }
+    Ok(None)
 }
 
 fn session_not_found(id: &str) -> anyhow::Error {
@@ -1401,6 +1618,17 @@ async fn flow_surface(
         .await?
         .ok_or_else(|| anyhow!("Task {} Home {} disappeared", task.id, placement.home_id))?;
     let id = flow_id(position)?;
+    let run_id = session_run_id(&id, position.session_run_id.as_ref())?;
+    // A remote Session's canonical name lives with its Run on that Home.
+    // Show the step as a label without claiming it is the generated name.
+    let name = if home.route == "local" {
+        session_name(local_session_run_dir(&run_id).as_deref(), step.step.clone())?
+    } else {
+        SessionName {
+            title: step.step.clone(),
+            source: SessionTitleSource::Unavailable,
+        }
+    };
     let open_argv = human_open_argv(
         (home.route != "local").then_some(&home.id),
         Some(&task.worktree),
@@ -1419,14 +1647,16 @@ async fn flow_surface(
         SessionState::Waiting
     };
     Ok(SessionRecord {
-        run_id: session_run_id(&id, position.session_run_id.as_ref())?,
+        run_id,
         id,
         kind: SessionKind::Flow,
         wave_id: Some(task.wave_id.clone()),
         work: Some(position.work()),
         work_path: session_work_path(store, Some(&position.work())).await?,
         actions: flow_actions(position),
-        title: task.plan.title.clone(),
+        title: name.title,
+        title_source: name.source,
+        flow_membership: SessionFlowMembership::of_position(position),
         detail: step.step,
         cwd: task.worktree.display().to_string(),
         state: runtime,
@@ -1442,15 +1672,27 @@ async fn ask_surface(store: &SharedStore, record: &AskSessionRecord) -> Result<S
         record.session_run_id.as_ref(),
         record.ready_summary.as_deref(),
     )?;
+    let run_id = session_run_id(&record.id, record.session_run_id.as_ref())?;
+    let dir = local_session_run_dir(&run_id);
+    let name = session_name(dir.as_deref(), record.title.clone())?;
+    let manifest = dir
+        .as_deref()
+        .map(crate::run_record::read_manifest)
+        .transpose()
+        .ok()
+        .flatten();
+    let flow_membership = run_flow_membership(store, manifest.as_ref(), &run_id).await;
     Ok(SessionRecord {
         id: record.id.clone(),
-        run_id: session_run_id(&record.id, record.session_run_id.as_ref())?,
+        run_id,
         kind: SessionKind::Ask,
         wave_id: session_wave_id(store, record.work.as_ref()).await?,
         work: record.work.clone(),
         work_path: session_work_path(store, record.work.as_ref()).await?,
         actions: session_actions(SessionKind::Ask, runtime),
-        title: record.title.clone(),
+        title: name.title,
+        title_source: name.source,
+        flow_membership,
         detail: record.detail.clone(),
         cwd: record.cwd.display().to_string(),
         state: runtime,
@@ -1877,7 +2119,7 @@ mod tests {
 
     use super::{
         active_flow_skill, ask, ask_background_name, ask_launch_args, ask_once, ask_record_path,
-        complete_ask, concise_title, flow_background_name, flow_id, flow_token_id, human_open_argv,
+        complete_ask, flow_background_name, flow_id, flow_token_id, human_open_argv,
         list_ask_sessions, preferred_work_selector, question_title, read_ask_record, serve_ask,
         session_run_is_resumable, token_matches, wait_for_ask, write_ask_record, AskSessionRecord,
         AskSessionStatus, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
@@ -2264,6 +2506,9 @@ mod tests {
                 super::session_actions(session.kind, session.state)
             );
             assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
+            let mut untitled = serde_json::to_value(&session).unwrap();
+            untitled.as_object_mut().unwrap().remove("title_source");
+            assert!(serde_json::from_value::<super::SessionRecord>(untitled).is_err());
             assert_eq!(
                 serde_json::from_value::<super::SessionRecord>(
                     serde_json::to_value(&session).unwrap()
@@ -2272,6 +2517,42 @@ mod tests {
                 session
             );
         }
+    }
+
+    #[test]
+    fn flow_membership_fixtures_cover_every_projection_and_are_required() {
+        let sessions: Vec<super::SessionRecord> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_memberships.json"
+        ))
+        .unwrap();
+        let mut kinds = Vec::new();
+        for session in &sessions {
+            assert_eq!(
+                session.actions,
+                super::session_actions(session.kind, session.state)
+            );
+            kinds.push(match &session.flow_membership {
+                super::SessionFlowMembership::Step { current: true, .. } => "current",
+                super::SessionFlowMembership::Step { current: false, .. } => "historical",
+                super::SessionFlowMembership::Independent => "independent",
+                super::SessionFlowMembership::Unknown { .. } => "unknown",
+            });
+            let mut value = serde_json::to_value(session).unwrap();
+            assert_eq!(
+                serde_json::from_value::<super::SessionRecord>(value.clone()).unwrap(),
+                *session
+            );
+            value.as_object_mut().unwrap().remove("flow_membership");
+            assert!(serde_json::from_value::<super::SessionRecord>(value).is_err());
+        }
+        assert_eq!(
+            kinds,
+            ["current", "historical", "independent", "unknown", "current"]
+        );
+        assert_eq!(
+            sessions.last().unwrap().title_source,
+            super::SessionTitleSource::Unavailable
+        );
     }
 
     #[test]
@@ -2381,6 +2662,7 @@ mod tests {
             runtime_digest: None,
             host: "fixture".to_string(),
             boot_id: None,
+            flow: None,
         };
         for selector in [&project.plan.slug, project.plan.id.as_str()] {
             manifest.subjects = vec![SubjectAttribution::declared(format!("project:{selector}"))];
@@ -2605,18 +2887,6 @@ mod tests {
     }
 
     #[test]
-    fn interactive_titles_use_one_bounded_line() {
-        assert_eq!(
-            concise_title(Some("\n  Fix session restore\nmore")),
-            Some("Fix session restore".to_string())
-        );
-        assert_eq!(
-            concise_title(Some(&"x".repeat(81))),
-            Some(format!("{}…", "x".repeat(80)))
-        );
-    }
-
-    #[test]
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
         let previous_lf_bin = std::env::var_os("LF_BIN");
@@ -2662,6 +2932,7 @@ mod tests {
             runtime_digest: None,
             host: "test".to_string(),
             boot_id: None,
+            flow: None,
         };
         assert_eq!(
             preferred_work_selector(&manifest).as_deref(),
@@ -2697,6 +2968,7 @@ mod tests {
             runtime_digest: None,
             host: "test".to_string(),
             boot_id: None,
+            flow: None,
         };
         std::fs::write(
             dir.path().join("manifest.json"),

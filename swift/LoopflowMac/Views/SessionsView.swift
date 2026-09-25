@@ -362,8 +362,14 @@ struct SessionsView: View {
                     .frame(width: 300)
                 Divider()
                 VStack(spacing: 0) {
-                    if let selected = model.selection, selected.kind == .task {
-                        taskControls(selected.id)
+                    if let crumb = model.workspace.breadcrumb(
+                        selection: model.selection,
+                        sessionId: navigation.selectedSessionId
+                    ), crumb.session != nil || crumb.task != nil {
+                        WorkspaceBreadcrumbBar(
+                            model: model, crumb: crumb,
+                            onOpenSession: openSession, onMonitor: showMonitor
+                        )
                     }
                     ZStack {
                         WorktreeNodeView(
@@ -504,26 +510,6 @@ struct SessionsView: View {
            model.workspace.subject(for: id) != work { return }
         guard multiplexer.focusedPane.content != .empty else { return }
         navigation.taskPanes[work.id] = (path, multiplexer.focusedPane)
-    }
-
-    private func taskControls(_ taskId: String) -> some View {
-        let work = model.task(id: taskId)?.task.runtime.map { WorkReference.task(id: $0.workId) }
-        let records = store.sessions.filter { work != nil && $0.record.work == work }
-        return HStack(spacing: 12) {
-            Menu("Sessions") {
-                ForEach(records) { item in
-                    Button(item.record.title) { openSession(item.record) }
-                }
-            }
-            .disabled(records.isEmpty)
-            .accessibilityIdentifier("task-sessions-\(taskId)")
-            Button("Monitor") { showMonitor(taskId) }
-                .accessibilityIdentifier("task-show-monitor-\(taskId)")
-            Spacer()
-            Button("Inspect") { model.select(.task(id: taskId)) }
-        }
-        .font(.system(size: 12))
-        .padding(8)
     }
 
     private func _pane(for sessionId: String) -> PaneState? {

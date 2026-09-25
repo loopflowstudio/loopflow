@@ -1,0 +1,372 @@
+--- /tmp/loo291-c1r-human_session.before	2026-09-25 12:58:03
++++ rust/loopflow/src/ops/human_session.rs	2026-09-25 13:03:37
+@@ -872,7 +872,8 @@
+         if !matches!(record.status, AskSessionStatus::Waiting) {
+             bail!("human Ask session {session_id:?} is already complete");
+         }
+-        if let Some(run_id) = &record.session_run_id {
++        let previous = record.session_run_id.clone();
++        if let Some(run_id) = &previous {
+             if resume_native_run(
+                 run_id,
+                 &HumanSessionToken::Ask {
+@@ -888,6 +889,11 @@
+             }
+         }
+         prepare_ask_run(&mut record)?;
++        carry_session_name(
++            session_id,
++            previous.as_ref(),
++            record.session_run_id.as_ref(),
++        )?;
+         write_ask_record(&record)?;
+         let run_id = session_run_id(session_id, record.session_run_id.as_ref())?;
+         serve_ask_locked(session_id, launch_lock).await?;
+@@ -895,7 +901,8 @@
+     }
+     let (task, mut position) = find_flow_session(store, session_id).await?;
+     let token = flow_token(&task, &position)?;
+-    if let Some(run_id) = &position.session_run_id {
++    let previous = position.session_run_id.clone();
++    if let Some(run_id) = &previous {
+         if resume_native_run(
+             run_id,
+             &HumanSessionToken::Flow {
+@@ -911,12 +918,44 @@
+         }
+     }
+     prepare_flow_run(&task, &mut position)?;
++    carry_session_name(
++        session_id,
++        previous.as_ref(),
++        position.session_run_id.as_ref(),
++    )?;
+     let run_id = session_run_id(session_id, position.session_run_id.as_ref())?;
+     store.set_flow_position(&task.id, position).await?;
+     serve_flow_locked(store.clone(), token, launch_lock).await?;
+     Ok(run_id)
+ }
+ 
++/// A replacement Run continues the same Session, so it keeps that Session's
++/// name. Copy it before the boundary publishes the new Run.
++fn carry_session_name(
++    session_id: &str,
++    previous: Option<&RunId>,
++    next: Option<&RunId>,
++) -> Result<()> {
++    let (Some(previous), Some(next)) = (previous, next) else {
++        return Ok(());
++    };
++    if previous == next {
++        return Ok(());
++    }
++    let (Some(from), Some(to)) = (local_session_run_dir(previous), local_session_run_dir(next))
++    else {
++        return Ok(());
++    };
++    let Some(name) =
++        crate::run_record::read_session_name(&from).context("read replaced Session name")?
++    else {
++        return Ok(());
++    };
++    crate::run_record::write_session_name(&to, &name.title, name.source)
++        .with_context(|| format!("carry Session {session_id} name to its replacement Run"))?;
++    Ok(())
++}
++
+ fn run_is_prepared(run_id: &RunId) -> Result<bool> {
+     match crate::run_record::resolve_manifest(
+         &crate::store::observability_home_dir(),
+@@ -939,12 +978,21 @@
+         .into_iter()
+         .filter_map(|position| position.session_run_id)
+         .collect::<HashSet<_>>();
+-    let directory = ask_session_directory();
+-    let entries = match fs::read_dir(&directory) {
++    run_ids.extend(
++        ask_records()?
++            .into_iter()
++            .filter_map(|record| record.session_run_id),
++    );
++    Ok(run_ids)
++}
++
++fn ask_records() -> Result<Vec<AskSessionRecord>> {
++    let entries = match fs::read_dir(ask_session_directory()) {
+         Ok(entries) => entries,
+-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(run_ids),
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+         Err(error) => return Err(error).context("read human session directory"),
+     };
++    let mut records = Vec::new();
+     for entry in entries {
+         let entry = entry.context("read human session entry")?;
+         let Some(id) = entry
+@@ -955,11 +1003,9 @@
+         else {
+             continue;
+         };
+-        if let Some(run_id) = read_ask_record(&id)?.and_then(|record| record.session_run_id) {
+-            run_ids.insert(run_id);
+-        }
++        records.extend(read_ask_record(&id)?);
+     }
+-    Ok(run_ids)
++    Ok(records)
+ }
+ 
+ async fn list_interactive_sessions(
+@@ -1081,23 +1127,125 @@
+ 
+ /// Rename a Session through its Run and return the authoritative record.
+ /// `Generated` is an agent suggestion; it never replaces a human-assigned name.
++/// The id may be the Session's own `$LF_RUN_ID`: an Ask or Flow Run names its
++/// boundary, and naming needs no provider history.
+ pub(crate) async fn rename(
+     store: &SharedStore,
+     session_id: &str,
+     title: &str,
+     source: SessionTitleSource,
+ ) -> Result<SessionRecord> {
+-    let target = find_session(store, session_id)
++    let mut target = find_named_session(store, session_id)
+         .await?
+         .ok_or_else(|| session_not_found(session_id))?;
+-    let session = session_surface(store, &target).await?;
++    // A boundary may replace its Run while opening. Serialize with that
++    // preparation and name the Run it publishes, not the one it replaced.
++    let _launch_lock = if matches!(target, NamedSession::Boundary(_)) {
++        let id = named_surface(store, &target).await?.id;
++        let lock = lock_session_launch(&id)?;
++        target = NamedSession::Boundary(Box::new(
++            find_session(store, &id)
++                .await?
++                .ok_or_else(|| session_not_found(&id))?,
++        ));
++        Some(lock)
++    } else {
++        None
++    };
++    let session = named_surface(store, &target).await?;
++    if let NamedSession::Boundary(boundary) = &target {
++        if let SessionTarget::Flow { position, .. } = boundary.as_ref() {
++            let placement = store.placement(&position.work()).await?;
++            let home = store
++                .home_by_id(&placement.home_id)
++                .await?
++                .ok_or_else(|| anyhow!("Session Home {} is unavailable", placement.home_id))?;
++            if home.route != "local" {
++                let prefix = &session.open_argv[..session.open_argv.len().saturating_sub(3)];
++                bail!(
++                "Session {} runs on Home {}; rename it there with `{} session rename '{}' <name>`",
++                session.id,
++                placement.home_id,
++                prefix.join(" "),
++                session.id
++            );
++            }
++        }
++    }
+     let dir = local_session_run_dir(&session.run_id)
+         .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
+     crate::run_record::write_session_name(&dir, title, source)
+         .map_err(|error| anyhow!("cannot rename Session {}: {error}", session.id))?;
+-    session_surface(store, &target).await
++    named_surface(store, &target).await
+ }
+ 
++enum NamedSession {
++    Interactive {
++        dir: PathBuf,
++        manifest: Box<RunManifest>,
++    },
++    Boundary(Box<SessionTarget>),
++}
++
++async fn named_surface(store: &SharedStore, target: &NamedSession) -> Result<SessionRecord> {
++    match target {
++        NamedSession::Interactive { dir, manifest } => {
++            interactive_surface(store, dir, manifest).await
++        }
++        NamedSession::Boundary(target) => session_surface(store, target).await,
++    }
++}
++
++async fn find_named_session(store: &SharedStore, id: &str) -> Result<Option<NamedSession>> {
++    if let Some(target) = find_boundary_for_run(store, id).await? {
++        return Ok(Some(NamedSession::Boundary(Box::new(target))));
++    }
++    match crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), id) {
++        Ok((dir, manifest)) => {
++            if !crate::run_record::has_interactive_history(&dir, &manifest)? {
++                bail!("Run {} is not an interactive Session", manifest.run_id);
++            }
++            if crate::run_record::provider_session_is_resolved(&dir)? {
++                bail!("Session {} is resolved", manifest.run_id);
++            }
++            return Ok(Some(NamedSession::Interactive {
++                dir,
++                manifest: Box::new(manifest),
++            }));
++        }
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
++        Err(error) => return Err(anyhow!("Session record unavailable: {error}")),
++    }
++    Ok(find_session(store, id)
++        .await?
++        .map(|target| NamedSession::Boundary(Box::new(target))))
++}
++
++/// The waiting Ask or Flow boundary whose linked Run is `run_id`.
++async fn find_boundary_for_run(store: &SharedStore, run_id: &str) -> Result<Option<SessionTarget>> {
++    for record in ask_records()? {
++        if record.session_run_id.as_ref().map(RunId::as_str) == Some(run_id)
++            && matches!(record.status, AskSessionStatus::Waiting)
++        {
++            return Ok(Some(SessionTarget::Ask(record)));
++        }
++    }
++    for position in store.human_task_flow_positions().await? {
++        if position.session_run_id.as_ref().map(RunId::as_str) != Some(run_id) {
++            continue;
++        }
++        let task = store
++            .get_task(&position.task_id)
++            .await?
++            .ok_or_else(|| anyhow!("Task {} disappeared", position.task_id))?;
++        return Ok(Some(SessionTarget::Flow {
++            task: Box::new(task),
++            position,
++        }));
++    }
++    Ok(None)
++}
++
+ fn session_not_found(id: &str) -> anyhow::Error {
+     anyhow!("Session {id} was not found")
+ }
+--- /tmp/loo291-c1r-session_cli_tests.before	2026-09-25 12:58:03
++++ rust/loopflow/tests/session_cli_tests.rs	2026-09-25 13:00:21
+@@ -377,3 +377,122 @@
+     assert_eq!(named["title"], "Morning triage");
+     assert_eq!(listed(home.path(), &run_id)["title_source"], "human");
+ }
++
++#[cfg(unix)]
++#[test]
++fn boundary_names_follow_run_ids_and_replacement_runs() {
++    use std::io::Write;
++    use std::os::unix::fs::PermissionsExt;
++    use std::process::Stdio;
++    use std::time::{Duration, Instant};
++
++    let home = tempfile::tempdir().unwrap();
++    let sessions = home.path().join("human-sessions");
++    std::fs::create_dir(&sessions).unwrap();
++    let id = "ask_rename-replacement";
++    let record = serde_json::json!({
++        "id": id,
++        "parent_run_id": "run_00000000000000000000000000000002",
++        "parent_run_dir": home.path().join("parent"),
++        "work": null, "work_selector": null,
++        "title": "Which release target?", "detail": "proof", "prompt": "Local proof",
++        "cwd": home.path(), "model": "opencode",
++        "session_run_id": null, "ready_summary": null, "status": "waiting"
++    });
++    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
++    let prepared = run(home.path(), &["session", "open", id, "--json"]);
++    assert!(prepared.status.success(), "{prepared:?}");
++    let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
++    let first_run = prepared["run_id"].as_str().unwrap().to_string();
++    let first_dir = home
++        .path()
++        .join("runs")
++        .join(&first_run[4..6])
++        .join(&first_run);
++
++    // The operating instruction passes the Session's own `$LF_RUN_ID`, which
++    // names the boundary's Run rather than the boundary. It must reach the
++    // boundary even before provider history exists.
++    let suggested = rename(home.path(), &[&first_run, "Release target", "--suggest"]);
++    assert_eq!(suggested["id"], id);
++    assert_eq!(suggested["kind"], "ask");
++    assert_eq!(suggested["title"], "Release target");
++    let named = rename(home.path(), &[id, "Launch notes"]);
++    assert_eq!(named["title_source"], "human");
++
++    // A consumed launch that never produced provider history is replaced by a
++    // new Run on the next open. The human name belongs to the Session.
++    std::fs::remove_file(first_dir.join("prepared")).unwrap();
++    let bin = home.path().join("bin");
++    std::fs::create_dir(&bin).unwrap();
++    let provider = bin.join("opencode");
++    std::fs::write(
++        &provider,
++        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$LF_RESUME_PROOF\"\nprintf '%s\\n' 'message=created id=ses_rename-proof' >&2\nread -r input\n",
++    )
++    .unwrap();
++    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
++    let evidence = home.path().join("launched");
++    let mut opened = command(home.path(), &["session", "open", id])
++        .env(
++            "PATH",
++            format!(
++                "{}:{}",
++                bin.display(),
++                std::env::var("PATH").unwrap_or_default()
++            ),
++        )
++        .env("LF_RESUME_PROOF", &evidence)
++        .stdin(Stdio::piped())
++        .stdout(Stdio::null())
++        .stderr(Stdio::piped())
++        .spawn()
++        .unwrap();
++    let deadline = Instant::now() + Duration::from_secs(10);
++    while !evidence.exists() && Instant::now() < deadline && opened.try_wait().unwrap().is_none() {
++        std::thread::sleep(Duration::from_millis(20));
++    }
++    let started = evidence.exists();
++    // Leave the provider waiting while the agent-facing rename runs inside it.
++    let replacement = std::fs::read_to_string(&evidence).unwrap_or_default();
++    let inside = command(
++        home.path(),
++        &[
++            "session",
++            "rename",
++            &replacement,
++            "Better guess",
++            "--suggest",
++            "--json",
++        ],
++    )
++    .env("LF_RUN_ID", &replacement)
++    .output()
++    .unwrap();
++    let _ = opened
++        .stdin
++        .take()
++        .map(|mut stdin| stdin.write_all(b"done\n"));
++    let opened = opened.wait_with_output().unwrap();
++    assert!(started, "fixture provider did not start: {opened:?}");
++    assert!(opened.status.success(), "{opened:?}");
++    assert_ne!(replacement, first_run);
++
++    assert!(inside.status.success(), "{inside:?}");
++    let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
++    assert_eq!(inside["id"], id);
++    assert_eq!(inside["kind"], "ask");
++    assert_eq!(inside["run_id"], replacement.as_str());
++    assert_eq!(inside["title"], "Launch notes");
++    assert_eq!(inside["title_source"], "human");
++
++    let readback = listed(home.path(), id);
++    assert_eq!(readback["run_id"], replacement.as_str());
++    assert_eq!(readback["title"], "Launch notes");
++    assert_eq!(readback["title_source"], "human");
++    // The boundary's Run never appears as a second, interactive Session.
++    let all: Vec<serde_json::Value> =
++        serde_json::from_slice(&run(home.path(), &["session", "list", "--all", "--json"]).stdout)
++            .unwrap();
++    assert_eq!(all.len(), 1, "{all:?}");
++}

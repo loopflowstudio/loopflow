@@ -1,0 +1,74 @@
+[
+  {
+    "direction": "a",
+    "viewport": [
+      1440,
+      1000
+    ],
+    "draft_return": true,
+    "monitor": true,
+    "companion": true,
+    "details": true,
+    "js_errors": []
+  },
+  {
+    "direction": "b",
+    "viewport": [
+      1440,
+      1000
+    ],
+    "draft_return": true,
+    "monitor": true,
+    "companion": true,
+    "details": true,
+    "js_errors": []
+  },
+  {
+    "direction": "c",
+    "viewport": [
+      1440,
+      1000
+    ],
+    "draft_return": true,
+    "monitor": true,
+    "companion": true,
+    "details": true,
+    "js_errors": []
+  },
+  {
+    "direction": "a",
+    "viewport": [
+      1100,
+      900
+    ],
+    "draft_return": true,
+    "monitor": true,
+    "companion": true,
+    "details": true,
+    "js_errors": []
+  },
+  {
+    "direction": "b",
+    "viewport": [
+      1100,
+      900
+    ],
+    "draft_return": true,
+    "monitor": true,
+    "companion": true,
+    "details": true,
+    "js_errors": []
+  },
+  {
+    "direction": "c",
+    "viewport": [
+      1100,
+      900
+    ],
+    "draft_return": true,
+    "monitor": true,
+    "companion": true,
+    "details": true,
+    "js_errors": []
+  }
+]

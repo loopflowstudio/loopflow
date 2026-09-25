@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "total": 43,
+    "started": 27,
+    "waves": 5
+  },
+  "sidebar_scrolls": true,
+  "scoped_search": true,
+  "started_without_session": true,
+  "wave_full_plan": true,
+  "backlog_inspection_does_not_add": true,
+  "errors": []
+}

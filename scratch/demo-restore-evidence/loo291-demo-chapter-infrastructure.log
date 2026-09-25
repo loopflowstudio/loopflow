@@ -1,0 +1,1 @@
+Error: Linear refresh failed: token endpoint rejected the request (HTTP 400, code unknown); prior credential preserved. Retry the PM operation; no credential was cleared.

@@ -1,0 +1,178 @@
+[
+  {
+    "id": "run_a54364bc803846488b2b68e1ba834372",
+    "run_id": "run_a54364bc803846488b2b68e1ba834372",
+    "kind": "interactive",
+    "work": null,
+    "wave_id": null,
+    "work_path": null,
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "title": "Content from clipboard.",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.refresh",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_a54364bc803846488b2b68e1ba834372"
+    ],
+    "terminal_ids": []
+  },
+  {
+    "id": "run_bb7e4f98a6284bdcaa818692408305d2",
+    "run_id": "run_bb7e4f98a6284bdcaa818692408305d2",
+    "kind": "interactive",
+    "work": null,
+    "wave_id": null,
+    "work_path": null,
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "title": "Content from clipboard.",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.refresh",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_bb7e4f98a6284bdcaa818692408305d2"
+    ],
+    "terminal_ids": []
+  },
+  {
+    "id": "run_bd99fa5d54fe4d1fa08244d4603c72da",
+    "run_id": "run_bd99fa5d54fe4d1fa08244d4603c72da",
+    "kind": "interactive",
+    "work": null,
+    "wave_id": null,
+    "work_path": null,
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+      },
+      {
+        "kind": "move_here",
+        "label": "Move here",
+        "help": "Stop the other client and resume here; unsent text there is lost",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "title": "Scratch design artifacts and working notes.",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.main-view-task",
+    "state": "active",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_bd99fa5d54fe4d1fa08244d4603c72da"
+    ],
+    "terminal_ids": []
+  },
+  {
+    "id": "run_e62d94f5e3c145478ce9039aa0256765",
+    "run_id": "run_e62d94f5e3c145478ce9039aa0256765",
+    "kind": "interactive",
+    "work": null,
+    "wave_id": null,
+    "work_path": null,
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "title": "Scratch design artifacts and working notes.",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.main-view-task",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_e62d94f5e3c145478ce9039aa0256765"
+    ],
+    "terminal_ids": []
+  },
+  {
+    "id": "run_a78010c6769b419fb0ed32ce8334da5f",
+    "run_id": "run_a78010c6769b419fb0ed32ce8334da5f",
+    "kind": "interactive",
+    "work": null,
+    "wave_id": null,
+    "work_path": null,
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "title": "loopflow · loopflow.build-size",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.build-size",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_a78010c6769b419fb0ed32ce8334da5f"
+    ],
+    "terminal_ids": []
+  }
+]

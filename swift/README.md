@@ -52,6 +52,15 @@ selecting a Session opens its exact terminal through the shared Session action.
 Use **Inspect** or the row's context menu for details. Presentation changes never
 start a provider or resolve a Session.
 
+The breadcrumb above the workspace drills Wave → Task → Session. Wave and Task
+crumbs return to their details; the Task's issue ID links to Linear. With several
+Sessions, the final crumb chooses among them by name. The pencil renames the
+Session in place through `lf session rename`; the shown name is the shared
+readback, and a rejected name stays in the field with its error. A remote Flow
+Session's name lives on its Home and is not renamed here. Beside the name, the
+Session shows its Flow step and iteration, **Independent**, or why membership is
+unknown.
+
 **Monitor** opens beside retained Sessions and shells in the same multiplexer.
 Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
 selected Task's active Runs and updates automatically. **Refresh** requests an

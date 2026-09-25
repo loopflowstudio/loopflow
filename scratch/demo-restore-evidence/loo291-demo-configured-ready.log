@@ -1,0 +1,71 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/42] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[4/42] Compiling LoopflowTests LocalWaveAgentLauncherTests.swift
+[5/42] Compiling LoopflowTests LoopflowStateTests.swift
+[6/42] Compiling LoopflowTests MessageRowTests.swift
+[7/42] Compiling LoopflowTests MockWaveFixtureTests.swift
+[8/42] Compiling LoopflowTests MultiplexerLayoutTests.swift
+[9/42] Compiling LoopflowTests MultiplexerStoreTests.swift
+[10/42] Compiling LoopflowTests NowProjectionTests.swift
+[11/42] Compiling LoopflowTests PodiumModelTests.swift
+[12/42] Compiling LoopflowTests PortfolioRepoStateTests.swift
+[13/42] Compiling LoopflowTests PortfolioServiceTests.swift
+[14/42] Compiling LoopflowTests ReferenceTextViewTests.swift
+[15/42] Compiling LoopflowTests RegistryQueryTests.swift
+[16/42] Compiling LoopflowTests RepoScannerTests.swift
+[17/42] Compiling LoopflowTests RoadmapViewTests.swift
+[18/42] Compiling LoopflowTests SelectableAssistantTextViewTests.swift
+[19/42] Compiling LoopflowTests SessionActionFixtures.swift
+[20/42] Compiling LoopflowTests SessionsPolishTests.swift
+[21/42] Compiling LoopflowTests SessionsStoreTests.swift
+[22/42] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[23/42] Compiling LoopflowTests TaskMonitorProofTests.swift
+[24/42] Compiling LoopflowTests TaskMonitorTests.swift
+[25/42] Compiling LoopflowTests TestHostTerminator.swift
+[26/42] Compiling LoopflowTests WaveChatConnectionTests.swift
+[27/54] Emitting module LoopflowTests
+[28/54] Compiling LoopflowTests ActiveRunsLifetimeTests.swift
+[29/54] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[30/54] Compiling LoopflowTests ActiveRunsTestFeed.swift
+[31/54] Compiling LoopflowTests AppAppearanceTests.swift
+[32/54] Compiling LoopflowTests AppBootstrapResourceTests.swift
+[33/54] Compiling LoopflowTests AttemptFailurePresentationTests.swift
+[34/54] Compiling LoopflowTests BundledDaemonPathTests.swift
+[35/54] Compiling LoopflowTests ChatReferenceTests.swift
+[36/54] Compiling LoopflowTests ContractTests.swift
+[37/54] Compiling LoopflowTests DTOFixtureTests.swift
+[38/54] Compiling LoopflowTests DemoConfiguredCaptureTests.swift
+[39/54] Compiling LoopflowTests DesktopPerformanceTests.swift
+[40/54] Compiling LoopflowTests FaderSwitchTests.swift
+[41/54] Compiling LoopflowTests WaveChatStreamTests.swift
+[42/54] Compiling LoopflowTests WaveChatTranscriptTests.swift
+[43/54] Compiling LoopflowTests WaveDetailReadingTests.swift
+[44/54] Compiling LoopflowTests WaveLensTests.swift
+[45/54] Compiling LoopflowTests WaveOriginTests.swift
+[46/54] Compiling LoopflowTests WavePlanParserTests.swift
+[47/54] Compiling LoopflowTests WaveRowTests.swift
+[48/54] Compiling LoopflowTests WaveSurfacePrimaryHierarchyTests.swift
+[49/54] Compiling LoopflowTests WaveTests.swift
+[50/54] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[51/54] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[52/54] Compiling LoopflowTests WorktreeWorkspaceTests.swift
+[52/54] Write Objects.LinkFileList
+[53/54] Linking LoopflowSwiftPackageTests
+Build complete! (10.25s)
+Test Suite 'Selected tests' started at 2026-09-24 21:19:33.039.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 21:19:33.040.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 21:19:33.040.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 21:19:33.040.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite DemoConfiguredCaptureTests started.
+◇ Test configuredReadAndRender() started.
+✔ Test configuredReadAndRender() passed after 2.615 seconds.
+✔ Suite DemoConfiguredCaptureTests passed after 2.615 seconds.
+✔ Test run with 1 test in 1 suite passed after 2.615 seconds.

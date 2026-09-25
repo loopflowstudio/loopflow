@@ -14,6 +14,9 @@ private enum SessionFixtureKind: String {
         let work = self == .flow
             ? #"{"kind":"task","id":"task_00000000000000000000000000000001"}"#
             : "null"
+        let membership = self == .flow
+            ? #"{"kind":"step","flow":"task-design","invocation_id":"fixture","step":"review-design","step_index":1,"iteration":0,"current":true}"#
+            : #"{"kind":"independent"}"#
         let actions: String
         switch self {
         case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Stop the other client and resume here; unsent text there is lost","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Stop the provider and remove this Session; native history remains resumable","unavailable_reason":null}]"#
@@ -32,7 +35,7 @@ private enum SessionFixtureKind: String {
           "ready_summary": \(summary),
           "work_path": null,
           "actions": \(actions),
-          "terminal_ids": [],
+          "title_source": "generated", "flow_membership": \(membership), "terminal_ids": [],
           "open_argv": ["/usr/bin/tail", "-f", "/dev/null"]
         }
         """

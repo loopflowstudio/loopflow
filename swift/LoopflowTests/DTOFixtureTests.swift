@@ -252,6 +252,7 @@ struct DTOFixtureTests {
             id: "task_00000000000000000000000000000001"
         ))
         #expect(session.title == "Simplify cross-Work questions")
+        #expect(session.titleSource == .human)
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
         #expect(session.workPath == "product / LOO-291")
@@ -259,6 +260,33 @@ struct DTOFixtureTests {
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
+        #expect(decoded == sessions)
+    }
+
+    @Test("Session Flow membership mirrors every Rust projection and is required")
+    func sessionFlowMembershipFixture() throws {
+        let data = try loadFixtureData("session_memberships.json")
+        let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
+        #expect(sessions.map(\.flowMembership) == [
+            .step(flow: "task-design", invocationId: "00000000-0000-0000-0000-00000000f10w",
+                  step: "review-design", stepIndex: 1, iteration: 0, current: true),
+            .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
+                  step: "implement", stepIndex: 2, iteration: 3, current: false),
+            .independent,
+            .unknown(reason: "Run run_00000000000000000000000000000004 predates recorded Flow membership"),
+            .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
+                  step: "demo", stepIndex: 7, iteration: 0, current: true),
+        ])
+        #expect(sessions.last?.titleSource == .unavailable)
+        #expect(sessions[1].flowMembership.label == "feature / implement · iteration 3 · earlier")
+        let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        for var value in objects {
+            value.removeValue(forKey: "flow_membership")
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+        }
+        let decoded = try JSONDecoder().decode([SessionRecord].self, from: JSONEncoder().encode(sessions))
         #expect(decoded == sessions)
     }
 
@@ -271,6 +299,11 @@ struct DTOFixtureTests {
             let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
             #expect(session.runId == "run_00000000000000000000000000000001")
             #expect(session.runId != session.id)
+            var untitled = value
+            untitled.removeValue(forKey: "title_source")
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: untitled))
+            }
             value.removeValue(forKey: "run_id")
             #expect(throws: DecodingError.self) {
                 try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
@@ -290,6 +323,7 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .ready)
+        #expect(session.titleSource == .generated)
         #expect(session.actions.map(\.kind) == [.open, .complete])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")

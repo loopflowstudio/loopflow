@@ -132,6 +132,7 @@ Finish every kind of Session explicitly:
 ```bash
 lf session list
 lf session open run_ab12
+lf session rename run_ab12 "Release notes"            # human name; agents add --suggest
 lf session complete run_ab12                         # interactive Run
 
 lf session ready "Ready for review"                 # inside an Ask

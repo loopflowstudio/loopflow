@@ -1,0 +1,13 @@
+{
+  "exact_task_names_and_descriptions": 12,
+  "exact_wave_objectives_and_krs": 14,
+  "repos": [
+    "loopflow",
+    "etude",
+    "kata"
+  ],
+  "repo_switching": true,
+  "kata_unavailable_not_empty": true,
+  "no_fake_sessions_or_mutation_controls": true,
+  "errors": []
+}

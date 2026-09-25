@@ -17,6 +17,11 @@ condition, reason, and actions through the existing Wave Task row.
 `session.json` pins `lf session open --json`: one unresolved Task FlowStep
 session, its explicit readiness state, and its exact Home-local attach route.
 
+`session_memberships.json` pins each Session's required `flow_membership`:
+the current Flow step, an earlier step, an independent conversation, a Run that
+predates recorded membership (unknown, never independent), and a remote Flow
+Session whose canonical name lives on its Home (`title_source: unavailable`).
+
 `task_condition_states.json` pins the Rust-owned Task condition fold for clean
 backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never

@@ -2254,6 +2254,7 @@ fn launch_skill_agent(
             worktree: Some(repo_root.to_path_buf()),
             skill: Some(skill_name.to_string()),
             subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Independent,
         },
         &context,
     )?;

@@ -1255,6 +1255,7 @@ fn main() -> anyhow::Result<()> {
                 from_build,
                 coordinated_build,
                 fresh,
+                reuse_home,
                 cli_target,
                 daemon_source,
                 daemon_target,
@@ -1277,6 +1278,7 @@ fn main() -> anyhow::Result<()> {
                 from_build.as_deref(),
                 coordinated_build.as_deref(),
                 *fresh,
+                reuse_home.as_deref(),
             ),
             Some(InstallCommand::Rollback {
                 cli_target,

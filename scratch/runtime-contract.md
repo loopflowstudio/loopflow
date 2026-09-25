@@ -1,5 +1,13 @@
 # Shared transition implementation contract
 
+Status: the implementation below predates the accepted decision/Ask refinement.
+Next/Repeat become Advance/Iterate; Blocked belongs to execution outcomes rather
+than the navigation decision enum. The `decide` skill follows work and review
+steps and owns the decision. Reporting Blocked opens one Ask whose Session runs
+`unblock`; human completion returns its summary for decision reassessment.
+`unblock` uses concept-review by default. Preserve this distinction when
+integrating the reducer; its current shape is not the final public contract.
+
 Implementation choice for the accepted loopflow goal. Main owns generic CLI
 execution, persistence, decision command, Task integration, exports, and tests.
 A bounded contribution owns engine/transitions.rs only.

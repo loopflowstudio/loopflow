@@ -29,6 +29,15 @@ A pass without meaningful progress reports Blocked and opens an Ask running
 a specific missing input directly. Human Complete returns the summary to
 loop-decide for reassessment; it does not approve a separate Flow gate.
 
+The accepted revision separates that decision into the `decide` skill after
+both reviews. Reviews produce evidence; decide compares the previous direction
+with the pass's results and chooses Advance or Iterate. A pass that makes no
+meaningful progress reports Blocked and opens an Ask. That Ask's Session runs
+`unblock`, which uses concept-review with the human by default, or resolves a
+specific missing input directly. Human completion returns the summary to decide
+for reassessment; it does not approve a separate Flow gate. Connecting this
+revised sequence and automatic Ask handoff remains runtime implementation work.
+
 ## What our history teaches
 
 The initial 2026-09-25 survey ranked first-parent commits on the local

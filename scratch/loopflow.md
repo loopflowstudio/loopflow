@@ -26,20 +26,34 @@ loopflow. Keep the Flow type and its entry points. The term describes the edges
 in the definition; it introduces no separate execution mode or setup requirement.
 Ordinary execution constraints still apply, including exact human approval.
 
-By default, finishing a step proceeds to the next step. At a decision step, the
-declared protocol chooses the next path: proceed forward, take a declared
-backward edge with direction for another pass, or stop with a blocker. A process
-exit is not a decision. A human gate requires the exact human decision; an
-autonomous reviewer cannot supply it.
+By default, finishing a step proceeds to the next step. One `decide` skill owns
+the decision step: Advance follows the forward edge; Iterate takes the declared
+backward edge with direction for another pass. Work and review agents supply
+evidence, not a decision file. A process exit is not a decision. A human gate
+requires the exact human decision; an autonomous reviewer cannot supply it.
+
+Blocked is a stopped execution outcome, not a third navigation choice. No
+meaningful progress in the preceding pass is a reason to stop and ask for help;
+new evidence or a narrowed hypothesis counts as progress. Reporting Blocked
+opens one Ask, whose Session runs `unblock`. That skill uses `concept-review`
+with the human by default, or works through a narrower question when the blocker
+is specific. Completing the Ask returns its summary and artifact changes to the
+decision agent for reassessment; it does not approve another Flow gate.
 
 The former first/loop/finally arrangement becomes one definition:
 
 ```text
 design → human design review → implement → compress → review-slice
                                   ↑                       ↓
-                                  └── repeat ── concept-review
-                                                        ↓ next
+                                  │                 concept-review
+                                  │                       ↓
+                                  └── Iterate ──────── decide
+                                                       ↓ Advance
                                                 human demo → delivery
+
+decide reports Blocked → Ask Session running unblock → human Complete
+                               (uses concept-review)          ↓
+                                                    decide reassesses
 ```
 
 The initial steps occur once, the declared edge repeats the chosen section,
@@ -101,8 +115,10 @@ add a third. Do not replace persisted decisions with transient return values.
 
 ## Decisions to work through after the usage draft
 
-1. Decision protocol: use simple next/repeat/blocked outcomes with a declared
-   target, or named authored outcomes when a step can select multiple edges?
+1. Decision protocol: Advance/Iterate and a separate Blocked execution outcome
+   are accepted. Connect the dedicated decision step to Ask exactly once and
+   retain that Ask association through recovery. Do not reopen an unchanged,
+   unresolved blocker automatically after the human completes the conversation.
 2. Standalone invocation: where does its durable position live, how is it named,
    and how does Advance resume or open its human boundary without a Task?
 3. Backward edges: define scope and budgets for multiple loops; decide whether
@@ -116,7 +132,9 @@ add a third. Do not replace persisted decisions with transient return values.
 Run the same loopflow definition through ordinary Flow invocation and a bound
 Task. In both, demonstrate the initial section once, a decision taking a backward
 edge, a later decision reaching final steps once, and a visible stop for human
-input or blocker. Exercise at least two backward edges, exact/stale decisions,
+input or blocker. A stalled pass opens an Ask running unblock once; its human
+completion resumes decision assessment without advancing a separate human gate.
+Exercise at least two backward edges, exact/stale decisions,
 interruption and saved-decision recovery. Compare their transition evidence;
 Task binding must not change the meaning of the definition.
 

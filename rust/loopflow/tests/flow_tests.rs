@@ -183,6 +183,119 @@ fn code_flow_records_each_skill_as_one_generic_run() {
 }
 
 #[test]
+fn observing_and_preparing_a_task_are_not_execution() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let task = support::register_unrun_task(
+        home.path(),
+        repo.path(),
+        "task-observation",
+        &repo.head_sha(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let starts = || {
+        runtime
+            .block_on(task.store.task_events_after(&task.task.id, 0))
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == loopflow::work::task::TaskEventKind::Started)
+            .count()
+    };
+    assert_eq!(starts(), 0);
+    let read = run_lf(
+        repo.path(),
+        home.path(),
+        &["runs", "--active", "--task", "INF-123", "--json"],
+        None,
+    );
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    assert_eq!(
+        starts(),
+        0,
+        "a filtered active-Run read cannot start its Task"
+    );
+
+    write_skill(repo.path(), "review-proof", "Review the fixture.");
+    write_flow(
+        repo.path(),
+        "review-first",
+        "- step:\n    id: review\n    name: review-proof\n    human: true\n",
+    );
+    let prepared = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--task",
+            "INF-123",
+            "flow",
+            "review-first",
+            "-b",
+            "--no-loopflow",
+        ],
+        None,
+    );
+    assert!(!prepared.status.success());
+    assert!(
+        String::from_utf8_lossy(&prepared.stderr).contains("waiting for human input"),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let sessions = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "list", "--json"],
+        None,
+    );
+    assert!(
+        sessions.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sessions.stderr)
+    );
+    let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert!(sessions[0]["run_id"].as_str().is_some());
+    assert_eq!(
+        starts(),
+        0,
+        "publishing and reading an unopened review only prepares its Run"
+    );
+
+    write_skill(repo.path(), "first-work", "Do this proof-owned work.");
+    let bin = TempDir::new().unwrap();
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script("done", ""),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    for _ in 0..2 {
+        let launched = run_lf(
+            repo.path(),
+            home.path(),
+            &["--task", "INF-123", "first-work", "-b", "--no-loopflow"],
+            Some(&path),
+        );
+        assert!(
+            launched.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launched.stderr)
+        );
+        assert_eq!(
+            starts(),
+            1,
+            "independent execution records the existing Started event once"
+        );
+    }
+}
+
+#[test]
 fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone() {
     use loopflow::controller::wave::playhead::QueuedInvocation;
     use loopflow::durable::FlowPosition;

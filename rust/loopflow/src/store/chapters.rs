@@ -38,11 +38,6 @@ impl Store {
         .await
     }
 
-    pub async fn begin_chapter_task(&self, task: &TaskId) -> StoreResult<()> {
-        let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.begin_chapter_task(&task)).await
-    }
-
     pub async fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {

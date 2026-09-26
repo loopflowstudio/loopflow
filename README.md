@@ -109,6 +109,7 @@ Watch this repository and the current Home:
 
 ```bash
 lf ls                  # every durable Wave and its Home/runtime evidence
+lf user name           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf status designer     # one Wave's current chapter and Tasks

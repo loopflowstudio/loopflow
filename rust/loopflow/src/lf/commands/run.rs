@@ -1110,10 +1110,19 @@ mod tests {
     #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["LF_HOME", "LF_USER_NAME"]);
+        let _restore = EnvironmentRestore::capture(&[
+            "LF_HOME",
+            "LF_USER_NAME",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+        ]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         std::env::remove_var("LF_USER_NAME");
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "user.name");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "Git User");
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
@@ -1140,7 +1149,7 @@ mod tests {
                 assert_eq!(
                     built.components.user_name.as_deref(),
                     if name.trim().is_empty() {
-                        None
+                        Some("Git User")
                     } else {
                         Some(name)
                     }
@@ -1155,12 +1164,12 @@ mod tests {
                 assert!(built.agent_config.task_prompt.contains(&context));
                 assert!(!built
                     .prompt
-                    .contains("preferred name is \"Repository Owner\""));
+                    .contains("display name is \"Repository Owner\""));
             }
         }
         std::fs::remove_file(home.path().join("config.yaml")).unwrap();
         let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
-        assert!(built.components.user_name.is_none());
+        assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
     }
 
     #[test]
@@ -1226,8 +1235,8 @@ mod tests {
                 None,
                 Some("Jack"),
             );
-            assert!(seed.contains("preferred name is \"Jack\""));
-            assert!(seed.contains("address them as \"you\""));
+            assert!(seed.contains("display name is \"Jack\""));
+            assert!(seed.contains("Address them as \"you\""));
             assert_eq!(seed.matches("<lf:user>").count(), 1);
         }
     }

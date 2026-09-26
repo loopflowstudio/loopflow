@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -20,18 +21,29 @@ struct UserConfig {
     name: Option<String>,
 }
 
-/// Read the explicitly chosen name from personal configuration only.
+/// Resolve a display name from personal Loopflow configuration or Git's user.name.
 pub fn load_user_name() -> Result<Option<String>, LoadError> {
-    let Some(config) = load_yaml_file(&global_config_path())? else {
+    if let Some(config) = load_yaml_file(&global_config_path())? {
+        if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
+            let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
+                LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
+            })?;
+            if let Some(name) = user.name.as_deref().and_then(normalize_user_name) {
+                return Ok(Some(name));
+            }
+        }
+    }
+    let Some(output) = Command::new("git")
+        .args(["config", "--get", "user.name"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+    else {
         return Ok(None);
     };
-    let Some(user) = config.get("user").filter(|value| !value.is_null()) else {
-        return Ok(None);
-    };
-    let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
-        LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
-    })?;
-    Ok(user.name.as_deref().and_then(normalize_user_name))
+    Ok(std::str::from_utf8(&output.stdout)
+        .ok()
+        .and_then(normalize_user_name))
 }
 
 /// Resolve a direct invocation's participant before execution moves Homes.

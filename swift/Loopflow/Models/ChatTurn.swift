@@ -193,6 +193,7 @@ public enum ChatTurnError: Error, Equatable {
 public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let role: ChatRole
+    /// Display name captured with the message, not a username or stable identity.
     public let authorName: String?
     public let text: String
     public let status: Lifecycle

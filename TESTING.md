@@ -3,6 +3,10 @@
 CI runs the full proof matrix in parallel. Local work should run the smallest
 proof that can change the next decision.
 
+The introductions in `README.md` and `docs/index.md` share the same text. When
+editing either introduction, update both and run
+`uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
+
 ## Quick Reference
 
 ```bash

@@ -2,12 +2,13 @@
 
 LOO-298 · Infrastructure · 2026-09-26
 
-Status: documentation specification updated through interactive review.
+Status: reviewed specification with the first storage reduction implemented;
+behavioral verification remains blocked by the resource envelope.
 The current participant (name unresolved) approved proceeding with taskless
 Invocations, Session owning Runs plus a current Run, and Flow / Invocation
 naming. This supersedes the earlier Session-as-Run-child and Task-required
-Invocation model. No implementation, schema change, provider mutation or
-real-Home migration is part of this review slice. See
+Invocation model. The implemented cut removes four derived Task SQL columns;
+the full owner cutover and real-Home migration remain outstanding. See
 [review feedback](data-model-review-feedback.md) for approval scope and assumptions.
 
 ## Problem
@@ -52,8 +53,8 @@ Session opens, Complete saves feedback once, and the captured next step receives
 it. Inspect an earlier Chapter while the transferred Task keeps progressing;
 its old KR evidence remains unchanged.
 
-These are end-state demos. This slice's deliverable is the reviewable doc diff,
-not a claim that these commands already work in this checkout.
+These are end-state demos. The documentation and preparatory storage reduction
+do not establish that these commands work in this checkout.
 
 ## Approach
 
@@ -370,8 +371,8 @@ The cutover and deletion conditions rule out that outcome.
 - Session has its own ID, owns its Runs, and selects a current Run. Replacement
   keeps the same Session, title and feedback; previous Runs remain history.
   Validate the current Run belongs to the Session and fence replacement writes.
-- No code/test/fixture/migration changes in this slice. The existing doc edits
-  were preserved with `lf commit` before this continuation.
+- The documentation review changed no code, tests, fixtures or migrations.
+  The subsequent storage cut is recorded below; it does not complete the design.
 - Use table-only current readers after one import. Keep raw evidence and the
   import report, not a parallel legacy runtime.
 - Prefer truthful unknown history over fabricated independent membership.
@@ -559,7 +560,7 @@ cutover; this preparatory reduction is not an independently publishable slice.
   Architecture inventory still fails only the two recorded SQLite owner gaps;
   this is not a green implementation gate.
 
-### Diff summary for Jack's review
+### Documentation review diff summary
 
 - Architecture entry and reference replace file-backed Run/Session unions with
   table ownership, typed ancestry, explicit lifecycle and transaction boundaries.
@@ -568,9 +569,41 @@ cutover; this preparatory reduction is not an independently publishable slice.
 - The contributor guide points to those owners and validators; both guide
   symlinks still resolve to `STYLE.md`. Portable HTML is regenerated from source.
 - This design retains the complete implementation, preservation and deletion
-  path. [Review agenda](questions.md) identifies naming and the material
-  inconsistencies found while writing the model down. Runtime, tests, fixtures
-  and migrations are unchanged.
+  path. [Review agenda](questions.md) records resolved decisions and remaining
+  assumptions. That review changed only documentation; the subsequent storage
+  cut is described in the slice ledger.
+
+### Compression review (2026-09-26)
+
+No further executable reduction selected. The implemented model fits in one
+ownership map:
+
+| Fact | Current owner and consumers | Disposition |
+| --- | --- | --- |
+| Flow name, selected step, node and human policy | `QueuedInvocation` plus `ExecutionCursor`; `FlowPosition.current_checked` derives `StepRef` | The forward draft removes all four SQL copies. `StepRef` remains a derived execution value, not another store. |
+| Captured cursor and recovery feedback | `task_flow_positions.review_json`; exact reads and review discovery share `decode_flow_position` | Retain the shared decoder. `step_index` and `iteration` still reconstruct flat historical records, as exercised by `legacy_flow_decisions_preserve_pinned_progress`. |
+| Pending review Run and readiness | Task position, consumed by `ops/human_session.rs` and the exact settlement transactions in `store/sqlite/children.rs` | Retain until Session owns these facts and the importer preserves existing boundaries. |
+| Execution authority | Position version, invocation identity, generation and exact worker claim | Retain; these fence different races and are not display duplicates. |
+| Session inventory and wire shape | Four current sources feed Rust `SessionRecord`, mirrored by Swift `SessionRecord` and DTO fixtures | Still live. Removing the union or wire ancestry before table-backed replacement would remove capability. |
+
+Followed the changed SQL through `store/durable.rs`, Task settlement, Session
+discovery, `ops/task_execution.rs`, the Swift Session model and fixture consumers.
+No current SQL caller still names the four removed columns. Historical migrations
+and their populated fixtures intentionally retain the old shape. The migration's
+capture/claim/readiness preservation proof and nested review discovery proof
+remain necessary; neither merely tests the deleted representation.
+
+The important review finding remains the larger read failure surface: review
+discovery now validates autonomous positions too, so an invalid autonomous
+capture can fail Session inventory. The full Session owner cutover must address
+inventory directly; another stored human flag or fallback reader would restore
+the duplication this cut removes.
+
+Resource preflight and safe recovery both still fail on the active
+`main-view-task` checkout (14.5 GiB / 12 GiB; 99.7 GiB free). No product test ran
+and no other checkout's active build was removed. Existing formatting, Clippy
+and migration-check evidence applies to unchanged executable bytes; this pass
+changes only these working notes. The two focused commands above remain owed.
 
 ## Measure
 

@@ -8,7 +8,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
 - Chapter = repository-wide planning clock; one current, advanced for all Waves together
 - Project = one unique (Wave, Chapter) plan: Tasks, KRs, metric targets, and a Flow
-- Task owns Flow invocations; the Project's Flow is the default, and explicit overrides are allowed
+- Flow invocations may be taskless; Task-owned invocations default to the Project's Flow, with explicit overrides allowed
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -199,6 +199,7 @@ objective, memory, cadence, or operator.
 
 Tasks own zero or more Flow invocations, with one current root. The Project's
 Flow supplies the default; explicit `--flow` and restart overrides are allowed.
+Flows also run without a Task, using the same invocation model and persistence.
 An invocation captures its fully expanded graph, cursor, and return counts.
 Template composition does not create invocation parents; runtime loop nesting does.
 
@@ -210,9 +211,12 @@ historical, and missing evidence remains unresolved. Skills judge outcomes and
 author plans; they do not implement rotation. Current navigation stays Wave →
 Task; history exposes the plan for a Wave in a past Chapter.
 
-Main product records have SQLite owners. Session is a child of Run and reads its
-ancestry through that Run. Nullable Run parents obey invocation ⇒ Task ⇒ Wave;
-constructors fill omitted ancestors and refuse mismatches. Every denormalization
+Main product records have SQLite owners. Session owns Runs and a current Run;
+its stable identity and name survive Run replacement. Run has a nullable Session
+FK; Session's current Run must belong to it. Session reads ancestry through its
+current Run. Invocation Task is nullable; an invocation's Runs
+share that nullable Task. A present Task implies Wave. Constructors fill omitted
+ancestors and refuse mismatches. Every denormalization
 is removed or validated on writes. The full ownership and invariant contract
 lives in [Architecture Reference](docs/architecture-reference.md#core-models-and-apis).
 

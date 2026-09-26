@@ -111,14 +111,19 @@ Repository --< Chapter                         one current for the repository
                                                  `--< Task
                                                        |-- worktree and serial PRs
                                                        `--< Flow invocation
-                                                              `--< Run -- Session?
+                                                              `--< Run
 
-Run.invocation_id => Run.task_id => Run.wave_id      nullable, filled upward
+Session --< Run                                    Run.session_id is nullable
+Session.current_run_id -> Run                      points to one of its Runs
+
+Run.invocation_id                                  nullable; invocation Task is optional
+Run.task_id => Run.wave_id                         nullable, filled upward
 Flow invocation.parent_id                          runtime nesting only
 ```
 
 The Run arrows above describe execution ownership. Independent Runs can belong
-to a Task, only a Wave, or neither. Session has one Run and no separate Work parent.
+to a Task, only a Wave, or neither. Session owns a Run history and selects its
+current Run; it has no separate Work parent.
 Project is a plan within a Chapter, not a second name for Chapter. Work remains
 `Wave | Project | Task`; Run parentage grants no Work or process-control authority.
 
@@ -132,7 +137,7 @@ Project is a plan within a Chapter, not a second name for Chapter. Work remains
 | Flow | Template name and source | Authored Skill/Op/Xor/human nodes and backward edges |
 | Flow invocation | Invocation ID | Captured expanded graph, cursor, return counts, runtime children |
 | Run | `RunId` | One launch, current attribution, execution membership, provider and outcome |
-| Session | Its `run_id` | One conversation's kind, name, readiness and completion |
+| Session | `SessionId` | One conversation's kind, name, readiness, completion, Runs and current Run |
 | Home | `HomeId` | Store, artifacts, credentials, local process authority |
 | Placement | `(WorkRef, HomeId)` | Where Work executes, not ownership of an observed process |
 | Steer | Work event identity | Ordered authored correction |
@@ -149,11 +154,11 @@ CLI names and issue identifiers resolve once at the boundary.
 | `waves` | Stable identity and repository locator; authored goal/memory/instrument definitions stay in repository files |
 | `projects` | `wave_id`, `chapter_id`, Flow template selection, provider Project identity; read/update the Linear-backed plan |
 | `tasks` | `project_id`, provider Issue identity, Work state, worktree and delivery facts; derive Wave through Project |
-| `flow_invocations` | Task, nullable runtime parent, captured Flow name/source and complete graph, local node cursor, loop return counts, status, claim/version/generation, pending boundary; create, claim, settle, interrupt, restart |
-| `runs` | ID, causal parent Run, Home/repository/cwd, provider/model/skill, timestamps/outcome, nullable `invocation_id`, `task_id`, `wave_id`, `work_source`, node, iteration tuple and `membership_known`; create, settle, bind, query |
-| `sessions` | `run_id` unique FK and identity; `kind` = `interactive | flow_review | ask`; `title`, `title_source` = `generated | human`; `state` = `waiting | active | ready | closed`; `ready_summary`; open, ready, complete, rename |
+| `flow_invocations` | Nullable Task, nullable runtime parent, captured Flow name/source and complete graph, local node cursor, loop return counts, status, claim/version/generation, pending boundary; create, claim, settle, interrupt, restart |
+| `runs` | ID, nullable `session_id` FK, causal parent Run, Home/repository/cwd, provider/model/skill, timestamps/outcome, nullable `invocation_id`, `task_id`, `wave_id`, `work_source`, node, iteration tuple and `membership_known`; create, settle, bind, query |
+| `sessions` | Stable `id`, `current_run_id` FK; `kind` = `interactive | flow_review | ask`; `title`, `title_source` = `generated | human`; `state` = `waiting | active | ready | closed`; `ready_summary`; query Runs, open, ready, complete, rename |
 
-A Session reads ancestry, cwd, provider, and Flow membership through its Run.
+A Session reads ancestry, cwd, provider, and Flow membership through its current Run.
 Session rows do not copy these fields. Headless Runs may have an optional name;
 a conversational Run's displayed name is its Session title, not a synchronized
 second title. Native provider identity and attachment receipts are Run-owned
@@ -161,13 +166,22 @@ operational data in SQLite; the provider still owns its transcript. Ask request,
 caller, selected Skill, keyed retry identity and completed result are Session
 kind-specific fields. There is no separate Ask file or Session registry.
 
+`Session.runs` queries `runs.session_id`; it is not a second stored list.
+`current_run_id` must refer to a Run whose `session_id` is this Session.
+Creation reserves both records and the current pointer in one transaction;
+replacement appends a Run and changes the pointer atomically, comparing the
+expected previous Run. No committed Session has a missing or foreign current
+Run. Closed Sessions retain the pointer and their complete Run history.
+Session identity, title and feedback survive replacement. Run outcomes, usage,
+native identities and process receipts stay attached to their original Runs.
+
 ### Three validator groups
 
 | Validator | Enforced contract | Mutation boundary |
 | --- | --- | --- |
 | Planning ancestry | Project's Wave and Chapter name the same repository; `(wave_id, chapter_id)` is unique; a repository has one current Chapter; Task's Wave is derived from its Project | Plan writes and atomic chapter activation |
-| Invocation structure | Invocation belongs to a Task; parent has the same Task; parent chain is acyclic and describes runtime entry; node exists in the captured expanded graph; one current root per Task | Invocation creation, child entry, cursor settlement, restart |
-| Run ancestry | Invocation fills Task; Task fills Wave; supplied parents must match. An invocation-owned Run has a valid node/iteration tuple; an independent Run has neither. Membership never changes through bind | All Run creation, binding, import and ancestry-changing writes |
+| Invocation structure | Invocation has an optional Task; parent has the same nullable Task; parent chain is acyclic and describes runtime entry; node exists in the captured expanded graph; one current root per Task when Task-owned | Invocation creation, child entry, cursor settlement, restart |
+| Run ancestry | Invocation supplies its nullable Task; a present Task fills Wave; supplied parents must match. An invocation-owned Run has a valid node/iteration tuple even when taskless; an independent Run has neither. Membership never changes through bind | All Run creation, binding, import and ancestry-changing writes |
 
 SQLite foreign keys, uniqueness and nullability constraints back these APIs.
 Cross-row checks run in the same write transaction as the change. Task moves
@@ -200,7 +214,7 @@ Chapter retirement also examines authored work, PRs and active invocation
 claims: absence of a Run alone never proves untouched backlog. Binding away the
 last Run can change the displayed fact without erasing delivery history.
 
-The shared readers select Session rows joined to Runs, and Runs by their typed
+The shared readers select Session rows joined to their current Runs, and Runs by their typed
 parents. `runs --task`, `session list --task`, usage, activity and the desktop
 agree. No read calls the launch resolver or requires an active PR. A Session
 with null Task is an orphan in the workspace, including a Wave-only Session;
@@ -258,7 +272,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **PM projection** — locally readable current planning snapshot | Linear remains authoritative; the Wave UUID keys the projection so locator changes preserve it. Sync atomically replaces the projection and reads never author through it. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_snapshots` | Foreground PM sync or Home webhook reconciliation | `lf pm` | `provider:linear` |
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its advancing worker | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task worker refreshes comments and attempts live input; successor workers refresh their seed | `lf task steer`, Linear issue comments | Linear |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
-| **Session** — one conversation on one Run | Session row owns name, readiness and completion. Run supplies ancestry and provider identity. Complete returns saved feedback; only the following deciding Run chooses navigation. | `SessionRecord`, `RunId` | `sessions` | `lf __provider-session` records native identity; Session operations own state | `lf session`, `lf ask`, interactive `lf` | — |
+| **Session** — one conversation across Runs | Session row owns name, readiness and completion. Current Run supplies ancestry and provider identity; Session owns the Run history. Complete returns saved feedback; only the following deciding Run chooses navigation. | `SessionRecord`, `SessionId`, `RunId` | `sessions` | `lf __provider-session` records native identity; Session operations own state | `lf session`, `lf ask`, interactive `lf` | — |
 | **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, service replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to rebase. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | `lfd` starts eligible Wave listeners; the promotion command owns only its OS-locked switch transaction | `lf home`, `lf work`, `lf ssh`, `lf install`, `lf install schedule`; `lfd GET /health`, `lfd GET /status`, `lfd POST /waves/start`, `lfd POST /waves/stop`, `lfd POST /waves/reconcile`, `lfd POST /linear/webhook`, `lfd POST /github/webhook` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
 | **Run** — one launch and current attribution | Run row owns identity, nullable parents, provider and lifecycle; immutable artifacts own original launch inputs and recorded provider evidence. Neither grants control authority. | `Run`, `RunSpec`, `RunManifest`, `RunSnapshot`, `RunUsage` | `runs`; Home-local `runs/<prefix>/<run-id>/` evidence artifacts | shared harness capture and settlement path | `lf runs`, `lf replay`, `lf usage`, `lf activity`; Work/status Run evidence | `exec:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
@@ -380,7 +394,8 @@ persistence formats. Project-scope planning Runs carry their Wave; Project is
 not an extra Run parent.
 
 ```text
-Home SQLite: runs -> sessions (only when there is a conversation)
+Home SQLite: sessions -> runs (Run.session_id is null without a conversation)
+             sessions.current_run_id -> one of that Session's Runs
 $LF_HOME/runs/<prefix>/<run-id>/
   manifest.json       immutable launch inputs, prompt/context references
   context.json        captured prompt context when present
@@ -390,8 +405,9 @@ $LF_HOME/runs/<prefix>/<run-id>/
 
 1. Resolve the Home once for the store and artifact root. Resolve optional
    Work selectors without granting execution authority; validate Run ancestry.
-2. Reserve the Run ID and optional Session in one transaction, in prepared
-   state. A review boundary binds that exact Run in the same transaction.
+2. Reserve the Run and create or reuse its Session in one transaction, in
+   prepared state. Set the Session's current Run and bind the review boundary's
+   exact Run in the same transaction. Headless Runs need no Session.
 3. Publish final launch inputs atomically in its artifact directory. Mark the
    Run launchable only after publication. No provider starts before both exist.
 4. Spawn and record the exact native provider/attachment information in the
@@ -475,27 +491,29 @@ lf task steer INF-123 "keep the public name"
 ```bash
 lf ask "Review this migration with me"
 lf session list --task INF-123 --json
-lf session open <run-id> --json
-lf session rename <run-id> "Migration review"
-lf session bind <run-id> --task INF-123 --json
+lf session open <session-id> --json
+lf session rename <session-id> "Migration review"
+lf session bind <session-id> --task INF-123 --json
 lf session ready "Ready for review"
-lf session complete <run-id>
+lf session complete <session-id>
 ```
 
 All three Session kinds are rows selected by the same query. Session identity
-is its unique Run FK. Flow review preparation creates its Run and Session before
+is independent of Run identity. Flow review preparation creates its Run and Session before
 provider launch; an Ask creates a child Run with the caller's Task/Wave and a
 Session holding the request. Standalone interactive launches use the same rows.
 There is no concatenation of file scans and runtime boundaries to build a list.
 
 Open resumes native history on the same Run. Retrying an unpublished launch
 keeps that reserved identity. If an unrecoverable published launch requires a
-replacement, the old Run/Session remains historical; a new Run has its own
-Session. An exact boundary transaction attaches the replacement and retains its
-relationship to the previous attempt. It never silently changes a Session's Run.
+replacement, the old Run remains in the Session's history. A new Run belongs to
+the same Session and becomes its current Run. An exact boundary transaction
+updates the pointer and pending attempt together, retaining the relationship to
+the previous attempt. Late results from the old Run cannot settle the new one.
+Session ID, name and feedback stay on the same row; no name copy is needed.
 
 Rename updates the title and provenance atomically; an agent's generated title
-cannot overwrite a human title. Bind delegates to the Run ancestry validator.
+cannot overwrite a human title. Bind delegates to the current Run's ancestry validator.
 The same operation and Rust-owned availability reason serve every UI surface.
 
 Ready saves the summary and leaves the Session open. Complete persists the
@@ -527,14 +545,16 @@ Fully expanded means no unresolved template references; backward edges and
 unchosen Xor alternatives remain finite graph structure. It does not mean
 preallocating an unbounded number of future loop passes.
 
-Every executable invocation has a Task. Direct Skill and inline-prompt Runs
-can remain taskless; a Wave attribution alone does not supply invocation
-ownership. Flow execution uses the Task's invocation driver.
+Flow invocations can run without a Task. `lf flow <name>` creates a taskless
+invocation when no Task is selected or inferred; Task launch uses the selected
+Task. Both use the same invocation records and execution machinery, including
+captured recovery and human boundaries. Taskless execution needs no synthetic
+Task, Project, or Wave. Its Runs may carry Wave-only attribution or none.
 
 Nodes have local typed IDs. Template composition does not create invocation
 parents. Runtime entry into a nested loop body creates a child invocation for
 that pass, linked to the parent's entry node. Child and parent belong to the
-same Task. The parent records which child it awaits; child completion and parent
+same nullable Task. The parent records which child it awaits; child completion and parent
 resumption settle together. Retrying reuses the same child; a new pass creates
 a new child. There is no path-string node identity or separate occurrence row.
 
@@ -835,7 +855,7 @@ model.
 <!-- architecture-vocabulary:start -->
 | Retired term | Allowed scopes | Current language |
 | --- | --- | --- |
-| `Project Session`, `Task Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; conversational Session is a child of Run, not a Work executor. |
+| `Project Session`, `Task Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; conversational Session owns Runs and a current Run; it is not a Work executor. |
 | `session context`, `LF_SESSION` | — | Stable Work identity plus `LF_RUN_ID`/`LF_RUN_DIR` execution evidence. |
 | `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, synchronous questions, and review FlowSteps. |
 | `pm.linear_project`, `projects/<slug>.md` | `release/` | `pm.linear_initiative`; Linear Initiative → Project → Issue. |
@@ -852,7 +872,7 @@ read paths. Their bytes survive only as migration input or historical evidence.
 | `FlowPosition`, `PinnedTaskFlow`, `task_flow_positions` | Flow invocation row: captured graph and execution state together |
 | `FlowRun`, `flows/<id>/position.json` | Flow invocation row |
 | Subject selector list on a Run | Typed Run parents and `work_source` |
-| Four Session projections, Ask files, composite boundary Session IDs | `sessions`, keyed by Run ID |
+| Four Session projections, Ask files, composite boundary Session IDs | `sessions`, keyed by Session ID, with a current Run and Run history |
 | Session name/resolution and provider attachment sidecars | Session attributes and Run operational data in SQLite |
 | Step occurrence / path-string node key | Invocation ID, local node ID, captured iteration tuple |
 

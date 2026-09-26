@@ -256,6 +256,7 @@ level stays there. Put `--` before literal arguments that look like flags.
 Run a named flow (chains of skills):
 
 ```bash
+lf flow feature                    # no Task required
 lf task run DES-123                 # Project's Flow
 lf task run DES-124 --flow feature  # explicit template override
 lf flow list --json                 # inspect available templates
@@ -273,6 +274,8 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 A **Flow** is a template; a **Flow invocation** captures its fully expanded
 graph and execution state. A **loopflow** is a Flow with backward edges.
 `lf task run ISSUE --flow feature` creates an invocation owned by the Task.
+`lf flow feature` can create a taskless invocation with the same captured graph,
+recovery, and human review boundaries. No planning record is required.
 Independent `lf --wave designer : "Review the plan"` creates a Wave-attributed
 Run without invocation membership. See [Flow decisions and recovery](#flow-decisions-and-recovery)
 for the protocol and current verification limits, and [authoring](authoring.md)
@@ -575,24 +578,26 @@ Tmux remains process containment, not product identity or advancement authority.
 ```bash
 lf --interactive --task INF-123 : "Review the change"
 lf session list --task INF-123 --json
-lf session rename <run-id> "Parser review"
-lf session bind <run-id> --task INF-124 --json
+lf session rename <session-id> "Parser review"
+lf session bind <session-id> --task INF-124 --json
 lf runs --task INF-124 --json
-lf session bind <run-id> --wave infrastructure --json
-lf session bind <run-id> --repository --json
+lf session bind <session-id> --wave infrastructure --json
+lf session bind <session-id> --repository --json
 ```
 
-Session identity is its Run ID. A Run has zero or one Session: an interactive
-conversation, Flow review, or Ask. Session title, title provenance, readiness
-and completion live on that child record; Task, Wave, provider and membership
-come from the Run.
+Session has its own stable ID, a history of Runs, and a current Run. A Run
+belongs to at most one Session; headless Runs need none. Interactive
+conversations, Flow reviews and Asks use the same Session record. Title,
+title provenance, readiness and completion stay on Session; Task, Wave,
+provider and membership come from its current Run. Replacing that Run keeps
+the Session ID and name, and preserves earlier Runs in its history.
 
 Explicit `--task`, `--wave` or `--as` selects ancestry at launch. Without an
 explicit selector, a registered Task checkout supplies the Task. Otherwise the
 Run can remain unbound. This changes ancestry only; a companion terminal does
 not inherit its neighboring Session's Flow membership.
 
-Bind updates the Run's Task and Wave. `--wave` clears Task while retaining the
+Bind updates the current Run's Task and Wave. `--wave` clears Task while retaining the
 chosen Wave; `--repository` clears both. Binding to a completed Task or a landed
 PR works without reopening Work. Session lists, Recent runs, usage attribution
 and the sidebar follow the same fields. A Run owned by an invocation cannot
@@ -707,11 +712,11 @@ lf runs run_ab12 --events        # print its event stream verbatim
 lf usage --project parser        # direct Run usage for one Project
 lf usage --task INF-123 --json   # direct Run evidence for one Task
 lf session list                  # Sessions, Work paths, actions and unavailable reasons
-lf session open run_ab12         # resume an open conversation after provider exit
-lf session open run_ab12 --try   # let the provider arbitrate an active session
-lf session open run_ab12 --replace # stop Loopflow's client, then continue here
-lf session open run_ab12 --json --replace # prepare a takeover command without stopping it yet
-lf session complete run_ab12     # finish it; provider history remains resumable
+lf session open sess_ab12         # resume an open conversation after provider exit
+lf session open sess_ab12 --try   # let the provider arbitrate an active session
+lf session open sess_ab12 --replace # stop Loopflow's client, then continue here
+lf session open sess_ab12 --json --replace # prepare a takeover command without stopping it yet
+lf session complete sess_ab12     # finish it; provider history remains resumable
 lf replay run_ab12               # launch that request as a child Run
 lf usage --days 30              # direct provider-authored usage per Run
 lf usage --days 0 --json        # all RunSnapshot rows; zero means all time

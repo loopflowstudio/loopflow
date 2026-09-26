@@ -39,3 +39,26 @@ neither inventories private Home contents nor changes them.
 Integration finding: this checkout predates several LOO-291 features and already
 dropped the former `runs` table. Reconcile actual source at implementation time;
 do not reapply the interrupted `d0-docs-partial.patch` over the completed doc edits.
+
+## First implementation cut (2026-09-26)
+
+The selected implement step follows the supplied completed-review feedback.
+The four Task step projection columns (`flow`, `step`, `node_id`, `human`)
+can be removed without introducing a second owner. Root `step_index` and
+`iteration` cannot yet go: historical flat review records still need them.
+Their conversion stays with the complete invocation migration.
+
+Review discovery now decodes each current Task position and selects the captured
+human policy, including nested XOR paths. This is a bounded intermediate reader
+over current Task positions, not the final indexed Session inventory and not a
+latency acceptance claim. A malformed autonomous capture is now surfaced by
+review discovery rather than skipped by the former SQL `human=1` filter.
+
+Verification observation: `scripts/resource_envelope.py` and its safe `--recover`
+pass both report the active `main-view-task` checkout at 14.5 GiB against its
+12 GiB budget, while the disk has 100 GiB free. Recovery correctly leaves the
+active checkout alone. TESTING.md stops product tests on unresolved pressure;
+this worker does not delete another contribution's active build output. Static
+checks continue. Behavioral tests remain required once that resource condition
+clears; no real Home import or installed binary promotion is authorized by this
+local proof.

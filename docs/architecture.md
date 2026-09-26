@@ -187,8 +187,10 @@ Repository
         `-- Project           = (Wave, Chapter); Tasks, KRs, metric targets, Flow
               `-- Task        one active remote branch, worktree, and PR
                     `-- Flow invocation   0..n, one current: unrolled graph + cursor + returns
-                          `-- Run         invocation => task => wave, each nullable
-                                `-- Session   one conversation on one Run
+                          `-- Run         optional invocation; task => wave, each nullable
+
+Session --< Run               one conversation with a Run history
+Session.current_run -> Run    one of that Session's Runs
 
 Flow = ordered Skill | Op | Xor | human boundaries, with optional backward edges
 WorkRef = Wave | Project | Task
@@ -201,7 +203,7 @@ WorkStatus = Ready | Done | Abandoned
 | Flow | The template: ordered Skill and mechanical nodes, Xor routing, human boundaries, backward edges | Repository or builtin YAML |
 | Flow invocation | One running Flow: the fully unrolled graph, its cursor, and each loop's return count | `flow_invocations` row |
 | Run | Evidence from one mediated provider launch, with its nullable invocation, Task, and Wave | `runs` row plus one immutable Home-local record |
-| Session | One conversation on one Run: interactive, Flow review, or Ask | `sessions` row plus provider-native history |
+| Session | One conversation across Runs, with a current Run: interactive, Flow review, or Ask | `sessions` row plus provider-native history |
 | Chapter | The repository's planning clock; one current, advanced for every Wave at once | `chapters` row |
 | Wave | Durable operating context with goal, memory, cadence, budget, chat, and metric instruments | Repository Wave files, `waves` row, Linear Initiative membership |
 | Project | One Wave's plan for one Chapter: Tasks, KRs, metric targets, and the Flow its Tasks invoke | `projects` row plus its Linear Project |
@@ -213,13 +215,17 @@ WorkStatus = Ready | Done | Abandoned
 
 SQLite owns each product record; files carry authored definitions and large
 evidence artifacts. Sessions, Runs, and Flow invocations each have one reader.
-A Session's Task, Wave, provider, and execution membership come from its Run.
-Renaming updates the Session; binding updates its Run's nullable Task and Wave.
+A Session has a stable ID, owns its Runs, and points to its current Run.
+Its Task, Wave, provider, and execution membership come from the current Run.
+Renaming updates the Session; binding updates its current Run's nullable Task and Wave.
+Replacing a Run retains the Session and its name, and preserves every prior Run.
 Landing a PR never erases those links.
 
-Run ancestry obeys invocation ⇒ Task ⇒ Wave. Construction fills omitted parents
-and refuses mismatches; binding preserves execution membership. Independent Runs
-may name only a Wave or no planning parent. A Task selects its Project's Flow by
+An invocation's Task is optional: Flows also run without planning records.
+A Run in an invocation shares its nullable Task; a present Task implies Wave.
+Construction fills omitted ancestors and refuses mismatches; binding preserves
+execution membership. Runs without a Task may name only a Wave or no planning
+parent, whether or not they belong to an invocation. A Task selects its Project's Flow by
 default and accepts an explicit override. Completed invocations remain readable.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns fields,

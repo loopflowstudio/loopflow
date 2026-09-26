@@ -5,6 +5,52 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Named participants and review feedback (curated 2026-09-25)
+
+Curated from the retired [name-attribution record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/name-attribution.md)
+and [continuation record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/directions/task-continuation.md).
+These preserve detailed dated evidence; curation changes no Task ownership or
+acceptance state. STYLE.md and operating guidance already own Jack's naming rule.
+
+- Personal `user.name`, the current participant and each request's original
+  author are different facts. Repository config cannot name every caller.
+  `LF_USER_NAME` carries launch participation; forwarded empty stays unknown
+  instead of adopting a remote Home owner's name. Detached work starts unnamed.
+  Native resume must deliver corrections and clearing to the model, not merely
+  change its environment; the update grants no review approval.
+- Store each text's author in its existing journal/provider record. Preserve
+  unknown on replay; provider IDs own identity and names are display data.
+  Publishers/editors need not be authors. No second name store, registry,
+  historical backfill or output-replacement filter is needed. Chat projections
+  must not fill absent historical names from the current participant.
+- Capture a name only for authored text. A preference-read failure once blocked
+  a bare Mac interrupt. Control inputs without text must remain independent of
+  display preferences. The repaired production loopback path demonstrated that
+  regression, not just a mock call.
+- Review Complete returns feedback for a following deciding occurrence. The
+  recorded pursue loop has review/concept decisions and a separate outer
+  demo-feedback decision, both able to return to implementation. A completed
+  failed-demo conversation is useful evidence, never a success claim. Runnable
+  prototyping and Flow alternatives belong to
+  [LOO-297](https://linear.app/loopflow/issue/LOO-297); parallel variant retention
+  and joins remain proposals.
+- Wave playhead removal leaves Session semantics intact. Task-shell NSView pools
+  need per-workspace ownership: a global pool steals terminals between windows.
+  Recorded scope retained Session code and background tmux process wrappers.
+  Fixture renders do not prove tab/window interaction or native recovery.
+
+The prior name-attribution gate passed 799 affected Rust tests, 229 Python tests,
+78 website checks (three skips), 112 focused Swift tests, static checks and the
+Mac build. A full Swift package run stopped completing and was terminated;
+focused stream checks passed later, but full-package and native-rendering proof
+remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
+not a live Task write or the review-bearing design Flow. Native review resume
+still needs anonymous → named → corrected → unknown participant acceptance on
+a differently named Home, preserving historical authors and review authority.
+LOO-297's attempted read failed on missing Linear credentials; local Task absence
+did not establish remote absence. Any sentence repair requires a fresh authorized
+issue read. No Task was filed or changed by these records.
+
 ## PR authorship and retired UX research (2026-09-25)
 
 - PR openings must explain the user's experienced change. “Try it” is a user

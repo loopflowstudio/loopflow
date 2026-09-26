@@ -5105,14 +5105,21 @@ mod tests {
         let position_columns = columns(&conn, "task_flow_positions");
         for present in [
             "task_id",
-            "node_id",
-            "human",
+            "invocation_json",
+            "review_json",
             "session_run_id",
             "ready_summary",
         ] {
             assert!(position_columns.contains(&present.to_string()));
         }
-        for deleted in ["epoch_id", "interactive"] {
+        for deleted in [
+            "epoch_id",
+            "interactive",
+            "flow",
+            "step",
+            "node_id",
+            "human",
+        ] {
             assert!(!position_columns.contains(&deleted.to_string()));
         }
         for deleted in ["work_kind", "work_id"] {
@@ -5131,6 +5138,100 @@ mod tests {
                 )
                 .unwrap());
         }
+    }
+
+    #[test]
+    fn dropping_task_step_projection_preserves_execution_and_review_evidence() {
+        let conn = open();
+        let name = "drop_task_flow_step_projection";
+        apply_before_current_draft(&conn, name);
+        let invocation =
+            crate::durable::test_flow_invocation("captured", 0, "review", Some("review"), true);
+        let capture = serde_json::to_string(&invocation).unwrap();
+        let cursor = serde_json::json!({
+            "index": 0, "iteration": 7,
+            "progress": {"repeats": {"review": 3}, "direction": "retained feedback"}
+        })
+        .to_string();
+        for (task, review, claim, failure) in [
+            ("human", Some(cursor.as_str()), None, None),
+            (
+                "claimed",
+                Some(cursor.as_str()),
+                Some("{\"generation\":4}"),
+                None,
+            ),
+            (
+                "historical",
+                None,
+                None,
+                Some("{\"reason\":\"retained blocker\"}"),
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO task_flow_positions (
+                    task_id, invocation_json, flow, step, node_id, human,
+                    session_run_id, ready_summary, step_index, iteration,
+                    position_version, worker_generation, claim_json, failure_json,
+                    updated_at, review_json
+                 ) VALUES (?1, ?2, 'captured', 'review', 'review', 1,
+                           'run-original', 'approved scope', 0, 7, 9, 4, ?3, ?4, 100, ?5)",
+                rusqlite::params![task, capture, claim, failure, review],
+            )
+            .unwrap();
+        }
+        let evidence = || {
+            conn.prepare(
+                "SELECT json_array(task_id, invocation_json, session_run_id, ready_summary,
+                    step_index, iteration, position_version, worker_generation,
+                    claim_json, failure_json, updated_at, review_json)
+                 FROM task_flow_positions ORDER BY task_id",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        };
+        let before = evidence();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        assert_eq!(evidence(), before);
+        for removed in ["flow", "step", "node_id", "human"] {
+            assert!(!columns(&conn, "task_flow_positions")
+                .iter()
+                .any(|column| column == removed));
+        }
+        let recovered: crate::engine::invocation::QueuedInvocation = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT invocation_json FROM task_flow_positions WHERE task_id='human'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(recovered, invocation);
+        let recovered: crate::engine::ExecutionCursor = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT review_json FROM task_flow_positions WHERE task_id='human'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(recovered.iteration, 7);
+        assert_eq!(recovered.progress.repeats["review"], 3);
+        assert_eq!(
+            recovered.progress.direction.as_deref(),
+            Some("retained feedback")
+        );
+        assert!(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='task_chapter_started')",
+            [], |row| row.get::<_, bool>(0)
+        ).unwrap());
     }
 
     #[test]

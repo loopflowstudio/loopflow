@@ -1,0 +1,41 @@
+Owned app PID 72044
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+BOUNDARY AXApplication  Loopflow Integration 
+BOUNDARY AXWindow SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>, SwiftUI._TaskModifier>, SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>>, SwiftUI._TaskModifier>-1-AppWindow-1 Loopflow 
+BOUNDARY AXGroup   
+BOUNDARY AXGroup podium  
+BOUNDARY AXGroup podium-bar  
+BOUNDARY AXMenuButton podium-repo-scope  
+BOUNDARY AXMenuButton podium-repo-scope  
+BOUNDARY AXMenuButton podium-repo-scope  
+BOUNDARY AXStaticText podium-wave-summary  3
+BOUNDARY AXStaticText podium-wave-summary  Waves
+BOUNDARY AXButton podium-sessions  1 Sessions
+BOUNDARY AXUnknown podium-process-activity  
+BOUNDARY AXButton sessions-surface  
+BOUNDARY AXStaticText sessions-surface  Planning read: 2026-09-24T04:14:11.363124Z
+BOUNDARY AXButton sessions-surface  
+BOUNDARY AXButton sessions-surface  
+BOUNDARY AXStaticText sessions-surface  Work
+BOUNDARY AXTextField sessions-surface  there
+BOUNDARY AXScrollArea sessions-surface  
+BOUNDARY AXOpaqueProviderGroup   
+BOUNDARY AXStaticText   Other open Sessions
+BOUNDARY AXStaticText   Repository conversations or Work absent from this planning read.
+BOUNDARY AXButton   
+BOUNDARY AXButton   
+BOUNDARY AXGroup   
+BOUNDARY AXGroup   
+BOUNDARY AXButton   
+BOUNDARY AXStaticText   Loopflow
+BOUNDARY AXMenuBar   
+PASS Press All work
+PASS Press New terminal
+Foreground identity 33576 owned 72044 cached active true AX focus 33576
+FAIL Failure(message: "Owned app foreground for input")
+Owned app termination requested true

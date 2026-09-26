@@ -19,14 +19,8 @@ pub enum Target {
     Flow(Flow),
 }
 
-/// Discover a skill or flow by name. Authored lifecycle entrypoints win their
-/// exact builtin skill collision; other names keep the reusable-skill default.
+/// Bare names prefer skills. Explicit CLI verbs resolve their requested kind.
 pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
-    if matches!(name, "design" | "launch-plan") {
-        if let Ok(flow) = crate::engine::load_flow(name, repo) {
-            return Ok(Target::Flow(flow));
-        }
-    }
     let skill_error = match discover_skill(repo, name) {
         Ok(skill) => return Ok(Target::Skill(skill)),
         Err(err) => err,
@@ -788,24 +782,17 @@ mod tests {
     }
 
     #[test]
-    fn reviewed_entrypoints_select_the_human_flows_not_the_reusable_skills() {
+    fn bare_names_prefer_skills_including_lifecycle_names() {
         let tmp = TempDir::new().expect("tempdir");
-
-        let Target::Flow(design) = discover_target(tmp.path(), "design").expect("design flow")
-        else {
-            panic!("design must select its reviewed flow");
-        };
-        assert_eq!(design.name, "design");
-
-        let Target::Flow(launch) = discover_target(tmp.path(), "launch-plan").expect("launch flow")
-        else {
-            panic!("launch-plan must select its reviewed flow");
-        };
-        assert_eq!(launch.name, "launch-plan");
-
+        for name in ["design", "launch-plan", "ship-5whys", "implement"] {
+            assert!(
+                matches!(discover_target(tmp.path(), name).unwrap(), Target::Skill(_)),
+                "{name}"
+            );
+        }
         assert!(matches!(
-            discover_target(tmp.path(), "implement").expect("ordinary skill"),
-            Target::Skill(_)
+            discover_target(tmp.path(), "code").unwrap(),
+            Target::Flow(_)
         ));
     }
 }

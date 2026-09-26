@@ -1,0 +1,21 @@
+{
+  "source_hashes": {
+    "rust/loopflow/src/run_record.rs": "0b6fcae3322098d451c2f4e2a9c54fd7b301f701853b417ee1f53b359dcc3b6a",
+    "rust/loopflow/src/run_record/active.rs": "db765baf77f9fd991a4fc0aefad160baeb22539bc6f160d2c2f9bdf161f03dd8",
+    "rust/loopflow/src/lf/commands/top.rs": "c608fb4cfc7fc50929d3ca9017c7e5dcde6a220caabc3f195e9dafb4208a68eb",
+    "rust/loopflow/src/lf/commands/util.rs": "c131144bba8ca29e3cc267af6a24476e689c61ff99de6f1bab849143e8ec5df3",
+    "rust/loopflow/src/lf/commands/runs.rs": "4a5dbcdc66faac57dc053199c7fcb6ac38fb0b974cd878b32f35ee75aec743fb",
+    "rust/loopflow/src/lf/mod.rs": "72101ff11e84ae7daa569bfd0e1cecbbf502550f5284e5565c6f8831e88ddcf0",
+    "rust/loopflow/src/bin/lf.rs": "a3e2480bec5489bd73040d5270db61b15feb7fd2fc4639bbe27c394df3674343",
+    "rust/loopflow/src/ops/human_session.rs": "d880e6c862ca5c30af9bc925f1d579f3d4a49b2f83d38891b79e6a8b651edbff",
+    "rust/loopflow/tests/session_cli_tests.rs": "bbf24f76349eff4f85846b9845c00d67b635905b7143dcc2f11ccac7f156fde4",
+    "rust/loopflow/tests/dto_fixtures.rs": "0f595e8ac6d0b0408a04c5dc95bcfba9c50930bc6cfaa2481e2793bb980a0263",
+    "swift/Loopflow/Models/ActiveRunsSnapshot.swift": "5d6c22e45a06d724c53839a8f1a8dc8860f43a724939115b4daa40b40807bea8",
+    "swift/Loopflow/Services/RegistryQuery.swift": "756e42edc7bfb569e2f563e23fb20d05ebff896b5288c8f5f42c2c34fac0ab12",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "0e3dfcc3f0c897a3b10ce137ff553f1fb419527523a49d8cb5c9bfb9db4b2f7a",
+    "tests/fixtures/dto/active_runs.json": "1f8518de22070fd68838b0a3308446d19ea75f5ef915fc30cd976c91e69822ab"
+  },
+  "unchanged_since_implementation_receipt": true,
+  "binary_sha256": "1244e391936befea39eb68e0ffa6034cb8258aaaee0c08ea7c591aeb10b95d2d",
+  "tracked_patch_sha256": "f5ef537ce69c1f3122ba0a3019d0eb59addfa40f3f132054ee6f4da2e226e4bf"
+}

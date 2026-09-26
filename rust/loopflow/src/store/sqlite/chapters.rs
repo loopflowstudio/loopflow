@@ -91,6 +91,20 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Durable evidence that execution began: a recorded Started, a worker
+    /// report or finished Flow, or a claimed worker generation. Preparing a
+    /// checkout or an unopened human Run records none of these.
+    pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')
+               IN ('started','progress','body_handed_off','flow_finished'))
+             OR EXISTS(SELECT 1 FROM task_flow_positions WHERE task_id=?1 AND worker_generation>0)",
+            [task.as_str()],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let begun: bool = conn.query_row(

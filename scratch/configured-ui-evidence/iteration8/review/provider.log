@@ -1,0 +1,37 @@
+Owned app PID 44677
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+TIMING launch_to_task_ax_ms 4279.20970832929
+PASS Select exact Task
+PASS Owned app active before launch
+PASS Press New conversation · LOO-291
+Owned Session run_a02a714cede94a0e84466dbbf175122e terminal_ids (
+    "F431A536-D21D-455A-A74F-0D3586C3FDDF"
+)
+PASS Shared projection records shell attachment
+PASS Provider descends from this owned app
+PASS Configured provider produced initial response
+TIMING new_conversation_to_initial_response_ms 10139.382666675374
+PASS Owned app active for input
+PASS Press Show work list
+PASS Press Work details
+PASS Press All work
+PASS Press Return to terminals
+PASS Same exact client through navigation
+PASS Owned app active for input
+PASS Exact draft survives integrated navigation
+PASS Same provider replied after navigation
+PASS One exact local completion control
+PASS Press Complete session
+PASS Shared Session resolved
+PASS Owned provider exited
+PASS Owned app active for input
+PASS Original launch pane remains a usable shell
+PASS Press Work details
+PASS Task survives with explicit no-Session state
+PASS configured New conversation, exact draft, completion and shell survival
+Owned app termination requested true

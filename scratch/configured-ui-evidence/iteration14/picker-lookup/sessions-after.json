@@ -1,0 +1,141 @@
+[
+  {
+    "cwd" : "\/Users\/jack\/src\/loopflow.restore-task-watching-with-live",
+    "detail" : "codex",
+    "id" : "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+    "kind" : "interactive",
+    "open_argv" : [
+      "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+      "session",
+      "open",
+      "run_32238dfb9f2c4782a9d9fcf7eba1c542"
+    ],
+    "ready_summary" : null,
+    "state" : "active",
+    "terminal_ids" : [
+
+    ],
+    "title" : "Scratch design artifacts and working notes.",
+    "work" : null
+  },
+  {
+    "cwd" : "\/Users\/jack\/src\/loopflow.restore-task-watching-with-live",
+    "detail" : "codex",
+    "id" : "run_c2a56c3b168d44b4ab2447a36696f5cd",
+    "kind" : "interactive",
+    "open_argv" : [
+      "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+      "session",
+      "open",
+      "run_c2a56c3b168d44b4ab2447a36696f5cd"
+    ],
+    "ready_summary" : null,
+    "state" : "closed",
+    "terminal_ids" : [
+
+    ],
+    "title" : "Scratch design artifacts and working notes.",
+    "work" : null
+  },
+  {
+    "cwd" : "\/Users\/jack\/src\/loopflow.steering",
+    "detail" : "codex",
+    "id" : "run_6d68330afdc044fdaee22c0c69987221",
+    "kind" : "interactive",
+    "open_argv" : [
+      "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+      "session",
+      "open",
+      "run_6d68330afdc044fdaee22c0c69987221"
+    ],
+    "ready_summary" : null,
+    "state" : "closed",
+    "terminal_ids" : [
+
+    ],
+    "title" : "ci-fix · loopflow.steering",
+    "work" : null
+  },
+  {
+    "cwd" : "\/Users\/jack\/src\/loopflow.steering",
+    "detail" : "codex",
+    "id" : "run_8583e499219840a09e09a2fae5669df3",
+    "kind" : "interactive",
+    "open_argv" : [
+      "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+      "session",
+      "open",
+      "run_8583e499219840a09e09a2fae5669df3"
+    ],
+    "ready_summary" : null,
+    "state" : "closed",
+    "terminal_ids" : [
+
+    ],
+    "title" : "ci-fix · loopflow.steering",
+    "work" : null
+  },
+  {
+    "cwd" : "\/Users\/jack\/src\/loopflow.main-view-task",
+    "detail" : "codex",
+    "id" : "run_84ceb7e9dac14fb1b3a22c25d722a8a5",
+    "kind" : "interactive",
+    "open_argv" : [
+      "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+      "session",
+      "open",
+      "run_84ceb7e9dac14fb1b3a22c25d722a8a5"
+    ],
+    "ready_summary" : null,
+    "state" : "closed",
+    "terminal_ids" : [
+
+    ],
+    "title" : "codex",
+    "work" : {
+      "id" : "task_2aa71a7e36fe416d8a721e2b2f7c54e7",
+      "kind" : "task"
+    }
+  },
+  {
+    "cwd" : "\/Users\/jack\/src\/loopflow.main-view-task",
+    "detail" : "codex",
+    "id" : "run_643d86d70d5b4109a460e80a87a97533",
+    "kind" : "interactive",
+    "open_argv" : [
+      "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+      "session",
+      "open",
+      "run_643d86d70d5b4109a460e80a87a97533"
+    ],
+    "ready_summary" : null,
+    "state" : "active",
+    "terminal_ids" : [
+
+    ],
+    "title" : "implement · loopflow.main-view-task",
+    "work" : {
+      "id" : "task_2aa71a7e36fe416d8a721e2b2f7c54e7",
+      "kind" : "task"
+    }
+  },
+  {
+    "cwd" : "\/Users\/jack\/src\/loopflow.task-viewer",
+    "detail" : "codex",
+    "id" : "run_53d33a43bf804f4e9ff72258ddea3316",
+    "kind" : "interactive",
+    "open_argv" : [
+      "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+      "session",
+      "open",
+      "run_53d33a43bf804f4e9ff72258ddea3316"
+    ],
+    "ready_summary" : null,
+    "state" : "active",
+    "terminal_ids" : [
+
+    ],
+    "title" : "review-slice · loopflow.task-viewer",
+    "work" : null
+  }
+]

@@ -1,0 +1,32 @@
+/* Task 2 execution panel. Every rule is scoped to .task-execution. */
+.task-execution{margin:18px 0 4px;max-width:850px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--cream);font-family:var(--sans);color:var(--ink)}
+.task-execution button{font:inherit;cursor:pointer}
+.task-execution button:focus-visible{outline:none;box-shadow:var(--ring)}
+.task-execution code{font-family:var(--mono);font-size:12px;color:var(--ink)}
+.task-execution .te-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.task-execution .te-spacer{flex:1}
+.task-execution .te-state{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:700}
+.task-execution .te-dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.task-execution.te-run .te-dot{background:#527fa8}
+.task-execution.te-pause .te-dot{background:transparent;border:1.5px solid var(--muted)}
+.task-execution.te-block{border-color:#d3918b;background:#fbe9e6}
+.task-execution.te-block .te-dot{background:#b4463e}
+.task-execution.te-block .te-state{color:#b4463e}
+.task-execution .te-where{font-size:13px;color:var(--ink-2)}
+.task-execution .te-reason{margin:8px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink)}
+.task-execution .te-line{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+.task-execution .te-note{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:8px 8px 8px 12px;border-radius:7px;background:var(--paper);border:1px dashed var(--line-2);font-size:12.5px;color:var(--ink-2)}
+.task-execution .te-note > span:nth-child(2){flex:1;min-width:220px}
+.task-execution .te-proto{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--amber)}
+.task-execution .te-history{margin-top:8px}
+.task-execution .te-disclose{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:4px 6px 4px 0;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.task-execution .te-disclose:hover{color:var(--wine)}
+.task-execution .te-chev{width:11px;height:11px;transition:transform .15s}
+.task-execution .te-disclose[aria-expanded="true"] .te-chev{transform:rotate(90deg)}
+.task-execution .te-runs{list-style:none;margin:4px 0 0;padding:0}
+.task-execution .te-runs li{display:grid;grid-template-columns:130px 70px 1fr;gap:10px;align-items:baseline;padding:4px 0;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink-2)}
+.task-execution .te-outcome{color:var(--muted)}
+.task-execution .te-running{color:#527fa8;font-weight:700}
+.task-execution .te-blocked{color:#b4463e;font-weight:700}
+.task-execution .te-caveat{margin:4px 0 0;font-size:11.5px;color:var(--faint)}
+@media (prefers-reduced-motion:reduce){.task-execution .te-chev{transition:none}}

@@ -1,0 +1,15 @@
+Observed at 2026-09-24T19:41:53Z
+Runner scratch/configured-ui-evidence/iteration16-review/planning-final-probe.swift AX trusted true
+Owned app PID 12981
+AX window roles ["AXWindow"] active false
+Count observed true expected 8 Sessions elapsed_ms 2049.3899998255074
+PASS Select exact LOO-291 planning row
+PASS Visible directive equals configured planning text
+selection_to_directive_ax_ms 638.4421666152775
+PASS Visible Project definition equals configured planning text
+PASS Visible KR text and verdict equal configured planning
+PASS Visible KR text and verdict equal configured planning
+PASS One exact Session association for selected Task
+FAIL configured planning observation ProofFailure(message: "Missing control: workspace-toggle-list")
+FAIL: configured planning proof incomplete; preceding observations retain their scope
+Owned app termination requested true

@@ -1,0 +1,35 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.84s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 27 tests
+test engine::builtins::tests::vsm_system_goals_are_registered ... ok
+test engine::builtins::tests::retired_export_memory_skill_is_not_registered ... ok
+test engine::builtins::tests::build_is_one_bounded_pass_without_delivery ... ok
+test engine::builtins::tests::wave_goal_authoring_keeps_live_metrics_wave_owned ... ok
+test engine::builtins::tests::wave_model_is_embedded_in_prompts_and_docs ... ok
+test engine::builtins::tests::generic_execution_skills_never_infer_a_wave_or_require_pm ... ok
+test engine::builtins::tests::init_connects_the_distributed_system_before_customizing_skills ... ok
+test engine::builtins::tests::execution_context_grants_delegation_by_tier ... ok
+test engine::builtins::tests::task_design_and_multi_task_outputs_share_the_machine_contract ... ok
+test engine::builtins::tests::formerly_attended_skills_have_bounded_headless_contracts ... ok
+test engine::builtins::tests::release_run_names_its_durable_restart_contract ... ok
+test engine::builtins::tests::project_guidance_sponsors_metrics_and_task_workers_propose_them ... ok
+test lf::commands::flow::tests::write_xor_route_skill_removes_temp_file_when_none_existed ... ok
+test lf::commands::flow::tests::write_xor_route_skill_restores_existing_file ... ok
+test lf::commands::flow::tests::present_human_flow_requires_a_typed_acceptance_after_the_session ... ok
+test engine::builtins::tests::chapter_skills_are_registered ... ok
+test lf::discovery::tests::discover_skill_loads_user_namespaced_override ... ok
+test lf::discovery::tests::discover_skill_rejects_legacy_colon_form ... ok
+test lf::discovery::tests::bare_names_prefer_skills_including_lifecycle_names ... ok
+test lf::commands::flow::tests::render_pipeline_lines_expands_xor_paths_on_separate_lines ... ok
+test lf::commands::flow::tests::detached_human_flow_refuses_to_invent_user_acceptance ... ok
+test ops::task::tests::task_worker_selects_explicit_or_project_recommended_flow ... ok
+test lf::commands::flow::tests::rendered_pipeline_lists_human_node_identity ... ok
+test lf::commands::flow::tests::validation_lists_human_nodes_hidden_in_xor_paths ... ok
+test controller::wave::playhead::tests::invocation_compiles_skills_and_preserves_authored_flow_precedence ... ok
+test engine::builtins::tests::builtin_skills_do_not_name_retired_child_controls ... ok
+test controller::wave::runtime::tests::default_wave_invokes_operate_without_a_wrapper_flow ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 1559 filtered out; finished in 0.02s
+

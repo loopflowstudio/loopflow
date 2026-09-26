@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One hierarchy · Loopflow study</title>
+<style>
+  * { box-sizing: border-box; }
+  :root { color-scheme: light; font: 14px/1.45 -apple-system, BlinkMacSystemFont, sans-serif; color: #302d2d; background: #efedeb; }
+  body { margin: 0; padding: 36px; }
+  button, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #783e4b; outline-offset: 2px; }
+  .study-note { max-width: 1180px; margin: 0 auto 18px; color: #696363; font-size: 12px; }
+  .window { max-width: 1180px; margin: auto; height: min(780px, 84vh); min-height: 520px; background: #fcfbfa; border: 1px solid #d8d3d0; border-radius: 10px; overflow: hidden; box-shadow: 0 15px 50px #3625200c; }
+  header { height: 49px; border-bottom: 1px solid #e6e1de; display: flex; align-items: center; padding: 0 18px; gap: 8px; }
+  header span { flex: 1; font-weight: 500; }
+  header label { color: #726a69; font-size: 12px; }
+  select { border: 1px solid #d8d3d0; border-radius: 5px; padding: 4px 8px; background: #fff; font-size: 12px; }
+  main { display: flex; height: calc(100% - 49px); }
+  nav { width: 370px; flex-shrink: 0; border-right: 1px solid #e6e1de; padding: 14px 10px; overflow: auto; }
+  .row { display: flex; align-items: center; min-height: 34px; padding-left: calc(var(--depth) * 15px); border-radius: 5px; }
+  .row:hover { background: #f0ece9; }
+  .row.selected { background: #ede1e3; color: #652f3d; }
+  .disclosure, .spacer { flex: 0 0 22px; width: 22px; }
+  .disclosure { padding: 6px 0; border: 0; background: transparent; color: #7c7472; font-size: 11px; }
+  .item { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; padding: 7px 8px 7px 0; border: 0; background: transparent; text-align: left; }
+  .name { overflow-wrap: anywhere; }
+  .kind { margin-left: auto; color: #88807d; font-size: 11px; white-space: nowrap; }
+  .session-mark { font-size: 11px; color: #8a6670; }
+  .context { display: block; color: #837674; font-size: 11px; margin-top: 2px; }
+  .compressed { border: 0; background: transparent; color: #837674; font-size: 11px; padding: 5px 8px; text-align: left; }
+  .compressed:hover { text-decoration: underline; }
+  .compressed.selected { color: #652f3d; background: #ede1e3; border-radius: 4px; }
+  #content { flex: 1; min-width: 0; padding: 34px; overflow: auto; }
+  h1 { font-size: 18px; font-weight: 500; margin: 0 0 8px; }
+  p { max-width: 470px; color: #7b7270; }
+  .location { font-size: 12px; margin: 0 0 28px; color: #8a7f7c; }
+  .conversation { margin-top: 38px; max-width: 570px; }
+  .message { margin: 0 0 24px; padding-left: 14px; border-left: 2px solid #ded2d5; color: #5d5553; }
+  .message strong { display: block; font-size: 12px; font-weight: 500; color: #8a757c; margin-bottom: 7px; }
+  textarea { display: block; width: 100%; resize: vertical; min-height: 130px; padding: 14px; border: 1px solid #d8d0cd; border-radius: 6px; background: #fff; }
+  .hint { font-size: 12px; color: #8a7f7c; }
+  [hidden] { display: none !important; }
+  @media (max-width: 760px) { body { padding: 12px; } nav { width: 48%; } #content { padding: 20px; } .kind { display: none; } }
+</style>
+<div class="study-note">Interaction study · sample data and simulated conversations. Change the presentation after typing a draft; the selected conversation stays put.</div>
+<div class="window">
+  <header><span>Loopflow</span><label for="presentation">Show</label><select id="presentation"><option value="compact">Compact hierarchy</option><option value="full">Full hierarchy</option><option value="sessions">Sessions</option></select></header>
+  <main><nav aria-label="Work and Sessions" id="outline"></nav><section id="content" aria-label="Selected content"><article id="details"></article><div id="conversations"></div></section></main>
+</div>
+<script>
+const node = (id, kind, name, children = [], detail = '') => ({id, kind, name, children, detail});
+const roots = [
+  node('loopflow', 'Repo', 'Loopflow', [
+    node('product', 'Wave', 'Product', [
+      node('desktop', 'Project', 'Desktop', [
+        node('navigation', 'Task', 'Simplify navigation', [node('navigation-session', 'Session', 'Design review')], 'Make the next action obvious in one shared hierarchy.'),
+        node('startup', 'Task', 'Measure startup', [], 'Upcoming · no open Session. Establish a baseline before choosing an optimization.')
+      ], 'Planning and native Sessions are understandable together.'),
+      node('product-session', 'Session', 'Chapter planning')
+    ]),
+    node('infrastructure', 'Wave', 'Infrastructure', [
+      node('execution', 'Project', 'Execution', [node('recovery', 'Task', 'Recover interrupted work', [node('recovery-session', 'Session', 'Design review')])]),
+      node('releases', 'Project', 'Releases', [node('packaging', 'Task', 'Verify the signed build', [], 'Upcoming · no open Session.')])
+    ]),
+    node('repo-session', 'Session', 'Explore a new idea'),
+    node('unavailable', 'Unknown', 'Ancestry unavailable', [node('unknown-session', 'Session', 'Review the migration')], 'Planning is unavailable for this Session. Keep it accessible without guessing its parents.')
+  ]),
+  node('kata', 'Repo', 'Kata', [node('practice', 'Wave', 'Practice', [node('feedback', 'Project', 'Feedback', [node('lesson', 'Task', 'Clarify the lesson summary', [node('lesson-session', 'Session', 'Design review')])])])])
+];
+const nodes = new Map(), ancestors = new Map();
+function index(items, path = []) {
+  for (const item of items) { nodes.set(item.id, item); ancestors.set(item.id, path); index(item.children, [...path, item]); }
+}
+index(roots);
+let selected = 'navigation-session';
+const folded = new Set();
+const outline = document.querySelector('#outline');
+const presentation = document.querySelector('#presentation');
+const panels = new Map();
+for (const item of nodes.values()) {
+  if (item.kind !== 'Session') continue;
+  const panel = document.createElement('article');
+  const title = document.createElement('h1'); title.textContent = item.name;
+  const location = document.createElement('p'); location.className = 'location'; location.textContent = ancestors.get(item.id).map(p => p.name).join(' / ');
+  const conversation = document.createElement('div'); conversation.className = 'conversation';
+  const message = document.createElement('div'); message.className = 'message';
+  const author = document.createElement('strong'); author.textContent = 'Sample conversation';
+  message.append(author, 'This conversation stays selected when the hierarchy changes.');
+  const draft = document.createElement('textarea'); draft.placeholder = 'An unfinished thought…'; draft.setAttribute('aria-label', `Draft for ${item.name} — ${location.textContent}`); draft.dataset.session = item.id;
+  const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = 'Simulated draft · no message is sent. Native terminal retention is not tested here.';
+  conversation.append(message, draft, hint); panel.append(title, location, conversation);
+  document.querySelector('#conversations').append(panel); panels.set(item.id, panel);
+}
+function select(id) { selected = id; render(); }
+function row(item, depth, children, compressedProject = null) {
+  const line = document.createElement('div'); line.className = 'row'; line.dataset.id = item.id; line.style.setProperty('--depth', depth);
+  if (selected === item.id) line.classList.add('selected');
+  if (children.length) {
+    const disclosure = document.createElement('button'); disclosure.className = 'disclosure'; disclosure.textContent = folded.has(item.id) ? '▸' : '▾';
+    disclosure.setAttribute('aria-label', `${folded.has(item.id) ? 'Expand' : 'Collapse'} ${item.name}`); disclosure.setAttribute('aria-expanded', !folded.has(item.id));
+    disclosure.onclick = () => { folded.has(item.id) ? folded.delete(item.id) : folded.add(item.id); render(); }; line.append(disclosure);
+  } else { const spacer = document.createElement('span'); spacer.className = 'spacer'; line.append(spacer); }
+  const button = document.createElement('button'); button.className = 'item'; button.setAttribute('aria-pressed', selected === item.id); button.onclick = () => select(item.id);
+  if (item.kind === 'Session') { const mark = document.createElement('span'); mark.className = 'session-mark'; mark.textContent = '◦'; mark.setAttribute('aria-hidden', 'true'); button.append(mark); }
+  const name = document.createElement('span'); name.className = 'name'; name.textContent = item.name;
+  if (presentation.value === 'sessions') {
+    const context = document.createElement('span'); context.className = 'context';
+    const path = ancestors.get(item.id); context.textContent = [path[0]?.name, path.at(-1)?.name].filter((value, i, list) => value && list.indexOf(value) === i).join(' · '); name.append(context);
+  }
+  const kind = document.createElement('span'); kind.className = 'kind'; kind.textContent = item.kind === 'Session' ? '' : item.kind;
+  button.append(name, kind); line.append(button); outline.append(line);
+  if (compressedProject) {
+    const projectButton = document.createElement('button'); projectButton.className = 'compressed'; projectButton.textContent = compressedProject.name; projectButton.dataset.id = compressedProject.id; projectButton.setAttribute('aria-label', `${compressedProject.name} Project details`); projectButton.onclick = () => select(compressedProject.id);
+    if (selected === compressedProject.id) projectButton.classList.add('selected');
+    line.append(projectButton);
+  }
+  if (!folded.has(item.id)) for (const child of children) visit(child, depth + 1);
+}
+function visit(item, depth) {
+  // Only the sample's known-complete singleton Project tier is compressed.
+  const projects = item.children.filter(child => child.kind === 'Project');
+  const singleton = presentation.value === 'compact' && item.kind === 'Wave' && projects.length === 1 ? projects[0] : null;
+  const children = singleton ? item.children.flatMap(child => child === singleton ? child.children : [child]) : item.children;
+  row(item, depth, children, singleton);
+}
+function render() {
+  outline.replaceChildren();
+  if (presentation.value === 'sessions') {
+    for (const item of nodes.values()) if (item.kind === 'Session') row(item, 0, []);
+  } else for (const root of roots) visit(root, 0);
+  for (const [id, panel] of panels) panel.hidden = id !== selected;
+  const details = document.querySelector('#details'); details.hidden = panels.has(selected); details.replaceChildren();
+  if (!details.hidden) {
+    const item = nodes.get(selected), title = document.createElement('h1'), location = document.createElement('p'), description = document.createElement('p');
+    title.textContent = item.name; location.className = 'location'; location.textContent = [...ancestors.get(selected).map(p => p.name), item.kind].join(' / ');
+    description.textContent = item.detail || `Selected ${item.kind.toLowerCase()}. Its descendants remain in the same outline.`;
+    details.append(title, location, description);
+  }
+}
+presentation.onchange = render;
+render();
+</script>
+</html>

@@ -1,0 +1,22 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+[2/4] Emitting module LoopflowTests
+[2/4] Write Objects.LinkFileList
+[3/4] Linking LoopflowSwiftPackageTests
+Build complete! (1.48s)
+Test Suite 'Selected tests' started at 2026-09-24 07:35:33.577.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 07:35:33.578.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 07:35:33.578.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 07:35:33.578.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "Session rows restore their shell and companion layout across worktree slots" started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✔ Test "Session rows restore their shell and companion layout across worktree slots" passed after 1.368 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 1.368 seconds.
+✔ Test run with 1 test in 1 suite passed after 1.368 seconds.

@@ -1,0 +1,85 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Emitting module LoopflowMac
+[4/7] Compiling LoopflowMac LocalActiveRunsObservation.swift
+[5/18] Compiling LoopflowMac WaveDetailPane.swift
+[6/18] Compiling LoopflowMac WavesView.swift
+[7/18] Compiling LoopflowMac LoopflowApp.swift
+[8/18] Compiling LoopflowMac RegistryQueryLocal.swift
+[9/18] Compiling LoopflowMac ChapterHistoryView.swift
+[10/18] Compiling LoopflowMac TaskWorkspaceView.swift
+[11/18] Compiling LoopflowMac TelemetryDashboardView.swift
+[12/18] Compiling LoopflowMac WaveChatView.swift
+[13/18] Compiling LoopflowMac PodiumView.swift
+[14/18] Compiling LoopflowMac RoadmapView.swift
+[15/18] Compiling LoopflowMac SessionsView.swift
+[15/20] Write Objects.LinkFileList
+[16/20] Linking LoopflowMac
+[17/20] Applying LoopflowMac
+[19/22] Emitting module LoopflowTests
+[20/22] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[20/22] Write Objects.LinkFileList
+[21/22] Linking LoopflowSwiftPackageTests
+Build complete! (11.37s)
+Test Suite 'Selected tests' started at 2026-09-24 18:51:42.690.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 18:51:42.691.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 18:51:42.691.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 18:51:42.691.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Podium active Run lifetime" started.
+◇ Test "Home replacement drains the old generation and rejects its late evidence" started.
+✔ Test "Home replacement drains the old generation and rejects its late evidence" passed after 0.037 seconds.
+◇ Test "Window teardown releases the subscription even while its Monitor is hidden" started.
+✔ Test "Window teardown releases the subscription even while its Monitor is hidden" passed after 0.102 seconds.
+✔ Suite "Podium active Run lifetime" passed after 0.140 seconds.
+◇ Suite "Active Run transport" started.
+◇ Test "Reader startup failure preserves the CLI diagnostic" started.
+◇ Test case passing 1 argument closesOutputFirst → false to "Reader startup failure preserves the CLI diagnostic" started.
+◇ Test case passing 1 argument closesOutputFirst → true to "Reader startup failure preserves the CLI diagnostic" started.
+✔ Test "Reader startup failure preserves the CLI diagnostic" with 2 test cases passed after 0.010 seconds.
+◇ Test "A slow consumer receives the latest complete snapshot without an output backlog" started.
+✔ Test "A slow consumer receives the latest complete snapshot without an output backlog" passed after 0.117 seconds.
+◇ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" started.
+✔ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" passed after 0.096 seconds.
+◇ Test "A stalled or noncooperative reader is reaped without touching other clients" started.
+✔ Test "A stalled or noncooperative reader is reaped without touching other clients" passed after 2.174 seconds.
+◇ Test "Silence expires the reading and stops the reader" started.
+✔ Test "Silence expires the reading and stops the reader" passed after 11.105 seconds.
+◇ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "malformed" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "oversized" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "wrong-home" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "home-change" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "partial-exit" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+✔ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" with 5 test cases passed after 0.320 seconds.
+◇ Test "Configuration invalidation retires the exact reader" started.
+✔ Test "Configuration invalidation retires the exact reader" passed after 2.006 seconds.
+◇ Test "The real foreground CLI delivers automatic observations and rescan through Swift" started.
+✔ Test "The real foreground CLI delivers automatic observations and rescan through Swift" passed after 9.508 seconds.
+✔ Suite "Active Run transport" passed after 25.342 seconds.
+◇ Suite "DTO Fixtures" started.
+◇ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" started.
+✔ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" passed after 0.002 seconds.
+✔ Suite "DTO Fixtures" passed after 0.002 seconds.
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" started.
+✔ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" passed after 0.839 seconds.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+✔ Test "Returning to a Task never restores another Task's Session in a reused pane" passed after 0.014 seconds.
+◇ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" started.
+✔ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" passed after 1.381 seconds.
+✔ Suite "Task Monitor integration proof" passed after 2.235 seconds.
+◇ Suite "Task Monitor" started.
+◇ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" started.
+✔ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" passed after 0.245 seconds.
+◇ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" started.
+✔ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" passed after 0.001 seconds.
+◇ Test "Task selection and Monitor preserve native Session input and its companion" started.
+✔ Test "Task selection and Monitor preserve native Session input and its companion" passed after 1.489 seconds.
+✔ Suite "Task Monitor" passed after 1.736 seconds.
+✔ Test run with 17 tests in 5 suites passed after 29.457 seconds.

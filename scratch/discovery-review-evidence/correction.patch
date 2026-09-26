@@ -1,0 +1,94 @@
+--- a/rust/loopflow/src/run_record/active/reader.rs
++++ b/rust/loopflow/src/run_record/active/reader.rs
+@@ -19,6 +19,7 @@
+     BTreeMap<PathBuf, RunBinding>,
+     ProcessSnapshot,
+     Vec<(crate::durable::RunId, ProviderClientRef, String)>,
++    Vec<String>,
+ );
+ 
+ #[derive(Debug, Clone, PartialEq, Eq)]
+@@ -466,7 +467,8 @@
+         };
+         let observation = self.collect();
+         match observation {
+-            Ok((bindings, processes, clients)) => {
++            Ok((bindings, processes, clients, gaps)) => {
++                result.gaps.extend(gaps);
+                 result.gaps.extend(
+                     self.errors
+                         .iter()
+@@ -584,6 +586,7 @@
+         let mut bindings = BTreeMap::new();
+         let mut receipts = Vec::new();
+         let mut clients = Vec::new();
++        let mut gaps = Vec::new();
+         for (path, candidate) in &self.candidates {
+             match candidate {
+                 Receipt::Capture {
+@@ -602,12 +605,12 @@
+                         .context("native receipt has no Run directory")?;
+                     match self.cost.manifest(dir) {
+                         Ok(manifest) => {
+-                            self.errors.remove(&dir.join("manifest.json"));
+                             clients.push((manifest.run_id, client.clone(), manifest.harness));
+                         }
+                         Err(error) => {
+-                            self.errors
+-                                .insert(dir.join("manifest.json"), error.to_string());
++                            // Manifest evidence belongs to this observation's live
++                            // clients, not to the retained receipt-discovery cache.
++                            gaps.push(format!("{}: {error}", dir.join("manifest.json").display()));
+                         }
+                     }
+                 }
+@@ -621,6 +624,7 @@
+                 opencode_servers: self.servers.clone(),
+             },
+             clients,
++            gaps,
+         ))
+     }
+ }
+--- a/rust/loopflow/src/run_record/active/reader/tests.rs
++++ b/rust/loopflow/src/run_record/active/reader/tests.rs
+@@ -232,6 +232,39 @@
+     assert!(!corrupt.gaps.is_empty());
+     fs::write(&receipt, bytes).unwrap();
+     visible(&mut reader, &store, &[]).await;
++}
++
++#[tokio::test]
++async fn manifest_failure_does_not_outlive_its_native_client() {
++    let home = tempfile::tempdir().unwrap();
++    let store = store(home.path()).await;
++    let id = prepare(home.path());
++    let (dir, _) = resolve_manifest(home.path(), id.as_str()).unwrap();
++    let client = Client::start();
++    write_provider_client(&dir, client.0.id()).unwrap();
++    let mut reader = ActiveRunReader::start(home.path(), true, CancellationToken::new()).unwrap();
++    visible(&mut reader, &store, std::slice::from_ref(&id)).await;
++    let manifest = dir.join("manifest.json");
++    let bytes = fs::read(&manifest).unwrap();
++    fs::write(&manifest, b"{").unwrap();
++    assert!(!reader.observe(&store, None).await.gaps.is_empty());
++    drop(client);
++    fs::write(&manifest, bytes).unwrap();
++    let deadline = Instant::now() + Duration::from_secs(5);
++    loop {
++        let observed = reader.observe(&store, None).await;
++        if observed.discovery == DiscoveryState::Ready {
++            let cold = crate::run_record::active::snapshot(home.path(), &store, None).await;
++            assert_eq!(observed.runs, cold.runs);
++            assert_eq!(
++                observed.gaps, cold.gaps,
++                "stale manifest failure survived repair and client exit"
++            );
++            assert!(observed.gaps.is_empty());
++            break;
++        }
++        assert!(Instant::now() < deadline, "{observed:?}");
++    }
+ }
+ 
+ #[tokio::test]

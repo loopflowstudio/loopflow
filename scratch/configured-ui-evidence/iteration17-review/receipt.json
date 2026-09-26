@@ -1,0 +1,108 @@
+{
+  "observed_at": "2026-09-24T20:01:12.511Z",
+  "head": "9b3264efd46d6b505917930aa257f3c9d11bb1eb",
+  "proof": "headless Chrome, simulated hierarchy and textareas; no native app or provider interaction",
+  "command": "node /tmp/loo291-review17/check.cjs",
+  "exit_code": 0,
+  "study_sha256": "db465f075762bdcfee131c016c1425c66873ec84ac7f0c3ceda615f2ca17926a",
+  "screenshots": "/tmp/loo291-review17/{compact,full,sessions}.png",
+  "visually_inspected": [
+    "compact",
+    "sessions"
+  ],
+  "tracked_diff_comparison": {
+    "prior_sections": 209,
+    "current_sections": 209,
+    "changed_sections": [
+      "scratch/compress.md",
+      "scratch/configured-ui-proof.md",
+      "scratch/main-view-task.md",
+      "scratch/review-slice.md"
+    ],
+    "snapshot": "before this review documentation corrections",
+    "executable_delta": false
+  },
+  "unchanged_from_review16": [
+    {
+      "path": "swift/Loopflow/Models/WorkStatus.swift",
+      "sha256": "4f596869b55a4d4f8bd3a0e48fc8c0f857c743ba9c24215fa3bf806c62b40d74",
+      "expected": "4f596869b55a4d4f8bd3a0e48fc8c0f857c743ba9c24215fa3bf806c62b40d74"
+    },
+    {
+      "path": "swift/Loopflow/Models/WaveWorkMap.swift",
+      "sha256": "922b7eba784e78cd5ee8611d17644909bf04edc9b92f3a5adbf9bc942cbe5a74",
+      "expected": "922b7eba784e78cd5ee8611d17644909bf04edc9b92f3a5adbf9bc942cbe5a74"
+    },
+    {
+      "path": "swift/Loopflow/Models/SessionRecord.swift",
+      "sha256": "92bab46706cb16915959d297b268088a6550b536eca496f706b4e6275716b5c0",
+      "expected": "92bab46706cb16915959d297b268088a6550b536eca496f706b4e6275716b5c0"
+    },
+    {
+      "path": "swift/LoopflowMac/Views/SessionsView.swift",
+      "sha256": "64b9e1162a28720c59ea8e0ea000399e34f17d65931ef578d75f57b5b9a94745",
+      "expected": "64b9e1162a28720c59ea8e0ea000399e34f17d65931ef578d75f57b5b9a94745"
+    },
+    {
+      "path": "swift/LoopflowMac/Views/WorkspaceNavigator.swift",
+      "sha256": "bd112954a032945447286be94d802f4f7ab179a611a942131d9a575d55e44f4d",
+      "expected": "bd112954a032945447286be94d802f4f7ab179a611a942131d9a575d55e44f4d"
+    },
+    {
+      "path": "swift/LoopflowMac/PodiumModel.swift",
+      "sha256": "e6069ff63254f5ee76c1fb93a231204e7b9d49be24ffca776381f41bf03386e1",
+      "expected": "e6069ff63254f5ee76c1fb93a231204e7b9d49be24ffca776381f41bf03386e1"
+    },
+    {
+      "path": "swift/Loopflow/Services/RegistryQuery.swift",
+      "sha256": "1a5582cc2a040dd353b21163fdc5ab11e560d360d4ed5631a5e18437298dde67",
+      "expected": "1a5582cc2a040dd353b21163fdc5ab11e560d360d4ed5631a5e18437298dde67"
+    },
+    {
+      "path": "rust/loopflow/src/ops/human_session.rs",
+      "sha256": "33bd05a8d693f0d16d9add3cea163b99808d0835cf792d1fb641620b013afcfb",
+      "expected": "33bd05a8d693f0d16d9add3cea163b99808d0835cf792d1fb641620b013afcfb"
+    },
+    {
+      "path": "rust/loopflow/src/lf/commands/waves.rs",
+      "sha256": "7eadb32447cd9a2611efb5acab8e15d4382e3cb8500f486d156f3b393efea924",
+      "expected": "7eadb32447cd9a2611efb5acab8e15d4382e3cb8500f486d156f3b393efea924"
+    },
+    {
+      "path": "rust/loopflow/src/controller/task/mod.rs",
+      "sha256": "9e168fa4c24fad4ca91746ba044775ab35785ba9f8cd2c6a2fc1b7ef9b9e2ef3",
+      "expected": "9e168fa4c24fad4ca91746ba044775ab35785ba9f8cd2c6a2fc1b7ef9b9e2ef3"
+    },
+    {
+      "path": "rust/loopflow/src/lf/commands/session.rs",
+      "sha256": "665fb44d05af2cc69467368e4f2626f256d0e82e0cba4b5239d0d48288be60e6",
+      "expected": "665fb44d05af2cc69467368e4f2626f256d0e82e0cba4b5239d0d48288be60e6"
+    },
+    {
+      "path": "tests/fixtures/dto/session.json",
+      "sha256": "198ca51b3baebb5d267a8e609bc15d0c2a30e2655f7ba1b45b7c4332d56cc317",
+      "expected": "198ca51b3baebb5d267a8e609bc15d0c2a30e2655f7ba1b45b7c4332d56cc317"
+    },
+    {
+      "path": "tests/fixtures/dto/sessions.json",
+      "sha256": "bae1d67529608f6f965c368fd6a2963ea707d7179da779c579c8a08cfcfd9147",
+      "expected": "bae1d67529608f6f965c368fd6a2963ea707d7179da779c579c8a08cfcfd9147"
+    },
+    {
+      "path": "tests/fixtures/dto/session_actions.json",
+      "sha256": "6cccebe2a55ed3c79a0683d8fd4019767bf7666893259b9d332c6d9903e21328",
+      "expected": "6cccebe2a55ed3c79a0683d8fd4019767bf7666893259b9d332c6d9903e21328"
+    },
+    {
+      "path": "swift/LoopflowTests/WorkspaceNavigationProofTests.swift",
+      "sha256": "06d4a95c442c5998e9b87e1181763b0f049da03afc231694ff38f58101ad61fb",
+      "expected": "06d4a95c442c5998e9b87e1181763b0f049da03afc231694ff38f58101ad61fb"
+    }
+  ],
+  "limits": [
+    "No native hierarchy implementation or human acceptance",
+    "No Monitor or active Run proof",
+    "No performance samples or budgets",
+    "No external Task trials or PM edit"
+  ]
+}

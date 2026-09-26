@@ -1,0 +1,24 @@
+{
+  "result": "5 focused tests pass; all-target clippy passes; rebuilt CLI local-preflight promotes an isolated copy with 32 compatible references",
+  "source_and_artifacts": {
+    "rust/loopflow/src/store/migrations.rs": "f2e74f903047ae38a47e908ab3fd0d737112e5963bac1a3f3bdd9ae0a354ce95",
+    "/tmp/loo291-demo-home-adoption-tests.log": "525f3586a2e1a33f5bfae95d190e745fa0c1471afdf75b63059f269b70810944",
+    "/tmp/loo291-demo-home-adoption-tests-final.log": "935c71f2520db314e1ca8ceac9edd6ede4949d9eb1ea57db7a40ff94b99778aa",
+    "/tmp/loo291-demo-home-retained-draft.log": "11a2fa9bab5db304de95ba2c10087e8641ca4dbd371ec575a6e588674917cce7",
+    "/tmp/loo291-demo-home-clippy.log": "92d33a1c4677af178e73e0f7fd7ab47e604e4b21febc25f38c5b7fe61b9dd090",
+    "/tmp/loo291-demo-home-build.log": "2c89dae075c5ff2d048192878f8fb194e5ac380b1b44afdac71738c39ca799c6",
+    "/tmp/loo291-retained-home-preflight.json": "e27a06c9bb72b22856ad167eaf11919fad2994c8188ac1b13435696b24bc2a5c",
+    "/tmp/loo291-retained-home-preflight-after.json": "dfac4dc0b90a67efdfc9dfebef47aa968c9b24c6b68d738eea2ef6b59692ec36"
+  },
+  "live_store_remains": {
+    "frontier": "0.12.20.001_release",
+    "development_drafts": [
+      [
+        "wave_chapters",
+        "519e4984a449617dbee7f541e8517214f0f0d96891264621421510972306343b"
+      ]
+    ],
+    "chapter_count": 6,
+    "chapter_records_sha256": "666769da46232c20b4a0479b5b0055cd8195881eb86e466029d2a6596f3e8d49"
+  }
+}

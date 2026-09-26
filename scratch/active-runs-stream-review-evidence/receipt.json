@@ -1,0 +1,74 @@
+{
+  "recorded_at": "2026-09-25T01:53:20.159464+00:00",
+  "focused_command": "swift test --package-path swift -Xswiftc -gnone --jobs 4 --no-parallel --filter 'ActiveRunsObservationTests|ActiveRunsLifetimeTests|TaskMonitorTests|TaskMonitorProofTests|DTOFixtureTests/activeRunsFixture'",
+  "focused_result": {
+    "exit": 0,
+    "tests": 17,
+    "suites": 5
+  },
+  "fallback_command": "uv run python: run_plans([plan for plan in build_plan([], False, {'loopflow'}) if plan.run])",
+  "fallback_result": "Xcode app/test build-for-testing passed; hosted UI tests not run",
+  "prior_stream_receipt_verified": {
+    "sources": 19,
+    "artifacts": 7,
+    "binaries": 2
+  },
+  "prior_discovery_receipt_verified": {
+    "artifacts": 9,
+    "rust_sources": "unchanged; four Swift sources superseded by stream receipt"
+  },
+  "sources": {
+    "swift/Loopflow/Services/RegistryQuery.swift": "1db64625baa7fae492aa376be41ec5c8092bdedaa2d81e8546f2d5c0be464c9f",
+    "swift/LoopflowMac/MacLocalWaveAgentLauncher.swift": "f7510144af357fb7a3efeebf16e5fe81c2886537640154794f710733f4209871",
+    "swift/LoopflowMac/PodiumModel.swift": "11e6052f37e302b26cb6db3f8c6058603451232402efdf83f21319d7ab1892de",
+    "swift/LoopflowMac/Services/RegistryQueryLocal.swift": "cb631a7523c9f24c6c0ee4d8bfade475acc2fd6c8da57afac85928b75ec3420a",
+    "swift/LoopflowMac/Views/PodiumView.swift": "06523686cffc692384f4bac18d0ea733ee27f857f3b359e0d82012adb20df2c1",
+    "swift/LoopflowMac/Views/SessionsView.swift": "52daac916ac272c9d3f73b799972646ad3d6ecf77c94e3e66682ba37728960b1",
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": "d78e5ea15f76b48421bcc4a9a3fc1896a341574059e45dcf9a0e4a98634ef5a4",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "b00de6f8e5bb7ef270135aadaeea37b0011e7895130ed8f33cddee32b0ce2143",
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": "59457a2f5ecdeeb8b8520c8035bbf52d3b21cb88b5817dc8076b705dc9c06806",
+    "swift/LoopflowTests/TaskMonitorProofTests.swift": "b17209031ff0ff73979a6f4ae91b4ac97c20629b734bfb319b97989ad1cb456c",
+    "swift/LoopflowTests/TaskMonitorTests.swift": "de382d4c7281fb1bb6ea5abd1ef5148a48c512e9cfd40902c747e0226e0b508f",
+    "swift/README.md": "679db9093fa988d7adf0c4e846069a449d11200cdd12ecf5e8c3e0a6182c865f",
+    "swift/Loopflow/Services/ActiveRunsObservation.swift": "63b8568a241484af8cf37590799dfca91785799c12e210c8fd96daf14dbf04ef",
+    "swift/LoopflowMac/Services/LocalActiveRunsObservation.swift": "07901e42542b301bc8010c9a519ea6d0435cd597c1574284c73387d27cb11882",
+    "swift/LoopflowTests/ActiveRunsTestFeed.swift": "e2d0eb84ae3b0f68b1ec0737060be6d19f67e78efcb4208e600e25b3e254d437",
+    "swift/LoopflowTests/ActiveRunsObservationTests.swift": "784018674e19e05b97160056c9cd6741ccd286969fad5e2f6c43aa5b0587d4ee",
+    "swift/LoopflowTests/ActiveRunsLifetimeTests.swift": "6a4df0fa399a3b316db774aa4b34775f8d9c8ad1201f8501c0a8421452d28f86",
+    "swift/Loopflow/Models/ActiveRunsSnapshot.swift": "9e9948ab10732f2848aed9e4a915cf13e2c5f5e4568ea1233b2d882f67fb5756",
+    "tests/fixtures/dto/active_runs.json": "c94d62f749ef3cce1121bda8a08350f64f65ec30141931fe1178f9ea28322274"
+  },
+  "review_files": {
+    ".lf/directions/desktop.md": "5a892a3bfa03d5327f232e9ff589fa76513eb8d18d7dc55a57c97ceb84d2ae74",
+    "scratch/review-active-runs-stream.md": "cf9f111c5db6588169136e6ec00fafe5d5446ca9d109dae2f426863c0723e7f1",
+    "scratch/review-slice.md": "1b479e69870856c243c8aa1387e97e143c74b57a613d95c37bad10f7ccad7b3c"
+  },
+  "binaries": {
+    "target/debug/lf": "8d7cc429ed7d66dab056400bea61b2b2c747e8fa192432adcdd8101423d67143",
+    "swift/.build/debug/LoopflowMac": "02a113ac34d0dab6b641fcba715318fafdedf93493d6137c3c96a9aee8989bf4"
+  },
+  "artifacts": {
+    "scratch/active-runs-stream-review-evidence/diff-scope.json": "33c581513b04bba8784c8e572e7df0628293a7937a5ae46f012dd6bf47bd42d3",
+    "scratch/active-runs-stream-review-evidence/initial-behavior.log": "94638324adc4d224e46b0bcbf09022299a95fee4f61e57ab66333b4e0655de60",
+    "scratch/active-runs-stream-review-evidence/focused-final.log": "79b6db0f93396602779345c8c758884219ea90729393937aee51f4ac9f57bb2a",
+    "scratch/active-runs-stream-review-evidence/diagnostic-before.log": "7e5f5db50f542625e0f32d5a7de0a35c8a25d8902b5161afb34b3223086fe9e0",
+    "scratch/active-runs-stream-review-evidence/correction.patch": "54bd15b36a82c0c541c8673b14df4e55091ba22808e107699cfb51885dfba83f",
+    "scratch/active-runs-stream-review-evidence/fallback-final.log": "959e6b5ca90b7e05a3e19b49e6a8f3d942034137ebab2aa0df0b270b22ef0cf8",
+    "scratch/active-runs-stream-review-evidence/diagnostic-initial-pass.log": "8a956164ac71341361ab16eb1cd031f80d55e2bd88650d6eeda81211f5fa0dda"
+  },
+  "complete_diff_chunks": "/tmp/loo291-stream-review-patches/index.json",
+  "diff_inventory": {
+    "sections": 836,
+    "identical_to_prior": 791,
+    "changed_or_new": 45,
+    "uncovered": 0,
+    "oversized_historical_fixture_full_sha256": "6de74ddd68f4b20710678e3b9fe0dee114c0d329ea5af120781dab9b45cce4dd"
+  },
+  "whitespace": "Correction patch added lines pass trailing-whitespace check",
+  "limits": [
+    "Isolated CLI and owned cat processes, not configured vendor acceptance",
+    "Mounted native panes use fixture transport",
+    "No performance rerun or rendering budget",
+    "No publication, installation, PM mutation, Task completion or blanket checkpoint"
+  ]
+}

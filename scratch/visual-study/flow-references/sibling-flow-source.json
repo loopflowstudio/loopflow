@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-09-25T18:55:36.371045+00:00",
+  "checkout": "/Users/jack/src/loopflow.restore-task-continuation-with-a",
+  "files": [
+    {
+      "path": "rust/loopflow/src/engine/builtins/task/flow/feature.yaml",
+      "sha256": "f9564d7ead851869d941ca510b50c1248a4b234172a3daf1276ebbc9ed494002",
+      "text": "- flow: task-design\n- flow: pursue\n"
+    },
+    {
+      "path": "rust/loopflow/src/engine/builtins/task/flow/task-design.yaml",
+      "sha256": "bc81bed4bf8f8300ba860e14c07de964fb79a75573eab246840c4b3afc7249a9",
+      "text": "# Establish the Task design once before autonomous slicing begins.\n- step:\n    id: kickoff\n    name: kickoff\n- step:\n    id: review_kickoff\n    name: review-design\n    human: true\n    repeat:\n      from: kickoff\n"
+    },
+    {
+      "path": "rust/loopflow/src/engine/builtins/task/flow/pursue.yaml",
+      "sha256": "d9cc61b4ba1a410a1a499ca486fd8cb2183d54f192d3108b7829403ec603c2e7",
+      "text": "- step:\n    id: implement\n    name: implement\n- compress\n- review-slice\n- step:\n    id: review_concepts\n    name: concept-review\n- step:\n    id: decide\n    name: loop-decide\n    repeat:\n      from: implement\n- step:\n    id: review_delivery\n    name: demo\n    human: true\n    repeat:\n      from: implement\n"
+    }
+  ]
+}

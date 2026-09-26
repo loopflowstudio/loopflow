@@ -571,6 +571,14 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
+    pub async fn forget_wave(&self, wave_id: &WaveId, dry_run: bool) -> StoreResult<()> {
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.forget_wave(&wave_id, dry_run)
+        })
+        .await
+    }
+
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
         let provider = provider.to_string();
         run_sqlite(&self.sqlite, move |store| {

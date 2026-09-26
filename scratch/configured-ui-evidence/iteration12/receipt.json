@@ -1,0 +1,18 @@
+{
+  "app_pid": 22294,
+  "focused_pid": 395,
+  "focused_app": "loginwindow",
+  "accessibility_trusted": true,
+  "accessible_window_count": 1,
+  "screen_locked": true,
+  "input_sent": false,
+  "provider_launched": false,
+  "app_terminated": true,
+  "human_demo_pid": 41489,
+  "human_client_pid": 37189,
+  "home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "sha256": {
+    "/tmp/loo291-iteration12/Loopflow Trial.app/Contents/MacOS/Loopflow": "9d8c7abbf7f2ab725893d2dc67e17fd52798822867f102a198553946fb9cf8e8",
+    "target/debug/lf": "a15444b8d5b1f7ada42404b69f46be1ac3892aa79acdbbc51f4645144ce72389"
+  }
+}

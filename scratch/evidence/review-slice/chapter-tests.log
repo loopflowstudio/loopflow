@@ -1,0 +1,17 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.projects/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.84s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 9 tests
+test work::chapter::tests::missing_worktree_evidence_never_abandons_a_task ... ok
+test work::chapter::tests::chapter_moves_started_work_and_expires_only_untouched_backlog ... ok
+test engine::builtins::tests::chapter_skills_are_registered ... ok
+test lf::tests::chapter_and_task_commands_require_no_project_selector ... ok
+test lf::commands::waves::tests::wave_keeps_current_plan_visible_with_a_failed_preparing_chapter ... ok
+test store::tests::chapter_retirement_fences_a_prepared_task_before_its_first_claim ... ok
+test store::sqlite::chapters::tests::chapter_cutover_keeps_one_current_plan_and_preserves_history ... ok
+test store::tests::chapter_transfer_preserves_worker_pr_and_rejects_stale_parent_updates ... ok
+test ops::chapter::tests::chapter_rotation_previews_retries_and_preserves_dated_history ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 1559 filtered out; finished in 16.95s
+

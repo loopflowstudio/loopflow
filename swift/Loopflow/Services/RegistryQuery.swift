@@ -1,11 +1,8 @@
-// RegistryQuery — discovery and history as `lf` queries over the machine
-// registry store, not a streaming center.
+// RegistryQuery — typed `lf` reads over the machine registry.
 //
-// The wave model has no telemetry hub (see `scratch/eventing.md`): durable
-// facts — which waves exist (running and stopped) and their work
-// — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
-// CLI. The Podium re-queries the bounded process snapshot for live output;
-// Wave conversation motion remains a per-wave SSE stream (`WaveChatConnection`).
+// Planning and history are one-shot queries. Active Runs use one foreground
+// observation per window so native receipt discovery survives between samples.
+// Wave conversations retain their per-wave SSE stream (`WaveChatConnection`).
 //
 // This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
@@ -30,15 +27,22 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
+    private let observe: @Sendable () async throws -> ActiveRunsObservation
 
-    public init(run: @escaping RegistryRunner) {
+    public init(
+        watchActiveRuns: @escaping @Sendable () async throws -> ActiveRunsObservation = {
+            throw RegistryQueryError("Active Run observation is unavailable on this transport")
+        },
+        run: @escaping RegistryRunner
+    ) {
         self.run = run
+        self.observe = watchActiveRuns
     }
 
-    /// Every wave the registry knows across the machine. Callers that need
-    /// several repo slices should call this once and filter locally.
+    /// Current Waves across the machine, including stopped Waves. The shared
+    /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await run(["ls", "--all", "--json"], nil)
+        let stdout = try await run(["ls", "--all", "--current", "--json"], nil)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }
@@ -130,6 +134,10 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(String?.self, from: stdout)
     }
 
+    public func watchActiveRuns() async throws -> ActiveRunsObservation {
+        try await observe()
+    }
+
     /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
     /// Filters are composed by `lf` before its bounded presentation window.
     public func workActivity(
@@ -174,6 +182,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
+    public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
+        _ = try await run([
+            "pm", "task", "update", "--id", id, "--wave", wave, "--notes=\(text)",
+        ], cwd)
+    }
+
     /// One Task's complete patch, or the patch for a selected changed file.
     public func taskDiff(
         issue: String,
@@ -212,6 +226,17 @@ public struct RegistryQuery: Sendable {
         var args = ["session", "open", id, "--json"]
         if replacing { args.append("--replace") }
         let stdout = try await run(args, cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
+    /// Give one Session a human-assigned name and return the authoritative
+    /// record. A Run ID reaches the Ask or Flow boundary that owns it.
+    public func renameSession(
+        id: String,
+        name: String,
+        cwd: String? = nil
+    ) async throws -> SessionRecord {
+        let stdout = try await run(["session", "rename", "--json", "--", id, name], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
@@ -505,7 +530,7 @@ public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-public struct RunSubjectAttribution: Decodable, Sendable, Hashable {
+public struct RunSubjectAttribution: Codable, Sendable, Hashable {
     public let selector: String
     public let source: String
 }

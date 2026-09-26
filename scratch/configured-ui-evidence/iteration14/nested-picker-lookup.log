@@ -1,0 +1,16 @@
+observed_at 2026-09-24T14:19:22Z
+Owned app PID 84461
+AX trust true active false
+PASS Exact runner trusted
+PASS One owned accessible window
+PASS Press All work
+PASS Press New terminal
+PASS One main checkout pane
+PASS Press Show work list
+PASS Select exact Task
+PASS Press New conversation · LOO-291
+Owned Session run_84ceb7e9dac14fb1b3a22c25d722a8a5
+PASS Shared Session has native terminal attachment
+PASS Exact provider descends from owned app
+FAIL Failure(message: "Exact Session action unavailable")
+Owned app termination requested true

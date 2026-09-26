@@ -161,7 +161,8 @@
           "workspace": {
             "slug": "infrastructure-task",
             "branch": "jack/infrastructure.task.20260713_1200",
-            "worktree": "/src/loopflow.infrastructure.task"
+            "worktree": "/src/loopflow.infrastructure.task",
+            "local_exists": true
           }
         },
         "runtime": {
@@ -169,7 +170,8 @@
           "status": "ready",
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
-          "provider": "codex"
+          "provider": "codex",
+          "started": true
         },
         "directive": {
           "version": 2,

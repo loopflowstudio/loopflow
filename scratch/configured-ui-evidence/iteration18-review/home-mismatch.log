@@ -1,0 +1,29 @@
+Observed at 2026-09-24T20:33:21Z
+Error: resolve the shared Loopflow store
+
+Caused by:
+    development lf (loopflow-main-view-task-6787ccf6a153) refuses production database /Users/jack/.lf/loopflow.db; use an installed release lf
+Swift/ErrorType.swift:254: Fatal error: Error raised at top level: Error Domain=ConfiguredRead Code=1 "(null)"
+Stack dump:
+0.	Program arguments: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -interpret scratch/configured-ui-evidence/iteration18-review/outline-probe.swift -Xllvm -aarch64-use-tbi -enable-objc-interop -stack-check -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -no-color-diagnostics -Xcc -fno-color-diagnostics -new-driver-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-driver -empty-abi-descriptor -no-auto-bridging-header-chaining -module-name main -disable-clang-spi -target-sdk-version 26.2 -target-sdk-name macosx26.2 -external-plugin-path /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server -external-plugin-path /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/local/lib/swift/host/plugins#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/local/lib/swift/host/plugins
+1.	Apple Swift version 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2)
+2.	Compiling with effective version 5.10
+3.	While running user code "scratch/configured-ui-evidence/iteration18-review/outline-probe.swift"
+Stack dump without symbol names (ensure you have llvm-symbolizer in your PATH or set the environment var `LLVM_SYMBOLIZER_PATH` to point to it):
+0  swift-frontend           0x000000010899ab60 llvm::sys::PrintStackTrace(llvm::raw_ostream&, int) + 56
+1  swift-frontend           0x00000001089984f0 llvm::sys::RunSignalHandlers() + 112
+2  swift-frontend           0x000000010899b18c SignalHandler(int, __siginfo*, void*) + 344
+3  libsystem_platform.dylib 0x000000019bbf6744 _sigtramp + 56
+4  libswiftCore.dylib       0x00000001aee4622c $ss17_assertionFailure__4file4line5flagss5NeverOs12StaticStringV_SSAHSus6UInt32VtF + 176
+5  libswiftCore.dylib       0x00000001aeef24f8 swift_errorInMain + 596
+6  libswiftCore.dylib       0x00000001185511e4 swift_errorInMain + 18446744071182872384
+7  swift-frontend           0x00000001027344c8 llvm::orc::runAsMain(int (*)(int, char**), llvm::ArrayRef<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>>, std::__1::optional<llvm::StringRef>) + 908
+8  swift-frontend           0x0000000102646be0 swift::SwiftJIT::runMain(llvm::ArrayRef<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>>) + 628
+9  swift-frontend           0x00000001026540d4 swift::RunImmediately(swift::CompilerInstance&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>>> const&, swift::IRGenOptions const&, swift::SILOptions const&, std::__1::unique_ptr<swift::SILModule, std::__1::default_delete<swift::SILModule>>&&) + 1052
+10 swift-frontend           0x00000001025ce7c4 processCommandLineAndRunImmediately(swift::CompilerInstance&, std::__1::unique_ptr<swift::SILModule, std::__1::default_delete<swift::SILModule>>&&, llvm::PointerUnion<swift::ModuleDecl*, swift::SourceFile*>, swift::FrontendObserver*, int&) + 504
+11 swift-frontend           0x00000001025ca008 performCompileStepsPostSILGen(swift::CompilerInstance&, std::__1::unique_ptr<swift::SILModule, std::__1::default_delete<swift::SILModule>>, llvm::PointerUnion<swift::ModuleDecl*, swift::SourceFile*>, swift::PrimarySpecificPaths const&, int&, swift::FrontendObserver*) + 1980
+12 swift-frontend           0x00000001025c96f8 swift::performCompileStepsPostSema(swift::CompilerInstance&, int&, swift::FrontendObserver*) + 2688
+13 swift-frontend           0x00000001025cd018 performCompile(swift::CompilerInstance&, int&, swift::FrontendObserver*) + 4932
+14 swift-frontend           0x00000001025cafc8 swift::performFrontend(llvm::ArrayRef<char const*>, char const*, void*, swift::FrontendObserver*) + 3580
+15 swift-frontend           0x0000000102548408 swift::mainEntry(int, char const**) + 5412
+16 dyld                     0x000000019b82dd54 start + 7184

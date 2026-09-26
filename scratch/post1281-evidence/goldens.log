@@ -1,0 +1,10 @@
+    Blocking waiting for file lock on build directory
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.71s
+     Running tests/golden_prompt.rs (target/debug/deps/golden_prompt-4493e217e07a2643)
+
+running 1 test
+test golden_prompts_match_python ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+

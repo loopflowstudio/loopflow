@@ -1,0 +1,9 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.33s
+     Running tests/flow_tests.rs (target/debug/deps/flow_tests-ecaae8bb656a9fa4)
+
+running 1 test
+test bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 54.17s
+

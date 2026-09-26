@@ -31,14 +31,61 @@ command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is
 excluded by the pinned Ghostty build.
 
-Opening Loopflow to a repository leads with its Sessions queue. Select a session
-to resume its provider-native terminal in the focused Ghostty pane; selecting it again
-jumps back to that pane. Each pane owns one native libghostty surface. Sessions
-include native interactive provider Runs, Task review FlowSteps, and `lf ask`
-calls made by ordinary Runs. Rows use the real prompt or Task title plus the
-actual provider, Skill, or Run detail. The row badge names the terminal's real
-state: **VIEWING** (in a pane here), **RUNNING** (live, view closed),
-**ELSEWHERE** (another client — Warp, another window, SSH — holds it).
+If macOS cannot provide Ghostty's display link, terminals use timer rendering.
+The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
+
+Select a repository in the outline, then choose a Task or Session. Use the
+outline menu for **Compact**, **Full hierarchy**, or **Sessions**. Compact
+shows repo → Wave → Task → Session and promotes descendants of singleton Waves
+when planning is readable;
+Tasks remain visible even before they have a Session. Disclosure folds a branch,
+while presentation changes preserve its saved expansion and selection.
+Same-named Sessions show distinguishing ancestry. Repository conversations and
+Sessions with unavailable ancestry remain reachable in the same outline.
+
+Right-click a row to inspect its subject or ancestors, start a scoped conversation,
+or open an ordinary terminal. Right-click the outline background for repository
+actions. **Show retained terminals** restores the existing pane layout. Search,
+scroll, presentation, expansion and selection survive repository switches within
+the window. Selecting a Task with exactly one open Session enters that Session;
+otherwise it opens the Task overview, which names each conversation. Monitor is
+an explicit breadcrumb control. Selecting a Session opens its exact terminal
+through the shared Session action.
+Use **Inspect** or the row's context menu for details. Presentation changes never
+start a provider or resolve a Session.
+
+The breadcrumb above the workspace drills Wave → Task → Session. Wave and Task
+crumbs return to their details; the Task's issue ID links to Linear. With several
+Sessions, the final crumb chooses among them by name. The pencil renames the
+Session in place through `lf session rename`; the shown name is the shared
+readback, and a rejected name stays in the field with its error. A remote Flow
+Session's name lives on its Home and is not renamed here. Beside the name, the
+Session shows its Flow step and iteration, **Independent**, or why membership is
+unknown.
+
+**Monitor** opens beside retained Sessions and shells in the same multiplexer.
+Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
+selected Task's active Runs and updates automatically. **Refresh** requests an
+observation from the same reader. Recovery and read failures retain the last
+observation with a visible reason; **Retry** restarts a failed reader. Incomplete
+ownership evidence cannot report confirmed emptiness. Closing a Monitor preserves
+the window's shared reader and terminals. **Sessions** selects an exact conversation and
+returns keyboard focus to its terminal with unfinished input retained.
+
+Wave details show the objective, current chapter plan/KRs, all Tasks and chapter
+history. Projects are internal chapter records and add no navigation tier. Task
+details include the directive, recorded condition, current KRs, Activity, PR and
+worktree references. Choose **Edit directive**, then
+**Save directive** to write through the shared PM API. Failed saves retain your
+text; an accepted write with unavailable readback retains the draft and explains
+what happened. Wave details expose Work outside the current plan. Failed and
+partial reads remain visible in the outline.
+
+Each terminal pane owns one native libghostty surface. Session badges distinguish
+**VIEWING**, **RUNNING**, **ELSEWHERE**, **OPENING**, and **RETRY**. Sessions
+include interactive provider Runs, Task human FlowSteps, and ad-hoc Asks.
+Runs resumed interactively also appear, including those originally launched
+headlessly. Closing their client preserves the Session until Complete.
 
 Selecting an ELSEWHERE row opens a pane that explains the situation; nothing is
 stopped until its explicit **Move here**, which stops the other client and
@@ -46,50 +93,64 @@ resumes the Session in that pane. Unsent text typed in the other client is
 lost, and the pane says so before you commit.
 
 The green **Complete** action stops an interactive provider client and removes
-its Session from the queue while retaining provider-native history. Closing a
+its Session from the queue while retaining provider-native history. If completion
+is rejected, its error stays visible through refresh and the terminal remains usable;
+retry Complete after addressing the error. Undo does
+not restore a completed Session's pane, even if you hid it before completion. Closing a
 pane only hides the view: the terminal and its provider client keep running
 (the row shows RUNNING) and reopen exactly as left. An Ask agent
-can mark itself ready, but the row and terminal remain until the user completes
-the conversation. Task FlowSteps instead expose Approve and Iterate. Closing
-or detaching either review boundary never resolves it.
+can mark itself ready, but the row and terminal remain until you complete
+the conversation. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
+Rejected completion preserves the terminal and keeps its error visible through refresh.
+The shared Session projection supplies action labels, unavailable reasons and Work
+paths to both CLI and Mac; local terminal presence only determines which pane to show.
+Closing or detaching a review never resolves it.
 
 Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
 files before the caller resumes. The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
-Selecting another session replaces the focused pane's view. Use the split
-controls first when both sessions should remain visible; closing the final pane
-clears it without ending the durable session.
-Completing the selected Session returns the main pane to its empty workspace.
-Use **New shell** there or in the sidebar for a bare terminal, and **Waves &
-roadmap** to return to Work. A shell pane closes when its process exits;
-closing a shell pane ends its shell. A Session whose provider client is
-stopped elsewhere reclassifies to ELSEWHERE instead of showing a dead
-terminal as live. Terminals survive Sessions ↔ Work navigation and
-repository switches within a window. Each window owns its panes and surfaces;
-the same Session shown from another window is simply another client and reads
-ELSEWHERE there.
+Every record carries a required `runId` for Run lookup, including unopened Ask
+and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
+Run. A prepared Run alone does not establish live provider activity.
+Use **New conversation** to talk about the selected repo, Wave, or Task
+in the configured app or terminal. It opens an interactive prompt without
+creating a Task or running an autonomous operating pass. **New terminal** opens
+an ordinary shell in the active checkout. A conversation launched here returns
+to a shell when it exits or hands off to an external app.
+
+Selecting a Session in another checkout restores that worktree's conversation,
+companion terminals, split layout, and focus. Worktree headers split entire
+workspaces; terminal headers split within one workspace. Hiding a worktree
+retains its processes. Closing a shell ends that shell. Changing a shell's
+directory does not move it into another workspace.
+
+Manually launched agents in these shells register against their actual terminal.
+Selecting their Session focuses the existing shell. **Complete** ends the attached
+Session while keeping that shell available; rejected completion stays visible.
+External clients still read
+ELSEWHERE and require explicit Move here. Terminals and their command titles survive Work list and detail
+navigation and repository switches within a window. Native surfaces belong to
+that window and are never mounted twice.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
-The Podium keeps a closable Wave hierarchy above the Sessions and Work surfaces.
-Its Work surface shows machine-wide Now/Roadmap Work beside durable Activity. Selecting a
-Wave, Project, or Task preserves the live view and scopes `lf activity --json`
-at the source. Disclose each branch from Wave → Project → Task → live Exec.
-Exec remains process evidence rather than a fourth Work kind. PR facts open
-GitHub proof.
+Planning and Sessions share the Podium readings; there is no separate
+Sessions-only roadmap query. A failed read keeps its last useful evidence and
+exposes the error. Inspection shows the planning snapshot's generation time,
+which does not establish a fresh provider sync, and an explicit no-Session state
+only after a successful Session read. Compact retains an empty Wave
+as an inspectable leaf; it compresses structural levels only when descendants
+can take their place.
 
-The compact Podium bar reads live process evidence from `lf ps --json`. Its
-lamp reflects OS-live state: black is off, green is working, blue is stalled,
-and amber is waiting or unknown. Wave count, active Runs, and
-Run-without-listener warnings come from `lf ls --json`.
-Its Sessions badge reads repo-scoped `lf session list --json` and returns to
-the Sessions screen.
+Current Wave navigation reads `lf ls --all --current --json`. The CLI excludes
+abandoned and retired registrations; unfiltered `lf ls` retains historical
+registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
+their first registration.
+
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
-Each provider node retains its existing repository and Work attribution, so the
-hierarchy rolls one process reading up to Task, Project, and Wave without another
-telemetry store. Authored Waves count even before they have an active Run.
+Provider activity remains separate from Task condition and human Session presence.
 
 Loading, empty, stale-last-good, and unavailable reads stay distinct. Wave and
 agent readings fail independently. A failed refresh keeps the last useful
@@ -107,8 +168,8 @@ create a parallel local thread. Prior backing epochs remain selectable and
 read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
-reads Projects, Tasks, decisions, PR delivery, and Task conditions from `lf
-status --json`.
+reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
+from `lf status <wave> --json`.
 
 Start, resume, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
@@ -124,11 +185,11 @@ codebase tree, and registry health.
 
 - **Wave Chat** owns the conversation, the active Wave turn, and
   Send and bare Interrupt controls.
-- **Projects and Tasks** appear in the Wave work map. Linear owns their planning
-  identity; Loopflow's registry owns their runtime state.
-- **Tasks** own implementation worktrees and PR delivery. Every Task
-  reports through its Project Work; the Wave retains root inspection and
-  override. Waves and Projects remain control-plane processes in main.
+- **Waves and Tasks** appear in the work map. Linear owns authored planning;
+  Loopflow's registry owns runtime state and the current chapter binding.
+- **Tasks** own implementation worktrees and PR delivery and report directly
+  to their Wave. The internal Project retains chapter planning and history;
+  it has no separate operator.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
   Lifecycle mutations remain `lf task run/resume/interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
@@ -143,7 +204,7 @@ codebase tree, and registry health.
 
 ## Code map
 
-- `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live process signal
+- `LoopflowMac/Views/PodiumView.swift` — one repository/Wave/Task/Session outline and retained workspace
 - `LoopflowMac/Views/SessionsView.swift` — every Session in a native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, color, and undo
@@ -151,7 +212,7 @@ codebase tree, and registry health.
 - `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
+- `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat, current chapter plan, and Tasks
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
@@ -237,3 +298,15 @@ xcodebuild -quiet \
 ```
 
 The repository-wide gate is `uv run python scripts/test.py --all`.
+
+Task Monitor's shared reader is `RegistryQuery.watchActiveRuns()`, backed by
+`lf runs --active --watch --json`. Its typed Work references and verified live processes
+are separate from Session rows and historical Run outcomes. Confirm emptiness
+only when `discovery` is `ready` and `gaps` is empty. Keep scanning, unavailable,
+and incomplete evidence visible. Podium starts one reader on first demand and
+retains it across pane and repository navigation until window teardown. Wake
+requests a rescan. Helper/Home configuration replacement drains the old reader
+and clears its evidence before starting the new one. Pipes drain off the main
+actor, frames are limited to 16 MiB, and pending delivery retains only the latest
+snapshot. Ten seconds without a frame pauses updates until Retry. Cancellation
+closes stdin, then terminates and reaps only the owned reader if necessary.

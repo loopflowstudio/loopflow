@@ -1,0 +1,10 @@
+{
+  "bundle": "/tmp/loo291-iteration8/Loopflow Proof.app",
+  "sha256": "75fdef9e4d35fed6deeb01c3995bddcd5c7e0c6e5b7f88ce733aff01c4ae1abe",
+  "sources": {
+    "swift/LoopflowMac/Views/SessionsView.swift": "adaae30350e7309a73e6d35e38898b201a849c36d01a31a8af37ac415257fc8d",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "630422390f41896c3dea0d37f4e2902791a6446b009811c4599352c377286db1"
+  },
+  "unsigned_sha256": "eb194a978f19618f20410f63e88d5eb56df92298142f38c8914fb2aa0ecd8b12",
+  "signature": "ad hoc; codesign --verify --deep --strict passed"
+}

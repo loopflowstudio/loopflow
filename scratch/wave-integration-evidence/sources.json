@@ -1,0 +1,18 @@
+{
+  "rust/loopflow/src/ops/human_session.rs": "0f2bde9599d4592954be7a3c7efa709d64d7f45d06d97a1f80f2764138414caa",
+  "rust/loopflow/src/lf/commands/waves.rs": "9a93fdc850a07fb948e132c126c2b67b566ae552752de20e967c79afbe65230f",
+  "rust/loopflow/tests/dto_fixtures.rs": "d85b62d9ceae996da4609c04ba2b53f69597f780baa31f79171da1299f5f6dbd",
+  "swift/Loopflow/Models/SessionRecord.swift": "dbd1a6048ed7957e23170265eca7b096fcfb2d9ae1889d5e33bc3c5990a638cd",
+  "swift/Loopflow/Services/RegistryQuery.swift": "8a1c2a8192603b2fdc2fbe790bfdb69f5c7d535c899f184bd052c1e685c62fda",
+  "swift/LoopflowMac/WorkspaceProjection.swift": "14057eb3ba6cc808cb04cf082024076cb5b39b951665a041dcb0239f596a6425",
+  "swift/LoopflowMac/PodiumModel.swift": "41a91cdab6753f7881ac2cf6ff9d42bc19cc0c0865b066be85e12857db5f510a",
+  "swift/LoopflowMac/ConversationLaunch.swift": "901a63cb1f3dde735d88e8ec8957d1e6aa64aa2ec7e2174d583bd5cb740b19e9",
+  "swift/LoopflowMac/Views/WorkSurfaceView.swift": "074e41bd49c4ec1935df5088a8b3f77d5df0e9b72b32f9fd14f1a4b2f45b5bf5",
+  "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "5f9614fd12c06317affbcb9ca5d36e6cbad01b045f5a3c1b6eee66bcb07904f7",
+  "swift/LoopflowTests/TaskMonitorProofTests.swift": "ac9a3cc31bf4427da212be2e144c80ead5205003bd2669091c13c394230f5ff9",
+  "swift/LoopflowTests/WorkspaceNavigationTests.swift": "273de26983e5cb963baa8dd587d42c38fa86185ed40149c9cd7a1d35162b9190",
+  "tests/fixtures/dto/session.json": "67da8ee7b0fa250403424e1b50c1f913e9a6cd42ad5e7d38da0b84c436129248",
+  "tests/fixtures/dto/sessions.json": "e61aa8da72b4310b6751c911e5cd17e0f13e2ea8478b3fe1b7369c850cbdee29",
+  "tests/fixtures/dto/roadmap_snapshot.json": "394debd2f58bfb3dbae0bf6e5e049d7d15a6dfa90c23b27d10b73e9ba4449801",
+  "rust/loopflow/src/run_record.rs": "39f44ee297dc3a5ad1508935fedf38948c184a996c075e7e4275c30cb3acfb3d"
+}

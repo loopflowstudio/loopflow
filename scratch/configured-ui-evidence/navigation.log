@@ -1,0 +1,24 @@
+Owned PID 99060
+Probe executable /tmp/loo291-configured-navigation.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active false hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_to_observed_task_ms 2535.7307081576437
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (17 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+PASS Press Show work list
+PASS List and details visible together
+PASS Press Hide work list
+PASS Press All work
+PASS Set work search
+PASS Search reveals the exact Task
+PASS Search survives a planning poll
+PASS Clear work search
+PASS Find existing design Sessions
+PASS Select exact existing session-row-run_033f7ed7985145ee8ca727ececb7f7cd
+PASS Existing client requires explicit Move here
+Configured navigation complete; Move here was not invoked and no Session was resolved
+Owned termination requested true

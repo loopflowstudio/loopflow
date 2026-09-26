@@ -28,6 +28,7 @@ public final class MultiplexerStore {
     public private(set) var layout: LayoutNode
     public private(set) var focusedPaneId: String
     public private(set) var zoomedPaneId: String?
+    public private(set) var shellCommands: [String: [String]] = [:]
 
     private var paneColors: [String: PaneColor] = [:]
     private var nextColorIndex = 0
@@ -102,6 +103,9 @@ public final class MultiplexerStore {
             paneColors: paneColors,
             nextColorIndex: nextColorIndex
         )
+        // Undo may restore a shell pane, but must never replay a completed or
+        // interrupted conversation's initial launch command.
+        shellCommands.removeValue(forKey: paneId)
         if layout.allPanes.count == 1 {
             layout = layout.replacingContent(of: paneId, with: .empty)
             zoomedPaneId = nil
@@ -136,9 +140,12 @@ public final class MultiplexerStore {
             return
         }
 
-        if focusedPane.content == .shell {
+        switch focusedPane.content {
+        case .shell, .monitor:
             _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
             return
+        case .empty, .session:
+            break
         }
 
         layout = layout.replacingContent(
@@ -149,15 +156,33 @@ public final class MultiplexerStore {
         _notify()
     }
 
-    public func newShell() {
+    public func newShell(command: [String] = []) {
         if focusedPane.content == .empty {
+            shellCommands[focusedPaneId] = command
             layout = layout.replacingContent(of: focusedPaneId, with: .shell)
         } else {
-            _ = _split(focusedPaneId, axis: .vertical, content: .shell)
+            if let pane = _split(focusedPaneId, axis: .vertical, content: .shell) {
+                shellCommands[pane.id] = command
+                _notify()
+            }
             return
         }
         closedState = nil
         _notify()
+    }
+
+    /// Reveal one Task's observation beside existing terminals, never replacing them.
+    public func showMonitor(taskId: String) {
+        let content = PaneContent.monitor(taskId: taskId)
+        if let pane = layout.allPanes.first(where: { $0.content == content }) {
+            setFocusedPane(pane.id)
+        } else if focusedPane.content == .empty {
+            layout = layout.replacingContent(of: focusedPaneId, with: content)
+            closedState = nil
+            _notify()
+        } else {
+            _ = _split(focusedPaneId, axis: .vertical, content: content)
+        }
     }
 
     public func toggleZoom(_ paneId: String) {
@@ -215,7 +240,11 @@ public final class MultiplexerStore {
             guard case .session(let id) = pane.content else { return false }
             return !sessionIds.contains(id)
         }
-        guard !stale.isEmpty else { return }
+        let undoIsStale = closedState?.layout.allPanes.contains { pane in
+            guard case .session(let id) = pane.content else { return false }
+            return !sessionIds.contains(id)
+        } == true
+        guard !stale.isEmpty || undoIsStale else { return }
 
         for pane in stale {
             if layout.allPanes.count == 1 {

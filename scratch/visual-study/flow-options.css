@@ -1,0 +1,154 @@
+/* Flow preview study. Every rule is scoped to .flow-study / .fs-comments. */
+.flow-study{margin:22px 0 4px;max-width:850px;font-family:var(--sans);color:var(--ink)}
+.flow-study .label-sm{margin:0}
+.flow-study button{font:inherit;color:inherit;cursor:pointer}
+.flow-study button:focus-visible,.fs-comments button:focus-visible{outline:none;box-shadow:var(--ring)}
+.flow-study .fs-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.flow-study .fs-spacer{flex:1}
+.flow-study .fs-human{width:13px;height:13px;flex:none;vertical-align:-2px}
+.flow-study .fs-hbadge{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--amber);background:var(--ochre-wash);border-radius:10px;padding:1px 7px;vertical-align:1px}
+.flow-study .fs-detail{margin:10px 0 0;font-size:13px;line-height:1.55;color:var(--ink-2)}
+.flow-study .fs-detail strong{color:var(--ink)}
+
+/* Flow picker (shared) */
+
+/* Prototype confirmation (shared) */
+.flow-study .fs-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding:8px 8px 8px 12px;border-radius:7px;background:var(--paper);border:1px dashed var(--line-2);font-size:12.5px;color:var(--ink-2)}
+.flow-study .fs-confirm > span:nth-child(2){flex:1;min-width:220px}
+.flow-study .fs-proto{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--amber)}
+
+/* A — compact route */
+.fs-a .fs-route{display:flex;align-items:flex-end;flex-wrap:wrap;row-gap:10px;margin-top:12px}
+.fs-a .fs-pill{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--line-2);background:var(--cream);font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+.fs-a .fs-pill:hover{border-color:var(--wine-soft)}
+.fs-a .fs-pill.on{background:var(--wine);border-color:var(--wine);color:#FBF3F2}
+.fs-a .fs-pill.human{border-style:dashed;border-color:var(--amber);color:var(--amber)}
+.fs-a .fs-pill.human.on{background:var(--amber);border-style:solid;color:#fff}
+.fs-a .fs-link{width:18px;height:1px;background:var(--line-2);margin-bottom:14px;flex:none}
+.fs-a .fs-grp{display:inline-flex;flex-direction:column;gap:4px;padding:0 6px 0;border-bottom:0;position:relative}
+.fs-a .fs-grp-label{font-size:10.5px;color:var(--faint);letter-spacing:.06em;text-transform:uppercase;padding-left:2px;border-left:1px solid var(--line-2);border-top:1px solid var(--line-2);border-right:1px solid var(--line-2);border-radius:5px 5px 0 0;padding:0 8px 2px;align-self:stretch}
+.fs-a .fs-grp-row{display:flex;align-items:center}
+.fs-a .fs-grp-row .fs-link{margin-bottom:0}
+.fs-a .fs-detail{padding-left:2px}
+
+/* B — step outline */
+.fs-b{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:28px;align-items:start}
+@media (max-width:1180px){.fs-b{grid-template-columns:minmax(0,1fr)}.fs-b .fs-launch{order:-1}}
+.fs-b .fs-outline{list-style:none;margin:0;padding:0;position:relative}
+.fs-b .fs-outline::before{content:"";position:absolute;left:11px;top:14px;bottom:14px;width:1px;background:var(--line-2)}
+.fs-b .fs-ogroup{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:8px 0 2px 36px}
+.fs-b .fs-ostep{position:relative;padding-left:36px}
+.fs-b .fs-ostep.nested{padding-left:52px}
+.fs-b .fs-ostep.nested .fs-dot{left:16px;width:17px;height:17px;top:10px;font-size:10px}
+.fs-b .fs-dot{position:absolute;left:0;top:8px;width:23px;height:23px;border-radius:50%;background:var(--cream);border:1px solid var(--line-2);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--muted);z-index:1}
+.fs-b .fs-ostep.open .fs-dot{border-color:var(--wine);color:var(--wine)}
+.fs-b .fs-ostep.human .fs-dot{border-color:var(--amber);color:var(--amber);background:var(--ochre-wash)}
+.fs-b .fs-orow{display:flex;align-items:baseline;gap:12px;width:100%;text-align:left;background:none;border:0;border-radius:6px;padding:9px 10px;min-height:38px}
+.fs-b .fs-orow:hover{background:var(--paper)}
+.fs-b .fs-oname{font-weight:700;font-size:13.5px;white-space:nowrap}
+.fs-b .fs-opurpose{flex:1;font-size:13px;color:var(--muted);min-width:0}
+.fs-b .fs-chev{width:12px;height:12px;color:var(--faint);align-self:center;transition:transform .15s}
+.fs-b .fs-orow[aria-expanded="true"] .fs-chev{transform:rotate(90deg)}
+.fs-b .fs-odetail{margin:0 10px 8px;font-size:13px;line-height:1.55;color:var(--ink-2)}
+.fs-b .fs-launch{display:grid;gap:8px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--cream)}
+.fs-b .fs-sum{margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.fs-b .fs-wide{justify-content:center;width:100%}
+
+/* C — flow map */
+.fs-c .fs-sum{font-size:12.5px;color:var(--muted)}
+.fs-c .fs-map{margin-top:12px;overflow-x:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
+.fs-c .fs-maprow{display:flex;align-items:center;width:max-content}
+.fs-c .fs-edge{width:22px;height:1px;background:var(--line-2);flex:none;position:relative}
+.fs-c .fs-edge::after{content:"";position:absolute;right:-1px;top:-3px;border:3.5px solid transparent;border-left-color:var(--line-2)}
+.fs-c .fs-node{display:grid;gap:3px;text-align:left;width:138px;padding:9px 11px;border-radius:8px;border:1px solid var(--line-2);background:var(--cream)}
+.fs-c .fs-node:hover{border-color:var(--wine-soft)}
+.fs-c .fs-node.on{border-color:var(--wine);box-shadow:inset 3px 0 0 var(--wine)}
+.fs-c .fs-node.human{border:1px solid #d1b56f;background:#fff0c4}
+.fs-c .fs-node.human.on{border-style:solid;box-shadow:inset 3px 0 0 var(--amber)}
+.fs-c .fs-nname{display:flex;align-items:center;gap:5px;font-size:13px;font-weight:700}
+.fs-c .fs-node.human .fs-nname{color:var(--ink)}
+.fs-c .fs-npurpose{font-size:11.5px;color:var(--muted);line-height:1.35}
+.fs-c .fs-mgroup{position:relative;padding:20px 10px 10px;border:1px dashed var(--line-2);border-radius:10px;background:rgba(250,248,245,.55)}
+.fs-c .fs-mglabel{position:absolute;top:4px;left:11px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.fs-c .fs-mgrow{display:flex;align-items:center}
+.fs-c .fs-inspect{margin-top:0;padding:0 2px}
+
+/* Comments — collapsed by default (shared) */
+.fs-comments{margin:26px 0 0;padding-top:14px;border-top:1px solid var(--line);max-width:850px;font-family:var(--sans)}
+.fs-comments .fs-disclose{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:4px 6px 4px 2px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);cursor:pointer}
+.fs-comments .fs-disclose:hover{color:var(--wine)}
+.fs-comments .fs-chev{width:11px;height:11px;transition:transform .15s}
+.fs-comments .fs-disclose[aria-expanded="true"] .fs-chev{transform:rotate(90deg)}
+.fs-comments-body p{margin:6px 0 8px;font-size:13px;color:var(--muted)}
+.fs-comments .fs-composer{width:100%;max-width:520px;height:54px;resize:none;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:8px 10px;font:13px var(--sans);color:var(--faint)}
+
+@media (prefers-reduced-motion:reduce){.fs-b .fs-chev,.fs-comments .fs-chev{transition:none}}
+
+.fs-comments .fs-comment-count{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:var(--paper);font-size:11px;letter-spacing:0;color:var(--ink-2)}
+
+/* The selected Flow name becomes a searchable picker in place. */
+.flow-study .fs-flow-name{position:relative;flex:none;min-width:86px}
+.flow-study .fs-name-button{display:flex;align-items:center;gap:9px;border:1px solid transparent;background:transparent;border-radius:5px;padding:5px 7px;font-size:14px;font-weight:700}
+.flow-study .fs-name-button span{color:var(--muted);font-size:12px;font-weight:400}
+.flow-study .fs-name-button:hover{background:var(--paper);border-color:var(--line)}
+.flow-study .fs-flow-search{width:170px;height:30px;border:1px solid var(--wine-soft);border-radius:5px;background:var(--cream);color:var(--ink);padding:4px 8px;font:14px var(--sans);outline:none;box-shadow:0 0 0 2px var(--wine-wash)}
+.flow-study .fs-results{position:absolute;top:calc(100% + 6px);left:0;width:320px;max-width:calc(100vw - 100px);z-index:20;padding:5px;background:var(--cream);border:1px solid var(--line-2);border-radius:7px;box-shadow:0 8px 24px #30282a18}
+.flow-study .fs-result{width:100%;display:grid;gap:4px;text-align:left;padding:9px 10px;border:0;border-radius:4px;background:transparent}
+.flow-study .fs-result.highlighted,.flow-study .fs-result:hover{background:var(--wine-wash)}
+.flow-study .fs-result-title{display:flex;align-items:center;justify-content:space-between;font-size:13px;font-weight:700}
+.flow-study .fs-current{font-size:10px;font-weight:400;color:var(--muted)}
+.flow-study .fs-result-description{font-size:12px;line-height:1.4;color:var(--muted)}
+.flow-study .fs-no-results{padding:12px 10px;color:var(--muted);font-size:13px}
+.fs-b .fs-flow-name{justify-self:start}
+.fs-b .fs-results{left:auto;right:0}
+
+.fs-run-state{display:flex;align-items:center;gap:8px;margin:22px 0 0;font:12px var(--sans);color:var(--muted)}
+.fs-run-state strong{font-weight:400;color:var(--ink-2)}
+.fs-unstarted-dot{width:8px;height:8px;border:1px solid var(--faint);border-radius:50%}
+.fs-state-separator{color:var(--faint)}
+
+/* One continuous Flow, with authored returns directly between its steps. */
+.flow-study.fs-c{max-width:none}
+.fs-loop-map{margin-top:12px;padding:46px 14px 10px;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+.fs-loop-drawing{position:relative}
+.fs-loop-drawing>svg{overflow:visible;position:absolute;inset:0;width:100%;height:100%;pointer-events:none;font:11px var(--sans)}
+.fs-loop-nodes{display:flex;align-items:center;position:relative;z-index:1}
+.fs-c .fs-loop-nodes .fs-node{width:106px;min-width:106px;height:46px;padding:6px 4px;justify-content:center;align-items:center;position:relative}
+.fs-c .fs-loop-nodes .fs-edge{width:14px;flex:none}
+.fs-c .fs-nname,.fs-c .fs-loop-nodes .fs-nname{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap}
+
+.fs-c .fs-node{position:relative}
+.fs-loop-heading{pointer-events:auto;cursor:default;fill:#527fa8;font:700 12px var(--sans);letter-spacing:.02em}
+.fs-c .fs-map{padding-top:38px}
+
+/* Execution observations on the same Flow, scoped to the current pass. */
+.fs-pinned-name{font-size:14px;font-weight:700;padding:5px 7px}
+.fs-c .fs-loop-nodes .fs-step-current{border:2px solid #527fa8;background:#eaf2fa}
+.fs-c .fs-loop-nodes .fs-step-current.blocked{border-color:#b4463e;background:#fbe9e6}
+.fs-c .fs-loop-nodes .fs-step-current.paused{border-color:var(--muted);border-style:dashed;background:var(--cream)}
+.fs-current-badge{position:absolute;top:-28px;left:50%;transform:translateX(-50%);padding:3px 8px;border-radius:10px;background:#527fa8;color:#fff;font:700 10px var(--sans)}
+.blocked .fs-current-badge{background:#b4463e}
+.paused .fs-current-badge{background:var(--muted)}
+.fs-step-check{position:absolute;right:-5px;top:-7px;border-radius:50%;width:16px;height:16px;background:#687d54;color:#fff;border:2px solid var(--paper);font:10px var(--sans);text-align:center}
+.fs-c .fs-loop-nodes .fs-step-done{border-color:#a7b39a;background:#eaf1e3}
+
+.fs-c .fs-loop-nodes .fs-node.human{border-color:#d1b56f;background:#fff0c4}
+
+.fs-c .fs-loop-nodes .fs-node.human.fs-step-done{border-color:#a7b39a;background:#eaf1e3}
+
+/* Hover reveals the explicit replacement action without editing a live Flow. */
+.fs-started-flow{display:inline-flex;align-items:center;gap:5px}
+.flow-study .fs-restart-trigger{opacity:0;border:0;border-radius:4px;background:transparent;padding:5px 7px;color:var(--muted);font-size:12px;cursor:pointer;transition:opacity .12s}
+.fs-started-flow:hover .fs-restart-trigger,.fs-started-flow:focus-within .fs-restart-trigger{opacity:1}
+.flow-study .fs-restart-trigger:hover{background:var(--paper);color:var(--wine)}
+.fs-restart-panel{margin-top:12px;padding:14px 16px;border:1px solid var(--line-2);border-radius:7px;background:var(--cream);max-width:640px}
+.fs-restart-title{font-size:14px;font-weight:700}
+.fs-restart-panel p{margin:7px 0;font-size:13px;line-height:1.5;color:var(--muted)}
+.fs-restart-route{margin-top:10px;font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.8;color:var(--ink-2)}
+.fs-restart-route span{color:var(--faint);padding:0 4px}
+.fs-restart-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:12px}
+@media(hover:none){.flow-study .fs-restart-trigger{opacity:1}}
+@media(prefers-reduced-motion:reduce){.flow-study .fs-restart-trigger{transition:none}}
+
+.fs-session-note{display:flex;align-items:center;gap:12px;margin-top:12px;padding:10px 12px;background:var(--cream);border:1px dashed var(--line-2);border-radius:7px;font-size:12.5px;color:var(--muted)}
+.fs-session-note p{margin:0;flex:1;line-height:1.5}

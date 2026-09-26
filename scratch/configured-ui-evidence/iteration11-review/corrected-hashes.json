@@ -1,0 +1,7 @@
+{
+  "target/debug/lf": "a15444b8d5b1f7ada42404b69f46be1ac3892aa79acdbbc51f4645144ce72389",
+  "rust/loopflow/src/ops/human_session.rs": "6a3e0946ae39ecb0c4e60f55c359f29ec8e7d6bbaa10762eefcd70a1972f1024",
+  "rust/loopflow/src/run_record.rs": "aaeb6e12984dce732fa7ccca83e9704b9b180efcdf1b38a47ad98d82c1761e68",
+  "swift/LoopflowMac/WorkspaceProjection.swift": "6aa6e425e009ab94855b76aa764d17477c924d0df33737bfa8e826cf9cfc4598",
+  "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "936aa808811fd0972b15de79bb6d31b619416313e1132c1e9b0940981e9b8396"
+}

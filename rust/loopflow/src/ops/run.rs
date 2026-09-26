@@ -185,10 +185,6 @@ pub async fn resolve_work_selection(
         } else {
             task.worktree.clone()
         };
-        store
-            .begin_chapter_task(&task.id)
-            .await
-            .map_err(run_error)?;
         return Ok(WorkBinding {
             subjects: vec![
                 format!("wave:{}", wave.name()),
@@ -523,6 +519,7 @@ mod tests {
                     worktree: None,
                     skill: Some("implement".into()),
                     subjects,
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap();

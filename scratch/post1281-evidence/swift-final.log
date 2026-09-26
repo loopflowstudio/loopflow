@@ -1,0 +1,113 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/14] Compiling LoopflowTests WaveOriginTests.swift
+[4/14] Compiling LoopflowTests WavePlanParserTests.swift
+[5/14] Compiling LoopflowTests WaveRowTests.swift
+[6/14] Compiling LoopflowTests WaveSurfacePrimaryHierarchyTests.swift
+[7/14] Compiling LoopflowTests WaveTests.swift
+[8/14] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[9/14] Compiling LoopflowTests WaveChatTranscriptTests.swift
+[10/14] Compiling LoopflowTests WaveDetailReadingTests.swift
+[11/14] Compiling LoopflowTests WaveLensTests.swift
+[12/14] Emitting module LoopflowTests
+[13/16] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[14/16] Compiling LoopflowTests WorktreeWorkspaceTests.swift
+[14/16] Write Objects.LinkFileList
+[15/16] Linking LoopflowSwiftPackageTests
+Build complete! (7.28s)
+Test Suite 'Selected tests' started at 2026-09-24 19:31:18.916.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 19:31:18.917.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 19:31:18.917.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 19:31:18.917.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "DTO Fixtures" started.
+◇ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" started.
+✔ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" passed after 0.002 seconds.
+◇ Test "Wave plan uses the same chapter as status" started.
+✔ Test "Wave plan uses the same chapter as status" passed after 0.002 seconds.
+◇ Test "Chapter history retains dated evidence for a moved Task" started.
+✔ Test "Chapter history retains dated evidence for a moved Task" passed after 0.001 seconds.
+◇ Test "Activity fixture preserves exact OS-live process state" started.
+✔ Test "Activity fixture preserves exact OS-live process state" passed after 0.001 seconds.
+◇ Test "Work Activity fixture preserves proof links and typed facts" started.
+✔ Test "Work Activity fixture preserves proof links and typed facts" passed after 0.001 seconds.
+◇ Test "wave detail fixture preserves Project and Task identity" started.
+✔ Test "wave detail fixture preserves Project and Task identity" passed after 0.001 seconds.
+◇ Test "roadmap fixture preserves sections and durable Task references" started.
+✔ Test "roadmap fixture preserves sections and durable Task references" passed after 0.001 seconds.
+◇ Test "metric portfolio fixture preserves every closed evidence payload" started.
+✔ Test "metric portfolio fixture preserves every closed evidence payload" passed after 0.001 seconds.
+◇ Test "child activity preserves typed delivery evidence" started.
+✔ Test "child activity preserves typed delivery evidence" passed after 0.001 seconds.
+◇ Test "Sessions fixture preserves the unresolved Session projection" started.
+✔ Test "Sessions fixture preserves the unresolved Session projection" passed after 0.001 seconds.
+◇ Test "Every Session kind has a required Run reference independent of its boundary ID" started.
+✔ Test "Every Session kind has a required Run reference independent of its boundary ID" passed after 0.001 seconds.
+◇ Test "Flow Session fixture preserves readiness and its open command" started.
+✔ Test "Flow Session fixture preserves readiness and its open command" passed after 0.001 seconds.
+◇ Test "Work status fixture preserves every status" started.
+✔ Test "Work status fixture preserves every status" passed after 0.001 seconds.
+✔ Suite "DTO Fixtures" passed after 0.012 seconds.
+◇ Suite "Podium model" started.
+◇ Test "Repository scope filters one shared snapshot and clears outside selection" started.
+✔ Test "Repository scope filters one shared snapshot and clears outside selection" passed after 0.091 seconds.
+◇ Test "Registry Wave paths cannot create repository choices" started.
+✔ Test "Registry Wave paths cannot create repository choices" passed after 0.001 seconds.
+◇ Test "Stable Work selection resolves against the latest snapshot" started.
+✔ Test "Stable Work selection resolves against the latest snapshot" passed after 0.001 seconds.
+◇ Test "Current chapter source references navigate directly to the Wave" started.
+✔ Test "Current chapter source references navigate directly to the Wave" passed after 0.001 seconds.
+◇ Test "Selected Task survives a chapter transfer with temporarily absent membership" started.
+✔ Test "Selected Task survives a chapter transfer with temporarily absent membership" passed after 0.001 seconds.
+◇ Test "Chapter history remains reachable when the current plan is unavailable" started.
+✔ Test "Chapter history remains reachable when the current plan is unavailable" passed after 0.031 seconds.
+◇ Test "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "history" to "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "task" to "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "repo" to "A delayed historical reference cannot replace newer navigation" started.
+✔ Test "A delayed historical reference cannot replace newer navigation" with 3 test cases passed after 0.003 seconds.
+◇ Test "Refresh failure preserves last-good evidence and exposes the reason" started.
+✔ Test "Refresh failure preserves last-good evidence and exposes the reason" passed after 0.001 seconds.
+◇ Test "A slow process read does not hold back fleet, Sessions, or roadmap" started.
+✔ Test "A slow process read does not hold back fleet, Sessions, or roadmap" passed after 0.001 seconds.
+◇ Test "Live refresh changes only process evidence and preserves its last good frame" started.
+✔ Test "Live refresh changes only process evidence and preserves its last good frame" passed after 0.001 seconds.
+◇ Test "Live process refreshes never overlap" started.
+✔ Test "Live process refreshes never overlap" passed after 0.001 seconds.
+◇ Test "Authored Waves remain visible without active Runs" started.
+✔ Test "Authored Waves remain visible without active Runs" passed after 1.606 seconds.
+◇ Test "A development worktree becomes one main-repository choice" started.
+✔ Test "A development worktree becomes one main-repository choice" passed after 3.129 seconds.
+◇ Test "Work selection becomes one server-side Activity filter" started.
+✔ Test "Work selection becomes one server-side Activity filter" passed after 0.001 seconds.
+◇ Test "A late Activity query cannot replace evidence for a newer selection" started.
+✔ Test "A late Activity query cannot replace evidence for a newer selection" passed after 0.001 seconds.
+◇ Test "Session refresh reads Task FlowSteps" started.
+✔ Test "Session refresh reads Task FlowSteps" passed after 0.001 seconds.
+◇ Test "Changing repository clears cached Sessions" started.
+✔ Test "Changing repository clears cached Sessions" passed after 0.019 seconds.
+◇ Test "A late Session refresh cannot cross repository scope" started.
+✔ Test "A late Session refresh cannot cross repository scope" passed after 0.001 seconds.
+✔ Suite "Podium model" passed after 4.895 seconds.
+◇ Suite "Podium process signal" started.
+◇ Test "Exact provider process state drives the signal" started.
+✔ Test "Exact provider process state drives the signal" passed after 0.001 seconds.
+✔ Suite "Podium process signal" passed after 0.001 seconds.
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" started.
+✔ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" passed after 0.797 seconds.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+✔ Test "Returning to a Task never restores another Task's Session in a reused pane" passed after 0.017 seconds.
+◇ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" started.
+✔ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" passed after 1.317 seconds.
+✔ Suite "Task Monitor integration proof" passed after 2.133 seconds.
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "Task details expose directive and current chapter proof from the same snapshot" started.
+✔ Test "Task details expose directive and current chapter proof from the same snapshot" passed after 0.047 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 0.047 seconds.
+✔ Test run with 36 tests in 5 suites passed after 7.089 seconds.

@@ -104,7 +104,8 @@
               "workspace": {
                 "slug": "make-lf-work-the-machine",
                 "branch": "jack-heart/make-lf-work-the-machine",
-                "worktree": "/src/loopflow.make-lf-work-the-machine"
+                "worktree": "/src/loopflow.make-lf-work-the-machine",
+                "local_exists": false
               }
             },
             "runtime": {
@@ -112,7 +113,8 @@
               "status": "ready",
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
-              "provider": "claude"
+              "provider": "claude",
+              "started": false
             },
             "next_move": {
               "owner": "task",
@@ -154,7 +156,8 @@
               "workspace": {
                 "slug": "all-wave-roadmap",
                 "branch": "jack-heart/all-wave-roadmap",
-                "worktree": "/src/loopflow.all-wave-roadmap"
+                "worktree": "/src/loopflow.all-wave-roadmap",
+                "local_exists": false
               }
             },
             "runtime": {
@@ -162,7 +165,8 @@
               "status": "ready",
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
-              "provider": "claude"
+              "provider": "claude",
+              "started": true
             },
             "next_move": {
               "owner": "user",
@@ -273,7 +277,8 @@
               "workspace": {
                 "slug": "now-available-research",
                 "branch": "jack-heart/now-available-research",
-                "worktree": "/src/loopflow.now-available-research"
+                "worktree": "/src/loopflow.now-available-research",
+                "local_exists": false
               }
             },
             "runtime": {
@@ -281,7 +286,8 @@
               "status": "done",
               "reason": "done",
               "updated_at": "2026-07-14T21:00:00Z",
-              "provider": "claude"
+              "provider": "claude",
+              "started": true
             },
             "next_move": {
               "owner": "wave",

@@ -1,7 +1,4 @@
-// The Podium's work surface: everything below the console belongs to the
-// selected node. No selection shows the flat, cross-wave NOW triage; selecting
-// a Wave or Task swaps in that node's own detail. The tree itself is
-// never drawn here — the console's drawer columns own the hierarchy.
+// Work inspectors consume the same planning reading as the compact navigator.
 
 #if os(macOS)
 import AppKit
@@ -10,12 +7,17 @@ import SwiftUI
 
 struct WorkSurfaceView: View {
     @Bindable var model: PodiumModel
+    var onOpenSession: (SessionRecord) -> Void = { _ in }
+    /// Opens a Task the way the sidebar does: its one Session, else its overview.
+    var onOpenTask: ((WorkReference) -> Void)?
+    /// Starts an independent Task-context conversation in the Task's checkout.
+    var onNewSession: ((String) async throws -> Void)?
 
     @Environment(\.palette) private var palette
-    @StateObject private var terminalStore = TaskTerminalStore()
     @State private var controlError: String?
+    @State private var startingSession = false
     @State private var activeControlId: String?
-    @State private var workspaceSelection: WorkTaskSelection?
+    @State private var editingTask: WorkTaskSelection?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -40,15 +42,8 @@ struct WorkSurfaceView: View {
         .sheet(item: $model.historyWave) { wave in
             ChapterHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
-        .sheet(item: $workspaceSelection) { selection in
-            TaskWorkspaceView(
-                task: selection.task.task,
-                reference: selection.task.reference,
-                runtime: selection.task.runtime,
-                repoPath: selection.wave.repo,
-                terminalStore: terminalStore,
-                initialSection: .changes
-            )
+        .sheet(item: $editingTask) { selection in
+            TaskDirectiveEditor(model: model, task: selection.task, wave: selection.wave)
         }
     }
 
@@ -77,11 +72,11 @@ struct WorkSurfaceView: View {
         } else {
             switch model.selection?.kind {
             case nil:
-                overview
+                ContentUnavailableView("Choose Work", systemImage: "list.bullet")
             case .wave:
                 waveDetail
             case .project:
-                waveDetail
+                missingSelection
             case .task:
                 taskDetail
             }
@@ -103,55 +98,65 @@ struct WorkSurfaceView: View {
         .accessibilityIdentifier(identifier)
     }
 
-    // MARK: - Overview (no selection): the flat NOW triage
-
-    @ViewBuilder
-    private var overview: some View {
-        let sections = nowSections(from: visibleWaves)
-        if sections.isEmpty {
-            ContentUnavailableView(
-                "Nothing needs action",
-                systemImage: "checkmark.circle",
-                description: Text("No live or stopped work across these Waves. Open the console to walk the plan.")
-            )
-        } else {
-            scrollingDetail(identifier: "work-now") {
-                surfaceHeader("Work", subtitle: "Everything that can move right now")
-                ForEach(sections) { section in
-                    NowSectionView(
-                        section: section,
-                        selection: model.selection,
-                        activeControlId: activeControlId,
-                        onSelect: { row in model.select(.task(id: row.task.id)) },
-                        onTaskAction: { row, action in
-                            perform(action, on: WorkTaskSelection(wave: row.wave, task: row.task))
-                        },
-                        onOpenWorktree: openWorktree
-                    )
-                }
-            }
-        }
-    }
-
     // MARK: - Wave detail
 
     @ViewBuilder
     private var waveDetail: some View {
         if let selection = model.selection, let roadmap = model.wave(id: selection.id) {
             scrollingDetail(identifier: "podium-detail-wave") {
-                HStack(alignment: .top, spacing: Spacing.md) {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        surfaceHeader(roadmap.wave.name, subtitle: roadmap.wave.status.label)
-                        if roadmap.wave.paused {
-                            pausedChip(roadmap.wave.id)
-                        }
-                        if !roadmap.wave.goal.isEmpty {
-                            Text(roadmap.wave.goal)
-                                .font(Typography.body(13))
-                                .foregroundStyle(palette.textSecondary)
-                        }
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                    Text(roadmap.wave.name)
+                        .font(Typography.sectionTitle(30))
+                        .foregroundStyle(palette.text)
+                        .accessibilityIdentifier("wave-title")
+                    if roadmap.wave.paused {
+                        pausedChip(roadmap.wave.id)
                     }
                     Spacer()
+                }
+                if !roadmap.wave.goal.isEmpty {
+                    Text(roadmap.wave.goal)
+                        .font(Typography.body(14))
+                        .foregroundStyle(palette.text)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("wave-objective")
+                }
+
+                sectionHeading("Current KRs")
+                if let chapter = roadmap.chapter {
+                    WaveChapterView(chapter: chapter)
+                } else {
+                    Text("No current chapter plan.").foregroundStyle(palette.textSecondary)
+                }
+
+                switch roadmap.tasks {
+                case .unavailable(let reason):
+                    sectionHeading("Tasks")
+                    Text(reason).foregroundStyle(Color.statusWarning)
+                case .available(let tasks, let truncated):
+                    sectionHeading("Tasks · \(tasks.count)")
+                    if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(tasks.sorted { $0.task.rank < $1.task.rank }) { task in
+                            planRow(task)
+                        }
+                    }
+                    if truncated {
+                        Text("Planning is partial; more Tasks exist.").foregroundStyle(Color.statusWarning)
+                    }
+                }
+                ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
+                    Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
+                        .foregroundStyle(Color.statusWarning)
+                        .textSelection(.enabled)
+                }
+                WaveMetricPortfolioView(portfolio: roadmap.metricPortfolio)
+                Button("Chapter history") {
+                    model.historyReference = nil
+                    model.historyWave = roadmap.wave
+                }
+                .buttonStyle(.link)
+                DisclosureGroup("Wave controls") {
                     HomeControl(
                         wave: roadmap.wave,
                         onOpen: {},
@@ -162,39 +167,12 @@ struct WorkSurfaceView: View {
                         onError: { controlError = $0 }
                     )
                 }
-
-                if let chapter = roadmap.chapter {
-                    WaveChapterView(chapter: chapter)
-                }
-                Button("Chapter history") {
-                    model.historyReference = nil
-                    model.historyWave = roadmap.wave
-                }
-                switch roadmap.tasks {
-                case .unavailable(let reason):
-                    Text(reason).foregroundStyle(Color.statusWarning)
-                case .available(let tasks, _):
-                    if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
-                    ForEach(tasks) { task in
-                        RoadmapTaskRow(
-                            task: task, isSelected: false, activeControlId: activeControlId,
-                            onSelect: { model.select(.task(id: task.id)) },
-                            onAction: { action in perform(action, on: WorkTaskSelection(wave: roadmap.wave, task: task)) },
-                            onOpenWorktree: openWorktree
-                        )
-                    }
-                }
-                WaveMetricPortfolioView(portfolio: roadmap.metricPortfolio)
-                ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                    Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
-                        .foregroundStyle(Color.statusWarning)
-                }
             }
         } else if let selection = model.selection, let roster = model.rosterWave(id: selection.id) {
             // Authored but never served: there is no roadmap to show yet.
             scrollingDetail(identifier: "podium-detail-wave") {
                 surfaceHeader(roster.displayName, subtitle: "Authored — not yet served")
-                Text("Press the Wave's fader in the console to start `lf start \(roster.api.name)`.")
+                Text("Planning evidence is not available for this authored Wave.")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
             }
@@ -209,35 +187,40 @@ struct WorkSurfaceView: View {
     private var taskDetail: some View {
         if let selection = model.selection, let found = model.task(id: selection.id) {
             let task = found.task
+            let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
+                .first { $0.id.work == selection }?.sessions
             scrollingDetail(identifier: "podium-detail-task") {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text(found.wave.wave.name)
-                        .font(Typography.caption(10).weight(.semibold))
-                        .tracking(0.8)
-                        .textCase(.uppercase)
-                        .foregroundStyle(palette.textSecondary)
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                        if let issueURL = task.reference.issueUrl {
-                            Link(task.task.identifier, destination: issueURL)
-                                .font(Typography.code(12).weight(.semibold))
-                        } else {
-                            Text(task.task.identifier)
-                                .font(Typography.code(12).weight(.semibold))
-                                .foregroundStyle(palette.textSecondary)
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                    Text(task.task.name)
+                        .font(Typography.body(22).weight(.semibold))
+                        .foregroundStyle(palette.text)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("task-title")
+                    Spacer(minLength: Spacing.sm)
+                    if let onNewSession {
+                        Button {
+                            startingSession = true
+                            controlError = nil
+                            Task {
+                                defer { startingSession = false }
+                                do { try await onNewSession(task.id) }
+                                catch { controlError = error.localizedDescription }
+                            }
+                        } label: {
+                            Label("New session", systemImage: "plus.bubble")
                         }
-                        Text(task.task.name)
-                            .font(Typography.sectionTitle(20))
-                            .foregroundStyle(palette.text)
-                        Spacer()
-                        Text(task.section.label)
-                            .font(Typography.caption(10).weight(.semibold))
-                            .foregroundStyle(task.section.color)
+                        .disabled(startingSession)
+                        .help("Open an independent conversation with this Task's context in its worktree. The managed Flow is not started.")
+                        .accessibilityIdentifier("task-new-session")
                     }
+                }
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(task.condition.reason)
                         .font(Typography.body(13))
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityLabel(taskConditionAccessibilityLabel(task))
-                    WorkChannelChips(task: task)
+                    Spacer()
                     TaskActionCluster(
                         task: task,
                         isActing: activeControlId == "task:\(task.id)",
@@ -248,12 +231,48 @@ struct WorkSurfaceView: View {
                         onOpenWorktree: openWorktree
                     )
                 }
-                .padding(Spacing.lg)
-                .background(palette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
-                .overlay {
-                    RoundedRectangle(cornerRadius: CornerRadius.lg)
-                        .stroke(palette.border, lineWidth: 1)
+                if let sessions, !sessions.isEmpty {
+                    sectionHeading("Sessions · \(sessions.count)")
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(sessions) { session in
+                            Button { onOpenSession(session) } label: {
+                                HStack(spacing: Spacing.sm) {
+                                    Image(systemName: "bubble.left").foregroundStyle(palette.textSecondary)
+                                    Text(session.title).font(.system(size: 13, weight: .medium))
+                                    Text(session.flowMembership.label)
+                                        .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                                    Spacer()
+                                    Text(session.state.rawValue.capitalized)
+                                        .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                                }
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("task-session-\(session.id)")
+                        }
+                    }
+                } else if sessions != nil, model.sessions.value != nil, model.sessions.errorMessage == nil {
+                    Text("No open Sessions.")
+                        .font(Typography.body(12))
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("workspace-no-sessions")
+                }
+                HStack {
+                    sectionHeading("Description")
+                    Spacer()
+                    Button("Edit description") {
+                        editingTask = WorkTaskSelection(wave: found.wave.wave, task: task)
+                    }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier("workspace-edit-directive")
+                }
+                if task.task.description.isEmpty {
+                    Text("No description recorded.").foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("workspace-task-directive")
+                } else {
+                    MarkdownBlocks(source: task.task.description)
+                        .accessibilityIdentifier("workspace-task-directive")
                 }
             }
         } else {
@@ -261,20 +280,55 @@ struct WorkSurfaceView: View {
         }
     }
 
+    private func sectionHeading(_ text: String) -> some View {
+        Text(text)
+            .font(Typography.caption(11).weight(.semibold))
+            .tracking(0.8)
+            .textCase(.uppercase)
+            .foregroundStyle(palette.textSecondary)
+            .padding(.top, Spacing.sm)
+    }
+
+    private func planRow(_ task: RoadmapTask) -> some View {
+        Button {
+            if let onOpenTask { onOpenTask(.task(id: task.id)) } else { model.select(.task(id: task.id)) }
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: task.task.completed ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(task.task.completed ? Color.statusSuccess : palette.textSecondary)
+                    .frame(width: 14)
+                Text(task.task.name)
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: Spacing.sm)
+                Text(task.task.identifier)
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(task.task.name)
+        .accessibilityIdentifier("podium-task-\(task.id)")
+    }
+
     // MARK: - Shared pieces
 
     private var missingSelection: some View {
         ContentUnavailableView(
-            "Selection is gone",
+            "Selected Work is unavailable",
             systemImage: "questionmark.circle",
-            description: Text("The selected work is absent from the latest roadmap.")
+            description: Text("This planning read cannot resolve the selection. Its Sessions remain accessible in the work list.")
         )
     }
 
     private func surfaceHeader(_ title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             Text(title)
-                .font(Typography.sectionTitle(22))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(palette.text)
             Text(subtitle)
                 .font(Typography.caption(11))
@@ -291,16 +345,6 @@ struct WorkSurfaceView: View {
             .background(WaveLensColor.blue.glow.opacity(0.12))
             .clipShape(Capsule())
             .accessibilityIdentifier("wave-paused-\(waveId)")
-    }
-
-    private func sectionBadge(_ section: RoadmapSection) -> some View {
-        Text(section.label)
-            .font(Typography.caption(9).weight(.semibold))
-            .foregroundStyle(section.color)
-            .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, 2)
-            .background(section.color.opacity(0.12))
-            .clipShape(Capsule())
     }
 
     private func evidenceBanner(title: String, detail: String) -> some View {
@@ -387,6 +431,73 @@ struct WorkSurfaceView: View {
             return
         }
         controlError = nil
+    }
+}
+
+struct TaskDirectiveEditor: View {
+    let model: PodiumModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var palette
+    @State private var draft: String
+    @State private var isSaving = false
+    @State private var saveError: String?
+
+    init(model: PodiumModel, task: RoadmapTask, wave: WaveSnapshot) {
+        self.model = model
+        self.task = task
+        self.wave = wave
+        _draft = State(initialValue: task.task.description)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Text("Edit description · \(task.task.identifier)")
+                .font(.system(size: 14, weight: .semibold))
+            TextEditor(text: $draft)
+                .font(Typography.body(13))
+                .scrollContentBackground(.hidden)
+                .padding(Spacing.sm)
+                .background(palette.surfaceMuted)
+                .accessibilityIdentifier("task-directive-draft")
+                .disabled(isSaving)
+            if let saveError {
+                Text(saveError)
+                    .font(Typography.body(12))
+                    .foregroundStyle(Color.statusWarning)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-directive-error")
+            }
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSaving)
+                Spacer()
+                if isSaving { ProgressView().controlSize(.small) }
+                Button("Save description") {
+                    isSaving = true
+                    saveError = nil
+                    Task {
+                        defer { isSaving = false }
+                        do {
+                            try await model.updateTaskDirective(task: task, wave: wave, text: draft)
+                            dismiss()
+                        } catch {
+                            saveError = error.localizedDescription
+                        }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(isSaving)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(minWidth: 520, minHeight: 360)
+        .foregroundStyle(palette.text)
+        .background(palette.background)
+        .interactiveDismissDisabled(isSaving)
     }
 }
 #endif

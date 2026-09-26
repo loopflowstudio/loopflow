@@ -26,6 +26,7 @@ mod run;
 pub mod task;
 pub mod task_actions;
 pub mod task_execution;
+pub mod task_flow;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;

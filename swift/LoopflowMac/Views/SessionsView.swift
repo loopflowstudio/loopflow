@@ -9,15 +9,25 @@ extension Notification.Name {
     static let openSessions = Notification.Name("loopflow.openSessions")
 }
 
-/// One window's terminal workspace for a repository: the pane layout and the
+/// One window's terminal workspace for a checkout: the pane layout and the
 /// pool of live surfaces behind it.
 @MainActor
 final class SessionsWorkspace {
     let multiplexer = MultiplexerStore()
-    let surfaces = GhosttySurfacePool()
+    let surfaces: GhosttySurfacePool
     private var surfaceClosed: AnyCancellable?
 
-    init() {
+    private var retainedStore: SessionsStore?
+
+    func sessionStore(repoPath: String, query: RegistryQuery) -> SessionsStore {
+        if let retainedStore { return retainedStore }
+        let store = SessionsStore(repoPath: repoPath, query: query, surfaces: surfaces)
+        retainedStore = store
+        return store
+    }
+
+    init(surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+        self.surfaces = surfaces
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
         surfaceClosed = NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)
@@ -41,62 +51,31 @@ final class SessionsWorkspace {
 @MainActor
 final class SessionsWorkspaceRegistry {
     private var workspaces: [String: SessionsWorkspace] = [:]
+    private var layouts: [String: WorktreeLayoutStore] = [:]
+    let surfaces = GhosttySurfacePool()
+
+    func layout(for repoPath: String) -> WorktreeLayoutStore {
+        if let layout = layouts[repoPath] { return layout }
+        let layout = WorktreeLayoutStore(path: repoPath)
+        layouts[repoPath] = layout
+        return layout
+    }
+
+    var paths: [String] { workspaces.keys.sorted() }
+
+    func path(containingShell id: String) -> String? {
+        workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
+    }
+
+    func reconcileSessions(_ ids: Set<String>, in paths: Set<String>) {
+        for path in paths { workspaces[path]?.multiplexer.reconcileSessions(ids) }
+    }
 
     func workspace(for repoPath: String) -> SessionsWorkspace {
         if let existing = workspaces[repoPath] { return existing }
-        let workspace = SessionsWorkspace()
+        let workspace = SessionsWorkspace(surfaces: surfaces)
         workspaces[repoPath] = workspace
         return workspace
-    }
-}
-
-enum SessionScope: Hashable, Sendable {
-    case repo(String)
-    case wave(repo: String, id: String)
-    case project(repo: String, id: String)
-    case task(repo: String, id: String)
-
-    var repoPath: String {
-        switch self {
-        case .repo(let path): path
-        case .wave(let path, _), .project(let path, _), .task(let path, _): path
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .repo(let path): URL(fileURLWithPath: path).lastPathComponent
-        case .wave(_, let id): id
-        case .project(_, let id): id
-        case .task(_, let id): id
-        }
-    }
-
-    func resolvingRepository() -> SessionScope {
-        let path = WaveOrigin.resolve(repoPath)
-        return switch self {
-        case .repo:
-            .repo(path)
-        case .wave(_, let id):
-            .wave(repo: path, id: id)
-        case .project(_, let id):
-            .project(repo: path, id: id)
-        case .task(_, let id):
-            .task(repo: path, id: id)
-        }
-    }
-
-    func includes(_ record: SessionRecord) -> Bool {
-        switch self {
-        case .repo:
-            true
-        case .wave(_, let id):
-            record.waveId == id || (record.work?.kind == .wave && record.work?.id == id)
-        case .project(_, let id):
-            record.work?.kind == .project && record.work?.id == id
-        case .task(_, let id):
-            record.work?.kind == .task && record.work?.id == id
-        }
     }
 }
 
@@ -112,21 +91,9 @@ struct SessionItem: Identifiable, Equatable {
 
     var record: SessionRecord
     var state: State
+    var resolutionError: String?
 
     var id: String { record.id }
-    var label: String { record.title }
-    var work: WorkReference? { record.work }
-
-    var statusLabel: String {
-        switch record.state {
-        case .waiting: "WAITING"
-        case .active: "ACTIVE"
-        case .ready: "READY"
-        case .closed: "CLOSED"
-        }
-    }
-
-    var step: String { record.detail }
 
     var surface: SessionRecord? {
         switch state {
@@ -144,167 +111,104 @@ struct SessionItem: Identifiable, Equatable {
 @MainActor
 final class SessionsStore: ObservableObject {
     @Published private(set) var sessions: [SessionItem] = []
-    @Published private(set) var hasLoaded = false
-    @Published var pollError: String?
+    var onResolved: ((String) -> Void)?
 
     let surfaces: GhosttySurfacePool
 
-    private let scope: SessionScope
+    let repoPath: String
     private let query: RegistryQuery
     private let metrics: SessionsLatencyMetrics
     private var hasRecordedSessionsLoad = false
-    private var requestedSessionId: String?
 
     init(
-        scope: SessionScope,
+        repoPath: String,
         query: RegistryQuery = RegistryQueryLocal.shared,
-        initialRecords: [SessionRecord]? = nil,
         surfaces: GhosttySurfacePool = GhosttySurfacePool()
     ) {
-        let scope = scope.resolvingRepository()
-        self.scope = scope
+        self.repoPath = WaveOrigin.resolve(repoPath)
         self.query = query
         self.surfaces = surfaces
-        metrics = SessionsLatencyMetrics(scope: scope.label)
-        if let initialRecords {
-            hasLoaded = true
-            reconcile(initialRecords)
-            metrics.recordSessionsLoaded(count: sessions.count)
-            hasRecordedSessionsLoad = true
-        }
-    }
-
-    func refresh() async {
-        do {
-            let records = try await query.sessions(cwd: scope.repoPath)
-            pollError = nil
-            reconcile(records)
-            hasLoaded = true
-            if !hasRecordedSessionsLoad {
-                metrics.recordSessionsLoaded(count: sessions.count)
-                hasRecordedSessionsLoad = true
-            }
-        } catch {
-            pollError = error.localizedDescription
-            hasLoaded = true
-        }
+        metrics = SessionsLatencyMetrics(scope: URL(fileURLWithPath: self.repoPath).lastPathComponent)
     }
 
     func reconcile(_ records: [SessionRecord]) {
-        let filtered = records.filter(scope.includes)
-        let incoming = Set(filtered.map(\.id))
+        if !hasRecordedSessionsLoad {
+            metrics.recordSessionsLoaded(count: records.count)
+            hasRecordedSessionsLoad = true
+        }
+        let incoming = Set(records.map(\.id))
         sessions.removeAll { !incoming.contains($0.id) }
 
-        for record in filtered {
-            let interactiveState: SessionItem.State = surfaces.hasSurface(
-                .session(record.id)
-            ) ? .live : record.state == .active ? .elsewhere : .pending
+        for record in records {
+            let observedState: SessionItem.State = localTerminal(for: record) != nil
+                ? .live : record.action(.moveHere) != nil ? .elsewhere : .pending
             if let index = _index(record.id) {
-                // Polling returns ordinary open argv. Keep the prepared launch
-                // (including explicit --replace) until its surface is created.
-                if record.kind == .interactive, case .prepared = sessions[index].state {
-                    continue
-                }
+                // Keep a prepared command until the retained native view consumes it.
+                if case .prepared = sessions[index].state { continue }
                 sessions[index].record = record
-                if record.kind == .interactive {
-                    if case .opening = sessions[index].state {
-                        continue
-                    }
-                    // Keep a failure visible until it is retried or a truthier
-                    // state (live here, or active elsewhere) supersedes it.
-                    if case .failed = sessions[index].state, interactiveState == .pending {
-                        continue
-                    }
-                    sessions[index].state = interactiveState
-                } else {
-                    if record.state != .waiting {
-                        sessions[index].state = .live
-                    } else if case .live = sessions[index].state {
-                        sessions[index].state = .pending
-                    }
-                }
+                if case .opening = sessions[index].state { continue }
+                if case .failed = sessions[index].state, observedState == .pending { continue }
+                sessions[index].state = observedState
             } else {
-                sessions.append(
-                    SessionItem(
-                        record: record,
-                        state: record.kind == .interactive
-                            ? interactiveState
-                            : record.state == .waiting ? .pending : .live
-                    )
-                )
+                sessions.append(SessionItem(record: record, state: observedState))
             }
         }
     }
 
-    func recover(_ id: String, replacing: Bool = false) async -> SessionRecord? {
-        guard let index = _index(id) else { return nil }
+    private func recover(_ id: String, replacing: Bool = false) async {
+        guard let index = _index(id),
+              let action = sessions[index].record.action(replacing ? .moveHere : .open),
+              action.unavailableReason == nil else { return }
         switch sessions[index].state {
         case .pending, .failed:
             sessions[index].state = .opening
         case .elsewhere where replacing:
             sessions[index].state = .opening
-        case .elsewhere:
-            return nil
-        case .opening, .prepared, .live:
-            return nil
+        case .elsewhere, .opening, .prepared, .live:
+            return
         }
         do {
             let surface = try await query.openSession(
                 id: id,
                 replacing: replacing,
-                cwd: scope.repoPath
+                cwd: repoPath
             )
-            guard let latest = _index(id) else { return nil }
+            guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].record = surface
                 sessions[latest].state = .prepared
             }
-            return surface
         } catch {
-            guard let latest = _index(id) else { return nil }
+            guard let latest = _index(id) else { return }
             sessions[latest].state = .failed(error.localizedDescription)
-            return nil
         }
     }
 
-    func select(_ id: String) async -> SessionRecord? {
-        guard let index = _index(id) else { return nil }
-        requestedSessionId = id
-        if sessions[index].record.kind == .interactive {
-            if surfaces.hasSurface(.session(id)) {
-                sessions[index].state = .live
-                requestedSessionId = nil
-                return sessions[index].record
-            }
-            if case .live = sessions[index].state {
-                sessions[index].state = sessions[index].record.state == .active
-                    ? .elsewhere : .pending
-            }
+    func select(_ id: String) async {
+        guard let index = _index(id) else { return }
+        if localTerminal(for: sessions[index].record) != nil {
+            sessions[index].state = .live
+            return
         }
-        if let surface = sessions[index].surface {
-            requestedSessionId = nil
-            return surface
+        if case .live = sessions[index].state {
+            sessions[index].state = sessions[index].record.action(.moveHere) != nil
+                ? .elsewhere : .pending
         }
-        if case .opening = sessions[index].state { return nil }
-        if case .elsewhere = sessions[index].state { return nil }
-
-        let surface = await recover(id)
-        guard requestedSessionId == id else { return nil }
-        requestedSessionId = nil
-        return surface
+        await recover(id)
     }
 
-    func moveHere(_ id: String) async -> SessionRecord? {
-        guard _index(id) != nil else { return nil }
-        requestedSessionId = id
-        let surface = await recover(id, replacing: true)
-        guard requestedSessionId == id else { return nil }
-        requestedSessionId = nil
-        return surface
+    func moveHere(_ id: String) async {
+        await recover(id, replacing: true)
     }
 
     func beginPaneLoad(_ id: String) {
         metrics.beginPaneLoad(id)
+    }
+
+    func localTerminal(for record: SessionRecord) -> TerminalIdentity? {
+        if surfaces.hasSurface(.session(record.id)) { return .session(record.id) }
+        return record.terminalIds.lazy.map { TerminalIdentity.shell($0) }
+            .first(where: surfaces.hasSurface)
     }
 
     func recordPaneLive(_ id: String) {
@@ -315,14 +219,16 @@ final class SessionsStore: ObservableObject {
     }
 
     func complete(_ id: String) async -> Bool {
-        guard _index(id) != nil else { return false }
+        guard let index = _index(id) else { return false }
+        sessions[index].resolutionError = nil
         do {
-            try await query.completeSession(id: id, cwd: scope.repoPath)
-            await refresh()
+            try await query.completeSession(id: id, cwd: repoPath)
+            sessions.removeAll { $0.id == id }
+            onResolved?(id)
             return true
         } catch {
             guard let latest = _index(id) else { return false }
-            sessions[latest].state = .failed(error.localizedDescription)
+            sessions[latest].resolutionError = error.localizedDescription
             return false
         }
     }
@@ -345,7 +251,7 @@ final class SessionsStore: ObservableObject {
         else { return }
         switch sessions[index].state {
         case .prepared, .live:
-            sessions[index].state = sessions[index].record.state == .active
+            sessions[index].state = sessions[index].record.action(.moveHere) != nil
                 ? .elsewhere : .pending
         case .pending, .elsewhere, .opening, .failed:
             break
@@ -392,375 +298,225 @@ private final class SessionsLatencyMetrics {
     }
 }
 
+/// Unified Work navigation around the existing retained native workspace.
 struct SessionsView: View {
-    private let scope: SessionScope
-    private let multiplexer: MultiplexerStore
-    private let onShowWork: () -> Void
-    private let query: RegistryQuery
-
-    @StateObject private var store: SessionsStore
-    @State private var layoutSnapshot: LayoutNode
-    @State private var focusedPaneId: String
-    @State private var zoomedPaneId: String?
-    /// Session work id → its Wave/Project/Task, resolved from the roadmap so a
-    /// row shows what it *is* instead of an opaque `task_…` id.
-    @State private var hierarchy: [String: SessionContext] = [:]
+    @Bindable var model: PodiumModel
+    private let workspaces: SessionsWorkspaceRegistry
+    private let worktreeLayout: WorktreeLayoutStore
+    @ObservedObject private var store: SessionsStore
+    @State private var layoutRevision = 0
+    @State private var launchError: String?
     @Environment(\.palette) private var palette
 
-    init(
-        scope: SessionScope,
-        workspaces: SessionsWorkspaceRegistry,
-        query: RegistryQuery = RegistryQueryLocal.shared,
-        initialRecords: [SessionRecord]? = nil,
-        onShowWork: @escaping () -> Void = {}
-    ) {
-        let scope = scope.resolvingRepository()
-        self.scope = scope
-        self.onShowWork = onShowWork
-        self.query = query
-        let workspace = workspaces.workspace(for: scope.repoPath)
-        self.multiplexer = workspace.multiplexer
-        _store = StateObject(
-            wrappedValue: SessionsStore(
-                scope: scope,
-                query: query,
-                initialRecords: initialRecords,
-                surfaces: workspace.surfaces
-            )
-        )
-        _layoutSnapshot = State(initialValue: multiplexer.layout)
-        _focusedPaneId = State(initialValue: multiplexer.focusedPaneId)
-        _zoomedPaneId = State(initialValue: multiplexer.zoomedPaneId)
+    private var multiplexer: MultiplexerStore {
+        workspaces.workspace(for: worktreeLayout.focusedPath ?? store.repoPath).multiplexer
+    }
+    private var availablePaths: [String] {
+        worktreeLayout.knownPaths.union(store.sessions.map(\.record.cwd)).sorted()
     }
 
+    init(model: PodiumModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
+         query: RegistryQuery = RegistryQueryLocal.shared) {
+        self.model = model
+        self.workspaces = workspaces
+        worktreeLayout = workspaces.layout(for: repoPath)
+        let store = workspaces.workspace(for: repoPath).sessionStore(repoPath: repoPath, query: query)
+        store.onResolved = { [weak model] id in model?.sessionResolved(id, repo: repoPath) }
+        _store = ObservedObject(wrappedValue: store)
+    }
+
+    private var navigation: WorkspaceNavigation { model.navigation }
+    private var terminalsVisible: Bool { navigation.content == .terminals }
+
     var body: some View {
-        HSplitView {
-            sidebar
-                .frame(minWidth: 220, idealWidth: 275, maxWidth: 360)
-            MultiplexerView(
-                layout: layoutSnapshot,
-                focusedPaneId: focusedPaneId,
-                zoomedPaneId: zoomedPaneId,
-                scope: scope,
-                sessions: store,
-                store: multiplexer
-            )
-            .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+        let _ = layoutRevision
+        VStack(spacing: 0) {
+            if let error = model.sessions.errorMessage {
+                Text("Sessions unavailable — \(error)")
+                    .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
+                    .padding(Spacing.sm)
+            }
+            HStack(spacing: 0) {
+                WorkspaceNavigator(model: model, onOpenSession: openSession, onConversation: { work in
+                    model.select(work)
+                    startConversation()
+                }, onNewShell: {
+                    if worktreeLayout.focusedPath == nil { worktreeLayout.select(store.repoPath) }
+                    multiplexer.newShell()
+                    navigation.content = .terminals
+                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask)
+                    .frame(width: 272)
+                Divider()
+                VStack(spacing: 0) {
+                    if let crumb = model.workspace.breadcrumb(
+                        selection: model.selection,
+                        sessionId: navigation.selectedSessionId
+                    ) {
+                        WorkspaceBreadcrumbBar(
+                            model: model, crumb: crumb,
+                            onOpenSession: openSession, onMonitor: showMonitor
+                        )
+                    }
+                    ZStack {
+                        WorktreeNodeView(
+                            node: worktreeLayout.layout, layout: worktreeLayout,
+                            workspaces: workspaces, paths: availablePaths, isActive: terminalsVisible, sessions: store
+                        )
+                        .opacity(terminalsVisible ? 1 : 0)
+                        .disabled(!terminalsVisible)
+                        .allowsHitTesting(terminalsVisible)
+                        .accessibilityHidden(!terminalsVisible)
+                        VStack(spacing: 0) {
+                            HSplitView {
+                                WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
+                                                onNewSession: newTaskSession)
+                                    .frame(minWidth: 300, maxWidth: .infinity)
+                                if navigation.showsActivity {
+                                    WorkActivityView(model: model)
+                                        .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
+                                }
+                            }
+                        }
+                        .background(palette.background)
+                        .opacity(navigation.content == .details ? 1 : 0)
+                        .allowsHitTesting(navigation.content == .details)
+                        .accessibilityHidden(navigation.content != .details)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                }
+            }
         }
         .background(palette.background)
+        .tint(palette.accent)
+        .environment(model)
         .overlay {
-            SessionsShortcutMonitor { shortcut in
-                _handle(shortcut)
+            if terminalsVisible {
+                SessionsShortcutMonitor { _handle($0) }
+                    .allowsHitTesting(false).frame(width: 0, height: 0)
             }
-            .allowsHitTesting(false)
-            .frame(width: 0, height: 0)
         }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)
-        ) { notification in
-            guard let source = notification.object as? MultiplexerStore,
-                  source === multiplexer else { return }
-            layoutSnapshot = multiplexer.layout
-            focusedPaneId = multiplexer.focusedPaneId
-            zoomedPaneId = multiplexer.zoomedPaneId
+        .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
+            guard notification.object is MultiplexerStore else { return }
+            layoutRevision += 1
+        }
+        .onChange(of: model.sessions.value, initial: true) { _, records in
+            guard let records else { return }
+            let previous = Set(store.sessions.map(\.id))
+            store.reconcile(records)
+            let ids = Set(store.sessions.map(\.id))
+            for id in previous.subtracting(ids) { store.releaseSurface(id) }
+            workspaces.reconcileSessions(ids, in: worktreeLayout.knownPaths)
         }
         .onChange(of: store.sessions.map(\.id)) { previous, ids in
-            for id in Set(previous).subtracting(ids) {
-                store.releaseSurface(id)
-            }
-            multiplexer.reconcileSessions(Set(ids))
+            for id in Set(previous).subtracting(ids) { store.releaseSurface(id) }
+            workspaces.reconcileSessions(Set(ids), in: worktreeLayout.knownPaths)
         }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)
-        ) { notification in
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
             store.noteSurfaceClosed(terminal)
         }
-        .task {
-            // Sessions are the primary content. Do not hold the list behind
-            // the slower roadmap query used only to enrich its group labels.
-            await store.refresh()
-            // The retained layout may hold panes for Sessions that resolved
-            // while this view was away; onChange only sees later changes.
-            if store.pollError == nil {
-                multiplexer.reconcileSessions(Set(store.sessions.map(\.id)))
-            }
-            await _loadHierarchy()
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(2))
-                } catch {
-                    return
-                }
-                await store.refresh()
-                // Resolve any newly-seen session whose task we don't know yet.
-                if store.sessions.contains(where: { item in
-                    item.work.map { hierarchy[$0.id] == nil } ?? false
-                }) {
-                    await _loadHierarchy()
-                }
-            }
+        .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
+            navigation.content = .terminals
         }
-        .accessibilityElement(children: .contain)
+        .alert("Could not start conversation", isPresented: Binding(
+            get: { launchError != nil },
+            set: { if !$0 { launchError = nil } }
+        )) {
+            Button("OK") { launchError = nil }
+        } message: { Text(launchError ?? "") }
         .accessibilityIdentifier("sessions-surface")
     }
 
-    private struct SessionContext: Equatable {
-        let wave: String
-        let identifier: String
-        let workName: String
-    }
-
-    /// Resolve every bound Session to its Wave/Project/Task via the roadmap.
-    private func _loadHierarchy() async {
-        guard let snapshot = try? await query.roadmap() else { return }
-        var index = hierarchy
-        for wave in snapshot.waves {
-            let context = SessionContext(wave: wave.wave.name, identifier: wave.wave.name, workName: wave.wave.name)
-            index[wave.wave.id] = context
-            if let chapter = wave.chapter { index[chapter.sourceProjectId] = context }
-            for task in wave.tasks.items {
-                let context = SessionContext(wave: wave.wave.name, identifier: task.task.identifier, workName: task.task.name)
-                if let workId = task.runtime?.workId { index[workId] = context }
-                index[task.task.id] = context
-            }
-        }
-        if !index.isEmpty { hierarchy = index }
-    }
-
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text("SESSIONS")
-                        .font(Typography.caption(9).weight(.bold))
-                        .tracking(1.4)
-                        .foregroundStyle(palette.textSecondary)
-                    Text(scope.label)
-                        .font(Typography.sectionTitle(17))
-                        .foregroundStyle(palette.text)
-                        .lineLimit(1)
-                }
-                Spacer()
-                if let pollError = store.pollError {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Color.statusWarning)
-                        .help(pollError)
-                }
-            }
-            .padding(Spacing.md)
-
-            Divider()
-
-            if !store.hasLoaded {
-                ProgressView("Loading sessions…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                sessionList
-            }
-
-            Divider()
-            VStack(spacing: Spacing.xs) {
-                Button {
-                    multiplexer.newShell()
-                } label: {
-                    Label("New shell", systemImage: "plus")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("sessions-new-shell")
-
-                Button(action: onShowWork) {
-                    Label("Waves & roadmap", systemImage: "water.waves")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("sessions-show-work")
-            }
-            .font(Typography.body(11).weight(.semibold))
-            .foregroundStyle(palette.text)
-            .padding(Spacing.md)
-        }
-        .background(palette.surface)
-    }
-
-    // Group Work-bound sessions by Wave › Project. Unbound Run sessions stay
-    // visible under Other.
-    private struct SessionGroup: Identifiable {
-        let wave: String
-        let items: [SessionRowItem]
-        var id: String { wave }
-    }
-
-    private struct SessionRowItem: Identifiable {
-        let item: SessionItem
-        let context: SessionContext?
-        var id: String { "\(item.id)#\(item.record.title)" }
-    }
-
-    private func _groupedSessions() -> [SessionGroup] {
-        var order: [String] = []
-        var buckets: [String: (wave: String, items: [SessionRowItem])] = [:]
-        for item in store.sessions {
-            let context = item.work.flatMap { hierarchy[$0.id] } ?? item.record.waveId.flatMap { hierarchy[$0] }
-            let row = SessionRowItem(item: item, context: context)
-            let wave = context?.wave ?? "—"
-            let key = wave
-            if buckets[key] == nil {
-                buckets[key] = (wave, [])
-                order.append(key)
-            }
-            buckets[key]?.items.append(row)
-        }
-        return order.compactMap { key in
-            buckets[key].map { SessionGroup(wave: $0.wave, items: $0.items) }
-        }
-    }
-
-    private var sessionList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                if store.sessions.isEmpty {
-                    _emptyState
-                } else {
-                    ForEach(_groupedSessions()) { group in
-                        _groupHeader(group.wave)
-                        ForEach(group.items) { row in
-                            _sessionRow(row)
-                        }
-                    }
-                }
-            }
-            .padding(Spacing.sm)
-        }
-    }
-
-    private func _groupHeader(_ wave: String) -> some View {
-        Text(wave == "—" ? "Other" : wave)
-            .font(Typography.caption(9).weight(.bold))
-            .foregroundStyle(Color.loopflowBurgundy)
-            .padding(.top, Spacing.sm)
-    }
-
-    private var _emptyState: some View {
-        if let pollError = store.pollError {
-            ContentUnavailableView(
-                "Sessions unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text(pollError)
-            )
-            .frame(maxWidth: .infinity)
-            .padding(.top, Spacing.xl)
+    private func openSession(_ record: SessionRecord) {
+        let subject = model.workspace.subject(for: record.id)
+        model.select(subject)
+        navigation.selectedSessionId = record.id
+        navigation.content = .terminals
+        // Place the opening/error/elsewhere pane immediately. A slow preparation
+        // must never change focus after the human selects another subject.
+        if case .shell(let id) = store.localTerminal(for: record),
+           let path = workspaces.path(containingShell: id) {
+            worktreeLayout.select(path)
+            multiplexer.setFocusedPane(id)
+            store.surfaces.focus(.shell(id))
         } else {
-            ContentUnavailableView(
-                "No sessions",
-                systemImage: "checkmark.circle",
-                description: Text("Interactive runs and requests for your input appear here until completed.")
-            )
-            .frame(maxWidth: .infinity)
-            .padding(.top, Spacing.xl)
+            worktreeLayout.select(record.cwd)
+            multiplexer.load(sessionId: record.id)
+            store.surfaces.focus(.session(record.id))
+        }
+        store.beginPaneLoad(record.id)
+        Task { @MainActor in await store.select(record.id) }
+    }
+
+    /// A Task with exactly one open Session drills into that Session; zero or
+    /// several open the Task overview, which names each conversation.
+    private func openTask(_ work: WorkReference) {
+        let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
+            .first { $0.id.work == work }?.sessions ?? []
+        if sessions.count == 1, let session = sessions.first {
+            openSession(session)
+        } else {
+            model.select(work)
         }
     }
 
-    private func _sessionRow(_ row: SessionRowItem) -> some View {
-        let item = row.item
-        let pane = _pane(for: item.id)
-        let isFocused = pane?.id == focusedPaneId
-        let color = pane.map { multiplexer.color(for: $0.id).color }
-        return VStack(alignment: .leading, spacing: Spacing.xxs) {
-            Button {
-                let startsTerminal = pane == nil && item.state != .elsewhere
-                if startsTerminal {
-                    store.beginPaneLoad(item.id)
-                }
-                Task { @MainActor in
-                    let surface = await store.select(item.id)
-                    guard let selected = store.sessions.first(where: { $0.id == item.id })
-                    else { return }
-                    // An "active elsewhere" Session still opens a pane: the pane
-                    // explains the situation and offers the explicit Move here.
-                    if surface != nil || selected.state == .elsewhere {
-                        _load(selected)
-                    }
-                }
-            } label: {
-                HStack(alignment: .top, spacing: Spacing.sm) {
-                    Circle()
-                        .fill(color ?? _stateColor(item.state))
-                        .frame(width: 8, height: 8)
-                        .padding(.top, 4)
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        Text(item.record.title)
-                            .font(Typography.body(11).weight(.semibold))
-                            .foregroundStyle(palette.text)
-                            .lineLimit(2)
-                        HStack(spacing: Spacing.xs) {
-                            Text(row.context?.identifier ?? item.record.work?.id ?? "Run")
-                                .font(Typography.caption(9))
-                                .foregroundStyle(palette.textSecondary)
-                            Text(item.step)
-                                .font(Typography.caption(8))
-                                .fontWeight(.semibold)
-                                .foregroundStyle(palette.textSecondary)
-                                .padding(.horizontal, Spacing.xxs)
-                                .padding(.vertical, 1)
-                                .background(palette.textSecondary.opacity(0.14), in: Capsule())
-                        }
-                        .lineLimit(1)
-                        if let error = item.error {
-                            Text(error)
-                                .font(Typography.caption(8))
-                                .foregroundStyle(Color.statusWarning)
-                                .lineLimit(2)
-                        }
-                    }
-                    Spacer(minLength: Spacing.xs)
-                    Text(_status(item, pane: pane))
-                        .font(Typography.caption(8).weight(.bold))
-                        .foregroundStyle(isFocused ? (color ?? palette.textSecondary) : palette.textSecondary)
-                }
-                .padding(Spacing.sm)
-                .background(
-                    (isFocused ? (color ?? Color.clear).opacity(0.12) : Color.clear),
-                    in: RoundedRectangle(cornerRadius: 8)
-                )
-                .contentShape(Rectangle())
+    private func showMonitor(_ taskId: String) {
+        let workspace = model.task(id: taskId)?.task.reference.workspace
+        let existing = workspaces.paths.first { path in
+            workspaces.workspace(for: path).multiplexer.layout.allPanes.contains {
+                $0.content == .monitor(taskId: taskId)
             }
-            .buttonStyle(.plain)
-            .help(
-                item.state == .elsewhere
-                    ? "Show this Session's status and transfer options"
-                    : ""
-            )
-            .accessibilityLabel("\(item.label), \(_status(item, pane: pane))")
-            .accessibilityIdentifier("session-row-\(item.id)")
+        }
+        let path = existing ?? workspace.flatMap { $0.localExists == true ? $0.worktree : nil } ?? store.repoPath
+        worktreeLayout.select(path)
+        navigation.selectedSessionId = nil
+        navigation.content = .terminals
+        multiplexer.showMonitor(taskId: taskId)
+        model.observeActiveRuns()
+    }
+
+    private func startConversation() {
+        guard let conversationScope = model.conversationScope else { return }
+        launch(conversationScope, in: navigation)
+    }
+
+    /// `navigation` belongs to the repository that requested the launch; a
+    /// launch that finishes after the human switched repositories must not
+    /// redirect the repository now on screen.
+    private func launch(_ scope: ConversationScope, in navigation: WorkspaceNavigation) {
+        do {
+            let lf = try LocalWaveAgentLauncher.controlLfPath()
+            worktreeLayout.select(scope.repoPath)
+            navigation.content = .terminals
+            multiplexer.newShell(command: ConversationLaunch(scope: scope).arguments(lf: lf))
+        } catch {
+            launchError = error.localizedDescription
         }
     }
 
-    private func _pane(for sessionId: String) -> PaneState? {
-        multiplexer.pane(forSessionId: sessionId)
-    }
-
-    private func _status(_ item: SessionItem, pane: PaneState?) -> String {
-        sessionRowStatus(item, hasOpenPane: pane != nil)
-    }
-
-    private func _stateColor(_ state: SessionItem.State) -> Color {
-        switch state {
-        case .pending, .opening, .prepared: palette.textSecondary.opacity(0.45)
-        case .elsewhere: Color.statusWarning
-        case .live: Color.statusSuccess
-        case .failed: Color.statusError
+    /// An independent conversation with Task context in the Task's checkout.
+    /// Resolving the checkout prepares Task Work only; it never starts the
+    /// managed Flow or replaces another Session.
+    private func newTaskSession(_ taskId: String) async throws {
+        guard let found = model.task(id: taskId) else { return }
+        let origin = navigation
+        let issue = found.task.task.identifier
+        let worktree: String
+        if let workspace = found.task.reference.workspace, workspace.localExists == true {
+            worktree = workspace.worktree
+        } else {
+            let repo = store.repoPath
+            worktree = try await Task.detached(priority: .userInitiated) {
+                try LocalWaveAgentLauncher.prepareTask(repoPath: repo, issue: issue)
+            }.value
         }
-    }
-
-    private func _load(_ item: SessionItem) {
-        multiplexer.load(sessionId: item.id)
+        launch(.task(repo: worktree, id: issue), in: origin)
     }
 
     private func _destroySurface(in pane: PaneState) {
         switch pane.content {
-        case .empty:
+        case .empty, .monitor:
             return
         case .shell:
             store.surfaces.release(.shell(pane.id))
@@ -788,11 +544,112 @@ struct SessionsView: View {
     }
 }
 
+private struct WorktreeNodeView: View {
+    let node: WorktreeLayout
+    let layout: WorktreeLayoutStore
+    let workspaces: SessionsWorkspaceRegistry
+    let paths: [String]
+    let isActive: Bool
+    @ObservedObject var sessions: SessionsStore
+
+    var body: some View { content }
+
+    private var content: AnyView {
+        switch node {
+        case .leaf(let id, let path):
+            return AnyView(VStack(spacing: 0) {
+                HStack(spacing: Spacing.sm) {
+                    Menu {
+                        ForEach(paths, id: \.self) { candidate in
+                            Button(URL(fileURLWithPath: candidate).lastPathComponent) {
+                                layout.select(candidate, in: id)
+                            }
+                        }
+                    } label: {
+                        Label(path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Choose worktree", systemImage: "folder")
+                    }
+                    .help(path ?? "Choose a worktree for this slot")
+                    Spacer()
+                    if let path {
+                        Button {
+                            layout.focus(id)
+                            workspaces.workspace(for: path).multiplexer.newShell()
+                        } label: { Image(systemName: "terminal.fill") }
+                        .help("New terminal in this worktree")
+                        .accessibilityLabel("New terminal in worktree")
+                    }
+                    Button { layout.split(id, axis: .vertical) } label: {
+                        Image(systemName: "rectangle.split.2x1")
+                    }
+                    .help("Split worktrees right")
+                    .accessibilityLabel("Split worktrees right")
+                    Button { layout.split(id, axis: .horizontal) } label: {
+                        Image(systemName: "rectangle.split.1x2")
+                    }
+                    .help("Split worktrees down")
+                    .accessibilityLabel("Split worktrees down")
+                    Button { layout.close(id) } label: { Image(systemName: "xmark") }
+                        .help("Hide this worktree; its terminals keep running")
+                        .accessibilityLabel("Hide worktree")
+                }
+                .buttonStyle(.plain)
+                .font(Typography.body(11).weight(.semibold))
+                .padding(Spacing.sm)
+                .background(layout.focusedSlotId == id ? Color.loopflowBurgundy.opacity(0.15) : Color.clear)
+                if let path {
+                    WorktreeTerminalsView(
+                        workspace: workspaces.workspace(for: path), path: path,
+                        isFocused: isActive && layout.focusedSlotId == id,
+                        sessions: sessions
+                    )
+                    .id(path)
+                    .simultaneousGesture(TapGesture().onEnded { layout.focus(id) })
+                } else {
+                    ContentUnavailableView("Choose a worktree", systemImage: "folder", description: Text("Select a worktree above to restore its conversation and terminals."))
+                }
+            }
+            .accessibilityIdentifier("worktree-slot-\(id)"))
+        case .split(let axis, let first, let second):
+            if axis == .vertical {
+                return AnyView(HSplitView { child(first); child(second) })
+            }
+            return AnyView(VSplitView { child(first); child(second) })
+        }
+    }
+
+    private func child(_ node: WorktreeLayout) -> WorktreeNodeView {
+        WorktreeNodeView(node: node, layout: layout, workspaces: workspaces, paths: paths, isActive: isActive,
+                         sessions: sessions)
+    }
+}
+
+private struct WorktreeTerminalsView: View {
+    let workspace: SessionsWorkspace
+    let path: String
+    let isFocused: Bool
+    @ObservedObject var sessions: SessionsStore
+    @State private var revision = 0
+
+    var body: some View {
+        let _ = revision
+        let store = workspace.multiplexer
+        MultiplexerView(
+            layout: store.layout,
+            focusedPaneId: isFocused ? store.focusedPaneId : "",
+            zoomedPaneId: store.zoomedPaneId,
+            workingDirectory: path, sessions: sessions, store: store
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
+            if let source = notification.object as? MultiplexerStore, source === store { revision += 1 }
+        }
+    }
+}
+
 private struct MultiplexerView: View {
     let layout: LayoutNode
     let focusedPaneId: String
     let zoomedPaneId: String?
-    let scope: SessionScope
+    let workingDirectory: String
     @ObservedObject var sessions: SessionsStore
     let store: MultiplexerStore
 
@@ -801,8 +658,8 @@ private struct MultiplexerView: View {
             if let zoomedPaneId, let pane = layout.pane(for: zoomedPaneId) {
                 SessionPaneView(
                     pane: pane,
-                    isFocused: true,
-                    scope: scope,
+                    isFocused: !focusedPaneId.isEmpty,
+                    workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store
                 )
@@ -810,7 +667,7 @@ private struct MultiplexerView: View {
                 MultiplexerNodeView(
                     node: layout,
                     focusedPaneId: focusedPaneId,
-                    scope: scope,
+                    workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store
                 )
@@ -825,7 +682,7 @@ private struct MultiplexerView: View {
 private struct MultiplexerNodeView: View {
     let node: LayoutNode
     let focusedPaneId: String
-    let scope: SessionScope
+    let workingDirectory: String
     @ObservedObject var sessions: SessionsStore
     let store: MultiplexerStore
 
@@ -838,7 +695,7 @@ private struct MultiplexerNodeView: View {
                 SessionPaneView(
                     pane: pane,
                     isFocused: pane.id == focusedPaneId,
-                    scope: scope,
+                    workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store
                 )
@@ -885,7 +742,7 @@ private struct MultiplexerNodeView: View {
         MultiplexerNodeView(
             node: child,
             focusedPaneId: focusedPaneId,
-            scope: scope,
+            workingDirectory: workingDirectory,
             sessions: sessions,
             store: store
         )
@@ -931,9 +788,10 @@ private struct SplitDivider: View {
 }
 
 private struct SessionPaneView: View {
+    @Environment(PodiumModel.self) private var model
     let pane: PaneState
     let isFocused: Bool
-    let scope: SessionScope
+    let workingDirectory: String
     @ObservedObject var sessions: SessionsStore
     let store: MultiplexerStore
     @State private var bellRinging = false
@@ -961,7 +819,7 @@ private struct SessionPaneView: View {
                 .strokeBorder(isFocused ? paneColor : Color.clear, lineWidth: 2)
         }
         .overlay(alignment: .bottomTrailing) {
-            completionAction
+            resolutionControls
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
@@ -974,7 +832,7 @@ private struct SessionPaneView: View {
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalTitle)) { notification in
             guard let update = notification.object as? GhosttyTerminalTitle,
                   update.terminal == _terminalIdentity else { return }
-            terminalTitle = update.title
+            terminalTitle = sessions.surfaces.title(for: update.terminal)
         }
         .onChange(of: isFocused) { _, focused in
             if focused { bellRinging = false }
@@ -1079,65 +937,77 @@ private struct SessionPaneView: View {
         .accessibilityIdentifier(id)
     }
 
-    @ViewBuilder
-    private var completionAction: some View {
-        // Only over a live terminal: a placeholder pane (elsewhere, opening,
-        // failed) leads with its own single action instead.
-        if let item, item.surface != nil {
-            Button {
-                isCompleting = true
-                Task { @MainActor in
-                    let completed = await sessions.complete(item.id)
-                    guard completed else {
-                        isCompleting = false
-                        return
-                    }
-                    store.close(pane.id)
-                    sessions.releaseSurface(item.id)
-                }
-            } label: {
-                HStack(spacing: Spacing.sm) {
-                    if isCompleting {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                    } else {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .bold))
-                    }
-                    Text("Complete")
-                        .font(Typography.body(13).weight(.bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, Spacing.xl)
-                .frame(height: 46)
-                .background(Color.statusSuccess, in: Capsule())
-                .overlay {
-                    Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+    private var paneSessions: [SessionItem] {
+        if case .shell = pane.content {
+            return sessions.sessions.filter {
+                sessions.localTerminal(for: $0.record) == .shell(pane.id)
             }
-            .buttonStyle(.plain)
-            .disabled(isCompleting || (item.record.kind != .interactive && item.record.state != .ready))
-            .help(_completionHelp(item))
-            .accessibilityLabel("Complete session")
-            .accessibilityHint(_completionHelp(item))
-            .accessibilityIdentifier("session-action-complete")
-            .padding(Spacing.xxl)
+        }
+        return item.map { [$0] } ?? []
+    }
+
+    private var completionItems: [SessionItem] {
+        // Placeholder panes lead with their opening or recovery action.
+        paneSessions.filter { $0.record.action(.complete) != nil && $0.surface != nil }
+    }
+
+    private var resolutionControls: some View {
+        VStack(alignment: .trailing, spacing: Spacing.sm) {
+            ForEach(paneSessions) { item in
+                if let error = item.resolutionError {
+                    Text(error)
+                        .font(Typography.caption(11))
+                        .foregroundStyle(Color.statusWarning)
+                        .padding(Spacing.sm)
+                        .background(LoopflowPalette.dark.background)
+                }
+            }
+            ForEach(completionItems) { item in
+                if let action = item.record.action(.complete) {
+                    completionButton(item, action: action)
+                }
+            }
         }
     }
 
-    private func _completionHelp(_ item: SessionItem) -> String {
-        switch item.record.kind {
-        case .ask where item.record.state != .ready, .flow where item.record.state != .ready:
-            "The session agent has not marked this ready"
-        case .ask:
-            "Complete the conversation and resume its blocked caller"
-        case .interactive:
-            "Stop the provider and remove this Session; native history remains resumable"
-        case .flow:
-            "Complete the review and return feedback to the next Flow step"
+    private func completionButton(_ item: SessionItem, action: SessionAction) -> some View {
+        Button {
+            isCompleting = true
+            Task { @MainActor in
+                defer { isCompleting = false }
+                guard await sessions.complete(item.id) else { return }
+                store.reconcileSessions(Set(sessions.sessions.map(\.id)))
+                sessions.releaseSurface(item.id)
+            }
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                if isCompleting {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .bold))
+                }
+                Text(completionItems.count > 1 ? "\(action.label) · \(item.record.title)" : action.label)
+                    .font(Typography.body(13).weight(.bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, Spacing.xl)
+            .frame(height: 46)
+            .background(Color.statusSuccess, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
         }
+        .buttonStyle(.plain)
+        .disabled(isCompleting || action.unavailableReason != nil)
+        .help(action.unavailableReason ?? action.help)
+        .accessibilityLabel(completionItems.count > 1 ? "Complete session: \(item.record.title)" : "Complete session")
+        .accessibilityHint(action.unavailableReason ?? action.help)
+        .accessibilityIdentifier("session-action-complete")
+        .padding(Spacing.xxl)
     }
 
     @ViewBuilder
@@ -1157,13 +1027,18 @@ private struct SessionPaneView: View {
             }
         case .shell:
             GhosttyTerminalView(
-                workingDirectory: scope.repoPath,
+                workingDirectory: workingDirectory,
+                argv: store.shellCommands[pane.id] ?? [],
                 terminal: .shell(pane.id),
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
                 onFocus: { store.setFocusedPane(pane.id) }
             )
             .id(pane.id)
+        case .monitor(let taskId):
+            TaskMonitorView(taskId: taskId, model: model)
+                .background(MonitorFocusTarget(isFocused: isFocused))
+                .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
         }
     }
 
@@ -1171,12 +1046,12 @@ private struct SessionPaneView: View {
         ContentUnavailableView {
             Label("No session open", systemImage: "terminal")
         } description: {
-            Text("Choose a session from the sidebar or start a shell.")
+            Text("Choose a session from the sidebar or start a terminal.")
         } actions: {
             Button {
                 store.newShell()
             } label: {
-                Label("New shell", systemImage: "plus")
+                Label("New terminal", systemImage: "terminal")
             }
             .buttonStyle(.borderedProminent)
             .tint(Color.loopflowBurgundy)
@@ -1200,13 +1075,7 @@ private struct SessionPaneView: View {
             } description: {
                 Text(message)
             } actions: {
-                Button("Try again") {
-                    sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in _ = await sessions.select(item.id) }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.loopflowBurgundy)
-                .accessibilityIdentifier("session-retry-\(item.id)")
+                openButton(item, retrying: true)
             }
         case .pending, .live:
             ContentUnavailableView {
@@ -1214,14 +1083,26 @@ private struct SessionPaneView: View {
             } description: {
                 Text("This Session has no live terminal in this pane yet.")
             } actions: {
-                Button("Open here") {
-                    sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in _ = await sessions.select(item.id) }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.loopflowBurgundy)
-                .accessibilityIdentifier("session-open-here-\(item.id)")
+                openButton(item, retrying: false)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func openButton(_ item: SessionItem, retrying: Bool) -> some View {
+        if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
+            Button(action.kind == .open && retrying ? "Try again" : action.label) {
+                sessions.beginPaneLoad(item.id)
+                Task { @MainActor in
+                    if action.kind == .moveHere { await sessions.moveHere(item.id) }
+                    else { await sessions.select(item.id) }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.loopflowBurgundy)
+            .disabled(action.unavailableReason != nil)
+            .help(action.unavailableReason ?? action.help)
+            .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
         }
     }
 
@@ -1240,22 +1121,25 @@ private struct SessionPaneView: View {
                 """
             )
         } actions: {
-            VStack(spacing: Spacing.sm) {
-                Button {
-                    sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in _ = await sessions.moveHere(item.id) }
-                } label: {
-                    Label("Move here", systemImage: "arrow.down.forward.square")
+            if let action = item.record.action(.moveHere) {
+                VStack(spacing: Spacing.sm) {
+                    Button {
+                        sessions.beginPaneLoad(item.id)
+                        Task { @MainActor in await sessions.moveHere(item.id) }
+                    } label: {
+                        Label(action.label, systemImage: "arrow.down.forward.square")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.loopflowBurgundy)
+                    .disabled(action.unavailableReason != nil)
+                    .help(action.unavailableReason ?? action.help)
+                    .accessibilityLabel("Move session here")
+                    .accessibilityHint("Stops the other client; unsent text typed there is lost")
+                    .accessibilityIdentifier("session-move-here-\(item.id)")
+                    Text("Moving stops the other client. Unsent text typed there is lost.")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(.white.opacity(0.55))
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.loopflowBurgundy)
-                .help("Stop the other terminal's provider client and resume this Session here")
-                .accessibilityLabel("Move session here")
-                .accessibilityHint("Stops the other client; unsent text typed there is lost")
-                .accessibilityIdentifier("session-move-here-\(item.id)")
-                Text("Moving stops the other client. Unsent text typed there is lost.")
-                    .font(Typography.caption(9))
-                    .foregroundStyle(.white.opacity(0.55))
             }
         }
         .accessibilityElement(children: .contain)
@@ -1265,7 +1149,7 @@ private struct SessionPaneView: View {
     @ViewBuilder
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
         GhosttyTerminalView(
-            workingDirectory: scope.repoPath,
+            workingDirectory: workingDirectory,
             argv: surface.openArgv,
             terminal: .session(surface.id),
             surfacePool: sessions.surfaces,
@@ -1279,11 +1163,13 @@ private struct SessionPaneView: View {
     }
 
     private var _title: String {
-        if let terminalTitle, !terminalTitle.isEmpty { return terminalTitle }
+        let title = terminalTitle ?? _terminalIdentity.flatMap { sessions.surfaces.title(for: $0) }
+        if let title, !title.isEmpty { return title }
         return switch pane.content {
         case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
+        case .monitor: "Monitor"
         }
     }
 
@@ -1293,23 +1179,41 @@ private struct SessionPaneView: View {
             item?.surface.map { .session($0.id) }
         case .shell:
             .shell(pane.id)
-        case .empty:
+        case .empty, .monitor:
             nil
         }
     }
 }
 
-/// Sidebar badge: VIEWING means this window shows the terminal in a pane,
-/// RUNNING means a live surface is retained without a visible pane, and
-/// ELSEWHERE means another client (Warp, another window, SSH) holds it.
-func sessionRowStatus(_ item: SessionItem, hasOpenPane: Bool) -> String {
-    if hasOpenPane, item.surface != nil { return "VIEWING" }
-    return switch item.state {
-    case .pending: item.statusLabel
-    case .elsewhere: "ELSEWHERE"
-    case .opening, .prepared: "OPENING…"
-    case .live: item.record.kind == .interactive ? "RUNNING" : item.statusLabel
-    case .failed: "RETRY"
+// Giving AppKit an observation responder prevents clearing terminal focus from
+// advancing straight to another visible terminal in the same key-view loop.
+private struct MonitorFocusTarget: NSViewRepresentable {
+    let isFocused: Bool
+
+    func makeNSView(context: Context) -> FocusView { FocusView() }
+
+    func updateNSView(_ view: FocusView, context: Context) {
+        guard view.focusRequested != isFocused else { return }
+        view.focusRequested = isFocused
+        view.applyFocus()
+    }
+
+    final class FocusView: NSView {
+        var focusRequested = false
+        override var acceptsFirstResponder: Bool { focusRequested }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyFocus()
+        }
+
+        func applyFocus() {
+            if focusRequested {
+                window?.makeFirstResponder(self)
+            } else if window?.firstResponder === self {
+                window?.makeFirstResponder(nil)
+            }
+        }
     }
 }
 

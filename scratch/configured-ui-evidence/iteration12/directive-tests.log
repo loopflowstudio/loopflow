@@ -1,0 +1,30 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.48s)
+Test Suite 'Selected tests' started at 2026-09-24 06:10:03.914.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 06:10:03.915.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 06:10:03.915.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 06:10:03.915.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified Work and Session navigation" started.
+◇ Suite "Task directive editing" started.
+◇ Test "Task details expose directive and Project proof from the same snapshot" started.
+◇ Test "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+◇ Test case passing 1 argument outcome → .rejected to "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+✔ Test "Task details expose directive and Project proof from the same snapshot" passed after 0.139 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 0.139 seconds.
+◇ Test case passing 1 argument outcome → .unreadable to "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+✔ Test "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" with 2 test cases passed after 0.152 seconds.
+◇ Test "A polling response started before Save cannot restore the old directive" started.
+✔ Test "A polling response started before Save cannot restore the old directive" passed after 0.001 seconds.
+✔ Suite "Task directive editing" passed after 0.153 seconds.
+✔ Test run with 3 tests in 2 suites passed after 0.153 seconds.

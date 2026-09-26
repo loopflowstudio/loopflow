@@ -1,0 +1,19 @@
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.08s)
+Test Suite 'Selected tests' started at 2026-09-24 15:08:39.720.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 15:08:39.721.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 15:08:39.721.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 15:08:39.721.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "DTO Fixtures" started.
+◇ Test "Sessions fixture preserves the unresolved Session projection" started.
+✔ Test "Sessions fixture preserves the unresolved Session projection" passed after 0.001 seconds.
+◇ Test "Every Session kind has a required Run reference independent of its boundary ID" started.
+✔ Test "Every Session kind has a required Run reference independent of its boundary ID" passed after 0.002 seconds.
+✔ Suite "DTO Fixtures" passed after 0.003 seconds.
+✔ Test run with 2 tests in 1 suite passed after 0.003 seconds.

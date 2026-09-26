@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::durable::{FlowPosition, RunId, TaskId};
 use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
+use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
 use crate::store::{SharedStore, StoreResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,14 +31,23 @@ pub(crate) async fn task_execution(
     store: &SharedStore,
     task_id: &TaskId,
 ) -> StoreResult<TaskExecutionSnapshot> {
+    Ok(task_execution_and_flow(store, task_id).await?.0)
+}
+
+/// Execution and the Flow record read from the same saved position.
+pub(crate) async fn task_execution_and_flow(
+    store: &SharedStore,
+    task_id: &TaskId,
+) -> StoreResult<(TaskExecutionSnapshot, TaskFlowRecord)> {
     let position = store.flow_position(task_id).await?;
     let evidence = position
         .as_ref()
         .and_then(|position| position.claim.as_ref())
         .map(|claim| task_worker_owner_evidence(&claim.owner));
     let mut snapshot = project_execution(position.as_ref(), evidence);
-    if position.is_none() {
-        if let Some(crate::work::task::TaskEventKind::FlowFinished { flow, .. }) = store
+    let record = match position.as_ref() {
+        Some(position) => TaskFlowRecord::Pinned(PinnedTaskFlow::new(position, &snapshot)),
+        None => match store
             .task_events_after(task_id, 0)
             .await?
             .into_iter()
@@ -45,10 +55,14 @@ pub(crate) async fn task_execution(
             .map(|event| event.kind)
             .find(|kind| matches!(kind, crate::work::task::TaskEventKind::FlowFinished { .. }))
         {
-            snapshot.reason = format!("Flow {flow} finished; no further steps are scheduled");
-        }
-    }
-    Ok(snapshot)
+            Some(crate::work::task::TaskEventKind::FlowFinished { flow, .. }) => {
+                snapshot.reason = format!("Flow {flow} finished; no further steps are scheduled");
+                TaskFlowRecord::Finished { flow }
+            }
+            _ => TaskFlowRecord::None,
+        },
+    };
+    Ok((snapshot, record))
 }
 
 fn project_execution(

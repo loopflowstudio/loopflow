@@ -1,0 +1,34 @@
+{
+  "sources": {
+    "docs/getting-started.md": "c8dd8a302d3c4779aa692b2bf1857b535a071fe719904370e35d2795d61469db",
+    "docs/lf.md": "83e11207ff1078fa24ebd038c25a38e48caf4b34ad41c18f729148aeebd0d591",
+    "rust/loopflow/src/bin/lf.rs": "54fa67d3ddb0c18056e799362b5c745f4a1fd57b42d0f82f125f09c0df36c12b",
+    "rust/loopflow/src/controller/wave/playhead.rs": "6476bca338f2f70b5bd8e78738c4b50ae29ead5dbde4f5c7c7500f1c31a059f9",
+    "rust/loopflow/src/controller/wave/runtime.rs": "1d707e5558fa71cf0a1e88f5c411016c588e8a8a9ebcad7520a33330061ab7e4",
+    "rust/loopflow/src/engine/builtins.rs": "94ac6e7cf8fc4a021e78f3668707db1cba24709212d7e4653eb47e5d0339fd76",
+    "rust/loopflow/src/engine/builtins/LOOPFLOW.md": "937d270b5860fcfc848bca27b40909f61b9dda93a2a3b6b5faa3a05f4834fc35",
+    "rust/loopflow/src/engine/builtins/task/flow/design.yaml": null,
+    "rust/loopflow/src/engine/builtins/task/flow/ship-5whys.yaml": null,
+    "rust/loopflow/src/engine/builtins/wave/flow/wave.yaml": null,
+    "rust/loopflow/src/lf/commands/flow.rs": "be22690e7d743585fb52eb9f1885a14c7e3603d7ec858f74f98617a51c36c77b",
+    "rust/loopflow/src/lf/discovery.rs": "b1de005bc7822156e11347d144bd5a5a788f9543d308ff9f23963214326ed3ab",
+    "rust/loopflow/src/lf/mod.rs": "8a81aeedddd1df43131833a69c92ecd63bceaacb7bb7b5827ba635aa12167a20",
+    "rust/loopflow/src/ops/task.rs": "fe236dbf6fd4796ca5fe111dabcdb469e6a27333c79593daa6e35328b8c4cc21",
+    "rust/loopflow/tests/flow_tests.rs": "9db2dffdcb68acca0f604c53bc235428350f8e942e88557c8914df3069f4887f",
+    "tests/goldens/basic.md": "de239d83bab5e1dbe978d439e64784e3c5e1282819f8e37083d206e005a91674",
+    "tests/goldens/builtin_debug.md": "89a4b77ffa0e95c4a64659b2fa5e712a093c15e00f903373efce3b22e61972c8",
+    "tests/goldens/builtin_implement.md": "2a80cea84693a030c56a1a0dd172bacd1caacfce065f81662d828c0158b845b2",
+    "tests/goldens/builtin_review_slice.md": "45e3013684bf13f6d46e4972e574b20f0d4d1762c13fecc1119a9878f2971ab9",
+    "tests/goldens/with_direction.md": "51a2ced8aa66bd363115e90e64e92186bd52d3f3c4cc9a8c5925e37cf386e73a",
+    "tests/goldens/with_docs.md": "3b71ecd807dc671b68cdb34af2d495e3a97e195f00524f69103ac9504a10b4ac",
+    "wave/product/GOAL.md": "3f99ce88f7b295e68898d812c0cddc8d22b14bfc7eb61b491158703807e8894d",
+    ".lf/directions/cli.md": "ecc47a10926f70a1d20dc5a15cff5b0c40be4d4f02810aa0d37c71a97a58d3fb"
+  },
+  "artifacts": {
+    "flow-tests.log": "d6b0a3d29130da096ced8a63e112bd3b25a3ff9dfc14494b5e90d80c1f17a972",
+    "unit-tests.log": "135bd5215b3997692c67090fd5ef157f4c9942e4a114677ea68b933810f807b5",
+    "golden-tests.log": "98b0cafee7553c08f7b200befd8f9e8272278740126c4f01cf422db7c9980550",
+    "clippy.log": "e60076807d97d7f03449c4e568934f058c5ae6973382c524e7540c22afef9e4f"
+  },
+  "proof": "Isolated real CLI and local provider stand-in; no configured provider or installed binary changed."
+}

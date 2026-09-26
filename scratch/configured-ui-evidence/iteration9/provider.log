@@ -1,0 +1,15 @@
+Owned app PID 19169
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+PASS Press All work
+PASS Press New terminal
+PASS Owned app active for input
+PASS Press Show work list
+TIMING launch_to_task_ax_ms 6073.947708355263
+PASS Select exact Task
+FAIL Failure(message: "Owned app active before launch")
+Owned app termination requested true

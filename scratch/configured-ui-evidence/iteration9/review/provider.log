@@ -1,0 +1,10 @@
+Owned app PID 12244
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true AX focused PID 33576
+Console locked absent login done 1
+FAIL Failure(message: "Owned app has exact AX focus before any UI mutation")
+Owned app termination requested true

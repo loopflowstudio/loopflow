@@ -470,6 +470,43 @@ second PR for the same Task; first drafts alone do not test whether the instruct
 resist entropy.
 
 
+## Task descriptions and comments
+
+A Task description is the current brief. Lead with the person's situation, the
+problem, and the improvement they should experience. Follow with observable
+acceptance and the constraints that materially change the work. Usually a short
+opening and a few bullets suffice; headings are optional. Preserve exact acceptance
+numbers and failure conditions. Technical detail earns its place when it explains
+the problem or a binding constraint. Architecture and implementation plans belong
+in the design.
+
+Task comments hold dated progress, planning changes, attempts, and verification
+updates. Write what changed and what it means; link detailed evidence. Keep raw
+chapter identifiers, timestamps, and application receipts in their existing
+records. Routine no-op messages need no comment. Post only within the operation's
+authorization; a proposal can draft an update without publishing it.
+
+Assume comments are collapsed. Current blockers, actual dependencies, accepted
+scope, and unresolved contrary evidence must still be clear in the description.
+Scheduling one Task after another does not by itself make it a technical dependency.
+When an update changes the accepted work, reconcile the brief and retain the comment
+as history. Preserve evidence before removing superseded prose. Avoid dated
+amendments that turn the description into competing versions of the plan.
+
+For example:
+
+> After an interrupted release, maintainers need to see whether anything shipped
+> and safely continue unfinished work.
+>
+> - Retrying unfinished work does not publish the same release twice.
+> - Failed verification remains visible and prevents publication.
+
+That is a brief excerpt, not a complete replacement for an existing Task's
+acceptance. “Moved into the September chapter; scheduled after the installation
+repair” belongs in a comment. A real dependency on that repair also belongs in the
+current brief. Neither a chapter ID nor a statement that filing launches nothing
+helps explain the requested improvement.
+
 ## Examples
 
 Opening lines that work:

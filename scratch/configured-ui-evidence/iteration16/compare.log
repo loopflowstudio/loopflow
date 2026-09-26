@@ -1,0 +1,1 @@
+PASS: 154 live Project/Task/Session records; 7 KRs; 1 exact Session-to-Task joins. Conditions: ["blocked", "waiting"]. UI trials: zero.

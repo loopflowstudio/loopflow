@@ -35,22 +35,56 @@ enum PodiumReading<Value> {
     }
 }
 
-struct WaveSummary: Equatable {
-    let waves: Int
-}
-
 @MainActor
 @Observable
 final class PodiumModel {
-    var repoPath: String?
-    var selection: WorkReference?
     var historyWave: WaveSnapshot?
     var historyReference: String?
-    private var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
-    private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
+    @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
+    var repoPath: String?
+    var selection: WorkReference? { navigation.selection }
+    @ObservationIgnored private var navigationByRepo: [String: WorkspaceNavigation] = [:]
+
+    var navigation: WorkspaceNavigation {
+        let key = repoPath ?? ""
+        if let existing = navigationByRepo[key] { return existing }
+        let state = WorkspaceNavigation()
+        navigationByRepo[key] = state
+        return state
+    }
+
+    var workspace: WorkspaceProjection {
+        WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: sessions.value ?? [])
+    }
+    private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {
+        didSet {
+            // Retain the latest observed Task across temporary chapter membership
+            // gaps, including selections saved in another repository.
+            for navigation in navigationByRepo.values {
+                guard let selection = navigation.selection, selection.kind == .task else { continue }
+                for wave in roadmap.value?.waves ?? [] {
+                    if let task = wave.tasks.items.first(where: { $0.id == selection.id }) {
+                        navigation.selectedTaskEvidence = (wave, task)
+                        break
+                    }
+                }
+            }
+        }
+    }
     private(set) var waves: PodiumReading<[Wave]> = .loading
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
-    private(set) var sessions: PodiumReading<[SessionRecord]> = .loading
+    private(set) var activeRuns: PodiumReading<ActiveRunsSnapshot> = .loading
+    private(set) var isRefreshingActiveRuns = false
+    private(set) var activeRunsNeedsRetry = false
+    @ObservationIgnored private var activeRunsObservation: ActiveRunsObservation?
+    @ObservationIgnored private var activeRunsTask: Task<Void, Never>?
+    private var activeRunsGeneration = 0
+    private var activeRunsDemanded = false
+    private var sessionReadings: [String: PodiumReading<[SessionRecord]>] = [:]
+    private(set) var sessions: PodiumReading<[SessionRecord]> {
+        get { sessionReadings[repoPath ?? ""] ?? .loading }
+        set { sessionReadings[repoPath ?? ""] = newValue }
+    }
     private(set) var workActivity: PodiumReading<WorkActivitySnapshot> = .loading
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
@@ -64,6 +98,7 @@ final class PodiumModel {
     private let query: RegistryQuery
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
+    private var roadmapGeneration = 0
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
@@ -105,11 +140,6 @@ final class PodiumModel {
         }
     }
 
-    var waveSummary: WaveSummary? {
-        guard waves.value != nil else { return nil }
-        return WaveSummary(waves: visibleWaves.count)
-    }
-
     var visibleRepos: [PortfolioRepo] {
         guard let repoPath else { return allRepos }
         let target = repoIdentity(repoPath)
@@ -142,30 +172,27 @@ final class PodiumModel {
         defer { isRefreshing = false }
 
         let previousRoadmap = roadmap.value
+        let generation = roadmapGeneration
         let previousWaves = waves.value
-        let previousSessions = sessions.value
-        let requestedSessionsGeneration = sessionsGeneration
-        let sessionsRepoPath = repoPath
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
-        if previousSessions == nil { sessions = .loading }
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
-        async let sessionsResult = readSessions(
-            repoPath: sessionsRepoPath
-        )
+        async let sessionRefresh: Void = refreshSessions()
         waves = reading(from: await wavesResult, lastGood: previousWaves)
-        let nextSessions = await sessionsResult
-        if sessionsGeneration == requestedSessionsGeneration {
-            sessions = reading(
-                from: nextSessions,
-                lastGood: previousSessions
-            )
+        await sessionRefresh
+        let result = await roadmapResult
+        if generation == roadmapGeneration {
+            roadmap = reading(from: result, lastGood: previousRoadmap)
         }
-        roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         selectRequestedWaveIfNeeded()
-        clearSelectionIfOutsideScope()
+        if visibleRoadmaps.allSatisfy({ wave in
+            guard case .available(_, false) = wave.tasks else { return false }
+            return wave.unavailableTasks.isEmpty
+        }) {
+            clearSelectionIfOutsideScope()
+        }
         await refreshWorkActivity()
     }
 
@@ -180,6 +207,124 @@ final class PodiumModel {
             from: await readProcessActivity(),
             lastGood: previous
         )
+    }
+
+    /// First demand starts a window-owned reader; navigation never restarts it.
+    func observeActiveRuns() {
+        guard !activeRunsDemanded else { return }
+        activeRunsDemanded = true
+        startActiveRuns()
+    }
+
+    func refreshActiveRuns() async {
+        activeRunsDemanded = true
+        if activeRunsNeedsRetry || activeRunsTask == nil {
+            await stopActiveRuns()
+            startActiveRuns()
+        } else {
+            await activeRunsObservation?.request(.refresh)
+        }
+    }
+
+    func rescanActiveRuns() async {
+        guard let observation = activeRunsObservation, !activeRunsNeedsRetry else { return }
+        activeRuns = .unavailable(lastGood: activeRuns.value, reason: "Rediscovering active Runs after wake")
+        isRefreshingActiveRuns = true
+        await observation.request(.rescan)
+    }
+
+    /// Attached once to the window root, independently of repository or pane visibility.
+    func activeRunsLifetime() async {
+        do {
+            while !Task.isCancelled { try await Task.sleep(for: .seconds(3600)) }
+        } catch { }
+        await stopActiveRuns()
+        activeRunsDemanded = false
+    }
+
+    func stopActiveRuns() async {
+        activeRunsGeneration += 1
+        let generation = activeRunsGeneration
+        let task = activeRunsTask
+        task?.cancel()
+        await task?.value
+        guard activeRunsGeneration == generation else { return }
+        activeRunsTask = nil
+        activeRunsObservation = nil
+        isRefreshingActiveRuns = false
+    }
+
+    deinit { activeRunsTask?.cancel() }
+
+    private func startActiveRuns() {
+        guard activeRunsTask == nil else { return }
+        activeRunsGeneration += 1
+        let generation = activeRunsGeneration
+        isRefreshingActiveRuns = true
+        activeRunsNeedsRetry = false
+        let query = query
+        activeRunsTask = Task { [weak self] in
+            // Only configuration replacement retries automatically. Transport failures
+            // retain evidence and wait for the explicit Retry action.
+            while !Task.isCancelled {
+                var observation: ActiveRunsObservation?
+                var replace = false
+                var discoveryFailed = false
+                do {
+                    let opened = try await query.watchActiveRuns()
+                    observation = opened
+                    guard !Task.isCancelled, self?.activeRunsGeneration == generation else {
+                        await opened.cancel()
+                        return
+                    }
+                    self?.activeRunsObservation = opened
+                    for try await snapshot in opened.snapshots {
+                        guard !Task.isCancelled, self?.activeRunsGeneration == generation else { break }
+                        self?.receiveActiveRuns(snapshot)
+                        if snapshot.discovery == .unavailable {
+                            discoveryFailed = true
+                            break
+                        }
+                    }
+                    if !Task.isCancelled && !discoveryFailed {
+                        throw RegistryQueryError("Active Run observation ended")
+                    }
+                } catch ActiveRunsObservationError.configurationChanged {
+                    replace = true
+                    if self?.activeRunsGeneration == generation {
+                        self?.activeRuns = .loading
+                    }
+                } catch {
+                    if !Task.isCancelled, let self, self.activeRunsGeneration == generation {
+                        self.activeRuns = .unavailable(lastGood: self.activeRuns.value, reason: error.localizedDescription)
+                        self.activeRunsNeedsRetry = true
+                    }
+                }
+                await observation?.cancel()
+                guard !Task.isCancelled, let self, self.activeRunsGeneration == generation else { return }
+                self.activeRunsObservation = nil
+                if replace {
+                    self.activeRuns = .loading
+                    self.isRefreshingActiveRuns = true
+                    continue
+                }
+                self.activeRunsTask = nil
+                self.isRefreshingActiveRuns = false
+                return
+            }
+        }
+    }
+
+    private func receiveActiveRuns(_ snapshot: ActiveRunsSnapshot) {
+        isRefreshingActiveRuns = snapshot.discovery == .scanning
+        activeRunsNeedsRetry = snapshot.discovery == .unavailable
+        switch snapshot.discovery {
+        case .ready:
+            activeRuns = .available(snapshot)
+        case .scanning, .unavailable:
+            let reason = snapshot.discovery == .scanning ? "Discovering active Runs…" : "Active Run discovery unavailable"
+            activeRuns = .unavailable(lastGood: activeRuns.value, reason: ([reason] + snapshot.gaps).joined(separator: "; "))
+        }
     }
 
     func refreshPortfolio(
@@ -198,17 +343,22 @@ final class PodiumModel {
         if repoPath == nil, let initialRepoPath {
             repoPath = PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
         }
-        clearSelectionIfOutsideScope()
+        // Repository discovery cannot establish that selected Work was removed.
+        // Planning refresh owns that reconciliation once its evidence is complete.
     }
 
     func setRepoPath(_ path: String?) {
         let path = path.map(WaveOrigin.resolve)
         if repoPath?.normalizedFilePath != path?.normalizedFilePath {
+            historyLookup?.cancel()
+            historyLookup = nil
             sessionsGeneration &+= 1
-            sessions = .loading
+            workActivityGeneration &+= 1
+            if !usesFixedFixture { workActivity = .loading }
         }
+        // Navigation is already scoped to this repository. A partial planning
+        // read cannot invalidate its saved selection merely because we return.
         repoPath = path
-        clearSelectionIfOutsideScope()
     }
 
     func setWavePaused(waveId: String, paused: Bool) async throws {
@@ -230,23 +380,51 @@ final class PodiumModel {
         await refresh()
     }
 
+    func updateTaskDirective(task: RoadmapTask, wave: WaveSnapshot, text: String) async throws {
+        try await query.updateTaskDirective(id: task.id, wave: wave.name, text: text, cwd: wave.repo)
+        // Polls started before this write must not restore the old directive.
+        roadmapGeneration &+= 1
+        let generation = roadmapGeneration
+        let result = await readRoadmap()
+        if generation == roadmapGeneration {
+            roadmap = reading(from: result, lastGood: roadmap.value)
+        }
+        switch result {
+        case .success(let snapshot):
+            guard snapshot.waves.contains(where: { row in
+                row.wave.id == wave.id && row.tasks.items.contains(where: { $0.id == task.id })
+            }) else {
+                throw RegistryQueryError("Update accepted, but the Task is absent from refreshed planning. Your draft is retained.")
+            }
+        case .failure(let error):
+            throw RegistryQueryError("Update accepted, but planning refresh failed: \(error.localizedDescription)")
+        }
+    }
+
     func select(_ requested: WorkReference?) {
+        historyLookup?.cancel()
+        historyLookup = nil
         let selection: WorkReference?
         if let requested, requested.kind == .project {
             if let current = waveForChapter(projectId: requested.id) {
                 selection = .wave(id: current.wave.id)
             } else {
-                Task { await openHistoricalReference(requested.id) }
+                historyLookup = Task { await openHistoricalReference(requested.id) }
                 return
             }
         } else { selection = requested }
+        navigation.selectedSessionId = nil
+        navigation.content = selection == nil ? .overview : .details
         setSelection(selection)
         clearSelectionIfOutsideScope()
     }
 
     private func openHistoricalReference(_ reference: String) async {
         for wave in visibleRoadmaps {
-            guard let entries = try? await query.chapterHistory(wave: wave.wave.name, cwd: wave.wave.repo) else { continue }
+            guard !Task.isCancelled else { return }
+            let result = try? await query.chapterHistory(wave: wave.wave.name, cwd: wave.wave.repo)
+            guard !Task.isCancelled else { return }
+            guard let entries = result else { continue }
             if entries.contains(where: { $0.sourceProjectId == reference || $0.sourceProjectSlug == reference || $0.sourceWorkId == reference }) {
                 select(.wave(id: wave.wave.id))
                 historyReference = reference
@@ -280,13 +458,81 @@ final class PodiumModel {
     }
 
     func refreshSessions() async {
-        guard !usesFixedFixture else { return }
+        guard !usesFixedFixture || AppTestMode.current() == .sessionFixtures else { return }
+        sessionsGeneration &+= 1
         let generation = sessionsGeneration
         let repoPath = repoPath
         let previous = sessions.value
         let result = await readSessions(repoPath: repoPath)
         guard sessionsGeneration == generation else { return }
         sessions = reading(from: result, lastGood: previous)
+        if case .success(let records) = result,
+           let selected = navigation.selectedSessionId, !records.contains(where: { $0.id == selected }) {
+            navigation.selectedSessionId = nil
+        }
+    }
+
+    func beginSessionRename(_ record: SessionRecord) {
+        guard navigation.renaming?.sessionId != record.id else { return }
+        navigation.renaming = SessionRenameDraft(sessionId: record.id, text: record.title)
+    }
+
+    /// Submit the current rename. Success publishes Rust's authoritative
+    /// record; rejection keeps the typed name and its error. Either outcome
+    /// settles only the Session and repository that started it.
+    func commitSessionRename() async {
+        guard let repo = repoPath, let draft = navigation.renaming, !draft.submitting else { return }
+        let owner = navigation
+        let target = draft.sessionId
+        owner.renaming?.submitting = true
+        owner.renaming?.error = nil
+        do {
+            let record = try await query.renameSession(id: target, name: draft.text, cwd: repo)
+            // A read started before the rename must not restore the old name.
+            sessionsGeneration &+= 1
+            replaceSession(record, repo: repo)
+            if owner.renaming?.sessionId == target { owner.renaming = nil }
+        } catch {
+            guard owner.renaming?.sessionId == target else { return }
+            owner.renaming?.submitting = false
+            owner.renaming?.error = error.localizedDescription
+        }
+    }
+
+    func cancelSessionRename() {
+        guard navigation.renaming?.submitting == false else { return }
+        navigation.renaming = nil
+    }
+
+    private func replaceSession(_ record: SessionRecord, repo: String) {
+        let replace = { (records: [SessionRecord]) in
+            records.map { $0.id == record.id ? record : $0 }
+        }
+        switch sessionReadings[repo] {
+        case .available(let records):
+            sessionReadings[repo] = .available(replace(records))
+        case .unavailable(let records, let reason):
+            sessionReadings[repo] = .unavailable(lastGood: records.map(replace), reason: reason)
+        case .loading, nil:
+            break
+        }
+    }
+
+    func sessionResolved(_ id: String, repo: String) {
+        // A pre-resolution read must not resurrect the completed human boundary.
+        // Resolution may finish after the human has switched repositories.
+        sessionsGeneration &+= 1
+        if navigationByRepo[repo]?.selectedSessionId == id {
+            navigationByRepo[repo]?.selectedSessionId = nil
+        }
+        switch sessionReadings[repo] {
+        case .available(let records):
+            sessionReadings[repo] = .available(records.filter { $0.id != id })
+        case .unavailable(let records, let reason):
+            sessionReadings[repo] = .unavailable(lastGood: records?.filter { $0.id != id }, reason: reason)
+        case .loading, nil:
+            break
+        }
     }
 
     func wave(id: String) -> WaveRoadmap? {
@@ -302,10 +548,10 @@ final class PodiumModel {
     }
 
     func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
-        for wave in roadmap.value?.waves ?? [] {
+        for wave in visibleRoadmaps {
             if let task = wave.tasks.items.first(where: { $0.id == id }) { return (wave, task) }
         }
-        if let previous = selectedTaskEvidence, previous.task.id == id,
+        if let previous = navigation.selectedTaskEvidence, previous.task.id == id,
            let current = wave(id: previous.wave.wave.id),
            current.tasks.unavailableReason != nil || current.chapter?.phase != "complete" {
             return (current, previous.task)
@@ -353,6 +599,7 @@ final class PodiumModel {
         fixed: Bool = false
     ) {
         self.roadmap = roadmap
+        if fixed && AppTestMode.current() != .sessionFixtures { self.sessions = .available([]) }
         self.waves = waves
         self.processActivity = processActivity
         self.workActivity = workActivity
@@ -408,8 +655,7 @@ final class PodiumModel {
                 task: nil
             )
         case .project:
-            guard let wave = waveForChapter(projectId: selection.id) else { return nil }
-            return WorkActivityScope(wave: wave.wave.name, project: nil, task: nil)
+            return nil
         case .task:
             guard let selected = task(id: selection.id) else { return nil }
             return WorkActivityScope(
@@ -423,8 +669,8 @@ final class PodiumModel {
     private func setSelection(_ selection: WorkReference?) {
         guard self.selection != selection else { return }
         workActivityGeneration &+= 1
-        selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
-        self.selection = selection
+        navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
+        navigation.selection = selection
         if !usesFixedFixture { workActivity = .loading }
     }
 

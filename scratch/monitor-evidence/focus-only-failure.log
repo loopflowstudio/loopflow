@@ -1,0 +1,29 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.38s)
+Test Suite 'Selected tests' started at 2026-09-24 14:33:56.601.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 14:33:56.602.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 14:33:56.602.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 14:33:56.602.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Monitor" started.
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+◇ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" started.
+✘ Test "Returning to a Task never restores another Task's Session in a reused pane" recorded an issue at TaskMonitorProofTests.swift:36:9: Expectation failed: (multiplexer.focusedPane.content → .session(id: "monitor-other")) != .session(id: "monitor-other")
+✘ Test "Returning to a Task never restores another Task's Session in a reused pane" recorded an issue at TaskMonitorProofTests.swift:37:9: Expectation failed: (model.navigation.selectedSessionId → "monitor-other") != "monitor-other"
+✘ Test "Returning to a Task never restores another Task's Session in a reused pane" failed after 0.123 seconds with 2 issues.
+✘ Suite "Task Monitor integration proof" failed after 0.123 seconds with 2 issues.
+✔ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" passed after 0.178 seconds.
+◇ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" started.
+✔ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" passed after 0.001 seconds.
+◇ Test "Task selection and Monitor preserve native Session input and its companion" started.
+✘ Test "Task selection and Monitor preserve native Session input and its companion" recorded an issue at TaskMonitorTests.swift:122:9: Expectation failed: (window.firstResponder → <LoopflowMac.GhosttyMetalView: 0x100e6a2c0>) !== (terminals[0] → <LoopflowMac.GhosttyMetalView: 0x100e6a2c0>)
+✘ Test "Task selection and Monitor preserve native Session input and its companion" failed after 1.596 seconds with 1 issue.
+✘ Suite "Task Monitor" failed after 1.776 seconds with 1 issue.
+✘ Test run with 4 tests in 2 suites failed after 1.776 seconds with 3 issues.

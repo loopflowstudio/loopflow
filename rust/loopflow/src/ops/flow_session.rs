@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
-use crate::durable::{RunId, WorkRef};
+use crate::durable::RunId;
 use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
 use crate::ops::flow_run::{self, FlowRun, StepToken};
 use crate::ops::human_session::{self, HumanSessionToken, OpenMode, SessionKind, SessionRecord};
@@ -74,13 +74,23 @@ pub(crate) fn worktree(token: &StepToken) -> Result<PathBuf> {
 }
 
 pub(crate) fn list() -> Result<Vec<SessionRecord>> {
+    let mut sessions = reviews()?
+        .iter()
+        .map(|(run, token)| session_surface(run, token))
+        .collect::<Result<Vec<_>>>()?;
+    sessions.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(sessions)
+}
+
+/// Every saved Flow waiting at a human review, with the token naming it.
+pub(crate) fn reviews() -> Result<Vec<(FlowRun, StepToken)>> {
     let directory = crate::store::current_home_lf_home_dir().join("flows");
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error).context("list saved Flow Sessions"),
     };
-    let mut sessions = Vec::new();
+    let mut reviews = Vec::new();
     for entry in entries {
         let entry = entry?;
         let id = entry.file_name().to_string_lossy().into_owned();
@@ -95,20 +105,18 @@ pub(crate) fn list() -> Result<Vec<SessionRecord>> {
                 continue;
             }
         };
-        if let Some(boundary) = &run.active {
-            if !run.finished && !boundary.completed && run.is_human()? {
-                sessions.push(session_surface(
-                    &run,
-                    &StepToken {
-                        invocation: id,
-                        boundary: boundary.id.clone(),
-                    },
-                )?);
-            }
+        let Some(boundary) = &run.active else {
+            continue;
+        };
+        if !run.finished && !boundary.completed && run.is_human()? {
+            let token = StepToken {
+                invocation: id,
+                boundary: boundary.id.clone(),
+            };
+            reviews.push((run, token));
         }
     }
-    sessions.sort_by(|left, right| left.id.cmp(&right.id));
-    Ok(sessions)
+    Ok(reviews)
 }
 
 pub(crate) fn surface(token: &StepToken) -> Result<SessionRecord> {
@@ -116,36 +124,84 @@ pub(crate) fn surface(token: &StepToken) -> Result<SessionRecord> {
     session_surface(&run, token)
 }
 
+pub(crate) fn prepare_run(run: &mut FlowRun) -> Result<()> {
+    if !run.is_human()? || run.active.as_ref().is_none_or(|b| b.run_id.is_some()) {
+        return Ok(());
+    }
+    let config = crate::engine::config::load_config(Some(&run.cwd))?.unwrap_or_default();
+    let (harness, model) =
+        crate::engine::config::parse_agent(run.model.as_deref().unwrap_or(config.agent()));
+    let subjects = run
+        .as_work
+        .clone()
+        .into_iter()
+        .chain(run.task.as_ref().map(|id| format!("task:{id}")))
+        .chain(run.wave.as_ref().map(|id| format!("wave:{id}")))
+        .map(crate::run_record::SubjectAttribution::declared)
+        .collect();
+    let id = crate::run_record::CaptureHandle::prepare(
+        crate::run_record::RunSpec {
+            harness: harness.to_string(),
+            model,
+            surface: "tui".into(),
+            cwd: run.cwd.clone(),
+            repo: None,
+            worktree: Some(run.cwd.clone()),
+            skill: Some(current_skill(run)?.skill.name.clone()),
+            subjects,
+            flow: crate::run_record::RunFlowMembership::Step(
+                crate::run_record::RunFlowStep::of_flow(run)?,
+            ),
+        },
+        None,
+    )?;
+    let (dir, _) =
+        crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), id.as_str())?;
+    let boundary = run
+        .active
+        .as_mut()
+        .expect("human boundary exists before preparation");
+    boundary.run_id = Some(id);
+    boundary.run_dir = Some(dir);
+    Ok(())
+}
+
 fn session_surface(run: &FlowRun, token: &StepToken) -> Result<SessionRecord> {
     let boundary = validate(run, token)?;
     let id = session_id(token);
-    let work = run
-        .task
-        .as_deref()
-        .and_then(|id| crate::work::task::TaskId::parse(id).ok())
-        .map(WorkRef::Task)
-        .or_else(|| {
-            run.wave
-                .as_deref()
-                .and_then(|id| crate::id::WaveId::parse(id).ok())
-                .map(WorkRef::Wave)
-        });
+    let run_id = boundary.run_id.clone().ok_or_else(|| {
+        anyhow!("Session {id} needs Run preparation; run `lf session open '{id}' --json`")
+    })?;
+    let (dir, _) = crate::run_record::resolve_manifest(
+        &crate::store::observability_home_dir(),
+        run_id.as_str(),
+    )?;
+    let name = human_session::session_name(Some(&dir), current_skill(run)?.skill.name.clone())?;
+    let state =
+        human_session::native_session_state(Some(&run_id), boundary.ready_summary.as_deref())?;
     Ok(SessionRecord {
         open_argv: human_session::human_open_argv(None, Some(&run.cwd), &id)?,
         id,
         kind: SessionKind::Flow,
-        work,
-        wave_id: run
-            .wave
-            .as_deref()
-            .and_then(|id| crate::id::WaveId::parse(id).ok()),
-        title: run.flow.clone(),
+        run_id,
+        work_path: None,
+        actions: human_session::session_actions(SessionKind::Flow, state),
+        terminal_ids: Vec::new(),
+        work: None,
+        wave_id: None,
+        title: name.title,
+        title_source: name.source,
+        flow_membership: human_session::SessionFlowMembership::Step {
+            flow: run.flow.clone(),
+            invocation_id: run.id.clone(),
+            step: current_skill(run)?.skill.name.clone(),
+            step_index: run.cursor.leaf().index as u32,
+            iteration: run.cursor.iteration,
+            occurrence: human_session::SessionFlowOccurrence::Current,
+        },
         detail: current_skill(run)?.skill.name.clone(),
         cwd: run.cwd.display().to_string(),
-        state: human_session::native_session_state(
-            boundary.run_id.as_ref(),
-            boundary.ready_summary.as_deref(),
-        )?,
+        state,
         ready_summary: boundary.ready_summary.clone(),
     })
 }
@@ -230,17 +286,26 @@ fn recover_unpublished_run(token: &StepToken) -> Result<()> {
             &crate::store::observability_home_dir(),
             run_id.as_str(),
         )?;
-        if crate::run_record::read_provider_session(&dir)?.is_some() {
+        if human_session::run_is_prepared(run_id)?
+            || crate::run_record::read_provider_session(&dir)?.is_some()
+        {
             return Ok(());
         }
         ensure!(
             crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?.is_empty(),
             "Flow Session provider is still starting; reopen after it becomes resumable"
         );
+        let previous = run_id.clone();
         let boundary = run.active.as_mut().expect("validated human boundary");
         boundary.run_id = None;
         boundary.run_dir = None;
         boundary.ready_summary = None;
+        prepare_run(run)?;
+        human_session::carry_session_name(
+            &session_id(token),
+            Some(&previous),
+            run.active.as_ref().and_then(|b| b.run_id.as_ref()),
+        )?;
         Ok(())
     })
 }
@@ -250,30 +315,33 @@ pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Res
         mode == OpenMode::Refuse,
         "--replace and --try apply only to interactive provider sessions"
     );
-    let surface = surface(token)?;
-    if !resume {
-        return Ok(surface);
-    }
     let id = session_id(token);
     let lock =
         tokio::task::spawn_blocking(move || human_session::lock_session_launch(&id)).await??;
     recover_unpublished_run(token)?;
+    flow_run::update(&token.invocation, prepare_run)?;
+    let surface = surface(token)?;
+    if !resume {
+        return Ok(surface);
+    }
     let run = flow_run::read(&token.invocation)?;
     let boundary = validate(&run, token)?;
     let human_token = HumanSessionToken::StandaloneFlow {
         token: token.clone(),
     };
-    if let Some(run_id) = &boundary.run_id {
-        // Retain a published native identity even if history is temporarily absent.
-        // The launch lock guards startup only, not the whole interactive session.
-        let run_id = run_id.clone();
-        drop(lock);
-        ensure!(
-            human_session::resume_native_run(&run_id, &human_token)?,
-            "Flow Session {0} has Run {run_id} but native history is unavailable",
-            session_id(token)
-        );
-        return Ok(surface);
+    if let Some(run_id) = boundary.run_id.as_ref() {
+        if !human_session::run_is_prepared(run_id)? {
+            // Retain a published native identity even if history is temporarily absent.
+            // The launch lock guards startup only, not the whole interactive session.
+            let run_id = run_id.clone();
+            drop(lock);
+            ensure!(
+                human_session::resume_native_run(&run_id, &human_token)?,
+                "Flow Session {0} has Run {run_id} but native history is unavailable",
+                session_id(token)
+            );
+            return Ok(surface);
+        }
     }
     let skill = &current_skill(&run)?.skill;
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
@@ -297,7 +365,11 @@ pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Res
         }
     }
     command.args(["skill", &skill.name, &review_message(&run, token)]);
-    let (mut child, run_id) = human_session::spawn_session_run(&mut command).await?;
+    let run_id = boundary
+        .run_id
+        .clone()
+        .expect("human Flow Run was prepared");
+    let mut child = human_session::spawn_session_run(&mut command, &run_id).await?;
     let binding = flow_run::update(&token.invocation, |current| {
         let boundary = validate(current, token)?;
         ensure!(
@@ -478,6 +550,7 @@ mod tests {
                     worktree: None,
                     skill: Some("demo".into()),
                     subjects: Vec::new(),
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap();
@@ -504,6 +577,12 @@ mod tests {
             if state == "published" {
                 crate::run_record::write_provider_session(&dir, "native-review", None).unwrap();
             }
+            crate::run_record::write_session_name(
+                &dir,
+                "Delivery review",
+                crate::run_record::SessionTitleSource::Human,
+            )
+            .unwrap();
             let manifest = fs::read(dir.join("manifest.json")).unwrap();
             let launch_lock =
                 crate::ops::human_session::lock_session_launch(&session_id(&token)).unwrap();
@@ -516,23 +595,21 @@ mod tests {
             assert_eq!(fs::read(dir.join("manifest.json")).unwrap(), manifest);
             if state == "failed" {
                 recovery.unwrap();
-                assert!(boundary.run_id.is_none());
-                assert!(boundary.run_dir.is_none());
+                assert_ne!(boundary.run_id, Some(capture.run_id()));
+                assert!(crate::ops::human_session::run_is_prepared(
+                    boundary.run_id.as_ref().unwrap()
+                )
+                .unwrap());
+                let name = crate::run_record::read_session_name(boundary.run_dir.as_ref().unwrap())
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(name.title, "Delivery review");
+                assert_eq!(name.source, crate::run_record::SessionTitleSource::Human);
             } else {
                 assert_eq!(boundary.run_id, Some(capture.run_id()));
                 assert_eq!(recovery.is_err(), state == "starting");
             }
-            if state == "failed" {
-                // Simulate the reopened review binding a fresh Run before readiness.
-                flow_run::update(&run.id, |run| {
-                    let boundary = run.active.as_mut().unwrap();
-                    boundary.run_id = Some(capture.run_id());
-                    boundary.run_dir = Some(dir.clone());
-                    Ok(())
-                })
-                .unwrap();
-            }
-            mark_ready(&token, &capture.run_id(), "reviewed").unwrap();
+            mark_ready(&token, boundary.run_id.as_ref().unwrap(), "reviewed").unwrap();
             record_completion(&token).unwrap();
             assert!(recover_unpublished_run(&token).is_err());
             assert!(flow_run::read(&run.id).unwrap().active.unwrap().completed);
@@ -629,12 +706,12 @@ mod tests {
         );
         let prompt = review_message(&flow_run::read(&run.id).unwrap(), &token);
         assert!(prompt.contains(&format!("lf session complete {}", session_id(&token))));
-        let provider = RunId::new();
-        flow_run::update(&run.id, |run| {
-            run.active.as_mut().unwrap().run_id = Some(provider.clone());
-            Ok(())
-        })
-        .unwrap();
+        let provider = flow_run::read(&run.id)
+            .unwrap()
+            .active
+            .unwrap()
+            .run_id
+            .unwrap();
         assert!(record_completion(&token).is_err());
         assert!(mark_ready(&token, &RunId::new(), "wrong Run").is_err());
         let before = flow_run::read(&run.id).unwrap().cursor;

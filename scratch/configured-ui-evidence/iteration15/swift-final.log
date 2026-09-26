@@ -1,0 +1,113 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Emitting module LoopflowMac
+[4/7] Compiling LoopflowMac SessionsView.swift
+[5/11] Compiling LoopflowMac PodiumView.swift
+[6/11] Compiling LoopflowMac GhosttyManager.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[7/11] Compiling LoopflowMac LoopflowApp.swift
+[8/11] Compiling LoopflowMac GhosttyTerminalView.swift
+[8/13] Write Objects.LinkFileList
+[9/13] Linking LoopflowMac
+[10/13] Applying LoopflowMac
+[12/45] Emitting module LoopflowTests
+[13/55] Compiling LoopflowTests RegistryQueryTests.swift
+[14/55] Compiling LoopflowTests RepoScannerTests.swift
+[15/55] Compiling LoopflowTests RoadmapViewTests.swift
+[16/55] Compiling LoopflowTests SessionActionFixtures.swift
+[17/55] Compiling LoopflowTests SessionsPolishTests.swift
+[18/55] Compiling LoopflowTests SessionsStoreTests.swift
+[19/55] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[20/55] Compiling LoopflowTests WaveChatConnectionTests.swift
+[21/55] Compiling LoopflowTests WaveChatStreamTests.swift
+[22/55] Compiling LoopflowTests WaveChatTranscriptTests.swift
+[23/55] Compiling LoopflowTests MessageRowTests.swift
+[24/55] Compiling LoopflowTests MockWaveFixtureTests.swift
+[25/55] Compiling LoopflowTests MultiplexerLayoutTests.swift
+[26/55] Compiling LoopflowTests MultiplexerStoreTests.swift
+[27/55] Compiling LoopflowTests NowProjectionTests.swift
+[28/55] Compiling LoopflowTests PodiumModelTests.swift
+[29/55] Compiling LoopflowTests PortfolioRepoStateTests.swift
+[30/55] Compiling LoopflowTests PortfolioServiceTests.swift
+[31/55] Compiling LoopflowTests ProjectFailureHistoryViewTests.swift
+[32/55] Compiling LoopflowTests ReferenceTextViewTests.swift
+[33/55] Compiling LoopflowTests AppAppearanceTests.swift
+[34/55] Compiling LoopflowTests AppBootstrapResourceTests.swift
+[35/55] Compiling LoopflowTests AttemptFailurePresentationTests.swift
+[36/55] Compiling LoopflowTests BundledDaemonPathTests.swift
+[37/55] Compiling LoopflowTests ChatReferenceTests.swift
+[38/55] Compiling LoopflowTests ContractTests.swift
+[39/55] Compiling LoopflowTests DTOFixtureTests.swift
+[40/55] Compiling LoopflowTests FaderSwitchTests.swift
+[41/55] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[42/55] Compiling LoopflowTests LocalWaveAgentLauncherTests.swift
+[43/55] Compiling LoopflowTests LoopflowStateTests.swift
+[44/55] Compiling LoopflowTests WaveDetailReadingTests.swift
+[45/55] Compiling LoopflowTests WaveLensTests.swift
+[46/55] Compiling LoopflowTests WaveOriginTests.swift
+[47/55] Compiling LoopflowTests WavePlanParserTests.swift
+[48/55] Compiling LoopflowTests WaveRowTests.swift
+[49/55] Compiling LoopflowTests WaveSurfacePrimaryHierarchyTests.swift
+[50/55] Compiling LoopflowTests WaveTests.swift
+[51/55] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[52/55] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[53/55] Compiling LoopflowTests WorktreeWorkspaceTests.swift
+[53/55] Write Objects.LinkFileList
+[54/55] Linking LoopflowSwiftPackageTests
+Build complete! (13.49s)
+Test Suite 'Selected tests' started at 2026-09-24 07:54:07.091.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 07:54:07.092.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 07:54:07.092.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 07:54:07.092.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "DTO Fixtures" started.
+◇ Suite "Unified workspace navigation proof" started.
+◇ Suite "Sessions store" started.
+◇ Test "Session rows restore their shell and companion layout across worktree slots" started.
+◇ Test "Flow Session fixture preserves readiness and its open command" started.
+◇ Test "An externally killed terminal reclassifies as active elsewhere" started.
+◇ Test "Shared activity never creates a local terminal; reconciliation removes resolved Sessions" started.
+◇ Test "Completing a ready Ask resumes its caller" started.
+◇ Test "Only a FlowStep decision removes a ready FlowStep" started.
+◇ Test "Completing an interactive Session removes it from Sessions" started.
+◇ Test "A failed open stays visible across polling until superseded" started.
+◇ Test "A ready FlowStep stays visible until its decision" started.
+◇ Test "Sessions fixture preserves the unresolved Session projection" started.
+◇ Test "Session actions use the main repository for a linked worktree" started.
+◇ Test "selecting one waiting Task recovers only that terminal" started.
+◇ Test "Polling preserves the prepared interactive launch command" started.
+◇ Test "Selecting an active Session leaves its other terminal running until Move here" started.
+◇ Test case passing 1 argument replacing → false to "Polling preserves the prepared interactive launch command" started.
+◇ Test case passing 1 argument replacing → true to "Polling preserves the prepared interactive launch command" started.
+✔ Test "Sessions fixture preserves the unresolved Session projection" passed after 0.001 seconds.
+✔ Test "Flow Session fixture preserves readiness and its open command" passed after 0.001 seconds.
+✔ Suite "DTO Fixtures" passed after 0.001 seconds.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✔ Test "An externally killed terminal reclassifies as active elsewhere" passed after 0.147 seconds.
+✔ Test "Selecting an active Session leaves its other terminal running until Move here" passed after 0.676 seconds.
+✔ Test "A failed open stays visible across polling until superseded" passed after 0.676 seconds.
+✔ Test "selecting one waiting Task recovers only that terminal" passed after 0.676 seconds.
+✔ Test "Polling preserves the prepared interactive launch command" with 2 test cases passed after 0.676 seconds.
+✔ Test "Completing a ready Ask resumes its caller" passed after 0.677 seconds.
+✔ Test "Completing an interactive Session removes it from Sessions" passed after 0.677 seconds.
+✔ Test "Only a FlowStep decision removes a ready FlowStep" passed after 0.677 seconds.
+✔ Test "Shared activity never creates a local terminal; reconciliation removes resolved Sessions" passed after 0.677 seconds.
+✔ Test "Session actions use the main repository for a linked worktree" passed after 0.752 seconds.
+✔ Test "A ready FlowStep stays visible until its decision" passed after 0.752 seconds.
+✔ Suite "Sessions store" passed after 0.752 seconds.
+✔ Test "Session rows restore their shell and companion layout across worktree slots" passed after 1.727 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 1.727 seconds.
+✔ Test run with 14 tests in 3 suites passed after 1.727 seconds.

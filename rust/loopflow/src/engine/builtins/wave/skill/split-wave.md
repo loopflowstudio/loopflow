@@ -52,7 +52,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - `wave/<child>/metrics/*.md` — contracts allocated to that child
    - `lf pm init --wave <child>` — create each child's Linear Initiative
    - `lf wave update-plan --wave <child> --plan <plan.json>` — author its one chapter plan
-   - File new Tasks with `lf pm task create --wave <child> --title "…"`.
+   - File new Tasks with `lf pm task create --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in authorized comments; keep current blockers and dependencies in the description even when comments are collapsed.
    - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
 5. Retire the parent's future planning

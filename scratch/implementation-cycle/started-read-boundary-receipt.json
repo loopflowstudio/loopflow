@@ -1,0 +1,15 @@
+{
+  "sources": {
+    "rust/loopflow/src/ops/run.rs": "045d589a45236bc078ba5c8467be083d34a4fd693303a356f0d967c9f2fe41d2",
+    "rust/loopflow/src/lf/commands/run.rs": "0c01a2e446b6fcb2a309ee33b07af0032e53c1c8febb3d3bd2731403b8f6bbbe",
+    "rust/loopflow/src/store/chapters.rs": "16df31c50b07d68d48e4154e804d9e7d0252c5ba1b51069ea1fafe3fced0ae0a",
+    "rust/loopflow/tests/flow_tests.rs": "169699940440847d860ca1b14eac0dc4ec4c2c796ccb34783942105a17e95a41",
+    ".lf/directions/cli.md": "dc1cf9e094cb3dbaf1f845fe64dd8a68b4614ccd275f4983ea4e44b6b0c801d9"
+  },
+  "artifacts": {
+    "/tmp/loo291-started-before.log": "8e05bfd9c68e9e95d68dd4b2e0e87a5b14b898b6b2b56936326ffb8f86ea1e09",
+    "/tmp/loo291-started-after.log": "c36f8137c2bcda17442e6850ef02eb46b0049224f3ade1bcc9f5121b6bb69a2f",
+    "/tmp/loo291-started-final.log": "644003d0b2a64a474eef9208c4ae64304aab228ce41f88d41cc3cd2c5bcfd6b8",
+    "/tmp/loo291-started-clippy.log": "5d7d6044ce689b78ed86098fc10e8ab868e9dfaf78bb0e7adf43c078d705d60f"
+  }
+}

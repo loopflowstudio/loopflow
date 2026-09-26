@@ -1,0 +1,28 @@
+warning: `VIRTUAL_ENV=/Users/jack/src/loopflow.agent/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Starting parallel builds: cargo, swift
+
+Building lf (cargo release)...
+Building Loopflow (swift release)...
+  [cargo]    Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+  [swift] [0/1] Planning build
+  [swift] Building for production...
+  [swift] [0/2] Write swift-version--58304C5D6DBC2206.txt
+  [swift] Build complete! (0.16s)
+
+>>> swift done (0.4s)
+  [cargo]     Finished `release` profile [optimized] target(s) in 1m 05s
+
+>>> cargo done (65.4s)
+Staging lf + Loopflow.app (v0.12.20) into /Users/jack/src/loopflow.main-view-task/local-bin...
+  [codesign] signing with stable identity: Developer ID Application: Jack Heart (2V3M244HF2)
+  [codesign] --prepared:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lfd
+  [codesign] --validated:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lfd
+  [codesign] --prepared:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lf
+  [codesign] --validated:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lf
+  [codesign] /Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app: valid on disk
+  [codesign] /Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app: satisfies its Designated Requirement
+Built /Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app
+
+Built into /Users/jack/src/loopflow.main-view-task/local-bin. Development builds cannot become production.
+
+Total time: 65.9s

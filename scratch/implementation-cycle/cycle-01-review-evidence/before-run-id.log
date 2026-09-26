@@ -1,0 +1,22 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.46s
+     Running tests/session_cli_tests.rs (target/debug/deps/session_cli_tests-24700fb2b3901da6)
+
+running 1 test
+test boundary_names_follow_run_ids_and_replacement_runs ... FAILED
+
+failures:
+
+---- boundary_names_follow_run_ids_and_replacement_runs stdout ----
+
+thread 'boundary_names_follow_run_ids_and_replacement_runs' (538136512) panicked at rust/loopflow/tests/session_cli_tests.rs:305:5:
+Output { status: ExitStatus(unix_wait_status(256)), stdout: "", stderr: "Error: Session run_d33cca23bdaa4fcf8d7b4305f01248ad has no provider history yet\n" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    boundary_names_follow_run_ids_and_replacement_runs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 4.30s
+
+error: test failed, to rerun pass `-p loopflow --test session_cli_tests`

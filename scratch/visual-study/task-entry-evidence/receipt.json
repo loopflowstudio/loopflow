@@ -1,0 +1,12 @@
+{
+  "scope": "Task-entry website experiment; no native changes",
+  "command": "uv run --no-project --with playwright python scratch/visual-study/task-entry-evidence/check_interactions.py",
+  "sha256": {
+    "scratch/visual-study/mockups.html": "5d05b0de9aa04f9878fc56745224b9130321597f76cad71b98d661146638f920",
+    "scratch/visual-study/task-entry-evidence/check_interactions.py": "b85429d0b94838bf105cfb94c324a27f2e232a7ed01770a50f17ae0e12b6c546",
+    "scratch/visual-study/task-entry-evidence/interactions.json": "335caaee4111831b4009577bc5c9b4c79135d78a93a5bdc3829b3bcd505367dc",
+    "scratch/visual-study/task-entry-evidence/overview-laptop.png": "533d4a09b99e25f07ddb79f30102dd8a7908bc41813fe7d5605e385ee3c032be",
+    "scratch/visual-study/task-entry-evidence/overview-wide.png": "997c7c3a7a359037cca35876b33a1cd805d9e2abbfcbce2f74dec43f62c9173a",
+    "scratch/visual-study/task-entry-evidence/review.md": "985a696b5a4e3d5f38cbe4337173a9bf6b3dcaa7e1a632e3f3fbda716f4f62e3"
+  }
+}

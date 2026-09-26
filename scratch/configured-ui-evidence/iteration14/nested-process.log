@@ -1,0 +1,31 @@
+observed_at 2026-09-24T14:23:40Z
+Owned app PID 66676
+AX trust true active false
+PASS Exact runner trusted
+PASS One owned accessible window
+PASS Press All work
+PASS Press New terminal
+PASS One main checkout pane
+PASS Press Show work list
+PASS Select exact Task
+PASS Press New conversation · LOO-291
+Owned Session run_b5289ca061c44ecb82bbd6cd30461c77
+PASS Shared Session has native terminal attachment
+PASS Exact provider descends from owned app
+SESSION_PICKER 2
+SESSION_OPTIONS [["session-row-run_b5289ca061c44ecb82bbd6cd30461c77", "codex · VIEWING"], ["session-row-run_643d86d70d5b4109a460e80a87a97533", "implement · loopflow.main-view-task · ELSEWHERE"]]
+PASS Select exact Session from multiple-Session picker
+PASS Row selection retains provider PID and birth receipt
+PASS Local row requests no transfer
+PASS Press New terminal
+PASS Task retains provider shell and companion
+PASS Press Split worktrees right
+WORKTREE_ACTIONS (
+    AXShowMenu
+)
+PASS Open worktree picker
+PASS Restore retained main checkout beside Task
+PASS Press New terminal
+PASS Two checkout groups each retain two native panes
+FAIL Failure(message: "Four direct child shells have process receipts")
+Owned app termination requested true

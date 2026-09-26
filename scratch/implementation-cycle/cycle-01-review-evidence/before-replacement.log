@@ -1,0 +1,23 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.79s
+     Running tests/session_cli_tests.rs (target/debug/deps/session_cli_tests-24700fb2b3901da6)
+
+running 1 test
+test boundary_names_follow_run_ids_and_replacement_runs ... FAILED
+
+failures:
+
+---- boundary_names_follow_run_ids_and_replacement_runs stdout ----
+
+thread 'boundary_names_follow_run_ids_and_replacement_runs' (538168952) panicked at rust/loopflow/tests/session_cli_tests.rs:476:5:
+assertion `left == right` failed
+  left: String("Better guess")
+ right: "Launch notes"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    boundary_names_follow_run_ids_and_replacement_runs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 9.30s
+
+error: test failed, to rerun pass `-p loopflow --test session_cli_tests`

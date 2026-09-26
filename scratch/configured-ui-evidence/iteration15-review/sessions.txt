@@ -1,0 +1,15 @@
+run_32238dfb9f2c4782a9d9fcf7eba1c542  active  Repository  Scratch design artifacts and working notes.
+  Open here — This Session is active in another terminal; use Move here to transfer it
+  Move here — Stop the other client and resume here; unsent text there is lost
+  Complete — Stop the provider and remove this Session; native history remains resumable
+run_c2a56c3b168d44b4ab2447a36696f5cd  closed  Repository  Scratch design artifacts and working notes.
+  Open here — Open this Session in a terminal
+  Complete — Stop the provider and remove this Session; native history remains resumable
+run_643d86d70d5b4109a460e80a87a97533  active  product / Desktop / LOO-291  implement · loopflow.main-view-task
+  Open here — This Session is active in another terminal; use Move here to transfer it
+  Move here — Stop the other client and resume here; unsent text there is lost
+  Complete — Stop the provider and remove this Session; native history remains resumable
+run_53d33a43bf804f4e9ff72258ddea3316  active  Repository  review-slice · loopflow.task-viewer
+  Open here — This Session is active in another terminal; use Move here to transfer it
+  Move here — Stop the other client and resume here; unsent text there is lost
+  Complete — Stop the provider and remove this Session; native history remains resumable

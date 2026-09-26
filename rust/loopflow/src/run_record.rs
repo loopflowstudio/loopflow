@@ -1,5 +1,7 @@
 //! Authoritative, Home-local evidence for one Loopflow harness launch.
 
+pub mod active;
+
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -9,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -35,6 +38,80 @@ pub(crate) struct RunSpec {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
+    pub flow: RunFlowMembership,
+}
+
+/// The exact managed Task or standalone Flow occurrence a Run executes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunFlowStep {
+    pub task_id: Option<crate::work::task::TaskId>,
+    pub boundary_key: String,
+    pub invocation_id: String,
+    pub flow: String,
+    pub step: String,
+    pub step_index: u32,
+    pub iteration: u32,
+}
+
+impl RunFlowStep {
+    pub(crate) fn of(position: &crate::durable::FlowPosition) -> Self {
+        Self {
+            task_id: Some(position.task_id.clone()),
+            boundary_key: position.cursor.boundary_key(),
+            invocation_id: position.invocation.id.clone(),
+            flow: position.invocation.flow.clone(),
+            step: position.current().step,
+            step_index: position.cursor.leaf().index as u32,
+            iteration: position.cursor.iteration,
+        }
+    }
+
+    pub(crate) fn of_flow(run: &crate::ops::flow_run::FlowRun) -> anyhow::Result<Self> {
+        let step = match run.current_step()? {
+            crate::engine::ConcreteStep::Skill(skill) => skill.skill.name.clone(),
+            crate::engine::ConcreteStep::Op(op) => op.item.display_name(),
+            crate::engine::ConcreteStep::Xor(branch) => branch.router.name.clone(),
+        };
+        Ok(Self {
+            task_id: None,
+            boundary_key: run.cursor.boundary_key(),
+            invocation_id: run.id.clone(),
+            flow: run.flow.clone(),
+            step,
+            step_index: run.cursor.leaf().index as u32,
+            iteration: run.cursor.iteration,
+        })
+    }
+
+    /// Where this occurrence sits relative to the Task's current Flow position.
+    pub(crate) fn occurrence(
+        &self,
+        position: Option<&crate::durable::FlowPosition>,
+    ) -> crate::ops::human_session::SessionFlowOccurrence {
+        use crate::ops::human_session::SessionFlowOccurrence;
+        match position {
+            Some(position)
+                if Some(&position.task_id) == self.task_id.as_ref()
+                    && position.invocation.id == self.invocation_id =>
+            {
+                if position.cursor.boundary_key() == self.boundary_key {
+                    SessionFlowOccurrence::Current
+                } else {
+                    SessionFlowOccurrence::Earlier
+                }
+            }
+            _ => SessionFlowOccurrence::Past,
+        }
+    }
+}
+
+/// Recorded when the Run is captured: a Flow step, or a Run outside a Flow. Manifests written before this field existed have none;
+/// readers treat that absence as unknown, never as independent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RunFlowMembership {
+    Step(RunFlowStep),
+    Independent,
 }
 
 /// Replayable, provider-facing inputs for one ordinary headless launch.
@@ -121,6 +198,7 @@ pub struct RunManifest {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
+    pub flow: Option<RunFlowMembership>,
     pub launch: Option<RunLaunchRequest>,
     pub context: Option<RunContextRef>,
     pub runtime_path: Option<PathBuf>,
@@ -159,6 +237,7 @@ pub(crate) struct ProviderSessionRef {
 pub(crate) struct ProviderClientRef {
     schema_version: u32,
     pub(crate) pid: u32,
+    pub(crate) terminal_id: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) started_at: OffsetDateTime,
 }
@@ -286,7 +365,7 @@ impl RunUsage {
     }
 }
 
-/// Disposable projection of one immutable Run record.
+/// Disposable projection of one Run's manifest and recorded evidence.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RunSnapshot {
     pub id: String,
@@ -466,7 +545,7 @@ pub(crate) fn scan_unresolved_provider_runs(
                 continue;
             }
         };
-        if manifest.surface != "tui" {
+        if !has_interactive_history(&dir, &manifest)? {
             continue;
         }
         let unresolved = match provider_session_is_resolved(&dir) {
@@ -511,35 +590,18 @@ fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
     };
     let mut records = Vec::new();
     for prefix in prefixes {
-        let prefix = match prefix {
-            Ok(prefix) if prefix.file_type().is_ok_and(|kind| kind.is_dir()) => prefix,
-            Ok(_) => continue,
-            Err(error) => {
-                tracing::warn!(%error, root = %root.display(), "Run record prefix unavailable");
-                continue;
-            }
-        };
-        let entries = match fs::read_dir(prefix.path()) {
-            Ok(entries) => entries,
-            Err(error) => {
-                tracing::warn!(%error, prefix = %prefix.path().display(), "Run record directory unavailable");
-                continue;
-            }
-        };
+        let prefix = prefix?;
+        if !prefix.file_type()?.is_dir() {
+            continue;
+        }
+        let entries = fs::read_dir(prefix.path())?;
         for record in entries {
-            let record = match record {
-                Ok(record)
-                    if !record.file_name().to_string_lossy().starts_with('.')
-                        && record.file_type().is_ok_and(|kind| kind.is_dir()) =>
-                {
-                    record
-                }
-                Ok(_) => continue,
-                Err(error) => {
-                    tracing::warn!(%error, prefix = %prefix.path().display(), "Run record unavailable");
-                    continue;
-                }
-            };
+            let record = record?;
+            if record.file_name().to_string_lossy().starts_with('.')
+                || !record.file_type()?.is_dir()
+            {
+                continue;
+            }
             records.push(record.path());
         }
     }
@@ -588,7 +650,9 @@ pub(crate) fn resolve_manifest(
 pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
     let manifest = read_manifest(dir)?;
     validate_manifest_path(dir, &manifest)?;
-    let mut evidence_gaps = usize::from(!context_ref_is_valid(dir, manifest.context.as_ref()));
+    let mut evidence_gaps = usize::from(
+        !dir.join("prepared").is_file() && !context_ref_is_valid(dir, manifest.context.as_ref()),
+    );
     let terminal = match fs::read(dir.join("terminal.json")) {
         Ok(bytes) => match serde_json::from_slice::<TerminalReceipt>(&bytes) {
             Ok(receipt)
@@ -831,12 +895,52 @@ pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()>
         &serde_json::to_vec_pretty(&ProviderClientRef {
             schema_version: SCHEMA_VERSION,
             pid,
+            terminal_id: current_terminal_id(),
             started_at: OffsetDateTime::now_utc(),
         })
         .map_err(std::io::Error::other)?,
     )?;
     fs::rename(staging, path)?;
     sync_dir(&root)
+}
+
+pub(crate) fn provider_client_matches(
+    client: &ProviderClientRef,
+    harness: &str,
+    pid: u32,
+    started_at: i64,
+    command: &str,
+) -> bool {
+    pid == client.pid
+        && (started_at - client.started_at.unix_timestamp()).abs() <= 5
+        && command.split_whitespace().any(|word| {
+            Path::new(word)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == harness || name.starts_with(&format!("{harness}-")))
+                || word.contains(&format!("/{harness}"))
+        })
+}
+
+/// A terminal marker is valid only on the PTY where the shell installed it.
+/// Inherited environment after app, SSH, or background handoff is not attachment.
+fn current_terminal_id() -> Option<String> {
+    let id = std::env::var("LF_TERMINAL_ID")
+        .ok()
+        .filter(|id| !id.is_empty())?;
+    let expected = std::env::var("LF_TERMINAL_TTY").ok()?;
+    let mut name = [0 as libc::c_char; 1024];
+    // SAFETY: name is a writable buffer of the supplied length. ttyname_r
+    // writes a NUL-terminated name on success and retains no pointers.
+    let result = unsafe { libc::ttyname_r(libc::STDIN_FILENO, name.as_mut_ptr(), name.len()) };
+    if result != 0 {
+        return None;
+    }
+    // SAFETY: successful ttyname_r above terminated the buffer.
+    let actual = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }
+        .to_str()
+        .ok()?;
+    (actual == expected).then_some(id)
 }
 
 pub(crate) fn read_provider_client_stop(
@@ -899,6 +1003,12 @@ pub(crate) fn remove_provider_client_stop(dir: &Path, pid: u32) -> std::io::Resu
     }
 }
 
+/// The client directory survives its last client: it records that an initially
+/// headless Run was opened interactively. Client files alone describe liveness.
+pub(crate) fn has_interactive_history(dir: &Path, manifest: &RunManifest) -> std::io::Result<bool> {
+    Ok(manifest.surface == "tui" || dir.join("provider-clients").try_exists()?)
+}
+
 pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
     let path = dir.join("provider-clients").join(format!("{pid}.json"));
     match fs::remove_file(path) {
@@ -906,6 +1016,111 @@ pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+/// Who chose a Session's current title. A human name is never replaced by a
+/// generated suggestion. `Unavailable` is never stored: the canonical name
+/// lives on another Home and the reader only has a local display label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTitleSource {
+    Generated,
+    Human,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionName {
+    pub title: String,
+    pub source: SessionTitleSource,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SessionNameRecord {
+    schema_version: u32,
+    title: String,
+    source: SessionTitleSource,
+}
+
+const SESSION_TITLE_MAX_CHARS: usize = 80;
+
+/// The stored Session name, or `None` while the Run still has its seed name.
+pub(crate) fn read_session_name(dir: &Path) -> std::io::Result<Option<SessionName>> {
+    let bytes = match fs::read(dir.join("session-name.json")) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let record: SessionNameRecord =
+        serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    if record.schema_version != SCHEMA_VERSION {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unsupported Session name schema",
+        ));
+    }
+    Ok(Some(SessionName {
+        title: record.title,
+        source: record.source,
+    }))
+}
+
+/// Store a Session name and return the name now in effect. A generated
+/// suggestion leaves an existing human name unchanged, including when the two
+/// writes race: both read and replace under one lock.
+pub(crate) fn write_session_name(
+    dir: &Path,
+    title: &str,
+    source: SessionTitleSource,
+) -> std::io::Result<SessionName> {
+    if source == SessionTitleSource::Unavailable {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "a Session name is either generated or human-assigned",
+        ));
+    }
+    let title = title.trim();
+    if title.is_empty() || title.contains(['\n', '\r']) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Session name must be one non-empty line",
+        ));
+    }
+    if title.chars().count() > SESSION_TITLE_MAX_CHARS {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Session name must be at most {SESSION_TITLE_MAX_CHARS} characters"),
+        ));
+    }
+    read_manifest(dir)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join(".session-name.lock"))?;
+    lock.lock_exclusive()?;
+    if let Some(current) = read_session_name(dir)? {
+        if source == SessionTitleSource::Generated && current.source == SessionTitleSource::Human {
+            return Ok(current);
+        }
+    }
+    let staging = dir.join(format!(".session-name-{}.staging", Uuid::new_v4()));
+    write_private_exclusive(
+        &staging,
+        &serde_json::to_vec_pretty(&SessionNameRecord {
+            schema_version: SCHEMA_VERSION,
+            title: title.to_string(),
+            source,
+        })
+        .map_err(std::io::Error::other)?,
+    )?;
+    fs::rename(staging, dir.join("session-name.json"))?;
+    sync_dir(dir)?;
+    Ok(SessionName {
+        title: title.to_string(),
+        source,
+    })
 }
 
 pub(crate) fn provider_session_is_resolved(dir: &Path) -> std::io::Result<bool> {
@@ -995,7 +1210,7 @@ struct UsageStream {
     cost_usd: Option<f64>,
 }
 
-fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
+pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
     let bytes = fs::read(dir.join("manifest.json"))?;
     let manifest = serde_json::from_slice::<RunManifest>(&bytes).map_err(std::io::Error::other)?;
     if manifest.schema_version != SCHEMA_VERSION {
@@ -1245,6 +1460,82 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 pub(crate) struct CaptureHandle(Arc<Mutex<RunCapture>>);
 
 impl CaptureHandle {
+    /// Publish identity before a human boundary becomes visible. No provider or
+    /// terminal receipt exists until this prepared Run is launched.
+    pub(crate) fn prepare(spec: RunSpec, parent: Option<RunId>) -> StoreResult<RunId> {
+        #[cfg(test)]
+        let home = std::env::var_os("LF_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
+            });
+        #[cfg(not(test))]
+        let home = crate::store::lf_home_dir();
+        Self::prepare_at(&home, spec, parent)
+    }
+
+    pub(crate) fn prepare_at(
+        home: &Path,
+        spec: RunSpec,
+        parent: Option<RunId>,
+    ) -> StoreResult<RunId> {
+        let id = RunId::new();
+        let capture =
+            RunCapture::begin(home, spec, id.clone(), parent, None, None).map_err(record_error)?;
+        write_private_exclusive(&capture.dir.join("prepared"), b"").map_err(record_error)?;
+        sync_dir(&capture.dir).map_err(record_error)?;
+        // This is not a CaptureHandle: dropping preparation must not settle a
+        // Run whose provider has never been launched.
+        Ok(id)
+    }
+
+    pub(crate) fn start_prepared(
+        home: &Path,
+        id: &RunId,
+        spec: RunSpec,
+        context: &crate::trace::PreparedTurnContext,
+    ) -> StoreResult<Self> {
+        let (dir, mut manifest) = resolve_manifest(home, id.as_str()).map_err(record_error)?;
+        // Atomically claim this preparation. A second launcher cannot record
+        // another provider attempt into the same Run.
+        fs::rename(dir.join("prepared"), dir.join("launching")).map_err(record_error)?;
+        let bytes = serde_json::to_vec_pretty(&RunContextArtifact {
+            schema_version: SCHEMA_VERSION,
+            context,
+        })?;
+        write_private_exclusive(&dir.join("context.json"), &bytes).map_err(record_error)?;
+        manifest.context = Some(RunContextRef {
+            path: "context.json".to_string(),
+            content_sha256: hex::encode(Sha256::digest(&bytes)),
+            bytes: bytes.len() as u64,
+        });
+        // Finalize launch provenance on the existing identity. Preparation did
+        // not freeze a prompt, runtime, or model selection before launch.
+        manifest.harness = spec.harness;
+        manifest.model = spec.model;
+        manifest.surface = spec.surface;
+        manifest.cwd = spec.cwd;
+        manifest.repo = spec.repo;
+        manifest.worktree = spec.worktree;
+        manifest.skill = spec.skill;
+        manifest.subjects = spec.subjects;
+        // Preparation is the owning transaction for a human Flow step's
+        // membership; a launch cannot reassign the prepared occurrence.
+        manifest.flow = manifest.flow.or(Some(spec.flow));
+        (manifest.runtime_path, manifest.runtime_digest) = runtime_identity();
+        manifest.host = gethostname::gethostname().to_string_lossy().into_owned();
+        manifest.boot_id = boot_id();
+        let staged = dir.join(".manifest-launching.json");
+        write_private_exclusive(&staged, &serde_json::to_vec_pretty(&manifest)?)
+            .map_err(record_error)?;
+        fs::rename(staged, dir.join("manifest.json")).map_err(record_error)?;
+        fs::remove_file(dir.join("launching")).map_err(record_error)?;
+        sync_dir(&dir).map_err(record_error)?;
+        Ok(Self(Arc::new(Mutex::new(RunCapture::from_manifest(
+            manifest, dir,
+        )))))
+    }
+
     pub(crate) fn begin_with_launch(spec: RunSpec, launch: RunLaunchRequest) -> StoreResult<Self> {
         let context = crate::trace::PreparedTurnContext::from_prompts(
             &launch.system_prompt,
@@ -1484,6 +1775,7 @@ impl Drop for CaptureHandle {
 
 #[derive(Debug)]
 struct RunCapture {
+    binding: Option<active::RunBindingGuard>,
     manifest: RunManifest,
     dir: PathBuf,
     provider: String,
@@ -1510,9 +1802,6 @@ impl RunCapture {
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> std::io::Result<Self> {
         let (runtime_path, runtime_digest) = runtime_identity();
-        let account_id = launch
-            .as_ref()
-            .and_then(|request| request.account_id.clone());
         let context_bytes = context
             .map(|context| {
                 serde_json::to_vec_pretty(&RunContextArtifact {
@@ -1540,6 +1829,7 @@ impl RunCapture {
             worktree: spec.worktree,
             skill: spec.skill,
             subjects: spec.subjects,
+            flow: Some(spec.flow),
             launch,
             context: context_ref,
             runtime_path,
@@ -1548,13 +1838,21 @@ impl RunCapture {
             boot_id: boot_id(),
         };
         let dir = publish_manifest(lf_home, &manifest, context_bytes.as_deref())?;
-        let recorder = RunRecorder::start(&dir, &run_id);
-        Ok(Self {
+        Ok(Self::from_manifest(manifest, dir))
+    }
+
+    fn from_manifest(manifest: RunManifest, dir: PathBuf) -> Self {
+        let recorder = RunRecorder::start(&dir, &manifest.run_id);
+        Self {
+            binding: None,
+            provider: manifest.harness.clone(),
+            model: manifest.model.clone(),
+            account_id: manifest
+                .launch
+                .as_ref()
+                .and_then(|launch| launch.account_id.clone()),
             manifest,
             dir,
-            provider: spec.harness,
-            model: spec.model,
-            account_id,
             attempt: 1,
             attempt_started: false,
             turn_key: Uuid::new_v4().to_string(),
@@ -1564,7 +1862,7 @@ impl RunCapture {
             recorder,
             telemetry_warned: false,
             settled_outcome: None,
-        })
+        }
     }
 
     fn attempt_key(&self) -> String {
@@ -1574,6 +1872,9 @@ impl RunCapture {
     fn start_attempt(&mut self) -> std::io::Result<()> {
         if self.attempt_started {
             return Ok(());
+        }
+        if self.binding.is_none() {
+            self.binding = Some(active::RunBindingGuard::publish(&self.dir)?);
         }
         self.attempt_started = true;
         self.append_event(RunEvent::ProviderAttemptStarted {
@@ -1739,6 +2040,7 @@ impl RunCapture {
             },
         )?;
         self.settled_outcome = Some(outcome.to_string());
+        self.binding = None;
         if self.attempt_started {
             if let Err(error) = self.append_event(RunEvent::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),
@@ -1795,7 +2097,7 @@ fn verified_parent(lf_home: &Path, run_id: RunId) -> Option<RunId> {
     (manifest.run_id == run_id).then_some(run_id)
 }
 
-fn record_dir(lf_home: &Path, run_id: &RunId) -> Option<PathBuf> {
+pub(crate) fn record_dir(lf_home: &Path, run_id: &RunId) -> Option<PathBuf> {
     let prefix = run_id.as_str().strip_prefix("run_")?.get(..2)?;
     Some(lf_home.join("runs").join(prefix).join(run_id.as_str()))
 }
@@ -1991,6 +2293,71 @@ fn record_error(error: std::io::Error) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
+pub(crate) async fn attributed_work(
+    store: &crate::store::SharedStore,
+    manifest: &RunManifest,
+) -> Option<crate::durable::WorkRef> {
+    let selector = preferred_work_selector(manifest)?;
+    let (kind, id) = selector.split_once(':')?;
+    let exact = match kind {
+        "task" => crate::work::task::TaskId::parse(id)
+            .ok()
+            .map(crate::durable::WorkRef::Task),
+        "project" => crate::durable::ProjectId::parse(id)
+            .ok()
+            .map(crate::durable::WorkRef::Project),
+        "wave" => crate::id::WaveId::parse(id)
+            .ok()
+            .map(crate::durable::WorkRef::Wave),
+        _ => None,
+    };
+    if exact.is_some() {
+        return exact;
+    }
+    // Historical Project subjects remain readable after Project launch selectors
+    // are removed. Resolve stored identity without reopening a planning workflow.
+    if kind == "project" {
+        return match store.get_project_by_project(id).await {
+            Ok(Some(project)) => Some(crate::durable::WorkRef::Project(project.id)),
+            Ok(None) => {
+                tracing::warn!(%selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, %selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
+                None
+            }
+        };
+    }
+    match crate::ops::resolve_work_binding(store, &manifest.cwd, &selector).await {
+        Ok(binding) => Some(binding.work),
+        Err(error) => {
+            tracing::warn!(%error, %selector, run_id = %manifest.run_id, "Run subject unavailable");
+            None
+        }
+    }
+}
+
+pub(crate) fn preferred_work_selector(manifest: &RunManifest) -> Option<String> {
+    manifest
+        .subjects
+        .iter()
+        .filter_map(|subject| {
+            let rank = if subject.selector.starts_with("task:") {
+                3
+            } else if subject.selector.starts_with("project:") {
+                2
+            } else if subject.selector.starts_with("wave:") {
+                1
+            } else {
+                return None;
+            };
+            Some((rank, subject.selector.clone()))
+        })
+        .max_by_key(|(rank, _)| *rank)
+        .map(|(_, selector)| selector)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -2008,6 +2375,85 @@ mod tests {
     use crate::engine::stream::{ResultSubtype, StreamEvent};
     use crate::engine::{AgentCapabilities, AgentConfig};
 
+    #[test]
+    fn terminal_attachment_probe() {
+        let Ok(expected) = std::env::var("LF_TEST_TERMINAL_ATTACHMENT") else {
+            return;
+        };
+        assert_eq!(
+            super::current_terminal_id().as_deref(),
+            (!expected.is_empty()).then_some(expected.as_str())
+        );
+    }
+
+    #[test]
+    fn terminal_attachment_requires_the_original_pty() {
+        use std::os::fd::FromRawFd;
+        use std::process::{Command, Stdio};
+
+        let mut master = -1;
+        let mut slave = -1;
+        let mut name = [0 as libc::c_char; 1024];
+        // SAFETY: all output pointers are valid; null termios/winsize use defaults.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    name.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: successful openpty returns two independently owned descriptors
+        // and a NUL-terminated device name in the buffer.
+        let (_master, slave, tty) = unsafe {
+            (
+                fs::File::from_raw_fd(master),
+                fs::File::from_raw_fd(slave),
+                std::ffi::CStr::from_ptr(name.as_ptr())
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            )
+        };
+        for (expected_tty, attached) in [(tty.as_str(), true), ("/dev/another-terminal", false)] {
+            for _ in 0..2 {
+                let output = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "run_record::tests::terminal_attachment_probe",
+                        "--nocapture",
+                    ])
+                    .env("LF_TERMINAL_ID", "shell-one")
+                    .env("LF_TERMINAL_TTY", expected_tty)
+                    .env(
+                        "LF_TEST_TERMINAL_ATTACHMENT",
+                        if attached { "shell-one" } else { "" },
+                    )
+                    .stdin(Stdio::from(slave.try_clone().unwrap()))
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
+        }
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "run_record::tests::terminal_attachment_probe"])
+            .env("LF_TERMINAL_ID", "shell-one")
+            .env("LF_TERMINAL_TTY", &tty)
+            .env("LF_TEST_TERMINAL_ATTACHMENT", "")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+
     fn spec(cwd: &std::path::Path) -> RunSpec {
         RunSpec {
             harness: "proof".to_string(),
@@ -2018,7 +2464,101 @@ mod tests {
             worktree: Some(cwd.to_path_buf()),
             skill: Some("implement".to_string()),
             subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Independent,
         }
+    }
+
+    #[test]
+    fn human_session_names_survive_generated_suggestions() {
+        use super::{read_session_name, write_session_name, SessionTitleSource};
+        let home = tempfile::tempdir().unwrap();
+        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
+        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        assert_eq!(read_session_name(&dir).unwrap(), None);
+
+        let suggested =
+            write_session_name(&dir, " Release outcomes ", SessionTitleSource::Generated).unwrap();
+        assert_eq!(suggested.title, "Release outcomes");
+        let human = write_session_name(&dir, "Launch notes", SessionTitleSource::Human).unwrap();
+        assert_eq!(human.source, SessionTitleSource::Human);
+        let kept = write_session_name(&dir, "Better guess", SessionTitleSource::Generated).unwrap();
+        assert_eq!(kept, human);
+        assert_eq!(read_session_name(&dir).unwrap(), Some(human));
+
+        for invalid in ["   ", "two\nlines", "x".repeat(81).as_str()] {
+            let error = write_session_name(&dir, invalid, SessionTitleSource::Human).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        }
+        assert_eq!(
+            read_session_name(&dir).unwrap().unwrap().title,
+            "Launch notes"
+        );
+    }
+
+    #[test]
+    fn racing_suggestions_never_replace_a_human_name() {
+        use super::{read_session_name, write_session_name, SessionTitleSource};
+        let home = tempfile::tempdir().unwrap();
+        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
+        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(9));
+        let writers = (0..9)
+            .map(|index| {
+                let dir = dir.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let (title, source) = if index == 4 {
+                        ("Human name".to_string(), SessionTitleSource::Human)
+                    } else {
+                        (format!("suggestion {index}"), SessionTitleSource::Generated)
+                    };
+                    for _ in 0..20 {
+                        write_session_name(&dir, &title, source).unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        let name = read_session_name(&dir).unwrap().unwrap();
+        assert_eq!(name.title, "Human name");
+        assert_eq!(name.source, SessionTitleSource::Human);
+    }
+
+    #[test]
+    fn prepared_session_run_is_resolvable_and_consumed_once() {
+        let home = tempfile::tempdir().unwrap();
+        let parent = crate::durable::RunId::new();
+        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(parent.clone()))
+            .unwrap();
+        let (dir, prepared) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        let snapshot = super::read_run_snapshot(&dir).unwrap();
+        assert_eq!(snapshot.id, id.as_str());
+        assert_eq!(snapshot.parent_run_id.as_deref(), Some(parent.as_str()));
+        assert_eq!(snapshot.outcome, None);
+        assert_eq!(snapshot.evidence_gaps, 0);
+        assert!(!dir.join("terminal.json").exists());
+        assert!(!dir.join("provider-clients").exists());
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "human prompt");
+        let capture =
+            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
+        let launched = super::read_manifest(&dir).unwrap();
+        assert_eq!(capture.run_id(), id);
+        assert_eq!(launched.created_at, prepared.created_at);
+        assert_eq!(launched.parent_run_id, Some(parent));
+        assert!(super::context_ref_is_valid(&dir, launched.context.as_ref()));
+        assert!(
+            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).is_err()
+        );
+        capture.mark_spawn_requested();
+        capture.finish("completed").unwrap();
+        assert_eq!(
+            super::read_run_snapshot(&dir).unwrap().outcome.as_deref(),
+            Some("completed")
+        );
+        assert_eq!(super::record_dirs(home.path()).unwrap().len(), 1);
     }
 
     #[test]
@@ -2300,7 +2840,7 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_provider_scan_keeps_only_open_tui_runs() {
+    fn unresolved_provider_scan_keeps_interactive_resumes_until_resolution() {
         let home = tempfile::tempdir().unwrap();
 
         let mut open_spec = spec(home.path());
@@ -2320,6 +2860,22 @@ mod tests {
         let runs = scan_unresolved_provider_runs(home.path()).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].1.run_id, open.run_id());
+
+        let dir = headless.artifact_dir();
+        write_provider_client(&dir, 101).unwrap();
+        let resumed = scan_unresolved_provider_runs(home.path()).unwrap();
+        assert!(resumed
+            .iter()
+            .any(|(_, manifest)| manifest.run_id == headless.run_id()));
+        remove_provider_client(&dir, 101).unwrap();
+        let closed = scan_unresolved_provider_runs(home.path()).unwrap();
+        assert!(closed
+            .iter()
+            .any(|(_, manifest)| manifest.run_id == headless.run_id()));
+        resolve_provider_session(&dir).unwrap();
+        let resolved = scan_unresolved_provider_runs(home.path()).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].1.run_id, open.run_id());
     }
 
     #[test]

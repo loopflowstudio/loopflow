@@ -1,0 +1,27 @@
+{
+  "head": "9b3264efd46d6b505917930aa257f3c9d11bb1eb",
+  "patch_sha256": "ec92ee61e072b76b5fbc2fe8d7014079f45796983159f28a926a856947388d65",
+  "sections": 207,
+  "unchanged_since_previous_review": 188,
+  "changed_sections": [
+    "a/.lf/directions/desktop.md b/.lf/directions/desktop.md",
+    "a/rust/loopflow/src/lf/commands/top.rs b/rust/loopflow/src/lf/commands/top.rs",
+    "a/rust/loopflow/src/lf/commands/waves.rs b/rust/loopflow/src/lf/commands/waves.rs",
+    "a/rust/loopflow/src/ops/human_session.rs b/rust/loopflow/src/ops/human_session.rs",
+    "a/rust/loopflow/src/run_record.rs b/rust/loopflow/src/run_record.rs",
+    "a/rust/loopflow/tests/dto_fixtures.rs b/rust/loopflow/tests/dto_fixtures.rs",
+    "a/scratch/compress.md b/scratch/compress.md",
+    "a/scratch/main-view-task.md b/scratch/main-view-task.md",
+    "a/scratch/review-slice.md b/scratch/review-slice.md",
+    "a/swift/Loopflow/Models/ActivitySnapshot.swift b/swift/Loopflow/Models/ActivitySnapshot.swift",
+    "a/swift/Loopflow/Models/WaveWorkMap.swift b/swift/Loopflow/Models/WaveWorkMap.swift",
+    "a/swift/LoopflowMac/Views/WorkspaceNavigator.swift b/swift/LoopflowMac/Views/WorkspaceNavigator.swift",
+    "a/swift/LoopflowMac/WorkspaceProjection.swift b/swift/LoopflowMac/WorkspaceProjection.swift",
+    "a/swift/LoopflowTests/DTOFixtureTests.swift b/swift/LoopflowTests/DTOFixtureTests.swift",
+    "a/swift/LoopflowTests/RegistryQueryTests.swift b/swift/LoopflowTests/RegistryQueryTests.swift",
+    "a/swift/LoopflowTests/WorkspaceNavigationTests.swift b/swift/LoopflowTests/WorkspaceNavigationTests.swift",
+    "a/swift/README.md b/swift/README.md",
+    "a/tests/fixtures/dto/roadmap_snapshot.json b/tests/fixtures/dto/roadmap_snapshot.json",
+    "a/tests/fixtures/dto/wave_detail.json b/tests/fixtures/dto/wave_detail.json"
+  ]
+}

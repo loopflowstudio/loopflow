@@ -1,0 +1,14 @@
+Owned PID 40872
+Probe executable /tmp/loo291-iteration7-scroll.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active false hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 2883.2193333655596
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (19 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+PASS Press New shell
+FAIL Failure(message: "Owned app active before terminal input") terminated false active false
+Owned termination requested true

@@ -1,0 +1,21 @@
+Owned app PID 29931
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+TIMING launch_to_task_ax_ms 4810.752583201975
+PASS Select exact Task
+PASS Owned app active before launch
+PASS Press All work
+PASS Press New terminal
+PASS Owned app active for input
+Wheel activation true
+PASS Owned app active before wheel
+PASS Press Show work list
+PASS Press Work details
+PASS Press All work
+PASS Press Return to terminals
+PASS Press Hide work list
+Owned app termination requested true

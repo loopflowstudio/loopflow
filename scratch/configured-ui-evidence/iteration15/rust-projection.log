@@ -1,0 +1,18 @@
+   Compiling loopflow v0.12.19 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.04s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-19093d58746e5e6d)
+
+running 10 tests
+test ops::human_session::tests::ask_titles_are_meaningful_and_bounded ... ok
+test ops::human_session::tests::interactive_titles_use_one_bounded_line ... ok
+test ops::human_session::tests::human_sessions_open_through_the_public_session_command ... ok
+test ops::human_session::tests::task_is_the_most_specific_parent_run_subject ... ok
+test ops::human_session::tests::session_identity_is_the_exact_human_flow_position ... ok
+test ops::human_session::tests::ready_flow_without_an_autonomous_predecessor_cannot_iterate ... ok
+test ops::human_session::tests::human_session_carries_the_started_skill_definition ... ok
+test ops::human_session::tests::session_action_fixtures_match_the_shared_boundary ... ok
+test ops::human_session::tests::initial_session_publication_requires_history_and_an_owned_client ... ok
+test ops::human_session::tests::session_work_labels_follow_stable_ancestry_without_a_roadmap ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 1556 filtered out; finished in 1.56s
+

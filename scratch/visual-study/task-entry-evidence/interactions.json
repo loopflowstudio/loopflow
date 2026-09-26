@@ -1,0 +1,28 @@
+[
+  {
+    "viewport": [
+      1400,
+      780
+    ],
+    "single_session_direct_entry": true,
+    "zero_and_external_explicit": true,
+    "multiple_exact_picker": true,
+    "draft_companion_monitor_retained": true,
+    "repo_round_trip": true,
+    "no_nested_session_rows": true,
+    "errors": []
+  },
+  {
+    "viewport": [
+      1100,
+      720
+    ],
+    "single_session_direct_entry": true,
+    "zero_and_external_explicit": true,
+    "multiple_exact_picker": true,
+    "draft_companion_monitor_retained": true,
+    "repo_round_trip": true,
+    "no_nested_session_rows": true,
+    "errors": []
+  }
+]

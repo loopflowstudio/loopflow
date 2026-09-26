@@ -1,0 +1,44 @@
+{
+  "observed_at": "2026-09-24T13:55:39.452896+00:00",
+  "head": "9b3264efd46d6b505917930aa257f3c9d11bb1eb",
+  "tracked_patch_chars": 1110904,
+  "tracked_sections": 207,
+  "unchanged_from_review11": 199,
+  "changed_sections": [
+    "diff --git a/scratch/compress.md b/scratch/compress.md",
+    "diff --git a/scratch/configured-ui-proof.md b/scratch/configured-ui-proof.md",
+    "diff --git a/scratch/main-view-task.md b/scratch/main-view-task.md",
+    "diff --git a/scratch/review-slice.md b/scratch/review-slice.md",
+    "diff --git a/swift/Loopflow/Services/RegistryQuery.swift b/swift/Loopflow/Services/RegistryQuery.swift",
+    "diff --git a/swift/LoopflowMac/PodiumModel.swift b/swift/LoopflowMac/PodiumModel.swift",
+    "diff --git a/swift/LoopflowMac/Views/WorkSurfaceView.swift b/swift/LoopflowMac/Views/WorkSurfaceView.swift",
+    "diff --git a/swift/README.md b/swift/README.md"
+  ],
+  "hashes": {
+    "swift/Loopflow/Services/RegistryQuery.swift": "1a5582cc2a040dd353b21163fdc5ab11e560d360d4ed5631a5e18437298dde67",
+    "swift/LoopflowMac/PodiumModel.swift": "e6069ff63254f5ee76c1fb93a231204e7b9d49be24ffca776381f41bf03386e1",
+    "swift/LoopflowMac/Views/WorkSurfaceView.swift": "2d91ca5e7d983d807e3ed23d43fd11ee0ada1fcec0b6f36442afc5877f0cc553",
+    "swift/LoopflowTests/TaskDirectiveEditorTests.swift": "d4ee3d6777c13a816d07ce624fea94ff077c37f56eb8bcd03b2496e88e0fb930",
+    "/tmp/loo291-iteration12-editor/Loopflow Editor.app/Contents/MacOS/Loopflow": "f11ea4ca6ac94c32bc122eece84533281877db74c67231d9fb8d43f5df1b4afd",
+    "target/debug/lf": "a15444b8d5b1f7ada42404b69f46be1ac3892aa79acdbbc51f4645144ce72389"
+  },
+  "matches_implementation_receipt": {
+    "swift/Loopflow/Services/RegistryQuery.swift": true,
+    "swift/LoopflowMac/PodiumModel.swift": true,
+    "swift/LoopflowMac/Views/WorkSurfaceView.swift": true,
+    "swift/LoopflowTests/TaskDirectiveEditorTests.swift": true,
+    "/tmp/loo291-iteration12-editor/Loopflow Editor.app/Contents/MacOS/Loopflow": true,
+    "target/debug/lf": true
+  },
+  "roadmap_generated_at": "2026-09-24T13:55:36.943172Z",
+  "task": {
+    "id": "ee671927-255f-41e6-8429-b830d59cc1de",
+    "identifier": "LOO-291",
+    "completed": false,
+    "work_id": "task_2aa71a7e36fe416d8a721e2b2f7c54e7",
+    "directive_sha256": "7f17492d8ec86ee45b40cc439e8752f3c1c342c1150e276cc1e9db789e952dac"
+  },
+  "owned_app_pid": 66438,
+  "owned_app_absent": true,
+  "sessions_unchanged": true
+}

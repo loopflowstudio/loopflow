@@ -1,0 +1,8 @@
+{
+  "unstarted_hidden_from_sidebar": true,
+  "wave_opens_full_plan": true,
+  "inspection_does_not_start": true,
+  "sample_start_adds_task": true,
+  "started_without_session_remains": true,
+  "scope": "Website sample state only; final case simulates Session removal"
+}

@@ -752,8 +752,16 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
+        flow: crate::ops::flow_run::capture_membership()?,
     };
-    let capture = if surface == "headless" {
+    let capture = if let Some(id) = crate::ops::human_session::prepared_run_id()? {
+        crate::run_record::CaptureHandle::start_prepared(
+            &crate::store::lf_home_dir(),
+            &id,
+            spec,
+            &built.context,
+        )
+    } else if surface == "headless" {
         let launch = crate::run_record::RunLaunchRequest::from_prepared(
             prepared_config,
             &built.capabilities,
@@ -767,10 +775,34 @@ fn begin_run_capture(
         crate::run_record::CaptureHandle::begin_with_context(spec, &built.context)
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
+    record_task_start(&built.subjects)?;
     capture.record_input("initial", &built.context.task.text);
-    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
     crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)
+}
+
+/// A captured launch starts work; resolving context or preparing identity does
+/// not. Declared subjects without a registered Task remain attribution only.
+fn record_task_start(subjects: &[String]) -> Result<()> {
+    let Some(selector) = subjects
+        .iter()
+        .find_map(|subject| subject.strip_prefix("task:"))
+    else {
+        return Ok(());
+    };
+    let path = crate::store::database_path_from_env()?;
+    if !path.try_exists()? {
+        return Ok(());
+    }
+    let store = crate::store::sqlite::SqliteStore::new(&path)?;
+    let task = match crate::durable::TaskId::parse(selector) {
+        Ok(id) => store.task(&id)?,
+        Err(_) => store.task_by_issue(selector)?,
+    };
+    if let Some(task) = task {
+        store.begin_chapter_task(&task.id)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn attributed_context(

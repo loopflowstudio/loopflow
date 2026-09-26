@@ -1,0 +1,1 @@
+PASS: 4 configured Session records decode and round-trip through production Swift DTOs; CLI labels/reasons agree; exact Task Work path agrees.

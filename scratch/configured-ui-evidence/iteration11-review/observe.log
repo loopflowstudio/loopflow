@@ -1,0 +1,39 @@
+observed_at 2026-09-24T04:49:03Z
+ax_trusted true
+app 38209 active false windows 1
+control podium-sessions value 5 Sessions
+control workspace-task-25a9a61a-d602-4e8b-8c41-a8d362b5fd4e value 
+nodes 40
+app 44263 active false windows 1
+control podium-sessions value 3 Sessions
+control workspace-task-a494d11f-1966-48c0-b40a-a56860cba1e6 value 
+control workspace-task-049348f6-de52-4ac9-a94c-5c0804435668 value 
+control workspace-task-564d1271-efde-471a-a137-f28ecd0de070 value 
+control workspace-task-15172e70-1ec8-4cb0-a15c-f84d49361381 value 
+control workspace-task-9500cecb-4e4a-4c0d-88b1-0186c5ddeb69 value 
+control workspace-task-25a9a61a-d602-4e8b-8c41-a8d362b5fd4e value 
+control workspace-task-ee671927-255f-41e6-8429-b830d59cc1de value 
+control workspace-task-eef88fa6-ddcf-4570-a779-8110c7a161c6 value 
+control workspace-task-directive value User outcome
+
+A developer can promote a locally built main or branch through the protected installation transaction used by releases. The first local install uses a disposable clone of the reliable published store; compatible local builds reuse that clone. The installed CLI, daemon, keeper, macOS app, and helpers agree on the selected artifact and Home. A later published release returns to the reliable store without importing dev data. Promotion never destroys live work to make progress.
+
+One promotion contract
+
+* Route local and published artifacts through one machine-global promotion lock, exact preflight, activation, recovery, keeper restart, and health proof. Never copy or relink installed binaries around that transaction.
+* Keep one reliable published store. A first local install clones it; compatible local installs reuse the dev Home; explicit fresh archives the old dev Home and reclones reliable data. Development binaries never receive reliable-store authority.
+* Treat an exact complete artifact, app/helper, selected-store, migration-frontier, and settled-receipt match as a true no-op before any upgrade receipt, generation change, pause, signal, or reconciliation. Print already installed; fleet untouched.
+* Before a real transition, settle absent owners only from exact Run-event and process-receipt evidence, then classify every live Invocation. Direct provider sessions may stop only with a proved native resume route. Same-lineage headless Work may stop only with a proved lifecycle relaunch. Captured first-fork Work may instead use the confirmed published-return or fresh parking disposition. Any other live or unprovable body defers the entire transition before pause or signal.
+* Preserve typed HomeUpgrade causality. Same-lineage Work relaunches with RunTrigger HomeUpgrade and no retry lineage; confirmed rewind Work stays parked. Neither disposition creates a work-failure event or consumes Task or Project recovery.
+* Use existing provider-session artifacts and command builders to reopen eligible conversations. Link old and replacement Invocations, preserve conversation evidence, and add no second inventory or handoff format.
+* Record exact artifact, store, recovery, first-fork Work, and safe-stop disposition in machine-level promotion authority. Retain the complete published artifact set and reliable store as failback.
+* A published return selects and migrates only the reliable store, parks surviving forked Work before reliable reconciliation, archives the dev Home for inspection, and never imports dev schema or rows.
+
+Proof
+
+One staged integration history proves: an exact reinstall leaves fleet identity untouched; local promotion clones but never mutates the reliable store; a live TUI or ambiguous owner defers promotion without receiving a signal; direct Claude and Codex conversations reopen from existing session artifacts; a headless Task relaunches across same-lineage local upgrades without spending recovery and is durably parked on published return; the 2026-08-19 stale Invocation shape settles exactly once with evidence preserved; keeper and app surfaces retain one artifact/store identity; failure injection leaves valid receipt-owned recovery; and the next published release migrates the reliable store once with no dev-data import.
+
+This Task absorbs LOO-228 and its 2026-08-19 evidence. Implement one promotion mechanism and preserve the combined acceptance cases in scratch/install-unpublished-local-builds-through.md.
+
+<!-- loopflow-task-start:c4baea4f50bb8eb893840d28ef77483ed740993c3625514fce864cb85b1336a1 -->
+nodes 97

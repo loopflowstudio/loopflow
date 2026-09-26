@@ -1,0 +1,24 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.02s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 1 test
+test run_record::active::reader::tests::manifest_failure_does_not_outlive_its_native_client ... FAILED
+
+failures:
+
+---- run_record::active::reader::tests::manifest_failure_does_not_outlive_its_native_client stdout ----
+
+thread 'run_record::active::reader::tests::manifest_failure_does_not_outlive_its_native_client' (522553799) panicked at rust/loopflow/src/run_record/active/reader/tests.rs:259:13:
+assertion `left == right` failed: stale manifest failure survived repair and client exit
+  left: ["/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp52vGtM/runs/4a/run_4aa51f7302d0452ea36c8b82c8e0622e/manifest.json: EOF while parsing an object at line 1 column 1"]
+ right: []
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    run_record::active::reader::tests::manifest_failure_does_not_outlive_its_native_client
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1592 filtered out; finished in 3.81s
+
+error: test failed, to rerun pass `-p loopflow --lib`

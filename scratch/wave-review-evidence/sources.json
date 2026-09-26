@@ -1,0 +1,22 @@
+{
+  "rust/loopflow/src/ops/human_session.rs": "0f2bde9599d4592954be7a3c7efa709d64d7f45d06d97a1f80f2764138414caa",
+  "rust/loopflow/src/lf/commands/waves.rs": "9a75b5a8577514e59b196eb29b8518d1fa6c23efc87e907eea110f534b747d6e",
+  "rust/loopflow/tests/dto_fixtures.rs": "d85b62d9ceae996da4609c04ba2b53f69597f780baa31f79171da1299f5f6dbd",
+  "swift/Loopflow/Models/SessionRecord.swift": "dbd1a6048ed7957e23170265eca7b096fcfb2d9ae1889d5e33bc3c5990a638cd",
+  "swift/Loopflow/Services/RegistryQuery.swift": "8a1c2a8192603b2fdc2fbe790bfdb69f5c7d535c899f184bd052c1e685c62fda",
+  "swift/LoopflowMac/WorkspaceProjection.swift": "14057eb3ba6cc808cb04cf082024076cb5b39b951665a041dcb0239f596a6425",
+  "swift/LoopflowMac/PodiumModel.swift": "dead64a525866125b6a65325e49018ef1e793150e5504bb2a55dd026a589061e",
+  "swift/LoopflowMac/ConversationLaunch.swift": "901a63cb1f3dde735d88e8ec8957d1e6aa64aa2ec7e2174d583bd5cb740b19e9",
+  "swift/LoopflowMac/Views/WorkSurfaceView.swift": "074e41bd49c4ec1935df5088a8b3f77d5df0e9b72b32f9fd14f1a4b2f45b5bf5",
+  "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "5f9614fd12c06317affbcb9ca5d36e6cbad01b045f5a3c1b6eee66bcb07904f7",
+  "swift/LoopflowTests/TaskMonitorProofTests.swift": "7638371997fced2d17b72a9c804727e13902984fd80d31aaff89a8d6a414fb4b",
+  "swift/LoopflowTests/WorkspaceNavigationTests.swift": "273de26983e5cb963baa8dd587d42c38fa86185ed40149c9cd7a1d35162b9190",
+  "tests/fixtures/dto/session.json": "67da8ee7b0fa250403424e1b50c1f913e9a6cd42ad5e7d38da0b84c436129248",
+  "tests/fixtures/dto/sessions.json": "e61aa8da72b4310b6751c911e5cd17e0f13e2ea8478b3fe1b7369c850cbdee29",
+  "tests/fixtures/dto/roadmap_snapshot.json": "99be0fc99a07152c07c35a56fcc9954c3ee4bc0380a8258e2c4f50c6aa1e0dc1",
+  "rust/loopflow/src/run_record.rs": "39f44ee297dc3a5ad1508935fedf38948c184a996c075e7e4275c30cb3acfb3d",
+  "swift/LoopflowTests/PodiumModelTests.swift": "7a8f6aeee19ad6618a2e7f61b79d3b874f193873fa4bf544ea4be9f1d24700fd",
+  "swift/Loopflow/Models/WaveWorkMap.swift": "61fb8d5334512e331bdc1161822ee9fd19fc12e5a6dcb9b77b5098d8d84d9f81",
+  "swift/LoopflowMac/Views/SessionsView.swift": "9e74e6d78b15f428867e2d6c8823519638176305991d94542329bd656e4550a6",
+  "swift/LoopflowMac/Views/TaskMonitorView.swift": "4b257784eade9ff15827653dbbee8495f9bd733a3f055f9896bb4446e2f6b7b4"
+}

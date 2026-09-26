@@ -1,0 +1,18 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 33.06s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 10 tests
+test run_record::active::reader::tests::discovery_cost_matrix ... ignored, explicit discovery cost collection: creates 100,000 historical Runs
+test run_record::active::tests::dead_missing_reused_and_ambiguous_owners_never_claim_a_live_run ... ok
+test run_record::active::tests::exact_owners_deduplicate_one_run_and_keep_other_runs_separate ... ok
+test run_record::active::events::tests::overflow_invalidates_coverage_instead_of_evicting_paths ... ok
+test run_record::active::tests::capture_intervals_do_not_keep_prior_runs_alive_in_a_reused_exec ... ok
+test run_record::active::tests::native_client_receipts_do_not_require_a_new_capture_binding ... ok
+test run_record::active::reader::tests::missing_roots_and_replaced_home_never_become_false_empty ... ok
+test run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear ... ok
+test run_record::active::reader::tests::retained_ownerless_capture_follows_loss_of_native_history ... ok
+test run_record::active::reader::tests::native_feed_discovers_old_resumes_replacement_and_removal ... ok
+
+test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 1582 filtered out; finished in 23.52s
+

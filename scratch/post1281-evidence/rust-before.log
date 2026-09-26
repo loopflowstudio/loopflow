@@ -1,0 +1,24 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+error[E0425]: cannot find function `receipt_matches_live_lf` in this scope
+   --> rust/loopflow/src/lf/commands/top.rs:202:27
+    |
+202 |           .filter(|receipt| receipt_matches_live_lf(receipt, &by_pid))
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^
+...
+796 | / fn receipt_matches_live_process(
+797 | |     receipt: &ExecProcessReceipt,
+798 | |     process_by_pid: &HashMap<u32, &OsProcess>,
+799 | | ) -> bool {
+...   |
+803 | |     })
+804 | | }
+    | |_- similarly named function `receipt_matches_live_process` defined here
+    |
+help: a function with a similar name exists
+    |
+202 -         .filter(|receipt| receipt_matches_live_lf(receipt, &by_pid))
+202 +         .filter(|receipt| receipt_matches_live_process(receipt, &by_pid))
+    |
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `loopflow` (lib) due to 1 previous error

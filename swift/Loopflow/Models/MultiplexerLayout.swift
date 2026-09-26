@@ -14,6 +14,7 @@ public enum PaneContent: Codable, Sendable, Equatable {
     case empty
     case session(id: String)
     case shell
+    case monitor(taskId: String)
 }
 
 public struct PaneState: Codable, Sendable, Identifiable, Equatable {

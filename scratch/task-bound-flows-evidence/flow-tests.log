@@ -1,0 +1,25 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.26s
+     Running tests/flow_tests.rs (target/debug/deps/flow_tests-ecaae8bb656a9fa4)
+
+running 12 tests
+test builtin_deploy_uses_ops_land_item ... ok
+test flow_parsing_parity ... ok
+test builtin_garden_flow_structure ... ok
+test builtin_governance_flows_structure ... ok
+test flow_ref_parses_into_items ... ok
+test ops_item_parses_and_expands ... ok
+test expand_flow_prefers_skill_over_single_skill_flow ... ok
+test expand_flow_resolves_plain_string_as_subflow ... ok
+test expand_flow_tracks_parents ... ok
+test builtin_build_or_silent_has_xor_branch ... ok
+Initialized empty Git repository in /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpiHoi3m/.git/
+[main (root-commit) 8d90428] fixture
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .lf/skills/compress.md
+ create mode 100644 .lf/skills/implement.md
+test code_flow_records_each_skill_as_one_generic_run ... ok
+test bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.07s
+

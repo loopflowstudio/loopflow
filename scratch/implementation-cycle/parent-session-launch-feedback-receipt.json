@@ -1,0 +1,9 @@
+{
+  "result": "1 focused test passed",
+  "files": {
+    "swift/LoopflowMac/Views/WorkSurfaceView.swift": "eaa28802a057dcc7f22f4bf6bfd45d2232a57807fbce95a663ce1838be5ec0bc",
+    "swift/LoopflowMac/WorkspaceProjection.swift": "4e33baad6f0dcb90225c184aab8462b1066a2d66dc7e965e1a6245f663ec76d4",
+    "swift/LoopflowTests/WorkspaceNavigationTests.swift": "f6ddddbad9da860486d2551eb709d5d930fba853798b932fb258900d099b3ea6",
+    "/tmp/loo291-session-launch-feedback.log": "e97813f449d2e6839a6a2eeebd1d86bd16d73f23077eb205594b227b0af319ff"
+  }
+}

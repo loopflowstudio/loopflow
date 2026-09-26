@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running tests/session_cli_tests.rs (target/debug/deps/session_cli_tests-24700fb2b3901da6)
+
+running 6 tests
+test session_cli_uses_one_truthful_resolution_contract ... ok
+test unopened_session_has_a_run_before_any_provider_is_started ... ok
+test raw_sessions_are_named_by_a_stable_word_pair ... ok
+test session_names_are_shared_and_human_names_win ... ok
+test boundary_names_follow_run_ids_and_replacement_runs ... ok
+test boundary_launch_and_resume_remain_openable_while_provider_waits ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.43s
+

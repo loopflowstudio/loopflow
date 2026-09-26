@@ -1,0 +1,27 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests DesktopPerformanceTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (2.47s)
+Test Suite 'Selected tests' started at 2026-09-24 16:07:13.602.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 16:07:13.658.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 16:07:13.658.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 16:07:13.658.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.056) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Desktop experience measurements" started.
+◇ Test measureExperiences() started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✘ Test measureExperiences() recorded an issue at DesktopPerformanceTests.swift:19:6: Caught error: Captured native content/input endpoint not reached in 5 seconds
+✘ Test measureExperiences() failed after 8.683 seconds with 1 issue.
+✘ Suite "Desktop experience measurements" failed after 8.683 seconds with 1 issue.
+↳ /// Opt-in native benchmark. The endpoint is captured native pixels + owned PTY input,
+↳ /// not compositor presentation. Run through scripts/desktop_performance.py.
+✘ Test run with 1 test in 1 suite failed after 8.684 seconds with 1 issue.

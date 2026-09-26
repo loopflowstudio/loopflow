@@ -14,9 +14,18 @@ private enum SessionFixtureKind: String {
         let work = self == .flow
             ? #"{"kind":"task","id":"task_00000000000000000000000000000001"}"#
             : "null"
+        let membership = self == .flow
+            ? #"{"kind":"step","flow":"task-design","invocation_id":"fixture","step":"review-design","step_index":1,"iteration":0,"occurrence":"current"}"#
+            : #"{"kind":"independent"}"#
+        let actions: String
+        switch self {
+        case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Stop the other client and resume here; unsent text there is lost","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Stop the provider and remove this Session; native history remains resumable","unavailable_reason":null}]"#
+        case .ask: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Complete the conversation and resume its blocked caller","unavailable_reason":null}]"#
+        case .flow: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"approve","label":"Approve and continue","help":"Approve and continue the Task","unavailable_reason":null},{"kind":"iterate","label":"Iterate","help":"Return to autonomous Task work with your direction","unavailable_reason":null}]"#
+        }
         return """
         {
-          "id": "\(id)",
+          "id": "\(id)", "run_id": "\(id)",
           "kind": "\(rawValue)",
           "work": \(work),
           "title": "\(rawValue.capitalized) fixture",
@@ -24,6 +33,9 @@ private enum SessionFixtureKind: String {
           "cwd": "/tmp",
           "state": "\(state)",
           "ready_summary": \(summary),
+          "work_path": null,
+          "actions": \(actions),
+          "title_source": "generated", "flow_membership": \(membership), "terminal_ids": [],
           "open_argv": ["/usr/bin/tail", "-f", "/dev/null"]
         }
         """

@@ -1,0 +1,13 @@
+observed_at 2026-09-24T14:00:08Z
+Owned app PID 49816
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+Focused application status -25204
+System focused PID (diagnostic only) -1 owned 49816
+PASS One owned accessible window
+TIMING launch_to_task_ax_ms 3485.759375151247
+PASS Select exact Task
+PASS Press Edit directive
+FAIL Failure(message: "Missing task-directive-draft")
+Owned app termination requested true

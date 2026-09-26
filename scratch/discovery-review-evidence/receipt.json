@@ -1,0 +1,45 @@
+{
+  "disposition": "Advances Rust slice after bounded fix; automatic Mac integration and complete acceptance remain open; no publication",
+  "checks": {
+    "before": "one regression failed with retained manifest gap versus clean cold read",
+    "reader": "10 passed, large cost matrix explicitly ignored",
+    "cli": "1 passed after correction",
+    "clippy": "pass",
+    "format": "pass",
+    "diff_check": "pass",
+    "prior_source_and_artifact_verification": "all 19 implementation sources and all receipt artifacts matched at entry",
+    "measurement": "prior 60/60 warm observations retain original source/binary attribution; not rerun"
+  },
+  "sources": {
+    "rust/loopflow/src/run_record/active.rs": "157beee1e55565737e99babab2a4463fef25950b6491c6564934d8c064cdfab1",
+    "rust/loopflow/src/run_record/active/reader.rs": "b3e2a9ad544a0596013f7f3224a38d10b2be7e1fd26e4bc39e21a9338be6775e",
+    "rust/loopflow/src/run_record/active/reader/tests.rs": "0ff99e44e42edbe3fcf15478dd7bbcc5b4edbcf5cb6d8746ff02485acf3ca68b",
+    "rust/loopflow/src/run_record/active/events.rs": "39946b8fa4f003836e6251699a82df642c2447e90564fcf648cc5059dd3af8db",
+    "rust/loopflow/src/lf/commands/runs_watch.rs": "184540e3e4128edd6f50ad8a00b393feca887f706e101e54b68184fb0b646ee8",
+    "rust/loopflow/src/lf/commands/runs.rs": "241ffbe8f7d4e68a8796ebf890f8e854d8e3acbedf66cb315df4a2ff9ba1534b",
+    "rust/loopflow/src/lf/commands/top.rs": "d3b74f0fe14e35558d74ae73a1cf81605b9cc2877d7425f782604871043d1259",
+    "rust/loopflow/src/journal/mod.rs": "30fef9d36a9999e16df5e211cebd6091a0d913326b7780434bc9504ae222e53d",
+    "rust/loopflow/src/lf/commands/mod.rs": "3d5b96bb9750281fb76f7d14245ae153569b31586f1a13be412c90e4983f090b",
+    "rust/loopflow/src/lf/mod.rs": "32bf98ac53fc71c13c252d0ff72112e299d923d2dcc7478b27b4a48ca5238d38",
+    "rust/loopflow/src/bin/lf.rs": "492e6f5b64c69cfbc603c591ea309d99c5812880d340349abde139fcf8855722",
+    "rust/loopflow/tests/active_runs_watch.rs": "b038db3da3d5afd1c728c3e7d25737747a574e6ae9ac98533fe8d990f0677a53",
+    "rust/loopflow/tests/dto_fixtures.rs": "727f2c6aca1d98e4c8c86f81af36a8e73323328cb418c21c7eb611bf2828768e",
+    "swift/Loopflow/Models/ActiveRunsSnapshot.swift": "9e9948ab10732f2848aed9e4a915cf13e2c5f5e4568ea1233b2d882f67fb5756",
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": "d5f1bb27c6c799cb68b4155ff3924fdc968f0b5d7c4c30aa873142d20d1b1713",
+    "swift/LoopflowTests/TaskMonitorTests.swift": "f82b302e1ac4ef1ce420dfa33dd94160390d8dab7acb8cc8d3b5d5390e07822a",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "4529ef3fabf78963d85e2cc1e5e707732e4373d571040cb1715850ed5e91b409",
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": "bc8216995e64c99edda54a00b5df0f4f6fdc4927e3535f59599e84008dfdad7f",
+    "tests/fixtures/dto/active_runs.json": "c94d62f749ef3cce1121bda8a08350f64f65ec30141931fe1178f9ea28322274"
+  },
+  "artifacts": {
+    "architecture.txt": "7c627d48a39b5c4d20fd216020b3171313c0ffef485bdf99521171a8aa56554a",
+    "cli-after.log": "f7cff8d191419f4adbd648662fcdba8b91f1a8390fc41700ffe9040485b6f495",
+    "cli.log": "c09b4e58a737286bdcae2712a1bd5b290666e0749066729e4d396f8c13c4cfe4",
+    "clippy.log": "d7927f9c024a3ecc14c3f9345e4f163ae10f6493460e440d9a4f431e031579c7",
+    "correction.patch": "c8c9597ba057e5f5b6904adbce052c1176519882ac248097a72424a077c9e0c8",
+    "diff-scope.json": "b5badb8741a3fe9d2d1a9f996682d667c76f44721afb9e3a25fb1e043c5edc15",
+    "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "manifest-before.log": "d687a183c095ae1f889349f4c8c17af68398fd422f45a1cef706dd61ceaa4e9c",
+    "reader-after.log": "7a209cff2b5e2066f436a4fb6bbb54f9a529c52643b36289f32a270568673528"
+  }
+}

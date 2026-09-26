@@ -1,0 +1,59 @@
+{
+  "observed_at": "2026-09-24T14:37:19.113101+00:00",
+  "commands": [
+    [
+      "target/debug/lf",
+      "roadmap",
+      "--all",
+      "--json"
+    ],
+    [
+      "target/debug/lf",
+      "session",
+      "list",
+      "--json"
+    ]
+  ],
+  "cwd": "/Users/jack/src/loopflow.main-view-task",
+  "home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "task": {
+    "id": "ee671927-255f-41e6-8429-b830d59cc1de",
+    "identifier": "LOO-291",
+    "work": {
+      "kind": "task",
+      "id": "task_2aa71a7e36fe416d8a721e2b2f7c54e7"
+    },
+    "completed": false,
+    "condition": "blocked"
+  },
+  "project": {
+    "id": "57fee17f-7231-46f3-afd8-031d866a1779",
+    "name": "Desktop",
+    "definition_present": true,
+    "kr_count": 2
+  },
+  "directive_present": true,
+  "sessions_total": 4,
+  "exact_task_session_ids": [
+    "run_643d86d70d5b4109a460e80a87a97533"
+  ],
+  "retired_trial_sessions_absent": true,
+  "native_test": {
+    "command": "swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter WorkspaceNavigationProofTests/sessionRowRestoresWorktree",
+    "exit_code": 0,
+    "tests_passed": 1,
+    "boundary": "Real Ghostty PTYs and AppKit, fixture Session records; input via Ghostty API"
+  },
+  "hashes": {
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "faa9f6c42b7b3a3b18d847f9e832b67ddc32b2dedc6c88b271b5882af5e72322",
+    "swift/LoopflowMac/Views/SessionsView.swift": "adaae30350e7309a73e6d35e38898b201a849c36d01a31a8af37ac415257fc8d",
+    "swift/LoopflowMac/WorkspaceProjection.swift": "6aa6e425e009ab94855b76aa764d17477c924d0df33737bfa8e826cf9cfc4598",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "fe54b64e8a57354536529b8fce5ca9dc028a552e830d0ba544a4e5f62ae808e3",
+    "target/debug/lf": "a15444b8d5b1f7ada42404b69f46be1ac3892aa79acdbbc51f4645144ce72389"
+  },
+  "read_payload_hashes": {
+    "roadmap.json": "6de74ddd68f4b20710678e3b9fe0dee114c0d329ea5af120781dab9b45cce4dd",
+    "sessions.json": "d6660c906337cf7c5b68d1c5bfeeec6c9892ed82e311de7ef1d4d44f3a83bfaa"
+  },
+  "mutations": "None to planning, Sessions or configured clients"
+}

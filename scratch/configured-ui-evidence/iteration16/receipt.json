@@ -1,0 +1,33 @@
+{
+  "observed_at": "2026-09-24T15:24:17.380483+00:00",
+  "sha256": {
+    "swift/Loopflow/Models/WorkStatus.swift": "4f596869b55a4d4f8bd3a0e48fc8c0f857c743ba9c24215fa3bf806c62b40d74",
+    "swift/Loopflow/Models/WaveWorkMap.swift": "922b7eba784e78cd5ee8611d17644909bf04edc9b92f3a5adbf9bc942cbe5a74",
+    "swift/Loopflow/Models/SessionRecord.swift": "92bab46706cb16915959d297b268088a6550b536eca496f706b4e6275716b5c0",
+    "swift/LoopflowMac/Views/SessionsView.swift": "64b9e1162a28720c59ea8e0ea000399e34f17d65931ef578d75f57b5b9a94745",
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "bd112954a032945447286be94d802f4f7ab179a611a942131d9a575d55e44f4d",
+    "swift/LoopflowMac/PodiumModel.swift": "e6069ff63254f5ee76c1fb93a231204e7b9d49be24ffca776381f41bf03386e1",
+    "swift/Loopflow/Services/RegistryQuery.swift": "1a5582cc2a040dd353b21163fdc5ab11e560d360d4ed5631a5e18437298dde67",
+    "rust/loopflow/src/ops/human_session.rs": "33bd05a8d693f0d16d9add3cea163b99808d0835cf792d1fb641620b013afcfb",
+    "rust/loopflow/src/lf/commands/waves.rs": "7eadb32447cd9a2611efb5acab8e15d4382e3cb8500f486d156f3b393efea924",
+    "target/debug/lf": "61e3ed3c17a53faca8a4de4a8c6b5d00b79812e6b272347e672bf4bb01b7e7b8",
+    "/tmp/loo291-iteration16/Loopflow Proof.app/Contents/MacOS/Loopflow": "d7b4c27d6fa3471288513c7d66ebd8d7b64915594dd234e71f7323c6c29881ee"
+  },
+  "comparison_counts": {
+    "project": 5,
+    "task": 145,
+    "session": 4
+  },
+  "configured_ui_result": "unavailable: console reports screen locked; system AX focus PID 395",
+  "owned_app_pids": [
+    87766,
+    8698,
+    44369
+  ],
+  "owned_apps_absent_after": true,
+  "provider_launches": 0,
+  "session_mutations": 0,
+  "production_edits": 0,
+  "configured_ui_trials": 0,
+  "ready_probe_exit": 2
+}

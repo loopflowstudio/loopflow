@@ -1,0 +1,163 @@
+{
+  "recorded_at": "2026-09-25T01:45:22.228755+00:00",
+  "command": "swift test --package-path swift -Xswiftc -gnone --jobs 4 --no-parallel --filter 'ActiveRunsObservationTests|ActiveRunsLifetimeTests|TaskMonitorTests|TaskMonitorProofTests|DTOFixtureTests/activeRunsFixture'",
+  "focused_result": {
+    "tests": 16,
+    "suites": 5,
+    "exit": 0
+  },
+  "fallback_command": "uv run python: run_plans([p for p in build_plan([], False, {'loopflow'}) if p.run])",
+  "fallback_result": "Xcode app and test build-for-testing passed; no hosted tests",
+  "sources": {
+    "swift/Loopflow/Services/RegistryQuery.swift": {
+      "sha256": "1db64625baa7fae492aa376be41ec5c8092bdedaa2d81e8546f2d5c0be464c9f",
+      "mtime_ns": 1790300242460265619,
+      "bytes": 23634
+    },
+    "swift/LoopflowMac/MacLocalWaveAgentLauncher.swift": {
+      "sha256": "f7510144af357fb7a3efeebf16e5fe81c2886537640154794f710733f4209871",
+      "mtime_ns": 1790299759143754623,
+      "bytes": 11312
+    },
+    "swift/LoopflowMac/PodiumModel.swift": {
+      "sha256": "11e6052f37e302b26cb6db3f8c6058603451232402efdf83f21319d7ab1892de",
+      "mtime_ns": 1790300441244546536,
+      "bytes": 26760
+    },
+    "swift/LoopflowMac/Services/RegistryQueryLocal.swift": {
+      "sha256": "cb631a7523c9f24c6c0ee4d8bfade475acc2fd6c8da57afac85928b75ec3420a",
+      "mtime_ns": 1790300079724725515,
+      "bytes": 2542
+    },
+    "swift/LoopflowMac/Views/PodiumView.swift": {
+      "sha256": "06523686cffc692384f4bac18d0ea733ee27f857f3b359e0d82012adb20df2c1",
+      "mtime_ns": 1790299926759835649,
+      "bytes": 4887
+    },
+    "swift/LoopflowMac/Views/SessionsView.swift": {
+      "sha256": "52daac916ac272c9d3f73b799972646ad3d6ecf77c94e3e66682ba37728960b1",
+      "mtime_ns": 1790299926762454189,
+      "bytes": 56720
+    },
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": {
+      "sha256": "d78e5ea15f76b48421bcc4a9a3fc1896a341574059e45dcf9a0e4a98634ef5a4",
+      "mtime_ns": 1790300242459269062,
+      "bytes": 4448
+    },
+    "swift/LoopflowTests/DTOFixtureTests.swift": {
+      "sha256": "b00de6f8e5bb7ef270135aadaeea37b0011e7895130ed8f33cddee32b0ce2143",
+      "mtime_ns": 1790299926763386745,
+      "bytes": 17441
+    },
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": {
+      "sha256": "59457a2f5ecdeeb8b8520c8035bbf52d3b21cb88b5817dc8076b705dc9c06806",
+      "mtime_ns": 1790300040016278031,
+      "bytes": 28421
+    },
+    "swift/LoopflowTests/TaskMonitorProofTests.swift": {
+      "sha256": "b17209031ff0ff73979a6f4ae91b4ac97c20629b734bfb319b97989ad1cb456c",
+      "mtime_ns": 1790300040015862817,
+      "bytes": 15799
+    },
+    "swift/LoopflowTests/TaskMonitorTests.swift": {
+      "sha256": "de382d4c7281fb1bb6ea5abd1ef5148a48c512e9cfd40902c747e0226e0b508f",
+      "mtime_ns": 1790300487468290382,
+      "bytes": 12762
+    },
+    "swift/README.md": {
+      "sha256": "679db9093fa988d7adf0c4e846069a449d11200cdd12ecf5e8c3e0a6182c865f",
+      "mtime_ns": 1790300395506095128,
+      "bytes": 16670
+    },
+    "swift/Loopflow/Services/ActiveRunsObservation.swift": {
+      "sha256": "63b8568a241484af8cf37590799dfca91785799c12e210c8fd96daf14dbf04ef",
+      "mtime_ns": 1790299759142710482,
+      "bytes": 940
+    },
+    "swift/LoopflowMac/Services/LocalActiveRunsObservation.swift": {
+      "sha256": "1388e9926870d4f00cc40c8ee2265582cf97aa00f04b20b911535b08bb861c2d",
+      "mtime_ns": 1790300272515514476,
+      "bytes": 10111
+    },
+    "swift/LoopflowTests/ActiveRunsTestFeed.swift": {
+      "sha256": "e2d0eb84ae3b0f68b1ec0737060be6d19f67e78efcb4208e600e25b3e254d437",
+      "mtime_ns": 1790300039951795012,
+      "bytes": 1595
+    },
+    "swift/LoopflowTests/ActiveRunsObservationTests.swift": {
+      "sha256": "f7c3c6e099eb9c3254712c36539f473f006d98394c07bc311aaf2c42c65ccb67",
+      "mtime_ns": 1790300487464056652,
+      "bytes": 13308
+    },
+    "swift/LoopflowTests/ActiveRunsLifetimeTests.swift": {
+      "sha256": "6a4df0fa399a3b316db774aa4b34775f8d9c8ad1201f8501c0a8421452d28f86",
+      "mtime_ns": 1790300487467526996,
+      "bytes": 3526
+    },
+    "swift/Loopflow/Models/ActiveRunsSnapshot.swift": {
+      "sha256": "9e9948ab10732f2848aed9e4a915cf13e2c5f5e4568ea1233b2d882f67fb5756",
+      "mtime_ns": 1790294700758494609,
+      "bytes": 1129
+    },
+    "tests/fixtures/dto/active_runs.json": {
+      "sha256": "c94d62f749ef3cce1121bda8a08350f64f65ec30141931fe1178f9ea28322274",
+      "mtime_ns": 1790294700759035731,
+      "bytes": 654
+    }
+  },
+  "binaries": {
+    "target/debug/lf": {
+      "sha256": "8d7cc429ed7d66dab056400bea61b2b2c747e8fa192432adcdd8101423d67143",
+      "mtime_ns": 1790299351959141240,
+      "bytes": 143567328
+    },
+    "swift/.build/debug/LoopflowMac": {
+      "sha256": "43ad26dac2744e44cd73e97c810ad0a36bb2772ecf1658e5d8f5ec3557689d66",
+      "mtime_ns": 1790300489194602919,
+      "bytes": 32391376
+    }
+  },
+  "artifacts": {
+    "scratch/active-runs-stream-evidence/transport-initial-failure.log": {
+      "sha256": "3fed81d965fdbee68b9e5ce441415c439cf894f6172bb97f8a653383c5dbbe59",
+      "mtime_ns": 1790300211570963747,
+      "bytes": 4537
+    },
+    "scratch/active-runs-stream-evidence/interrupted-broad-run.log": {
+      "sha256": "ddb7f54b690e9b56242a11d7fe87ba05a9c2d57fd687af9c0b1483988b7f60b8",
+      "mtime_ns": 1790300326940628905,
+      "bytes": 3588
+    },
+    "scratch/active-runs-stream-evidence/focused-final.log": {
+      "sha256": "d63a826552880c4365c63812ceb547e349a5697c7bc12879bde99b78d8a49216",
+      "mtime_ns": 1790300520740407407,
+      "bytes": 5817
+    },
+    "scratch/active-runs-stream-evidence/transport-lifetime.log": {
+      "sha256": "38318d0a10502696a58585a4a34d27cd1791fd7e5ed9314c6a7c133010cf70fc",
+      "mtime_ns": 1790300305185376791,
+      "bytes": 5221
+    },
+    "scratch/active-runs-stream-evidence/fallback-final.log": {
+      "sha256": "e01de9c4321378724ef21bac63bdd7c031276866c9ce62df57563d7bf111c0d6",
+      "mtime_ns": 1790300551657398116,
+      "bytes": 118343
+    },
+    "scratch/active-runs-stream-evidence/real-cli.log": {
+      "sha256": "585880f6396322ea0bce07cb46ed7d05a82aee9ff17bf89ebc2926536c4110b1",
+      "mtime_ns": 1790300429038958896,
+      "bytes": 1751
+    },
+    "scratch/active-runs-stream-evidence/contribution.patch": {
+      "sha256": "5b102144f8c95d325d5e4489a899cb3d71878d72086b38def29624e5eb7b2fe0",
+      "mtime_ns": 1790300722228735012,
+      "bytes": 61511
+    }
+  },
+  "limits": [
+    "Owned cat clients and fixture wire streams, not configured vendor-provider acceptance",
+    "Prior Rust cost matrix and desktop timing baselines retain their original source attribution",
+    "Interrupted broad-run failure is retained separately, not a gate pass",
+    "No publication, installation, PM mutation, Task completion or blanket checkpoint"
+  ]
+}

@@ -11,10 +11,54 @@ use crate::controller::wave::journal::short_id;
 use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
+pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot, DiscoveryState};
 pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
+
+pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (home, store, task) = runtime.block_on(async {
+        let home = crate::store::observability_home_dir();
+        let config =
+            crate::store::StorageConfig::sqlite(crate::store::observability_database_path()?);
+        let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
+        let task = match task {
+            Some(task) => Some(
+                crate::ops::resolve_work_binding(
+                    &store,
+                    &std::env::current_dir()?,
+                    &format!("task:{task}"),
+                )
+                .await?
+                .work,
+            ),
+            None => None,
+        };
+        Ok::<_, anyhow::Error>((home, store, task))
+    })?;
+    if watch {
+        return super::runs_watch::run(&home, &store, task, &runtime);
+    }
+    runtime.block_on(async {
+        let snapshot = crate::run_record::active::snapshot(&home, &store, task).await;
+        if json {
+            println!("{}", serde_json::to_string(&snapshot)?);
+        } else {
+            for run in &snapshot.runs {
+                println!("{}  {}  {}", run.id, run.harness, run.label);
+            }
+            for gap in &snapshot.gaps {
+                println!("Unavailable: {gap}");
+            }
+            if snapshot.runs.is_empty() && snapshot.gaps.is_empty() {
+                println!("No active Runs.");
+            }
+        }
+        Ok(())
+    })
+}
 
 /// The Runs matching a filter, newest first, capped. One reader behind
 /// `lf runs`, its Work drills, and `lf status`'s Runs evidence, so the surfaces
@@ -344,6 +388,7 @@ mod tests {
                     worktree: Some(home.path().to_path_buf()),
                     skill: Some("implement".to_string()),
                     subjects: vec![SubjectAttribution::declared(format!("task:{task}"))],
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap();
@@ -380,6 +425,7 @@ mod tests {
                 worktree: Some(home.path().to_path_buf()),
                 skill: Some("review-chapter".to_string()),
                 subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -397,6 +443,7 @@ mod tests {
                     worktree: Some(home.path().to_path_buf()),
                     skill: Some("project/review-chapter".to_string()),
                     subjects: Vec::new(),
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
                 RunLaunchRequest {
                     system_prompt: "system".to_string(),

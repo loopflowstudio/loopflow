@@ -1,5 +1,5 @@
-//! Name primitives shared by the identity layer: author slug and branch-safe
-//! sanitization.
+//! Name primitives: author slug, branch-safe sanitization, and the
+//! `magical-musical` word pair that names raw Sessions.
 //!
 //! Branch/worktree identity itself lives in [`crate::engine::identity`]. This
 //! module only supplies the raw pieces it composes.
@@ -7,6 +7,31 @@
 use crate::engine::error::GitError;
 use std::path::Path;
 use std::process::Command;
+
+const MAGICAL: &[&str] = &[
+    "aurora", "cascade", "crystal", "drift", "echo", "ember", "fern", "flume", "frost", "glade",
+    "grove", "haze", "ivy", "jade", "luna", "mist", "nova", "opal", "petal", "prism", "rain",
+    "ripple", "sage", "shade", "spark", "star", "stone", "storm", "tide", "vale", "wave", "wisp",
+    "wren", "zephyr",
+];
+
+const MUSICAL: &[&str] = &[
+    "allegro", "aria", "ballad", "cadence", "canon", "chord", "coda", "duet", "forte", "fugue",
+    "harmony", "hymn", "lilt", "lyric", "melody", "motif", "opus", "prelude", "refrain", "rondo",
+    "sonata", "tempo", "trill", "tune", "verse", "waltz",
+];
+
+/// A stable `magical-musical` pair, e.g. `aurora-fugue`, derived from `seed`.
+/// The same seed always yields the same pair, so readers need not persist it.
+pub fn word_pair(seed: &str) -> String {
+    // FNV-1a: stable across Rust releases, unlike the std hasher.
+    let hash = seed.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    let magical = MAGICAL[(hash % MAGICAL.len() as u64) as usize];
+    let musical = MUSICAL[((hash >> 32) % MUSICAL.len() as u64) as usize];
+    format!("{magical}-{musical}")
+}
 
 /// Reduce an arbitrary string to a branch-safe slug: lowercase alphanumerics,
 /// `-`, `_`, `.`, with runs of anything else collapsed to a single `-`.
@@ -81,6 +106,18 @@ mod tests {
     #[test]
     fn sanitize_collapses_hyphens() {
         assert_eq!(sanitize_for_branch("a---b"), "a-b");
+    }
+
+    #[test]
+    fn word_pairs_are_stable_and_vary_by_seed() {
+        let pair = word_pair("run_1");
+        assert_eq!(pair, word_pair("run_1"));
+        let (magical, musical) = pair.split_once('-').expect("two words");
+        assert!(MAGICAL.contains(&magical) && MUSICAL.contains(&musical));
+        let distinct = (0..20)
+            .map(|index| word_pair(&format!("run_{index}")))
+            .collect::<std::collections::HashSet<_>>();
+        assert!(distinct.len() > 10);
     }
 
     #[test]

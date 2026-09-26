@@ -1,0 +1,35 @@
+[
+  {
+    "recommended": "feature",
+    "record": {
+      "kind": "none"
+    },
+    "controls": []
+  },
+  {
+    "recommended": "feature",
+    "record": {
+      "kind": "pinned",
+      "invocation_id": "inv_fixture",
+      "graph": {
+        "name": "feature",
+        "steps": []
+      },
+      "current": null,
+      "completed": [],
+      "returns": [],
+      "execution": "idle",
+      "reason": "No worker is running",
+      "restart_required": false
+    },
+    "controls": []
+  },
+  {
+    "recommended": "feature",
+    "record": {
+      "kind": "finished",
+      "flow": "feature"
+    },
+    "controls": []
+  }
+]

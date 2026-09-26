@@ -1,0 +1,23 @@
+    Blocking waiting for file lock on build directory
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.64s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 1 test
+test ops::human_session::tests::session_action_fixtures_match_the_shared_boundary ... FAILED
+
+failures:
+
+---- ops::human_session::tests::session_action_fixtures_match_the_shared_boundary stdout ----
+
+thread 'ops::human_session::tests::session_action_fixtures_match_the_shared_boundary' (517297101) panicked at rust/loopflow/src/ops/human_session.rs:1776:79:
+called `Result::unwrap()` on an `Err` value: Error("invalid id: invalid character: found `w` at 0", line: 19, column: 52)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ops::human_session::tests::session_action_fixtures_match_the_shared_boundary
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1583 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p loopflow --lib`

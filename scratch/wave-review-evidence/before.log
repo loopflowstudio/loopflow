@@ -1,0 +1,62 @@
+Another instance of SwiftPM (PID: 68663) is already running using '/Users/jack/src/loopflow.main-view-task/swift/.build', waiting until that process has finished execution...[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/10] Compiling LoopflowMac PodiumModel.swift
+[5/10] Emitting module LoopflowMac
+[6/21] Compiling LoopflowMac ConversationLaunch.swift
+[7/21] Compiling LoopflowMac LoopflowApp.swift
+[8/21] Compiling LoopflowMac PodiumFixture.swift
+[9/21] Compiling LoopflowMac TaskMonitorView.swift
+[10/21] Compiling LoopflowMac WavesView.swift
+[11/21] Compiling LoopflowMac WorkActivityView.swift
+[12/21] Compiling LoopflowMac WorkSurfaceView.swift
+[13/21] Compiling LoopflowMac WorkspaceNavigator.swift
+[14/21] Compiling LoopflowMac PodiumView.swift
+[15/21] Compiling LoopflowMac RoadmapView.swift
+[16/21] Compiling LoopflowMac SessionsView.swift
+[16/21] Write Objects.LinkFileList
+[17/21] Linking LoopflowMac
+[18/21] Applying LoopflowMac
+[20/34] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[21/34] Compiling LoopflowTests TaskMonitorProofTests.swift
+[22/34] Compiling LoopflowTests TaskMonitorTests.swift
+[23/34] Compiling LoopflowTests WaveDetailReadingTests.swift
+[24/34] Compiling LoopflowTests DTOFixtureTests.swift
+[25/34] Compiling LoopflowTests DesktopPerformanceTests.swift
+[26/34] Compiling LoopflowTests FaderSwitchTests.swift
+[27/34] Compiling LoopflowTests MockWaveFixtureTests.swift
+[28/34] Compiling LoopflowTests NowProjectionTests.swift
+[29/34] Compiling LoopflowTests PodiumModelTests.swift
+[30/34] Compiling LoopflowTests RegistryQueryTests.swift
+[31/34] Compiling LoopflowTests RoadmapViewTests.swift
+[32/34] Emitting module LoopflowTests
+[33/37] Compiling LoopflowTests WaveLensTests.swift
+[34/37] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[35/37] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[35/37] Write Objects.LinkFileList
+[36/37] Linking LoopflowSwiftPackageTests
+Build complete! (16.52s)
+Test Suite 'Selected tests' started at 2026-09-24 15:18:36.600.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 15:18:36.646.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 15:18:36.646.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 15:18:36.646.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.046) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Podium model" started.
+◇ Test "Selected Task survives a chapter transfer with temporarily absent membership" started.
+✘ Test "Selected Task survives a chapter transfer with temporarily absent membership" recorded an issue at PodiumModelTests.swift:109:9: Expectation failed: (model.task(id: "issue-now")?.task.task.name → "Make lf roadmap the machine-wide view") == "Updated while selected"
+✘ Test "Selected Task survives a chapter transfer with temporarily absent membership" failed after 0.154 seconds with 1 issue.
+◇ Test "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "history" to "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "task" to "A delayed historical reference cannot replace newer navigation" started.
+✘ Test "A delayed historical reference cannot replace newer navigation" recorded an issue with 1 argument destination → "task" at PodiumModelTests.swift:133:13: Expectation failed: (model.selection → WorkReference(kind: Loopflow.WorkReference.Kind.wave, id: "wave-1")) == (.task(id: "issue-now") → WorkReference(kind: Loopflow.WorkReference.Kind.task, id: "issue-now"))
+✘ Test "A delayed historical reference cannot replace newer navigation" recorded an issue with 1 argument destination → "task" at PodiumModelTests.swift:134:13: Expectation failed: (model.historyWave → WaveSnapshot(id: "wave-1", name: "product", status: Loopflow.WorkStatus.ready, goal: "Conduct goal-authored work everywhere.", repo: "/src/loopflow", activeTasks: 2, live: true, paused: true, enabled: true, endpoint: Optional("127.0.0.1:7777"), createdAt: Optional("2026-07-01T00:00:00Z"), parentWaveId: nil, retiredAt: nil, supersededByWaveId: nil, retirementReason: nil, home: Loopflow.Home(id: "home_00000000000000000000000000000001", route: "local", createdAt: "1970-01-01T00:00:00Z", observedAt: "1970-01-01T00:00:00Z"))) == nil
+◇ Test case passing 1 argument destination → "repo" to "A delayed historical reference cannot replace newer navigation" started.
+✘ Test "A delayed historical reference cannot replace newer navigation" recorded an issue with 1 argument destination → "repo" at PodiumModelTests.swift:138:13: Expectation failed: (model.historyWave → WaveSnapshot(id: "wave-1", name: "product", status: Loopflow.WorkStatus.ready, goal: "Conduct goal-authored work everywhere.", repo: "/src/loopflow", activeTasks: 2, live: true, paused: true, enabled: true, endpoint: Optional("127.0.0.1:7777"), createdAt: Optional("2026-07-01T00:00:00Z"), parentWaveId: nil, retiredAt: nil, supersededByWaveId: nil, retirementReason: nil, home: Loopflow.Home(id: "home_00000000000000000000000000000001", route: "local", createdAt: "1970-01-01T00:00:00Z", observedAt: "1970-01-01T00:00:00Z"))) == nil
+✘ Test "A delayed historical reference cannot replace newer navigation" with 3 test cases failed after 0.003 seconds with 3 issues.
+✘ Suite "Podium model" failed after 0.158 seconds with 4 issues.
+✘ Test run with 2 tests in 1 suite failed after 0.158 seconds with 4 issues.

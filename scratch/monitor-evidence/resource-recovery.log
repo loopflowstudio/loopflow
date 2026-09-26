@@ -1,0 +1,19 @@
+warning: `VIRTUAL_ENV=/Users/jack/src/loopflow.agent/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Resource envelope: FAIL · 188.9 GiB free / 64.0 GiB floor · 4 workers · nice +10
+ok    build     3.8 GiB /   12.0 GiB  jack-heart/account-for-scheduled-release-opportunities · active
+ok    build     3.5 GiB /   12.0 GiB  jack-heart/chapter-planning
+ok    build     1.2 GiB /   12.0 GiB  jack-heart/clean-up-owned-tmux-terminals
+ok    build     1.6 GiB /   12.0 GiB  jack-heart/global-cmds · active
+ok    build     9.8 GiB /   12.0 GiB  jack-heart/lf-new
+ok    build     4.8 GiB /   12.0 GiB  jack-heart/main-view-task · active
+ok    build     6.4 GiB /   12.0 GiB  jack-heart/make-laptop-refresh-and-lf-installed-schedule-proof
+ok    build     4.2 GiB /   12.0 GiB  jack-heart/make-linear-oauth-recovery-survive · active
+ok    build     4.0 GiB /   12.0 GiB  jack-heart/projects · active
+ok    build     4.9 GiB /   12.0 GiB  jack-heart/restore-task-watching-with-live · active
+FAIL  build    19.1 GiB /   12.0 GiB  main · active
+ok    cache   545.9 MiB /    4.0 GiB  Cargo · active
+ok    cache    12.1 GiB /   16.0 GiB  uv
+ok    runs    665.4 MiB /   16.0 GiB  Loopflow Home · active
+
+build:main: build uses 19.1 GiB / 12.0 GiB budget
+  next: run `uv run python scripts/resource_envelope.py --recover`; recovery removes only build roots from inactive worktrees

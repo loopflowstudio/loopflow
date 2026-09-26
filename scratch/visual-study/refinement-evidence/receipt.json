@@ -1,0 +1,21 @@
+{
+  "scope": "Website prototype only; sample data",
+  "author_runs": [
+    "run_7c6e15c4db9e4381bbbad9838a66cbdd",
+    "run_6f54007489d148fd93e5e9dfea4f09d8"
+  ],
+  "interaction_command": "uv run --no-project --with playwright python scratch/visual-study/refinement-evidence/check_interactions.py",
+  "sha256": {
+    "scratch/visual-study/mockups.html": "446eded6e50a5718243680917c2ae3f802ae3668a6cb5fc4078d2db5c40e236c",
+    "scratch/visual-study/index.html": "fee02d70b0a4fc29cd89d5ea47197c8f77f42f67d76f3dc1f379b62f07f1c94c",
+    "scratch/visual-study/refinement-evidence/context-laptop.png": "9ee85763745eb4b54b3b8414657ec050c9abda80eae6e79c6a23778b5e1c89cb",
+    "scratch/visual-study/refinement-evidence/context-wide.png": "ff8fd9200b70a3a78d52ed234fe62b1f7fce5790bab9cdce4e7bc3fabdcca45b",
+    "scratch/visual-study/refinement-evidence/overview-laptop.png": "36cf2ef35aff43c81e58e0e9546c694b7b83abcf840dc9446658ddd8cfe522ce",
+    "scratch/visual-study/refinement-evidence/overview-wide.png": "d1fe97fe02e245ee2b542f6cbbf17bd42afe2859a4f9bf767deed97712626b29",
+    "scratch/visual-study/refinement-evidence/session-laptop.png": "f5ffc2cc4443b58b7957050efe6beb52d48f67c4c957caacc919c88b07761d2f",
+    "scratch/visual-study/refinement-evidence/session-wide.png": "ae4be91e8abbe234b9ed57a0419975bc5dfc691a5fb6e962d26817af3720d5b2",
+    "scratch/visual-study/refinement-evidence/interactions.json": "7b9e5785b374761073121ca73788616e6f0ae64c24167208457dd48312adaec0",
+    "scratch/visual-study/refinement-evidence/check_interactions.py": "8fbb347cf748c91b647937c24f04b2767d32e5c50ef45f96e1d33db12b9b904f",
+    "scratch/visual-study/refinement-evidence/review.md": "ae7285cd065ebbb3dbceae82784ca17cecbf1ba2a9e6238bf8786df1ded16ffd"
+  }
+}

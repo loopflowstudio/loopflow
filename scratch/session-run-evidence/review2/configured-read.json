@@ -1,0 +1,140 @@
+{
+  "home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "read_only": true,
+  "sessions": {
+    "exit_code": 0
+  },
+  "active_runs": {
+    "exit_code": 0
+  },
+  "session_count": 16,
+  "active_run_count": 6,
+  "gaps": [
+    "Exec 9d54d558-6f76-4a81-b14f-0aba376085b6 has live providers but 0 current Run identities"
+  ],
+  "active_session_links": [
+    {
+      "session": "run_042de7267e1b4d9f8b617fa16234bd42",
+      "run": "run_042de7267e1b4d9f8b617fa16234bd42",
+      "observed_in_active_runs": true
+    },
+    {
+      "session": "run_2c98180b98a64510a44fe6565c3269d3",
+      "run": "run_2c98180b98a64510a44fe6565c3269d3",
+      "observed_in_active_runs": true
+    },
+    {
+      "session": "run_44294c0bbd314e2bbe5920a57eefb9b3",
+      "run": "run_44294c0bbd314e2bbe5920a57eefb9b3",
+      "observed_in_active_runs": true
+    },
+    {
+      "session": "run_8255b1de6daf4238a62bc0bbefd4f4df",
+      "run": "run_8255b1de6daf4238a62bc0bbefd4f4df",
+      "observed_in_active_runs": true
+    },
+    {
+      "session": "run_5ffd266a4f984b28ac2e9e915db824ef",
+      "run": "run_5ffd266a4f984b28ac2e9e915db824ef",
+      "observed_in_active_runs": true
+    }
+  ],
+  "run_lookups": [
+    {
+      "session": "task_d9e2245ddf8449a08112341321fc3c0e:8edcaf09-56f3-459c-9531-fb3f626e2ad1:task-design:review_kickoff:0",
+      "run": "run_f2ee9572a1cb4dcf9d06f8274c5acaa0",
+      "exit_code": 0,
+      "returned_id": "run_f2ee9572a1cb4dcf9d06f8274c5acaa0"
+    },
+    {
+      "session": "run_7bacfe379eea403884b464c63f23be2c",
+      "run": "run_7bacfe379eea403884b464c63f23be2c",
+      "exit_code": 0,
+      "returned_id": "run_7bacfe379eea403884b464c63f23be2c"
+    },
+    {
+      "session": "run_042de7267e1b4d9f8b617fa16234bd42",
+      "run": "run_042de7267e1b4d9f8b617fa16234bd42",
+      "exit_code": 0,
+      "returned_id": "run_042de7267e1b4d9f8b617fa16234bd42"
+    },
+    {
+      "session": "run_2c98180b98a64510a44fe6565c3269d3",
+      "run": "run_2c98180b98a64510a44fe6565c3269d3",
+      "exit_code": 0,
+      "returned_id": "run_2c98180b98a64510a44fe6565c3269d3"
+    },
+    {
+      "session": "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+      "run": "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+      "exit_code": 0,
+      "returned_id": "run_32238dfb9f2c4782a9d9fcf7eba1c542"
+    },
+    {
+      "session": "run_44294c0bbd314e2bbe5920a57eefb9b3",
+      "run": "run_44294c0bbd314e2bbe5920a57eefb9b3",
+      "exit_code": 0,
+      "returned_id": "run_44294c0bbd314e2bbe5920a57eefb9b3"
+    },
+    {
+      "session": "run_c2a56c3b168d44b4ab2447a36696f5cd",
+      "run": "run_c2a56c3b168d44b4ab2447a36696f5cd",
+      "exit_code": 0,
+      "returned_id": "run_c2a56c3b168d44b4ab2447a36696f5cd"
+    },
+    {
+      "session": "run_ced16df79c344b5dbafbabab85cfd134",
+      "run": "run_ced16df79c344b5dbafbabab85cfd134",
+      "exit_code": 0,
+      "returned_id": "run_ced16df79c344b5dbafbabab85cfd134"
+    },
+    {
+      "session": "run_dfa05b65e606420d8e16af76f155c577",
+      "run": "run_dfa05b65e606420d8e16af76f155c577",
+      "exit_code": 0,
+      "returned_id": "run_dfa05b65e606420d8e16af76f155c577"
+    },
+    {
+      "session": "run_6d68330afdc044fdaee22c0c69987221",
+      "run": "run_6d68330afdc044fdaee22c0c69987221",
+      "exit_code": 0,
+      "returned_id": "run_6d68330afdc044fdaee22c0c69987221"
+    },
+    {
+      "session": "run_8583e499219840a09e09a2fae5669df3",
+      "run": "run_8583e499219840a09e09a2fae5669df3",
+      "exit_code": 0,
+      "returned_id": "run_8583e499219840a09e09a2fae5669df3"
+    },
+    {
+      "session": "run_8255b1de6daf4238a62bc0bbefd4f4df",
+      "run": "run_8255b1de6daf4238a62bc0bbefd4f4df",
+      "exit_code": 0,
+      "returned_id": "run_8255b1de6daf4238a62bc0bbefd4f4df"
+    },
+    {
+      "session": "run_5ffd266a4f984b28ac2e9e915db824ef",
+      "run": "run_5ffd266a4f984b28ac2e9e915db824ef",
+      "exit_code": 0,
+      "returned_id": "run_5ffd266a4f984b28ac2e9e915db824ef"
+    },
+    {
+      "session": "run_643d86d70d5b4109a460e80a87a97533",
+      "run": "run_643d86d70d5b4109a460e80a87a97533",
+      "exit_code": 0,
+      "returned_id": "run_643d86d70d5b4109a460e80a87a97533"
+    },
+    {
+      "session": "run_f8b3df345dc94aeab0ae3e2338893def",
+      "run": "run_f8b3df345dc94aeab0ae3e2338893def",
+      "exit_code": 0,
+      "returned_id": "run_f8b3df345dc94aeab0ae3e2338893def"
+    },
+    {
+      "session": "run_53d33a43bf804f4e9ff72258ddea3316",
+      "run": "run_53d33a43bf804f4e9ff72258ddea3316",
+      "exit_code": 0,
+      "returned_id": "run_53d33a43bf804f4e9ff72258ddea3316"
+    }
+  ]
+}

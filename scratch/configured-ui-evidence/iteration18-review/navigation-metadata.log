@@ -1,0 +1,78 @@
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/8] Emitting module LoopflowMac
+[5/8] Compiling LoopflowMac WorkSurfaceView.swift
+[5/10] Write Objects.LinkFileList
+[6/10] Linking LoopflowMac
+[7/10] Applying LoopflowMac
+[9/12] Emitting module LoopflowTests
+[10/12] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[10/12] Write Objects.LinkFileList
+[11/12] Linking LoopflowSwiftPackageTests
+Build complete! (4.24s)
+Test Suite 'Selected tests' started at 2026-09-24 13:38:18.492.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:38:18.532.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:38:18.532.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:38:18.532.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.040) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified workspace navigation proof" started.
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "Session rows restore their shell and companion layout across worktree slots" started.
+◇ Test "Incomplete planning preserves the repository's selected Task" started.
+◇ Test "Work outside the plan is explained in Wave details without crowding the Task list" started.
+◇ Test "Task details expose directive and Project proof from the same snapshot" started.
+◇ Test "Every presentation opens the exact Session without changing the selected Work" started.
+◇ Test "New conversation follows the visible subject and repository scope" started.
+◇ Test "Completing a Session removes its link without completing its Task" started.
+◇ Test "Compression promotes leaves without changing identity or hiding upcoming Tasks" started.
+◇ Test "Compact preserves structural distinctions when planning is multiple, partial or unavailable" started.
+◇ Test "Failed reads keep last-good work and exact Sessions with a visible error" started.
+◇ Test "Autonomous, upcoming and human work share stable ranked planning rows" started.
+◇ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" started.
+◇ Test "Compact keeps empty planning subjects available for inspection and conversation" started.
+◇ Test "Inspection distinguishes no Sessions from an unavailable reading" started.
+◇ Test "An existing Task checkout remains visible across provider gaps, including completed planning work" started.
+◇ Test "Returning to a repository retains its last-good Sessions when refresh fails" started.
+◇ Test "Incomplete planning keeps out-of-plan Work reachable" started.
+◇ Test case passing 1 argument truncated → false to "Incomplete planning preserves the repository's selected Task" started.
+◇ Test "Presentation and repo changes preserve selection, expansion, search and terminal splits" started.
+◇ Test case passing 1 argument evidence → "partial" to "Compact preserves structural distinctions when planning is multiple, partial or unavailable" started.
+◇ Test case passing 1 argument evidence → "unavailable" to "Compact preserves structural distinctions when planning is multiple, partial or unavailable" started.
+◇ Test case passing 1 argument truncated → true to "Incomplete planning preserves the repository's selected Task" started.
+◇ Test case passing 1 argument hasProject → true to "Compact keeps empty planning subjects available for inspection and conversation" started.
+◇ Test case passing 1 argument hasProject → false to "Compact keeps empty planning subjects available for inspection and conversation" started.
+◇ Test case passing 1 argument hasSession → true to "Inspection distinguishes no Sessions from an unavailable reading" started.
+◇ Test case passing 1 argument hasUnplannedWork → true to "Incomplete planning keeps out-of-plan Work reachable" started.
+◇ Test "Slow planning does not gate Session reading or navigation" started.
+◇ Test case passing 1 argument hasSession → false to "Inspection distinguishes no Sessions from an unavailable reading" started.
+◇ Test case passing 1 argument hasUnplannedWork → false to "Incomplete planning keeps out-of-plan Work reachable" started.
+◇ Test case passing 1 argument evidence → "multiple" to "Compact preserves structural distinctions when planning is multiple, partial or unavailable" started.
+◇ Test "Session list disambiguates same-named conversations and retains unknown ancestry" started.
+✔ Test "Autonomous, upcoming and human work share stable ranked planning rows" passed after 0.250 seconds.
+✔ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" passed after 0.250 seconds.
+✔ Test "Session list disambiguates same-named conversations and retains unknown ancestry" passed after 0.250 seconds.
+✔ Test "Compact preserves structural distinctions when planning is multiple, partial or unavailable" with 3 test cases passed after 0.250 seconds.
+✔ Test "Compression promotes leaves without changing identity or hiding upcoming Tasks" passed after 0.250 seconds.
+✔ Test "An existing Task checkout remains visible across provider gaps, including completed planning work" passed after 0.250 seconds.
+✔ Test "Compact keeps empty planning subjects available for inspection and conversation" with 2 test cases passed after 0.250 seconds.
+✔ Test "Task details expose directive and Project proof from the same snapshot" passed after 0.353 seconds.
+✔ Test "Completing a Session removes its link without completing its Task" passed after 0.353 seconds.
+✔ Test "New conversation follows the visible subject and repository scope" passed after 0.353 seconds.
+✔ Test "Work outside the plan is explained in Wave details without crowding the Task list" passed after 0.435 seconds.
+✔ Test "Every presentation opens the exact Session without changing the selected Work" passed after 0.459 seconds.
+✔ Test "Presentation and repo changes preserve selection, expansion, search and terminal splits" passed after 0.480 seconds.
+✔ Test "Incomplete planning keeps out-of-plan Work reachable" with 2 test cases passed after 0.580 seconds.
+✔ Test "Returning to a repository retains its last-good Sessions when refresh fails" passed after 0.580 seconds.
+✔ Test "Slow planning does not gate Session reading or navigation" passed after 0.585 seconds.
+✔ Test "Failed reads keep last-good work and exact Sessions with a visible error" passed after 0.604 seconds.
+✔ Test "Inspection distinguishes no Sessions from an unavailable reading" with 2 test cases passed after 0.616 seconds.
+✔ Test "Session rows restore their shell and companion layout across worktree slots" passed after 1.475 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 1.475 seconds.
+✔ Test "Incomplete planning preserves the repository's selected Task" with 2 test cases passed after 1.872 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 1.872 seconds.
+✔ Test run with 20 tests in 2 suites passed after 1.872 seconds.

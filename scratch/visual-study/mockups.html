@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopflow — workspace directions (sample)</title>
+<style>
+@font-face{font-family:"Cormorant";src:url("../../swift/Loopflow/Fonts/CormorantGaramond-Regular.otf");font-weight:400}
+@font-face{font-family:"Cormorant";src:url("../../swift/Loopflow/Fonts/CormorantGaramond-SemiBold.otf");font-weight:600}
+@font-face{font-family:"Lato";src:url("../../swift/Loopflow/Fonts/Lato-Regular.ttf");font-weight:400}
+@font-face{font-family:"Lato";src:url("../../swift/Loopflow/Fonts/Lato-Bold.ttf");font-weight:700}
+@font-face{font-family:"JBM";src:url("../../swift/Loopflow/Fonts/JetBrainsMono-Regular.ttf")}
+
+:root{
+  --wine:#722F37; --wine-deep:#4E2026; --wine-wash:#F2E6E4; --wine-soft:#B9868B;
+  --cream:#FAF8F5; --paper:#F4F0E9; --sand:#ECE6DC; --line:#E2DACE; --line-2:#D5CBBC;
+  --ink:#2A2421; --ink-2:#51483F; --muted:#857A6F; --faint:#A89D91;
+  --char:#2B3036; --char-2:#24282D; --char-3:#353B42; --char-line:#3D434A;
+  --t-ink:#DDD7CD; --t-dim:#8F8B84; --t-you:#E9C9A6; --t-ok:#9CB88C; --t-warn:#D9A95F;
+  --moss:#5F7A56; --amber:#9E6B22; --ochre-wash:#F5EBD8;
+  --w-product:#722F37; --w-infra:#4F6B78; --w-intel:#7A6A3E; --w-studio:#5D5A7A;
+  --serif:"Cormorant",Georgia,serif; --sans:"Lato",-apple-system,"Helvetica Neue",sans-serif; --mono:"JBM",ui-monospace,Menlo,monospace;
+  --ring:0 0 0 2px var(--cream),0 0 0 4px #9A4A53;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden}
+body{font-family:var(--sans);font-size:13.5px;color:var(--ink);background:var(--cream);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+input,textarea{font:inherit;color:inherit}
+:focus{outline:none}
+:focus-visible{box-shadow:var(--ring);border-radius:5px}
+.dark :focus-visible,.pane :focus-visible{box-shadow:0 0 0 2px var(--char),0 0 0 4px #D9A0A7}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+svg.i{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- shared bits ---------- */
+.sample{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--wine);border:1px solid var(--wine-soft);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:6px;border:1px solid var(--line-2);background:var(--cream);color:var(--ink-2);font-size:13px;white-space:nowrap;transition:background .12s,border-color .12s}
+.btn:hover{background:#fff;border-color:var(--faint)}
+.btn.primary{background:var(--wine);border-color:var(--wine);color:#FBF3F2}
+.btn.primary:hover{background:#7F3740}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:var(--sand)}
+.btn.small{height:26px;padding:0 9px;font-size:12px}
+.btn[aria-pressed="true"]{background:var(--wine-wash);border-color:var(--wine-soft);color:var(--wine-deep)}
+.state{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)}
+.state::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.state.review::before{background:var(--wine)}
+.state.progress::before{background:var(--moss)}
+.state.upcoming::before{background:transparent;border:1.5px solid var(--faint)}
+.loc{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:4px;white-space:nowrap}
+.loc.here{color:var(--moss);background:#E8EEE3}
+.loc.elsewhere{color:var(--amber);background:var(--ochre-wash)}
+.loc.unknown{color:var(--muted);background:var(--sand)}
+.key{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.crumb{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;min-width:0;white-space:nowrap}
+.crumb b{color:var(--ink);font-weight:700;overflow:hidden;text-overflow:ellipsis}
+.crumb .sep{color:var(--faint)}
+.kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:0 4px;color:var(--muted)}
+
+/* ---------- outline ---------- */
+.outline{padding:6px 8px 16px;font-size:13px}
+.search{display:flex;align-items:center;gap:7px;margin:10px 10px 6px;padding:0 9px;height:30px;border-radius:6px;background:rgba(255,255,255,.55);border:1px solid var(--line);color:var(--muted)}
+.search:focus-within{background:#fff;border-color:var(--wine-soft)}
+.search input{border:0;background:transparent;flex:1;min-width:0;outline:none;color:var(--ink);font-size:13px}
+.row{display:flex;align-items:center;min-height:30px;border-radius:6px;position:relative}
+.row:hover{background:rgba(114,47,55,.05)}
+.disc{width:22px;height:26px;display:grid;place-items:center;color:var(--faint);border-radius:5px;flex:none}
+.disc:hover{color:var(--ink-2);background:rgba(0,0,0,.04)}
+.disc svg{transition:transform .15s}
+.disc[aria-expanded="true"] svg{transform:rotate(90deg)}
+.disc.none{visibility:hidden}
+.row .label{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:30px;padding-right:8px;border-radius:5px}
+.row .label span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo-row .label{font-weight:700;font-size:12.5px;color:var(--ink-2)}
+.wave-row{margin-top:6px}
+.wave-row .label{font-family:var(--serif);font-size:17px;font-weight:600;color:var(--ink);letter-spacing:.01em}
+.wave-row .dot{width:7px;height:7px;border-radius:2px;flex:none}
+.wave-row .count{margin-left:auto;font-family:var(--sans);font-size:11px;color:var(--faint);font-weight:400}
+.task-row .label{padding-left:2px}
+.task-row .st{width:7px;height:7px;border-radius:50%;flex:none;background:var(--faint)}
+.task-row .st.review{background:var(--wine)} .task-row .st.progress{background:var(--moss)} .task-row .st.upcoming{background:transparent;border:1.5px solid var(--faint)}
+.task-row.sel{background:var(--cream);box-shadow:inset 2.5px 0 0 var(--wine),0 1px 2px rgba(60,30,30,.06)}
+.task-row.sel .label{color:var(--wine-deep);font-weight:700}
+/* A experiment: flat Task rows with an inline open-conversation count; no nested Session rows */
+.task-row.flat .label{padding-left:24px}
+.task-row .convs{flex:none;display:inline-flex;align-items:center;gap:4px;height:22px;margin-right:6px;padding:0 6px;border-radius:11px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.task-row .convs svg{width:12px;height:12px}
+.task-row .convs:hover{background:rgba(114,47,55,.08);color:var(--wine-deep)}
+.task-row.sel .convs{color:var(--wine-deep)}
+.sess-row .label{font-size:12.5px;color:var(--ink-2);gap:7px}
+.sess-row .label svg{color:var(--faint)}
+.sess-row.sel .label{color:var(--wine-deep)}
+.sess-row.sel{background:rgba(114,47,55,.07)}
+.empty-row{padding:4px 0 6px 52px;color:var(--faint);font-size:12px;font-style:italic}
+.err-row{margin:4px 6px 6px 30px;padding:7px 9px;border-radius:6px;background:var(--ochre-wash);color:#6B4A1A;font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.err-row button{text-decoration:underline;text-underline-offset:2px}
+.nomatch{padding:18px 16px;color:var(--muted);font-size:12.5px}
+.ind1{padding-left:14px}.ind2{padding-left:30px}.ind3{padding-left:50px}
+.outline.scoped .wave-row{padding-left:0}.outline.scoped .wave-row:first-child{margin-top:0}
+.outline.scoped .task-row{padding-left:16px}.outline.scoped .sess-row.ind3{padding-left:36px}
+.outline.scoped .sess-row.ind1{padding-left:6px}.outline.scoped .empty-row{padding-left:38px}
+.outline.scoped .err-row{margin:10px 4px 4px 8px}
+
+/* ---------- panes / terminal ---------- */
+.panes{display:grid;gap:6px;height:100%;min-height:0;padding:6px;background:var(--char-2)}
+.pane{background:var(--char);border-radius:7px;display:flex;flex-direction:column;min-height:0;min-width:0;color:var(--t-ink);border:1px solid var(--char-line);position:relative;overflow:hidden}
+.pane.focused{border-color:#8E5A60;box-shadow:inset 0 2px 0 #B5727A}
+.phead{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 12px;border-bottom:1px solid var(--char-line);font-size:12px;color:var(--t-dim);flex:none;background:rgba(255,255,255,.015)}
+.phead .kind{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#B7A99B}
+.phead .name{color:var(--t-ink);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phead .owner{color:var(--t-dim);white-space:nowrap}
+.phead .typing{margin-left:auto;font-size:10.5px;color:#D9A0A7;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.phead .typing::before{content:"";width:6px;height:6px;border-radius:50%;background:#D9A0A7}
+.phead .spacer{margin-left:auto}
+.phead .x{width:24px;height:24px;display:grid;place-items:center;border-radius:5px;color:var(--t-dim)}
+.phead .x:hover{background:var(--char-3);color:var(--t-ink)}
+.term{flex:1;overflow:auto;padding:14px 16px 8px;font-family:var(--mono);font-size:12.5px;line-height:1.62;min-height:0}
+.term .l{white-space:pre-wrap;margin:0 0 9px}
+.term .who{color:var(--t-dim);display:block;font-size:11px;margin-bottom:1px}
+.term .you{color:var(--t-you)}
+.term .dim{color:var(--t-dim)} .term .ok{color:var(--t-ok)} .term .warn{color:var(--t-warn)}
+.term .marker{font-size:10.5px;color:var(--t-dim);border:1px dashed var(--char-line);border-radius:4px;padding:1px 6px;display:inline-block;margin-bottom:12px;font-family:var(--sans);letter-spacing:.04em}
+.cursor{display:inline-block;width:7px;height:14px;background:var(--t-ink);vertical-align:-2px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.composer{border-top:1px solid var(--char-line);padding:10px 14px 8px;display:flex;gap:10px;align-items:flex-start;flex:none}
+.composer .p{font-family:var(--mono);color:#D9A0A7;padding-top:2px}
+.composer textarea{flex:1;background:transparent;border:0;resize:none;color:var(--t-ink);font-family:var(--mono);font-size:12.5px;line-height:1.55;min-height:40px;outline:none}
+.composer textarea::placeholder{color:#6F6C67}
+.cfoot{display:flex;gap:10px;padding:0 14px 8px 36px;font-size:10.5px;color:#77746E;flex:none}
+.cfoot .kept{color:var(--t-ok)}
+.pstate{flex:1;display:grid;place-items:center;padding:24px;text-align:center}
+.pstate .box{max-width:340px;font-size:13px;line-height:1.55;color:var(--t-ink)}
+.pstate h4{font-family:var(--serif);font-weight:600;font-size:21px;margin:0 0 6px;color:#F1EAE0}
+.pstate p{margin:0 0 14px;color:var(--t-dim)}
+.pstate .btn{background:transparent;border-color:#5B6168;color:var(--t-ink)}
+.pstate .btn:hover{background:var(--char-3)}
+.pstate .btn.primary{background:#8A3A44;border-color:#8A3A44;color:#fff}
+.mon{flex:1;overflow:auto;padding:12px 14px;font-size:12.5px;min-height:0}
+.mon .read{display:flex;align-items:center;gap:8px;color:var(--t-dim);font-size:11.5px;margin-bottom:10px;flex-wrap:wrap}
+.mon .read .ok{color:var(--t-ok)} .mon .read .warn{color:var(--t-warn)}
+.mon .read button{color:var(--t-ink);text-decoration:underline;text-underline-offset:2px}
+.run{border:1px solid var(--char-line);border-radius:6px;padding:9px 11px;margin-bottom:8px;background:rgba(255,255,255,.02)}
+.run .top{display:flex;align-items:center;gap:8px;color:var(--t-ink);font-weight:700}
+.run .top .live{width:7px;height:7px;border-radius:50%;background:var(--t-ok);box-shadow:0 0 0 3px rgba(156,184,140,.15)}
+.run .meta{color:var(--t-dim);font-size:11.5px;margin-top:3px;font-family:var(--mono)}
+.gap{border:1px dashed #6E5A3A;color:var(--t-warn);border-radius:6px;padding:8px 10px;font-size:12px;margin-bottom:8px}
+.gap details summary{cursor:pointer;color:var(--t-ink)}
+.gap pre{font-family:var(--mono);font-size:11px;color:var(--t-dim);white-space:pre-wrap;margin:6px 0 0}
+
+/* ---------- context blocks ---------- */
+.ctx h1{font-family:var(--serif);font-weight:600;letter-spacing:-.005em;margin:0;color:var(--ink);line-height:1.08}
+.ctx .brief{color:var(--ink-2);line-height:1.55}
+.outcome{list-style:none;padding:0;margin:0}
+.outcome li{display:flex;gap:9px;align-items:baseline;padding:3px 0;color:var(--ink-2)}
+.outcome li::before{content:"";width:5px;height:5px;border:1.5px solid var(--wine-soft);border-radius:50%;flex:none;transform:translateY(-1px)}
+.sessions-list{display:flex;flex-direction:column;gap:2px}
+.sline{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:6px;border:1px solid transparent}
+.sline:hover{background:#fff;border-color:var(--line)}
+.sline.sel{background:#fff;border-color:var(--line-2)}
+.sline .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sline .agent{font-size:11.5px;color:var(--muted)}
+.label-sm{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:700}
+.detailsbody{font-size:13px;line-height:1.6;color:var(--ink-2)}
+.detailsbody h5{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:18px 0 6px}
+.detailsbody p{margin:0 0 10px}
+.detailsbody ul{margin:0 0 10px;padding-left:18px}
+.detailsbody code,.diag{font-family:var(--mono);font-size:11.5px}
+.diag{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:10px 12px;white-space:pre-wrap;color:var(--ink-2)}
+.ids{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:11.5px;color:var(--muted)}
+.ids span:nth-child(odd){color:var(--faint)}
+.ids span:nth-child(even){font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis}
+
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;background:var(--ink);color:#F6EFE6;padding:9px 14px;border-radius:8px;font-size:12.5px;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:all .2s;pointer-events:none;z-index:50;max-width:80vw}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* =========================================================
+   A · Work led
+   ========================================================= */
+.va .app{display:grid;grid-template-columns:var(--sw,272px) 1fr;grid-template-rows:48px minmax(0,1fr);height:100vh;transition:grid-template-columns .18s}
+/* One frame: the repository header and its outline share one paper column; main's top rule stops at that column. */
+.va .hrepo{grid-column:1;grid-row:1;background:var(--paper);border-right:1px solid var(--line);display:flex;align-items:center;padding:0 8px;min-width:0;overflow:hidden;position:relative}
+.va .rsw{display:flex;align-items:center;height:38px;padding-right:8px;border-radius:7px;min-width:0;max-width:100%;transition:background .12s}
+.va .rsw:hover,.va .rsw[aria-expanded="true"]{background:rgba(114,47,55,.06)}
+.va .rsw .slot{width:22px;flex:none}
+.va .rsw .mk{width:9px;height:9px;border-radius:2.5px;background:var(--wine);flex:none;margin-right:10px;box-shadow:0 0 0 3px var(--wine-wash)}
+.va .rsw .mk.all{background:transparent;border:1.5px solid var(--wine);box-shadow:none}
+.va .rsw .nm{font-family:var(--serif);font-weight:600;font-size:22px;color:var(--ink);letter-spacing:.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}
+.va .rsw svg{color:var(--faint);margin-left:7px;margin-top:3px}
+.va .rsw.compact{height:26px;padding:0 6px;margin-left:-6px}
+.va .rsw.compact .nm{font-family:var(--sans);font-weight:400;font-size:12.5px;color:var(--muted)}
+.va .rsw.compact svg{margin:0 0 0 3px;width:12px;height:12px}
+.va .rmenu{position:absolute;top:46px;left:8px;width:250px;background:var(--cream);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 18px 40px -18px rgba(50,20,24,.35);padding:5px;z-index:30}
+.va .app{position:relative}
+.va .rmenu.at-top{left:52px;top:42px}
+.va .rmenu button{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;border-radius:6px}
+.va .rmenu button:hover,.va .rmenu button:focus-visible{background:var(--sand);box-shadow:none}
+.va .rmenu .mk{width:8px;height:8px;border-radius:2px;background:var(--wine-soft);flex:none}
+.va .rmenu .mk.all{background:transparent;border:1.5px solid var(--wine-soft)}
+.va .rmenu [aria-checked="true"] .mk{background:var(--wine)}
+.va .rmenu [aria-checked="true"] .mk.all{background:transparent;border-color:var(--wine)}
+.va .rmenu .nm{flex:1;min-width:0}
+.va .rmenu .nm b{display:block;font-weight:700;font-size:13px;color:var(--ink)}
+.va .rmenu .nm small{display:block;font-size:11.5px;color:var(--muted)}
+.va .rmenu .nm small.warn{color:#8A5E1E}
+.va .rmenu .ck{color:var(--wine);font-size:12px;visibility:hidden}
+.va .rmenu [aria-checked="true"] .ck{visibility:visible}
+.va .rmenu hr{border:0;border-top:1px solid var(--line);margin:4px 6px}
+.va .mscrim{position:fixed;inset:0;z-index:29}
+.va.side-off .app{--sw:0px}
+.va .side{grid-column:1;grid-row:2;background:var(--paper);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.va .side .scroll{flex:1;overflow:auto;min-height:0}
+.va .side .outline{padding-top:0}
+.va .side .dock{flex:none;border-top:1px solid var(--line);padding:9px 10px 7px;background:var(--paper)}
+.va .side .dock .search{margin:0}
+.va .side .foot{display:flex;align-items:center;gap:8px;color:var(--faint);font-size:11px;padding:6px 3px 0}
+.va main{grid-column:2;grid-row:1/3;display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.va .top{height:48px;display:flex;align-items:center;gap:10px;padding:0 16px 0 14px;border-bottom:1px solid var(--line);flex:none}
+.va .top .right{margin-left:auto;display:flex;gap:6px;align-items:center}
+.va .page{padding:26px 44px 18px;flex:none;max-width:980px;width:100%}
+.va .page .eyebrow{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+.va .page h1{font-size:40px}
+.va .page .brief{font-size:17px;margin:10px 0 0;max-width:640px}
+.va .page .cols{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:32px;margin-top:20px}
+.va .page .actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
+.va .page.slim{padding:14px 44px 12px}
+.va .page.slim h1{font-size:26px}
+.va .work{flex:1;min-height:220px;margin:0 16px 16px;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;background:var(--char-2);box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 10px 30px -18px rgba(40,20,20,.5)}
+.va .wbar{display:flex;align-items:center;gap:4px;height:38px;padding:0 10px;color:var(--t-dim);font-size:12px;border-bottom:1px solid #1C1F23;flex:none}
+.va .wbar .ttl{color:#CFC6BA;margin-right:10px;display:flex;gap:8px;align-items:center;white-space:nowrap}
+.va .wbar .ttl b{color:#F0E8DD}
+.va .wbar .tg{height:26px;padding:0 10px;border-radius:5px;color:var(--t-dim);display:inline-flex;gap:6px;align-items:center}
+.va .wbar .tg:hover{background:var(--char-3);color:var(--t-ink)}
+.va .wbar .tg[aria-pressed="true"]{color:#F0E8DD;background:#3A3036}
+.va .wbar .right{margin-left:auto;display:flex;gap:4px;align-items:center}
+.va .panes{flex:1;padding:0 6px 6px}
+.va .panes.n1{grid-template-columns:1fr}
+.va .panes.n2{grid-template-columns:1.45fr 1fr}
+.va .panes.n3{grid-template-columns:1.45fr 1fr;grid-template-rows:1fr 1fr}
+.va .panes.n3 .pane.p-session{grid-row:1/3}
+.va .drawer{position:absolute;top:48px;right:0;bottom:0;width:min(460px,92%);background:var(--cream);border-left:1px solid var(--line);box-shadow:-18px 0 40px -24px rgba(40,20,20,.35);transform:translateX(102%);transition:transform .2s;overflow:auto;padding:22px 26px;z-index:5}
+.va .drawer.open{transform:none}
+.va .wavepage{padding:30px 44px;overflow:auto;flex:1}
+.va .wavepage h1{font-size:40px}
+.va .page.current-task{flex:1;min-height:0;overflow:auto;max-width:none;padding-bottom:44px}
+.task-heading{display:flex;align-items:baseline;gap:16px;margin:0 0 24px}
+.va .current-task .task-heading h1{font-family:var(--sans);font-weight:600;font-size:24px;line-height:1.3;margin:0;min-width:0}
+.task-heading > .btn{margin-left:auto;flex:none}
+.task-heading .issue-link{flex:none;white-space:nowrap;font-size:13px;color:var(--muted);text-underline-offset:3px}
+.task-heading .issue-link:hover{color:var(--wine)}
+/* header=a|b|c: Task header study (current data only) */
+.va .top .task-crumb{display:flex;align-items:center;gap:8px;font-size:13px}
+.va .top .task-crumb .sep{color:var(--faint)}
+.va .top .task-crumb .issue-link{color:var(--muted);white-space:nowrap;text-underline-offset:3px}
+.va .top .task-crumb .issue-link:hover{color:var(--wine)}
+.va .top .hwave{font-size:13px;font-weight:700;color:var(--ink-2);padding:4px 8px;border-radius:5px;white-space:nowrap}
+.va .top .hwave:hover{background:var(--paper);color:var(--wine)}
+.va .top.hb{height:auto;min-height:48px;align-items:flex-start;padding-top:9px;padding-bottom:9px}
+.va .top.hb > .btn{flex:none}
+.va .top .htitle{display:flex;align-items:baseline;gap:12px;min-width:0;flex:1;padding-top:3px}
+.va .top .htitle h1{font-family:var(--sans);font-weight:600;font-size:17px;line-height:1.35;margin:0;min-width:0;overflow-wrap:anywhere}
+.va .top .htitle .issue-link{flex:none;white-space:nowrap;font-size:12.5px;color:var(--muted);text-underline-offset:3px}
+.va .top .htitle .issue-link:hover{color:var(--wine)}
+.va .top .hback{flex:none;font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;padding:3px 8px 3px 4px;border-radius:5px;white-space:nowrap}
+.va .top .hback:hover{background:var(--paper);color:var(--wine)}
+.va .page.current-task.hb{padding-top:22px}
+.va .top .qcrumb{display:flex;align-items:center;gap:6px;min-width:0;font-size:12.5px;color:var(--faint);white-space:nowrap}
+.va .top .qcrumb button{color:var(--muted);padding:3px 6px;border-radius:5px;flex:none}
+.va .top .qcrumb button:hover{background:var(--paper);color:var(--wine)}
+.va .top .qcrumb .cur{color:var(--muted);overflow:hidden;text-overflow:ellipsis;min-width:0}
+.va .page.current-task.hc{padding-top:44px}
+.va .current-task.hc .task-heading{gap:14px;margin-bottom:28px}
+.va .current-task.hc .task-heading h1{font-size:28px;line-height:1.25}
+.directive-text{font-size:14px;line-height:1.65;max-width:850px;overflow-wrap:anywhere}
+.directive-text h1,.directive-text h2,.directive-text h3{font-family:var(--sans);font-size:18px!important;line-height:1.4;margin:22px 0 10px}
+.directive-text pre{overflow:auto;padding:12px;background:var(--paper)}
+.directive-text table{border-collapse:collapse;display:block;overflow:auto}
+.directive-text td,.directive-text th{padding:6px;border:1px solid var(--line)}
+.plan-gap{margin:24px 0;font-size:14px;line-height:1.6;max-width:820px;color:var(--muted)}
+.wave-krs{margin:0 0 26px;max-width:780px}
+.wave-krs ol{list-style:none;counter-reset:kr;padding:0;margin:8px 0 0}
+.wave-krs li{counter-increment:kr;display:flex;gap:12px;padding:7px 0;font-size:14px;line-height:1.5;color:var(--ink-2)}
+.wave-krs li p{margin:0}.wave-krs li::before{content:counter(kr,decimal-leading-zero);font-size:11px;color:var(--wine);font-variant-numeric:tabular-nums;padding-top:3px;flex:none}
+.va .kept-note{flex:1;display:grid;place-items:center;color:var(--t-dim);font-size:13px;text-align:center;padding:20px}
+.va .kept-note .btn{margin-top:10px;background:transparent;border-color:#5B6168;color:var(--t-ink)}
+@media (max-width:1180px){.va .app{--sw:240px}.va .page{padding:20px 28px 14px}.va .page h1{font-size:32px}.va .page .cols{gap:14px}.va .page .brief{font-size:15.5px}}
+@media (max-width:860px){.va .page .cols{grid-template-columns:1fr}}
+/* A · zoom: Overview → Session + context → Session. Presentation only. */
+.va .zoom{display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+.va .zoom button{height:24px;padding:0 9px;border-radius:6px;font-size:12px;color:var(--muted);display:inline-flex;gap:6px;align-items:center;white-space:nowrap;transition:background .12s,color .12s}
+.va .zoom button:hover:not([aria-disabled="true"]){color:var(--ink);background:var(--sand)}
+.va .zoom button[aria-pressed="true"]{background:var(--cream);color:var(--wine-deep);box-shadow:0 1px 2px rgba(40,20,20,.14)}
+.va .zoom button[aria-disabled="true"]{color:var(--faint);cursor:not-allowed}
+.va .zoom .g{width:16px;height:12px;flex:none}
+.va .zoom .g rect{fill:none;stroke:currentColor;stroke-width:1.2}
+.va .zoom .g .f{fill:currentColor;stroke:none;opacity:.55}
+.va .zoom button[aria-pressed="true"] .g .f{opacity:.9}
+.va .zback{color:var(--ink-2)}
+.va.zoomed .app{--sw:0px}
+.va .zctx{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 18px;align-items:start;padding:14px 26px 12px;flex:none;border-bottom:1px solid var(--line);background:var(--cream)}
+.va .zctx .zmeta{display:flex;flex-direction:column;gap:5px;padding-top:4px;min-width:112px}
+.va .zctx h2{font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.1;margin:0;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.va .zctx .brief{margin:3px 0 0;color:var(--ink-2);font-size:14px;line-height:1.45}
+.va .zctx .outc{margin:5px 0 0;color:var(--muted);font-size:12.5px;line-height:1.5}
+.va .zctx .outc span+span::before{content:"·";margin:0 7px;color:var(--faint)}
+.va .zctx .zacts{display:flex;gap:6px;padding-top:2px}
+.va.z1 .work{margin:12px 16px 16px}
+.va .zctx .kept{color:var(--faint);font-size:11.5px;white-space:nowrap;align-self:center;margin-right:4px}
+.va.z1 .panes{padding-top:6px}
+.va.z2 main{background:var(--char)}
+.va.z2 .top{background:var(--char);border-color:#1C1F23;color:var(--t-ink)}
+.va.z2 .top .zback{color:var(--t-dim)}
+.va.z2 .top .zback:hover{background:var(--char-3);color:var(--t-ink)}
+.va.z2 .top .sample{color:#D9A0A7;border-color:#6A4A50}
+.va .zid{display:flex;gap:8px;align-items:baseline;min-width:0;white-space:nowrap;font-size:12.5px;color:var(--t-dim)}
+.va .zid b{color:#F0E8DD;font-weight:700;overflow:hidden;text-overflow:ellipsis}
+.va.z2 .zoom{background:var(--char-2);border-color:var(--char-line)}
+.va.z2 .zoom button{color:var(--t-dim)}
+.va.z2 .zoom button:hover:not([aria-disabled="true"]){background:var(--char-3);color:var(--t-ink)}
+.va.z2 .zoom button[aria-pressed="true"]{background:#3A3036;color:#F0E8DD;box-shadow:none}
+.va.z2 .work{margin:0 10px 10px;border-radius:8px;box-shadow:none}
+.va.z2 .panes{padding-top:6px}
+.va .work.z-in{animation:zin .22s ease-out}
+.va .work.z-out{animation:zout .22s ease-out}
+@keyframes zin{from{transform:scale(.975);opacity:.55}to{transform:none;opacity:1}}
+@keyframes zout{from{transform:scale(1.02);opacity:.6}to{transform:none;opacity:1}}
+@media (max-width:1180px){.va .zctx .kept{display:none}.va .zoom button .lbl{display:none}.va .zoom button[aria-pressed="true"] .lbl{display:inline}.va .zctx{padding:12px 18px 10px}.va .zctx .outc{display:none}}
+@media (max-width:860px){.va .zctx{grid-template-columns:minmax(0,1fr) auto}.va .zctx .zmeta{display:none}.va .top .crumb span,.va .top .crumb .sep{display:none}}
+
+/* =========================================================
+   B · Studio
+   ========================================================= */
+.vb .app{display:grid;grid-template-rows:44px 1fr 28px;grid-template-columns:var(--nw,236px) 1fr var(--iw,312px);height:100vh;background:var(--char-2)}
+.vb.nav-off .app{--nw:0px}
+.vb.insp-off .app{--iw:0px}
+.vb .bar{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:0 12px;background:var(--cream);border-bottom:1px solid var(--line)}
+.vb .bar .mono{width:26px;height:26px;border-radius:6px;background:var(--wine);color:#F8EDEB;display:grid;place-items:center;font-family:var(--serif);font-weight:600;font-size:17px}
+.vb .bar .center{display:flex;align-items:center;gap:2px;margin:0 auto;background:var(--sand);border-radius:7px;padding:2px}
+.vb .bar .seg{height:26px;padding:0 11px;border-radius:5px;font-size:12.5px;color:var(--ink-2);display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.vb .bar .seg[aria-pressed="true"]{background:var(--cream);color:var(--wine-deep);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.vb .bar .right{display:flex;gap:6px;align-items:center}
+.vb .nav{background:var(--paper);border-right:1px solid var(--line);overflow:auto;min-width:0}
+.vb .nav .hd{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.vb .canvas{min-width:0;min-height:0;display:flex;flex-direction:column}
+.vb .canvas .ctxline{display:flex;align-items:center;gap:10px;height:34px;padding:0 14px;color:var(--t-dim);font-size:12px;border-bottom:1px solid #1C1F23;flex:none}
+.vb .canvas .ctxline b{color:#F0E8DD;font-weight:700}
+.vb .canvas .ctxline .st{color:#D9A0A7}
+.vb .panes{flex:1;padding:8px}
+.vb .panes.n1{grid-template-columns:1fr}
+.vb .panes.n2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
+.vb .panes.n3{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);grid-template-rows:1.15fr 1fr}
+.vb .panes.n3 .pane.p-session{grid-row:1/3}
+.vb .insp{background:var(--cream);border-left:1px solid var(--line);overflow:auto;min-width:0}
+.vb .insp .sec{padding:16px 18px;border-bottom:1px solid var(--line)}
+.vb .insp h1{font-size:27px}
+.vb .insp .brief{font-size:14px;margin:8px 0 0}
+.vb .insp details summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.vb .insp details summary::-webkit-details-marker{display:none}
+.vb .insp details summary svg{transition:transform .15s}
+.vb .insp details[open] summary svg{transform:rotate(90deg)}
+.vb .status{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--paper);border-top:1px solid var(--line);font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden}
+.vb .status .warn{color:#7A551C;display:flex;gap:6px;align-items:center}
+.vb .status .warn button{text-decoration:underline;text-underline-offset:2px}
+.vb .status .r{margin-left:auto;display:flex;gap:12px}
+@media (max-width:1240px){.vb .app{--iw:0px}.vb.insp-on .app{--iw:0px}.vb .insp{position:fixed;top:44px;right:0;bottom:28px;width:320px;transform:translateX(100%);transition:transform .2s;box-shadow:-20px 0 40px -24px rgba(0,0,0,.4);z-index:6}.vb.insp-open-sm .insp{transform:none}}
+@media (max-width:1100px){.vb .app{--nw:210px}.vb .bar .seg .lbl{display:none}}
+
+/* =========================================================
+   C · Focus
+   ========================================================= */
+.vc .app{display:grid;grid-template-columns:var(--rw,248px) 1fr;height:100vh;transition:grid-template-columns .18s;background:var(--cream)}
+.vc.rail-off .app{--rw:0px}
+.vc .rail{background:var(--paper);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.vc .rail .hd{height:52px;display:flex;align-items:center;gap:8px;padding:0 12px 0 16px}
+.vc .rail .hd .mark{font-family:var(--serif);font-weight:600;font-size:20px;color:var(--wine)}
+.vc .rail .scroll{flex:1;overflow:auto}
+.vc main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.vc .top{height:52px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 14px;flex:none}
+.vc .top .l{display:flex;gap:6px;align-items:center}
+.vc .top .r{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+.vc .pill{display:inline-flex;align-items:center;gap:9px;height:34px;padding:0 12px 0 14px;border-radius:999px;border:1px solid var(--line-2);background:#fff;max-width:520px;box-shadow:0 1px 2px rgba(60,30,30,.05)}
+.vc .pill:hover{border-color:var(--wine-soft)}
+.vc .pill .w{font-size:12px;color:var(--muted)}
+.vc .pill .t{font-family:var(--serif);font-weight:600;font-size:17px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vc .stage{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;padding:0 24px 20px}
+.vc .ctxband{width:100%;max-width:var(--cw);display:flex;align-items:flex-start;gap:14px;padding:6px 4px 14px;flex:none}
+.vc .ctxband .brief{font-family:var(--serif);font-size:21px;line-height:1.3;color:var(--ink);flex:1}
+.vc .ctxband .meta{display:flex;gap:10px;align-items:center;padding-top:5px;flex:none}
+.vc .ctxmore{width:100%;max-width:var(--cw);background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:-4px 0 14px;display:grid;grid-template-columns:1fr 1fr;gap:18px;flex:none;max-height:40vh;overflow:auto}
+.vc .surface{width:100%;max-width:var(--cw);flex:1;min-height:0;border-radius:14px;overflow:hidden;background:var(--char-2);box-shadow:0 24px 48px -28px rgba(50,20,24,.55),0 0 0 1px rgba(0,0,0,.05)}
+.vc{--cw:900px}
+.vc.with-side{--cw:1180px}
+.vc .panes{padding:6px}
+.vc .panes.n1{grid-template-columns:1fr}
+.vc .panes.n2{grid-template-columns:minmax(0,1fr) 340px}
+.vc .panes.n3{grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:1fr 1fr}
+.vc .panes.n3 .pane.p-session{grid-row:1/3}
+.vc .pane.p-session .term{padding:22px 28px 10px;font-size:13px}
+.vc .pane.p-session .composer{padding:14px 26px 10px}
+.vc .pane.p-session .cfoot{padding-left:48px}
+.vc .switcher{position:absolute;top:58px;left:50%;transform:translateX(-50%);width:min(560px,92%);background:#fff;border:1px solid var(--line-2);border-radius:12px;box-shadow:0 30px 60px -20px rgba(50,20,24,.35);z-index:10;max-height:70vh;display:flex;flex-direction:column;overflow:hidden}
+.vc .switcher .scroll{overflow:auto;padding-bottom:6px}
+.vc .switcher .search{margin:10px}
+.vc .scrim{position:absolute;inset:0;z-index:9;background:rgba(250,248,245,.35)}
+.vc .railbtn{position:relative}
+@media (max-width:1180px){.vc.with-side{--cw:100%}.vc .panes.n2,.vc .panes.n3{grid-template-columns:minmax(0,1fr) 290px}.vc .ctxband .brief{font-size:18px}}
+@media (max-width:1100px){.vc .app{--rw:230px}}
+</style>
+<link rel="stylesheet" href="flow-options.css">
+<link rel="stylesheet" href="task-execution.css">
+<link rel="stylesheet" href="task-sessions.css">
+
+</head>
+<body>
+<div id="root" aria-live="off"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+"use strict";
+/* ---------------- sample data (not live) ---------------- */
+const REPOS = [
+  {id:"loopflow", name:"loopflow", waves:[
+    {id:"product", name:"Product", color:"var(--w-product)", objective:"People outside Loopflow ship real work with it, without babysitting the tool.", krs:["Three external creators ship a real change through Loopflow this chapter.", "In ten observed work sessions, creators resume their Task without losing drafts or companion terminals.", "At least eight of ten first-time users find their next action without help."], tasks:["loo291","loo293"]},
+    {id:"infra", name:"Infrastructure", color:"var(--w-infra)", objective:"Local development and releases stay boringly reliable.", tasks:["loo295"]},
+    {id:"intel", name:"Intelligence", color:"var(--w-intel)", objective:"Agents choose better next steps from the evidence they have.", tasks:[]}
+  ], loose:["s-scratch"]},
+  {id:"cube", name:"cube", waves:[
+    {id:"studio", name:"Studio", color:"var(--w-studio)", objective:"Exports look right the first time.", tasks:["cub12"]}
+  ], loose:[], error:"Sessions couldn’t be read"}
+];
+const TASKS = {
+  loo291:{id:"loo291", started:true, key:"LOO-291", title:"A calmer desktop workspace", repo:"loopflow", wave:"product", state:"review", stateLabel:"Needs your review",
+    brief:"Move between work and its conversations without losing your place.",
+    outcome:["A clear Work hierarchy you can scan in one pass","Your draft and companion shell survive navigation","Live activity is explicit — including when it’s unknown"],
+    checkout:"loopflow.main-view-task", pr:"#1290 · draft", sessions:["s-desktop"],
+    directive:["Build one compressible repo → Wave → Task → Session outline with one restrained row vocabulary. The chapter Project stays internal; it is never another navigation level.","Task Sessions and Monitor are retained contents of the existing checkout multiplexer. Task selection restores its last pane choice. Monitor, Session and an ordinary companion shell can coexist; showing Monitor never takes a live terminal’s keyboard input.","Contextual actions keep directive editing, Wave planning and history, and fresh scoped conversations in the configured destination."],
+    diag:"planning snapshot   2026-09-25 14:04:51\ncondition           waiting · human review\nruntime work        task_2aa71a7e…7c54e7\ncheckout            ~/src/loopflow.main-view-task\nsessions read       14:05:02 · complete"},
+  loo293:{id:"loo293", started:true, key:"LOO-293", title:"Understand running work", repo:"loopflow", wave:"product", state:"progress", stateLabel:"In progress",
+    brief:"See which Runs are working on a Task right now, and what they last said.",
+    outcome:["Active Runs appear under their exact Task","Unknown ownership is shown, never guessed"],
+    checkout:"loopflow.restore-task-watching", pr:null, sessions:["s-watch"],
+    directive:["Monitor shows the selected Task’s active Runs from one shared reading. History and output load on demand."],
+    diag:"planning snapshot   2026-09-25 14:04:51\ncondition           running\nruntime work        task_91c4…0d2e\nsessions read       14:05:02 · complete"},
+  loo295:{id:"loo295", started:false, key:"LOO-295", title:"Reliable local development", repo:"loopflow", wave:"infra", state:"upcoming", stateLabel:"Upcoming",
+    brief:"A fresh checkout builds and runs the app on the first try.",
+    outcome:["One command from clone to running app","Failures name the missing prerequisite"],
+    checkout:null, pr:null, sessions:[],
+    directive:["Make first-run setup deterministic and explain each failure with its fix."],
+    diag:"planning snapshot   2026-09-25 14:04:51\ncondition           not started\nruntime work        none yet"},
+  cub12:{id:"cub12", started:false, key:"CUB-12", title:"Tidy the export dialog", repo:"cube", wave:"studio", state:"upcoming", stateLabel:"Upcoming",
+    brief:"Fewer choices up front; the common export is one click.",
+    outcome:["Default export needs no configuration"], checkout:null, pr:null, sessions:[],
+    directive:["Collapse advanced export settings behind a disclosure; keep format and destination visible."],
+    diag:"planning snapshot   2026-09-25 14:03:10\ncondition           not started"}
+};
+const SESSIONS = {
+  "s-desktop":{id:"s-desktop", title:"Desktop composition", task:"loo291", agent:"Codex", where:"here", run:"run_643d86d7…", lines:[
+    ["you","The rail feels dense. Can Wave headings get quieter, and Task names stay on one line?"],
+    ["codex","Yes. One row per Task with the name on a single line; the issue key moves to details. Wave headings become small labels instead of rows competing with Tasks."],
+    ["codex","The directive is long. I’ll lead with the brief and put the full text behind Details."],
+    ["you","Keep my draft and the shell when I jump to another Task."],
+    ["codex","They stay in this workspace. Another Task opens its own workspace; this one is kept exactly as you left it."]
+  ]},
+  "s-watch":{id:"s-watch", title:"Run output review", task:"loo293", agent:"Claude", where:"elsewhere", run:"run_0b7e21a4…", lines:[
+    ["you","Summarise what the implement Run printed in the last hour."],
+    ["claude","It finished the reader tests and is now waiting on a rebuild. Nothing needs you yet."]
+  ]},
+  "s-scratch":{id:"s-scratch", title:"Untitled conversation", task:null, repo:"loopflow", agent:"Codex", where:"here", ambiguous:true, run:"run_9f02c1…", lines:[
+    ["you","Sketch a name for the export presets feature."],
+    ["codex","A few options: Presets, Recipes, Saved exports."]
+  ]}
+};
+const RUNS = {
+  loo291:{complete:true, runs:[{name:"implement", agent:"Codex", started:"14:02", state:"waiting for input", exec:"exec_7d1…"}]},
+  loo293:{complete:false, runs:[{name:"implement", agent:"Claude", started:"13:41", state:"working", exec:"exec_22a…"}], gap:"1 process in this checkout has no confirmed owner"},
+  loo295:{complete:true, runs:[]},
+  cub12:{complete:true, runs:[]}
+};
+
+/* ---------------- state ---------------- */
+const qsP = new URLSearchParams(location.search);
+const qsV = (qsP.get("v")||"a").toLowerCase();
+const qsZ = parseInt(qsP.get("zoom"),10);
+const qsHeader = ["a","b","c"].includes((qsP.get("header")||"").toLowerCase()) ? qsP.get("header").toLowerCase() : "a";
+const S = {
+  v: ["a","b","c"].includes(qsV) ? qsV : "a",
+  sel: {kind:"task", id:"loo291"},
+  lastTask: "loo291",
+  openRepos: {loopflow:true, cube:false},
+  openWaves: {product:true, infra:true, intel:true, studio:true},
+  openTasks: {loo291:true, loo293:true},
+  q: "",
+  drafts: {"s-desktop":"Let’s try the quieter rail with the brief above the workspace, and "},
+  ws: {
+    loo291:{session:"s-desktop", companion:true, monitor:false, focus:"session"},
+    loo293:{session:"s-watch", companion:false, monitor:true, focus:"monitor"},
+    loo295:{session:null, companion:false, monitor:false, focus:"session"},
+    cub12:{session:null, companion:false, monitor:false, focus:"session"},
+    "s-scratch":{session:"s-scratch", companion:false, monitor:false, focus:"session"}
+  },
+  reads: {loo291:"14:06:12", loo293:"14:06:12", loo295:"14:06:12", cub12:"14:05:40"},
+  sideOff:qsV==="c" && matchMedia("(max-width:1100px)").matches, detailsOpen:false, briefSlim:false, inspOff:false, inspSm:false, navOff:false, switcher:false, ctxMore:false,
+  zoom: [0,1,2].includes(qsZ) ? qsZ : 0, zoomDir: null,
+  scope: "loopflow", repoMenu: false,
+  scopeMem: { loopflow:{sel:{kind:"task",id:"loo291"}, lastTask:"loo291", q:""}, cube:{sel:{kind:"task",id:"cub12"}, lastTask:"cub12", q:""}, all:null },
+  n: 0
+};
+
+{ const r=(qsP.get("repo")||"").toLowerCase(); if (r==="cube"||r==="all"){ S.scope=r; if (r==="cube"){ S.sel={kind:"task",id:"cub12"}; S.lastTask="cub12"; } } }
+
+/* ---------------- helpers ---------------- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const I = {
+  chev:'<svg class="i" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></svg>',
+  down:'<svg class="i" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>',
+  term:'<svg class="i" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 7l2 1.5L5 10M8.5 10.5H11"/></svg>',
+  shell:'<svg class="i" viewBox="0 0 16 16"><path d="M3 5l3 3-3 3M8 11h5"/></svg>',
+  pulse:'<svg class="i" viewBox="0 0 16 16"><path d="M1.5 8.5h3l2-4 3 7 2-3h3"/></svg>',
+  search:'<svg class="i" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/></svg>',
+  side:'<svg class="i" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6 3v10"/></svg>',
+  insp:'<svg class="i" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M10 3v10"/></svg>',
+  x:'<svg class="i" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+  plus:'<svg class="i" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></svg>',
+  info:'<svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>',
+  back:'<svg class="i" viewBox="0 0 16 16"><path d="M10 4L6 8l4 4"/></svg>',
+  refresh:'<svg class="i" viewBox="0 0 16 16"><path d="M13 7a5 5 0 10-1.2 4.2M13 3.5V7H9.5"/></svg>'
+};
+const waveOf = id => { for (const r of REPOS) for (const w of r.waves) if (w.id===id) return w; };
+const repoOf = id => REPOS.find(r=>r.id===id);
+const task = () => S.sel.kind==="task" ? TASKS[S.sel.id] : null;
+const wsKey = () => S.sel.kind==="task" ? S.sel.id : S.sel.kind==="loose" ? S.sel.id : null;
+const ws = () => { const k=wsKey(); return k ? S.ws[k] : null; };
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast.h); toast.h=setTimeout(()=>t.classList.remove("show"),2600); }
+function nowStr(){ const d=new Date(); return d.toTimeString().slice(0,8); }
+function matches(t){ if(!S.q) return true; const q=S.q.toLowerCase(); return (t.title+" "+t.key).toLowerCase().includes(q) || t.sessions.some(s=>SESSIONS[s].title.toLowerCase().includes(q)); }
+function sessMatch(s){ if(!S.q) return true; return s.title.toLowerCase().includes(S.q.toLowerCase()); }
+
+/* ---------------- outline (shared) ---------------- */
+function outline(opts={}){
+  const searching = !!S.q; let any = false; let out = "";
+  const only = opts.scope && opts.scope!=="all" ? repoOf(opts.scope) : null; // A: one repository, no repeated root row
+  for (const repo of (only ? [only] : REPOS)){
+    const tasksIn = repo.waves.flatMap(w=>w.tasks).map(id=>TASKS[id]).filter(t=>!opts.flat || t.started);
+    const looseIn = repo.loose.map(id=>SESSIONS[id]).filter(sessMatch);
+    const repoHit = tasksIn.some(matches) || looseIn.length || !searching;
+    if (!repoHit) continue; any = true;
+    const ro = only || searching || S.openRepos[repo.id];
+    const errRow = repo.error ? `<div class="err-row" role="status"><span>${esc(repo.error)}.</span><button data-act="retry" data-id="${repo.id}">Retry</button><button data-act="errdetail" title="lf session list exited 1: store is migrating (sample)">Details</button></div>` : "";
+    if (!only) out += `<div class="row repo-row" role="treeitem" aria-level="1" aria-expanded="${ro}">
+      <button class="disc" data-act="repo" data-id="${repo.id}" aria-expanded="${ro}" aria-label="${ro?"Collapse":"Expand"} ${repo.name}">${I.chev}</button>
+      <button class="label" data-act="repo" data-id="${repo.id}"><span class="t">${repo.name}</span></button></div>`;
+    if (!ro) continue;
+    if (!only) out += errRow;
+    for (const w of repo.waves){
+      const started = w.tasks.map(id=>TASKS[id]).filter(t=>!opts.flat || t.started);
+      const ts = started.filter(matches);
+      if (searching && !ts.length) continue;
+      const wo = searching || S.openWaves[w.id];
+      const wsel = S.sel.kind==="wave" && S.sel.id===w.id;
+      out += `<div class="row wave-row ind1${wsel?" sel":""}" role="treeitem" aria-level="2">
+        <button class="disc" data-act="wave" data-id="${w.id}" aria-expanded="${wo}" aria-label="${wo?"Collapse":"Expand"} ${w.name}">${I.chev}</button>
+        <button class="label" data-act="selwave" data-id="${w.id}" aria-current="${wsel}" title="Open ${w.name} — objective and plan"><span class="dot" style="background:${w.color}"></span><span class="t">${w.name}</span><span class="count">${started.length||""}</span></button></div>`;
+      if (!wo) continue;
+      if (!started.length){ out += `<div class="empty-row">${w.planError?"Plan unavailable":opts.flat?"No started Tasks":"No active Tasks"}</div>`; continue; }
+      for (const t of ts){
+        const tsel = S.sel.kind==="task" && S.sel.id===t.id;
+        const has = t.sessions.length>0; const to = searching || !!S.openTasks[t.id];
+        if (opts.flat){ // A: one row per Task; open conversations shown as an inline count
+          const n = t.sessions.length; const cl = `${n} open conversation${n===1?"":"s"}`;
+          const opens = n===1 && SESSIONS[t.sessions[0]].where==="here" ? `Open “${esc(SESSIONS[t.sessions[0]].title)}”` : "Open Task";
+          out += `<div class="row task-row flat ind2${tsel?" sel":""}" role="treeitem" aria-level="3" aria-selected="${tsel}">
+          <button class="label" data-act="opentask" data-id="${t.id}" title="${esc(t.title)} · ${t.key} · ${t.stateLabel} — ${opens}"><span class="st ${t.state}" aria-hidden="true"></span><span class="t">${esc(t.title)}</span>${n?`<span class="sr">, ${cl}</span>`:""}</button>
+          ${n?`<button class="convs" data-act="inspecttask" data-id="${t.id}" aria-label="${cl} — show ${esc(t.title)} overview" title="${cl} — show the Task overview">${I.term}<span aria-hidden="true">${n}</span></button>`:""}</div>`;
+          continue;
+        }
+        out += `<div class="row task-row ind2${tsel?" sel":""}" role="treeitem" aria-level="3" aria-selected="${tsel}">
+          <button class="disc${has?"":" none"}" data-act="task" data-id="${t.id}" ${has?`aria-expanded="${to}" aria-label="${to?"Hide":"Show"} Sessions for ${esc(t.title)}"`:'tabindex="-1" aria-hidden="true"'}>${I.chev}</button>
+          <button class="label" data-act="seltask" data-id="${t.id}" title="${esc(t.title)} · ${t.key} · ${t.stateLabel}"><span class="st ${t.state}" aria-hidden="true"></span><span class="t">${esc(t.title)}</span></button></div>`;
+        if (has && to) for (const sid of t.sessions){
+          const s = SESSIONS[sid]; const ssel = tsel && S.ws[t.id].session===sid;
+          out += `<div class="row sess-row ind3${ssel?" sel":""}" role="treeitem" aria-level="4">
+            <button class="label" data-act="selsession" data-id="${sid}" title="${esc(s.title)} · ${s.agent}">${I.term}<span class="t">${esc(s.title)}</span></button></div>`;
+        }
+      }
+    }
+    for (const s of looseIn){
+      const ssel = S.sel.kind==="loose" && S.sel.id===s.id;
+      out += `<div class="row sess-row ind1${ssel?" sel":""}" role="treeitem" aria-level="2" style="margin-top:6px">
+        <button class="label" data-act="selloose" data-id="${s.id}" title="Not attached to a Task — attribution unknown">${I.term}<span class="t">${esc(s.title)}</span><span class="loc unknown">no Task</span></button></div>`;
+    }
+    if (only) out += errRow; // scoped: the read warning follows the data, quietly
+  }
+  if (!any) out = `<div class="nomatch">No Work or Sessions${only?" in "+esc(only.name):""} match “${esc(S.q)}”.<br><button class="btn small ghost" data-act="clearq" style="margin-top:8px;padding-left:0">Clear search</button></div>`;
+  return `<div class="outline${only?" scoped":""}" role="tree" aria-label="${only?"Work in "+esc(only.name):"Work"}">${out}</div>`;
+}
+const searchBox = (ph="Find work or Sessions") => `<label class="search">${I.search}<span class="sr">Search</span><input data-fk="q" data-inp="q" value="${esc(S.q)}" placeholder="${ph}" autocomplete="off"><span class="kbd">/</span></label>`;
+
+/* ---------------- panes (shared) ---------------- */
+function sessionPane(sid, key, only=false){
+  const w = S.ws[key]; const focused = only || w.focus==="session";
+  const owner = key.startsWith("s-") ? "no Task" : TASKS[key].key;
+  if (!sid){
+    const t = TASKS[key];
+    return `<section class="pane p-session${focused?" focused":""}" data-act="focus" data-pane="session" aria-label="Conversation">
+      <div class="phead"><span class="kind">Conversation</span><span class="owner">· ${owner}</span></div>
+      <div class="pstate"><div class="box"><h4>No conversation yet</h4><p>Start one about “${esc(t.title)}”. It opens in this Task’s workspace and nothing else is replaced.</p>
+      <button class="btn primary" data-act="startconv" data-id="${key}">${I.plus} Start conversation</button> <button class="btn" data-act="togglecomp">Open a shell</button></div></div></section>`;
+  }
+  const s = SESSIONS[sid];
+  if (s.where==="elsewhere"){
+    return `<section class="pane p-session${focused?" focused":""}" data-act="focus" data-pane="session" aria-label="${esc(s.title)}">
+      <div class="phead"><span class="kind">Session</span><span class="name">${esc(s.title)}</span><span class="owner">· ${s.agent} · ${owner}</span></div>
+      <div class="pstate"><div class="box"><h4>Open in another window</h4><p>${s.agent} is running this conversation in another window. It stays there unless you move it.</p>
+      <button class="btn primary" data-act="movehere" data-id="${sid}">Move here</button></div></div></section>`;
+  }
+  const lines = s.lines.map(([who,txt])=>`<p class="l"><span class="who">${who==="you"?"you":who}</span><span class="${who==="you"?"you":""}">${esc(txt)}</span></p>`).join("");
+  const draft = S.drafts[sid]||"";
+  return `<section class="pane p-session${focused?" focused":""}" data-act="focus" data-pane="session" aria-label="Session ${esc(s.title)}">
+    <div class="phead"><span class="kind">Session</span><span class="name">${esc(s.title)}</span><span class="owner">· ${s.agent} · ${owner}</span>${s.ambiguous?'<span class="loc unknown">attribution unknown</span>':""}${focused?'<span class="typing">typing here</span>':'<span class="spacer"></span>'}</div>
+    <div class="term" tabindex="-1"><span class="marker">Sample transcript</span>${lines}</div>
+    <div class="composer"><span class="p">›</span><label class="sr" for="d-${sid}">Draft for ${esc(s.title)}</label><textarea id="d-${sid}" data-fk="draft-${sid}" data-draft="${sid}" rows="2" placeholder="Continue the conversation…">${esc(draft)}</textarea></div>
+    <div class="cfoot"><span class="${draft?"kept":""}">${draft?"Draft kept with this Session":"Draft is kept when you navigate"}</span><span>Sample — Enter does not send</span></div></section>`;
+}
+function companionPane(key){
+  const w=S.ws[key]; const focused=w.focus==="companion";
+  const co = key.startsWith("s-") ? "loopflow" : (TASKS[key].checkout || repoOf(TASKS[key].repo).name);
+  const body = key==="loo291" ? `<span class="dim">~/src/${co}</span> $ cargo test -p loopflow outline
+<span class="dim">   Compiling loopflow v0.12.19</span>
+<span class="dim">    Finished test profile in 8.41s</span>
+test outline::compact_keeps_selection ... <span class="ok">ok</span>
+test outline::folded_singleton_stays ... <span class="ok">ok</span>
+test workspace::draft_survives_return ... <span class="ok">ok</span>
+
+test result: <span class="ok">ok</span>. 12 passed; 0 failed
+<span class="dim">~/src/${co}</span> $ <span class="cursor"></span>` : `<span class="dim">~/src/${co}</span> $ <span class="cursor"></span>`;
+  return `<section class="pane p-comp${focused?" focused":""}" data-act="focus" data-pane="companion" aria-label="Shell">
+    <div class="phead"><span class="kind">Shell</span><span class="name">${esc(co)}</span>${focused?'<span class="typing">typing here</span>':'<span class="spacer"></span>'}<button class="x" data-act="togglecomp" aria-label="Hide shell (it keeps running)" title="Hide shell — it keeps running">${I.x}</button></div>
+    <div class="term" tabindex="-1"><span class="marker">Sample shell</span><div class="l">${body}</div></div></section>`;
+}
+function monitorPane(key){
+  const w=S.ws[key]; const focused=w.focus==="monitor";
+  const m = key.startsWith("s-") ? null : RUNS[key];
+  let inner;
+  if (!m) inner = `<div class="read">Monitor follows Tasks. This conversation has no Task.</div>`;
+  else {
+    const read = `<div class="read">${m.complete?'<span class="ok">● complete reading</span>':'<span class="warn">● incomplete reading</span>'}<span>read ${S.reads[key]}</span><button data-act="refresh" data-id="${key}">Refresh</button></div>`;
+    const gap = m.gap && !m.complete ? `<div class="gap">${esc(m.gap)}. <button data-act="retrymon" data-id="${key}" style="text-decoration:underline;color:inherit">Retry</button><details><summary>Details</summary><pre>pid 48211 /usr/local/bin/claude
+checkout ~/src/loopflow.restore-task-watching
+no capture binding or client receipt (sample)</pre></details></div>` : "";
+    const runs = m.runs.length ? m.runs.map(r=>`<div class="run"><div class="top"><span class="live"></span>${r.name}<span style="font-weight:400;color:var(--t-dim)">· ${r.agent}</span></div><div class="meta">${r.state} · since ${r.started} · ${r.exec}</div></div>`).join("")
+      : (m.complete ? `<div style="color:var(--t-dim)">No active Runs for this Task.</div>` : "");
+    inner = read+gap+runs;
+  }
+  return `<section class="pane p-mon${focused?" focused":""}" data-act="focus" data-pane="monitor" aria-label="Monitor">
+    <div class="phead"><span class="kind">Monitor</span><span class="name">${key.startsWith("s-")?"—":TASKS[key].key}</span>${focused?'<span class="typing" style="color:var(--t-dim)">selected</span>':'<span class="spacer"></span>'}<button class="x" data-act="togglemon" aria-label="Hide Monitor" title="Hide Monitor">${I.x}</button></div>
+    <div class="mon"><span class="marker" style="font-size:10.5px;color:var(--t-dim);border:1px dashed var(--char-line);border-radius:4px;padding:1px 6px;display:inline-block;margin-bottom:10px">Sample activity</span>${inner}</div></section>`;
+}
+function panes(sessionOnly=false){
+  const k = wsKey(); const w = S.ws[k];
+  const list = [sessionPane(w.session,k,sessionOnly)];
+  if (sessionOnly) return `<div class="panes n1">${list[0]}</div>`; // stored shell/Monitor visibility untouched
+  if (w.companion) list.push(companionPane(k));
+  if (w.monitor) list.push(monitorPane(k));
+  return `<div class="panes n${list.length}">${list.join("")}</div>`;
+}
+
+/* ---------------- context pieces ---------------- */
+function detailsBody(t){
+  if (!t) return "";
+  return `<div class="detailsbody"><h5>Full description</h5>${t.directive.map(p=>`<p>${esc(p)}</p>`).join("")}
+  <h5>Runtime</h5><div class="diag">${esc(t.diag)}</div>
+  <h5>Identifiers</h5><div class="ids"><span>Issue</span><span>${t.key}</span><span>Checkout</span><span>${t.checkout||"none yet"}</span><span>PR</span><span>${t.pr||"none"}</span>${t.sessions.map(s=>`<span>Run</span><span>${SESSIONS[s].run}</span>`).join("")}</div></div>`;
+}
+function sessionsList(t){
+  if (!t.sessions.length) return `<div style="color:var(--muted);font-size:13px">No conversations yet.</div>`;
+  return `<div class="sessions-list">${t.sessions.map(sid=>{const s=SESSIONS[sid]; const sel=S.ws[t.id].session===sid;
+    return `<button class="sline${sel?" sel":""}" data-act="selsession" data-id="${sid}">${I.term}<span class="t">${esc(s.title)}</span><span class="agent">${s.agent}</span></button>`;}).join("")}</div>`;
+}
+function primaryAction(t){
+  const w = S.ws[t.id]; const s = w.session && SESSIONS[w.session];
+  if (!s) return `<button class="btn primary" data-act="startconv" data-id="${t.id}">${I.plus} Start conversation</button>`;
+  if (s.where==="elsewhere") return `<button class="btn primary" data-act="movehere" data-id="${s.id}">Move “${esc(s.title)}” here</button>`;
+  return `<button class="btn primary" data-act="continue">Continue “${esc(s.title)}”</button>`;
+}
+function wavePage(w, big=true){
+  const ts = w.tasks.map(id=>TASKS[id]);
+  return `<div class="ctx"><div class="label-sm" style="display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:2px;background:${w.color}"></span>Wave</div>
+  <h1 style="font-size:${big?40:28}px">${w.name}</h1><p class="brief" style="font-size:${big?17:14}px;max-width:620px;margin:10px 0 22px">${esc(w.objective)}</p>
+  ${w.krs ? `<section class="wave-krs" aria-label="Current KRs"><div class="label-sm">Current KRs</div><ol>${w.krs.map((kr,i)=>`<li><div>${w.krHtml ? w.krHtml[i] : esc(kr)}</div></li>`).join("")}</ol></section>` : ""}
+  ${w.planError ? `<section class="plan-gap" role="status"><div class="label-sm">Current plan unavailable</div><p>${esc(w.planError)}</p></section>` : `<div class="label-sm">Current chapter · ${ts.length} Tasks</div>`}
+  ${ts.length? `<div class="sessions-list">${ts.map(t=>`<button class="sline" data-act="${S.v==="a"?"opentask":"seltask"}" data-id="${t.id}"><span class="state ${t.state}" aria-hidden="true"></span><span class="t">${esc(t.title)}</span><span class="agent">${t.stateLabel}</span></button>`).join("")}</div>`
+     : w.planError ? "" : `<p style="color:var(--muted)">No active Tasks in this chapter. That’s a confirmed empty plan, not a failed read.</p>`}</div>`;
+}
+function looseContext(s, big=true){
+  return `<div class="ctx"><div class="label-sm">Conversation · ${repoOf(s.repo).name}</div><h1 style="font-size:${big?36:26}px">${esc(s.title)}</h1>
+  <p class="brief" style="font-size:${big?16:14}px;max-width:620px;margin:10px 0 0">Not attached to a Task. Loopflow can’t tell what this conversation is about, so it won’t guess or file it anywhere.</p></div>`;
+}
+const selRepo = () => S.sel.kind==="task" ? TASKS[S.sel.id].repo : S.sel.kind==="wave" ? REPOS.find(r=>r.waves.some(w=>w.id===S.sel.id)).id : SESSIONS[S.sel.id].repo;
+// repoPart: undefined → plain repo name; "" → omitted (the header already names it); html → that control
+const crumb = (repoPart) => {
+  const rp = repoPart===undefined ? `<span>${repoOf(selRepo()).name}</span>` : repoPart;
+  const lead = rp ? `${rp}<span class="sep">/</span>` : "";
+  if (S.sel.kind==="task"){ const t=task(); return `<nav class="crumb" aria-label="Location">${lead}<span>${waveOf(t.wave).name}</span><span class="sep">/</span><b>${esc(t.title)}</b></nav>`; }
+  if (S.sel.kind==="wave"){ const w=waveOf(S.sel.id); return `<nav class="crumb" aria-label="Location">${lead}<b>${w.name}</b></nav>`; }
+  const s=SESSIONS[S.sel.id]; return `<nav class="crumb" aria-label="Location">${lead}<b>${esc(s.title)}</b></nav>`;
+};
+function paneToggles(cls){
+  const w = ws(); if (!w) return "";
+  return `<button class="${cls}" data-act="togglecomp" aria-pressed="${w.companion}" title="Show or hide the companion shell (hiding keeps it running)">${I.shell}<span class="lbl">Shell</span></button>
+  <button class="${cls}" data-act="togglemon" aria-pressed="${w.monitor}" title="Show or hide this Task’s Monitor">${I.pulse}<span class="lbl">Monitor</span></button>`;
+}
+
+/* ---------------- A · zoom ---------------- */
+const ZOOMS = ["Overview","Session + context","Session"];
+function zoomBlock(){ // why the current selection cannot zoom, or null
+  if (S.sel.kind==="wave") return "A Wave has no conversation to zoom into. Select a Task or Session.";
+  const w=ws(); if (!w || !w.session) return "No conversation yet. Start one to zoom in.";
+  if (SESSIONS[w.session].where==="elsewhere") return "This conversation is open in another window. Move it here first.";
+  return null;
+}
+const G = [
+  '<svg class="g" viewBox="0 0 16 12" aria-hidden="true"><rect x=".6" y=".6" width="14.8" height="10.8" rx="1.5"/><rect class="f" x="1.6" y="1.6" width="3.2" height="8.8"/><rect class="f" x="6" y="1.6" width="8.4" height="2.4"/></svg>',
+  '<svg class="g" viewBox="0 0 16 12" aria-hidden="true"><rect x=".6" y=".6" width="14.8" height="10.8" rx="1.5"/><rect class="f" x="1.6" y="1.6" width="12.8" height="1.8"/><rect class="f" x="1.6" y="4.4" width="12.8" height="6"/></svg>',
+  '<svg class="g" viewBox="0 0 16 12" aria-hidden="true"><rect x=".6" y=".6" width="14.8" height="10.8" rx="1.5"/><rect class="f" x="1.6" y="1.6" width="12.8" height="8.8"/></svg>'
+];
+function zoomCtl(){
+  const why = zoomBlock();
+  return `<div class="zoom" role="group" aria-label="Zoom">${ZOOMS.map((l,z)=>{
+    const off = z>0 && why;
+    return `<button data-act="zoom" data-z="${z}" data-fk="zoom-${z}" aria-label="${l}" aria-pressed="${S.zoom===z}" ${off?`aria-disabled="true" aria-describedby="zoom-why"`:""} title="${off?esc(why):l+(z<S.zoom?" (Esc)":"")}">${G[z]}<span class="lbl">${l}</span></button>`;}).join("")}
+    ${why?`<span id="zoom-why" class="sr">${esc(why)}</span>`:""}</div>`;
+}
+function setZoom(z){
+  if (z===S.zoom) return;
+  if (z>0 && zoomBlock()){ toast(zoomBlock()); return; }
+  S.zoomDir = z>S.zoom ? "in" : "out";
+  if (z===2) S.detailsOpen=false;
+  S.zoom = z; render(); S.zoomDir = null;
+  if (!root.contains(document.activeElement) || document.activeElement===document.body) root.querySelector(`[data-fk="zoom-${z}"]`)?.focus();
+}
+function zoomContext(t, keptNote=""){
+  if (!t){ const s=SESSIONS[S.sel.id];
+    return `<section class="zctx" aria-label="Work context"><div class="zmeta"><span class="loc unknown">no Task</span><span class="key">${esc(repoOf(s.repo).name)}</span></div>
+      <div><h2>Work context unknown</h2><p class="brief">“${esc(s.title)}” isn’t attached to a Task. Loopflow won’t guess what it’s about.</p></div><div class="zacts">${keptNote}</div></section>`; }
+  return `<section class="zctx" aria-label="Task context"><div class="zmeta"><span class="state ${t.state}">${t.stateLabel}</span><span class="key">${esc(waveOf(t.wave).name)} · ${t.key}</span></div>
+    <div><h2>${esc(t.title)}</h2><p class="brief">${esc(t.brief)}</p><p class="outc">${t.outcome.map(o=>`<span>${esc(o)}</span>`).join("")}</p></div>
+    <div class="zacts">${keptNote}<button class="btn ghost small" data-act="details" data-fk="zdetails" aria-expanded="${S.detailsOpen}">${I.info} Details</button></div></section>`;
+}
+
+/* ---------------- A · repository scope ---------------- */
+const rswEl = () => root.querySelector(S.sideOff ? ".top .rsw" : ".hrepo .rsw");
+const scopeName = sc => sc==="all" ? "All repositories" : repoOf(sc).name;
+function repoSwitch(compact){
+  return `<button class="rsw${compact?" compact":""}" data-act="repomenu" data-fk="rsw${compact?"-c":""}" aria-haspopup="menu" aria-expanded="${S.repoMenu}" title="Switch repository">
+    ${compact?"":`<span class="slot" aria-hidden="true"></span><span class="mk${S.scope==="all"?" all":""}" aria-hidden="true"></span>`}<span class="nm">${esc(scopeName(S.scope))}</span>${I.down}<span class="sr"> — switch repository</span></button>`;
+}
+function repoMenu(atTop){
+  if (!S.repoMenu) return "";
+  const item = (sc, sub, warn) => `<button role="menuitemradio" aria-checked="${S.scope===sc}" data-act="scope" data-id="${sc}" data-fk="scope-${sc}"><span class="mk${sc==="all"?" all":""}" aria-hidden="true"></span><span class="nm"><b>${esc(scopeName(sc))}</b><small${warn?' class="warn"':""}>${esc(sub)}</small></span><span class="ck" aria-hidden="true">✓</span></button>`;
+  const sub = r => { const n=r.waves.reduce((a,w)=>a+w.tasks.length,0); return r.waves.some(w=>w.planError) ? `${r.waves.length} Waves · planning incomplete` : r.error ? `${r.waves.length} Wave · ${r.error.toLowerCase()}` : `${r.waves.length} Waves · ${n} Tasks`; };
+  return `<div class="mscrim" data-act="repomenu"></div><div class="rmenu${atTop?" at-top":""}" role="menu" aria-label="Repository">
+    ${REPOS.map(r=>item(r.id, sub(r), !!r.error)).join("")}<hr>${item("all","Every repository in one outline")}</div>`;
+}
+function setScope(sc){
+  S.repoMenu = false;
+  if (sc===S.scope) return;
+  S.scopeMem[S.scope] = {sel:{...S.sel}, lastTask:S.lastTask, q:S.q};
+  if (S.scope==="all"){ const r=selRepo(); const lt=TASKS[S.lastTask]; S.scopeMem[r] = {sel:{...S.sel}, lastTask: lt && lt.repo===r ? S.lastTask : S.scopeMem[r].lastTask, q:""}; }
+  const m = S.scopeMem[sc];
+  if (m){ S.sel={...m.sel}; S.lastTask=m.lastTask; S.q=m.q; } else S.q="";
+  S.scope = sc; S.zoom = 0; S.detailsOpen = false; S.switcher = false;
+}
+
+/* ---------------- A · work led ---------------- */
+function renderA(){
+  const t = task(); const w = ws();
+  let mainInner;
+  if (window.isSessionStudyTask?.(t)){
+    mainInner = window.renderSessionStudyPage(t);
+  } else if (S.currentData && t){
+    const heading = qsHeader==="b" ? "" : `<header class="task-heading"><h1>${esc(t.title)}</h1>${qsHeader==="a"?"":issueLink(t)}${window.renderTaskSessionAction?.(t)||""}</header>`;
+    mainInner = `<section class="page current-task${qsHeader?" h"+qsHeader:""}">${heading}${window.renderTaskFlow ? window.renderTaskFlow(t) : ""}
+      <div class="label-sm" style="margin-top:${qsHeader==="b"?0:26}px">Description</div><article class="directive-text">${t.directiveHtml || "No description in Linear."}</article>${window.renderTaskComments ? window.renderTaskComments(t) : ""}</section>`;
+  } else if (S.currentData && S.sel.kind==="wave"){
+    mainInner = `<div class="wavepage">${wavePage(waveOf(S.sel.id))}</div>`;
+  } else if (S.sel.kind==="wave"){
+    const back = TASKS[S.lastTask];
+    mainInner = `<div class="wavepage">${wavePage(waveOf(S.sel.id))}</div>
+    <div class="work" style="flex:0 0 150px"><div class="kept-note"><div>Your <b style="color:#F0E8DD">${esc(back.title)}</b> workspace is kept — draft, shell and panes untouched.<br><button class="btn small" data-act="seltask" data-id="${back.id}">${I.back} Return to it</button></div></div></div>`;
+  } else if (S.zoom>0){
+    const s = SESSIONS[w.session];
+    const kept = [w.companion&&"shell", w.monitor&&"Monitor"].filter(Boolean);
+    const keptNote = kept.length ? `<span class="kept">${kept.join(" and ")} kept in Overview</span>` : "";
+    mainInner = (S.zoom===1 ? zoomContext(t, keptNote) + `<section class="work dark${S.zoomDir?" z-"+S.zoomDir:""}" aria-label="Session ${esc(s.title)}">${panes(true)}</section>`
+      : `<section class="work dark${S.zoomDir?" z-"+S.zoomDir:""}" aria-label="Session ${esc(s.title)}">${panes(true)}</section>`);
+  } else {
+    const slim = S.briefSlim;
+    const ctx = t ? `<section class="page ctx${slim?" slim":""}">
+        ${slim?"":`<div class="eyebrow"><span class="state ${t.state}">${t.stateLabel}</span><span class="key">${t.key}</span></div>`}
+        <h1>${esc(t.title)}</h1>
+        ${slim?"":`<p class="brief">${esc(t.brief)}</p>
+        <div class="cols"><div><div class="label-sm">Outcome</div><ul class="outcome">${t.outcome.map(o=>`<li>${esc(o)}</li>`).join("")}</ul></div>
+        <div class="sessblock"><div class="label-sm">Conversations</div>${sessionsList(t)}</div></div>
+        <div class="actions">${primaryAction(t)}<button class="btn" data-act="newconv" data-id="${t.id}">${I.plus} New conversation</button><button class="btn ghost" data-act="details" aria-expanded="${S.detailsOpen}">${I.info} Details</button></div>`}
+      </section>`
+      : `<section class="page">${looseContext(SESSIONS[S.sel.id])}</section>`;
+    const title = t ? `${esc(t.title)}` : esc(SESSIONS[S.sel.id].title);
+    mainInner = ctx + `<section class="work dark${S.zoomDir?" z-"+S.zoomDir:""}" aria-label="Workspace for ${title}">
+      <div class="wbar"><span class="ttl">Workspace · <b>${t?t.key:"no Task"}</b></span>${paneToggles("tg")}
+      <div class="right"><button class="tg" data-act="slim" aria-pressed="${slim}" title="${slim?"Show the brief":"Give the workspace more room"}">${slim?"Show brief":"More room"}</button></div></div>
+      ${panes()}</section>`;
+  }
+  const sideHidden = S.sideOff || S.zoom>0;
+  return `<div class="app">
+    <header class="hrepo" aria-label="Repository" ${sideHidden?"inert":""}>${repoSwitch(false)}</header>
+    ${S.zoom===0 ? repoMenu(S.sideOff) : ""}
+    <aside class="side" aria-label="Work navigation" ${sideHidden?"inert":""}>
+      <div class="scroll">${outline({scope:S.scope, flat:true})}</div>
+      <div class="dock">${searchBox(S.scope==="all"?"Find work or Sessions":"Find in "+scopeName(S.scope))}
+        <div class="foot"><span>${S.currentData?"Read "+esc(new Date(S.currentData.observedAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})):"Planning read 14:05"}</span><span style="margin-left:auto"><span class="kbd">⌘\\</span> hide</span></div></div>
+    </aside>
+    <main>
+      <div class="top${S.zoom===2?" dark":""}${headerStudy(t)==="b"?" hb":""}">${topLeftA(t, w)}
+        ${S.currentData?"":`<div class="right"><span class="sample" title="Sample data">Sample workspace</span>${zoomCtl()}</div>`}</div>
+      ${mainInner}
+      <aside class="drawer${S.detailsOpen&&t?" open":""}" aria-label="Task details" ${S.detailsOpen&&t?"":"inert"}>
+        <div style="display:flex;align-items:center;margin-bottom:6px"><span class="label-sm" style="margin:0">Details</span><button class="btn ghost small" style="margin-left:auto" data-act="details" aria-label="Close details">${I.x}</button></div>
+        ${t?`<h2 style="font-family:var(--serif);font-weight:600;font-size:26px;margin:0 0 4px">${esc(t.title)}</h2>`+detailsBody(t):""}
+      </aside>
+    </main></div>`;
+}
+
+const issueLink = t => t.issueUrl
+  ? `<a class="issue-link" href="${esc(t.issueUrl)}" target="_blank" rel="noopener" aria-label="Open ${esc(t.key)} in Linear">${esc(t.key)}</a>`
+  : `<span class="issue-link">${esc(t.key)}</span>`;
+// The header study applies only to current-data Task pages at Overview depth.
+const headerStudy = t => S.currentData && t && S.zoom===0 ? qsHeader : null;
+function topLeftA(t, w){
+  if (window.isSessionStudyTask?.(t)) return window.renderSessionStudyHeader(t);
+  // With the outline visible its header names the repository; otherwise the crumb carries it.
+  const rp = S.sideOff ? repoSwitch(true) : S.scope==="all" ? undefined : "";
+  const hv = headerStudy(t);
+  if (hv){
+    const side = `<button class="btn ghost small" data-act="side" aria-pressed="${!S.sideOff}" aria-label="${S.sideOff?"Show":"Hide"} Work list" title="Show or hide the Work list (⌘\\)">${I.side}</button>`;
+    const repo = S.sideOff ? repoSwitch(true) : S.scope==="all" ? `<span class="crumb"><span>${repoOf(selRepo()).name}</span></span>` : "";
+    const wave = waveOf(t.wave);
+    if (hv==="a") return `${side}${repo}<nav class="task-crumb" aria-label="Location"><button class="hwave" data-act="selwave" data-id="${wave.id}" title="Open ${esc(wave.name)} — objective and plan">${esc(wave.name)}</button><span class="sep" aria-hidden="true">/</span>${issueLink(t)}</nav>`;
+    if (hv==="b") return `${side}${repo}<button class="hback" data-act="selwave" data-id="${wave.id}" aria-label="Back to ${esc(wave.name)}">${I.back}${esc(wave.name)}</button>
+      <div class="htitle"><h1>${esc(t.title)}</h1>${issueLink(t)}</div>`;
+    return `${side}${repo}<nav class="qcrumb" aria-label="Location"><button data-act="selwave" data-id="${wave.id}">${esc(wave.name)}</button><span aria-hidden="true">/</span><span class="cur" title="${esc(t.title)}" aria-current="page">${esc(t.title)}</span></nav>`;
+  }
+  if (S.zoom===0) return `<button class="btn ghost small" data-act="side" aria-pressed="${!S.sideOff}" aria-label="${S.sideOff?"Show":"Hide"} Work list" title="Show or hide the Work list (⌘\\)">${I.side}</button>${crumb(rp)}`;
+  if (S.zoom===1) return `<button class="btn ghost small zback" data-act="zoom" data-z="0" data-fk="zback-0" title="Back to Overview (Esc)">${I.back} Overview</button>${crumb()}`;
+  const s = SESSIONS[w.session];
+  return `<button class="btn ghost small zback" data-act="zoom" data-z="1" data-fk="zback-1" title="Back to Session + context (Esc)">${I.back} Context</button>
+    <span class="zid"><b>${esc(s.title)}</b><span>${s.agent} · ${esc(repoOf(selRepo()).name)}${t?" / "+t.key:" · no Task"}</span></span>`;
+}
+
+/* ---------------- B · studio ---------------- */
+function renderB(){
+  const t = task();
+  let canvas, insp;
+  if (S.sel.kind==="wave"){
+    const back=TASKS[S.lastTask];
+    canvas = `<div class="ctxline">Wave selected — workspaces are kept per Task.</div><div class="pstate"><div class="box"><h4>${waveOf(S.sel.id).name}</h4><p>No workspace is shown for a Wave. Your ${esc(back.title)} workspace is kept as you left it.</p><button class="btn" data-act="seltask" data-id="${back.id}">${I.back} Return to ${back.key}</button></div></div>`;
+    insp = `<div class="sec">${wavePage(waveOf(S.sel.id), false)}</div>`;
+  } else {
+    const w = ws(); const sname = w.session ? SESSIONS[w.session].title : "no conversation";
+    canvas = `<div class="ctxline"><b>${t?esc(t.title):"Untitled conversation"}</b><span>·</span><span>${esc(sname)}</span>${t?`<span class="st" style="margin-left:auto">${t.stateLabel}</span>`:""}</div>${panes()}`;
+    insp = t ? `<div class="sec ctx"><div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><span class="state ${t.state}">${t.stateLabel}</span><span class="key" style="margin-left:auto">${t.key}</span></div>
+        <h1>${esc(t.title)}</h1><p class="brief">${esc(t.brief)}</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:14px">${primaryAction(t)}</div></div>
+      <div class="sec"><div class="label-sm">Outcome</div><ul class="outcome" style="font-size:13px">${t.outcome.map(o=>`<li>${esc(o)}</li>`).join("")}</ul></div>
+      <div class="sec"><div style="display:flex;align-items:center;margin-bottom:8px"><span class="label-sm" style="margin:0">Conversations</span><button class="btn ghost small" style="margin-left:auto" data-act="newconv" data-id="${t.id}">${I.plus} New</button></div>${sessionsList(t)}</div>
+      <div class="sec"><details ${S.detailsOpen?"open":""} data-det="1"><summary>${I.chev} Description & diagnostics</summary><div style="margin-top:6px">${detailsBody(t)}</div></details></div>`
+      : `<div class="sec">${looseContext(SESSIONS[S.sel.id], false)}</div>`;
+  }
+  return `<div class="app">
+    <header class="bar"><span class="mono" aria-hidden="true">L</span>
+      <button class="btn ghost small" data-act="nav" aria-pressed="${!S.navOff}" aria-label="${S.navOff?"Show":"Hide"} navigator" title="Navigator (⌘\\)">${I.side}</button>${crumb()}
+      <div class="center" role="group" aria-label="Workspace panes">${S.sel.kind==="wave"?"":`<span class="seg" aria-pressed="true">${I.term}<span class="lbl">Conversation</span></span>`+paneToggles("seg")}</div>
+      <div class="right"><span class="sample">Sample workspace</span><button class="btn ghost small" data-act="insp" aria-pressed="${!S.inspOff && (!matchMedia("(max-width:1240px)").matches || S.inspSm)}" aria-label="Toggle inspector" title="Inspector">${I.insp}</button></div></header>
+    <nav class="nav" aria-label="Work navigation" ${S.navOff?"inert":""}><div class="hd">Work<span class="key" style="text-transform:none;letter-spacing:0">read 14:05</span></div>${searchBox("Find…")}${outline()}</nav>
+    <main class="canvas dark" aria-label="Workspace">${canvas}</main>
+    <aside class="insp" aria-label="Inspector" ${(S.inspOff || (matchMedia("(max-width:1240px)").matches && !S.inspSm))?"inert":""}>${insp}</aside>
+    <footer class="status"><span>Sample workspace — nothing here reaches a provider</span>
+      ${REPOS[1].error?`<span class="warn">cube: ${esc(REPOS[1].error)} · <button data-act="retry" data-id="cube">Retry</button></span>`:""}
+      <span class="r"><span>Planning read 14:05:02</span><span>Sessions read 14:05:02</span></span></footer>
+  </div>`;
+}
+
+/* ---------------- C · focus ---------------- */
+function renderC(){
+  const t = task(); const w = ws();
+  const pillTitle = S.sel.kind==="task" ? esc(t.title) : S.sel.kind==="wave" ? waveOf(S.sel.id).name : esc(SESSIONS[S.sel.id].title);
+  const pillWave = S.sel.kind==="task" ? waveOf(t.wave).name : S.sel.kind==="wave" ? REPOS.find(r=>r.waves.some(x=>x.id===S.sel.id)).name : "no Task";
+  let stage;
+  if (S.sel.kind==="wave"){
+    const back=TASKS[S.lastTask];
+    stage = `<div class="ctxmore" style="margin:30px 0 0;grid-template-columns:1fr;max-width:720px">${wavePage(waveOf(S.sel.id), false)}
+      <div style="border-top:1px solid var(--line);padding-top:12px;color:var(--muted);font-size:13px">Your ${esc(back.title)} workspace is kept. <button class="btn small" data-act="seltask" data-id="${back.id}">${I.back} Return</button></div></div>`;
+  } else {
+    const band = t ? `<div class="ctxband"><div class="brief">${esc(t.brief)}</div><div class="meta"><span class="state ${t.state}">${t.stateLabel}</span><button class="btn small ghost" data-act="ctxmore" aria-expanded="${S.ctxMore}">${S.ctxMore?"Less":"About this Task"} ${I.down}</button></div></div>`
+      : `<div class="ctxband"><div class="brief" style="font-size:17px;color:var(--ink-2)">Not attached to a Task — attribution unknown, so Loopflow won’t guess.</div></div>`;
+    const more = t && S.ctxMore ? `<div class="ctxmore"><div><div class="label-sm">Outcome</div><ul class="outcome">${t.outcome.map(o=>`<li>${esc(o)}</li>`).join("")}</ul>
+        <div class="label-sm" style="margin-top:14px">Conversations</div>${sessionsList(t)}<div style="margin-top:10px"><button class="btn small" data-act="newconv" data-id="${t.id}">${I.plus} New conversation</button></div></div><div>${detailsBody(t)}</div></div>` : "";
+    stage = band + more + `<section class="surface dark" aria-label="Workspace">${panes()}</section>`;
+  }
+  const wide = w && (w.companion||w.monitor) && S.sel.kind!=="wave";
+  document.body.classList.toggle("with-side", !!wide);
+  return `<div class="app">
+    <aside class="rail" aria-label="Work navigation" ${S.sideOff?"inert":""}>
+      <div class="hd"><span class="mark">Loopflow</span><button class="btn ghost small" style="margin-left:auto" data-act="side" aria-label="Hide Work list" title="Hide (⌘\\)">${I.side}</button></div>
+      ${searchBox()}<div class="scroll">${outline()}</div></aside>
+    <main>
+      <div class="top"><div class="l">${S.sideOff?`<button class="btn ghost small" data-act="side" aria-label="Show Work list" title="Show Work list (⌘\\)">${I.side}</button>`:""}<span class="sample">Sample workspace</span></div>
+        <button class="pill" data-act="switcher" aria-haspopup="dialog" aria-expanded="${S.switcher}" title="Switch Work (/)"><span class="w">${pillWave}</span><span class="t">${pillTitle}</span>${I.down}</button>
+        <div class="r">${S.sel.kind==="wave"?"":paneToggles("btn ghost small")}</div></div>
+      <div class="stage">${stage}</div>
+      ${S.switcher?`<div class="scrim" data-act="switcher"></div><div class="switcher" role="dialog" aria-label="Switch Work">${searchBox("Jump to a Task or Session")}<div class="scroll">${outline()}</div></div>`:""}
+    </main></div>`;
+}
+
+/* ---------------- render + focus retention ---------------- */
+const root = document.getElementById("root");
+function render(){
+  const a = document.activeElement; const fk = a && a.dataset ? a.dataset.fk : null;
+  const sel = fk && a.selectionStart!=null ? [a.selectionStart,a.selectionEnd] : null;
+  if (S.zoom>0 && zoomBlock()) S.zoom = 0;
+  const zc = S.v==="a" && S.zoom>0 ? " zoomed z"+S.zoom : "";
+  document.body.className = "v"+S.v + zc + (S.sideOff?(S.v==="a"?" side-off":" rail-off"):"") + (S.navOff?" nav-off":"") + (S.inspOff?" insp-off":"") + (S.inspSm?" insp-open-sm":"");
+  root.innerHTML = S.v==="a" ? renderA() : S.v==="b" ? renderB() : renderC();
+  if (fk){ const el = root.querySelector(`[data-fk="${fk}"]`); if (el){ el.focus({preventScroll:true}); if (sel && el.setSelectionRange) el.setSelectionRange(sel[0],sel[1]); } }
+}
+function focusDraft(){ const w=ws(); if(!w||!w.session) return; const el=root.querySelector(`[data-draft="${w.session}"]`); if(el){ el.focus(); el.setSelectionRange(el.value.length,el.value.length);} }
+
+/* ---------------- actions ---------------- */
+function selectTask(id){ S.sel={kind:"task",id}; S.lastTask=id; S.switcher=false; S.zoom=0; }
+// A experiment: a Task with exactly one local open conversation opens straight into it (Session + context).
+// None, several, or one open elsewhere: the Task Overview, where the choice stays explicit.
+function foregroundSession(tid, sid){ const w=S.ws[tid]; w.session=sid; w.focus="session"; S.detailsOpen=false; S.zoomDir="in"; S.zoom=1; render(); S.zoomDir=null; focusDraft(); }
+function openTask(id){
+  const t=TASKS[id]; selectTask(id); S.detailsOpen=false;
+  const only = t.sessions.length===1 ? SESSIONS[t.sessions[0]] : null;
+  if (only && only.where==="here"){ foregroundSession(id, only.id); return; }
+  if (only) S.ws[id].session=only.id; // shown with its explicit Move-here choice
+  render();
+}
+root.addEventListener("click", e=>{
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  if (S.currentData && ["newconv","startconv","movehere","retry","refresh","retrymon"].includes(act)) return;
+  if (act==="focus"){ // pane focus: only when clicking pane chrome, not inner buttons
+    if (e.target.closest("button,textarea,summary,a")) return;
+    const w=ws(); if (w){ w.focus=el.dataset.pane; render(); if (w.focus==="session") focusDraft(); } return;
+  }
+  e.stopPropagation();
+  switch(act){
+    case "repo": S.openRepos[id]=!S.openRepos[id]; break;
+    case "wave": S.openWaves[id]=!S.openWaves[id]; break;
+    case "task": S.openTasks[id]=!S.openTasks[id]; break;
+    case "selwave": S.sel={kind:"wave",id}; S.switcher=false; S.detailsOpen=false; S.zoom=0; break;
+    case "seltask": selectTask(id); break;
+    case "opentask": openTask(id); return;
+    case "inspecttask": selectTask(id); S.detailsOpen=false; break;
+    case "selsession": { const s=SESSIONS[id]; if (S.v==="a" && s.where==="here"){ selectTask(s.task); foregroundSession(s.task, id); return; } selectTask(s.task); S.ws[s.task].session=id; S.ws[s.task].focus="session"; S.openTasks[s.task]=true; render(); focusDraft(); return; }
+    case "selloose": S.sel={kind:"loose",id}; S.switcher=false; S.detailsOpen=false; S.zoom=0; render(); focusDraft(); return;
+    case "zoom": setZoom(+el.dataset.z); return;
+    case "repomenu": S.repoMenu=!S.repoMenu; render(); if (S.repoMenu) root.querySelector(`.rmenu [aria-checked="true"]`)?.focus(); else rswEl()?.focus(); return;
+    case "scope": setScope(id); render(); rswEl()?.focus(); return;
+    case "togglecomp": { const w=ws(); w.companion=!w.companion; w.focus = w.companion?"companion":"session"; if(!w.companion) toast("Shell hidden — it keeps running in this workspace."); break; }
+    case "togglemon": { const w=ws(); w.monitor=!w.monitor; if(w.monitor) w.focus="monitor"; else if(w.focus==="monitor") w.focus="session"; break; }
+    case "continue": { const w=ws(); w.focus="session"; render(); focusDraft(); return; }
+    case "movehere": { SESSIONS[id].where="here"; toast("Sample: conversation shown here. Nothing was moved."); break; }
+    case "startconv": case "newconv": {
+      const t=TASKS[id]; const sid="s-new-"+(++S.n); SESSIONS[sid]={id:sid,title:"New conversation"+(S.n>1?" "+S.n:""),task:id,agent:"Codex",where:"here",run:"run_sample_"+S.n,lines:[["codex",`Ready to talk about “${t.title}”. (Sample — no provider is running.)`]]};
+      t.started=true; t.sessions.push(sid); S.ws[id].session=sid; S.ws[id].focus="session"; S.openTasks[id]=true; selectTask(id); render(); focusDraft(); return; }
+    case "refresh": S.reads[id]=nowStr(); toast("Monitor re-read (sample data)."); break;
+    case "retrymon": RUNS[id].complete=true; RUNS[id].gap=null; S.reads[id]=nowStr(); toast("Sample retry: ownership confirmed."); break;
+    case "retry": { const r=repoOf(id); r.error=null; toast("Sample retry succeeded for "+r.name+"."); break; }
+    case "errdetail": toast("lf session list exited 1 — store is migrating (sample)."); return;
+    case "clearq": S.q=""; break;
+    case "details": S.detailsOpen=!S.detailsOpen; break;
+    case "slim": S.briefSlim=!S.briefSlim; break;
+    case "side": S.sideOff=!S.sideOff; break;
+    case "nav": S.navOff=!S.navOff; break;
+    case "insp": if (matchMedia("(max-width:1240px)").matches) S.inspSm=!S.inspSm; else S.inspOff=!S.inspOff; break;
+    case "ctxmore": S.ctxMore=!S.ctxMore; break;
+    case "switcher": S.switcher=!S.switcher; render(); if (S.switcher) root.querySelector('.switcher input')?.focus(); return;
+  }
+  render();
+});
+root.addEventListener("toggle", e=>{ if (e.target.dataset && e.target.dataset.det) S.detailsOpen=e.target.open; }, true);
+root.addEventListener("input", e=>{
+  const t=e.target;
+  if (t.dataset.inp==="q"){ S.q=t.value; render(); }
+  else if (t.dataset.draft){ S.drafts[t.dataset.draft]=t.value; const f=t.closest(".pane").querySelector(".cfoot span"); if(f){f.textContent=t.value?"Draft kept with this Session":"Draft is kept when you navigate"; f.className=t.value?"kept":"";} }
+});
+root.addEventListener("focusin", e=>{
+  const p = e.target.closest && e.target.closest(".pane"); const w=ws();
+  if (p && w && e.target.dataset.draft && w.focus!=="session"){ w.focus="session"; render(); focusDraft(); }
+});
+root.addEventListener("keydown", e=>{
+  const t=e.target;
+  if (t.dataset && t.dataset.draft && e.key==="Enter" && !e.shiftKey){ e.preventDefault(); toast("Sample workspace — nothing was sent. Your draft is kept."); }
+});
+document.addEventListener("keydown", e=>{
+  const typing = e.target.matches && e.target.matches("input,textarea");
+  if (S.repoMenu && S.v==="a" && (e.key==="ArrowDown"||e.key==="ArrowUp")){ e.preventDefault(); const items=[...root.querySelectorAll(".rmenu button")]; const i=items.indexOf(document.activeElement); items[(i+(e.key==="ArrowDown"?1:-1)+items.length)%items.length]?.focus(); return; }
+  if (e.key==="/" && !typing && S.v==="a"){ e.preventDefault(); if (S.zoom>0||S.sideOff){ S.sideOff=false; S.zoomDir=S.zoom>0?"out":null; S.zoom=0; render(); S.zoomDir=null; } root.querySelector('[data-inp="q"]')?.focus(); return; }
+  if (e.key==="/" && !typing){ e.preventDefault(); if (S.v==="c" && (S.sideOff || matchMedia("(max-width:1100px)").matches)){ S.switcher=true; render(); root.querySelector(".switcher input")?.focus(); } else root.querySelector('[data-inp="q"]')?.focus(); }
+  else if (e.key==="Escape"){ if (S.repoMenu){S.repoMenu=false;render();rswEl()?.focus();} else if (S.switcher){S.switcher=false;render();} else if (S.inspSm && S.v==="b"){S.inspSm=false;render();} else if (S.detailsOpen && S.v==="a"){S.detailsOpen=false;render();} else if (S.q && typing && e.target.dataset.inp==="q"){S.q="";render();} else if (S.v==="a" && S.zoom>0){e.preventDefault(); setZoom(S.zoom-1);} }
+  else if ((e.metaKey||e.ctrlKey) && e.key==="\\"){ e.preventDefault(); if (S.v==="b") S.navOff=!S.navOff; else if (S.v==="a" && S.zoom>0){ S.sideOff=false; setZoom(0); return; } else S.sideOff=!S.sideOff; render(); }
+});
+function setDirection(v){ if(S.currentData) return; if(!["a","b","c"].includes(v)) return; S.v=v; S.switcher=false; S.inspSm=false; S.repoMenu=false; render(); }
+window.addEventListener("message", e=>{ const d=e.data; if (d && d.type==="direction") setDirection(d.value); });
+matchMedia("(max-width:1240px)").addEventListener("change", () => render());
+window.setDirection = setDirection;
+</script>
+<script src="large-population.js"></script>
+<script src="current-data.js"></script>
+<script src="current-plan.js"></script>
+<script src="flow-options.js"></script>
+<script src="task-execution.js"></script>
+<script src="task-sessions.js"></script>
+<script src="task3-fixture.js"></script>
+<script>render();</script>
+</body>
+</html>

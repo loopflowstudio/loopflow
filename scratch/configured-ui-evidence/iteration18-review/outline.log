@@ -1,0 +1,8 @@
+Observed at 2026-09-24T20:40:06Z
+Owned app PID 43537 Home /Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590
+PASS configured Task selected by exact planning ID ee671927-255f-41e6-8429-b830d59cc1de and directive control available
+PASS planning snapshot evidence is available in inspection
+PASS one menu exposes Compact, Full hierarchy and Sessions
+PASS Full presentation preserves selected Task and inspection
+PASS configured Session identities unchanged; no Session action issued
+Owned app termination requested true

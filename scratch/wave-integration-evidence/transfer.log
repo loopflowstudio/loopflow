@@ -1,0 +1,23 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Emitting module LoopflowTests
+[4/5] Compiling LoopflowTests TaskMonitorProofTests.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.78s)
+Test Suite 'Selected tests' started at 2026-09-24 15:09:57.670.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 15:09:57.671.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 15:09:57.671.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 15:09:57.672.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" started.
+✔ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" passed after 1.331 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.331 seconds.
+✔ Test run with 1 test in 1 suite passed after 1.331 seconds.

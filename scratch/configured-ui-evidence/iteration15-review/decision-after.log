@@ -1,0 +1,63 @@
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/8] Emitting module LoopflowMac
+[5/8] Compiling LoopflowMac SessionsView.swift
+[5/10] Write Objects.LinkFileList
+[6/10] Linking LoopflowMac
+[7/10] Applying LoopflowMac
+[9/14] Compiling LoopflowTests SessionsStoreTests.swift
+[10/14] Compiling LoopflowTests SessionsPolishTests.swift
+[11/15] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[12/15] Emitting module LoopflowTests
+[13/15] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[13/15] Write Objects.LinkFileList
+[14/15] Linking LoopflowSwiftPackageTests
+Build complete! (10.62s)
+Test Suite 'Selected tests' started at 2026-09-24 08:11:18.728.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 08:11:18.729.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 08:11:18.729.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 08:11:18.729.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified workspace navigation proof" started.
+◇ Suite "Sessions store" started.
+◇ Test "Completing an interactive Session removes it from Sessions" started.
+◇ Test "Rejected Flow decisions retain their terminal and remain visible after polling" started.
+◇ Test "Shell-attached Sessions can complete without closing their terminal" started.
+◇ Test "Shared activity never creates a local terminal; reconciliation removes resolved Sessions" started.
+◇ Test "A failed open stays visible across polling until superseded" started.
+◇ Test "A ready FlowStep stays visible until its decision" started.
+◇ Test "Session actions use the main repository for a linked worktree" started.
+◇ Test "selecting one waiting Task recovers only that terminal" started.
+◇ Test "Only a FlowStep decision removes a ready FlowStep" started.
+◇ Test "Completing a ready Ask resumes its caller" started.
+◇ Test "Selecting an active Session leaves its other terminal running until Move here" started.
+◇ Test case passing 1 argument approving → true to "Rejected Flow decisions retain their terminal and remain visible after polling" started.
+◇ Test "Polling preserves the prepared interactive launch command" started.
+◇ Test case passing 1 argument rejected → false to "Shell-attached Sessions can complete without closing their terminal" started.
+◇ Test "An externally killed terminal reclassifies as active elsewhere" started.
+◇ Test case passing 1 argument replacing → false to "Polling preserves the prepared interactive launch command" started.
+◇ Test case passing 1 argument replacing → true to "Polling preserves the prepared interactive launch command" started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✔ Test "A ready FlowStep stays visible until its decision" passed after 0.507 seconds.
+✔ Test "Selecting an active Session leaves its other terminal running until Move here" passed after 0.507 seconds.
+✔ Test "Shared activity never creates a local terminal; reconciliation removes resolved Sessions" passed after 0.507 seconds.
+✔ Test "selecting one waiting Task recovers only that terminal" passed after 0.507 seconds.
+✔ Test "An externally killed terminal reclassifies as active elsewhere" passed after 0.692 seconds.
+✔ Test "A failed open stays visible across polling until superseded" passed after 0.693 seconds.
+✔ Test "Polling preserves the prepared interactive launch command" with 2 test cases passed after 0.770 seconds.
+✔ Test "Session actions use the main repository for a linked worktree" passed after 0.770 seconds.
+✔ Test "Only a FlowStep decision removes a ready FlowStep" passed after 0.770 seconds.
+✔ Test "Completing an interactive Session removes it from Sessions" passed after 0.770 seconds.
+✔ Test "Completing a ready Ask resumes its caller" passed after 0.770 seconds.
+✔ Suite "Sessions store" passed after 0.771 seconds.
+◇ Test case passing 1 argument approving → false to "Rejected Flow decisions retain their terminal and remain visible after polling" started.
+◇ Test case passing 1 argument rejected → true to "Shell-attached Sessions can complete without closing their terminal" started.
+✔ Test "Rejected Flow decisions retain their terminal and remain visible after polling" with 2 test cases passed after 2.112 seconds.
+✔ Test "Shell-attached Sessions can complete without closing their terminal" with 2 test cases passed after 2.133 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 2.134 seconds.
+✔ Test run with 13 tests in 2 suites passed after 2.134 seconds.

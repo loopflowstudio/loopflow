@@ -1,0 +1,50 @@
+observed_at 2026-09-24T14:24:52Z
+Owned app PID 20745
+AX trust true active false
+PASS Exact runner trusted
+PASS One owned accessible window
+PASS Press All work
+PASS Press New terminal
+PASS One main checkout pane
+PASS Press Show work list
+PASS Select exact Task
+PASS Press New conversation · LOO-291
+Owned Session run_522857d1d4b1446fbdd7939a9931e2c4
+PASS Shared Session has native terminal attachment
+PASS Exact provider descends from owned app
+SESSION_PICKER 2
+SESSION_OPTIONS [["session-row-run_522857d1d4b1446fbdd7939a9931e2c4", "codex · VIEWING"], ["session-row-run_643d86d70d5b4109a460e80a87a97533", "implement · loopflow.main-view-task · ELSEWHERE"]]
+PASS Select exact Session from multiple-Session picker
+PASS Row selection retains provider PID and birth receipt
+PASS Local row requests no transfer
+PASS Press New terminal
+PASS Task retains provider shell and companion
+PASS Press Split worktrees right
+WORKTREE_ACTIONS (
+    AXShowMenu
+)
+PASS Open worktree picker
+PASS Restore retained main checkout beside Task
+PASS Press New terminal
+PASS Two checkout groups each retain two native panes
+PTY_RECEIPTS ["24143 20745 ttys003  Thu Sep 24 07:24:56 2026     /usr/bin/login", "25582 20745 ttys006  Thu Sep 24 07:24:59 2026     /usr/bin/login", "35994 20745 ttys008  Thu Sep 24 07:25:07 2026     /usr/bin/login", "37365 20745 ttys018  Thu Sep 24 07:25:09 2026     /usr/bin/login"]
+PASS Four direct PTY children have process receipts
+PANE_LABELS_BEFORE ["Split right", "Split right", "Split right", "Split right"]
+SESSION_PICKER 2
+SESSION_OPTIONS [["session-row-run_522857d1d4b1446fbdd7939a9931e2c4", "codex · VIEWING"], ["session-row-run_643d86d70d5b4109a460e80a87a97533", "implement · loopflow.main-view-task · ELSEWHERE"]]
+PASS Select exact Session from multiple-Session picker
+PASS Row return preserves both nested layouts
+PROVIDER_PANE_LABEL ⠇ Review loopflow instructions | loopflow.main-view-task, active
+PASS Exact attached provider pane is selected after row return
+PASS Press Work details
+PASS Press Return to terminals
+PASS Details return retains all four native panes
+PASS Navigation retains exact provider client
+PASS Navigation retains all four shell PID/birth receipts
+PASS Press Complete session
+PASS Owned Session is resolved through UI
+PASS Owned provider has exited
+PASS Completion preserves all four shell panes
+PASS Completion retains original launch shell and companions
+PASS configured Session row and nested layout retention; no keyboard input or draft assertion
+Owned app termination requested true

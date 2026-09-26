@@ -962,8 +962,6 @@ struct WaveChapterView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            Text("Chapter \(chapter.id)").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-
             ForEach(chapter.krs) { kr in
                 Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
                     .font(Typography.body(12)).textSelection(.enabled)

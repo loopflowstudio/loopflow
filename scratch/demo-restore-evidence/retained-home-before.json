@@ -1,0 +1,47 @@
+{
+  "home": "/Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea",
+  "chapters": [
+    {
+      "wave_id": "5081a624-c095-4218-9a54-6d1a6711f282",
+      "chapter_id": "demo-20260924",
+      "project_id": "5420affb-2d31-411a-b8d4-5516a7f49b8e",
+      "current": 1,
+      "receipt_sha256": "af553fe37f8387db2ed2ee06bdb02302617973fadcdda0595cde6adcc37d0275"
+    },
+    {
+      "wave_id": "54bc9162-c883-4574-bab1-af589526c1ad",
+      "chapter_id": "20260924-trained-challengers",
+      "project_id": "a0c7eb95-741e-4b31-a5fb-098f67ccba54",
+      "current": 1,
+      "receipt_sha256": "d0090a58c43e8c4c5227c4694e1874b1195a535142cd87b54dc9e31c58378a97"
+    },
+    {
+      "wave_id": "6155f18a-1b7f-418c-9af3-8d6fa5ce4989",
+      "chapter_id": "demo-20260924",
+      "project_id": "5a3aaee8-a95a-4726-9578-22a4700270ac",
+      "current": 1,
+      "receipt_sha256": "ee87f70d3e9b4592b395b49665a84d2bbf6780dad14a3e47722e2121ba5a083c"
+    },
+    {
+      "wave_id": "74d9efbc-444b-4e88-b4a4-c67983448649",
+      "chapter_id": "20260924-trained-challengers",
+      "project_id": "ce74bb65-b93c-4ec1-b971-790222a2c0bc",
+      "current": 1,
+      "receipt_sha256": "6e3211ae2202f1c5badb68615de33f2e66ac3d854ac5f6ac554af14339cc8482"
+    },
+    {
+      "wave_id": "cb366067-4821-4071-9393-82ff4b6d61d2",
+      "chapter_id": "demo-20260924",
+      "project_id": "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
+      "current": 1,
+      "receipt_sha256": "1a4cd8e435fccb09d0ac235a4f6cb81a46096bd49f287914a46f6ad1f0140acf"
+    },
+    {
+      "wave_id": "d97e0563-141d-4053-a174-953642dcfe0e",
+      "chapter_id": "20260924-trained-challengers",
+      "project_id": "b5f82d53-ff4b-409d-96f2-23c5efd8a956",
+      "current": 1,
+      "receipt_sha256": "1a3c60b88e2be89e0bcf94b2dffb95787a79f66f33b76a181325218329260f21"
+    }
+  ]
+}

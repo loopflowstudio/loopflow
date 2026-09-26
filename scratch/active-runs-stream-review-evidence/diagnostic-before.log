@@ -1,0 +1,26 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.89s)
+Test Suite 'Selected tests' started at 2026-09-24 18:51:06.289.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 18:51:06.289.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 18:51:06.290.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 18:51:06.290.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Active Run transport" started.
+◇ Test "Reader startup failure preserves the CLI diagnostic" started.
+◇ Test case passing 1 argument closesOutputFirst → false to "Reader startup failure preserves the CLI diagnostic" started.
+✘ Test "Reader startup failure preserves the CLI diagnostic" recorded an issue with 1 argument closesOutputFirst → false at ActiveRunsObservationTests.swift:22:13: Expectation failed: (error.localizedDescription → "Active Run reader closed its output").contains(diagnosis → "Selected Home has an incompatible migration frontier")
+◇ Test case passing 1 argument closesOutputFirst → true to "Reader startup failure preserves the CLI diagnostic" started.
+✘ Test "Reader startup failure preserves the CLI diagnostic" recorded an issue with 1 argument closesOutputFirst → true at ActiveRunsObservationTests.swift:22:13: Expectation failed: (error.localizedDescription → "Active Run reader closed its output").contains(diagnosis → "Selected Home has an incompatible migration frontier")
+✘ Test "Reader startup failure preserves the CLI diagnostic" with 2 test cases failed after 0.009 seconds with 2 issues.
+✘ Suite "Active Run transport" failed after 0.010 seconds with 2 issues.
+✘ Test run with 1 test in 1 suite failed after 0.010 seconds with 2 issues.

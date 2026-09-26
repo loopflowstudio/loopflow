@@ -59,6 +59,7 @@ pub struct ActivityNode {
     pub kind: ActivityNodeKind,
     pub label: String,
     pub repo: Option<String>,
+    pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
     pub started_at: i64,
@@ -111,7 +112,7 @@ struct ActivityData {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OsProcess {
+pub(crate) struct OsProcess {
     pid: u32,
     ppid: u32,
     process_group: u32,
@@ -122,16 +123,162 @@ struct OsProcess {
 }
 
 #[derive(Debug, Clone)]
-struct ProcessSnapshot {
-    processes: Vec<OsProcess>,
-    receipts: Vec<ExecProcessReceipt>,
-    opencode_servers: Vec<OpenCodeServerEntry>,
+pub(crate) struct ProcessSnapshot {
+    pub(crate) processes: Vec<OsProcess>,
+    pub(crate) receipts: Vec<ExecProcessReceipt>,
+    pub(crate) opencode_servers: Vec<OpenCodeServerEntry>,
 }
 
 #[derive(Debug, Clone)]
 struct OwnedProviderProcess {
     exec_id: String,
     process: OsProcess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveProviderProcess {
+    pub pid: u32,
+    pub provider: String,
+    pub state: ActivityState,
+}
+
+#[derive(Debug)]
+pub(crate) struct LiveExecProviders {
+    pub receipt: ExecProcessReceipt,
+    pub providers: Vec<LiveProviderProcess>,
+}
+
+#[derive(Debug)]
+pub(crate) struct LiveRunProcesses {
+    pub execs: Vec<LiveExecProviders>,
+    pub clients: Vec<(crate::durable::RunId, LiveProviderProcess)>,
+    pub gaps: Vec<String>,
+}
+
+/// Run observations use the same process and ownership evidence as `ps`,
+/// without loading the Exec event ledger or provider output.
+pub(crate) fn live_exec_providers(
+    snapshot: &ProcessSnapshot,
+    bound_owners: &[crate::durable::TaskWorkerOwner],
+    clients: &[(
+        crate::durable::RunId,
+        crate::run_record::ProviderClientRef,
+        String,
+    )],
+) -> LiveRunProcesses {
+    let mut native = Vec::new();
+    let by_pid: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.pid, p)).collect();
+    for (run_id, client, harness) in clients {
+        let Some(process) = by_pid.get(&client.pid) else {
+            continue;
+        };
+        if process.kernel_state.starts_with('Z') {
+            continue;
+        }
+        if crate::run_record::provider_client_matches(
+            client,
+            harness,
+            process.pid,
+            process.started_at,
+            &process.command,
+        ) {
+            native.push((
+                run_id.clone(),
+                LiveProviderProcess {
+                    pid: process.pid,
+                    provider: harness.clone(),
+                    state: os_activity_state(process),
+                },
+            ));
+        }
+    }
+    let native_pids = native
+        .iter()
+        .map(|(_, process)| process.pid)
+        .collect::<HashSet<_>>();
+    let receipts = snapshot
+        .receipts
+        .iter()
+        .filter(|receipt| receipt_matches_live_process(receipt, &by_pid))
+        .collect::<Vec<_>>();
+    let owners = receipts
+        .iter()
+        .map(|receipt| (receipt.pid, receipt.exec_id.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut gaps = Vec::new();
+    for owner in bound_owners {
+        if by_pid.get(&owner.pid).is_some_and(|process| {
+            (process.started_at - owner.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
+        }) && !receipts.iter().any(|receipt| {
+            receipt.exec_id == owner.exec_id.as_str()
+                && receipt.trace_id == owner.trace_id.as_str()
+                && receipt.pid == owner.pid
+                && receipt.started_at == owner.started_at
+        }) {
+            gaps.push(format!(
+                "Exec {} is live but its ownership receipt is unavailable",
+                owner.exec_id
+            ));
+        }
+    }
+    let (providers, unclaimed) = claim_provider_processes(snapshot, &by_pid, &owners);
+    let unclaimed = unclaimed
+        .iter()
+        .filter(|process| {
+            process.claim == ProviderClaim::Orphaned && !native_pids.contains(&process.pid)
+        })
+        .count()
+        + snapshot
+            .processes
+            .iter()
+            .filter(|process| {
+                process.kind.is_none()
+                    && !native_pids.contains(&process.pid)
+                    && nearest_exec_owner(process.ppid, &by_pid, &owners).is_some()
+                    && process
+                        .command
+                        .split_whitespace()
+                        .next()
+                        .and_then(|word| Path::new(word).file_name())
+                        .is_some_and(|name| name == "opencode")
+            })
+            .count();
+    let execs = receipts
+        .into_iter()
+        .map(|receipt| LiveExecProviders {
+            receipt: receipt.clone(),
+            providers: providers
+                .iter()
+                .filter(|provider| {
+                    provider.exec_id == receipt.exec_id
+                        && !native_pids.contains(&provider.process.pid)
+                        && !provider.process.kernel_state.starts_with('Z')
+                })
+                .map(|provider| LiveProviderProcess {
+                    pid: provider.process.pid,
+                    provider: provider
+                        .process
+                        .kind
+                        .expect("owned process is a provider")
+                        .label()
+                        .to_owned(),
+                    state: os_activity_state(&provider.process),
+                })
+                .collect(),
+        })
+        .collect();
+    if unclaimed > 0 {
+        gaps.push(format!(
+            "{unclaimed} Home-owned provider processes have no verified Run attribution"
+        ));
+    }
+    gaps.sort();
+    gaps.dedup();
+    LiveRunProcesses {
+        execs,
+        clients: native,
+        gaps,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +311,7 @@ struct ExecRecord {
     parent_id: Option<String>,
     label: String,
     repo: Option<String>,
+    worktree: Option<String>,
     wave: Option<String>,
     started_at: i64,
 }
@@ -339,6 +487,16 @@ fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<
 }
 
 fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
+    Ok(ProcessSnapshot {
+        processes: sample_processes(now)?,
+        receipts: read_exec_process_receipts_at(lf_home)
+            .context("failed to read live Exec receipts")?,
+        opencode_servers: registered_opencode_servers_at(lf_home)
+            .context("OpenCode ownership registry unavailable")?,
+    })
+}
+
+pub(crate) fn sample_processes(now: i64) -> Result<Vec<OsProcess>> {
     let output = Command::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,state=,etime=,command="])
         .output()
@@ -346,20 +504,22 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     if !output.status.success() {
         return Err(anyhow!("ps failed while collecting Loopflow activity"));
     }
-    let processes = parse_processes(&String::from_utf8_lossy(&output.stdout), now);
-    let opencode_servers = match registered_opencode_servers_at(lf_home) {
-        Ok(servers) => servers,
-        Err(error) => {
-            tracing::warn!(error = %error, "OpenCode ownership registry unavailable");
-            Vec::new()
-        }
-    };
-    Ok(ProcessSnapshot {
-        processes,
-        receipts: read_exec_process_receipts_at(lf_home)
-            .context("failed to read live Exec receipts")?,
-        opencode_servers,
-    })
+    Ok(parse_processes(
+        &String::from_utf8_lossy(&output.stdout),
+        now,
+    ))
+}
+
+impl OsProcess {
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    pub(crate) fn matches_start(&self, pid: u32, started_at: i64, tolerance: i64) -> bool {
+        self.pid == pid
+            && !self.kernel_state.starts_with('Z')
+            && (self.started_at - started_at).abs() <= tolerance
+    }
 }
 
 fn parse_processes(output: &str, now: i64) -> Vec<OsProcess> {
@@ -492,6 +652,7 @@ fn collect_activity(
             kind: ActivityNodeKind::Exec,
             label: exec.label,
             repo: exec.repo,
+            worktree: exec.worktree,
             wave: exec.wave,
             pid: match evidence {
                 ReceiptEvidence::Present(pid) => Some(pid),
@@ -508,14 +669,19 @@ fn collect_activity(
     }
     let exec_context = nodes
         .iter()
-        .map(|node| (node.id.clone(), (node.repo.clone(), node.wave.clone())))
+        .map(|node| {
+            (
+                node.id.clone(),
+                (node.repo.clone(), node.worktree.clone(), node.wave.clone()),
+            )
+        })
         .collect::<HashMap<_, _>>();
     for owned in owned_providers {
         let parent_id = exec_node_id(&owned.exec_id);
-        let (repo, wave) = exec_context
+        let (repo, worktree, wave) = exec_context
             .get(&parent_id)
             .cloned()
-            .unwrap_or((None, None));
+            .unwrap_or((None, None, None));
         let process = owned.process;
         let provider = process
             .kind
@@ -527,6 +693,7 @@ fn collect_activity(
             kind: ActivityNodeKind::ProviderProcess,
             label: format!("{provider} {}", process.pid),
             repo,
+            worktree,
             wave,
             pid: Some(process.pid),
             started_at: process.started_at,
@@ -555,12 +722,16 @@ fn collect_execs(events: &[RunEventRow]) -> HashMap<String, ExecRecord> {
                 parent_id: event.parent_process_id.clone(),
                 label: command_label(event.command.as_deref()),
                 repo: event.repo.clone(),
+                worktree: event.worktree.clone(),
                 wave: event.wave.clone(),
                 started_at: event.ts,
             });
         entry.started_at = entry.started_at.min(event.ts);
         if entry.repo.is_none() {
             entry.repo.clone_from(&event.repo);
+        }
+        if entry.worktree.is_none() {
+            entry.worktree.clone_from(&event.worktree);
         }
         if entry.wave.is_none() {
             entry.wave.clone_from(&event.wave);
@@ -1048,6 +1219,43 @@ mod tests {
     }
 
     #[test]
+    fn activity_fixture_preserves_provider_worktrees() {
+        let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/activity_snapshot.json"
+        ))
+        .unwrap();
+        let paths: Vec<_> = snapshot
+            .nodes
+            .iter()
+            .filter(|node| node.kind == ActivityNodeKind::ProviderProcess)
+            .map(|node| node.worktree.as_deref())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![Some("/src/loopflow.task"), Some("/src/loopflow.task")]
+        );
+    }
+
+    #[test]
+    fn live_receipts_survive_versioned_binaries_and_app_paths() {
+        for command in [
+            "/Users/jack/.lf/bin/lf-4bacf9e4ad62b05f6b1f3a7fae56111401c387f336ef8048000a01aab1a0446c implement",
+            "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf implement",
+        ] {
+            let snapshot = collect_activity(
+                ActivityData { events: vec![run_event("trace", "worker", None, 1_000, "started", "implement")] },
+                ProcessSnapshot {
+                    processes: vec![process(10, 1, 1_000, command), process(11, 10, 1_001, "codex app-server")],
+                    receipts: vec![receipt("worker", 10, 1_000)],
+                    opencode_servers: Vec::new(),
+                }, 2_000,
+            ).unwrap();
+            assert_eq!(snapshot.nodes.iter().filter(|node| node.kind == ActivityNodeKind::ProviderProcess).count(), 1);
+            assert!(snapshot.provider_processes.is_empty());
+        }
+    }
+
+    #[test]
     fn call_tree_uses_only_live_receipts_and_os_processes() {
         let now = 10_000;
         let data = ActivityData {
@@ -1096,6 +1304,7 @@ mod tests {
             .unwrap();
         assert_eq!(provider.parent_id.as_deref(), Some("exec:exec-implement"));
         assert_eq!(provider.kind, ActivityNodeKind::ProviderProcess);
+        assert_eq!(provider.worktree.as_deref(), Some("/src/loopflow"));
         assert_eq!(provider.state, ActivityState::Working);
         assert_eq!(snapshot.provider_processes.len(), 1);
         assert_eq!(snapshot.provider_processes[0].pid, 40);

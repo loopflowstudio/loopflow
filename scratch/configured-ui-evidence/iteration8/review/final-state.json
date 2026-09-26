@@ -1,0 +1,28 @@
+{
+  "observed_at": "2026-09-24T03:43:22.488762+00:00",
+  "session": "run_a02a714cede94a0e84466dbbf175122e",
+  "conversation": "01a0d181-4875-70c2-9cea-4c4d6b17543b",
+  "owned_processes_alive": {
+    "44677": false,
+    "48366": false
+  },
+  "session_absent": true,
+  "task_completed": false,
+  "roadmap_generated_at": "2026-09-24T03:42:33.100524Z",
+  "provider_tool_calls": [],
+  "assistant_messages": [
+    {
+      "timestamp": "2026-09-24T03:41:54.207Z",
+      "text": "LOO-291 now has unified Work/Session navigation, scoped conversations, retained worktree layouts, and appearance/completion fixes. The latest configured launch proof stopped at a locked desktop.\n\nRemaining work includes configured provider proof, Task-directive editing, shared Session actions, and external-work trials with measured budgets.\n\nWhat would you like to tackle: try the current UI, add directive editing, or revisit the interaction design?"
+    },
+    {
+      "timestamp": "2026-09-24T03:41:59.075Z",
+      "text": "LOO291_ITER8_CONFIRMED"
+    }
+  ],
+  "bundle_sha256": "75fdef9e4d35fed6deeb01c3995bddcd5c7e0c6e5b7f88ce733aff01c4ae1abe",
+  "sources": {
+    "swift/LoopflowMac/Views/SessionsView.swift": "adaae30350e7309a73e6d35e38898b201a849c36d01a31a8af37ac415257fc8d",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "630422390f41896c3dea0d37f4e2902791a6446b009811c4599352c377286db1"
+  }
+}

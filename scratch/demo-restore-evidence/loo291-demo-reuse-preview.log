@@ -1,0 +1,7 @@
+Promotion preflight (candidate 0.12.20+d5d2b37d2.dirty, validation-only)
+  shared store   /Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea/loopflow.db
+  candidate      knows through 0.12.20.001_release
+  store frontier 0.12.20.001_release (candidate recognizes it exactly)
+  lifecycles     32 executable reference(s) resolve
+  VERDICT: promote (no migration to apply)
+  (preview only: no target changed)

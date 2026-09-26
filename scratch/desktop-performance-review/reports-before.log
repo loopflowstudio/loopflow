@@ -1,0 +1,122 @@
+warning: `VIRTUAL_ENV=/Users/jack/src/loopflow/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+...FFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+_________ test_completion_requires_each_planned_observation[unplanned] _________
+
+tmp_path = PosixPath('/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/pytest-of-jack/pytest-301/test_completion_requires_each_0')
+replacement = 'unplanned'
+
+    @pytest.mark.parametrize("replacement", ["unplanned", "duplicate"])
+    def test_completion_requires_each_planned_observation(tmp_path: Path, replacement: str) -> None:
+        events = _events(2)
+        for event in events[-2:]:
+            if replacement == "unplanned":
+                event["scenario"] = "unplanned"
+            else:
+                event["attempt"] = 0
+                event["state"] = "first_interaction"
+        result = _report(tmp_path, events)
+>       assert result["status"] == "incomplete"
+E       AssertionError: assert 'complete' == 'incomplete'
+E         
+E         - incomplete
+E         ? --
+E         + complete
+
+python/tests/test_desktop_performance.py:105: AssertionError
+_________ test_completion_requires_each_planned_observation[duplicate] _________
+
+tmp_path = PosixPath('/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/pytest-of-jack/pytest-301/test_completion_requires_each_1')
+replacement = 'duplicate'
+
+    @pytest.mark.parametrize("replacement", ["unplanned", "duplicate"])
+    def test_completion_requires_each_planned_observation(tmp_path: Path, replacement: str) -> None:
+        events = _events(2)
+        for event in events[-2:]:
+            if replacement == "unplanned":
+                event["scenario"] = "unplanned"
+            else:
+                event["attempt"] = 0
+                event["state"] = "first_interaction"
+        result = _report(tmp_path, events)
+>       assert result["status"] == "incomplete"
+E       AssertionError: assert 'complete' == 'incomplete'
+E         
+E         - incomplete
+E         ? --
+E         + complete
+
+python/tests/test_desktop_performance.py:105: AssertionError
+_________ test_ambiguous_results_cannot_complete_a_run[duplicate_end] __________
+
+tmp_path = PosixPath('/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/pytest-of-jack/pytest-301/test_ambiguous_results_cannot_0')
+defect = 'duplicate_end'
+
+    @pytest.mark.parametrize("defect", ["duplicate_end", "orphan_end", "changed_subject"])
+    def test_ambiguous_results_cannot_complete_a_run(tmp_path: Path, defect: str) -> None:
+        events = _events(1)
+        if defect == "duplicate_end":
+            events.append({**events[-1], "outcome": "failed"})
+        elif defect == "orphan_end":
+            events.append({**events[-1], "id": "orphan"})
+        else:
+            events[-1]["population"] = "different"
+        result = _report(tmp_path, events)
+        assert result["status"] == "incomplete"
+>       assert result["journal_errors"]
+E       assert []
+
+python/tests/test_desktop_performance.py:121: AssertionError
+___________ test_ambiguous_results_cannot_complete_a_run[orphan_end] ___________
+
+tmp_path = PosixPath('/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/pytest-of-jack/pytest-301/test_ambiguous_results_cannot_1')
+defect = 'orphan_end'
+
+    @pytest.mark.parametrize("defect", ["duplicate_end", "orphan_end", "changed_subject"])
+    def test_ambiguous_results_cannot_complete_a_run(tmp_path: Path, defect: str) -> None:
+        events = _events(1)
+        if defect == "duplicate_end":
+            events.append({**events[-1], "outcome": "failed"})
+        elif defect == "orphan_end":
+            events.append({**events[-1], "id": "orphan"})
+        else:
+            events[-1]["population"] = "different"
+        result = _report(tmp_path, events)
+>       assert result["status"] == "incomplete"
+E       AssertionError: assert 'complete' == 'incomplete'
+E         
+E         - incomplete
+E         ? --
+E         + complete
+
+python/tests/test_desktop_performance.py:120: AssertionError
+________ test_ambiguous_results_cannot_complete_a_run[changed_subject] _________
+
+tmp_path = PosixPath('/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/pytest-of-jack/pytest-301/test_ambiguous_results_cannot_2')
+defect = 'changed_subject'
+
+    @pytest.mark.parametrize("defect", ["duplicate_end", "orphan_end", "changed_subject"])
+    def test_ambiguous_results_cannot_complete_a_run(tmp_path: Path, defect: str) -> None:
+        events = _events(1)
+        if defect == "duplicate_end":
+            events.append({**events[-1], "outcome": "failed"})
+        elif defect == "orphan_end":
+            events.append({**events[-1], "id": "orphan"})
+        else:
+            events[-1]["population"] = "different"
+        result = _report(tmp_path, events)
+>       assert result["status"] == "incomplete"
+E       AssertionError: assert 'complete' == 'incomplete'
+E         
+E         - incomplete
+E         ? --
+E         + complete
+
+python/tests/test_desktop_performance.py:120: AssertionError
+=========================== short test summary info ============================
+FAILED python/tests/test_desktop_performance.py::test_completion_requires_each_planned_observation[unplanned]
+FAILED python/tests/test_desktop_performance.py::test_completion_requires_each_planned_observation[duplicate]
+FAILED python/tests/test_desktop_performance.py::test_ambiguous_results_cannot_complete_a_run[duplicate_end]
+FAILED python/tests/test_desktop_performance.py::test_ambiguous_results_cannot_complete_a_run[orphan_end]
+FAILED python/tests/test_desktop_performance.py::test_ambiguous_results_cannot_complete_a_run[changed_subject]
+5 failed, 3 passed in 0.03s

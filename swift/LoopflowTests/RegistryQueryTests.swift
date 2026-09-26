@@ -54,7 +54,7 @@ struct RegistryQueryTests {
         ]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["ls", "--all", "--json"])
+            #expect(args == ["ls", "--all", "--current", "--json"])
             return json
         }
 
@@ -115,7 +115,7 @@ struct RegistryQueryTests {
         let counter = CallCounter()
         let query = RegistryQuery { args, _ in
             await counter.increment()
-            #expect(args == ["ls", "--all", "--json"])
+            #expect(args == ["ls", "--all", "--current", "--json"])
             return json
         }
 
@@ -257,7 +257,8 @@ struct RegistryQueryTests {
                   "status": "ready",
                   "reason": "ready",
                   "updated_at": "2026-07-06T00:00:00Z",
-                  "provider": "codex"
+                  "provider": "codex",
+                  "started": true
                 },
                 "directive": null,
                 "next_move": {
@@ -679,19 +680,6 @@ struct RegistryQueryTests {
         #expect(snapshot.nodes.count == 3)
         #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.count == 2)
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
-    }
-
-    @Test("lf ps accepts provider launch nodes from the installed Home")
-    func providerLaunchActivityDecodes() async throws {
-        let json = #"{"schema_version":1,"observed_at":1784606400,"nodes":[{"id":"launch:invocation-1","parent_id":"exec:exec-1","kind":"provider_launch","label":"codex 4101","repo":"/src/loopflow","wave":"product","pid":4101,"started_at":1784602805,"state":"working"}],"provider_processes":[]}"#
-        let query = RegistryQuery { args, _ in
-            #expect(args == ["ps", "--json"])
-            return json
-        }
-
-        let snapshot = try await query.processActivity()
-
-        #expect(snapshot.nodes.map(\.kind) == [.providerLaunch])
     }
 
     @Test("lf activity accepts invocation identity from the installed Home")

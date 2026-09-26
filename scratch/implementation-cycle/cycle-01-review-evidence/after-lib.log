@@ -1,0 +1,16 @@
+test ops::human_session::tests::ask_titles_are_meaningful_and_bounded ... ok
+test engine::naming::tests::word_pairs_are_stable_and_vary_by_seed ... ok
+test ops::human_session::tests::task_is_the_most_specific_parent_run_subject ... ok
+test ops::human_session::tests::session_identity_is_the_exact_human_flow_position ... ok
+test ops::human_session::tests::ready_flow_without_an_autonomous_predecessor_cannot_iterate ... ok
+test ops::human_session::tests::human_session_carries_the_started_skill_definition ... ok
+test ops::human_session::tests::every_session_kind_requires_its_own_run_reference ... ok
+test ops::human_session::tests::human_sessions_open_through_the_public_session_command ... ok
+test ops::human_session::tests::session_action_fixtures_match_the_shared_boundary ... ok
+test ops::human_session::tests::initial_session_publication_requires_history_and_an_owned_client ... ok
+test run_record::tests::human_session_names_survive_generated_suggestions ... ok
+test run_record::tests::racing_suggestions_never_replace_a_human_name ... ok
+test ops::human_session::tests::session_work_labels_follow_stable_ancestry_without_a_roadmap ... ok
+test store::migrations::tests::native_human_session_schema_uses_task_flow_positions ... ok
+test store::sqlite::durable::durable_store_tests::human_session_runtime_survives_a_store_round_trip ... ok
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 1577 filtered out; finished in 7.37s

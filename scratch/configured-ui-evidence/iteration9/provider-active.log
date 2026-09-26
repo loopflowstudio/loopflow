@@ -1,0 +1,13 @@
+Owned app PID 49373
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request false
+PASS Press All work
+PASS Press New terminal
+Input foreground studio.loopflow.proof.loo291.iteration8
+Input activation true
+FAIL Failure(message: "Owned app active for input")
+Owned app termination requested true

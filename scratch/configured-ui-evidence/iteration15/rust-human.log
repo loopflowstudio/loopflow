@@ -1,0 +1,42 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-19093d58746e5e6d)
+
+running 35 tests
+test controller::task::planning_tests::iterate_skips_prior_human_nodes_when_returning_to_autonomous_work ... ok
+test lf::commands::auth::tests::format_relative_delta_uses_human_units ... ok
+test controller::wave::playhead::tests::playhead_preserves_human_node_identity ... ok
+test lf::commands::flow::tests::present_human_flow_requires_a_typed_acceptance_after_the_session ... ok
+test lf::commands::ci::tests::a_human_assisted_green_is_not_autonomous ... ok
+test lf::commands::flow::tests::detached_human_flow_refuses_to_invent_user_acceptance ... ok
+test lf::commands::runs::tests::tokens_keep_the_compact_human_format ... ok
+test ops::human_session::tests::ask_titles_are_meaningful_and_bounded ... ok
+test engine::flow::tests::human_skill_nodes_require_stable_ids ... ok
+test lf::commands::run::tests::direct_tty_is_human_present_but_detached_named_launch_is_headless ... ok
+test lf::commands::flow::tests::rendered_pipeline_lists_human_node_identity ... ok
+test lf::discovery::tests::reviewed_entrypoints_select_the_human_flows_not_the_reusable_skills ... ok
+test engine::flow::tests::nested_expansion_preserves_human_occurrence_identity ... ok
+test lf::commands::flow::tests::validation_lists_human_nodes_hidden_in_xor_paths ... ok
+test ops::human_session::tests::interactive_titles_use_one_bounded_line ... ok
+test ops::human_session::tests::task_is_the_most_specific_parent_run_subject ... ok
+test ops::human_session::tests::session_identity_is_the_exact_human_flow_position ... ok
+test ops::human_session::tests::session_action_fixtures_match_the_shared_boundary ... ok
+test pm::linear::tests::ensure_team_claims_unmarked_team_without_erasing_human_description ... ok
+test controller::wave::supervisor::tests::human_message_respawns_a_dead_resident_immediately ... ok
+test ops::human_session::tests::initial_session_publication_requires_history_and_an_owned_client ... ok
+test store::migrations::tests::native_human_session_schema_uses_task_flow_positions ... ok
+test ops::task::tests::parked_human_boundary_reports_blockers_without_provider_preflight ... ok
+test controller::task::planning_tests::iterating_a_human_node_returns_to_autonomous_work_with_a_steer ... ok
+test store::tests::ci_incident_reports_find_human_help_in_task_comments ... ok
+test controller::task::planning_tests::stale_task_child_cannot_rewrite_a_replacement_human_boundary ... ok
+test controller::task::planning_tests::restarting_a_human_node_reuses_the_same_task_position ... ok
+test store::sqlite::durable::durable_store_tests::human_session_runtime_survives_a_store_round_trip ... ok
+test controller::task::planning_tests::claimed_autonomous_boundary_settles_once_at_the_human_node ... ok
+test ops::human_session::tests::human_session_carries_the_started_skill_definition ... ok
+test ops::human_session::tests::human_sessions_open_through_the_public_session_command ... ok
+test controller::task::planning_tests::premature_human_decisions_preserve_the_playhead ... ok
+test controller::task::planning_tests::stale_human_decisions_cannot_target_a_replacement_invocation ... ok
+test controller::task::planning_tests::concurrent_human_decisions_settle_once ... ok
+test controller::task::planning_tests::approving_a_human_node_advances_the_task_without_an_ask ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 1529 filtered out; finished in 36.61s
+

@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-23",
+  "bundle": "/tmp/loo291-integration/Loopflow Integration.app",
+  "executable_sha256": "99b8b2b9d1964a7c24ea335be5dddc1027ecd938d9b2b7eb1f270a2c250f2d36",
+  "source_sha256": {
+    "swift/LoopflowMac/Views/SessionsView.swift": "a4302a66c9c744a24d3c7398d28452cbcdcf0f455220788be7a89b864382c5c0",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "9638c42f2e731306fba06c1441dc4667fe1f98b2eead067ccfbaae21ca24bbd4",
+    "swift/LoopflowMac/LoopflowApp.swift": "976442804d98cbe486667f70aff518e2603348ec9c3fdaec57c9debc2a4ce3fa"
+  },
+  "configured_shell": {
+    "pid": 12966,
+    "exit_code": 0,
+    "app_absent_after": true,
+    "provider_launched": false,
+    "fixtures": false
+  },
+  "native_proof": {
+    "tests": 2,
+    "cases": 4,
+    "exit_code": 0,
+    "boundary": "real AppKit/Ghostty PTYs; mocked CLI completion; fixture Session records"
+  },
+  "gate": "not run: resource preflight rejects active main build 19.1 GiB / 12 GiB; recovery preserves active build"
+}

@@ -1,6 +1,6 @@
 ---
 crons:
-- flow: wave
+- flow: wave/operate
   schedule: 0 0 8 * * * *
 chat:
   provider: discord
@@ -16,38 +16,39 @@ Loopflow keeps Cube, Etude, Kata, and Hootro moving on explicitly selected work.
 In every chapter week, at least three have durable Work accurately stating the
 requested next focus and verifiable material progress on at least one Task.
 Product owns external usefulness and the shared user contract across CLI, Mac,
-iOS, agent turns, and workers. Desktop joins current Project/KR/Task intent to
-excellent native Session organization, consuming shared planning, identity, and
-legal actions without inventing a second authority.
+iOS, agent turns, and workers. Desktop makes Wave intent, chapter proof, Tasks,
+and native Sessions understandable through one workspace, consuming shared
+planning, identity, and legal actions without inventing a second authority.
 
-## Projects
+## Chapter planning
 
-Projects and tasks live in Linear and sync into the local SQLite registry.
-Projects do not own memory, cadence, or child projects.
+The Wave retains its objective, memory, cadence, budget, chat, and metric
+instruments. Exactly one internal Project owns the current chapter's Tasks, KRs,
+metric targets, and recommended Flow. Present the plan through the Wave; ordinary
+navigation and steering select Waves and Tasks. Historical chapters remain readable.
+Linear owns authored planning; the local registry supplies shared reads.
 
-## Cron
-
-- `daily` -> dogfood one complete product path across CLI or app surface:
-  create, understand, steer, delegate, inspect, or recover. Convert the first
-  real product failure into a task under the project it proves.
+Chapter changes use the deterministic `lf wave new-chapter` operation after the
+concrete plan is accepted. Started unfinished Tasks keep their identity, checkout,
+PR, and Flow. Untouched backlog expires as abandoned; uncertain evidence cannot
+authorize closure. Code integration alone never authorizes a live migration.
 
 ## Process
 
-Read the accepted chapter and synced Projects. Company Dogfood judges complete
-weekly coverage of Cube, Etude, Kata, and Hootro; missing requested focus remains
-unknown. Sessions, planning churn, runtime settlement, and Loopflow self-hosting
-alone earn no credit for external progress. External Work stays in its own repository.
+Dogfood one complete product path: create, understand, steer, inspect, or recover.
+Judge complete weekly coverage of Cube, Etude, Kata, and Hootro; missing human
+focus stays unknown. Sessions, planning churn, runtime settlement, and Loopflow
+self-hosting alone earn no external-progress credit. External Work stays in its
+own repository, with capacity preserved for its human-selected priorities.
 
-Desktop consumes shared APIs for current planning, stable identity, legal actions,
-and native Sessions. Open with LOO-251; use LOO-280 in the same serial slot only
-when its real configured proof is blocked by the Xcode/Ghostty build gap. Follow
-with LOO-284 and the scoped planning/Session integration. Publish measured budgets
-before scoring and retain configured UI/Ask caller-release proof. Keep LOO-185
-parked until explicitly requested Discord use is blocked by provisioning friction.
+Build the desktop incrementally with the human. One compressible outline and
+the existing pane multiplexer organize work. Preserve native input and useful
+context while inspecting planning or monitoring Runs. Measure hierarchy navigation
+and Task workspace opening/switching at rendered, usable endpoints before choosing
+optimizations. Publish measured budgets before scoring; retain failed attempts,
+configured Session/Ask caller-release proof, and human usability confirmation.
 
-Keep one serial implementation slot per Project and preserve capacity for the
-external products. Wave, Project, and Task remain durable Work. Long-lived
-implementation pursuit and PR ownership belong to Tasks; Wave and Project
-operations are bounded Runs against their durable records. Infrastructure owns
-execution/recovery semantics, Intelligence owns raw context/trace, and Product
-owns presentation and external-outcome judgment.
+Long-lived implementation pursuit and PR ownership belong to Tasks. Wave operation
+selects and steers the current chapter's work; its internal Project is not another
+operator. Infrastructure owns execution/recovery semantics, Intelligence owns raw
+context/trace, and Product owns presentation and external-outcome judgment.

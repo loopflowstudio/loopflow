@@ -166,6 +166,7 @@ mod tests {
                 worktree: Some(home.path().to_path_buf()),
                 skill: Some("implement".to_string()),
                 subjects: vec![SubjectAttribution::declared("task:LOO-265".to_string())],
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();

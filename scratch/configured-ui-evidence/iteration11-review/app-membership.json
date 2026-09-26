@@ -1,0 +1,66 @@
+[
+  {
+    "id": "a494d11f-1966-48c0-b40a-a56860cba1e6",
+    "identifier": "LOO-294",
+    "completed": false,
+    "local_exists": true,
+    "provider_in_checkout": false,
+    "open_session": false
+  },
+  {
+    "id": "049348f6-de52-4ac9-a94c-5c0804435668",
+    "identifier": "LOO-285",
+    "completed": false,
+    "local_exists": true,
+    "provider_in_checkout": true,
+    "open_session": false
+  },
+  {
+    "id": "564d1271-efde-471a-a137-f28ecd0de070",
+    "identifier": "LOO-292",
+    "completed": false,
+    "local_exists": true,
+    "provider_in_checkout": false,
+    "open_session": false
+  },
+  {
+    "id": "15172e70-1ec8-4cb0-a15c-f84d49361381",
+    "identifier": "LOO-279",
+    "completed": true,
+    "local_exists": true,
+    "provider_in_checkout": true,
+    "open_session": false
+  },
+  {
+    "id": "9500cecb-4e4a-4c0d-88b1-0186c5ddeb69",
+    "identifier": "LOO-226",
+    "completed": true,
+    "local_exists": false,
+    "provider_in_checkout": true,
+    "open_session": false
+  },
+  {
+    "id": "25a9a61a-d602-4e8b-8c41-a8d362b5fd4e",
+    "identifier": "LOO-293",
+    "completed": false,
+    "local_exists": true,
+    "provider_in_checkout": true,
+    "open_session": false
+  },
+  {
+    "id": "ee671927-255f-41e6-8429-b830d59cc1de",
+    "identifier": "LOO-291",
+    "completed": false,
+    "local_exists": true,
+    "provider_in_checkout": true,
+    "open_session": false
+  },
+  {
+    "id": "eef88fa6-ddcf-4570-a779-8110c7a161c6",
+    "identifier": "LOO-278",
+    "completed": true,
+    "local_exists": true,
+    "provider_in_checkout": false,
+    "open_session": false
+  }
+]

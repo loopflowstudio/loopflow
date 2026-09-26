@@ -1,0 +1,45 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.63s)
+Test Suite 'Selected tests' started at 2026-09-24 18:49:49.352.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 18:49:49.353.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 18:49:49.353.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 18:49:49.353.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Podium active Run lifetime" started.
+◇ Test "Home replacement drains the old generation and rejects its late evidence" started.
+✔ Test "Home replacement drains the old generation and rejects its late evidence" passed after 0.038 seconds.
+◇ Test "Window teardown releases the subscription even while its Monitor is hidden" started.
+✔ Test "Window teardown releases the subscription even while its Monitor is hidden" passed after 0.104 seconds.
+✔ Suite "Podium active Run lifetime" passed after 0.143 seconds.
+◇ Suite "Active Run transport" started.
+◇ Test "A slow consumer receives the latest complete snapshot without an output backlog" started.
+✔ Test "A slow consumer receives the latest complete snapshot without an output backlog" passed after 0.122 seconds.
+◇ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" started.
+✔ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" passed after 0.072 seconds.
+◇ Test "A stalled or noncooperative reader is reaped without touching other clients" started.
+✔ Test "A stalled or noncooperative reader is reaped without touching other clients" passed after 2.270 seconds.
+◇ Test "Silence expires the reading and stops the reader" started.
+✔ Test "Silence expires the reading and stops the reader" passed after 11.105 seconds.
+◇ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "malformed" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "oversized" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "wrong-home" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "home-change" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "partial-exit" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+✔ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" with 5 test cases passed after 0.344 seconds.
+◇ Test "Configuration invalidation retires the exact reader" started.
+✔ Test "Configuration invalidation retires the exact reader" passed after 2.005 seconds.
+◇ Test "The real foreground CLI delivers automatic observations and rescan through Swift" started.
+✔ Test "The real foreground CLI delivers automatic observations and rescan through Swift" passed after 10.704 seconds.
+✔ Suite "Active Run transport" passed after 26.626 seconds.
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" started.
+✔ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" passed after 1.502 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.502 seconds.
+✔ Test run with 10 tests in 3 suites passed after 28.272 seconds.

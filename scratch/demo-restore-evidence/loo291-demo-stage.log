@@ -1,0 +1,417 @@
+warning: `VIRTUAL_ENV=/Users/jack/src/loopflow.agent/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Starting parallel builds: cargo, swift
+
+Building lf (cargo release)...
+Building Loopflow (swift release)...
+  [cargo]    Compiling libc v0.2.189
+  [cargo]    Compiling proc-macro2 v1.0.106
+  [cargo]    Compiling unicode-ident v1.0.24
+  [cargo]    Compiling quote v1.0.45
+  [cargo]    Compiling cfg-if v1.0.4
+  [cargo]    Compiling version_check v0.9.5
+  [cargo]    Compiling memchr v2.8.0
+  [cargo]    Compiling shlex v1.3.0
+  [cargo]    Compiling find-msvc-tools v0.1.9
+  [cargo]    Compiling once_cell v1.21.4
+  [cargo]    Compiling bytes v1.12.1
+  [cargo]    Compiling typenum v1.20.1
+  [cargo]    Compiling pin-project-lite v0.2.17
+  [cargo]    Compiling log v0.4.29
+  [cargo]    Compiling itoa v1.0.17
+  [cargo]    Compiling subtle v2.6.1
+  [cargo]    Compiling bitflags v2.11.0
+  [cargo]    Compiling futures-core v0.3.34
+  [cargo]    Compiling dunce v1.0.5
+  [cargo]    Compiling stable_deref_trait v1.2.1
+  [cargo]    Compiling fs_extra v1.3.0
+  [cargo]    Compiling zeroize v1.8.2
+  [cargo]    Compiling core-foundation-sys v0.8.7
+  [cargo]    Compiling serde_core v1.0.229
+  [cargo]    Compiling generic-array v0.14.7
+  [cargo]    Compiling tracing-core v0.1.36
+  [cargo]    Compiling futures-sink v0.3.34
+  [cargo]    Compiling futures-io v0.3.34
+  [cargo]    Compiling futures-task v0.3.34
+  [cargo]    Compiling smallvec v1.15.1
+  [cargo]    Compiling aws-lc-rs v1.16.0
+  [cargo]    Compiling slab v0.4.12
+  [cargo]    Compiling rustls-pki-types v1.14.0
+  [cargo]    Compiling http v1.4.0
+  [cargo]    Compiling aho-corasick v1.1.4
+  [cargo]    Compiling regex-syntax v0.8.11
+  [cargo]    Compiling percent-encoding v2.3.2
+  [cargo]    Compiling serde v1.0.229
+  [cargo]    Compiling writeable v0.6.2
+  [cargo]    Compiling litemap v0.8.1
+  [cargo]    Compiling rustls v0.23.37
+  [cargo]    Compiling httparse v1.10.1
+  [cargo]    Compiling untrusted v0.9.0
+  [cargo]    Compiling tower-service v0.3.3
+  [cargo]    Compiling hashbrown v0.16.1
+  [cargo]    Compiling equivalent v1.0.2
+  [cargo]    Compiling zerocopy v0.8.40
+  [cargo]    Compiling icu_properties_data v2.1.2
+  [cargo]    Compiling getrandom v0.3.4
+  [cargo]    Compiling http-body v1.0.1
+  [cargo]    Compiling icu_normalizer_data v2.1.1
+  [cargo]    Compiling syn v2.0.117
+  [cargo]    Compiling syn v3.0.3
+  [cargo]    Compiling indexmap v2.13.0
+  [cargo]    Compiling jobserver v0.1.34
+  [cargo]    Compiling getrandom v0.2.17
+  [cargo]    Compiling errno v0.3.14
+  [cargo]    Compiling rand_core v0.6.4
+  [cargo]    Compiling signal-hook-registry v1.4.8
+  [cargo]    Compiling socket2 v0.6.2
+  [cargo]    Compiling cc v1.2.56
+  [cargo]    Compiling mio v1.1.1
+  [cargo]    Compiling regex-automata v0.4.18
+  [cargo]    Compiling crypto-common v0.1.7
+  [cargo]    Compiling cpufeatures v0.2.17
+  [cargo]    Compiling block-buffer v0.10.4
+  [cargo]    Compiling system-configuration-sys v0.6.0
+  [cargo]    Compiling cmake v0.1.57
+  [cargo]    Compiling digest v0.10.7
+  [cargo]    Compiling tower-layer v0.3.3
+  [cargo]    Compiling try-lock v0.2.5
+  [cargo]    Compiling atomic-waker v1.1.2
+  [cargo]    Compiling fnv v1.0.7
+  [cargo]    Compiling want v0.3.1
+  [cargo]    Compiling core-foundation v0.9.4
+  [cargo]    Compiling form_urlencoded v1.2.2
+  [cargo]    Compiling aws-lc-sys v0.37.1
+  [cargo]    Compiling futures-channel v0.3.32
+  [cargo]    Compiling sync_wrapper v1.0.2
+  [cargo]    Compiling autocfg v1.5.0
+  [cargo]    Compiling zmij v1.0.21
+  [cargo]    Compiling getrandom v0.4.1
+  [cargo]    Compiling crossbeam-utils v0.8.21
+  [cargo]    Compiling pin-utils v0.1.0
+  [cargo]    Compiling synstructure v0.13.2
+  [cargo]    Compiling base64 v0.22.1
+  [cargo]    Compiling rand_core v0.9.5
+  [cargo]    Compiling thiserror v2.0.20
+  [cargo]    Compiling siphasher v1.0.2
+  [cargo]    Compiling httpdate v1.0.3
+  [cargo]    Compiling objc2 v0.6.4
+  [cargo]    Compiling rand_core v0.10.0
+  [cargo]    Compiling phf_shared v0.11.3
+  [cargo]    Compiling rand v0.8.6
+  [cargo]    Compiling num-traits v0.2.19
+  [cargo]    Compiling futures-macro v0.3.34
+  [cargo]    Compiling serde_derive v1.0.229
+  [cargo]    Compiling thiserror-impl v2.0.20
+  [cargo]    Compiling inout v0.1.4
+  [cargo]    Compiling system-configuration v0.7.0
+  [cargo]    Compiling bit-vec v0.8.0
+  [cargo]    Compiling futures-util v0.3.34
+  [cargo]    Compiling serde_json v1.0.151
+  [cargo]    Compiling rustix v1.1.4
+  [cargo]    Compiling cfg_aliases v0.2.1
+  [cargo]    Compiling vcpkg v0.2.15
+  [cargo]    Compiling utf8_iter v1.0.4
+  [swift] Building for production...
+  [swift] [0/8] Copying libghostty.a
+  [swift] [0/8] Write sources
+  [swift] [3/8] Copying Fonts
+  [swift] [4/8] Copying GhosttyResources
+  [cargo]    Compiling zerofrom-derive v0.1.6
+  [cargo]    Compiling yoke-derive v0.8.1
+  [swift] [5/8] Write swift-version--58304C5D6DBC2206.txt
+  [cargo]    Compiling tokio-macros v2.6.0
+  [cargo]    Compiling zerovec-derive v0.11.2
+  [cargo]    Compiling displaydoc v0.2.5
+  [cargo]    Compiling tracing-attributes v0.1.31
+  [cargo]    Compiling tokio v1.50.0
+  [cargo]    Compiling pkg-config v0.3.32
+  [cargo]    Compiling ipnet v2.12.1
+  [cargo]    Compiling objc2-encode v4.1.0
+  [cargo]    Compiling utf8parse v0.2.2
+  [cargo]    Compiling zerofrom v0.1.6
+  [cargo]    Compiling anstyle-parse v1.0.0
+  [cargo]    Compiling libsqlite3-sys v0.38.2
+  [cargo]    Compiling tracing v0.1.44
+  [cargo]    Compiling nix v0.31.3
+  [cargo]    Compiling ppv-lite86 v0.2.21
+  [cargo]    Compiling bit-set v0.8.0
+  [cargo]    Compiling bstr v1.12.1
+  [cargo]    Compiling rand_chacha v0.9.0
+  [cargo]    Compiling cipher v0.4.4
+  [cargo]    Compiling rand v0.9.2
+  [cargo]    Compiling phf_generator v0.11.3
+  [cargo]    Compiling sha1 v0.10.6
+  [cargo]    Compiling yoke v0.8.1
+  [cargo]    Compiling universal-hash v0.5.1
+  [cargo]    Compiling core-foundation v0.10.1
+  [cargo]    Compiling security-framework-sys v2.17.0
+  [cargo]    Compiling http-body-util v0.1.3
+  [cargo]    Compiling webpki-roots v1.0.9
+  [cargo]    Compiling lazy_static v1.5.0
+  [cargo]    Compiling mime v0.3.17
+  [cargo]    Compiling data-encoding v2.10.0
+  [cargo]    Compiling opaque-debug v0.3.1
+  [cargo]    Compiling foldhash v0.2.0
+  [cargo]    Compiling anstyle-query v1.1.5
+  [cargo]    Compiling ryu v1.0.23
+  [cargo]    Compiling is_terminal_polyfill v1.70.2
+  [cargo]    Compiling colorchoice v1.0.4
+  [cargo]    Compiling anyhow v1.0.104
+  [cargo]    Compiling anstyle v1.0.14
+  [cargo]    Compiling anstream v1.0.0
+  [cargo]    Compiling hashbrown v0.17.1
+  [cargo]    Compiling polyval v0.6.2
+  [cargo]    Compiling sha2 v0.10.9
+  [cargo]    Compiling webpki-roots v0.26.11
+  [cargo]    Compiling security-framework v3.7.0
+  [cargo]    Compiling phf_macros v0.11.3
+  [cargo]    Compiling block2 v0.6.2
+  [cargo]    Compiling crossbeam-epoch v0.9.18
+  [cargo]    Compiling iana-time-zone v0.1.65
+  [cargo]    Compiling strsim v0.11.1
+  [cargo]    Compiling option-ext v0.2.0
+  [cargo]    Compiling clap_lex v1.0.0
+  [cargo]    Compiling same-file v1.0.6
+  [cargo]    Compiling hex v0.4.3
+  [cargo]    Compiling heck v0.5.0
+  [cargo]    Compiling walkdir v2.5.0
+  [cargo]    Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+  [cargo]    Compiling clap_derive v4.6.4
+  [cargo]    Compiling phf v0.11.3
+  [cargo]    Compiling zerovec v0.11.5
+  [cargo]    Compiling zerotrie v0.2.3
+  [cargo]    Compiling clap_builder v4.6.6
+  [cargo]    Compiling tokio-util v0.7.19
+  [cargo]    Compiling tower v0.5.3
+  [cargo]    Compiling chrono v0.4.45
+  [cargo]    Compiling dirs-sys v0.5.0
+  [cargo]    Compiling crossbeam-deque v0.8.6
+  [cargo]    Compiling dispatch2 v0.3.1
+  [cargo]    Compiling h2 v0.4.13
+  [cargo]    Compiling hashlink v0.12.0
+  [cargo]    Compiling serde_urlencoded v0.7.1
+  [cargo]    Compiling axum-core v0.5.6
+  [cargo]    Compiling ghash v0.5.1
+  [cargo]    Compiling sharded-slab v0.1.7
+  [cargo]    Compiling globset v0.4.18
+  [cargo]    Compiling aes v0.8.4
+  [cargo]    Compiling tinystr v0.8.2
+  [cargo]    Compiling potential_utf v0.1.4
+  [cargo]    Compiling icu_locale_core v2.1.1
+  [cargo]    Compiling icu_collections v2.1.1
+  [cargo]    Compiling ctr v0.9.2
+  [cargo]    Compiling fancy-regex v0.17.0
+  [cargo]    Compiling regex v1.13.1
+  [cargo]    Compiling matchers v0.2.0
+  [cargo]    Compiling chacha20 v0.10.0
+  [cargo]    Compiling serde_path_to_error v0.1.20
+  [cargo]    Compiling deranged v0.5.8
+  [cargo]    Compiling aead v0.5.2
+  [cargo]    Compiling rtoolbox v0.0.5
+  [cargo]    Compiling icu_provider v2.1.1
+  [cargo]    Compiling tracing-log v0.2.0
+  [cargo]    Compiling encoding_rs v0.8.35
+  [cargo]    Compiling icu_properties v2.1.2
+  [cargo]    Compiling icu_normalizer v2.1.1
+  [cargo]    Compiling thread_local v1.1.9
+  [cargo]    Compiling rustc-hash v2.1.1
+  [cargo]    Compiling matchit v0.8.4
+  [cargo]    Compiling winnow v0.7.15
+  [cargo]    Compiling fallible-iterator v0.3.0
+  [cargo]    Compiling num-conv v0.2.2
+  [cargo]    Compiling fastrand v2.3.0
+  [cargo]    Compiling powerfmt v0.2.0
+  [cargo]    Compiling idna_adapter v1.2.1
+  [cargo]    Compiling nu-ansi-term v0.50.3
+  [cargo]    Compiling idna v1.1.0
+  [cargo]    Compiling time-core v0.1.9
+  [cargo]    Compiling unsafe-libyaml v0.2.11
+  [cargo]    Compiling fallible-streaming-iterator v0.1.9
+  [cargo]    Compiling url v2.5.8
+  [cargo]    Compiling time v0.3.55
+  [cargo]    Compiling hyper v1.8.1
+  [cargo]    Compiling tracing-subscriber v0.3.23
+  [cargo]    Compiling cron v0.17.0
+  [cargo]    Compiling tower-http v0.6.11
+  [cargo]    Compiling serde_yaml_ng v0.10.0
+  [cargo]    Compiling hyper-util v0.1.20
+  [cargo]    Compiling tempfile v3.27.0
+  [cargo]    Compiling tiktoken-rs v0.12.0
+  [cargo]    Compiling rpassword v7.5.4
+  [cargo]    Compiling aes-gcm v0.10.3
+  [cargo]    Compiling rand v0.10.2
+  [cargo]    Compiling clap v4.6.6
+  [cargo]    Compiling ignore v0.4.33
+  [cargo]    Compiling ctrlc v3.5.2
+  [cargo]    Compiling tokio-stream v0.1.19
+  [cargo]    Compiling dirs v6.0.0
+  [cargo]    Compiling gethostname v1.1.0
+  [cargo]    Compiling secrecy v0.8.0
+  [cargo]    Compiling tower-http v0.7.0
+  [cargo]    Compiling fancy-regex v0.19.0
+  [cargo]    Compiling uuid v1.24.0
+  [cargo]    Compiling async-trait v0.1.92
+  [cargo]    Compiling hmac v0.12.1
+  [cargo]    Compiling fs2 v0.4.3
+  [cargo]    Compiling base64 v0.23.1
+  [swift] [7/9] Compiling Loopflow AppBootstrap.swift
+  [cargo]    Compiling rusqlite v0.40.2
+  [cargo]    Compiling rustls-webpki v0.103.9
+  [cargo]    Compiling tokio-rustls v0.26.4
+  [cargo]    Compiling tungstenite v0.29.0
+  [cargo]    Compiling rustls-platform-verifier v0.6.2
+  [cargo]    Compiling hyper-rustls v0.27.7
+  [cargo]    Compiling reqwest v0.13.4
+  [cargo]    Compiling tokio-tungstenite v0.29.0
+  [cargo]    Compiling axum v0.8.9
+  [swift] [8/10] Compiling LoopflowMac AppTestMode.swift
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/key.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/key.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/result.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/result.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/color.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/color.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/key/event.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/key/event.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/key/encoder.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/key/encoder.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/wasm.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/wasm.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/osc.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/osc.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/allocator.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/allocator.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/paste.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/paste.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/sgr.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt/sgr.h'
+  [swift] 
+  [swift] <module-includes>:1:9: note: in file included from <module-includes>:1:
+  [swift] 1 | #import "ghostty.h"
+  [swift]   |         `- note: in file included from <module-includes>:1:
+  [swift] 2 |
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/.build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h:1183:1: warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt.h'
+  [swift] 1181 |
+  [swift] 1182 | #endif /* GHOSTTY_H */
+  [swift] 1183 |
+  [swift]      | `- warning: umbrella header for module 'GhosttyKit' does not include header '/ghostty/vt.h'
+  [swift] 
+  [swift] /Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+  [swift] 176 |         // and refuses every surface. Its timer renderer works without that link.
+  [swift] 177 |         var displayLink: CVDisplayLink?
+  [swift] 178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+  [swift]     |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+  [swift] 179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+  [swift] 180 |             embeddedConfig += "\nwindow-vsync = false\n"
+  [swift] 
+  [swift] [#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+  [swift] [8/10] Write Objects.LinkFileList
+  [swift] [9/10] Linking LoopflowMac
+  [swift] Build complete! (51.07s)
+
+>>> swift done (53.1s)
+  [cargo]     Finished `release` profile [optimized] target(s) in 1m 38s
+
+>>> cargo done (98.8s)
+Staging lf + Loopflow.app (v0.12.20) into /Users/jack/src/loopflow.main-view-task/local-bin...
+  [codesign] signing with stable identity: Developer ID Application: Jack Heart (2V3M244HF2)
+  [codesign] --prepared:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lf
+  [codesign] --validated:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lf
+  [codesign] --prepared:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lfd
+  [codesign] --validated:/Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app/Contents/MacOS/lfd
+  [codesign] /Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app: valid on disk
+  [codesign] /Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app: satisfies its Designated Requirement
+Built /Users/jack/src/loopflow.main-view-task/local-bin/Loopflow.app
+
+Built into /Users/jack/src/loopflow.main-view-task/local-bin. Development builds cannot become production.
+
+Total time: 99.2s

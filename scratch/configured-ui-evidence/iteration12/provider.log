@@ -1,0 +1,10 @@
+Owned app PID 22294
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested false
+Raise owned window -25206
+Active after request false
+System focused PID 395 owned 22294
+FAIL Failure(message: "Owned app focused before workspace trial")
+Owned app termination requested true

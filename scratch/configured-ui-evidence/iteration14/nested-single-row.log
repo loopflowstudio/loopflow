@@ -1,0 +1,16 @@
+observed_at 2026-09-24T14:17:04Z
+Owned app PID 95996
+AX trust true active false
+PASS Exact runner trusted
+PASS One owned accessible window
+PASS Press All work
+PASS Press New terminal
+PASS One main checkout pane
+PASS Press Show work list
+PASS Select exact Task
+PASS Press New conversation · LOO-291
+Owned Session run_70cd803e56a4470caf6be235bba3241e
+PASS Shared Session has native terminal attachment
+PASS Exact provider descends from owned app
+FAIL Failure(message: "Missing session-row-run_70cd803e56a4470caf6be235bba3241e")
+Owned app termination requested true

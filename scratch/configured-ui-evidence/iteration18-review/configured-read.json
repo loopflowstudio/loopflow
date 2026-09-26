@@ -1,0 +1,87 @@
+{
+  "observed_at": "2026-09-24T20:30:29.740601+00:00",
+  "cli": "/Users/jack/src/loopflow.main-view-task/target/debug/lf",
+  "cli_sha256": "91b7f268d016d79db4cc9800b47a5e723dfc077e8a1f1087a0fd4ed98d9b0a91",
+  "home_selection": {
+    "LF_HOME": null,
+    "LF_CONTROL_HOME": "/Users/jack/.lf",
+    "LF_DB_PATH": null,
+    "LF_CONTROL_DB_PATH": "/Users/jack/.lf/loopflow.db"
+  },
+  "argv": [
+    "session",
+    "list",
+    "--all",
+    "--json"
+  ],
+  "exit_code": 0,
+  "sessions": [
+    {
+      "id": "run_191f3ccc6cc849b29b854c80f6195340",
+      "run_id": "run_191f3ccc6cc849b29b854c80f6195340",
+      "kind": "interactive",
+      "state": "closed"
+    },
+    {
+      "id": "run_50cd4e3fb15745a1823e5419ca5c5732",
+      "run_id": "run_50cd4e3fb15745a1823e5419ca5c5732",
+      "kind": "interactive",
+      "state": "closed"
+    },
+    {
+      "id": "run_908754dbc9674dcc8fc20d2cc8936f7a",
+      "run_id": "run_908754dbc9674dcc8fc20d2cc8936f7a",
+      "kind": "interactive",
+      "state": "closed"
+    },
+    {
+      "id": "run_a40f6d5251254fe7850b702442fffa8b",
+      "run_id": "run_a40f6d5251254fe7850b702442fffa8b",
+      "kind": "interactive",
+      "state": "active"
+    },
+    {
+      "id": "run_02ee391efc2b4d9b8ce94dec58613584",
+      "run_id": "run_02ee391efc2b4d9b8ce94dec58613584",
+      "kind": "interactive",
+      "state": "active"
+    },
+    {
+      "id": "run_a7bff34f53fd426bb67d0fd0adbc6240",
+      "run_id": "run_a7bff34f53fd426bb67d0fd0adbc6240",
+      "kind": "interactive",
+      "state": "active"
+    },
+    {
+      "id": "run_033f7ed7985145ee8ca727ececb7f7cd",
+      "run_id": "run_033f7ed7985145ee8ca727ececb7f7cd",
+      "kind": "interactive",
+      "state": "closed"
+    },
+    {
+      "id": "run_0c0d06143cd74003bdc0a3ace66598c1",
+      "run_id": "run_0c0d06143cd74003bdc0a3ace66598c1",
+      "kind": "interactive",
+      "state": "closed"
+    },
+    {
+      "id": "run_720bb1cdf74b4c32b6cdd68832fc61b7",
+      "run_id": "run_720bb1cdf74b4c32b6cdd68832fc61b7",
+      "kind": "interactive",
+      "state": "closed"
+    },
+    {
+      "id": "run_e5d6efc75a62449fba9b94059befbfdb",
+      "run_id": "run_e5d6efc75a62449fba9b94059befbfdb",
+      "kind": "interactive",
+      "state": "closed"
+    },
+    {
+      "id": "run_6be4948e60b344f3beb11984f2719b42",
+      "run_id": "run_6be4948e60b344f3beb11984f2719b42",
+      "kind": "interactive",
+      "state": "closed"
+    }
+  ],
+  "required_run_count": 11
+}

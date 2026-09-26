@@ -1,0 +1,56 @@
+[
+  {
+    "id": "run_033f7ed7985145ee8ca727ececb7f7cd",
+    "kind": "interactive",
+    "work": null,
+    "title": "design · loopflow.steering",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.steering",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_033f7ed7985145ee8ca727ececb7f7cd"
+    ],
+    "terminal_ids": []
+  },
+  {
+    "id": "run_0c0d06143cd74003bdc0a3ace66598c1",
+    "kind": "interactive",
+    "work": null,
+    "title": "design · loopflow.task-viewer",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.task-viewer",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_0c0d06143cd74003bdc0a3ace66598c1"
+    ],
+    "terminal_ids": []
+  },
+  {
+    "id": "run_720bb1cdf74b4c32b6cdd68832fc61b7",
+    "kind": "interactive",
+    "work": {
+      "kind": "task",
+      "id": "task_97e04da37e5e4231bde30f4d1d93a5fa"
+    },
+    "title": "implement · loopflow.restore-task-watching-with-live",
+    "detail": "codex",
+    "cwd": "/Users/jack/src/loopflow.restore-task-watching-with-live",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_720bb1cdf74b4c32b6cdd68832fc61b7"
+    ],
+    "terminal_ids": []
+  }
+]

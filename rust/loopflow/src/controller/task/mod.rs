@@ -196,8 +196,10 @@ fn task_run_spec(
     harness: String,
     model: Option<String>,
     surface: &str,
-    skill: Option<String>,
+    position: &FlowPosition,
 ) -> crate::run_record::RunSpec {
+    let step = position.current();
+    let skill = (step.kind != StepKind::Op).then_some(step.step);
     crate::run_record::RunSpec {
         harness,
         model,
@@ -217,6 +219,9 @@ fn task_run_spec(
                 task.plan.identifier
             )),
         ],
+        flow: crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
+            position,
+        )),
     }
 }
 
@@ -261,7 +266,7 @@ async fn run_task_with(
             prepared.turn.harness.clone(),
             prepared.turn.model.clone(),
             "headless",
-            Some(flow.current().step),
+            &flow,
         ),
         &prepared.turn.context,
     )?;
@@ -515,7 +520,7 @@ async fn run_task_op_boundary(
             "loopflow".to_string(),
             None,
             "operation",
-            None,
+            &flow,
         ),
         &context,
     )?;
@@ -659,6 +664,7 @@ async fn settle_claimed_task_position(
     next.session_run_id = None;
     next.ready_summary = None;
     next.updated_at = time::OffsetDateTime::now_utc();
+    crate::ops::human_session::prepare_flow_run(task, &mut next)?;
     let summary = progress_summary(text);
     let next = store
         .settle_task_worker(
@@ -801,6 +807,7 @@ pub(crate) async fn complete_human_flow_step(
     position.session_run_id = None;
     position.ready_summary = None;
     position.updated_at = time::OffsetDateTime::now_utc();
+    crate::ops::human_session::prepare_flow_run(&task, &mut position)?;
     store
         .complete_human_task_boundary(&task, &expected, &position, text)
         .await?;
@@ -813,7 +820,11 @@ pub(crate) async fn ensure_flow_position(
     selected_flow: Option<&str>,
 ) -> Result<FlowPosition> {
     let task = load_task(store, task_id).await?;
-    if let Some(current) = store.flow_position(&task.id).await? {
+    if let Some(mut current) = store.flow_position(&task.id).await? {
+        if current.is_human() && current.session_run_id.is_none() {
+            crate::ops::human_session::prepare_flow_run(&task, &mut current)?;
+            return Ok(store.set_flow_position(&task.id, current).await?);
+        }
         return Ok(current);
     }
     let selected_flow = selected_flow.ok_or_else(|| {
@@ -823,7 +834,8 @@ pub(crate) async fn ensure_flow_position(
             task.plan.identifier
         )
     })?;
-    let candidate = start_task_flow(&task, selected_flow)?;
+    let mut candidate = start_task_flow(&task, selected_flow)?;
+    crate::ops::human_session::prepare_flow_run(&task, &mut candidate)?;
     let candidate = store.set_flow_position(&task.id, candidate).await?;
     if candidate.is_human() {
         let node_id = candidate
@@ -1225,6 +1237,29 @@ mod planning_tests {
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         assert_eq!(position.current().step, "implement");
         assert_eq!(position.cursor.progress.repeats["decide"], 10);
+        // Final Advance is the only edge into queue and landing. This traverses
+        // the authored plan without invoking any publication operation.
+        for _ in 0..4 {
+            super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        }
+        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Advance,
+            summary: "Revision proved".into(),
+        });
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        assert_eq!(position.current().step, "demo");
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
+            decision: crate::engine::transitions::FlowDecision::Advance,
+            summary: "Human feedback addressed".into(),
+        });
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        for expected in ["compress", "update-wave", "gate", "pr land -c"] {
+            assert_eq!(position.current().step, expected);
+            let finished =
+                super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+            assert_eq!(finished, expected == "pr land -c");
+        }
     }
 
     #[tokio::test]
@@ -1408,6 +1443,7 @@ mod planning_tests {
                             worktree: None,
                             skill: Some("loop-decide".into()),
                             subjects: vec![],
+                            flow: crate::run_record::RunFlowMembership::Independent,
                         },
                     )
                     .unwrap();
@@ -1541,6 +1577,7 @@ mod planning_tests {
                         harness: "proof".into(), model: None, surface: "headless".into(),
                         cwd: task.worktree.clone(), repo: None, worktree: None,
                         skill: Some("loop-decide".into()), subjects: vec![],
+                        flow: crate::run_record::RunFlowMembership::Independent,
                     },
                 ).unwrap();
                 let run = capture.run_id();
@@ -2380,6 +2417,153 @@ mod planning_tests {
         assert!(settled.claim.is_none());
         assert_eq!(settled.version, initial.version + 1);
         assert_eq!(store.human_task_flow_positions().await.unwrap().len(), 1);
+        let run_id = settled.session_run_id.as_ref().unwrap();
+        let (dir, manifest) = crate::run_record::resolve_manifest(
+            &crate::store::observability_home_dir(),
+            run_id.as_str(),
+        )
+        .unwrap();
+        assert_eq!(&manifest.run_id, run_id);
+        assert!(dir.join("prepared").is_file());
+        assert!(!dir.join("provider-clients").exists());
+        let restarted = super::ensure_flow_position(&store, &task.id, None)
+            .await
+            .unwrap();
+        assert_eq!(restarted.session_run_id.as_ref(), Some(run_id));
+        assert_eq!(restarted.version, settled.version);
+    }
+
+    #[tokio::test]
+    async fn flow_sessions_are_named_through_their_run_and_keep_exact_membership() {
+        use crate::ops::human_session::{self, SessionFlowMembership, SessionKind};
+        use crate::run_record::{RunFlowMembership, RunFlowStep, SessionTitleSource};
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, task, mut flow) = human_task_fixture().await;
+        human_session::prepare_flow_run(&task, &mut flow).unwrap();
+        let flow = store.set_flow_position(&task.id, flow).await.unwrap();
+        let run_id = flow.session_run_id.clone().unwrap();
+        let step = flow.current().step;
+        let (_, manifest) = crate::run_record::resolve_manifest(
+            &crate::store::observability_home_dir(),
+            run_id.as_str(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.flow,
+            Some(RunFlowMembership::Step(RunFlowStep::of(&flow)))
+        );
+
+        let listed = |sessions: Vec<human_session::SessionRecord>| {
+            sessions
+                .into_iter()
+                .find(|session| session.run_id == run_id)
+                .expect("the Flow Run is listed")
+        };
+        let session = listed(human_session::list(&store).await.unwrap());
+        assert_eq!(session.kind, SessionKind::Flow);
+        assert_eq!(
+            (session.title.as_str(), session.title_source),
+            (step.as_str(), SessionTitleSource::Generated)
+        );
+        assert_eq!(
+            session.flow_membership,
+            SessionFlowMembership::Step {
+                flow: flow.invocation.flow.clone(),
+                invocation_id: flow.invocation.id.clone(),
+                step: step.clone(),
+                step_index: flow.cursor.leaf().index as u32,
+                iteration: flow.cursor.iteration,
+                occurrence: human_session::SessionFlowOccurrence::Current,
+            }
+        );
+
+        // The agent's `$LF_RUN_ID` reaches the Flow boundary before any
+        // provider history exists.
+        let suggested = human_session::rename(
+            &store,
+            run_id.as_str(),
+            "Kickoff review",
+            SessionTitleSource::Generated,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (suggested.id.as_str(), suggested.title.as_str()),
+            (session.id.as_str(), "Kickoff review")
+        );
+        human_session::rename(
+            &store,
+            &session.id,
+            "Launch design",
+            SessionTitleSource::Human,
+        )
+        .await
+        .unwrap();
+        let kept = human_session::rename(
+            &store,
+            run_id.as_str(),
+            "Better guess",
+            SessionTitleSource::Generated,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (kept.title.as_str(), kept.title_source),
+            ("Launch design", SessionTitleSource::Human)
+        );
+        assert!(
+            human_session::rename(&store, &session.id, " ", SessionTitleSource::Human)
+                .await
+                .is_err()
+        );
+
+        // Once the Flow moves on, the same Run keeps its human name and is
+        // truthfully historical, never relabeled Independent.
+        let (dir, _) = crate::run_record::resolve_manifest(
+            &crate::store::observability_home_dir(),
+            run_id.as_str(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("provider-session.json"),
+            r#"{"schema_version":1,"provider_session_id":"ses_flow-proof","account_id":null}"#,
+        )
+        .unwrap();
+        // A later position in the same invocation is "earlier", not a past run.
+        let mut moved = store.flow_position(&task.id).await.unwrap().unwrap();
+        moved.cursor.index = 0;
+        moved.session_run_id = None;
+        store.set_flow_position(&task.id, moved).await.unwrap();
+        let earlier = listed(human_session::list(&store).await.unwrap());
+        assert_eq!(earlier.kind, SessionKind::Interactive);
+        assert_eq!(earlier.title, "Launch design");
+        assert!(matches!(
+            earlier.flow_membership,
+            SessionFlowMembership::Step {
+                occurrence: human_session::SessionFlowOccurrence::Earlier,
+                ref invocation_id,
+                step: ref recorded,
+                ..
+            } if *recorded == step && *invocation_id == flow.invocation.id
+        ));
+
+        // Restarting replaces the invocation: the same Run is a past run.
+        let current = store.flow_position(&task.id).await.unwrap().unwrap();
+        let mut next = super::start_task_flow(&task, "task-design").unwrap();
+        assert_ne!(next.invocation.id, flow.invocation.id);
+        next.cursor.index = 0;
+        next.version = current.version;
+        store.set_flow_position(&task.id, next).await.unwrap();
+        let past = listed(human_session::list(&store).await.unwrap());
+        assert_eq!(past.title, "Launch design");
+        assert!(matches!(
+            past.flow_membership,
+            SessionFlowMembership::Step {
+                occurrence: human_session::SessionFlowOccurrence::Past,
+                step: ref recorded,
+                ..
+            } if *recorded == step
+        ));
     }
 
     #[tokio::test]

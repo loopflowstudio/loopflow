@@ -1,0 +1,16 @@
+[
+  {
+    "client": "system-cat",
+    "status": 0,
+    "bytes": 29,
+    "argc": 1,
+    "locator_present": false
+  },
+  {
+    "client": "owned-python",
+    "status": 0,
+    "bytes": 4132,
+    "argc": 3,
+    "locator_present": true
+  }
+]

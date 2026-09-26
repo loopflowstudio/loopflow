@@ -1,0 +1,16 @@
+{
+  "kind": "Dated shared read; refreshed Linear-backed planning with explicit Kata/Session gaps",
+  "sha256": {
+    "scratch/visual-study/mockups.html": "007617f2322fd26e741633d6d14992a1755f7678d15189497c57efd027ece745",
+    "scratch/visual-study/current-data.js": "6c8c6626fc19835124100db8e34b8912308442d7c880d3496d0d379bebad5a86",
+    "scratch/visual-study/current-plan.js": "9a244935ef358de6e6e6b0f41af7c0dd039e86eaaa920603fca9316ef3448751",
+    "scratch/visual-study/current-data-evidence/build.py": "2d05a871d17c2fdbb78a9ae1dec165ea642de5293baabc5acaae15ea8b816003",
+    "scratch/visual-study/current-data-evidence/check.py": "612c3dadbd4ff8a67668443df29af0a7918e625be4ed0964d0cd2aa1d0cd4b70",
+    "scratch/visual-study/current-data-evidence/checks.json": "b572e6382a5fd5811d16f7edac786a518272f7b2f9cd98756e4e63dba54e349d",
+    "scratch/visual-study/current-data-evidence/review.md": "d4f8706af78571c8dd3915749f257086ab30d57943adf12b25afbc50651a301f",
+    "scratch/visual-study/current-data-evidence/source.json": "89613cda58f73b2f67a09481aea806340ffe2350648cf42fa694b50b3ded9fae",
+    "scratch/visual-study/current-data-evidence/task-loopflow.png": "91e58f6ffad048047a05a21caf5ef67494ce2ccde31a7a9b2bf9f176fba85112",
+    "scratch/visual-study/current-data-evidence/wave-etude.png": "a5d964dac517088dcc71d85e4d965fd9d3faca39358124d5ab9c853010dd90bf",
+    "scratch/visual-study/current-data-evidence/wave-kata.png": "dedf6461371bab3f0ee1e6d9afd0d9de1267ee8112c1e533d681a6f2449533f8"
+  }
+}

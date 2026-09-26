@@ -1,0 +1,17 @@
+{
+  "observed_at": "2026-09-24T14:58:48.387357+00:00",
+  "sha256": {
+    "rust/loopflow/src/ops/human_session.rs": "33bd05a8d693f0d16d9add3cea163b99808d0835cf792d1fb641620b013afcfb",
+    "rust/loopflow/src/controller/task/mod.rs": "9e168fa4c24fad4ca91746ba044775ab35785ba9f8cd2c6a2fc1b7ef9b9e2ef3",
+    "rust/loopflow/src/lf/commands/session.rs": "665fb44d05af2cc69467368e4f2626f256d0e82e0cba4b5239d0d48288be60e6",
+    "swift/Loopflow/Models/SessionRecord.swift": "92bab46706cb16915959d297b268088a6550b536eca496f706b4e6275716b5c0",
+    "swift/LoopflowMac/Views/SessionsView.swift": "35ee7dc77ef42ca7d3a6bbee20aae8cac89b76daf2bfcaf6099f8f2d7451efec",
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "bd112954a032945447286be94d802f4f7ab179a611a942131d9a575d55e44f4d",
+    "tests/fixtures/dto/session.json": "198ca51b3baebb5d267a8e609bc15d0c2a30e2655f7ba1b45b7c4332d56cc317",
+    "tests/fixtures/dto/sessions.json": "bae1d67529608f6f965c368fd6a2963ea707d7179da779c579c8a08cfcfd9147",
+    "tests/fixtures/dto/session_actions.json": "6cccebe2a55ed3c79a0683d8fd4019767bf7666893259b9d332c6d9903e21328",
+    "swift/.build/debug/LoopflowMac": "7eb84db7d615c650f7672239b6add6ea38e142097f753997bda102370c7ab505",
+    "target/debug/lf": "61e3ed3c17a53faca8a4de4a8c6b5d00b79812e6b272347e672bf4bb01b7e7b8",
+    "/tmp/loo291-iteration15/Loopflow Shared Sessions.app/Contents/MacOS/Loopflow": "fcbe6b9879db6fdd91f663494a57a2f8771e71b38e1403a465de2483e30a600f"
+  }
+}

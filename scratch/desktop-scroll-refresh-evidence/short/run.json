@@ -1,0 +1,28 @@
+{
+  "build_mode": "SwiftPM debug -gnone",
+  "command": [
+    "swift",
+    "test",
+    "--package-path",
+    "swift",
+    "-Xswiftc",
+    "-gnone",
+    "--jobs",
+    "4",
+    "--no-parallel",
+    "--filter",
+    "DesktopPerformanceTests"
+  ],
+  "exit_code": 0,
+  "host": {
+    "arch": "arm64",
+    "name": "Jacks-MacBook-Pro-2.local",
+    "os": "macOS-26.0.1-arm64-arm-64bit-Mach-O"
+  },
+  "measurement_source": "7f74f30d2f499969a85334baad9782b9a18c75c337e33d6925381ad4e07a86f9",
+  "population_source": "isolated DTO fixtures; no configured Home",
+  "schema": 1,
+  "source_after": "31dc2306fbb7f543c956976f81a09789824d63c1c2b580b42b16e69a3310aa53",
+  "source_before": "31dc2306fbb7f543c956976f81a09789824d63c1c2b580b42b16e69a3310aa53",
+  "started_at": "2026-09-24T23:09:29.475228+00:00"
+}

@@ -1,0 +1,36 @@
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/8] Compiling LoopflowMac SessionsView.swift
+[5/8] Emitting module LoopflowMac
+[5/10] Write Objects.LinkFileList
+[6/10] Linking LoopflowMac
+[7/10] Applying LoopflowMac
+[9/14] Emitting module LoopflowTests
+[10/15] Compiling LoopflowTests SessionsStoreTests.swift
+[11/15] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[12/15] Compiling LoopflowTests SessionsPolishTests.swift
+[13/15] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[13/15] Write Objects.LinkFileList
+[14/15] Linking LoopflowSwiftPackageTests
+Build complete! (11.06s)
+Test Suite 'Selected tests' started at 2026-09-23 20:02:41.697.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-23 20:02:41.698.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-23 20:02:41.698.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-23 20:02:41.698.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "Shell-attached Sessions can complete without closing their terminal" started.
+◇ Test "The workspace retains navigation and reconciles completion in its originating repository" started.
+◇ Test case passing 1 argument rejected → false to "Shell-attached Sessions can complete without closing their terminal" started.
+◇ Test case passing 1 argument switchBeforeCompletion → false to "The workspace retains navigation and reconciles completion in its originating repository" started.
+◇ Test case passing 1 argument rejected → true to "Shell-attached Sessions can complete without closing their terminal" started.
+✔ Test "Shell-attached Sessions can complete without closing their terminal" with 2 test cases passed after 1.488 seconds.
+◇ Test case passing 1 argument switchBeforeCompletion → true to "The workspace retains navigation and reconciles completion in its originating repository" started.
+✔ Test "The workspace retains navigation and reconciles completion in its originating repository" with 2 test cases passed after 5.529 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 5.529 seconds.
+✔ Test run with 2 tests in 1 suite passed after 5.529 seconds.

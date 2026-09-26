@@ -1,0 +1,67 @@
+{
+  "home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "read_only": true,
+  "binary_sha256": "1244e391936befea39eb68e0ffa6034cb8258aaaee0c08ea7c591aeb10b95d2d",
+  "commands": [
+    {
+      "args": [
+        "session",
+        "list",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 1256.2
+    },
+    {
+      "args": [
+        "runs",
+        "--active",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 855.7
+    },
+    {
+      "args": [
+        "runs",
+        "--active",
+        "--task",
+        "LOO-291",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 1159.8
+    }
+  ],
+  "session_count": 6,
+  "active_run_count": 6,
+  "gaps": [],
+  "active_session_links": [
+    {
+      "session": "run_44294c0bbd314e2bbe5920a57eefb9b3",
+      "run": "run_44294c0bbd314e2bbe5920a57eefb9b3",
+      "found": true
+    },
+    {
+      "session": "run_8255b1de6daf4238a62bc0bbefd4f4df",
+      "run": "run_8255b1de6daf4238a62bc0bbefd4f4df",
+      "found": true
+    },
+    {
+      "session": "run_5ffd266a4f984b28ac2e9e915db824ef",
+      "run": "run_5ffd266a4f984b28ac2e9e915db824ef",
+      "found": true
+    }
+  ],
+  "scoped_task": {
+    "kind": "task",
+    "id": "task_2aa71a7e36fe416d8a721e2b2f7c54e7"
+  },
+  "scoped_run_count": 0,
+  "scoped_gaps": [],
+  "limits": [
+    "Sequential observations, not an atomic inventory",
+    "CLI elapsed times are not rendering benchmarks",
+    "No provider or Work mutation"
+  ]
+}

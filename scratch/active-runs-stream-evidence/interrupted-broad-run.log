@@ -1,0 +1,63 @@
+warning: `VIRTUAL_ENV=/Users/jack/src/loopflow.agent/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Gate budget: 8340s across 6 suites (architecture, python, rust, website, swift, loopflow)
+Artifacts on failure: /Users/jack/src/loopflow.main-view-task/.lf/tmp/gate/run-17751
+Resource preflight: PASS · 227.6 GiB free / 64.0 GiB floor · 4 workers · nice +10
+
+========================================================================
+ SUITE: architecture  (matched (changed paths))  [budget 120s]
+========================================================================
+
+$ uv run python scripts/check_architecture.py  (budget 120s)
+Architecture map coverage
+  PASS  public API: 45/45
+  PASS  process boundary: 8/8
+  PASS  SQLite owner/mirror: 31/31
+  PASS  read projection: 6/6
+  PASS  HTTP route: 19/19
+  PASS  provider edge: 6/6
+  FAIL  subprocess edge: 27/28
+  PASS  compatibility seam: 5/5
+
+Unexplained architecture drift:
+- subprocess edge missing from map: exec:/bin/cat
+
+[architecture] PRODUCT FAILURE (architecture, exit 1). Log: /Users/jack/src/loopflow.main-view-task/.lf/tmp/gate/run-17751/architecture/architecture.log
+
+========================================================================
+ SUITE: python  (matched (changed paths))  [budget 600s]
+========================================================================
+
+$ uv run pytest python/tests/  (budget 600s)
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/jack/src/loopflow.main-view-task
+configfile: pyproject.toml
+collected 248 items
+
+python/tests/test_architecture.py .F..................                   [  8%]
+python/tests/test_budget_guardrails.py ....                              [  9%]
+python/tests/test_canonicalize_migrations.py ....................        [ 17%]
+python/tests/test_check_migrations.py ...............................    [ 30%]
+python/tests/test_checkout_refresh.py ..Traceback (most recent call last):
+  File "/Users/jack/src/loopflow.main-view-task/scripts/test.py", line 1719, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/jack/src/loopflow.main-view-task/scripts/test.py", line 1715, in main
+    return run_plans(plans, kind=kind, reuse_passing=args.reuse_passing)
+  File "/Users/jack/src/loopflow.main-view-task/scripts/test.py", line 1585, in run_plans
+    outcomes[plan.suite.name] = _run_suite(plan, artifact_root, _checkpoint_phase)
+                                ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jack/src/loopflow.main-view-task/scripts/test.py", line 1468, in _run_suite
+    result = _run_suite_commands(plan, artifact_dir, phases, started, checkpoint_phase)
+  File "/Users/jack/src/loopflow.main-view-task/scripts/test.py", line 1497, in _run_suite_commands
+    outcome = _run_command(cmd, artifact_dir, plan.suite.name)
+  File "/Users/jack/src/loopflow.main-view-task/scripts/test.py", line 1365, in _run_command
+    proc.wait(timeout=min(sample_interval, remaining))
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/lib/python3.14/subprocess.py", line 1278, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/lib/python3.14/subprocess.py", line 2077, in _wait
+    time.sleep(delay)
+    ~~~~~~~~~~^^^^^^^
+KeyboardInterrupt

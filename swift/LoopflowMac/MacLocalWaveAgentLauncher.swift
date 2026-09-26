@@ -93,6 +93,28 @@ enum LocalWaveAgentLauncher {
         [lfPath, "pr", "open"]
     }
 
+    /// Ensure Task Work and its checkout without starting a worker; returns
+    /// the authoritative worktree.
+    static func prepareTask(repoPath: String, issue: String) throws -> String {
+        let stdout = try runCheckedOutput(taskPrepareCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+        return try taskPrepareWorktree(stdout)
+    }
+
+    static func taskPrepareCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "prepare", issue, "--json"]
+    }
+
+    static func taskPrepareWorktree(_ stdout: String) throws -> String {
+        struct Prepared: Decodable { let worktree: String }
+        do {
+            return try JSONDecoder().decode(Prepared.self, from: Data(stdout.utf8)).worktree
+        } catch {
+            throw LocalLfError(
+                errorDescription: "lf task prepare returned an invalid receipt: \(error.localizedDescription)"
+            )
+        }
+    }
+
     static func taskRunCommand(lfPath: String, issue: String) -> [String] {
         [lfPath, "task", "run", issue]
     }
@@ -201,6 +223,17 @@ enum LocalWaveAgentLauncher {
 
     // MARK: - Process plumbing
 
+    static func queryProcess(_ args: [String], cwd: String? = nil) -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        if let cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        return process
+    }
+
     private static func runChecked(_ args: [String], cwd: String) throws {
         _ = try runCheckedOutput(args, cwd: cwd)
     }
@@ -226,17 +259,11 @@ enum LocalWaveAgentLauncher {
         _ args: [String],
         cwd: String? = nil
     ) -> (status: Int32, stdout: String, stderr: String)? {
-        let process = Process()
+        let process = queryProcess(args, cwd: cwd)
         let stdout = Pipe()
         let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
         process.standardOutput = stdout
         process.standardError = stderr
-        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
-        if let cwd {
-            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
-        }
 
         let outHandle = stdout.fileHandleForReading
         let errHandle = stderr.fileHandleForReading

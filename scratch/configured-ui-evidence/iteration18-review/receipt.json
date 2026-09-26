@@ -1,0 +1,56 @@
+{
+  "observed_at": "2026-09-24T20:41:17.559190+00:00",
+  "head": "32c1ed6ef1ea81a777ffa02fdf0427eb06e2aba2",
+  "source_sha256": {
+    "rust/loopflow/src/controller/task/mod.rs": "4db7774343b4017a56f376e82238eedda570f58e21a5ef07d9f92a9c8dbec92f",
+    "rust/loopflow/src/lf/commands/run.rs": "355f87ec07925330703fb248d27f4170f59c6de96ac9d8279cee1b5ad9e1c282",
+    "rust/loopflow/src/ops/human_session.rs": "7245c0fb1a86243f93078a302a9f1e99b02f6b785e21f9785f62b15a2e986c2c",
+    "rust/loopflow/src/run_record.rs": "f5b5600d3882e2bac83432ffc06d20ccdc4f9f8ea5aab0af02e18cc4a3f4e7eb",
+    "rust/loopflow/tests/session_cli_tests.rs": "4a97becf9c0d4d7102acf58c80488d332b7d956eb6d841c284d6ee3e62f3c1a3",
+    "swift/Loopflow/Models/SessionRecord.swift": "a1c2e77562a328cc04fbd46612970f662ffdf45d68c14a948660664c0827ce0b",
+    "swift/LoopflowMac/PodiumModel.swift": "cdfc19c76ef3a938a6b0e3613c784d6f7fac763c6841cf4024fe8645a60c8044",
+    "swift/LoopflowMac/SessionFixture.swift": "78720ab73f262cfd9c7c46f2258149e4f05546c1580cd66314eecc69cc28152c",
+    "swift/LoopflowMac/Views/PodiumView.swift": "9e58c09d5981f29de16f9f2272c6c952d6bc0709333084c8a477b27e093995b1",
+    "swift/LoopflowMac/Views/SessionsButton.swift": null,
+    "swift/LoopflowMac/Views/SessionsView.swift": "8a255bf6ee0f27be1cb7621f8cf2cde358b5838782dadda844aa4302332fc0f7",
+    "swift/LoopflowMac/Views/WorkSurfaceView.swift": "733498982ee79de6fe3d4ee9ad788cd033ede9744b76139141eef11591312307",
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "00144efa11fd7905560221b708ea3a7dad7987d01823ec49cac6edeb7c8f0288",
+    "swift/LoopflowMac/WorkspaceProjection.swift": "da310cf36287f995f4efea72413fa668c058caec65ebe523f28a880edd91ec73",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "c7ab0c99ab92db4fb87adaae01d5bfa668f878e4f8e4c61a45bf970c6b27ea4c",
+    "swift/LoopflowTests/GhosttyTerminalInputTests.swift": "81ced684b2d6571dff3c543e79a577abe84c92672e2d3d0550080e6c430de0af",
+    "swift/LoopflowTests/PodiumModelTests.swift": "0e4f7907c0997342787950653bfc97bf68ad6d5efbd8aaae30e2bcd071463e1b",
+    "swift/LoopflowTests/SessionsPolishTests.swift": "0c10af4452057d265d93d3f058a30eea7cd5aa14d821b324b3b624f0adf99a02",
+    "swift/LoopflowTests/SessionsStoreTests.swift": "635bd73956a51712b1a41294d08649734f4b9927ac145de428a662e6230f74c9",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "f006a96c65c2add93eabc2e8d725dcf2bcb5169d8348e860093cee1d8867413b",
+    "swift/LoopflowTests/WorkspaceNavigationTests.swift": "64e4d91d8fb6f078cb77c2d4130ae7daa9bdc63c8002dd69821cfd890825aa1d",
+    "swift/LoopflowUITests/PodiumStateTests.swift": "cb5e553cfac21d1fce349c7febb8c3d4b96cec8f46316fac881442a877149d22",
+    "swift/LoopflowUITests/SessionsInteractionTests.swift": "a5666ffe66a8b37e31d030dbffa5684a42681421b05239a9db9a2661ba0859bf",
+    "swift/README.md": "74b79647f02edac7708c7ab53b003292121ccff9ed556f114943b97cf8912aa9",
+    "tests/fixtures/dto/session.json": "235b8272525a558927a959425ada6acea2587fb65f4eebce561e1ad77348db4c",
+    "tests/fixtures/dto/sessions.json": "a19de0d3bc1bd320f0777f2e68f346b47173464f9881aeb00088f45e50fef745",
+    "scratch/main-view-task.md": "d6a08b22138d9e72551aa60df63a22cceff6b005337a16ec436b61af818d1b8b",
+    "scratch/canvas-chapter-review.md": "fa23bab91ee5a5688fee3117f9fdbf1eeaf1da628629b94d26f7e8fe6bcc4592",
+    "scratch/session-run-review.md": "9886ae95634d23bab312e1bfa2d4148ca15d42ca2cdbfda685afe90701a2ebba"
+  },
+  "binaries": {
+    "target/debug/lf": "b9e6e29b0f4a85334b2f7cb5489e6a61731d93e01beab6e3e836b68baf6de7d0",
+    "/tmp/loo291-review18/Loopflow Proof.app/Contents/MacOS/Loopflow": "60db1036fbe4bd03a6121d41ab19674a33ec4495d5c06c4f0fa13f8dc013f09c"
+  },
+  "configured_home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "configured_outcome": "pass: Task inspection, snapshot evidence, presentation menu, Full selection continuity, unchanged Session IDs; no Session action",
+  "logs": {
+    "empty-before.log": "/tmp/loo291-review18-empty-before.log",
+    "outline-after.log": "/tmp/loo291-review18-outline-after.log",
+    "navigation-metadata.log": "/tmp/loo291-review18-final-swift.log",
+    "inspection-final.log": "/tmp/loo291-review18-inspection-final.log",
+    "prelaunch-cli.log": "/tmp/loo291-review18-cli.log",
+    "concurrent-launch-resume.log": "/tmp/loo291-session-launch-resume-proof.log",
+    "concurrent-clippy.log": "/tmp/loo291-session-recovery-clippy.log",
+    "fmt.log": "/tmp/loo291-review18-fmt.log"
+  },
+  "limitations": [
+    "No configured provider launch/resume in this review",
+    "No rendering or readiness timing claim",
+    "No full Task acceptance or publication"
+  ]
+}

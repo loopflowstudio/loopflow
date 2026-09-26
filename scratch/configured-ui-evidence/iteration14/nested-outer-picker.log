@@ -1,0 +1,26 @@
+observed_at 2026-09-24T14:22:37Z
+Owned app PID 25302
+AX trust true active false
+PASS Exact runner trusted
+PASS One owned accessible window
+PASS Press All work
+PASS Press New terminal
+PASS One main checkout pane
+PASS Press Show work list
+PASS Select exact Task
+PASS Press New conversation · LOO-291
+Owned Session run_45ae04e2137841ad8197c62535c446c6
+PASS Shared Session has native terminal attachment
+PASS Exact provider descends from owned app
+SESSION_PICKER 2
+SESSION_OPTIONS [["session-row-run_45ae04e2137841ad8197c62535c446c6", "codex · VIEWING"], ["session-row-run_643d86d70d5b4109a460e80a87a97533", "implement · loopflow.main-view-task · ELSEWHERE"]]
+PASS Select exact Session from multiple-Session picker
+PASS Row selection retains provider PID and birth receipt
+PASS Local row requests no transfer
+PASS Press New terminal
+PASS Task retains provider shell and companion
+PASS Press Split worktrees right
+PASS Open worktree picker
+MENU []
+FAIL Failure(message: "No retained main checkout option")
+Owned app termination requested true

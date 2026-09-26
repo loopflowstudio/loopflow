@@ -68,9 +68,16 @@ fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::p
         .env("HOME", home)
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_BIN")
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env("NO_COLOR", "1")
+        .env_remove("LF_RUN_ID")
+        .env_remove("LF_RUN_DIR")
+        .env_remove("LF_WAVE_ID")
+        .env_remove("LF_ACCOUNT_LEASE")
+        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID");
     if let Some(path) = path {
@@ -173,6 +180,366 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     skills.sort_unstable();
     assert_eq!(skills, ["compress", "implement"]);
     assert!(runs.iter().all(|run| run["outcome"] == "completed"));
+}
+
+#[test]
+fn observing_and_preparing_a_task_are_not_execution() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let task = support::register_unrun_task(
+        home.path(),
+        repo.path(),
+        "task-observation",
+        &repo.head_sha(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let starts = || {
+        runtime
+            .block_on(task.store.task_events_after(&task.task.id, 0))
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == loopflow::work::task::TaskEventKind::Started)
+            .count()
+    };
+    // The shared evidence the desktop sidebar consumes.
+    let started = || {
+        runtime
+            .block_on(task.store.task_started(&task.task.id))
+            .unwrap()
+    };
+    assert_eq!(starts(), 0);
+    assert!(!started(), "a prepared, unrun Task is not started");
+    let read = run_lf(
+        repo.path(),
+        home.path(),
+        &["runs", "--active", "--task", "INF-123", "--json"],
+        None,
+    );
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    assert_eq!(
+        starts(),
+        0,
+        "a filtered active-Run read cannot start its Task"
+    );
+
+    write_skill(repo.path(), "review-proof", "Review the fixture.");
+    write_flow(
+        repo.path(),
+        "review-first",
+        "- step:\n    id: review\n    name: review-proof\n    human: true\n",
+    );
+    let prepared = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--task",
+            "INF-123",
+            "flow",
+            "review-first",
+            "-b",
+            "--no-loopflow",
+        ],
+        None,
+    );
+    assert!(!prepared.status.success());
+    assert!(
+        String::from_utf8_lossy(&prepared.stderr).contains("waiting for human input"),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let sessions = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "list", "--json"],
+        None,
+    );
+    assert!(
+        sessions.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sessions.stderr)
+    );
+    let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert!(sessions[0]["run_id"].as_str().is_some());
+    assert_eq!(
+        starts(),
+        0,
+        "publishing and reading an unopened review only prepares its Run"
+    );
+    assert!(
+        !started(),
+        "an unopened review's prepared Run is not execution"
+    );
+
+    write_skill(repo.path(), "first-work", "Do this proof-owned work.");
+    let bin = TempDir::new().unwrap();
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script("done", ""),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    for _ in 0..2 {
+        let launched = run_lf(
+            repo.path(),
+            home.path(),
+            &["--task", "INF-123", "first-work", "-b", "--no-loopflow"],
+            Some(&path),
+        );
+        assert!(
+            launched.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launched.stderr)
+        );
+        assert_eq!(
+            starts(),
+            1,
+            "independent execution records the existing Started event once"
+        );
+        assert!(started(), "a launched Run is durable start evidence");
+    }
+}
+
+#[test]
+fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone() {
+    use loopflow::durable::FlowPosition;
+    use loopflow::engine::invocation::QueuedInvocation;
+    use loopflow_test_support::TestRepo;
+
+    let repo = TestRepo::new();
+    let caller = TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let task = support::register_unrun_task(
+        home.path(),
+        repo.path(),
+        "task-contribution",
+        &repo.head_sha(),
+    );
+    for skill in ["first", "second"] {
+        write_skill(repo.path(), skill, &format!("Execute {skill}."));
+    }
+    write_flow(repo.path(), "contribution", "- first\n- second\n");
+    // A real collision: bare and explicit skill must choose the skill, explicit
+    // flow must execute both steps, including when Work-bound.
+    write_skill(
+        repo.path(),
+        "contribution",
+        "Execute the single contribution skill.",
+    );
+    fs::create_dir_all(repo.path().join("scratch")).unwrap();
+    fs::write(
+        repo.path().join("scratch/existing.md"),
+        "Another contributor's unfinished work.",
+    )
+    .unwrap();
+    let original_head = repo.head_sha();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let position = runtime
+        .block_on(task.store.set_flow_position(
+            &task.task.id,
+            FlowPosition {
+                task_id: task.task.id.clone(),
+                invocation: QueuedInvocation::load(repo.path(), "code").unwrap(),
+                session_run_id: None,
+                ready_summary: None,
+                cursor: loopflow::engine::ExecutionCursor {
+                    index: 1,
+                    iteration: 4,
+                    ..Default::default()
+                },
+                version: 0,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        ))
+        .unwrap();
+
+    let bin = TempDir::new().unwrap();
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_CONTROL_HOME/cwds\"").replace(
+        "read -r turn_start",
+        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_CONTROL_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+    );
+    write_executable(&bin.path().join("codex"), &provider);
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    // Distinct name tests bare flow dispatch without the collision above.
+    write_flow(repo.path(), "two-steps", "- first\n- second\n");
+    for args in [
+        vec!["--task", "INF-123", "two-steps"],
+        vec!["--task", "INF-123", "flow", "contribution"],
+        vec!["--as", "task:INF-123", "flow", "contribution"],
+    ] {
+        let _ = fs::remove_file(home.path().join("prompts"));
+        let _ = fs::remove_file(home.path().join("cwds"));
+        let _ = fs::remove_file(repo.path().join("scratch/step.md"));
+        let mut args = args;
+        args.extend(["-b", "--no-loopflow", "Keep the Task context."]);
+        let output = run_lf(caller.path(), home.path(), &args, Some(&path));
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let prompts = fs::read_to_string(home.path().join("prompts")).unwrap();
+        let prompts: Vec<_> = prompts.lines().collect();
+        assert_eq!(
+            prompts.len(),
+            2,
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for prompt in &prompts {
+            assert!(prompt.contains("Exercise the persisted lifecycle."));
+            assert!(prompt.contains(task.task.id.as_str()));
+            assert!(prompt.contains("Another contributor's unfinished work."));
+            assert!(prompt.contains("Keep the Task context."));
+        }
+        assert!(!prompts[0].contains("Evidence from preceding step."));
+        assert!(prompts[1].contains("Evidence from preceding step."));
+        let cwds = fs::read_to_string(home.path().join("cwds")).unwrap();
+        for cwd in cwds.lines() {
+            assert_eq!(
+                Path::new(cwd).canonicalize().unwrap(),
+                repo.path().canonicalize().unwrap()
+            );
+        }
+        assert_eq!(repo.head_sha(), original_head);
+        assert_eq!(
+            runtime
+                .block_on(task.store.flow_position(&task.task.id))
+                .unwrap(),
+            Some(position.clone())
+        );
+        let staged = Command::new("git")
+            .args(["diff", "--cached", "--name-only"])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(staged.stdout.is_empty());
+    }
+    let output = run_lf(repo.path(), home.path(), &["runs", "--json"], None);
+    assert!(output.status.success());
+    let runs: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(runs.len(), 6);
+    for run in runs {
+        assert!(run["subjects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|subject| subject["selector"] == format!("task:{}", task.task.plan.identifier)));
+        assert_eq!(run["outcome"], "completed");
+    }
+    for invocation in [
+        vec!["contribution"],
+        vec!["skill", "contribution"],
+        vec!["design"],
+    ] {
+        let _ = fs::remove_file(home.path().join("prompts"));
+        let mut args = vec!["--task", "INF-123"];
+        args.extend(invocation);
+        args.extend(["-b", "--no-loopflow"]);
+        let output = run_lf(caller.path(), home.path(), &args, Some(&path));
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(home.path().join("prompts"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+    }
+    // A human boundary remains explicit and cannot silently run the next step
+    // just because the invocation has Task attribution.
+    write_flow(
+        repo.path(),
+        "review-contribution",
+        "- step:\n    id: accept\n    name: first\n    human: true\n- second\n",
+    );
+    fs::remove_file(home.path().join("prompts")).unwrap();
+    let output = run_lf(
+        caller.path(),
+        home.path(),
+        &["--task", "INF-123", "review-contribution", "-b"],
+        Some(&path),
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Flow is waiting for human input"));
+    assert!(!home.path().join("prompts").exists());
+    let listed = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "list", "--all", "--json"],
+        Some(&path),
+    );
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let sessions: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let session = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"].as_str().unwrap().starts_with("flow:"))
+        .unwrap();
+    assert_eq!(session["work"]["id"], task.task.id.to_string());
+    assert_eq!(session["flow_membership"]["flow"], "review-contribution");
+    assert_eq!(session["flow_membership"]["occurrence"], "current");
+    let run_id = session["run_id"].as_str().unwrap();
+    let renamed = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "rename", run_id, "Contribution review", "--json"],
+        Some(&path),
+    );
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    let renamed: serde_json::Value = serde_json::from_slice(&renamed.stdout).unwrap();
+    assert_eq!(renamed["id"], session["id"]);
+    assert_eq!(renamed["title_source"], "human");
+    let opened = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "open", session["id"].as_str().unwrap(), "--json"],
+        Some(&path),
+    );
+    assert!(
+        opened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
+    assert_eq!(opened["title"], "Contribution review");
+    assert_eq!(opened["run_id"], run_id);
+    assert_eq!(opened["work"], session["work"]);
+    assert!(!home.path().join("prompts").exists());
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap(),
+        Some(position)
+    );
+    assert_eq!(repo.head_sha(), original_head);
 }
 
 #[test]

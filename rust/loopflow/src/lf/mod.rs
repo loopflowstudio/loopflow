@@ -112,7 +112,7 @@ pub struct Cli {
     #[arg(long = "task", value_name = "ISSUE")]
     pub task: Option<String>,
 
-    /// Select one Work for a direct Skill or inline prompt
+    /// Select one Work for a direct skill, flow or inline prompt
     #[arg(
         long = "as",
         value_name = "WORK",
@@ -185,7 +185,7 @@ impl Cli {
         Self::toggle_setting(self.diff, self.no_diff)
     }
 
-    /// The most specific Work selected for a direct skill Run.
+    /// The most specific Work selected for direct execution.
     pub fn work_subject_selector(&self) -> Option<String> {
         self.as_work.clone().or_else(|| {
             self.task
@@ -484,6 +484,9 @@ pub enum Commands {
         /// current repository (worktrees collapse to their main checkout).
         #[arg(long)]
         all: bool,
+        /// Exclude abandoned and retired registrations from current navigation.
+        #[arg(long)]
+        current: bool,
     },
     /// Show one Wave's chapter, Tasks, Runs, and live loop
     /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
@@ -535,6 +538,12 @@ pub enum Commands {
     },
     /// Show recent agent-backed skill runs with context and token evidence
     Runs {
+        /// Observe current provider-backed Runs without the history window or cap
+        #[arg(long, conflicts_with_all = ["run", "parent", "wave", "project"])]
+        active: bool,
+        /// Retain discovery and stream active snapshots until stdin closes
+        #[arg(long, requires_all = ["active", "json"])]
+        watch: bool,
         /// Inspect one Run by full id or unambiguous displayed prefix
         #[arg(conflicts_with_all = ["parent", "task", "project", "wave"])]
         run: Option<String>,
@@ -732,6 +741,17 @@ pub enum SessionCommand {
     },
     /// Complete a review, blocked Ask, or interactive session
     Complete { id: String },
+    /// Rename a Session; a human name is never replaced by a suggestion
+    Rename {
+        id: String,
+        #[arg(value_name = "NAME", required = true, num_args = 1..)]
+        name: Vec<String>,
+        /// Propose an agent-generated name; keeps a human-assigned name
+        #[arg(long)]
+        suggest: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Mark the active session ready for your review
     Ready {
         #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
@@ -757,6 +777,16 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WorkCommand {
+    /// Forget an abandoned, empty Wave registration without touching repository files
+    Forget {
+        #[arg(value_parser = ["wave"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show current Work state and placement
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
@@ -1119,6 +1149,9 @@ pub enum InstallCommand {
         /// Abandon an incompatible disposable Home and fork published data again.
         #[arg(long, requires = "from_build")]
         fresh: bool,
+        /// Reuse a retained development installation and its existing Home data.
+        #[arg(long, requires = "from_build", conflicts_with = "fresh")]
+        reuse_home: Option<String>,
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
         cli_target: PathBuf,
@@ -1862,7 +1895,8 @@ mod tests {
             waves.command,
             Some(Commands::Ls {
                 json: true,
-                all: false
+                all: false,
+                current: false
             })
         ));
     }
@@ -2901,6 +2935,24 @@ mod tests {
             Cli::try_parse_from(["lf", "session", "open", "run_123", "--replace", "--try",])
                 .is_err()
         );
+
+        let rename = Cli::try_parse_from([
+            "lf",
+            "session",
+            "rename",
+            "run_123",
+            "Release",
+            "notes",
+            "--suggest",
+        ])
+        .expect("parse Session rename");
+        assert!(matches!(
+            rename.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Rename { id, name, suggest: true, json: false }
+            }) if id == "run_123" && name == ["Release", "notes"]
+        ));
+        assert!(Cli::try_parse_from(["lf", "session", "rename", "run_123"]).is_err());
 
         let complete = Cli::try_parse_from(["lf", "session", "complete", "run_123"])
             .expect("parse interactive completion");

@@ -1,0 +1,60 @@
+[0/1] Planning build
+Building for debugging...
+[0/7] Write sources
+[2/7] Write swift-version--58304C5D6DBC2206.txt
+[4/11] Emitting module LoopflowMac
+[5/11] Compiling LoopflowMac PodiumModel.swift
+[6/11] Compiling LoopflowMac LocalActiveRunsObservation.swift
+[7/11] Compiling LoopflowMac RegistryQueryLocal.swift
+[8/21] Compiling LoopflowMac LoopflowApp.swift
+[9/21] Compiling LoopflowMac ChapterHistoryView.swift
+[10/21] Compiling LoopflowMac PodiumView.swift
+[11/21] Compiling LoopflowMac WaveDetailPane.swift
+[12/21] Compiling LoopflowMac WavesView.swift
+[13/21] Compiling LoopflowMac TelemetryDashboardView.swift
+[14/21] Compiling LoopflowMac WaveChatView.swift
+[15/21] Compiling LoopflowMac RoadmapView.swift
+[16/21] Compiling LoopflowMac SessionsView.swift
+[17/21] Compiling LoopflowMac TaskWorkspaceView.swift
+[17/22] Write Objects.LinkFileList
+[18/22] Linking LoopflowMac
+[19/22] Applying LoopflowMac
+[21/24] Emitting module LoopflowTests
+[22/24] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[22/24] Write Objects.LinkFileList
+[23/24] Linking LoopflowSwiftPackageTests
+Build complete! (10.85s)
+Test Suite 'Selected tests' started at 2026-09-24 18:36:20.300.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 18:36:20.301.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 18:36:20.301.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 18:36:20.301.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Active Run transport" started.
+◇ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" started.
+✔ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" passed after 0.071 seconds.
+◇ Test "A stalled or noncooperative reader is reaped without touching other clients" started.
+✔ Test "A stalled or noncooperative reader is reaped without touching other clients" passed after 2.173 seconds.
+◇ Test "Silence expires the reading and stops the reader" started.
+✔ Test "Silence expires the reading and stops the reader" passed after 11.010 seconds.
+◇ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "malformed" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "oversized" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "wrong-home" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "home-change" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "partial-exit" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+✔ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" with 5 test cases passed after 11.031 seconds.
+◇ Test "Configuration invalidation retires the exact reader" started.
+✔ Test "Configuration invalidation retires the exact reader" passed after 2.005 seconds.
+◇ Test "The real foreground CLI delivers automatic observations and rescan through Swift" started.
+✘ Test "The real foreground CLI delivers automatic observations and rescan through Swift" recorded an issue at ActiveRunsObservationTests.swift:140:9: Expectation failed: (first.home → "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/49195B59-226E-46FC-B23A-C22E6A241D8A/") == (home.path → "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/49195B59-226E-46FC-B23A-C22E6A241D8A")
+✘ Test "The real foreground CLI delivers automatic observations and rescan through Swift" failed after 4.706 seconds with 1 issue.
+✘ Suite "Active Run transport" failed after 31.000 seconds with 1 issue.
+◇ Suite "Task Monitor" started.
+◇ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" started.
+✔ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" passed after 0.204 seconds.
+✔ Suite "Task Monitor" passed after 0.204 seconds.
+✘ Test run with 7 tests in 2 suites failed after 31.205 seconds with 1 issue.

@@ -1,0 +1,35 @@
+Another instance of SwiftPM (PID: 76284) is already running using '/Users/jack/src/loopflow.main-view-task/swift/.build', waiting until that process has finished execution...[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Compiling LoopflowMac GhosttyTerminalView.swift
+[4/7] Emitting module LoopflowMac
+Build complete! (2.62s)
+Test Suite 'Selected tests' started at 2026-09-24 14:36:47.134.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 14:36:47.137.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 14:36:47.137.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 14:36:47.137.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.004) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+✔ Test "Returning to a Task never restores another Task's Session in a reused pane" passed after 0.124 seconds.
+◇ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" started.
+✔ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" passed after 1.639 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.764 seconds.
+◇ Suite "Task Monitor" started.
+◇ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" started.
+✔ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" passed after 0.110 seconds.
+◇ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" started.
+✔ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" passed after 0.001 seconds.
+◇ Test "Task selection and Monitor preserve native Session input and its companion" started.
+✔ Test "Task selection and Monitor preserve native Session input and its companion" passed after 1.835 seconds.
+✔ Suite "Task Monitor" passed after 1.946 seconds.
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "A hidden retained terminal relinquishes focus and keeps its unfinished PTY input" started.
+✔ Test "A hidden retained terminal relinquishes focus and keeps its unfinished PTY input" passed after 0.352 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 0.352 seconds.
+✔ Test run with 6 tests in 3 suites passed after 4.064 seconds.

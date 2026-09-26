@@ -1,0 +1,92 @@
+[0/1] Planning build
+Building for debugging...
+[0/7] Write sources
+[2/7] Write swift-version--58304C5D6DBC2206.txt
+[4/9] Compiling LoopflowMac TaskFlowView.swift
+[5/9] Emitting module LoopflowMac
+[5/10] Write Objects.LinkFileList
+[6/10] Linking LoopflowMac
+[7/10] Applying LoopflowMac
+[9/49] Compiling LoopflowTests ActiveRunsLifetimeTests.swift
+[10/49] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[11/49] Compiling LoopflowTests ActiveRunsTestFeed.swift
+[12/49] Compiling LoopflowTests AppAppearanceTests.swift
+[13/49] Compiling LoopflowTests AppBootstrapResourceTests.swift
+[14/49] Compiling LoopflowTests AttemptFailurePresentationTests.swift
+[15/49] Compiling LoopflowTests BundledDaemonPathTests.swift
+[16/49] Compiling LoopflowTests ChatReferenceTests.swift
+[17/49] Compiling LoopflowTests ContractTests.swift
+[18/49] Compiling LoopflowTests DTOFixtureTests.swift
+[19/49] Compiling LoopflowTests DesktopPerformanceTests.swift
+[20/49] Compiling LoopflowTests FaderSwitchTests.swift
+[21/49] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[22/49] Compiling LoopflowTests RoadmapViewTests.swift
+[23/49] Compiling LoopflowTests SelectableAssistantTextViewTests.swift
+[24/49] Compiling LoopflowTests SessionActionFixtures.swift
+[25/49] Compiling LoopflowTests SessionRenameTests.swift
+[26/49] Compiling LoopflowTests SessionsPolishTests.swift
+[27/49] Compiling LoopflowTests SessionsStoreTests.swift
+[28/49] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[29/49] Compiling LoopflowTests TaskFlowProofTests.swift
+[30/49] Compiling LoopflowTests TaskMonitorProofTests.swift
+[31/49] Compiling LoopflowTests TaskMonitorTests.swift
+[32/49] Compiling LoopflowTests TestHostTerminator.swift
+[33/49] Compiling LoopflowTests WaveChatConnectionTests.swift
+[34/49] Compiling LoopflowTests LocalWaveAgentLauncherTests.swift
+[35/49] Compiling LoopflowTests LoopflowStateTests.swift
+[36/49] Compiling LoopflowTests MessageRowTests.swift
+[37/49] Compiling LoopflowTests MockWaveFixtureTests.swift
+[38/49] Compiling LoopflowTests MultiplexerLayoutTests.swift
+[39/49] Compiling LoopflowTests MultiplexerStoreTests.swift
+[40/49] Compiling LoopflowTests NowProjectionTests.swift
+[41/49] Compiling LoopflowTests PodiumModelTests.swift
+[42/49] Compiling LoopflowTests PortfolioRepoStateTests.swift
+[43/49] Compiling LoopflowTests PortfolioServiceTests.swift
+[44/49] Compiling LoopflowTests ReferenceTextViewTests.swift
+[45/49] Compiling LoopflowTests RegistryQueryTests.swift
+[46/49] Compiling LoopflowTests RepoScannerTests.swift
+[47/49] Emitting module LoopflowTests
+[48/61] Compiling LoopflowTests WaveChatStreamTests.swift
+[49/61] Compiling LoopflowTests WaveChatTranscriptTests.swift
+[50/61] Compiling LoopflowTests WaveDetailReadingTests.swift
+[51/61] Compiling LoopflowTests WaveLensTests.swift
+[52/61] Compiling LoopflowTests WaveOriginTests.swift
+[53/61] Compiling LoopflowTests WavePlanParserTests.swift
+[54/61] Compiling LoopflowTests WaveRowTests.swift
+[55/61] Compiling LoopflowTests WaveSurfacePrimaryHierarchyTests.swift
+[56/61] Compiling LoopflowTests WaveTests.swift
+[57/61] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[58/61] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[59/61] Compiling LoopflowTests WorktreeWorkspaceTests.swift
+[59/61] Write Objects.LinkFileList
+[60/61] Linking LoopflowSwiftPackageTests
+Build complete! (13.37s)
+Test Suite 'Selected tests' started at 2026-09-25 15:47:04.155.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-25 15:47:04.156.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-25 15:47:04.156.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-25 15:47:04.156.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Flow" started.
+◇ Test "Flow snapshots and the catalogue decode every record without defaults" started.
+✔ Test "Flow snapshots and the catalogue decode every record without defaults" passed after 0.002 seconds.
+◇ Test "Occurrence state and iteration come from the saved pass, separately from edge counts" started.
+✔ Test "Occurrence state and iteration come from the saved pass, separately from edge counts" passed after 0.001 seconds.
+✔ Suite "Task Flow" passed after 0.003 seconds.
+◇ Suite "Task Flow native proof" started.
+◇ Test "Flow preview, controls and execution updates keep the Session's terminal, draft and companion" started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✔ Test "Flow preview, controls and execution updates keep the Session's terminal, draft and companion" passed after 4.568 seconds.
+✔ Suite "Task Flow native proof" passed after 4.568 seconds.
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "Renaming a Session and returning through its ancestors keeps its terminal, draft and companion" started.
+✔ Test "Renaming a Session and returning through its ancestors keeps its terminal, draft and companion" passed after 2.644 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 2.644 seconds.
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "A delayed New session failure stays with its Task across Task and repository navigation" started.
+✔ Test "A delayed New session failure stays with its Task across Task and repository navigation" passed after 0.211 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 0.211 seconds.
+✔ Test run with 5 tests in 4 suites passed after 7.427 seconds.

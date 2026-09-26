@@ -1,0 +1,121 @@
+{
+  "run_id": "run_10f00e81505443329b4e764ae8127d88",
+  "invocation": "lf -b -m claude --no-diff --no-diff-files : <bounded brief>",
+  "provider_reported_models": [
+    "claude-opus-5-5",
+    "claude-opus-5-5[1m]"
+  ],
+  "state": "complete",
+  "comparison_checks": [
+    "direction switching",
+    "three-up comparison",
+    "research dialog",
+    "Escape dismissal",
+    "feedback persists after reload"
+  ],
+  "mockup_checks": [
+    {
+      "direction": "a",
+      "viewport": [
+        1440,
+        1000
+      ],
+      "draft_return": true,
+      "monitor": true,
+      "companion": true,
+      "details": true,
+      "js_errors": []
+    },
+    {
+      "direction": "b",
+      "viewport": [
+        1440,
+        1000
+      ],
+      "draft_return": true,
+      "monitor": true,
+      "companion": true,
+      "details": true,
+      "js_errors": []
+    },
+    {
+      "direction": "c",
+      "viewport": [
+        1440,
+        1000
+      ],
+      "draft_return": true,
+      "monitor": true,
+      "companion": true,
+      "details": true,
+      "js_errors": []
+    },
+    {
+      "direction": "a",
+      "viewport": [
+        1100,
+        900
+      ],
+      "draft_return": true,
+      "monitor": true,
+      "companion": true,
+      "details": true,
+      "js_errors": []
+    },
+    {
+      "direction": "b",
+      "viewport": [
+        1100,
+        900
+      ],
+      "draft_return": true,
+      "monitor": true,
+      "companion": true,
+      "details": true,
+      "js_errors": []
+    },
+    {
+      "direction": "c",
+      "viewport": [
+        1100,
+        900
+      ],
+      "draft_return": true,
+      "monitor": true,
+      "companion": true,
+      "details": true,
+      "js_errors": []
+    }
+  ],
+  "additional_checks": [
+    "Studio resize keeps hidden inspector inert",
+    "Studio inspector pressed state matches visibility",
+    "Escape closes Studio overlay"
+  ],
+  "parent_corrections": [
+    "Focus narrow sidebar gets an explicit working restore control",
+    "Studio hidden inspector excludes keyboard focus and updates on resize",
+    "Escape closes Studio overlay; toggle state reflects visibility"
+  ],
+  "visual_review": {
+    "widths": [
+      1440,
+      1100
+    ],
+    "heights": [
+      1000,
+      900
+    ],
+    "directions": [
+      "a",
+      "b",
+      "c"
+    ],
+    "capture_tool": "lf screenshot",
+    "human_acceptance": "pending"
+  },
+  "sources": {
+    "scratch/visual-study/index.html": "b1b0a3f2811299b8f6110b2889388263f9679dee78393db25460fc0ca8839d6a",
+    "scratch/visual-study/mockups.html": "e2e2d4828cbcbce24128b0aa83b74924209fb3cae08dc9802d5ffe79ef952500"
+  }
+}

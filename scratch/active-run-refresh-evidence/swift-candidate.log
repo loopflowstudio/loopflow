@@ -1,0 +1,51 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/10] Emitting module LoopflowMac
+[5/10] Compiling LoopflowMac TaskMonitorView.swift
+[6/10] Compiling LoopflowMac PodiumView.swift
+[7/10] Compiling LoopflowMac PodiumModel.swift
+[8/19] Compiling LoopflowMac WorkSurfaceView.swift
+[9/19] Compiling LoopflowMac WorkspaceNavigator.swift
+[10/19] Compiling LoopflowMac WavesView.swift
+[11/19] Compiling LoopflowMac WorkActivityView.swift
+[12/19] Compiling LoopflowMac RoadmapView.swift
+[13/19] Compiling LoopflowMac SessionsView.swift
+[14/19] Compiling LoopflowMac ConversationLaunch.swift
+[15/19] Compiling LoopflowMac LoopflowApp.swift
+[16/19] Compiling LoopflowMac PodiumFixture.swift
+[16/21] Write Objects.LinkFileList
+[17/21] Linking LoopflowMac
+[18/21] Applying LoopflowMac
+[20/28] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[21/28] Compiling LoopflowTests TaskMonitorProofTests.swift
+[22/28] Emitting module LoopflowTests
+[23/28] Compiling LoopflowTests DesktopPerformanceTests.swift
+[24/28] Compiling LoopflowTests PodiumModelTests.swift
+[25/28] Compiling LoopflowTests TaskMonitorTests.swift
+[26/28] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[27/29] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[27/29] Write Objects.LinkFileList
+[28/29] Linking LoopflowSwiftPackageTests
+Build complete! (12.33s)
+Test Suite 'Selected tests' started at 2026-09-24 16:35:35.790.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 16:35:35.791.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 16:35:35.791.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 16:35:35.791.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" started.
+✔ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" passed after 1.380 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.380 seconds.
+◇ Suite "Task Monitor" started.
+◇ Test "The shared live refresh updates retained Monitors without changing Task selection" started.
+✔ Test "The shared live refresh updates retained Monitors without changing Task selection" passed after 0.038 seconds.
+◇ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" started.
+✔ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" passed after 0.028 seconds.
+✔ Suite "Task Monitor" passed after 0.067 seconds.
+✔ Test run with 3 tests in 2 suites passed after 1.448 seconds.

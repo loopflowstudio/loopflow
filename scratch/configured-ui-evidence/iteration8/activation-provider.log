@@ -1,0 +1,11 @@
+Owned app PID 46912
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested false
+Raise owned window -25206
+Active after request false
+BOUNDARY AXApplication  Loopflow Integration 
+BOUNDARY AXMenuBar   
+FAIL Failure(message: "Missing workspace-task-ee671927-255f-41e6-8429-b830d59cc1de")
+Owned app termination requested true

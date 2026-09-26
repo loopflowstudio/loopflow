@@ -1,0 +1,18 @@
+[0/1] Planning build
+Test Suite 'Selected tests' started at 2026-09-24 07:56:51.145.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 07:56:51.146.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 07:56:51.146.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 07:56:51.146.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "The workspace retains navigation and reconciles completion in its originating repository" started.
+◇ Test case passing 1 argument switchBeforeCompletion → false to "The workspace retains navigation and reconciles completion in its originating repository" started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+◇ Test case passing 1 argument switchBeforeCompletion → true to "The workspace retains navigation and reconciles completion in its originating repository" started.
+✔ Test "The workspace retains navigation and reconciles completion in its originating repository" with 2 test cases passed after 5.213 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 5.213 seconds.
+✔ Test run with 1 test in 1 suite passed after 5.213 seconds.

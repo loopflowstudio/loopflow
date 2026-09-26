@@ -1,0 +1,70 @@
+{
+  "recorded_at": "2026-09-24T21:52:38.409738+00:00",
+  "configured_exit_code": 0,
+  "configured_home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "planning_task_id": "ee671927-255f-41e6-8429-b830d59cc1de",
+  "configured_run_ids": [],
+  "configured_gap_count": 0,
+  "native_build_exit_code": 0,
+  "prior_source_receipts": {
+    "scratch/monitor-evidence/receipt.json": {
+      "checked": 9,
+      "changed": [
+        "swift/LoopflowMac/Views/SessionsView.swift",
+        "swift/LoopflowTests/TaskMonitorProofTests.swift"
+      ]
+    },
+    "scratch/active-runs-evidence/receipt.json": {
+      "checked": 14,
+      "changed": []
+    }
+  },
+  "final_source_sha256": {
+    "swift/Loopflow/Models/MultiplexerLayout.swift": "f49b42cb5454a548201b899662f3f62c168fa9b161951a5e818a21b94158b771",
+    "swift/Loopflow/Models/MultiplexerStore.swift": "6644ce3a041b4bbb92b00a1297a68be22fd42ed77740c064c639d930493f5d71",
+    "swift/LoopflowMac/PodiumModel.swift": "7fb9b278748201d162054a7554c1a5e7650d6b35445ce3a215a40666a36d96fb",
+    "swift/LoopflowMac/WorkspaceProjection.swift": "d1127a6e2bab41a7e8f7e63b58d3cfc32cb88b2abb5368fc44421419eff45fd2",
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "b7e137c461efa3263add6d1329cec3a20767927f53325002945585aacc3927d1",
+    "swift/LoopflowMac/Views/SessionsView.swift": "9e74e6d78b15f428867e2d6c8823519638176305991d94542329bd656e4550a6",
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": "4b257784eade9ff15827653dbbee8495f9bd733a3f055f9896bb4446e2f6b7b4",
+    "swift/LoopflowTests/TaskMonitorTests.swift": "635fcd9e99e0155264f41bbd9a2c95f31184e06d6a6c0580a2053b591010fe90",
+    "swift/LoopflowTests/TaskMonitorProofTests.swift": "d65ddefc773edc82b6909f151db63d9e05de84924de661f3b92bb697b17ebff8",
+    "rust/loopflow/src/run_record.rs": "0b6fcae3322098d451c2f4e2a9c54fd7b301f701853b417ee1f53b359dcc3b6a",
+    "rust/loopflow/src/run_record/active.rs": "db765baf77f9fd991a4fc0aefad160baeb22539bc6f160d2c2f9bdf161f03dd8",
+    "rust/loopflow/src/lf/commands/top.rs": "c608fb4cfc7fc50929d3ca9017c7e5dcde6a220caabc3f195e9dafb4208a68eb",
+    "rust/loopflow/src/lf/commands/util.rs": "c131144bba8ca29e3cc267af6a24476e689c61ff99de6f1bab849143e8ec5df3",
+    "rust/loopflow/src/lf/commands/runs.rs": "4a5dbcdc66faac57dc053199c7fcb6ac38fb0b974cd878b32f35ee75aec743fb",
+    "rust/loopflow/src/lf/mod.rs": "72101ff11e84ae7daa569bfd0e1cecbbf502550f5284e5565c6f8831e88ddcf0",
+    "rust/loopflow/src/bin/lf.rs": "a3e2480bec5489bd73040d5270db61b15feb7fd2fc4639bbe27c394df3674343",
+    "rust/loopflow/src/ops/human_session.rs": "d880e6c862ca5c30af9bc925f1d579f3d4a49b2f83d38891b79e6a8b651edbff",
+    "rust/loopflow/tests/session_cli_tests.rs": "bbf24f76349eff4f85846b9845c00d67b635905b7143dcc2f11ccac7f156fde4",
+    "rust/loopflow/tests/dto_fixtures.rs": "0f595e8ac6d0b0408a04c5dc95bcfba9c50930bc6cfaa2481e2793bb980a0263",
+    "swift/Loopflow/Models/ActiveRunsSnapshot.swift": "5d6c22e45a06d724c53839a8f1a8dc8860f43a724939115b4daa40b40807bea8",
+    "swift/Loopflow/Services/RegistryQuery.swift": "756e42edc7bfb569e2f563e23fb20d05ebff896b5288c8f5f42c2c34fac0ab12",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "0e3dfcc3f0c897a3b10ce137ff553f1fb419527523a49d8cb5c9bfb9db4b2f7a",
+    "tests/fixtures/dto/active_runs.json": "1f8518de22070fd68838b0a3308446d19ea75f5ef915fc30cd976c91e69822ab"
+  },
+  "artifact_sha256": {
+    "/tmp/loo291-review20/Loopflow Proof.app/Contents/MacOS/Loopflow": "36ac6a4e1a40f269272dd5a1140658ed358f56bf330cce41caf4ad2d351bd774",
+    "/tmp/loo291-review20/configured": "fc4ddd1683809212e824a54fe8670a56fa378964c24478acb7068436dc8a2826",
+    "scratch/monitor-evidence/review20/configured.swift": "2c562accd3512103cd17460908af90e0a6b6d7f40f754300f2824d5c7c2d5d44",
+    "scratch/monitor-evidence/review20/configured.log": "d66ec22bfb79d23137775c9122fe44000aa0cbdbc68c63030cb51cd22c2b129a",
+    "target/debug/lf": "1244e391936befea39eb68e0ffa6034cb8258aaaee0c08ea7c591aeb10b95d2d"
+  },
+  "fresh_focused_command": "swift test --package-path swift -Xswiftc -gnone --jobs 4 --no-parallel --filter TaskMonitorProofTests",
+  "fresh_focused_tests_passed": 3,
+  "concurrent_change": "Two-line Session attribution check in rememberTaskPane plus paneFocusPreservesTaskChoice regression; preserved, reviewed and tested, not authored by this review",
+  "tracked_diff": {
+    "path": "/tmp/loo291-review20-tracked.patch",
+    "sections": 455,
+    "unchanged_from_review19": 444,
+    "changed": 11
+  },
+  "limits": [
+    "Configured binary precedes concurrent pane-choice correction",
+    "Sequential configured empty observation, not positive live Run changes",
+    "Refresh action accepted; newer observation not independently asserted",
+    "No rendered latency or frame-hitch measurement",
+    "Fallback compile and full Task acceptance remain open"
+  ]
+}

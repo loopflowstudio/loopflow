@@ -1,0 +1,48 @@
+/* Task 3 study: open Sessions. Scoped to .ts-* */
+.ts-overview{margin:6px 0 22px}
+.ts-heading{display:flex;align-items:center;gap:8px;margin:0 0 8px;font:700 13px var(--sans);color:var(--ink-2);letter-spacing:.02em}
+.ts-count{min-width:18px;padding:0 6px;border-radius:9px;background:var(--sand);color:var(--ink-2);font-size:11px;line-height:18px;text-align:center}
+.ts-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--cream);overflow:hidden}
+.ts-list li+li{border-top:1px solid var(--line)}
+.ts-row{display:flex;flex-direction:column;gap:3px;width:100%;padding:10px 14px;background:none;border:0;text-align:left;cursor:pointer;font:inherit;color:var(--ink)}
+.ts-row:hover{background:var(--paper)}
+.ts-row:focus-visible{box-shadow:var(--ring);outline:none}
+.ts-row-top{display:flex;align-items:center;gap:10px;min-width:0}
+.ts-title{font:700 14px var(--sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ts-agent{font-size:12px;color:var(--muted);white-space:nowrap}
+.ts-excerpt{font-size:13px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ts-status{margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:10px;font:700 11px var(--sans);white-space:nowrap}
+.ts-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.ts-turn{background:#fff0c4;color:#7d6220;border:1px solid #d1b56f}
+.ts-working{background:#eaf2fa;color:#527fa8;border:1px solid #b9cfe3}
+.ts-other{background:var(--sand);color:var(--ink-2)}
+
+.ts-workspace{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;padding:16px}
+.ts-session-name{font:700 13px var(--sans);color:var(--ink);background:transparent;border:0;max-width:280px;padding:5px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+select.ts-session-name{cursor:pointer}
+.ts-surface{flex:1;min-height:320px;display:flex}
+.ts-surface .pane{flex:1}
+@media (prefers-reduced-motion:reduce){.ts-row{transition:none}}
+.ts-workspace .cfoot{color:var(--t-dim)}
+.ts-workspace textarea::placeholder{color:var(--t-dim)}
+
+.ts-origin{font-size:11px;color:var(--muted);white-space:nowrap}
+.ts-flow-origin{color:#527fa8}
+.ts-flow-origin code{font:11px var(--mono)}
+.ts-session-context{display:flex;align-items:center;gap:10px;padding:0 2px 4px;min-height:24px}
+.ts-session-context .ts-origin{font-size:12px}
+.ts-iteration{font-size:11px;color:var(--muted)}
+.ts-hierarchy{min-width:0;flex:1}
+.ts-task-ancestor{display:flex;gap:10px;align-items:center;min-width:0}
+.ts-task-ancestor button{max-width:440px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.ts-task-ancestor button:hover{text-decoration:underline;text-underline-offset:3px}
+@media(max-width:1000px){.ts-task-ancestor button{max-width:240px}.ts-session-name{max-width:200px}}
+
+.ts-named-session{display:inline-flex;align-items:center;min-width:0;gap:4px}
+.ts-rename-button{color:var(--muted);padding:4px 7px;border-radius:4px;opacity:0}
+.ts-named-session:hover .ts-rename-button,.ts-named-session:focus-within .ts-rename-button{opacity:1}
+.ts-rename-button:hover{background:var(--sand)}
+.ts-rename{display:flex;align-items:center;gap:8px;min-width:0}
+.ts-rename input{width:230px;min-width:70px;padding:5px 7px;border:1px solid var(--line-2);border-radius:4px;background:var(--cream)}
+.ts-rename button{font-size:12px;color:var(--wine);padding:4px}
+@media(hover:none){.ts-rename-button{opacity:1}}

@@ -1,0 +1,21 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.68s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 1 test
+
+thread 'run_record::active::reader::tests::retained_ownerless_capture_follows_loss_of_native_history' (520878479) panicked at rust/loopflow/src/run_record/active/reader/tests.rs:199:13:
+assertion `left == right` failed: retained discovery lost an ownership dependency
+  left: []
+ right: ["Run run_7739773d471046aba2e636b2269d9e0a: capture has no Exec or native-client ownership evidence"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test run_record::active::reader::tests::retained_ownerless_capture_follows_loss_of_native_history ... FAILED
+
+failures:
+
+failures:
+    run_record::active::reader::tests::retained_ownerless_capture_follows_loss_of_native_history
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1591 filtered out; finished in 2.77s
+
+error: test failed, to rerun pass `-p loopflow --lib`

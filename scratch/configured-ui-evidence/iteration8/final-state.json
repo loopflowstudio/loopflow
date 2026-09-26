@@ -1,0 +1,12 @@
+{
+  "owned_app_pids": [
+    28259,
+    46912,
+    65817
+  ],
+  "owned_apps_absent_after": true,
+  "provider_launched": false,
+  "screen_locked": true,
+  "ax_trusted": true,
+  "installed_app_replaced": false
+}

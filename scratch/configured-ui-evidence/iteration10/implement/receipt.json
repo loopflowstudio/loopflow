@@ -1,0 +1,26 @@
+{
+  "observed_at": "2026-09-24T04:29:09.174655+00:00",
+  "head": "9b3264efd46d6b505917930aa257f3c9d11bb1eb",
+  "sha256": {
+    "swift/LoopflowMac/Views/SessionsView.swift": "adaae30350e7309a73e6d35e38898b201a849c36d01a31a8af37ac415257fc8d",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "4025c72d1e2b2cb8cb70c75930e1c5b0c86d07f0a27dae0890839aba457f60a4",
+    "/tmp/loo291-iteration8/Loopflow Proof.app/Contents/MacOS/Loopflow": "75fdef9e4d35fed6deeb01c3995bddcd5c7e0c6e5b7f88ce733aff01c4ae1abe"
+  },
+  "owned_app_and_client_pids_absent": [
+    15245,
+    21448,
+    45385
+  ],
+  "completed_disposable_session": "run_eb31ad60301e4b0cb2c006224dd38b70",
+  "remaining_session_ids": [
+    "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+    "run_c2a56c3b168d44b4ab2447a36696f5cd",
+    "run_6d68330afdc044fdaee22c0c69987221",
+    "run_f8b3df345dc94aeab0ae3e2338893def"
+  ],
+  "task_completed_values": [
+    false
+  ],
+  "first_trial": "Configured new Task conversation and verified local attachment; stopped at already-visible list probe assumption before row selection. Completed via CLI afterward.",
+  "corrected_trial": "AX trusted, one window; exact AX focus precondition failed before interaction. Focused PID was not recorded by this probe."
+}

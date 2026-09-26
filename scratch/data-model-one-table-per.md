@@ -478,18 +478,59 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-Finish the documentation spec and record findings for `review-design`. Read
-`scratch/questions.md` for the small review agenda. The selected Flow owns that
-human boundary; this worker does not start implementation, publish a PR, or open
-a duplicate Ask just to report readiness.
+After the completed documentation review, remove Task execution's redundant
+Flow name, step name, node ID and human-policy SQL columns. Resolve all four
+through the captured invocation and cursor; Session review discovery uses the
+same decoder as exact Task reads. Keep claim/version fencing, readiness, failure
+and captured bytes unchanged. Add a forward draft and populated preservation
+proof, plus nested review discovery and existing worker settlement proofs.
 
-Focused proof: inspect the doc diff against Jack's latest decisions, check local
-links and whitespace, regenerate/check portable architecture HTML, and run the
-existing architecture inventory and focused documentation tests. Record expected
-source/spec failures truthfully. Do not edit tests to make target docs pass old
-schema checks.
+Root `step_index` / `iteration` still reconstruct pre-cursor historical review
+records. Their removal requires the explicit cursor conversion; this slice does
+not discard that evidence or introduce a second invocation owner. Full
+Invocation/Run/Session cutover, repository Chapter rotation and configured Home
+migration remain required before publication. No real Home is changed here.
+
+Focused proof: populated forward migration; nested human-step discovery and
+transition back to autonomous work; existing nested cursor and exact worker
+settlement checks. Formatting, Clippy and migration checks accompany the diff.
 
 ## Slice ledger
+
+- 2026-09-26 implementation: checkpointed reviewed documentation with `lf commit`.
+  Selected removal of the four derived Task step columns as the first storage
+  cut. Kept old root cursor inputs because the existing decoder still needs
+  them for historical review records. This does not complete the owner cutover.
+- 2026-09-26 implementation evidence: removed `flow`, `step`, `node_id` and
+  `human` from current Task SQL writers/readers via a forward draft. Exact reads
+  and review discovery share the captured-state decoder. Added populated
+  preservation and nested-review discovery regressions; updated the fixture to
+  use `open_ephemeral`, so its draft frontier does not depend on ambient authority.
+- 2026-09-26 verification: `cargo fmt --all --check`,
+  `cargo clippy --all-targets -- -D warnings`, migration checks and whitespace
+  checks pass. Clippy compiled the new tests but did not execute them. Resource
+  preflight and safe recovery both fail on another active checkout's 14.5 GiB
+  build (12 GiB limit); TESTING.md therefore blocks behavioral execution. The
+  architecture inventory still has exactly the two documented owner gaps.
+  This is a compiled first draft, not a passing behavioral or implementation gate.
+- 2026-09-26 code review: retained root cursor inputs after finding their
+  historical consumer; retained every mutation's version/claim predicate and
+  the chapter start trigger. Review discovery now also surfaces malformed
+  autonomous captures; recorded that changed failure surface in questions.
+  No public API, DTO, source-independent capture or process authority changed.
+
+Focused commands still owed once resource pressure clears (isolated environment
+per TESTING.md; materialization only in a disposable source copy):
+
+```sh
+cargo test -p loopflow --lib dropping_task_step_projection_preserves_execution_and_review_evidence
+cargo test -p loopflow --lib store::sqlite::durable::durable_store_tests
+```
+
+The latter covers review discovery, historical progress, nested cursor recovery,
+claim races, exact worker settlement and completion. Gate still owns affected
+suites. Next implementation must continue the invocation/Run/Session ownership
+cutover; this preparatory reduction is not an independently publishable slice.
 
 - 2026-09-26 interactive review: the current participant (name unresolved)
   confirmed Session owns Runs plus a current Run, accepted Flow / Invocation

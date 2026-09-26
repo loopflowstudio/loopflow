@@ -391,73 +391,16 @@ impl SqliteStore {
 
     pub fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT task_id, invocation_json, flow, step, node_id, human,
-                    session_run_id, ready_summary, step_index, iteration,
-                    position_version, worker_generation, claim_json, failure_json,
-                    updated_at, review_json
-             FROM task_flow_positions WHERE human=1 ORDER BY updated_at, task_id",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, bool>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, Option<String>>(7)?,
-                row.get::<_, i64>(8)?,
-                row.get::<_, i64>(9)?,
-                row.get::<_, i64>(10)?,
-                row.get::<_, i64>(11)?,
-                row.get::<_, Option<String>>(12)?,
-                row.get::<_, Option<String>>(13)?,
-                row.get::<_, i64>(14)?,
-                row.get::<_, Option<String>>(15)?,
-            ))
-        })?;
+        let mut statement = conn.prepare(&format!(
+            "{FLOW_POSITION_SELECT} ORDER BY updated_at, task_id"
+        ))?;
+        let rows = statement.query_map([], read_flow_position_row)?;
         let mut positions = Vec::new();
         for row in rows {
-            let (
-                task_id,
-                invocation_json,
-                flow,
-                step,
-                node_id,
-                human,
-                session_run_id,
-                ready_summary,
-                step_index,
-                iteration,
-                position_version,
-                worker_generation,
-                claim_json,
-                failure_json,
-                updated_at,
-                review_json,
-            ) = row?;
-            positions.push(decode_flow_position(
-                TaskId::parse(&task_id).map_err(invalid_durable)?,
-                (
-                    invocation_json,
-                    flow,
-                    step,
-                    node_id,
-                    human,
-                    session_run_id,
-                    ready_summary,
-                    step_index,
-                    iteration,
-                    position_version,
-                    worker_generation,
-                    claim_json,
-                    failure_json,
-                    updated_at,
-                    review_json,
-                ),
-            )?);
+            let position = decode_flow_position(row?)?;
+            if position.is_human() {
+                positions.push(position);
+            }
         }
         Ok(positions)
     }
@@ -990,12 +933,14 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
     }
 }
 
+const FLOW_POSITION_SELECT: &str = "SELECT task_id, invocation_json, session_run_id, ready_summary,
+            step_index, iteration, position_version, worker_generation,
+            claim_json, failure_json, updated_at, review_json
+     FROM task_flow_positions";
+
 type StoredFlowPosition = (
     String,
     String,
-    String,
-    Option<String>,
-    bool,
     Option<String>,
     Option<String>,
     i64,
@@ -1008,40 +953,35 @@ type StoredFlowPosition = (
     Option<String>,
 );
 
+fn read_flow_position_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredFlowPosition> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+    ))
+}
+
 pub(super) fn flow_position_in(
     conn: &Connection,
     task_id: &TaskId,
 ) -> StoreResult<Option<FlowPosition>> {
     let row = conn
         .query_row(
-            "SELECT invocation_json, flow, step, node_id, human, session_run_id, ready_summary,
-                    step_index, iteration, position_version, worker_generation,
-                    claim_json, failure_json, updated_at, review_json
-             FROM task_flow_positions WHERE task_id=?1",
+            &format!("{FLOW_POSITION_SELECT} WHERE task_id=?1"),
             [task_id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, bool>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, i64>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, i64>(13)?,
-                    row.get::<_, Option<String>>(14)?,
-                ))
-            },
+            read_flow_position_row,
         )
         .optional()?;
-    row.map(|row| decode_flow_position(task_id.clone(), row))
-        .transpose()
+    row.map(decode_flow_position).transpose()
 }
 
 pub(super) fn set_flow_position_in(
@@ -1062,24 +1002,19 @@ pub(super) fn set_flow_position_in(
         .as_ref()
         .map(serde_json::to_string)
         .transpose()?;
-    let step = position.current();
     let changed = if position.version == 0 {
         conn.execute(
             "INSERT INTO task_flow_positions (
-                task_id, invocation_json, flow, step, node_id, human, session_run_id,
-                ready_summary, step_index, iteration, position_version,
-                worker_generation, claim_json, failure_json, updated_at, review_json
+                task_id, invocation_json, session_run_id, ready_summary,
+                step_index, iteration, position_version, worker_generation,
+                claim_json, failure_json, updated_at, review_json
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, 0, NULL, ?11, ?12, ?13
+                ?1, ?2, ?3, ?4, ?5, ?6, 1, 0, NULL, ?7, ?8, ?9
              )
              ON CONFLICT(task_id) DO NOTHING",
             params![
                 task_id.as_str(),
                 serde_json::to_string(&position.invocation)?,
-                step.flow,
-                step.step,
-                step.policy.id,
-                step.policy.human,
                 position.session_run_id.as_ref().map(RunId::as_str),
                 position.ready_summary,
                 i64::try_from(position.cursor.index).map_err(invalid_durable)?,
@@ -1092,19 +1027,14 @@ pub(super) fn set_flow_position_in(
     } else {
         conn.execute(
             "UPDATE task_flow_positions
-             SET invocation_json=?2, flow=?3, step=?4, node_id=?5, human=?6, session_run_id=?7,
-                 ready_summary=?8, step_index=?9, iteration=?10,
-                 position_version=position_version + 1,
-                 worker_generation=0, claim_json=NULL, failure_json=?11,
-                 updated_at=?12, review_json=?14
-             WHERE task_id=?1 AND position_version=?13 AND claim_json IS NULL",
+             SET invocation_json=?2, session_run_id=?3, ready_summary=?4,
+                 step_index=?5, iteration=?6, position_version=position_version + 1,
+                 worker_generation=0, claim_json=NULL, failure_json=?7,
+                 updated_at=?8, review_json=?10
+             WHERE task_id=?1 AND position_version=?9 AND claim_json IS NULL",
             params![
                 task_id.as_str(),
                 serde_json::to_string(&position.invocation)?,
-                step.flow,
-                step.step,
-                step.policy.id,
-                step.policy.human,
                 position.session_run_id.as_ref().map(RunId::as_str),
                 position.ready_summary,
                 i64::try_from(position.cursor.index).map_err(invalid_durable)?,
@@ -1203,22 +1133,16 @@ pub(super) fn settle_task_worker_in(
     }
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
     let expected_json = serde_json::to_string(expected)?;
-    let step = next.current();
     if conn.execute(
         "UPDATE task_flow_positions
-         SET invocation_json=?2, flow=?3, step=?4, node_id=?5, human=?6, session_run_id=?7,
-             ready_summary=?8, step_index=?9, iteration=?10,
-             position_version=position_version + 1,
+         SET invocation_json=?2, session_run_id=?3, ready_summary=?4,
+             step_index=?5, iteration=?6, position_version=position_version + 1,
              worker_generation=0, claim_json=NULL, failure_json=NULL,
-             updated_at=?11, review_json=?14
-         WHERE task_id=?1 AND position_version=?12 AND claim_json=?13",
+             updated_at=?7, review_json=?10
+         WHERE task_id=?1 AND position_version=?8 AND claim_json=?9",
         params![
             task_id.as_str(),
             serde_json::to_string(&next.invocation)?,
-            step.flow,
-            step.step,
-            step.policy.id,
-            step.policy.human,
             next.session_run_id.as_ref().map(RunId::as_str),
             next.ready_summary,
             i64::try_from(next.cursor.index).map_err(invalid_durable)?,
@@ -1318,13 +1242,9 @@ fn decode_flow_progress(
 }
 
 fn decode_flow_position(
-    task_id: TaskId,
     (
+        task_id,
         invocation_json,
-        flow,
-        step,
-        node_id,
-        human,
         session_run_id,
         ready_summary,
         step_index,
@@ -1363,7 +1283,7 @@ fn decode_flow_position(
     }
     let position = FlowPosition {
         cursor,
-        task_id,
+        task_id: TaskId::parse(&task_id).map_err(invalid_durable)?,
         invocation: serde_json::from_str(&invocation_json)?,
         session_run_id: session_run_id
             .map(|run_id| RunId::parse(&run_id).map_err(invalid_durable))
@@ -1378,18 +1298,6 @@ fn decode_flow_position(
         updated_at,
     };
     validate_flow_position(&position.task_id, &position)?;
-    let current = position
-        .current_checked()
-        .ok_or_else(|| StoreError::InvalidData("Flow position has no current step".to_string()))?;
-    if current.flow != flow
-        || current.step != step
-        || current.policy.id != node_id
-        || current.policy.human != human
-    {
-        return Err(StoreError::InvalidData(
-            "stored Flow position projection does not match its invocation".to_string(),
-        ));
-    }
     Ok(position)
 }
 
@@ -1580,7 +1488,7 @@ mod durable_store_tests {
     fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("loopflow.db");
-        let store = SqliteStore::new(&path).expect("open a fresh store");
+        let store = SqliteStore::open_ephemeral(&path).expect("open a fresh store");
         let wave_id = WaveId::new();
         let project_id = ProjectId::new();
         let task_id = TaskId::new();
@@ -1877,6 +1785,60 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn review_discovery_follows_the_captured_nested_step() {
+        let (_dir, store, task_id) = store_with_task();
+        let mut position = autonomous_position(&task_id);
+        assert!(store.human_task_flow_positions().unwrap().is_empty());
+        let review = crate::durable::test_flow_invocation(
+            "captured",
+            0,
+            "review-design",
+            Some("review"),
+            true,
+        );
+        position.invocation.steps = vec![
+            ConcreteStep::Xor(ConcreteXor {
+                router: Skill::named("route"),
+                paths: [(
+                    "selected".into(),
+                    ConcretePath {
+                        description: "captured path".into(),
+                        steps: review.steps,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                flow_parents: vec![],
+            }),
+            position.invocation.steps[0].clone(),
+        ];
+        position.cursor.child = Some(Box::new(NestedCursor::Xor {
+            selected: "selected".into(),
+            cursor: ExecutionCursor::default(),
+        }));
+        position.session_run_id = Some(RunId::new());
+        position.ready_summary = Some("retain the reviewed scope".into());
+        let mut saved = store.set_flow_position(&task_id, &position).unwrap();
+        assert_eq!(
+            store.human_task_flow_positions().unwrap(),
+            vec![saved.clone()]
+        );
+        assert_eq!(saved.current().step, "review-design");
+        assert_eq!(saved.current().policy.id.as_deref(), Some("review"));
+        assert_eq!(store.flow_position(&task_id).unwrap(), Some(saved.clone()));
+
+        saved.cursor.child = None;
+        saved.cursor.index = 1;
+        saved.session_run_id = None;
+        saved.ready_summary = None;
+        let saved = store.set_flow_position(&task_id, &saved).unwrap();
+        assert_eq!(saved.current().step, "implement");
+        assert!(store.human_task_flow_positions().unwrap().is_empty());
+        assert!(store.set_flow_position(&task_id, &position).is_err());
+        assert_eq!(store.flow_position(&task_id).unwrap(), Some(saved));
+    }
+
+    #[test]
     fn nested_cursor_recovers_routes_and_verdicts_under_exact_worker_authority() {
         for routing in [true, false] {
             let (_dir, store, task_id) = store_with_task();
@@ -2057,7 +2019,7 @@ mod durable_store_tests {
             .unwrap();
         let barrier = Arc::new(Barrier::new(20));
         let stores = (0..20)
-            .map(|_| SqliteStore::new(&dir.path().join("loopflow.db")).unwrap())
+            .map(|_| SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap())
             .collect::<Vec<_>>();
         let handles = stores
             .into_iter()

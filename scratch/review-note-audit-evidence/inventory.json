@@ -1,0 +1,2324 @@
+{
+  "observed_at": "2026-09-25",
+  "method": "Full text decision/requirement scan of all Markdown and text documents; targeted reading and source reconciliation; no test rerun. Concurrent writers may supersede hashes.",
+  "counts": {
+    "markdown": 167,
+    "text": 19
+  },
+  "documents": [
+    {
+      "path": "scratch/active-run-refresh.md",
+      "sha256": "22a5e3ff82d79158153b9b2bc2622173c9ce74ca8f7db8678138d84e5829e09e",
+      "bytes": 5522,
+      "headings": [
+        "# Bounded active Run discovery and shared refresh",
+        "## Result: candidate rejected before publication",
+        "## Revised next implementation boundary",
+        "## Rejected candidate design"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/active-runs-implementation.md",
+      "sha256": "7dacfecc495543103d91bb5359d9cf79741785846dfa17c2f379496eb7d95fda",
+      "bytes": 2746,
+      "headings": [
+        "# Shared active Runs \u2014 implementation, 2026-09-24"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/active-runs-stream.md",
+      "sha256": "b66d5475afabdade644519f19ab270c4e399165dd10b6b7409204f3f89f2cd1b",
+      "bytes": 6393,
+      "headings": [
+        "# Shared automatic Run observation \u2014 2026-09-24",
+        "## Result and scope",
+        "## Ownership and review",
+        "## Focused evidence",
+        "## Remaining boundary"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/ask-protocol-audit.md",
+      "sha256": "83fb253bee41ddf60c65df33d7837d38005d1b0dc7735044795a4b9976185609",
+      "bytes": 14067,
+      "headings": [
+        "# Ask protocol audit \u2014 LOO-295",
+        "## Findings and final source disposition",
+        "### 1. Repaired during audit: Ask reopening could overwrite a completed answer (P1)",
+        "### 2. Repaired during audit: a failed ordinary Flow boundary could authorize Blocked (P2)",
+        "### 3. A development handoff can switch artifact and Home before reading the saved ID (P2)",
+        "## Trace and authority that do hold in the inspected source",
+        "## Acceptance ordering changed during this review",
+        "## Evidence limits"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/ask-recovery-proof.md",
+      "sha256": "27744549ab84c05750da142557e4e56da6746945a10436c7c7e27be29facf10d",
+      "bytes": 6768,
+      "headings": [
+        "# Keyed Ask recovery contribution",
+        "## Contract and implementation",
+        "## Launch and native ownership trace",
+        "## Verification",
+        "## Review and limits"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/ask-skill-proof.md",
+      "sha256": "bea1004ada0de55f3d74f64fd40f6e89f42b3879a900eb0b78bcdb3d07282222",
+      "bytes": 3962,
+      "headings": [
+        "# Skill-selected Ask contribution",
+        "## Behavior",
+        "## Validation",
+        "## Review and evidence limits"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/compress-archive.txt",
+      "sha256": "0eb1f3596ec31cdd7b87514492673fdd6742f7f20f5c35f15ae8bf9b4e551f3f",
+      "bytes": 78331,
+      "headings": [
+        "# Compression review \u2014 2026-09-23",
+        "## Effective model",
+        "## Before and after",
+        "### Shared stream ownership review (2026-09-24)",
+        "### Retained discovery ownership review (2026-09-24)",
+        "### Iteration 21 \u2014 measurement ownership review (2026-09-24)",
+        "### Iteration 21 \u2014 remove duplicate Task routing identity (2026-09-24)",
+        "### Iteration 20 \u2014 Monitor integration and retained pane choice (2026-09-24)",
+        "### Iteration 19 \u2014 active Run ownership and wire projection (2026-09-24)",
+        "### Iteration 18 \u2014 one outline row payload (2026-09-24)",
+        "### Iteration 17 \u2014 hierarchy study and retained ownership (2026-09-24)",
+        "### Iteration 16 \u2014 live contract comparison and resolution errors (2026-09-24)",
+        "### Iteration 15 \u2014 shared Session actions and Work paths (2026-09-24)",
+        "### Iteration 14 \u2014 exact Session picker and nested workspaces (2026-09-24)",
+        "### Iteration 13 \u2014 configured editor Cancel path (2026-09-24)",
+        "### Iteration 12 \u2014 directive editing and shared evidence",
+        "### Iteration 11 \u2014 remove the obsolete activity node kind",
+        "### Iteration 10 \u2014 Session-row return and planning diagnostics",
+        "### Iteration 9 \u2014 configured viewport retention",
+        "### Iteration 8 \u2014 completion errors and retained terminals",
+        "### Iteration 7 \u2014 integrated checkout and terminal ownership",
+        "### Iteration 6 \u2014 one Session-opening result path",
+        "### Iteration 5 \u2014 completion after repository navigation",
+        "### Iteration 4 \u2014 completion reconciliation",
+        "### Iteration 3 \u2014 navigator retention",
+        "### Iteration 2 \u2014 mounted-workspace proof",
+        "### Earlier native-focus compression",
+        "## Paths and mirrors inspected",
+        "## Intentional boundaries",
+        "## Earlier native-focus verification"
+      ],
+      "decision_passage_count": 15
+    },
+    {
+      "path": "scratch/compress-boundary.md",
+      "sha256": "c32ab16b7bd43c25ffe7163cdf4b9fe14287c1b97300f3cf544ce0631f58ac35",
+      "bytes": 4256,
+      "headings": [
+        "# Compress ordinary Flow boundary ownership",
+        "## Result and review"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/compress.md",
+      "sha256": "0a39899fadc84d9f4d3736c3e4c6a4d4e0cea9f33c002cd342a75d5fa4ab9877",
+      "bytes": 789,
+      "headings": [
+        "# Historical compression reviews"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/concept-integration-audit.md",
+      "sha256": "dd85509f2e79070c75f1954484baee4e825a116e479b352cb6acf23832a74ce8",
+      "bytes": 5968,
+      "headings": [
+        "# Concept-review integration audit",
+        "## Finish line and changes",
+        "## Validation",
+        "## Review findings and handoff"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/concept-review-audit.md",
+      "sha256": "ba8ad66908675b0906926b00b77c3da94a16ab6e41367657581a5212fc9cc5fb",
+      "bytes": 4181,
+      "headings": [
+        "# Concept-review audit",
+        "## Result",
+        "## Checks and sources",
+        "## Adversarial review",
+        "## Remaining integration evidence"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/concept-review-flow-identity.md",
+      "sha256": "cc4ddc8210aedba9944608fd2424ba9fc707869fb8ba16dd905328a2338f64e7",
+      "bytes": 7294,
+      "headings": [
+        "# Concept review \u2014 Flow occurrences, loops and Task controls",
+        "## Intent to keep",
+        "## Accepted usage (implementation pending)",
+        "## Findings",
+        "### 1. One occurrence, three encodings (observed; fix in the cycle-4 slice)",
+        "### 2. Feature has two loops sharing one iteration counter \u2014 **decided: two loops**",
+        "### 3. Pause is a control that can never be used \u2014 **decided: not yet required, option (a)**",
+        "### 4. The Session UI fixture still uses the removed Flow approval model (observed defect)",
+        "### 5. Kept deliberately",
+        "## Unchanged gaps",
+        "## Smallest next actions and proof"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/concept-review-skill.md",
+      "sha256": "efd82904cc0f7314c5570a26573ffca31797b72907739562d3b5d3a18d90d2d0",
+      "bytes": 1890,
+      "headings": [
+        "# Concept review skill"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/concept-review.md",
+      "sha256": "a76fe2fdc7acdb1fee38e7295a1a7ca584e57942b6432eea2a8cce456334bd11",
+      "bytes": 6562,
+      "headings": [
+        "# Workspace concept review \u2014 discussion with Jack",
+        "## Accepted usage \u2014 implementation pending",
+        "## Model to keep",
+        "## Consequential mismatch: selected conversation versus focused pane",
+        "## Smallest next implementation proof",
+        "## Existing gaps remain gaps"
+      ],
+      "decision_passage_count": 6
+    },
+    {
+      "path": "scratch/concurrent-proof.md",
+      "sha256": "e83cdf3062e3a8aea184ecb0b8550977a1006f4a8e599eba6cfed2042cd7a2f2",
+      "bytes": 8515,
+      "headings": [
+        "# Concurrent implementation observation"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/configured-ui-evidence/iteration15/sessions.txt",
+      "sha256": "95d59e4f384ff627f38ad68a211a4f7b4591de555ed5145d0b9ee29724835e7c",
+      "bytes": 1333,
+      "headings": [],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/configured-ui-evidence/iteration15-review/sessions.txt",
+      "sha256": "95d59e4f384ff627f38ad68a211a4f7b4591de555ed5145d0b9ee29724835e7c",
+      "bytes": 1333,
+      "headings": [],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/configured-ui-proof.md",
+      "sha256": "fd4f23aa723d07c3c3ba19d97e55b8a08b0e806f8bf96542cff81f43cd0d862a",
+      "bytes": 26680,
+      "headings": [
+        "# Configured UI proof \u2014 2026-09-23",
+        "## Iteration 7 \u2014 exact provider continuation and comparable count timing",
+        "### Exact provider text and completion",
+        "### Same-population before/after measurement",
+        "### Configured repository return and source corrections",
+        "## Iteration 6 review addendum",
+        "## Build and host",
+        "## Product correction",
+        "## Evidence and limits",
+        "## Scoped timings",
+        "## Next configured procedure"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/continuation-memory-placement.md",
+      "sha256": "c8055aca159a9673ba15e648db22fcc40fbe9c38f42ee26072e68fa86e67abbc",
+      "bytes": 589,
+      "headings": [
+        "# Unresolved memory placement"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/cursor-dedup.md",
+      "sha256": "5f832ea27d537e108a2ec8a5986287badc9be6c411f5cbea9eb647906a1f2446",
+      "bytes": 4752,
+      "headings": [
+        "# Deduplicate captured XOR cursor bodies",
+        "## Required patch for main's owned file",
+        "## Implementation and recovery boundary",
+        "## Focused proof"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/cursor-integration.md",
+      "sha256": "f5dc77937fc69ba1c69962ec94fabe4fc9d8a8c1737d25516a7bba3990b7e5c7",
+      "bytes": 4985,
+      "headings": [
+        "# Shared cursor integration \u2014 implementation and remaining proof",
+        "## Integrated evidence, 2026-09-25",
+        "## Remaining release and review work"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/decision-and-unblock.md",
+      "sha256": "c342814e626c9758441e66d6965814d3070fd0b0f4996a441152e7e55a2559f6",
+      "bytes": 3396,
+      "headings": [
+        "# Decide and unblock \u2014 accepted handoff",
+        "## Remaining integration",
+        "## Skill review cases",
+        "## Bounded implementation evidence"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/decision-protocol-research.md",
+      "sha256": "b4e9b31a70ba3fea2f4a762989792cf9512e74bb6086e7a31a74bb14ac1c7d25",
+      "bytes": 5408,
+      "headings": [
+        "# Decision protocol: lessons from Jev and Pydantic",
+        "## Observed source claims",
+        "## Application to Loopflow (design inference)",
+        "## Proof and future work",
+        "## Implemented application and limits"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/demo-restore.md",
+      "sha256": "6bac0770317525f8909a7732b305db2ae7ffa25667b0ab27cb0bb840d1e3359e",
+      "bytes": 6719,
+      "headings": [
+        "# Configured demo restoration",
+        "## Observed failures and bounded corrections",
+        "## Restoration and remaining human demo",
+        "### Authenticated counterexample: preserve the existing chapter Home"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/demo.md",
+      "sha256": "907bc7b337299a1fbf5bde0c81cddd78e7b2f988b6ceeb0f52b63ac8ff8a3a7e",
+      "bytes": 4544,
+      "headings": [
+        "# Human demo \u2014 2026-09-23",
+        "## Human feedback \u2014 overall usability, 2026-09-24",
+        "## Earlier demo history",
+        "## Current relaunch",
+        "## Current Session discovery relaunch",
+        "## Human screenshot \u2014 2026-09-24 07:21 PDT"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/desktop-performance-review/report.md",
+      "sha256": "0ad9bd12c557ede9870460752d17da5595a7e2ad913a87eb5412089699d6f958",
+      "bytes": 1966,
+      "headings": [
+        "# Desktop measurements: complete"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/desktop-performance.md",
+      "sha256": "7fc56f5cac71646f7ea531880efd4782252a1521dd4be33fb24b001c40b96558",
+      "bytes": 6512,
+      "headings": [
+        "# Native desktop measurement runner \u2014 2026-09-24",
+        "## Remaining measurement contract",
+        "## Implemented measurement boundary",
+        "## Review findings",
+        "## Receipts"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/desktop-scroll-refresh-evidence/offset-counterexample/report.md",
+      "sha256": "9cc9117acf5216130e958e1f390eae255af1680973276237a90d5d19c90968a2",
+      "bytes": 1860,
+      "headings": [
+        "# Desktop measurements: incomplete"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/desktop-scroll-refresh-evidence/report.md",
+      "sha256": "dde0049b4d69bd978c5a30f1720e726af902bd9f063f8f01500d9dd30560d307",
+      "bytes": 3485,
+      "headings": [
+        "# Desktop measurements: complete",
+        "## Comparison"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/desktop-scroll-refresh-evidence/short/report.md",
+      "sha256": "7b0ca480b600958637582a318e2559b45c807040ff1cf633cb7b82e611d3542a",
+      "bytes": 2102,
+      "headings": [
+        "# Desktop measurements: complete"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/desktop-scroll-refresh.md",
+      "sha256": "bbb9c47d574cd2c9cc2193157f61a232fd58ac281c8f97a05b0f5644b6979279",
+      "bytes": 3546,
+      "headings": [
+        "# Scroll during planning refresh \u2014 iteration 22",
+        "## Review finding",
+        "## Evidence and remaining work"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/discovery-evidence/report.md",
+      "sha256": "4ec817119be5111a0eb0920c765950f3fecf1b49d447fad2d54c7b660f75ceb8",
+      "bytes": 2359,
+      "headings": [
+        "# Active Run discovery cost proof"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/discovery-implementation.md",
+      "sha256": "f2a84d238d818ceeed01a3c9f3de39ae00153ed067f70b9d2bf0014610dcce86",
+      "bytes": 7944,
+      "headings": [
+        "# Retained active Run discovery \u2014 2026-09-24",
+        "## Finish line and current boundary",
+        "## Implemented ownership and lifetime",
+        "## Counterexamples and review changes",
+        "## Evidence and limits"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/discovery-review-evidence/architecture.txt",
+      "sha256": "7c627d48a39b5c4d20fd216020b3171313c0ffef485bdf99521171a8aa56554a",
+      "bytes": 1404,
+      "headings": [],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/fork-request.md",
+      "sha256": "139b91861b2a33abb130bbfdd7b1f46cd5f8f2c929c8e9392a429ec32df9a940",
+      "bytes": 1199,
+      "headings": [
+        "# Human-requested follow-up: forks and UX prototypes"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/generic-loop-engine-proof.md",
+      "sha256": "dbeb0240dfd9f9684967841a494da0a78c75fadbebf8733ae17a4898ede31135",
+      "bytes": 7421,
+      "headings": [
+        "# Ordinary Flow engine contribution",
+        "## Runtime contract",
+        "## Focused proof",
+        "## Repository build counterexamples",
+        "## Review and remaining integration"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/handoff.md",
+      "sha256": "e768a369d32afaeaaf4867e9293ee3839a87fb468ca3c36abef755d6ac223837",
+      "bytes": 1108,
+      "headings": [
+        "# LOO-291 current handoff"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/README.md",
+      "sha256": "82ac62ecc3e8addf99da11537fc03301398cef8ed5285ea8a73f44ef9343f6d3",
+      "bytes": 3067,
+      "headings": [
+        "# Ordered implementation cycle",
+        "## Current handoff"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/audit-coordination.md",
+      "sha256": "4f047dd1d835bde46c1c6f73613448a181b7d75143c3341074b0c69c811c534b",
+      "bytes": 746,
+      "headings": [
+        "# Audit coordination \u2014 2026-09-25"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/continuation-integration.md",
+      "sha256": "4dd62be2224f470cff207f6c25127bb8831e3ceb8b1e0be186c27ed7bfe9bc9b",
+      "bytes": 11900,
+      "headings": [
+        "# Continuation branch comparison \u2014 2026-09-25",
+        "## Local integration in progress",
+        "## Focused integration outcomes",
+        "## Delegation transport",
+        "## Successful delegated continuation"
+      ],
+      "decision_passage_count": 7
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-01-compress.md",
+      "sha256": "48b7606555396eca7e7ea50f0ac73cbcbbc42cde7ccfa12c380aea7ba4664b61",
+      "bytes": 3671,
+      "headings": [
+        "# Cycle 1 \u2014 compress: shared Session naming",
+        "## Model",
+        "## Reductions",
+        "## Retained deliberately",
+        "## Proof",
+        "## Unresolved findings for review (not concealed)"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-01-implement.md",
+      "sha256": "c84656f752462fb94e4f4cc3387a6cbe683eda7f9d8f7cd36f5c12f01372468f",
+      "bytes": 5553,
+      "headings": [
+        "# Cycle 1 \u2014 implement: shared Session naming",
+        "## Result",
+        "## Changed paths",
+        "## Proof",
+        "## Findings",
+        "## Next slice"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-01-review.md",
+      "sha256": "96fffba5dce5af5e5897ff1aa5bd021eede58bcf754914fae04c671f6d530943",
+      "bytes": 5413,
+      "headings": [
+        "# Cycle 1 \u2014 review-slice: shared Session naming",
+        "## Findings fixed",
+        "## Evidence",
+        "## Remaining gaps (this slice)",
+        "## Full-design obligations still open",
+        "## Next bounded slice"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-02-brief.md",
+      "sha256": "4d3512f35e20956982b7e4417dd4316baa19699217afb4774466eadb9aae791b",
+      "bytes": 2880,
+      "headings": [
+        "# Cycle 2 \u2014 named native Sessions"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-02-compress.md",
+      "sha256": "fe35e3e8d87cd957ba0df2f08231cf3f896e7990e00a09753da326adbc1685d6",
+      "bytes": 5890,
+      "headings": [
+        "# Cycle 2 \u2014 compress: named native Sessions after continuation integration",
+        "## Model before",
+        "## Model after",
+        "### Behavior changes (intentional, small)",
+        "## Deliberately retained",
+        "## Proof",
+        "## Gaps for review"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-02-implement.md",
+      "sha256": "b982903676279a0312f920fe7a1cc688e60da921258124b48553270e2b417b00",
+      "bytes": 8266,
+      "headings": [
+        "# Cycle 2 \u2014 implement: named native Sessions",
+        "## Result",
+        "### Shared exact Flow membership (Rust \u2192 Swift)",
+        "### Naming gaps carried from cycle 1",
+        "### Native rename state and ordering",
+        "## Changed paths",
+        "## Proof",
+        "## Remaining limitations",
+        "## Next slice"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-02-review-focus.md",
+      "sha256": "cdb608737ba581519a6820d4df58605612f0e9a74f9b264331d2a7f34fe8570d",
+      "bytes": 1963,
+      "headings": [
+        "# Cycle 2 parent review questions"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-02-review.md",
+      "sha256": "c1ca607ccaee6822d59b7506df2cf15b5475c1cf08d6e816811cdaae89c06514",
+      "bytes": 10593,
+      "headings": [
+        "# Cycle 2 \u2014 review-slice: named native Sessions after continuation integration",
+        "## Claim matrix",
+        "## Findings",
+        "## Negative searches",
+        "## Commands and receipts",
+        "## Review limits",
+        "## Remaining full-design gaps",
+        "## Next slice"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-03-compress.md",
+      "sha256": "b42ab693ccaa2a181bb69a38d2c23eed747063fbff6ad894038c46059ee89925",
+      "bytes": 5589,
+      "headings": [
+        "# Cycle 3 \u2014 compress: frame, Wave plan, basic Task overview",
+        "## Model before \u2192 after",
+        "## Deletions",
+        "## Retained boundaries (reviewed)",
+        "## Proof",
+        "## Complete-design gaps (unchanged)"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-03-implement.md",
+      "sha256": "1037f84ab1251caaa9d9f827a6c1dde837c18c169f415cabc1610b5d45cb4c88",
+      "bytes": 10130,
+      "headings": [
+        "# Cycle 3 \u2014 implement: calmer frame, Wave plan, basic Task overview",
+        "## Changed behavior",
+        "## Proof",
+        "## Owner and deletion review",
+        "## Findings for compress/review",
+        "## Remaining full-design scope"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-03-parent-composition.md",
+      "sha256": "fd1077e1fc6ee77bf0cb6e0ef79f1ac76c5f12cffba758c64366a7ac3d3dd514",
+      "bytes": 1916,
+      "headings": [
+        "# Parent composition correction"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-03-preparation.md",
+      "sha256": "907c90dda3d2a127c616b226ee344522effd1b1c91185d514c58af58305550b1",
+      "bytes": 4230,
+      "headings": [
+        "# Parent preparation for the next bounded presentation slice",
+        "## Parent-discovered read/write counterexample"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-03-review.md",
+      "sha256": "12fa40f7ae530d10cdfe9c3810e66db5b5fc9ad91a720694a67eff0d359fcfd3",
+      "bytes": 8200,
+      "headings": [
+        "# Cycle 3 \u2014 review-slice: frame, Wave plan, basic Task overview",
+        "## Claim matrix",
+        "## Findings and fixes",
+        "## Receipts",
+        "## Review limits",
+        "## Remaining full-design gaps"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-04-compress.md",
+      "sha256": "0d15ce8d299e6d90717922d1f274a89cd95ec7836f787030bf0a7380173095a3",
+      "bytes": 7251,
+      "headings": [
+        "# Cycle 4 \u2014 compress: Task Flow projection and controls",
+        "## Model before \u2192 after",
+        "## Retained deliberately",
+        "## Proof",
+        "## Outstanding full-design gaps (unchanged)"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-04-implement.md",
+      "sha256": "2dbcb642e379e9834c369e2ecd8702e6d9fe37ebe477bc25d64d0a3fb4609465",
+      "bytes": 10268,
+      "headings": [
+        "# Cycle 4 \u2014 implement: Task Flow preview, pinned diagram, controls",
+        "## Observable claims",
+        "## Ownership and deletions",
+        "## Proof",
+        "## Limits and remaining complete-design gaps"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-04-interrupted-for-main.md",
+      "sha256": "de109daadcb5426e8a05c4e5f80fe9471a89ce12773c123ab0751e5ff9cb014f",
+      "bytes": 1704,
+      "headings": [
+        "# Cycle 4 interrupted for requested main rebase"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/cycle-04-preparation.md",
+      "sha256": "3ff5fe4bf6884b5d2380c168b73f03ce1db8debf07514094800571c29dc9ec35",
+      "bytes": 4125,
+      "headings": [
+        "# Parent preparation: Flow controls and comments",
+        "## Existing authorities",
+        "## Expected next proof"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/implementation-cycle/final-build-plan.md",
+      "sha256": "1735f8b9068b10017477149f88089e1100ea8b04840a9c0d79950766d869d7f0",
+      "bytes": 2595,
+      "headings": [
+        "# Remaining native build boundary",
+        "## Build resource correction before cycle 4 compilation"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/implementation-cycle/jack-iteration-tuple.md",
+      "sha256": "679c6c07ad9837f72cee1d9c603712b16d50e53eddea3e4a8ef759dcbabbfcb0",
+      "bytes": 1619,
+      "headings": [
+        "# Jack's decision: Flow iteration is a tuple"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/markdown-rendering-observation.md",
+      "sha256": "f6315b2c877ad4b830a3a0b8638f62fd501826f6e137ea4480e20fd537bd92de",
+      "bytes": 1029,
+      "headings": [
+        "# Native Markdown rendering seam"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/implementation-cycle/parent-flow-counter-review.md",
+      "sha256": "453039ae9ebf6bb1671f6118484aa07c2bba6e871a6372a813a74929dce50975",
+      "bytes": 4532,
+      "headings": [
+        "# Flow counter reconciliation required before review acceptance",
+        "## Parent correction \u2014 verified locally",
+        "## Focused result"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/parent-session-focus.md",
+      "sha256": "65c14fc1ceab25dd79854c3cbe5ec2934eb64d0dd4a279a5cdab9b32c69c2b98",
+      "bytes": 2036,
+      "headings": [
+        "# Session focus integration \u2014 verified locally",
+        "## Evidence"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/post-1283-rebase.md",
+      "sha256": "b455961a880f53c54ff7499b9e008efa69f7ab914c5c78641386f6e7334756b6",
+      "bytes": 3119,
+      "headings": [
+        "# Main integration after PR #1283",
+        "## Reconciliation",
+        "## Proof"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/implementation-cycle/review-focus.md",
+      "sha256": "1d75834bc860cb7410c83e45ab0b74a1efa645ed866f7e8e9057eb52b4bdf289",
+      "bytes": 2682,
+      "headings": [
+        "# Cycle 1 review focus"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-cycle/started-read-boundary.md",
+      "sha256": "b7403106a0eefd29f3e614a68acb8f00a7f68ac23e69a0be54add238d4f437c4",
+      "bytes": 2769,
+      "headings": [
+        "# Started-work read boundary",
+        "## Result"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/implementation-evidence.md",
+      "sha256": "85832f7b469fd873335750c4277928693d991beac196d93d32e11a564c349401",
+      "bytes": 7963,
+      "headings": [
+        "# Implementation evidence \u2014 2026-09-23",
+        "## Scope and observable finish",
+        "## Screenshot counterexamples",
+        "## Wave cleanup boundary",
+        "## Verification",
+        "## Integration with main-view",
+        "## Integrated proof and review",
+        "## Authorized installation and Task flow \u2014 ongoing",
+        "### Installed result"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/interactive-feedback-proof.md",
+      "sha256": "f67aa5d3d586d007c066d03b2692da19496ded73f207060f74c82e0671fb0e09",
+      "bytes": 4777,
+      "headings": [
+        "# Interactive review feedback and explicit double loops",
+        "## Evidence"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/iteration10-implement.md",
+      "sha256": "0077769b557781d69152ca6cf6c5f461678ff4c16e0b9e57e1aefaeda45c48d8",
+      "bytes": 5295,
+      "headings": [
+        "# Iteration 10 \u2014 configured launch and foreground boundary",
+        "## Executed configured trials",
+        "## Concrete manual continuation"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/iteration11-implement.md",
+      "sha256": "ea67653b33cbd3e90a79d9c532faf0e5e2036090ee7490072eb5d5d3be23cb30",
+      "bytes": 2478,
+      "headings": [
+        "# Iteration 11 \u2014 truthful Active presentation, 2026-09-23",
+        "## Proof"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/iteration12-proof.md",
+      "sha256": "bebba1ba7960993dd1030fcde473eec1bf13eaf1b89d8e203d2131ec351a63d0",
+      "bytes": 5466,
+      "headings": [
+        "# Iteration 12 \u2014 directive editing and configured host boundary",
+        "## Focused proof",
+        "## Configured attempt",
+        "## Review build and remaining procedure"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/iteration13-proof.md",
+      "sha256": "427820f3d7e0dbe1bafe920aa94517b8ce82f18ce6b296f03e850e6aa13e5d6f",
+      "bytes": 4257,
+      "headings": [
+        "# Iteration 13 \u2014 configured directive editor, 2026-09-24",
+        "## Configured path",
+        "## Review and remaining work"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/iteration14-proof.md",
+      "sha256": "c7f63e0b6adf028e965329614d16fc2e532c67ab68a2fc3297d9cded27116a50",
+      "bytes": 6483,
+      "headings": [
+        "# Iteration 14 \u2014 configured Session picker and nested workspace",
+        "## Change and authority",
+        "## Passing configured trial",
+        "## Earlier attempts and cleanup",
+        "## Verification and remaining scope"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/iteration15-shared-sessions.md",
+      "sha256": "bb65f73420db72d31f9d69da143eec69e36f0f6ea0bc7d82e2159c61054dae24",
+      "bytes": 5197,
+      "headings": [
+        "# Shared Session contract \u2014 2026-09-24",
+        "## Change",
+        "## Proof",
+        "## Remaining"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/iteration16-proof.md",
+      "sha256": "c90d0336315c3e3b53e78a41cf0cbcf77fc2c2d13f4dc1eebad8def394a21e1c",
+      "bytes": 6014,
+      "headings": [
+        "# Configured host and shared contract proof \u2014 2026-09-24",
+        "## Configured observation",
+        "## Live contract comparison",
+        "## Resume the configured proof",
+        "## Review and disposition"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/iteration8-proof.md",
+      "sha256": "5b1f7f63d57510d88c8029253db841f40cb12c4e3cb4cf2b7dc2ba730d6803d9",
+      "bytes": 6645,
+      "headings": [
+        "# Iteration 8 \u2014 completion rejection and configured launch boundary",
+        "## Implemented",
+        "## Focused proof",
+        "## Configured boundary",
+        "## Prepared procedure \u2014 executed by the subsequent review"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/iteration9-proof.md",
+      "sha256": "6439a4a3714c9b56e752af32274381a503c819482d79a8e3f61c6699283411dd",
+      "bytes": 5078,
+      "headings": [
+        "# Iteration 9 \u2014 configured terminal viewport retention",
+        "## Configured result",
+        "## Failed attempts and exact boundary",
+        "## Review and remaining work"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/lf-new-context/lf-new.md",
+      "sha256": "a0e73db97cda8656639ccf269b4c8a973fd97c8bf9b9ca9f76bce5905372d137",
+      "bytes": 21668,
+      "headings": [
+        "# Worktree workspaces",
+        "## What to build",
+        "## Scope chooses the starting conversation",
+        "## Fit with main-view",
+        "## Placement",
+        "## The demo",
+        "## Interaction",
+        "## Current system and observed failure",
+        "## Data structures and key functions",
+        "## Failure recovery and constraints",
+        "## Shape and internal slices",
+        "## Done when / forbidden near-misses",
+        "## Evidence ledger"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/lf-new-context/questions.md",
+      "sha256": "398f61f5d50fa09213aa7ea03df63730954d9a6a5544ad9bae5626fa15270559",
+      "bytes": 3049,
+      "headings": [
+        "# Open design questions",
+        "## Confirmed",
+        "## Still open"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/lf-new-context/session-registration.md",
+      "sha256": "55c0fdae0aefb4d397cf62eb071dda59be01802de3d7ae3bda3602f61f4cfc3c",
+      "bytes": 364,
+      "headings": [
+        "# Session registration counterexample"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/lf-new-implementation/design.md",
+      "sha256": "b27c434dccb169c6fcd001ca7b800691cdad913fe52f17a3fb9a44552790d957",
+      "bytes": 328,
+      "headings": [
+        "# Historical workspace design"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/lf-new-implementation/evidence.md",
+      "sha256": "387efbe495b50583f6962451669afda4d4aed61d30c1a03965dc7b9eea1ab4cb",
+      "bytes": 368,
+      "headings": [
+        "# Workspace implementation evidence"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/lf-new-implementation/handoff.md",
+      "sha256": "bb40d3a37d8bf0d9000ba44adad7d79787c5d70c7ad0f12ad0eec4202480e6ef",
+      "bytes": 343,
+      "headings": [
+        "# Historical integration handoff"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/lf-new-implementation/installed-proof.md",
+      "sha256": "77ec1910340b68991b98e89b7d3c355db3c10c8a4ad43139fd8619b68c95ebbf",
+      "bytes": 1763,
+      "headings": [
+        "### Installed capture counterexample and Task advance",
+        "### Final handoff state"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/lf-new-implementation/integration.md",
+      "sha256": "14e4e42ae892e977f65e669cbad66fc67a48abc124d85d970d3d91ecb0da7028",
+      "bytes": 6516,
+      "headings": [
+        "# LOO-291 workspace integration \u2014 2026-09-23",
+        "## Result and remaining boundary",
+        "## Integration and concrete review findings",
+        "## Focused proof",
+        "## Appearance verification",
+        "## Remaining Task work"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/lf-new.md",
+      "sha256": "821efe775ca6b976acfc65c0143b5de8e05c08bf9bec930f6883c202de1ad25b",
+      "bytes": 6673,
+      "headings": [
+        "# Conversations and worktree workspaces",
+        "## What to build",
+        "## Placement",
+        "## Demo",
+        "## Data and key functions",
+        "## Current system reshaped",
+        "## Constraints and forbidden outcomes",
+        "## Internal slices \u2014 one integrated PR",
+        "## Done when and evidence"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/live-loopflow/advance-observation.md",
+      "sha256": "700b389e2aa8f8bb8006cf7c2fc09805e125f6a4386c3eaaa7112c4cc95a824d",
+      "bytes": 2812,
+      "headings": [
+        "# Live Advance observation \u2014 2026-09-25",
+        "## Ask completion and return"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/live-loopflow/auth-investigation.md",
+      "sha256": "a94b2c87b2dc428eb1409f4b03f13a67fc626d2631e4d4b879bba73fcaaf78a5",
+      "bytes": 12906,
+      "headings": [
+        "# Live Flow Session auth investigation",
+        "## Finding",
+        "## Observations",
+        "## Source trace",
+        "## Hypotheses and discriminating evidence",
+        "## Supported recovery and fixes"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/live-loopflow/contract.md",
+      "sha256": "998cafa7d35bc606a56fe6625ddf7b3d82c5555acff7da13cf8d1f06f60c7aa3",
+      "bytes": 7658,
+      "headings": [
+        "# LOO-295 live loopflow demo",
+        "## Observable finish",
+        "## Artifact acceptance",
+        "## Evidence",
+        "### Failed live launch and recovery \u2014 2026-09-25",
+        "### Retry repair",
+        "### Credential discriminator"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/live-loopflow/decision-evidence.md",
+      "sha256": "a22e3b8913d934ec3cea6610d47234672adadad51b080c163db4aa7fc7e3110e",
+      "bytes": 2442,
+      "headings": [
+        "# Second-pass decision evidence",
+        "## Completed Ask and reassessment"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/live-loopflow/final-review.md",
+      "sha256": "4bb2dd9c5607da05caa04af838b2aca909b7f7a98e665873be0ec7662999a829",
+      "bytes": 2129,
+      "headings": [
+        "# Final human demo review \u2014 2026-09-25",
+        "## Human acceptance",
+        "## Observed completion"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/live-loopflow/walkthrough.md",
+      "sha256": "e25633636a709b4c5f19cbb701db0170aff26a123e2be901ef3d3c0326be8b7e",
+      "bytes": 5501,
+      "headings": [
+        "# Live loopflow walkthrough",
+        "## Writing pass 1",
+        "## Writing pass 2",
+        "## Human observation in Ask"
+      ],
+      "decision_passage_count": 9
+    },
+    {
+      "path": "scratch/loopflow-entrypoints.md",
+      "sha256": "bb8dccd549b7d1c126c291f72510c71d73f8a7617f9e37aef3c710d6336a5d87",
+      "bytes": 21103,
+      "headings": [
+        "# Loopflow entry points and counterexamples",
+        "## Entry points and actual executors",
+        "## Composition is part of the contract",
+        "## Persistence, authority and recovery",
+        "## Human boundary paths",
+        "## Minimal shared transition seam",
+        "## Concrete acceptance matrix"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/loopflow-integration-contract.md",
+      "sha256": "7c31dccf1c44e3d4e29e97f71c593cfb586d37056756b1520f4628ee0f0e474e",
+      "bytes": 3613,
+      "headings": [
+        "# Current runtime integration contract",
+        "## Shared types",
+        "## Ordinary engine contract",
+        "## Ownership"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/loopflow-transition-proof.md",
+      "sha256": "0a94719497f7904e8389963dc30abfd085f1150659d8aaf75641a950704a91e8",
+      "bytes": 3406,
+      "headings": [
+        "# Shared transition contribution",
+        "## Decisions",
+        "## Proof",
+        "## Integration proof still needed"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/loopflow.md",
+      "sha256": "92f0bb36126cbdde706073cf2c783de394c6954c2ed70bffc44fb2adbcacb353",
+      "bytes": 9904,
+      "headings": [
+        "# Loopflows: proposed usage and branch direction",
+        "## Proposed usage documentation",
+        "## Proposed skill guidance",
+        "## Where the current implementation differs",
+        "## What must survive the simplification",
+        "## Decisions to work through after the usage draft",
+        "## Proof that would accept the branch",
+        "## Future direction",
+        "## Current integration checkpoint (2026-09-25)"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/main-view-task-discovery.md",
+      "sha256": "2aea4e7effcd5bfbd1e3abba08aecc398e57ebd41c46db05014f982c552bc6c0",
+      "bytes": 18321,
+      "headings": [
+        "# Active Run discovery across observations",
+        "## What to build",
+        "## Placement and boundary",
+        "## Current system and replacement",
+        "## Lifetime and transport",
+        "## Values and functions",
+        "## Subscription, publication and recovery",
+        "## Cost contract and measurement",
+        "## Demo and Done when",
+        "## Internal slices and forbidden outcomes",
+        "## Evidence and assumptions"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/main-view-task-history-archive.txt",
+      "sha256": "361f5e4c6b4ecd220623d00bd4d984ec30473882a1a2b2356948e3c0dec874fd",
+      "bytes": 69147,
+      "headings": [
+        "# Historical design and evidence \u2014 through 2026-09-25",
+        "# One workspace for work and Sessions",
+        "## Accepted visual direction \u2014 2026-09-25",
+        "### Task entry experiment \u2014 2026-09-25",
+        "## Earlier visual review \u2014 2026-09-25",
+        "## Next discovery slice \u2014 2026-09-24",
+        "## Latest human direction \u2014 2026-09-24",
+        "## What to build",
+        "## Visual exploration \u2014 current work",
+        "## Placement",
+        "## Integration with `loopflow.lf-new`",
+        "## The demo",
+        "## Interactions",
+        "## Data structures and key functions",
+        "### Optional conversations, one current at a time",
+        "### Existing shared values",
+        "## Current system and integration",
+        "## Scope and internal slices",
+        "## Done when / forbidden outcomes",
+        "## Evidence ledger",
+        "## Slice ledger \u2014 scroll during shared planning refresh, 2026-09-24",
+        "## Slice ledger \u2014 native capture/input measurements, 2026-09-24",
+        "## Slice ledger \u2014 Wave-only integration, 2026-09-24",
+        "## Slice ledger \u2014 Task Monitor panes, 2026-09-24",
+        "## Slice ledger \u2014 required Session \u2192 Run, 2026-09-24",
+        "## Slice ledger \u2014 navigation implementation, 2026-09-23",
+        "## Integration amendment \u2014 2026-09-23",
+        "## Slice ledger \u2014 directive editor, 2026-09-24",
+        "## Slice ledger \u2014 configured editor, 2026-09-24",
+        "## Slice ledger \u2014 configured Session picker and nested workspace, 2026-09-24",
+        "### Iteration 15 \u2014 shared Session actions and Work path (2026-09-24)",
+        "### Iteration 16 \u2014 configured host diagnosis and live contract comparison (2026-09-24)",
+        "### Iteration 17 \u2014 one hierarchy interaction study (2026-09-24)",
+        "## Slice ledger \u2014 native outline contribution, 2026-09-24",
+        "## Slice ledger \u2014 shared active Runs, 2026-09-24",
+        "## Slice ledger \u2014 shared automatic Run observation, 2026-09-24"
+      ],
+      "decision_passage_count": 32
+    },
+    {
+      "path": "scratch/main-view-task-history.md",
+      "sha256": "541f51cd4ce9cd1055c68acd76cf6eced525d183726bde17551a507247388b19",
+      "bytes": 788,
+      "headings": [
+        "# Historical design and evidence"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/main-view-task.md",
+      "sha256": "3db41aec40f1e5a320e3a76ff204ccc87ef77a8bcd1dd65a7aa54576adab6832",
+      "bytes": 19006,
+      "headings": [
+        "# A calmer desktop workspace",
+        "## Reference prototype",
+        "## Accepted experience",
+        "### Repository and Wave",
+        "### Task",
+        "### Flow",
+        "### Session",
+        "## Implementation shape and owners",
+        "## Internal slices and proof",
+        "## Evidence and remaining decisions"
+      ],
+      "decision_passage_count": 12
+    },
+    {
+      "path": "scratch/monitor-proof-coordination.md",
+      "sha256": "b11518164c4ae2a04b17ea0beaab80b52471f75a4f313dc822d63ed2065be4e0",
+      "bytes": 4488,
+      "headings": [
+        "# Monitor integration ownership \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/native-surface-diagnostic.md",
+      "sha256": "01495b0b053eb77dcb30b69f19e1db42074a181c9ba49f8f246d5b186e9e2fe5",
+      "bytes": 5093,
+      "headings": [
+        "# Native surface restoration \u2014 2026-09-23",
+        "## Remaining proof",
+        "## Cause and correction",
+        "## Focused receipts",
+        "## Reproduce the isolated boundary"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/navigation-proof.md",
+      "sha256": "33df5867c583d78f666aaaf74d439146323ead1a9c985abb0c3708e50dcdf179",
+      "bytes": 16277,
+      "headings": [
+        "# Unified navigation evidence",
+        "## Iteration 7 update",
+        "## Observable result",
+        "## Source reconciliation",
+        "## Review findings resolved",
+        "## Recorded validation"
+      ],
+      "decision_passage_count": 6
+    },
+    {
+      "path": "scratch/no-pass-limits.md",
+      "sha256": "a0bba110b33529c0964d5e9ea821468d6c6b76e4eae0b2698bb8085c40caf0fa",
+      "bytes": 3425,
+      "headings": [
+        "# Remove Flow pass limits",
+        "## Integration handoff"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/outline-implementation.md",
+      "sha256": "a844a54d8a5ea5d8116ddfbb36d2a1a779debd911387c0079ef3dcb2b48dd8f4",
+      "bytes": 4125,
+      "headings": [
+        "# Native outline contribution \u2014 2026-09-24",
+        "## Evidence",
+        "## Review findings applied",
+        "## Remaining core"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/post1281-integration.md",
+      "sha256": "67dd4b2e8f9821330647b0ef00f4e72e40cf7b5a310eed9db92edbbff4d6bd05",
+      "bytes": 3827,
+      "headings": [
+        "# Main after #1281: integration and pending demo",
+        "## Demo is pending human observation and a usable configured Home"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/projects.md",
+      "sha256": "af184a2064859840b5348017c696abd5fec1f7b94076f20df49ca8b83b15ebe1",
+      "bytes": 22734,
+      "headings": [
+        "# One Wave, one chapter Project",
+        "## What to build",
+        "## Placement",
+        "## The demo",
+        "## Desktop and CLI contract",
+        "## Data and authority",
+        "## Deterministic API and CLI",
+        "## Chapter skills own judgment; the API owns rotation",
+        "## Reset and recovery",
+        "## Current system and deletion path",
+        "## Constraints and forbidden outcomes",
+        "## Internal slices \u2014 one PR",
+        "## Done when",
+        "## Evidence ledger"
+      ],
+      "decision_passage_count": 12
+    },
+    {
+      "path": "scratch/questions.md",
+      "sha256": "f7ee260888c2a1bc468053c6f84e70e7a2ddb32cd7b07d5b197371e8ef02236a",
+      "bytes": 3149,
+      "headings": [
+        "# Remaining implementation and acceptance boundaries",
+        "## Observed provider transport follow-up \u2014 2026-09-25"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/research-new-task-ux-69c7ed21.md",
+      "sha256": "c05e5c1af1897d5afb2b40639818ddb30a8701c3e48edf23bce3da72b4d8d16b",
+      "bytes": 8400,
+      "headings": [
+        "# Research: starting new work in Loopflow",
+        "## System understanding",
+        "### Architecture and data flow",
+        "### Evidence and counterexamples",
+        "## Observations from reference products",
+        "### Notion: create before organizing",
+        "### Superlogical: sessions and their views have different scopes",
+        "### HumanLayer: make workspace setup and handoff visible",
+        "## Tensions",
+        "## Quality and potential",
+        "## Recommendations",
+        "## Review artifact",
+        "## Open questions"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/research-wave-ui-collapse-5db824ef.md",
+      "sha256": "0be3a1d18def3b34fa403c2dd6136679b247265a4ee219601447a8ba7c6f9b84",
+      "bytes": 10980,
+      "headings": [
+        "# Research: Wave-only Desktop and CLI planning surfaces",
+        "## System understanding",
+        "### Architecture and data flow",
+        "### Evidence and counterexamples",
+        "### CLI dependencies",
+        "### Shared abstractions",
+        "## Tensions",
+        "## Observations",
+        "### Complexity",
+        "### Quality and proof",
+        "### Potential",
+        "## Recommendations",
+        "### Make Wave the ordinary scope everywhere",
+        "### Keep current reads flat and historical reads explicit",
+        "## Open questions and limits"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/research-workspace-design-603c72da.md",
+      "sha256": "1ec692f24d9a275c04a9e7a79d4be1b8b8e8e5323f1c8708ce5d77e25a968d7e",
+      "bytes": 9794,
+      "headings": [
+        "# Research: workspace composition and missing affordances",
+        "## System understanding",
+        "### External observations",
+        "### General guidance",
+        "## Affordance audit",
+        "## Tensions",
+        "## Recommendations to test",
+        "## Questions for the comparison",
+        "## Model execution boundary"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/research-workspace-model-7eefb9b3.md",
+      "sha256": "8a16aa45ca9973e6f29a1f9f451ade2616d6552a47bf7a4cfabba5b0410f1d91",
+      "bytes": 24283,
+      "headings": [
+        "# Research: one outline, shared panes, Sessions and Runs",
+        "## System understanding",
+        "### Result and human requirements",
+        "### Current authorities and read contracts",
+        "### Identity is a graph behind a simple outline",
+        "### Sessions: required Run identity changes creation, not just serialization",
+        "## Tensions and evidence",
+        "### The active-Run join is missing",
+        "### Watch is coherent for Flow inspection, too broad for initial Monitor",
+        "### Output is reusable, but its bounds are partial",
+        "## Recommendations",
+        "### API direction: domain reads with independent costs",
+        "### Pane ownership and outline projection",
+        "### Two user-experience performance contracts",
+        "### Disposition of LOO-293",
+        "## Verification, quality and open questions",
+        "## Reviewed contract fingerprints"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-active-runs-stream.md",
+      "sha256": "cf9f111c5db6588169136e6ec00fafe5d5446ca9d109dae2f426863c0723e7f1",
+      "bytes": 8526,
+      "headings": [
+        "# Shared automatic Run observation review \u2014 2026-09-24",
+        "## Finding fixed",
+        "## Evidence matrix",
+        "## Verification",
+        "## Source and ownership",
+        "## Next boundary and disposition"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-desktop-performance.md",
+      "sha256": "75263ddfb155d0d2f51e2ca0b7cc6ee230178d7aef4ec4531cb6e13eab481f61",
+      "bytes": 6822,
+      "headings": [
+        "# Desktop measurement review \u2014 2026-09-24",
+        "## Finding fixed",
+        "## Evidence matrix",
+        "## Source and intent",
+        "## Next boundary"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/review-discovery.md",
+      "sha256": "d5fe88b37592754e734f5d812987e362bf28b331bc24781487dfbd33d1d54efe",
+      "bytes": 8525,
+      "headings": [
+        "# Retained discovery review \u2014 2026-09-24",
+        "## Finding and correction",
+        "## Evidence matrix",
+        "## Focused verification",
+        "## Review boundaries",
+        "## Next slice and disposition"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/review-note-audit.md",
+      "sha256": "4b893f46b9216ca27ac7d633d798086a2bca11a6107bb944bdade1993477d747",
+      "bytes": 9758,
+      "headings": [
+        "# Human review \u2192 implementation audit",
+        "## Result",
+        "## Implementation order and ownership",
+        "## Contradictions resolved",
+        "## Audit scope and limits"
+      ],
+      "decision_passage_count": 6
+    },
+    {
+      "path": "scratch/review-scroll-discovery.md",
+      "sha256": "fdcf19f5e4a11054807a1fdfb9e208c54265d6665778da3ed924af33bef7a2fe",
+      "bytes": 6255,
+      "headings": [
+        "# Scroll refresh and discovery review \u2014 2026-09-24",
+        "## Fresh proof",
+        "## Source and next design boundary"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-archive.txt",
+      "sha256": "1b479e69870856c243c8aa1387e97e143c74b57a613d95c37bad10f7ccad7b3c",
+      "bytes": 71980,
+      "headings": [
+        "# Unified navigation slice review \u2014 2026-09-23",
+        "## Iteration 9 review \u2014 viewport proof confirmed; exact focus unavailable",
+        "### Fresh configured boundary",
+        "### Source and verification disposition",
+        "## Iteration 8 review \u2014 integrated provider path passes",
+        "### Configured receipt",
+        "### Verification and next slice",
+        "## Integrated workspace review \u2014 2026-09-23",
+        "### Bounded correction",
+        "### Configured result and remaining boundary",
+        "## Iteration 7 independent verification",
+        "## Iteration 6 disposition",
+        "### Fresh configured observations",
+        "### Source reconciliation and next proof",
+        "## Earlier disposition (before iteration 6)",
+        "## Iteration 5 review \u2014 2026-09-23",
+        "## Iteration 4 review \u2014 2026-09-23",
+        "## Iteration 3 review \u2014 2026-09-23",
+        "## Iteration 2 review \u2014 2026-09-23",
+        "## Earlier review after native restoration \u2014 2026-09-23",
+        "## Evidence matrix",
+        "## Bounded corrections made",
+        "## Commands and observations",
+        "## Negative architectural proof",
+        "## Next proof, without redesign",
+        "## Second review after native diagnosis \u2014 2026-09-23"
+      ],
+      "decision_passage_count": 28
+    },
+    {
+      "path": "scratch/review-slice-iteration10-followup.md",
+      "sha256": "9d21455a55b1f0741f4ded005dee0e309ee4d619f9ae9226113435c0a866f13b",
+      "bytes": 786,
+      "headings": [
+        "# Review disposition \u2014 iteration 10 follow-up"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration10-followup.txt",
+      "sha256": "019fca3850678859f622bebb42e683a2d80b5c8ac847ff9124f59691b9164f18",
+      "bytes": 8616,
+      "headings": [
+        "# Review disposition \u2014 iteration 10 follow-up",
+        "## Findings",
+        "## Evidence matrix",
+        "## Review and configured observations",
+        "## Next slice and verification"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration10.md",
+      "sha256": "2d8fb35a4c60f2186afa9f64e80a7a95cac9588fcdf878ee09ebcb301797ecd9",
+      "bytes": 774,
+      "headings": [
+        "# Integrated workspace review \u2014 2026-09-23"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration10.txt",
+      "sha256": "b4bdd8935f81844a953d05f08d6b4a963253739d01d0d957360b5d60cffb0989",
+      "bytes": 7413,
+      "headings": [
+        "# Integrated workspace review \u2014 2026-09-23",
+        "## Evidence matrix",
+        "## What was reviewed",
+        "## Exact configured boundary",
+        "## Focused native proof"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/review-slice-iteration11.md",
+      "sha256": "b619ffd20f2c3ddfa83c863820523fba1b0e7fd32246c3af4fecf26ab0d850e4",
+      "bytes": 766,
+      "headings": [
+        "# Iteration 11 review \u2014 2026-09-23"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration11.txt",
+      "sha256": "c54aa279cb49c0fc2e8dec849013c8e99981a4273001af4ca1a491ab7d798a44",
+      "bytes": 7751,
+      "headings": [
+        "# Iteration 11 review \u2014 2026-09-23",
+        "## Evidence",
+        "## Configured observations and corrected interpretation",
+        "## Source and architecture"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration12.md",
+      "sha256": "59fc04c3f670c85144a2adf4f44071032a595dbaff7e3cc8b2a711a861ca1c1d",
+      "bytes": 766,
+      "headings": [
+        "# Iteration 12 review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration12.txt",
+      "sha256": "ef70dde2d76fa457b9bf5a92d1367e851b0a125dde0d7006cdf468472062f801",
+      "bytes": 6765,
+      "headings": [
+        "# Iteration 12 review \u2014 2026-09-24",
+        "## Evidence and scope",
+        "## Configured observation",
+        "## Source judgment and verification",
+        "## Next slice and disposition"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration13.md",
+      "sha256": "23bc08c531529172cbe31565c4481ffcdfef11ccef2fb43877fc5b67dfe61ffc",
+      "bytes": 766,
+      "headings": [
+        "# Iteration 13 review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration13.txt",
+      "sha256": "538e49cc0ed9e71e0a988791e95158f51549b3ee4e662b38ec44633d49db7ff5",
+      "bytes": 6070,
+      "headings": [
+        "# Iteration 13 review \u2014 2026-09-24",
+        "## Evidence matrix",
+        "## Demonstration",
+        "## Source review and disposition"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration14.md",
+      "sha256": "a195258e6c982cdec2d98a19f961e5cdb3d4bc05db342a25d5daad41ded76ec3",
+      "bytes": 766,
+      "headings": [
+        "# Iteration 14 review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration14.txt",
+      "sha256": "f6fa75aef6788eec626a07fa90d87fc0e8c3dc0dc7018d1b3d7f9fb5d08a4232",
+      "bytes": 8060,
+      "headings": [
+        "# Iteration 14 review \u2014 2026-09-24",
+        "## Evidence matrix",
+        "## Demonstration and evidence limits",
+        "## Source and architectural review",
+        "## Disposition"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration15.md",
+      "sha256": "783a3609578d01a16fea302d0e3542f2684a11fff8f8a1c731ae9c0f61c103b0",
+      "bytes": 777,
+      "headings": [
+        "# Shared Session contract review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration15.txt",
+      "sha256": "9ca89cbe7e04f2b3bf5372c486336969f65495fe976b9fe7e95882eb6f0a1feb",
+      "bytes": 9418,
+      "headings": [
+        "# Shared Session contract review \u2014 2026-09-24",
+        "## Scope and evidence",
+        "## Fixed finding",
+        "## Configured boundary",
+        "## Ownership and disposition"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration16.md",
+      "sha256": "a803d7030840bcc186125d0ab305e5b157323d72cb303691a3e692e7f866d12f",
+      "bytes": 773,
+      "headings": [
+        "# Configured planning review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration16.txt",
+      "sha256": "a07c2cd940b5d1fda21a00fe4336cbc58428f072460001beeb9ae4079b24d30c",
+      "bytes": 7460,
+      "headings": [
+        "# Configured planning review \u2014 2026-09-24",
+        "## Scope and review",
+        "## Configured evidence and probe corrections",
+        "## Architecture and disposition"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/review-slice-iteration17.md",
+      "sha256": "172beb931e9bf8559419f96749f5e273e12f3c26282537c88f8010e9236cf531",
+      "bytes": 769,
+      "headings": [
+        "# Hierarchy study review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration17.txt",
+      "sha256": "545e05c55424e69b2bf50180d32b177ccd9ffd6f5f03a15bdba88db204e7cf9e",
+      "bytes": 7026,
+      "headings": [
+        "# Hierarchy study review \u2014 2026-09-24",
+        "## Evidence matrix",
+        "## Scope and source findings",
+        "## Next slice and disposition"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration18.md",
+      "sha256": "e99dcffb0bbdcbf8b99a095352a1e935cf8045f0ea296f445efb7e6f8dc35656",
+      "bytes": 789,
+      "headings": [
+        "# Iteration 18 \u2014 native outline and required Session Runs"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration18.txt",
+      "sha256": "f11f0f947b391b98183b9e75eb8f46202f08d8a77eef4c98ff6662594a287ce7",
+      "bytes": 9575,
+      "headings": [
+        "# Iteration 18 \u2014 native outline and required Session Runs",
+        "## Evidence matrix",
+        "## Corrections made in this review",
+        "## Configured demonstration and limits",
+        "## Verification",
+        "## Next implementation boundary"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-slice-iteration19.md",
+      "sha256": "7805160851afaccfeb1638b2dfc1095b1a7998adbc28e920a5bcf166bef62c13",
+      "bytes": 774,
+      "headings": [
+        "# Active Runs contract review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration19.txt",
+      "sha256": "0276674acec2083ca9d45ee024df30ac0eba6004becd7f018003300a478f319a",
+      "bytes": 6836,
+      "headings": [
+        "# Active Runs contract review \u2014 2026-09-24",
+        "## Evidence matrix",
+        "## Demonstrated behavior",
+        "## Source and review limits",
+        "## Next implementation boundary"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/review-slice-iteration20.md",
+      "sha256": "b41609cb6cceee91a556c8832249847755745ff6eb25384d2d9c71f0d88e7746",
+      "bytes": 766,
+      "headings": [
+        "# Task Monitor review \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration20.txt",
+      "sha256": "17da4035732a1d3ecaa4aa1d3057e30f1a2e3a14a0b3553603c6f47758e8ed1d",
+      "bytes": 9248,
+      "headings": [
+        "# Task Monitor review \u2014 2026-09-24",
+        "## Evidence matrix",
+        "## Fresh configured proof",
+        "## Source review",
+        "## Disposition"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/review-slice-iteration7-independent.md",
+      "sha256": "3b305a03fd39836f4ee7e98d62581e4a9e789c1f7a03e4bc1d18f9c70c2bcfd9",
+      "bytes": 788,
+      "headings": [
+        "# Iteration 7 independent review \u2014 2026-09-23"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-slice-iteration7-independent.txt",
+      "sha256": "0ff5a0eb537cd770392a90f8f085812d5841e1c3dc2233117417e3d72a4ab503",
+      "bytes": 8315,
+      "headings": [
+        "# Iteration 7 independent review \u2014 2026-09-23",
+        "## Scope and source",
+        "## Evidence matrix",
+        "## Fresh configured result",
+        "## Completion finding and verification boundary"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/review-slice.md",
+      "sha256": "ea9e86be4442d40103402364c642492996e2140ccb77a8c6b830bb9be83f6724",
+      "bytes": 844,
+      "headings": [
+        "# Historical implementation reviews"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/review-wave-chapters.md",
+      "sha256": "577a1a9487169c2b17be51123319f5e782e3a172fa07604cc3951997314f4f45",
+      "bytes": 4373,
+      "headings": [
+        "# Implementation review \u2014 Wave chapters",
+        "## Findings fixed",
+        "## Proof",
+        "## Limits"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/review-wave-integration.md",
+      "sha256": "d2db50fbb74bcd3fa0d0f928932fcfd7f27ced8102d6c31f3c1344b364f26781",
+      "bytes": 8161,
+      "headings": [
+        "# Wave-only workspace review \u2014 2026-09-24",
+        "## Findings fixed",
+        "## Evidence matrix",
+        "## Source scope and ownership",
+        "## Next slice and disposition"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/review-wave-reconciliation.md",
+      "sha256": "7449ec0737277d6df323834a5c3e38c3f53eaf2a6e898af1a37618d4f36315a5",
+      "bytes": 5266,
+      "headings": [
+        "# Monitor review and Wave reconciliation \u2014 2026-09-24",
+        "## Observed sibling contract",
+        "## Bounded correction and proof",
+        "## Next slice and disposition"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/review22-evidence/report.md",
+      "sha256": "e05b959dc1bc077a46f1a6a63f69c191eefd1e9f9fb26a46285087cb5e4c8644",
+      "bytes": 2102,
+      "headings": [
+        "# Desktop measurements: complete"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/runtime-contract.md",
+      "sha256": "8d8ac174c8986a11fb7e47baff3bcb21bc6540c104fe302cde87783ff3414430",
+      "bytes": 3217,
+      "headings": [
+        "# Shared transition implementation contract"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/saved-xor-recovery.md",
+      "sha256": "a6af2f57e9ab4b583dc6580443e5aac89120b3d1db380ebb3befd067d39eac05",
+      "bytes": 5645,
+      "headings": [
+        "# Saved XOR recovery and continued integration",
+        "## Results and subsequent audit"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/scratch-feedback-handoff.md",
+      "sha256": "b2e42700c2945543ea1a8b5a13491bf5ce26d1cffefd85da2628aecf8b8e4cf4",
+      "bytes": 2570,
+      "headings": [
+        "# Scratch feedback handoff"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/session-discovery.md",
+      "sha256": "20fb3e0636b4c650ba2affa3d3940528b110be18ebdd0b19361287dc51cded1e",
+      "bytes": 3055,
+      "headings": [
+        "# Current-conversation discovery",
+        "## Verification"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/session-registration.md",
+      "sha256": "e1a0010e3582a2afc8cf53873a6814ef7964b9c4e4db399380386873b30ad18d",
+      "bytes": 1536,
+      "headings": [
+        "# Session registration counterexample"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/session-run-implementation.md",
+      "sha256": "44ad5d5b5ee557b22ab70b23bf38d806fe459210b8c0317bd204a80025a8580e",
+      "bytes": 5516,
+      "headings": [
+        "# Required Session \u2192 Run \u2014 implementation slice",
+        "## Remaining work",
+        "## Observable contract",
+        "## Review findings",
+        "## Focused proof"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/standalone-session-proof.md",
+      "sha256": "fbb24085308e061a3c10a32faed0585b6e9704c7b1dafb86328d0a1d47cc1bd8",
+      "bytes": 7965,
+      "headings": [
+        "# Standalone Flow Session adapter",
+        "## Implemented contract",
+        "## Integration hooks for main",
+        "## Proof",
+        "## Remaining integration limits",
+        "## Main integration follow-through"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/task-bound-flows.md",
+      "sha256": "d36162d6a140954b614d96ba5aba4fd7c9a33b3bcf82510d2d22e5eca03639f7",
+      "bytes": 4792,
+      "headings": [
+        "# Direct Work-bound skills and flows",
+        "## Review and result \u2014 2026-09-24"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/task-cursor-proof.md",
+      "sha256": "312dbe50ebe8f8bd32353ffc3afa7e7a896c269812f66fedcf92d6b2ad39f40d",
+      "bytes": 4172,
+      "headings": [
+        "# Task cursor store contribution",
+        "## Contract",
+        "## Proof boundary",
+        "## Review and integration"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/task-description-prompts.md",
+      "sha256": "1cbea0f037eb93e3a5b082ebeb85eab997f0ab53077008be6ccac6ac769ce634",
+      "bytes": 3926,
+      "headings": [
+        "# Task descriptions and update history",
+        "## Review cases"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/task-handoff.md",
+      "sha256": "368ef033f4ec20a2cc4900f6d57d1058c06898bf02abc89d0193b98ec057daf5",
+      "bytes": 3698,
+      "headings": [
+        "# LOO-291 integration handoff \u2014 2026-09-23",
+        "## Concrete contribution",
+        "## Updated product intent",
+        "## Integration and next step",
+        "## Existing proof"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/task-loop-integration-proof.md",
+      "sha256": "2cec3d8ee151575cd49e2b645e9e74114b2c1f57ff50413ad13d2be16392e97d",
+      "bytes": 6382,
+      "headings": [
+        "# Task transition integration",
+        "## Result and review",
+        "## Focused proof plan and validation",
+        "## Limits and integration remaining",
+        "## Main integration evidence"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/task-monitor-implementation.md",
+      "sha256": "1c2f438cfac17587f67112f9e953f6ca83e7a622002ffa5614c55adf4cdfb71c",
+      "bytes": 5480,
+      "headings": [
+        "# Task Monitor panes \u2014 first increment, 2026-09-24",
+        "## First proof and counterexamples",
+        "## Final outcome"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/task-monitor-integration-proof.md",
+      "sha256": "315a81f6343cc5a645b9b48fbde053654b2fe7775759ade9fd7b3a52490add86",
+      "bytes": 3595,
+      "headings": [
+        "# Monitor pane identity and keyboard ownership \u2014 2026-09-24",
+        "## Corrections",
+        "## Proof",
+        "## Remaining acceptance"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/task-views.md",
+      "sha256": "ae30c41cf8f720a0bdc6b3b6adc3880b3986e9c9fed3a33561b8691ed1736451",
+      "bytes": 4712,
+      "headings": [
+        "# Task views \u2014 human direction, 2026-09-23",
+        "## Screenshot correction",
+        "## Worktree retention correction"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/update-wave.md",
+      "sha256": "70ea37caac7180ece406b16bb6846caff6fcc2a55f56d506f44eaa52636ba4df",
+      "bytes": 2983,
+      "headings": [
+        "# Product memory reconciliation \u2014 2026-09-24",
+        "## Result and review checks"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/ux-prototyping-forks.md",
+      "sha256": "4f44f9c31936bd3c7ccd719e6ae2d7b83c1f84aad7e75c86198de8301ff8d242",
+      "bytes": 11750,
+      "headings": [
+        "# Follow-up: software UX prototyping and Flow alternatives",
+        "## Problem and desired experience",
+        "## Historical findings",
+        "### Workspaces and result handling",
+        "### Costs and recovery implications",
+        "## Decisions for the follow-up",
+        "## Done when"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/visual-study/README.md",
+      "sha256": "6dbde4ddb2947af50d6fcedb195afcf2b68356ee538f561f1330f092425e5b6c",
+      "bytes": 4682,
+      "headings": [
+        "# Accepted workspace prototype",
+        "## Source map"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/brief.md",
+      "sha256": "a869ce920efd1d2e547247896373584751584fb4ca20a1104097a0bb1a62c8c4",
+      "bytes": 6396,
+      "headings": [
+        "# Three Loopflow visual directions"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/visual-study/current-data-evidence/review.md",
+      "sha256": "0f4731b9e858c56e5b2aae2aab568094edc4c27751054fb81e183e4edf2baa2b",
+      "bytes": 3628,
+      "headings": [
+        "# Current planning preview \u2014 2026-09-25"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/visual-study/density-evidence/review.md",
+      "sha256": "c9480eecf0be91def3c1ff62e50a6660b0a868234287be8c220259e0e638257a",
+      "bytes": 1890,
+      "headings": [
+        "# Larger Task population \u2014 2026-09-25",
+        "## Earlier population"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/visual-study/flow-research.md",
+      "sha256": "af1e4adc78974a49ac719df3cdec1a9f1dfbdddc1fbcfd4832888f15ec9fe4b7",
+      "bytes": 8075,
+      "headings": [
+        "# Before the first Run",
+        "## Observed references",
+        "## Design hypotheses",
+        "## Data limits",
+        "## Review of the working study",
+        "## Accepted C and backward-edge direction"
+      ],
+      "decision_passage_count": 5
+    },
+    {
+      "path": "scratch/visual-study/flow-study-brief.md",
+      "sha256": "de5e891817b8cf6f23c900866a86c2e43cc5ca2938afb875cb321c227170638d",
+      "bytes": 4596,
+      "headings": [
+        "# Task 1: preview its Flow before starting",
+        "## Contract",
+        "## Three genuinely distinct treatments",
+        "## Accepted visual language",
+        "## References inspected by parent"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/header-brief.md",
+      "sha256": "5be54bc3c194ae3e0d9879e39c1c7f9b32df50178d53ad3c5fe16a8b87426463",
+      "bytes": 1900,
+      "headings": [
+        "# Three Task header treatments"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/header-evidence/review.md",
+      "sha256": "69c61c654f82299f226c873b68b5fdd32e041879cca72a46e489c8b7665f07da",
+      "bytes": 2021,
+      "headings": [
+        "# Task header comparison \u2014 September 25, 2026"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/refinement-evidence/review.md",
+      "sha256": "ae7285cd065ebbb3dbceae82784ca17cecbf1ba2a9e6238bf8786df1ded16ffd",
+      "bytes": 2507,
+      "headings": [
+        "# A refinement \u2014 2026-09-25"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/repo-frame-brief.md",
+      "sha256": "9acab84c66ccae31eb3db158aa79f8af330681d2edf65d1447dcf7ab05deff64",
+      "bytes": 3868,
+      "headings": [
+        "# A: one repository frame, with data first"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/review.md",
+      "sha256": "3dff7c41abbd0dfaf7340f0a7748258988ce19c84a9b924310ce8b6630f0e26b",
+      "bytes": 1841,
+      "headings": [
+        "# Composition study review"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/visual-study/task-entry-brief.md",
+      "sha256": "41f5726167d6be443473f9dd8ff8ee18ccbbf9383ef89cbab8112e7931ad46c9",
+      "bytes": 2125,
+      "headings": [
+        "# Task row \u2192 conversation experiment"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/task-entry-evidence/review.md",
+      "sha256": "2bb298823c78b2e8d810225e5beb47c2d7eadf6d74cb74a7354359774d6f8423",
+      "bytes": 2806,
+      "headings": [
+        "# Task entry experiment \u2014 2026-09-25"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/task2-brief.md",
+      "sha256": "8a37da094f4d2c6310e32137beab3a68e1a201731e21b338096301ee950713db",
+      "bytes": 2903,
+      "headings": [
+        "# Task 2: execution without an open Session"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/visual-study/task2-design.md",
+      "sha256": "901dfb2324650907ce228466979fb4296cf2597a56cdfabb69feb2ee5972ee1a",
+      "bytes": 5375,
+      "headings": [
+        "# Task 2 \u2014 execution, no open Session",
+        "## Review and remaining decision"
+      ],
+      "decision_passage_count": 4
+    },
+    {
+      "path": "scratch/visual-study/task3-brief.md",
+      "sha256": "0e5957df5738461c28301b76408590f8d4d05a208ba014cc7dc082dac2c784cc",
+      "bytes": 2093,
+      "headings": [
+        "# Task 3: open Sessions prototype"
+      ],
+      "decision_passage_count": 0
+    },
+    {
+      "path": "scratch/visual-study/task3-design.md",
+      "sha256": "4eb212296a7a3455ae70dc5cc807b8e776a9d027a2729c5aa12df7d4c8a8dbfc",
+      "bytes": 2605,
+      "headings": [
+        "# Task 3 \u2014 open Sessions"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/visual-study/zoom-brief.md",
+      "sha256": "c1d579aee0ce2ad1c363b7bc88aae83d4a04062461c9af7b02d61e29d8c75267",
+      "bytes": 2528,
+      "headings": [
+        "# Refine the selected A composition"
+      ],
+      "decision_passage_count": 1
+    },
+    {
+      "path": "scratch/wave-integration.md",
+      "sha256": "a3c21cf127d6f8efad3387bfdccb072dc8c259e168609572de154a0338e131f8",
+      "bytes": 6981,
+      "headings": [
+        "# Wave-only workspace integration \u2014 2026-09-24",
+        "## Result and remaining work",
+        "## Reconciled ownership",
+        "## Verification",
+        "## Review and concurrent contribution"
+      ],
+      "decision_passage_count": 2
+    },
+    {
+      "path": "scratch/wave-playhead-removal.md",
+      "sha256": "ef29908e1e6588cabd4ea028a5f1519c4fef5886ecbc079b18f03b93f788a9c6",
+      "bytes": 13555,
+      "headings": [
+        "# Remove the Wave Flow interpreter; preserve Wave operation",
+        "## Outcome and boundary",
+        "## Shared types and ownership",
+        "## Journal cutover and recovery",
+        "## Behavior that must survive",
+        "## Completion proof",
+        "## Documentation contribution findings"
+      ],
+      "decision_passage_count": 3
+    },
+    {
+      "path": "scratch/xor-pinning-proof.md",
+      "sha256": "80aa464a2a9316381154e58bb41d6c98b38ea3398387de5b7a6f4472bda4a252",
+      "bytes": 4581,
+      "headings": [
+        "# XOR definition pinning",
+        "## Captured definition",
+        "## Focused proof",
+        "## Review and integration boundary"
+      ],
+      "decision_passage_count": 0
+    }
+  ],
+  "source_observations": [
+    {
+      "path": "swift/LoopflowMac/Views/WorkSurfaceView.swift",
+      "sha256": "4886f061b4148c7b631dc531309c16b006e08287908669a92c0fe02901973cdb"
+    },
+    {
+      "path": "swift/LoopflowMac/Views/WorkspaceNavigator.swift",
+      "sha256": "eec92ee5218061f2fe00477cb8f969266e3b6b1857fb58ad1049953e38749e39"
+    },
+    {
+      "path": "swift/LoopflowMac/Views/WorkspaceBreadcrumbBar.swift",
+      "sha256": "23ec6ca3f9401216784b130391b924c6bdd9c861e1164637e655897312d973e2"
+    },
+    {
+      "path": "swift/LoopflowMac/Views/SessionsView.swift",
+      "sha256": "4eb101b2405d1a4f7c7257ad277acf40b9c61b1fc3921762415a5ee9547bff76"
+    },
+    {
+      "path": "swift/LoopflowMac/Views/TaskFlowView.swift",
+      "sha256": "168342b1960841ce673156a2881c2a46abb353a614047db96c1212c13a44ba39"
+    },
+    {
+      "path": "swift/LoopflowMac/WorkspaceProjection.swift",
+      "sha256": "100a1cf0643f8497db6212e072da3226ee043c9fd41d777b8294a37a19c2cf9b"
+    },
+    {
+      "path": "swift/Loopflow/Models/SessionRecord.swift",
+      "sha256": "43a5aea0c5d9db1c803bae3679a54b80e15b9c1a21e3277947610491c10e5a8c"
+    },
+    {
+      "path": "swift/Loopflow/Models/TaskFlow.swift",
+      "sha256": "cba7ee51b432d7d8846af476375106d4df25ef261c6cf6888d49fb9f7021d569"
+    },
+    {
+      "path": "swift/LoopflowTests/WorkspaceNavigationTests.swift",
+      "sha256": "a57dec71ad670ae23b03a69766533d28fbfc0d49d46cb69abb65835aa3b7c336"
+    },
+    {
+      "path": "swift/LoopflowTests/WorkspaceNavigationProofTests.swift",
+      "sha256": "765d265577d83a6a0c26e049f6679199243efbe372ad64c2ff5faf80914c7239"
+    },
+    {
+      "path": "rust/loopflow/src/engine/flow_graph.rs",
+      "sha256": "4234cff44814aefd2ed74563523e6b1fc8ddf7b022034461cab1a4911e8c0733"
+    },
+    {
+      "path": "rust/loopflow/src/ops/task_flow.rs",
+      "sha256": "5beb874f5780aed9ee0b70fbbbf48a4f47d2463e9c03033bf037e43a76df8660"
+    },
+    {
+      "path": ".lf/directions/desktop.md",
+      "sha256": "f1341445476a58b5b0570ef886b937fd271a42f3698baa90cd6aa035caf7b3d3"
+    }
+  ]
+}

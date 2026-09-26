@@ -309,8 +309,8 @@ fn observing_and_preparing_a_task_are_not_execution() {
 
 #[test]
 fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone() {
-    use loopflow::controller::wave::playhead::QueuedInvocation;
     use loopflow::durable::FlowPosition;
+    use loopflow::engine::invocation::QueuedInvocation;
     use loopflow_test_support::TestRepo;
 
     let repo = TestRepo::new();
@@ -501,7 +501,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         .unwrap();
     assert_eq!(session["work"]["id"], task.task.id.to_string());
     assert_eq!(session["flow_membership"]["flow"], "review-contribution");
-    assert_eq!(session["flow_membership"]["current"], true);
+    assert_eq!(session["flow_membership"]["occurrence"], "current");
     let run_id = session["run_id"].as_str().unwrap();
     let renamed = run_lf(
         repo.path(),

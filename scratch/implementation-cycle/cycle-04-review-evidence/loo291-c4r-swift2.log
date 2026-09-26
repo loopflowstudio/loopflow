@@ -1,0 +1,36 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Compiling LoopflowMac TaskFlowView.swift
+[4/7] Emitting module LoopflowMac
+[4/8] Write Objects.LinkFileList
+[5/8] Linking LoopflowMac
+[6/8] Applying LoopflowMac
+[8/9] Emitting module LoopflowTests
+[8/10] Write Objects.LinkFileList
+[9/10] Linking LoopflowSwiftPackageTests
+Build complete! (3.09s)
+Test Suite 'Selected tests' started at 2026-09-25 15:46:22.582.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-25 15:46:22.583.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-25 15:46:22.583.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-25 15:46:22.583.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Flow" started.
+◇ Test "Flow snapshots and the catalogue decode every record without defaults" started.
+✔ Test "Flow snapshots and the catalogue decode every record without defaults" passed after 0.003 seconds.
+◇ Test "Occurrence state and iteration come from the saved pass, separately from edge counts" started.
+✔ Test "Occurrence state and iteration come from the saved pass, separately from edge counts" passed after 0.001 seconds.
+✔ Suite "Task Flow" passed after 0.003 seconds.
+◇ Suite "Task Flow native proof" started.
+◇ Test "Flow preview, controls and execution updates keep the Session's terminal, draft and companion" started.
+✔ Test "Flow preview, controls and execution updates keep the Session's terminal, draft and companion" passed after 4.392 seconds.
+✔ Suite "Task Flow native proof" passed after 4.392 seconds.
+◇ Suite "Real Feature capture (temporary)" started.
+◇ Test captureRealFeature() started.
+✔ Test captureRealFeature() passed after 0.067 seconds.
+✔ Suite "Real Feature capture (temporary)" passed after 0.067 seconds.
+✔ Test run with 4 tests in 3 suites passed after 4.463 seconds.

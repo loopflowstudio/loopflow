@@ -1,0 +1,26 @@
+{
+  "source": {
+    "rust/loopflow/src/engine/flow_graph.rs": "30b0aaa9ed26c681a26f41aa7c8daa9f0349280f052b379534ed436df6fc1fb9",
+    "rust/loopflow/src/ops/task_flow.rs": "759a52961dc1d9cbfd4a4398bf3cdb51066fd3d0cbeddbba7de970fb4dd3655a",
+    "rust/loopflow/src/run_record.rs": "8c87543b5b1808e06c05eafcf054eaf8272814a86d4ed3f68e1d637b8a0fec3d",
+    "rust/loopflow/src/ops/human_session.rs": "b7b7ed01a9c522d4a89ac923afeaf40b001ce249c9fd45ea74ce903bb45d72b0",
+    "rust/loopflow/src/ops/flow_session.rs": "1461bf06e358468f8c31795e1182850af0f36bf5d79484b873229b40cdcc81ca",
+    "rust/loopflow/src/controller/task/mod.rs": "c40725b5f5868371d89be034be39e23b43095c70545b58709a611092ca6b5fa8",
+    "rust/loopflow/tests/flow_tests.rs": "5d9994d304164319cf0825cfb12c632b7a559cf8a05ce0232ae7dfcc2b14b271",
+    "swift/Loopflow/Models/TaskFlow.swift": "0cf8b0209cf35a3d0a33f1e4edc95de8df79efc9b02ca0eb10b54883e31af4ae",
+    "swift/Loopflow/Models/SessionRecord.swift": "e773deb60436ebe74b43c9bc1952a08b815ea9bae97581abf67cf7da26b53fa2",
+    "swift/LoopflowMac/Views/TaskFlowView.swift": "d756a11540ef32ff8f081b22bbc5fbfe56520d29c5c1222486313ada897ea2ad",
+    "swift/LoopflowTests/TaskFlowProofTests.swift": "52bf8dfe9de72bd6c674a748a383b4f35d0d3c1dd291daf7a8b1f3fe035eb2cd",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "55245abcd8250d2dc640afc3267f6fe6e97655207e97d90a94d23edfd71a196f",
+    "tests/fixtures/dto/task_flow.json": "932a13662b4bf533bafade56f3bdd33893b1062da9a3bc338ace0f6385d7a199",
+    "tests/fixtures/dto/session_memberships.json": "1a2448d7a1759242e8f650978280bcd4538affb14f2fc27222463036e079cf58"
+  },
+  "artifacts": {
+    "/tmp/loo291-parent-tuple-identity.log": "f0a7803e5adc1d91628d8e99c5befe2f27e6c91e6b51abb5ce6151176cf922d9",
+    "/tmp/loo291-parent-tuple-cli-final.log": "ca0ac8c129841a968b92b7df5c62043f1311dfab92a8f8dc5a3fbd5edc95f32a",
+    "/tmp/loo291-parent-tuple-dto.log": "0af8ad1094bb824d616c4b36a1cf90e92ae1d28189ba2790a15860a273513b30",
+    "/tmp/loo291-parent-tuple-swift-final.log": "677bbfeb7ee54646549a539afdf15511fa0e280d529f392a1a8b9fdb46514509",
+    "/tmp/loo291-parent-tuple-clippy.log": "0d6ca60dd08d323c778212036226403ace6b8da776860511b2abfe403ce2eea4"
+  },
+  "scope": "Tuple projection; concurrent polish and Comments edits preserved, not attributed here"
+}

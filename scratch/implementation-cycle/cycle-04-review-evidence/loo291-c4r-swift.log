@@ -1,0 +1,43 @@
+[0/1] Planning build
+Building for debugging...
+[0/7] Write sources
+[2/7] Write swift-version--58304C5D6DBC2206.txt
+[4/9] Emitting module LoopflowMac
+[5/9] Compiling LoopflowMac TaskFlowView.swift
+[5/10] Write Objects.LinkFileList
+[6/10] Linking LoopflowMac
+[7/10] Applying LoopflowMac
+[9/13] Compiling LoopflowTests TaskFlowRealCaptureTemp.swift
+[10/13] Compiling LoopflowTests TaskFlowProofTests.swift
+[11/13] Emitting module LoopflowTests
+[11/13] Write Objects.LinkFileList
+[12/13] Linking LoopflowSwiftPackageTests
+Build complete! (4.09s)
+Test Suite 'Selected tests' started at 2026-09-25 15:46:01.077.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-25 15:46:01.078.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-25 15:46:01.078.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-25 15:46:01.078.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Flow" started.
+◇ Test "Flow snapshots and the catalogue decode every record without defaults" started.
+✔ Test "Flow snapshots and the catalogue decode every record without defaults" passed after 0.002 seconds.
+◇ Test "Occurrence state and iteration come from the saved pass, separately from edge counts" started.
+✔ Test "Occurrence state and iteration come from the saved pass, separately from edge counts" passed after 0.001 seconds.
+✔ Suite "Task Flow" passed after 0.003 seconds.
+◇ Suite "Task Flow native proof" started.
+◇ Test "Flow preview, controls and execution updates keep the Session's terminal, draft and companion" started.
+✔ Test "Flow preview, controls and execution updates keep the Session's terminal, draft and companion" passed after 4.403 seconds.
+✔ Suite "Task Flow native proof" passed after 4.403 seconds.
+◇ Suite "Real Feature capture (temporary)" started.
+◇ Test captureRealFeature() started.
+✔ Test captureRealFeature() passed after 0.066 seconds.
+✔ Suite "Real Feature capture (temporary)" passed after 0.066 seconds.
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "A delayed New session failure stays with its Task across Task and repository navigation" started.
+✔ Test "A delayed New session failure stays with its Task across Task and repository navigation" passed after 0.188 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 0.188 seconds.
+✔ Test run with 5 tests in 4 suites passed after 4.662 seconds.

@@ -1,0 +1,56 @@
+16c16,17
+<     case paused
+---
+>     case stopped
+>     case unknown
+43c44,45
+<         case .idle, .unknown: return .paused
+---
+>         case .idle: return .stopped
+>         case .unknown: return .unknown
+223c225
+<             Text("Loopflow checkpoints and pushes this worktree, stops the current worker, and pins \(replacement) from its first step. The Task, worktree, and PR history stay.")
+---
+>             Text("Loopflow refreshes this Task from Linear, commits and pushes every change in its worktree as a checkpoint, stops the current worker, and starts \(replacement) from its first step. The Task, worktree, and PR history stay.")
+271,277c273,278
+<             let label = switch pinned.execution {
+<             case .running: "Running"
+<             case .starting: "Starting"
+<             case .human: "Waiting for you"
+<             case .blocked: "Blocked"
+<             case .idle: "Stopped"
+<             case .unknown: "Unknown"
+---
+>             // Running, starting, review and unknown reasons already name their
+>             // state; a failure reason and an idle boundary need the label.
+>             switch pinned.execution {
+>             case .blocked: return "Blocked · \(pinned.reason)"
+>             case .idle: return "Stopped · \(pinned.reason)"
+>             case .running, .starting, .human, .unknown: return pinned.reason
+279d279
+<             return "\(label) · \(pinned.reason)"
+453c453,457
+<             .background(RoundedRectangle(cornerRadius: 7).fill(style.fill))
+---
+>             .background(
+>                 // An opaque base keeps state colors legible over the loop tint.
+>                 RoundedRectangle(cornerRadius: 7).fill(style.fill)
+>                     .background(RoundedRectangle(cornerRadius: 7).fill(palette.surface))
+>             )
+550c554
+<         case .paused: (Color.statusNeutral.opacity(0.18), Color.statusNeutral)
+---
+>         case .stopped, .unknown: (Color.statusNeutral.opacity(0.18), Color.statusNeutral)
+561c565,566
+<         case .paused: "current, not advancing"
+---
+>         case .stopped: "stopped here"
+>         case .unknown: "current, worker state unknown"
+163c163
+<         #expect(try text("task-flow-status") == "Waiting for you · Waiting for your review at demo")
+---
+>         #expect(try text("task-flow-status") == "Waiting for your review at demo")
+196c196
+<         #expect(try text("task-flow-status") == "Running · Worker is running review-slice")
+---
+>         #expect(try text("task-flow-status") == "Worker is running review-slice")

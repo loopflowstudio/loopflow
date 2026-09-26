@@ -52,9 +52,9 @@ lf task run DES-124 --stack-on DES-123                # dependent Task, separate
 ```
 
 `--task` and `--wave` run a named skill, Flow or inline prompt about existing Work
-without advancing its managed Flow position. A direct bound Flow has its own
+without advancing its current invocation. A direct bound Flow has its own
 invocation; attribution does not claim the Task worker's cursor. The most
-specific selector is the Run subject: a Task implies its Wave. Broader
+specific selector is the Run's typed parent: a Task implies its Wave. Broader
 selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
 Markdown snapshot. Wave binding uses its repository. Several Runs may concern the same Work
@@ -783,7 +783,7 @@ lf runs run_ab12 --events        # print its event stream verbatim
 lf usage --project parser        # direct Run usage for one Project
 lf usage --task INF-123 --json   # direct Run evidence for one Task
 lf session list                  # Sessions, Work paths, actions and unavailable reasons
-lf session open run_ab12         # continue a closed native provider session
+lf session open run_ab12         # resume an open conversation after provider exit
 lf session open run_ab12 --try   # let the provider arbitrate an active session
 lf session open run_ab12 --replace # stop Loopflow's client, then continue here
 lf session open run_ab12 --json --replace # prepare a takeover command without stopping it yet
@@ -903,7 +903,8 @@ Replay uses the immutable prompt, agent/model, non-secret provider account ID,
 and tool boundary recorded before spawn; it never reconstructs those inputs
 from current planning or prompt configuration. Managed Claude/Codex replay
 resolves that account ID through the current Home's deterministic credential
-directory or an explicit forwarded lease, without opening planning SQLite.
+directory or an explicit forwarded lease; replay uses the same validated Run
+creation path as any other launch.
 None of these commands silently queries or aggregates another Home.
 
 `lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
@@ -942,7 +943,8 @@ route, then the default route. If neither exists, all automatic managed logins
 are eligible and Loopflow skips known cooling or limited accounts. If no
 managed login exists, the provider CLI uses its ambient default credentials.
 
-`lf usage` scans the same Home-local bundles as `lf runs`, ordered newest first.
+`lf usage` selects the same Home-local Run rows as `lf runs`, ordered newest
+first, and reads their provider usage evidence.
 `--days` filters by Run start time and defaults to 30; zero selects all recorded
 Runs. `--wave`, `--project`, and `--task` apply the same Work attribution drill
 as `lf runs`; the table names the most specific Work on each row. JSON remains
@@ -951,9 +953,10 @@ cumulative counters once per usage stream. Omitted counters stay unknown,
 provider final receipts are counted explicitly, and evidence gaps remain visible.
 Run settlement never invents provider finality.
 
-A Run is one Home-local harness bundle. Its immutable manifest names launch
-context and causal parent; append-only event and conversation streams retain
-direct evidence; an exclusive terminal receipt settles it once. Provider
+A Run is one Home-local row with immutable launch artifacts and append-only
+provider evidence. The row owns current attribution and lifecycle. The manifest
+retains launch inputs and causal parent; terminal evidence supports recoverable
+settlement. Bind changes current attribution without rewriting launch evidence. Provider
 retry/failover remains inside that Run as distinct attempts and usage streams.
 No owner receipt means no process signal authority.
 
@@ -1132,7 +1135,7 @@ are updated regardless of where the copy came from.
 
 Inside a managed Task worktree, `submit` records a user-owned exact-head merge
 request in the Task PR state. It does not advance or consult the Task's Flow
-position. Use `-c` to complete the Task after merge or `--next <slug>` to
+invocation. Use `-c` to complete the Task after merge or `--next <slug>` to
 rotate its serial PR chain.
 
 ### lf pr arm
@@ -1211,7 +1214,7 @@ in **Checks** or CI, never in the walkthrough. Ordinary non-Task PR copy is unch
 
 If a Task's work already merged and rotation left a provably empty unpublished
 successor, `lf pr land -c` completes over the merged PR without creating
-another one. This is a delivery-state decision and needs no Flow-position claim.
+another one. This is a delivery-state decision and needs no invocation claim.
 
 Submit, arm, and land clear `scratch/`, preserve a recovery ref, collapse the
 authored range to one tree-identical commit, replay that commit onto the pinned
@@ -1437,9 +1440,10 @@ and host-drift observation windows share one evidence surface.
 
 ## Planning commands
 
-Read and edit a wave's Linear planning state. Each wave is backed by one
-Linear Initiative, its one current chapter uses an internal Linear Project, and Tasks are Issues. `sync`
-refreshes the local SQLite read model used by every other read surface.
+Read and edit a Wave's Linear planning state. Each Wave maps to an Initiative;
+its Project in each repository Chapter maps to a Linear Project; Tasks are
+Issues. `sync` refreshes the local planning projection. Chapter identity and
+execution records retain their own SQLite authority.
 
 ```bash
 lf wave list                                # linked waves and task counts
@@ -1449,8 +1453,8 @@ lf doctor --planning                           # report drift without writing
 lf wave status designer                  # read shared planning
 lf wave status designer --no-sync        # cache-only agent/app read
 lf wave update-plan --wave designer --plan plan.json
-lf wave new-chapter --wave designer --chapter 2026-09 --plan plan.json --dry-run --json
-lf wave new-chapter --wave designer --chapter 2026-09 --plan plan.json --json
+lf wave new-chapter --chapter 2026-09 --plan chapter.json --dry-run --json
+lf wave new-chapter --chapter 2026-09 --plan chapter.json --json
 lf wave history --wave designer --json
 lf wave status designer --chapter 2026-08 --json
 lf task create --wave designer --title "Dark mode"
@@ -1461,6 +1465,12 @@ lf wave rename designer --title "Designer"   # rename the Initiative
 lf repo reteam                            # dry-run the repository-wide Team migration
 lf repo reteam --apply                    # migrate when no Task Run can write old ids
 ```
+
+`update-plan` replaces one Wave's current Project content. `new-chapter`
+advances the repository clock for every Wave together; `chapter.json` supplies
+all Wave plans. See [Waves](waves.md#the-planning-model) for the envelope,
+preview, transfer and retry rules. `history --wave` filters a repository's
+chapter history to one Wave; it does not define an independent clock.
 
 `lf task delete ISSUE` deletes registered or planning-only Tasks from Linear and
 reconciles their local record. Completed work keeps its outcome and terminal time;

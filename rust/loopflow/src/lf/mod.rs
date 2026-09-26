@@ -215,11 +215,20 @@ pub struct ScreenshotArgs {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Commands {
-    /// Show the preferred name saved in personal configuration
+pub enum UserCommand {
+    /// Show the display name from personal Loopflow configuration or Git
     Name {
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Inspect the current user
+    User {
+        #[command(subcommand)]
+        cmd: UserCommand,
     },
     /// Run an inline prompt
     #[command(name = ":")]

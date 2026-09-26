@@ -1398,7 +1398,9 @@ fn main() -> anyhow::Result<()> {
                 })
             }
             Some(Commands::Desktop) => loopflow::lf::commands::desktop::run(),
-            Some(Commands::Name { json }) => {
+            Some(Commands::User {
+                cmd: loopflow::lf::UserCommand::Name { json },
+            }) => {
                 let name = loopflow::engine::config::load_user_name()?;
                 if *json {
                     println!("{}", serde_json::to_string(&name)?);

@@ -68,12 +68,15 @@ Home, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
-In an interactive session, if the current participant's preferred name is
-missing, ask what name to use in saved artifacts. Record their explicit choice as `user.name` in personal
-configuration (`$LF_HOME/config.yaml`, or `~/.lf/config.yaml` when unset),
-preserving other settings. An explicit correction updates the same preference;
-blank or absent means unknown. Never infer it from an account, directory, or
-Git author, and never put a personal name in repo configuration.
+Read `lf user name --json`: a personal Loopflow `user.name` override wins,
+otherwise Git's configured `user.name` supplies the baseline. An available name
+needs no additional setup. Agents may also use a name already known in the session.
+In an interactive session, if neither source supplies a name, ask what name to
+use in saved artifacts. Record an explicit choice or correction as `user.name`
+in personal configuration (`$LF_HOME/config.yaml`, or `~/.lf/config.yaml` when
+unset), preserving other settings. Blank or absent preferences fall through to
+Git. Never infer a name from an account, directory, or commit author, and never
+put a personal name in repo Loopflow configuration.
 On SSH, preserve the destination owner's preference; the caller's preference
 belongs on the originating Home. In unattended work, leave an absent name unknown.
 

@@ -318,6 +318,7 @@ pub struct IssueComment {
     pub revision: Option<String>,
     pub body: String,
     pub author_id: Option<String>,
+    /// Provider display name for attribution, independent of the provider user ID.
     pub author_name: Option<String>,
 }
 

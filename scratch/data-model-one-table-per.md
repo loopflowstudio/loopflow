@@ -1,0 +1,488 @@
+# One SQLite owner per product object
+
+LOO-298 · Infrastructure · 2026-09-26
+
+Status: documentation specification for Jack's `review-design` boundary.
+Jack approved the target model, not every mechanism below. No implementation,
+schema change, provider mutation or real-Home migration is part of this slice.
+
+## Problem
+
+Jack needs a Session to retain its identity and Task when a PR lands, and every
+reader to agree about that Task. Four storage formats assembled into one Session
+list make rename, bind, completion and recovery separate mechanisms. Run ancestry
+encoded in selector strings makes each reader reconstruct relationships that
+should be foreign keys. The desktop pays for repeated scans and regrouping.
+
+The Infrastructure objective is dependable execution with one owner per fact.
+This work supports the chapter's generic Session → Task → progress KR and its
+no-chasing-Sessions KR by removing attribution and recovery plumbing. It does
+not establish either KR merely by changing schema or passing fixture tests.
+The supplied chapter has no metric targets; the latency goal below is a proposed
+acceptance measure, not an invented chapter commitment.
+
+Accepted decisions live in [the handoff](from-loo291/demo-native-workspace.md),
+especially “Main objects are main tables,” “Green light,” and the final nullable
+parent correction. [The synthesis](from-loo291/data-model.md) summarizes them.
+Earlier manifest-only and Session-owned ancestry proposals, sidecar binding,
+Wave-default Flow, per-Wave Chapter clocks and six-pane limits are superseded.
+The last Task steer explicitly commissions docs in present tense before code.
+
+## The demo
+
+Open a taskless interactive Session, rename it, bind it to a Task whose PR has
+landed, and read the same Run ID and Task ID from `session list --task`,
+`runs --task`, usage and the desktop. The same terminal retains its draft;
+an independent conversation stays independent of that Task's invocation.
+
+```sh
+lf --interactive : "Review the parser"
+lf session rename <run-id> "Parser review"
+lf session bind <run-id> --task INF-123 --json
+lf session list --task INF-123 --json
+lf runs --task INF-123 --json
+```
+
+Also resume a Task review after its template files are unavailable: the same
+Session opens, Complete saves feedback once, and the captured next step receives
+it. Inspect an earlier Chapter while the transferred Task keeps progressing;
+its old KR evidence remains unchanged.
+
+These are end-state demos. This slice's deliverable is the reviewable doc diff,
+not a claim that these commands already work in this checkout.
+
+## Approach
+
+The canonical field and invariant contract is
+[Architecture Reference](../docs/architecture-reference.md#core-models-and-apis).
+The short model is Repository → Chapter, Chapter × Wave → Project → Task →
+Flow invocation → Run → Session. Run can omit invocation, Task and Wave in
+that order; Session never has independent ancestry. Authored Flow templates,
+Wave files and large immutable evidence remain files. Mutable product facts
+have SQLite owners.
+
+### Documentation ownership
+
+| File | Owns |
+| --- | --- |
+| `docs/architecture.md` | Entry example, model overview and links to detailed contracts |
+| `docs/architecture-reference.md` | Fields, validators, durable owners, launch/settlement, Session and invocation contracts, historical vocabulary |
+| `docs/waves.md` | Planning experience, repository-wide rotation and per-Wave chapter history |
+| `docs/lf.md` | CLI examples, binding, Session lifecycle, Task Flow selection and recovery |
+| `STYLE.md` | Concise contributor rules; `CLAUDE.md` and `AGENTS.md` are symlinks here |
+| This design | Implementation choices, current evidence, migration protocol, proof and remaining review decisions |
+
+The docs use the target's present tense as Jack requested. They are not release
+notes. Source-linked specialist pages under `docs/architecture/`, authoring/config
+docs, builtin skills and Swift documentation still describe parts of the current
+implementation; reconcile those with the implementation before shipping. Do not
+mask this boundary by teaching both storage models as supported modes.
+
+### Replace owners, then switch all callers together
+
+Introduce typed `Chapter`, `FlowInvocation`, `Run` and `Session` records through
+the existing Store/SQLite boundary. Keep execution traversal in the engine;
+move persistence from its two adapters into invocation transactions. Replace
+the old tables/files and their callers in one coherent implementation change.
+Internal commits are sequencing, not independently shipped dual-write phases.
+
+`runs` is the record, not a manifest index that can be rebuilt and discarded.
+Indexes begin with `(task_id, created_at, id)`, `(wave_id, created_at, id)` and
+`(invocation_id, created_at, id)`. Sessions use `run_id` as their primary key/FK
+and an open-state index. Query filters apply before pagination. A joined Session
+read obtains Run ancestry/provider/cwd without scanning all Run directories or
+calling launch preparation. Detailed transcript/usage reads can open artifacts
+for the already selected Runs.
+
+The existing Work selector resolver remains a CLI input facility. It resolves
+IDs once without requiring a live PR or producing launch side effects on a
+read. Task launch preparation and delivery authority stay separate operations.
+Project-attributed planning Runs retain their Wave; Project is not a fourth
+Run parent. Project-level historic launch context remains in immutable evidence.
+
+### Writers and transaction boundaries
+
+| Entry | Required write |
+| --- | --- |
+| Direct Skill, inline prompt, interactive CLI | Resolve explicit selectors, else registered checkout Task; reserve one Run and optional Session |
+| Wave/Project operation | Independent Run with Wave attribution; no invocation authority |
+| Task driver | Claim invocation; create its exact Run with node and launch-time iteration tuple |
+| Human Flow step | Reserve Run + `flow_review` Session and bind the pending boundary atomically |
+| Ask | Child Run with causal caller ID, inherited Task/Wave, independent membership; `ask` Session stores request, retry key and result |
+| Replay | New Run with inherited ancestry; causality is not authority to join the previous invocation |
+| Bind | Update Run parents/provenance through the same validator; no name, graph, node or process change |
+| Rename | Update Session title/provenance with human-over-generated ordering |
+| Ready/Complete | Persist Session feedback; Complete closes once and settles the exact waiting boundary before teardown |
+| Provider start/attach/stop | Update Run-owned native identity and exact process receipts; reconcile liveness against the OS |
+
+Choose the store and artifact root from one resolved Home. Existing
+`LF_CONTROL_HOME`/`LF_HOME` divergence must not split a Run row from its evidence.
+Carry the selected store identity into child processes. An unbound launch needs
+no planning provider, Wave or daemon, but does need its local writable store.
+The recorder gets already validated typed input; the engine does not load Work.
+
+SQLite and artifact publication are not one transaction. Reserve a prepared row,
+publish final manifest/context, mark launchable, then spawn. A failed preparation
+is visible and retryable under the same ID. Publish terminal evidence before
+settling the row so interruption between those writes is recoverable. No second
+provider launch is authorized merely because a spawn receipt is missing. Keep
+the existing exact process-ownership mechanism, moved to Run-owned operational
+storage, and preserve uncertainty. Telemetry remains best effort.
+
+“No sidecars” removes mutable name, resolution, Ask, provider-session, client,
+client-stop and prepared/launching-marker owners. It does not remove immutable
+manifest/context/terminal evidence, append-only streams, provider-native history,
+or unrelated Git/process exclusion locks. Multiple exact client receipts may be
+normalized as Run children; they are operational records, not another Session
+store. Never infer signal permission from `sessions.state = active`.
+
+### Validation and denormalization audit
+
+The three parent checks are `Run.invocation.task == Run.task`,
+`Run.task.project.wave == Run.wave`, and `child_invocation.task == parent.task`.
+Constructors fill omitted ancestors; explicit mismatches fail atomically.
+The reference groups these with planning and structural constraints. Import,
+bind and parent-changing writes use the same checks as launch.
+
+| Pair or duplicate | Treatment |
+| --- | --- |
+| Task Wave vs Project Wave | Remove stored Task Wave; derive through Project |
+| Project Wave/Chapter repository | Validate same repository; unique pair; one current Chapter per repository |
+| Run Task/Wave and invocation/Task | Retain nullable indexed parents; validate in the write transaction |
+| Invocation parent/Task, current root | Same Task, acyclic parent chain, one current root; restart closes the old tree |
+| Session Task/Wave/provider/cwd | Remove; join Run |
+| Session ID/Run ID | One identity: `run_id` PK, no separately mutable ID |
+| Node/cursor/return counts | One invocation cursor; node must belong to captured graph; no parallel flat cursor projections |
+| Run tuple vs mutable invocation counts | Launch-time snapshot; validate while holding the chain, then immutable, never compare it to later counters |
+| Session readiness in Flow/Ask and Session | Session owns feedback; invocation stores only pending Run reference and settlement identity |
+| Run outcome vs terminal artifact | Row lifecycle is query authority; immutable terminal receipt is settlement evidence; validate receipt identity during recovery |
+| Native provider ID vs attachment/process evidence | Different facts; each has one Run-owned record, exact process receipts still fence stop/move |
+| Generated and human names | One conversational title; conditional update prevents generated overwrite |
+| `started` event vs Run existence | Delete new Started writes; displayed started derives from Runs; old event evidence still protects chapter retirement |
+| Swift Work/path vs Run parents | Typed IDs in DTOs; labels computed from cached readings, no selector decoding or cwd-based regrouping |
+
+Two consequences require explicit review visibility. Binding away the last Run
+can make the displayed `started` false; it must not erase historical execution
+or make authored work eligible for automatic abandonment. An invocation-owned
+Run cannot change Task without violating Jack's parent constraint. The universal
+Bind API reports that constraint from Rust; it is not a UI-only kind prohibition.
+Asks without invocation membership may bind independently of their caller.
+
+New membership is known by construction. Old missing capture is not proof of
+independence. Proposed stored `membership_known` distinguishes that missingness
+without a file fallback: false implies no claimed invocation/node/tuple; a new
+independent Run is true with null location. This is a historical evidence field,
+not a second attribution mechanism. Binding never changes it.
+
+### Flow graph and runtime nesting
+
+Fully unrolled means expand template composition, including all Xor alternatives
+and their captured Skill content. Keep loops finite as backward edges; do not
+expand hypothetical future passes. Use typed local node IDs, not a string path
+through templates or cursor children. Selected Xor paths traverse those captured
+nodes and do not manufacture invocation parents merely for composition.
+
+Each entered nested loop body has a child invocation for that pass, with its
+own graph/cursor/counts and a parent entry node. Create the child and parent wait
+link together. Retry uses that child, and a subsequent pass creates a fresh one.
+Child completion and parent resumption commit together. The child graph comes
+from the parent's capture, never a fresh catalog load. Overlapping return edges
+in one body remain local counters, not false parent relationships.
+
+Preserve the exact decision fence: invocation identity, version, worker
+generation and original successful Run. A saved candidate from a failed Run
+cannot be consumed after reclaim replaces its binding. Restart does not reuse
+execution identity. Retain finished invocations; completion clears the current
+root without selecting a successor or completing Task Work.
+
+### Sessions and desktop
+
+One list query returns all three kinds. Complete and Ready retain their current
+meaning; provider exit leaves resumable history rather than resolving a review.
+A published Run that cannot be recovered stays historical. Its replacement is
+a new Run/Session, linked as a retry; do not reparent an existing Session. An
+unpublished preparation retry retains its reserved Run ID. Migrate pane IDs once
+from old Ask/boundary IDs to their recorded Run IDs before the desktop reconnects.
+
+Move Rust, Swift and JSON fixtures together. Session DTOs expose typed Run
+parents and membership once, plus Session attributes/actions; remove `work`,
+derived `work_path`, duplicate ancestor fields and Project variants. Required
+fields have no DTO defaults. Historical unknown membership stays explicit.
+Cache grouping and reverse lookup at reading changes; bound Tasks missing from
+the current roadmap stay reachable and are never labeled orphan. Orphan means
+null Task, including Wave-only conversations.
+
+This checkout predates the handoff's workspace projection. Reconcile the
+available Product branch at implementation time through the normal integration
+path; if it has not landed, apply these contracts to existing `PodiumModel` and
+`SessionsView` rather than creating a competing workspace. S6 control-room
+presentation, Session streaming, palette and S9 folded-template UI are later UX
+slices. LOO-298 supplies their model, bind API, correct grouping and cache.
+
+### Repository Chapter rotation
+
+Reuse classification, provider reconciliation and frozen evidence from
+`ops/chapter.rs`; change the operation's scope and persistence owner. Prepare all
+Wave successor plans, including explicit empty plans, before local activation.
+Snapshot stable membership; if Wave membership changes before activation, refresh
+the preview. One transaction selects the new Chapter and local Project bindings.
+External Issue moves and predecessor archival can remain pending and retry from
+the fixed boundary. Never claim a distributed transaction with Linear.
+
+Moving unfinished Tasks inside their Wave retains invocation, claim, Run, Session,
+worktree and PR. A cross-Wave reassignment is separate from rotation: reconcile
+existing mutation authority first, then update dependent current Run attribution
+atomically if the move is authorized. It cannot confer delivery authority through
+the new FKs or rewrite the launch artifacts. Frozen plan membership and targets
+keep history investigable even after a Task moves.
+
+### One-time Home migration
+
+Schema migration and filesystem import are distinct work. A new ordinal-free
+draft creates the owners and constraints; released migrations are never edited.
+The install/promotion path must not activate table-only readers over an unimported
+Home. Use the existing promotion boundary and explicit offline import tooling;
+do not teach ordinary reads to create rows lazily or read old subjects forever.
+
+1. Inventory actual selected stores and artifact roots by Home, binary frontier
+   and checksum. Do not assume `$HOME`, `LF_HOME` or the handoff's counts describe
+   the installed selection. Account for pinned old writers and UI/client owners.
+2. Rehearse on consistent store/artifact copies. Retain SQLite backup plus exact
+   input bytes and an import report outside runtime read paths. Record original
+   row/Run IDs, file hashes and old Session → Run ID mappings.
+3. Import planning identities first. Equal chapter labels across Waves do not
+   prove synchronized history. Preserve dated per-Wave predecessor plans; assign
+   the initial common current Chapter only from a reviewed mapping. Do not mint
+   a fictional historical all-Wave rotation. Ambiguities block activation until
+   resolved in the report.
+4. Import captured invocations, cursors, pending reviews, claims and failures.
+   Do not recompile templates. Map saved indices/paths to captured local nodes.
+   Retain original identity relationships and recovery facts. A taskless saved
+   invocation requires the explicit disposition described in the open items.
+5. Import Runs from manifests and exact receipts. Resolve subjects using stable
+   IDs and unambiguous historical aliases, with ancestry used to disambiguate.
+   Never use the launch resolver, active PR, cwd spelling or a current display
+   label as historical authority. Preserve Declared/Inherited as recorded; do
+   not retroactively relabel old inferred launches Checkout without evidence.
+6. Import Sessions from interactive evidence, pending/completed Asks and human
+   boundaries, keyed by their recorded Run. Carry names/provenance, readiness,
+   completion, native identity and exact attachments. Old boundary records with
+   no published Run reserve a prepared identity, not a fabricated successful Run.
+   Missing execution capture remains Unknown. Ambiguous attribution is repaired
+   explicitly before cutover; it is not silently nulled as a successful import.
+7. Verify constraints, counts by kind, identity mapping, terminal outcomes,
+   completed Ask answers and captured cursor bytes/meaning. Re-run the importer:
+   identical inputs must be a no-op, conflicting inputs a named error. Test
+   interruption before and after each durable stage.
+8. At real cutover, quiesce exact old writers using existing control authority,
+   take final backups, import the final delta and activate the matching binaries
+   and database together. Do not stop this Task's own worker mid-migration;
+   hand that maintenance boundary to an external invocation. Unknown writer
+   liveness blocks destructive cleanup, not read-only rehearsal.
+9. Read back through the configured CLI and app. Only then delete retired active
+   sidecar/cursor files. Keep archival evidence and rollback bytes. Rollback is a
+   matched old binary/store/artifact restore before new writes; after new writes,
+   preserve those writes and forward-repair rather than blindly restore a backup.
+
+Jack authorized one-time repair on his machine. That authorization does not make
+guessed identities true or authorize unrelated provider/Task mutations. The
+import tool may live under `scripts/` with preservation tests; runtime code has
+no historical fallback. Normal schema migrations remain supported for published
+databases. The final deletion pass removes conversion-only runtime helpers.
+
+## De-risking
+
+Read-only findings below are from this checkout after documentation checkpoint
+`ef817d4f9`; line citations in LOO-291 are not assumed current.
+
+| Question | Finding | Impact on design |
+| --- | --- | --- |
+| Are the handoff's files already here? | `WorkspaceProjection.swift` is absent; `RunManifest` has subjects but no captured membership; `human_session.rs` has no rename writer. `PodiumModel.swift:50` owns readings; `SessionsView.swift:193` reconciles them. | Coordinate source integration later; do not promise deletion of code absent from this branch. |
+| Is there an old `runs` table to repurpose? | `0.12.15.001_release.sql:332` drops it and earlier execution tables; the schema checker discovers 31 live tables without `runs`. | Create the new record in a forward draft; preserve older-frontier history during migration, not by editing the earlier table creation. |
+| Are there still four Session sources? | `ops/human_session.rs:269` concatenates Task, Ask, standalone Flow and interactive lists. `:911` parses manifest subject IDs; it does not call the launch resolver in this base. | Four-owner defect is confirmed. The handoff's post-merge resolver bug is evidence from another tree, not a reproduced local symptom. This base also loses identifier-form ancestry. |
+| Can ordinary Flow invocations lack a Task? | `ops/flow_run.rs:34` stores optional Task/Wave selectors and `create` at `:149` persists them without Task ownership. | Approved invocation ⇒ Task conflicts with a working launch path. Expose the scope decision before implementation. |
+| Does the engine already have runtime loop children? | `engine/execution.rs:22` has a cursor child for Xor; `NestedCursor` has only Xor. Loop progress lives on a cursor. | A table rename is insufficient. Preserve routing and introduce runtime loop parentage deliberately; do not label Xor nesting as loop nesting. |
+| Is repository-wide rotation already atomic? | `store/sqlite/chapters.rs:33` clears current only for one Wave; `work/chapter.rs:51` gives Chapter one Wave. | Reuse provider recovery but change the aggregate and transaction boundary. |
+| Can Started writes disappear safely? | `chapters.rs:78` writes an event and `:97` combines it with position generation. Retirement rechecks those facts in its transaction. | Replace live started queries; retain historical start evidence and authored/PR/claim checks for retirement. |
+| Are ordinal races a reason for sidecars? | `store/MIGRATIONS.md` specifies ordinal-free drafts, dependency ordering, backups and typed JSON validation. | No. Use the migration system and populated preservation proofs. |
+| Can ordinary rows and artifacts select different Homes? | `human_session.rs:290` resolves observability Home; `ops/flow_run.rs:64` resolves current Home. Wave memory records this divergence. | Resolve once and test with conflicting environment selections. |
+| Can a documentation-only spec pass source/schema parity now? | `check_architecture.py` reports missing current `task_flow_positions` and `wave_chapters` from the target owner map. The other seven inventories pass. | Record the exact gap; do not modify code or dilute the checker before review. |
+
+No new live Home inventory or latency measurement was taken. The handoff's
+~340 manifests and 0.8–3.5 s reads are dated motivation, not this branch's baseline.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+| --- | --- | --- |
+| Mutable manifest with typed parents and inline name | Smallest change; still scans files, Ask/Flow recovery remains elsewhere | Jack explicitly chose SQLite owners and Session as Run child. |
+| Session table plus manifest-backed Runs | Makes rename easy; current attribution still crosses two owners and headless Runs need another mechanism | Preserves the defect and makes bind/usage disagree unless another adapter is added. |
+| One SQLite owner for every mutable product record | Larger coherent migration; simpler readers and common validation | Chosen. Complexity belongs in a bounded conversion and exact settlement, not perpetual reader dispatch. |
+
+Wild success is mundane: an idle desktop does little work, every view names the
+same Task, and resuming a review does not involve finding which file owns it.
+Wild failure is a new SQL projection beside the old files: each “temporary”
+fallback hides a lost import and old writers keep resurrecting stale truth.
+The cutover and deletion conditions rule out that outcome.
+
+## Key decisions
+
+- Keep “Flow” for template and “Flow invocation” for execution, pending Jack's
+  naming review. Project's Flow is a default, never an override prohibition.
+- Session identity is its Run ID. Completion history survives; replacing a
+  published Run creates a new Session rather than copying a mutable identity.
+- No code/test/fixture/migration changes in this slice. The existing doc edits
+  were preserved with `lf commit` before this continuation.
+- Use table-only current readers after one import. Keep raw evidence and the
+  import report, not a parallel legacy runtime.
+- Prefer truthful unknown history over fabricated independent membership.
+- Run records require SQLite before spawn. This is an intentional change from
+  file-only launch resilience and must be called out in review.
+
+## Scope
+
+- In scope: listed documentation; complete model/validator and migration design;
+  after review, Chapter/Project ownership, invocation/Run/Session writes and
+  reads, bind/rename, DTOs, Swift identity/grouping cache, real-Home conversion
+  and the requested deletion research followed by deletion.
+- Out of scope: visual redesign, dark mode, first-run onboarding, control-room
+  composition, palette, Session event streaming, provider authentication
+  redesign, new orchestration platform and unrelated Wave recovery work.
+- Preserve: source-independent continuation, exact process authority, saved
+  feedback, terminal Work semantics, PR chains, original provider counters,
+  Work placement and existing promotion history.
+
+## Done when
+
+For the full implementation, collect these proofs on the final integrated bytes:
+
+1. **Ancestry matrix:** none, Wave-only, Task-only input, invocation-only input
+   fill correctly; wrong Wave/Task, wrong parent, cycle, invalid node/tuple,
+   duplicate Session, duplicate current root and duplicate Project pair reject
+   without partial writes. Race bind/launch against an ancestry-changing write.
+2. **One CLI reader:** isolated actual CLI launch, rename, bind/rebind/unbind,
+   landed/done Task and explicit-selector-vs-checkout cases; Session and Run
+   outputs agree. Usage moves attribution without changing counters or artifacts.
+   Reject a conflicting bind on an invocation Run atomically.
+3. **Execution preservation:** multiple provider turns, nested loop returns,
+   Xor selection, review completion and keyed Ask retry; remove template sources
+   before recovery. Test interruption, restart with reused numeric generations,
+   late results and failed candidate Runs. Helpers cannot settle a cursor.
+4. **Chapter operation:** two Waves including an empty plan, concurrent start
+   versus retirement, loss of a provider response, missing Task/Project reads,
+   external reassignment and retry after activation. One current repo Chapter;
+   preserved active identity and frozen predecessor evidence.
+5. **Populated import:** old SQL frontier plus real-shaped Run/Ask/Flow files,
+   human name, completed Session, unknown membership, unresolved aliases and
+   controller-only evidence. No silent discard; rerun idempotence and fault
+   injection at publication/cutover boundaries. Canonical materialization passes.
+6. **DTO/desktop:** shared fixtures in every consumer; bound Session absent from
+   roadmap stays bound; Wave-only is orphan; cached projection changes on data
+   changes only. Mounted PTY proof retains the same surface/draft across bind
+   and rename. Real installed proof is separate from fixture transport.
+7. **Configured acceptance:** backed-up real Homes converted and read back via
+   matching installed CLI/app; exercise the demo and preserve Run IDs, exact
+   binary/store identities and failure evidence. No substituted development
+   Home and no installed-success claim from a simulated provider.
+8. **Deletion and consistency:** no runtime subjects/sidecar reader or writer,
+   four-way Session union, file Flow adapter or duplicate Started writer.
+   `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, affected
+   Rust/Swift suites, migration checks and architecture checker pass. Update
+   specialist docs and generated HTML to the final implementation.
+
+Use TESTING.md's isolated environment and executable rules. Focused behavioral
+proof belongs to each implementation cut; affected suites run once at gate.
+Do not claim a full CI, deployed recovery or UI acceptance result from this spec.
+
+## Forbidden outcomes
+
+- Creating tables while `session list` still reconstructs product records from
+  four stores, or fallback reads that silently repair missing imports.
+- Rebinding execution membership to satisfy a requested ancestry change.
+- Inferring membership, Task or process authority from cwd text, provider identity,
+  taskless missing capture, listener absence or a stored Active flag.
+- Destructively migrating while old writers can still publish sidecars.
+- Discarding a captured cursor, completed Ask result, human name, historical Run
+  or provider receipt merely because a new model cannot represent it yet.
+- Counting a prepared Run as provider success, a cursor as exactly-once external
+  effects, a fixture as live proof, or renamed docs as implemented behavior.
+- Shipping a Taskless Flow regression without Jack seeing the decision.
+
+## Internal slices
+
+1. **Docs and review:** this design plus the five requested doc owners. Jack
+   reviews the contracts and conflicts before implementation starts.
+2. **Domain and storage:** forward drafts, typed constructors, indexes, three
+   parent validators plus structural checks; populated conversion rehearsal.
+3. **Execution and planning owners:** invocation driver, runtime nesting,
+   Session/Ask transactions, Chapter aggregation and publication recovery.
+4. **All consumers:** CLI launch/inference/bind/rename and Run queries, DTOs,
+   Swift grouping/cache; remove alternate writers/readers in the same cutover.
+5. **Real-Home conversion:** inventory and backup, exact-writer quiescence,
+   verified import, binary activation and configured proof.
+6. **Deletion research, then deletion:** inspect every obsolete resolver,
+   sidecar function, type, field, cache, test and doc paragraph; record path and
+   dependency evidence, then delete proven dead code and review the result.
+
+Slices 2–4 form one architectural change; do not publish an intermediate reader
+that depends on keeping the old store alive. Migration rehearsal precedes real
+data mutation even though the real-Home pass follows implementation.
+
+## This slice
+
+Finish the documentation spec and record findings for `review-design`. Read
+`scratch/questions.md` for the small review agenda. The selected Flow owns that
+human boundary; this worker does not start implementation, publish a PR, or open
+a duplicate Ask just to report readiness.
+
+Focused proof: inspect the doc diff against Jack's latest decisions, check local
+links and whitespace, regenerate/check portable architecture HTML, and run the
+existing architecture inventory and focused documentation tests. Record expected
+source/spec failures truthfully. Do not edit tests to make target docs pass old
+schema checks.
+
+## Slice ledger
+
+- 2026-09-26: supplied worktree contained five documentation edits and the
+  committed LOO-291 handoff. Preserved those edits at `ef817d4f9` through
+  `lf commit`; no source changes were present.
+- 2026-09-26: read current source and migration contracts. Corrected the premise
+  that an unused `runs` table still exists; identified absent Product-side code,
+  taskless Flow conflict, missing membership evidence and old-writer cutover.
+- 2026-09-26: review of the inherited spec found direct bound Flow language
+  contradicting the Task-only model, an `owner.json` assertion conflicting with
+  receipt relocation, and “bound Run” incorrectly implying invocation membership.
+  Fixed these in the docs; retained substantive tradeoffs for Jack's review.
+- 2026-09-26: final documentation validation: `git diff --check` passed;
+  a read-only local-link probe checked 112 paths/anchors with no failures;
+  `render_architecture_html.py --check` passed after regeneration; the prescribed
+  website command selected and passed both portable-architecture and README/index
+  tests (79 deselected). No Rust/Swift behavioral suite ran for this docs slice.
+  Architecture inventory still fails only the two recorded SQLite owner gaps;
+  this is not a green implementation gate.
+
+### Diff summary for Jack's review
+
+- Architecture entry and reference replace file-backed Run/Session unions with
+  table ownership, typed ancestry, explicit lifecycle and transaction boundaries.
+- Waves and CLI docs use the repository Chapter and per-Wave Project model,
+  Project Flow defaults, Task invocations, and Session bind/rename examples.
+- The contributor guide points to those owners and validators; both guide
+  symlinks still resolve to `STYLE.md`. Portable HTML is regenerated from source.
+- This design retains the complete implementation, preservation and deletion
+  path. [Review agenda](questions.md) identifies naming and the material
+  inconsistencies found while writing the model down. Runtime, tests, fixtures
+  and migrations are unchanged.
+
+## Measure
+
+Before implementation, capture 20 comparable `session list --json` and
+`runs --task <id> --json` samples on a copied representative Home, recording
+binary, row counts, environment and p50/p95. Repeat on the same data after import.
+Use query plans and filesystem instrumentation to show filtering uses indexes
+and Session inventory opens no manifest per row. Proposed target: local p95
+below 300 ms at the handoff's ~340-Run population, including CLI overhead.
+
+Desktop projection measurements use the existing harness if integrated from
+LOO-291. Do not import its old cold-start/idle figures as new measurements or
+add the separate streaming project to make this Task's numbers pass.

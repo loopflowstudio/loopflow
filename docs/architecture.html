@@ -2239,8 +2239,10 @@ ledger.</p>
         `-- Project           = (Wave, Chapter); Tasks, KRs, metric targets, Flow
               `-- Task        one active remote branch, worktree, and PR
                     `-- Flow invocation   0..n, one current: unrolled graph + cursor + returns
-                          `-- Run         invocation =&gt; task =&gt; wave, each nullable
-                                `-- Session   one conversation on one Run
+                          `-- Run         optional invocation; task =&gt; wave, each nullable
+
+Session --&lt; Run               one conversation with a Run history
+Session.current_run -&gt; Run    one of that Session's Runs
 
 Flow = ordered Skill | Command | Xor | human boundaries, with optional backward edges
 WorkRef = Wave | Project | Task
@@ -2277,7 +2279,7 @@ WorkStatus = Ready | Done | Abandoned
 </tr>
 <tr>
 <td>Session</td>
-<td>One conversation on one Run: interactive, Flow review, or Ask</td>
+<td>One conversation across Runs, with a current Run: interactive, Flow review, or Ask</td>
 <td><code>sessions</code> row plus provider-native history</td>
 </tr>
 <tr>
@@ -2324,12 +2326,16 @@ WorkStatus = Ready | Done | Abandoned
 </table>
 <p>SQLite owns each product record; files carry authored definitions and large
 evidence artifacts. Sessions, Runs, and Flow invocations each have one reader.
-A Session's Task, Wave, provider, and execution membership come from its Run.
-Renaming updates the Session; binding updates its Run's nullable Task and Wave.
+A Session has a stable ID, owns its Runs, and points to its current Run.
+Its Task, Wave, provider, and execution membership come from the current Run.
+Renaming updates the Session; binding updates its current Run's nullable Task and Wave.
+Replacing a Run retains the Session and its name, and preserves every prior Run.
 Landing a PR never erases those links.</p>
-<p>Run ancestry obeys invocation ⇒ Task ⇒ Wave. Construction fills omitted parents
-and refuses mismatches; binding preserves execution membership. Independent Runs
-may name only a Wave or no planning parent. A Task selects its Project's Flow by
+<p>An invocation's Task is optional: Flows also run without planning records.
+A Run in an invocation shares its nullable Task; a present Task implies Wave.
+Construction fills omitted ancestors and refuses mismatches; binding preserves
+execution membership. Runs without a Task may name only a Wave or no planning
+parent, whether or not they belong to an invocation. A Task selects its Project's Flow by
 default and accepts an explicit override. Completed invocations remain readable.</p>
 <p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns fields,
 validators, and write contracts. The <a href="https://loopflow.studio/architecture/reference#flow-execution">Flow execution contract</a>

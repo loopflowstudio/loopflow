@@ -607,6 +607,12 @@ changes only these working notes. The two focused commands above remain owed.
 
 ## Measure
 
+The [2026-09-26 slice review](data-model-slice-review.md) records the current
+evidence matrix and publication gaps. Behavioral proof remains blocked by the
+resource envelope. It traces malformed autonomous captures through Session
+listing and exact review lookup, and records the branch-range whitespace
+failure separately from earlier working-tree checks.
+
 Before implementation, capture 20 comparable `session list --json` and
 `runs --task <id> --json` samples on a copied representative Home, recording
 binary, row counts, environment and p50/p95. Repeat on the same data after import.

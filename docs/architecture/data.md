@@ -82,7 +82,9 @@ its Task evidence in one transaction. Ordinary Task updates write facts, while
 Flow settlement only touches the Task timestamp.
 
 The Task position stores the shared `ExecutionCursor` tree in `review_json`;
-SQL `step_index` and `iteration` are projections. Historical flat progress is
+the current Flow name, step, node and human policy come from its captured graph.
+Review discovery and exact Task reads share that decoder. SQL `step_index` and
+`iteration` remain root projections while historical flat progress is
 decoded without replacing its captured definition. Ordinary Flow invocations
 use the same cursor and navigation rules, with file ownership instead of a
 Task claim or transaction. A direct Flow attributed to a Task owns its own

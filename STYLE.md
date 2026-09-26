@@ -6,12 +6,12 @@ This is the governing document of the loopflow codebase. Contributors and agents
 
 **Wave planning:**
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
-- Each Wave has exactly one current chapter plan, stored in an internal Project
-- The Project owns Tasks, KRs, and metric targets; the Wave UI presents them
-- Chapters replace that Project and its content; completed history stays readable
-- Started unfinished Tasks move with identity, worktree, PR, and Flow intact
+- Chapter = repository-wide planning clock; one current, advanced for all Waves together
+- Project = one unique (Wave, Chapter) plan: Tasks, KRs, metric targets, and a Flow
+- Task owns Flow invocations; the Project's Flow is the default, and explicit overrides are allowed
+- Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
-- User and agent interfaces select Waves and Tasks; Project identity is internal
+- Current navigation is Wave → Task; chapter history retains each Wave's past plan
 - Definitions name the beneficiary and experienced improvement; KRs prove it
 
 **Python:**
@@ -191,25 +191,30 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 
 ## Wave Planning
 
-A Wave is a durable responsibility. Its objective, memory, cadence, budget, chat,
-and metric instruments survive chapter boundaries. Its current chapter plan
-contains proof-shaped KRs, metric targets, recommended Flow, and Tasks. Exactly
-one internal Project holds that plan; it is replaced every chapter. Do not
-create sibling current Projects, standing Projects, or a separate Project
-operator. Ordinary UI and CLI navigation is Wave → Task.
+A Wave's objective, memory, cadence, budget, chat, and metric instruments survive
+chapter boundaries. A Chapter is the repository's planning clock. Exactly one
+Project per (Wave, Chapter) holds Tasks, proof-shaped KRs, metric targets, and a
+Flow template; a Wave without work has an empty Project. Project has no second
+objective, memory, cadence, or operator.
 
-Start a chapter through `lf wave new-chapter --wave <wave> --chapter <id>`.
-The deterministic operation owns previews, classification, transfer, retirement,
-and retry receipts. Started unfinished Tasks retain their identities and
-execution state. Untouched backlog is canceled, never marked successful.
-Completed Tasks remain historical. Missing evidence is unresolved. Skills judge
-outcomes and author new content; they never implement their own rotation.
+Tasks own zero or more Flow invocations, with one current root. The Project's
+Flow supplies the default; explicit `--flow` and restart overrides are allowed.
+An invocation captures its fully expanded graph, cursor, and return counts.
+Template composition does not create invocation parents; runtime loop nesting does.
 
-The Wave objective names who benefits and what improves. KRs prove observable outcomes
-across a stated window; issue lists and implementation receipts belong in Tasks.
-Metric instruments belong to the Wave. Their chapter-specific targets and
-evaluations belong to the Project and remain readable in chapter history.
-Do not add a second objective to the Project or a Project tier to the UI.
+Chapter rotation advances every Wave together through the deterministic operation
+documented in [Waves](docs/waves.md#the-planning-model). It owns preview,
+classification, transfer, retirement, and retry. Started unfinished Tasks retain
+identity and execution; untouched backlog is abandoned, completed Tasks remain
+historical, and missing evidence remains unresolved. Skills judge outcomes and
+author plans; they do not implement rotation. Current navigation stays Wave →
+Task; history exposes the plan for a Wave in a past Chapter.
+
+Main product records have SQLite owners. Session is a child of Run and reads its
+ancestry through that Run. Nullable Run parents obey invocation ⇒ Task ⇒ Wave;
+constructors fill omitted ancestors and refuse mismatches. Every denormalization
+is removed or validated on writes. The full ownership and invariant contract
+lives in [Architecture Reference](docs/architecture-reference.md#core-models-and-apis).
 
 # Development Environment
 

@@ -22,8 +22,8 @@ lf implement
 
 That command discovers `implement`, assembles its context, chooses a provider,
 publishes a Run manifest, launches the provider, records direct evidence, and
-settles once. It needs no Wave, Project, Task, daemon, or readable planning
-database.
+settles once. It needs no Wave, Project, Task, or daemon. The local SQLite
+store records the Run even when all its planning parents are null.
 
 ```text
 request
@@ -32,11 +32,11 @@ request
 lf CLI --> Skill discovery --> prompt --> provider route --> harness
                                                           |
                                                           v
-                                               Home-local Run record
-                                               manifest + JSONL + terminal
+                                               SQLite Run row
+                                               + launch/evidence artifacts
 ```
 
-Before the provider starts, the current Home contains:
+Before the provider starts, the current Home has a `runs` row and launch evidence:
 
 ```text
 $LF_HOME/runs/<prefix>/<run-id>/
@@ -45,9 +45,11 @@ $LF_HOME/runs/<prefix>/<run-id>/
 
 While it runs, Loopflow may append lifecycle, conversation, tool, raw provider,
 and usage evidence to `events.jsonl`. When the harness returns, it creates
-`terminal.json` once. Planning SQLite may be unreadable; the launch still
-works. Missing telemetry may make the record incomplete; it never changes the
-provider result.
+`terminal.json` once. The row owns Run identity, current ancestry, and lifecycle;
+files retain immutable launch inputs and append-only evidence. A failed Run-row
+write stops before provider launch. Missing telemetry cannot change the provider
+result. [Run publication and recovery](architecture-reference.md#harness-launch-and-run-records)
+define the database/filesystem boundary.
 
 The implementation follows the same order as the diagram:
 
@@ -58,7 +60,7 @@ The implementation follows the same order as the diagram:
 | Assemble context | [`engine/prompt.rs`](../rust/loopflow/src/engine/prompt.rs) | System and task prompts |
 | Select credentials and route | [`provider_account.rs`](../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
 | Launch and normalize | [`harness/`](../rust/loopflow/src/harness/) | Provider output and usage events |
-| Publish and settle evidence | [`run_record.rs`](../rust/loopflow/src/run_record.rs) | One immutable manifest and terminal receipt |
+| Record the Run and evidence | [`run_record.rs`](../rust/loopflow/src/run_record.rs) and the store | Run row, immutable launch inputs, and terminal evidence |
 
 [Follow the complete execution path →](architecture/execution.md)
 
@@ -111,8 +113,8 @@ composition surfaces: lf/ + bin/
 
 `work` never imports `controller`. The execution kernel works without either
 layer and never loads Work. CLI and boundary callers resolve Work identity,
-Wave memory, and the exact Flow position, then pass ordinary launch inputs into
-the kernel.
+Wave memory, and the Task's current Flow invocation, then pass ordinary launch
+inputs into the kernel.
 
 Release delivery also separates proof from authority:
 
@@ -149,7 +151,7 @@ user / agent --> lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Wave -> Task (one internal chapter plan)
+  Skills / Flows /       Chapter x Wave = Project -> Task
   goals / memory                  |
           |                       +---------> Task delivery
           |                       |                ^
@@ -179,14 +181,16 @@ ledger.
 ## Core models
 
 ```text
-Wave
-  |-- current chapter (internal Project)
-  `-- Task
-        `-- one active remote branch and PR
+Repository
+  |-- Chapter                 one current; a repository-wide clock
+  `-- Wave                    durable objective, memory, cadence, budget, chat, metrics
+        `-- Project           = (Wave, Chapter); Tasks, KRs, metric targets, Flow
+              `-- Task        one active remote branch, worktree, and PR
+                    `-- Flow invocation   0..n, one current: unrolled graph + cursor + returns
+                          `-- Run         invocation => task => wave, each nullable
+                                `-- Session   one conversation on one Run
 
-Flow = ordered Skill | Command | Xor | review boundaries
-Run  = evidence for one mediated harness launch
-
+Flow = ordered Skill | Command | Xor | human boundaries, with optional backward edges
 WorkRef = Wave | Project | Task
 WorkStatus = Ready | Done | Abandoned
 ```
@@ -194,23 +198,39 @@ WorkStatus = Ready | Done | Abandoned
 | Model | Represents | Primary truth |
 | --- | --- | --- |
 | Skill | Reusable instructions plus declared context needs | Repository override, builtin, or installed Markdown |
-| Flow | Ordered Skill and mechanical nodes, Xor routing, review boundaries | Repository or builtin YAML plus a caller-owned playhead |
-| Run | Evidence from one mediated provider launch | One immutable Home-local record |
-| Wave | Durable operating context with goal, memory, cadence, chat, and chapter planning | Repository Wave files, local identity, Linear Initiative membership |
-| Project | One internal chapter plan inside exactly one Wave | Linear Project plus bounded local Work state |
-| Task | One concrete change, investigation, or document | Linear Issue, local delivery state, Git, GitHub |
+| Flow | The template: ordered Skill and mechanical nodes, Xor routing, human boundaries, backward edges | Repository or builtin YAML |
+| Flow invocation | One running Flow: the fully unrolled graph, its cursor, and each loop's return count | `flow_invocations` row |
+| Run | Evidence from one mediated provider launch, with its nullable invocation, Task, and Wave | `runs` row plus one immutable Home-local record |
+| Session | One conversation on one Run: interactive, Flow review, or Ask | `sessions` row plus provider-native history |
+| Chapter | The repository's planning clock; one current, advanced for every Wave at once | `chapters` row |
+| Wave | Durable operating context with goal, memory, cadence, budget, chat, and metric instruments | Repository Wave files, `waves` row, Linear Initiative membership |
+| Project | One Wave's plan for one Chapter: Tasks, KRs, metric targets, and the Flow its Tasks invoke | `projects` row plus its Linear Project |
+| Task | One concrete change, investigation, or document | `tasks` row, Linear Issue, Git, GitHub |
 | Work | Shared durable planning state for one Wave, Project, or Task | Rows keyed directly by stable Work identity |
 | Steer | Ordered authored correction to Work | Append-only Work input |
-| Session | Unresolved Ask or Task FlowStep bound to one ordinary provider Run | Boundary record, exact Run id, and provider-native history |
 | Home | Stable machine authority whose route may change | Home identity and observed SSH route |
 | Placement | Assignment of one Work to one Home | `(WorkRef, HomeId)` |
+
+SQLite owns each product record; files carry authored definitions and large
+evidence artifacts. Sessions, Runs, and Flow invocations each have one reader.
+A Session's Task, Wave, provider, and execution membership come from its Run.
+Renaming updates the Session; binding updates its Run's nullable Task and Wave.
+Landing a PR never erases those links.
+
+Run ancestry obeys invocation ⇒ Task ⇒ Wave. Construction fills omitted parents
+and refuses mismatches; binding preserves execution membership. Independent Runs
+may name only a Wave or no planning parent. A Task selects its Project's Flow by
+default and accepts an explicit override. Completed invocations remain readable.
+
+The [reference](architecture-reference.md#core-models-and-apis) owns fields,
+validators, and write contracts. The [Flow execution contract](architecture-reference.md#flow-execution)
+distinguishes template expansion from runtime nesting.
 
 Run identity records causality and provenance. It never grants Work mutation,
 credential, Git, or process-signal authority.
 
-A provider-backed Flow boundary launches or continues a harness and therefore
-produces Run evidence. Mechanical, routing, and review boundaries need not
-create a Run.
+Provider-backed steps, including review conversations and routing Skills, have
+Runs. A mechanical operation or a cursor transition need not launch a provider.
 
 ## Follow the common paths
 
@@ -254,8 +274,9 @@ lf wave status product
 ```
 
 The Home keeper may start the placed Wave listener and resident. Task motion
-does not depend on either: Task commands claim an exact Flow boundary for one
-worker. Chapter rotation is a deterministic Wave-scoped operation.
+does not depend on either: Task commands claim the Task's current Flow
+invocation for one worker. Chapter rotation is a deterministic
+repository-wide operation that gives every Wave a new Project at once.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
 A Task review FlowStep starts the persisted Skill as a provider Run and remains
@@ -287,6 +308,6 @@ the behavior.
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](architecture/codebase.md) |
 
 For exhaustive lookup, open the [checked architecture reference](architecture-reference.md).
-Its maps are machine-verified against CLI families, process boundaries, live
-SQLite tables, HTTP routes, providers, subprocess edges, projections,
-compatibility seams, and retired vocabulary.
+Its bounded checker compares CLI families, process boundaries, SQLite tables,
+HTTP routes, providers, subprocess edges, projections, and historical vocabulary.
+A successful check covers that inventory, not configured runtime behavior.

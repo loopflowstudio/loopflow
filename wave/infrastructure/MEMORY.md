@@ -2,6 +2,76 @@
 
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
+## Continuation and recovery lessons (curated 2026-09-25)
+
+Curated from the retired [continuation record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/directions/task-continuation.md).
+Infrastructure owns these execution/recovery lessons by its repository mandate;
+this curation does not assign a Task, change a chapter or establish shipment.
+The linked record preserves exact historical proof counts and follow-up scope.
+
+- Ordinary and Task execution share captured Flow navigation. Task transactions
+  and ordinary file locks remain distinct persistence owners. Advance/Iterate
+  choose navigation; completing an Ask returns evidence for reassessment and
+  never chooses a verdict. Keyed retries retain the answer. Iteration counts
+  describe progress without imposing a pass budget.
+- Capture every XOR alternative/router before execution. Recover saved nested
+  and human boundaries after their sources disappear; never replace uncaptured
+  history with today's catalog. Captured occurrences own human/decision policy.
+  Restart can reuse versions and worker generations, so invocation identity must
+  fence failure handling and the next claim against late replacement-worker errors.
+- A saved candidate is not a completed Run. Failed/interrupted Runs lose decision
+  authority. Check the original Run's completion before reclaim replaces its
+  binding; consume under the original fenced claim. Recovery fixtures need real
+  completion receipts. Cursor settlement alone cannot prove external effects
+  occurred exactly once. SQL cursor projection removal needs forward migration;
+  captured human Skill tokens still own synchronous prompt preparation.
+- Serialize every Ask writer, including reopen reset, under the launch lock.
+  Read exact saved feedback during atomic completion, persist completion before
+  teardown, and retain published native identity. An unpublished failed launch
+  is recoverable only with readable manifest, no published identity and no owned
+  live client. The recorded waiver for obsolete human navigation does not waive
+  preservation of other execution evidence.
+- Prove the driver as well as the reducer: multiple finite provider turns,
+  review direction carried into another pass, and recovery without rerunning
+  review. Interactive stops and finished Flows never imply Task completion.
+  Native handoff must use an executable reading the same Home. Exercise its
+  advertised CLI command with a different `lf` first on PATH and overrides absent.
+- The live demonstration required manual Flow/Run binding and native provider
+  Home corrections. It therefore did not prove automatic propagation. Removing
+  stored Codex OAuth injection fixed the observed native-login rejection, but
+  forwarded-account leases and ambient Home/auth consistency remain separate
+  questions; never generalize that result into credential copying.
+- One terminal Wave journal event closes the attempt and restores unfinished
+  input claims. Independent chat replies do not claim a governance turn;
+  `Inner.open` governs late output. Preserve late-delta and next-turn proofs
+  when reducing redundant state. One captured `wave/operate` attempt runs per
+  wake; an ordinary catalog Flow can still have callers after its resident is gone.
+- Cutover dispositions refer to original sequence/invocation IDs. Only captured
+  idle default roots without work retire automatically. Custom, queued, nested
+  and uncaptured work retains bytes/order as unresolved evidence. Recovery
+  inspection/cancellation does not recompile or launch history. Unknown active
+  attempts require termination evidence before cancellation; an absent listener
+  does not prove provider death. Arbitrary queue transfer remains unproven.
+- Ask fixtures must pin their test executable: mocked launchers still reach
+  executable resolution during Session listing. PR #1283 failed in CI when an
+  installed development CLI had masked this locally. TESTING.md owns the
+  clean-PATH proof. Keep system tools such as `ps` available while excluding `lf`.
+- The recorded gate passed 1,988 isolated Rust tests (six skipped), 267 Swift
+  tests, eight fixture renders, 229 Python tests, 78 website checks (three
+  skipped), architecture, formatting, Clippy and the Xcode fallback build.
+  These are prior results with simulated provider effects, not new cleanup
+  verification. The default gate receipt `20260925T221844Z-96933-933aee17` failed
+  because materialization pinned `LF_CONTROL_HOME` while a fixture isolated only
+  `LF_HOME`; the separate Rust pass removed that pin. No green default-gate or
+  configured live operation/chat/interruption/failure-recovery claim follows.
+
+Continuation remains scoped to [LOO-295](https://linear.app/loopflow/issue/LOO-295);
+broader restoration belongs to [LOO-296](https://linear.app/loopflow/issue/LOO-296).
+The historical Wave deletion directive already had implementation; do not
+launch a duplicate from that older note. Follow-up Task ownership and installed
+acceptance remain unresolved. Historical commit links identify locally recorded
+evidence; remote availability was not checked during curation.
+
 ## Delivery and chapter implementation lessons (2026-09-25)
 
 Curated from the retired `.lf/prs-and-tasks.md` and chapter direction note.

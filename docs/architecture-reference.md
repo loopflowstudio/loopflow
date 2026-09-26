@@ -150,7 +150,7 @@ CLI names and issue identifiers resolve once at the boundary.
 | `projects` | `wave_id`, `chapter_id`, Flow template selection, provider Project identity; read/update the Linear-backed plan |
 | `tasks` | `project_id`, provider Issue identity, Work state, worktree and delivery facts; derive Wave through Project |
 | `flow_invocations` | Task, nullable runtime parent, captured Flow name/source and complete graph, local node cursor, loop return counts, status, claim/version/generation, pending boundary; create, claim, settle, interrupt, restart |
-| `runs` | ID, causal parent Run, Home/repository/cwd, provider/model/skill, timestamps/outcome, nullable `invocation_id`, `task_id`, `wave_id`, `work_source`, node and iteration tuple; create, settle, bind, query |
+| `runs` | ID, causal parent Run, Home/repository/cwd, provider/model/skill, timestamps/outcome, nullable `invocation_id`, `task_id`, `wave_id`, `work_source`, node, iteration tuple and `membership_known`; create, settle, bind, query |
 | `sessions` | `run_id` unique FK and identity; `kind` = `interactive | flow_review | ask`; `title`, `title_source` = `generated | human`; `state` = `waiting | active | ready | closed`; `ready_summary`; open, ready, complete, rename |
 
 A Session reads ancestry, cwd, provider, and Flow membership through its Run.
@@ -167,7 +167,7 @@ kind-specific fields. There is no separate Ask file or Session registry.
 | --- | --- | --- |
 | Planning ancestry | Project's Wave and Chapter name the same repository; `(wave_id, chapter_id)` is unique; a repository has one current Chapter; Task's Wave is derived from its Project | Plan writes and atomic chapter activation |
 | Invocation structure | Invocation belongs to a Task; parent has the same Task; parent chain is acyclic and describes runtime entry; node exists in the captured expanded graph; one current root per Task | Invocation creation, child entry, cursor settlement, restart |
-| Run ancestry | Invocation fills Task; Task fills Wave; supplied parents must match. A bound Run has a valid node/iteration tuple; an independent Run has neither. Membership never changes through bind | All Run creation, binding, import and ancestry-changing writes |
+| Run ancestry | Invocation fills Task; Task fills Wave; supplied parents must match. An invocation-owned Run has a valid node/iteration tuple; an independent Run has neither. Membership never changes through bind | All Run creation, binding, import and ancestry-changing writes |
 
 SQLite foreign keys, uniqueness and nullability constraints back these APIs.
 Cross-row checks run in the same write transaction as the change. Task moves
@@ -175,6 +175,12 @@ within a Wave leave Run ancestry unchanged; a cross-Wave move validates and
 updates dependent Run Wave values atomically. It cannot silently invalidate
 historical execution. Current attribution and immutable launch evidence are
 different facts.
+
+Every new Run records known membership: either a validated invocation location
+or an independent launch. Imported history without execution evidence has
+`membership_known = false` and no claimed invocation location. Readers show
+Unknown, never Independent, for those rows. A known invocation link requires
+known membership. Binding cannot manufacture missing execution evidence.
 
 `work_source` is nullable for no attribution, otherwise `declared`, `checkout`,
 `inherited`, or `bound`. Explicit launch selectors win over checkout inference.
@@ -201,6 +207,11 @@ with null Task is an orphan in the workspace, including a Wave-only Session;
 a Task-bound Session missing from a visible roadmap remains bound and reachable.
 Swift caches the workspace projection by its input readings and uses IDs for
 forward and reverse lookup.
+
+Session lifecycle is explicit: `closed` requires completion; `ready` retains
+saved feedback. `active` and `waiting` reflect exact provider-client evidence,
+reconciled before returning a current reading. A stale state field cannot
+authorize signaling or turn provider exit into Session completion.
 
 Adjacent APIs keep their own authority: Task PR operations own Git/GitHub;
 provider routing owns credentials; Home placement owns routing; exact process
@@ -279,6 +290,639 @@ kernel locks                 live local exclusion authority
 
 ### Live SQLite tables
 
+| Owner | Tables | Purpose |
+| --- | --- | --- |
+| Planning | `chapters`, `waves`, `projects`, `project_events`, `tasks`, `task_events` | Repository clock, Wave plans, Work identity, corrections, historical evidence |
+| Execution | `flow_invocations`, `runs`, `sessions` | Saved execution, indexed launch records, conversations |
+| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Serial PR chain and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | Tool answers and Home placement |
 | Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Blocking requests, answering-attempt fence, typed results, Linear publication |
 | PM projection | `pm_snapshots`, `observation_outbox` | Bounded Linear reads and deferred child-event delivery to the Wave |
+| Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
+| PR landing | `pr_landings`, `ci_incidents` | Exact PR-head supervision and repair generations |
+| Home and provider authority | `homes`, `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens`, `provider_deliveries` | Machine routes, credentials, selection, limits, delivery receipts |
+| Local observation/cache | `run_events`, `blob_tokens` | Outer command events and deterministic Git-blob token counts |
+| Schema | `schema_migrations` | Applied migration identity and checksum frontier |
+
+Released migration files are immutable history. A forward migration creates the
+new schema. A one-time Home import moves historical Run, Session, invocation and
+chapter facts into it before ordinary readers switch. Imported records retain
+identity and evidence; ambiguous mappings remain explicit migration findings.
+Runtime reads never fall back to historical files. Retired files are removed
+only after verified import and a recoverable backup.
+
+### Filesystem state
+
+| Location | Contents | Write pattern |
+| --- | --- | --- |
+| `.lf/skills/`, `.lf/flows/`, `.lf/config.yaml` | Repository-owned execution definitions | Authored and reviewed with code |
+| `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | Wave intent, curated memory, metric contracts | Authored and reviewed with code |
+| `.lf/journal/waves/<name>/journal.jsonl` | Wave conversation/resident events | Append-only with crash-tail repair |
+| `.lf/releases/<tag>/<commit>-<run>/` | Prepared release bytes and their candidate receipt | Replace one exact candidate atomically; retain through retry, remove after publication |
+| `$LF_HOME/runs/<prefix>/<run-id>/` | Run manifest, event streams, terminal receipt | Publish once, append streams, settle once |
+| Home provider directories | Provider-native login and resume state | Owned by provider adapters |
+| Git directory `loopflow/` receipts | writer/rebase/PR mutation coordination | Kernel-locked receipt files |
+| machine install root | Versioned artifact sets and switch receipts | Stage immutably, select atomically |
+
+### External systems
+
+Linear owns Initiative/Project/Issue planning shared with the team. GitHub owns
+PR heads, checks, and merge. Git owns commits and worktrees. Model providers own
+their session and usage semantics. Local rows cache or record observations from
+those systems; they never silently become substitute authority.
+
+## Processes and public APIs
+
+```text
+interactive shell / automation / Loopflow.app
+                  |
+                  v
+                 lf
+       +----------+-----------+
+       |          |           |
+       v          v           v
+ planning APIs   Skill run    Git/PR operations
+       |          |           |
+       |          v           +---- Linear / GitHub
+       |       provider
+       |          |
+       v          v
+ SQLite       Run record
+
+Task CLI -> exact Task advancement claim -> one worker boundary Run
+Wave operation -> one finite wave/operate Run
+Task/Wave-bound helper Runs ---------> shared Skill execution components
+```
+
+| Surface | Responsibility | Scope |
+| --- | --- | --- |
+| `lf <skill>` and `lf flow` | Direct Skill execution and Flow composition | Current process and Home |
+| `lf wave`, `project`, `task`, `work` | Durable planning and Work coordination | Work resolved in the current planning store |
+| `lf ask`, `session` | Sessions and explicit resolution | Current Home Session rows joined to Runs |
+| `lf wt`, `commit`, `rebase`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
+| `lf runs`, `usage`, `ps`, `top`, `prune`, `doctor` | Execution and process observation | Current Home only |
+| `lf home`, `lf work`, `start`, `stop`, `pause`, `resume` | Home identity and Wave service lifecycle | Current Home unless routed explicitly |
+| `lf ssh <home-id> <args...>` | Run the target Home's `lf` | Explicit remote Home; no implicit fan-out |
+| `lfd` HTTP API | Start/stop/reconcile Waves, receive webhooks, claim landings | One Home |
+| Wave HTTP API | Channel, conversation, events, messages, observations, resident attachment | One Wave listener |
+| Loopflow.app | Swift projections and user interaction | Queries the same DTOs and remote routes; owns no lifecycle |
+
+Most commands are local by default. `lf ssh` is transport, not a second API:
+the inner `lf` and separator are implicit, the target re-resolves its own Home
+state, and durable processes scrub foreground-forwarded secrets before
+detaching.
+
+## Harness launch and Run records
+
+Every Loopflow-mediated launch uses the same Run constructor and recorder.
+Task, Wave, Ask and ordinary CLI callers supply typed context, not different
+persistence formats. Project-scope planning Runs carry their Wave; Project is
+not an extra Run parent.
+
+```text
+Home SQLite: runs -> sessions (only when there is a conversation)
+$LF_HOME/runs/<prefix>/<run-id>/
+  manifest.json       immutable launch inputs, prompt/context references
+  context.json        captured prompt context when present
+  events.jsonl        append-only provider and usage evidence
+  terminal.json       immutable terminal evidence
+```
+
+1. Resolve the Home once for the store and artifact root. Resolve optional
+   Work selectors without granting execution authority; validate Run ancestry.
+2. Reserve the Run ID and optional Session in one transaction, in prepared
+   state. A review boundary binds that exact Run in the same transaction.
+3. Publish final launch inputs atomically in its artifact directory. Mark the
+   Run launchable only after publication. No provider starts before both exist.
+4. Spawn and record the exact native provider/attachment information in the
+   store. Append telemetry without putting event writes on the critical path.
+5. Publish terminal evidence and settle the Run row. A recovery pass can finish
+   this interrupted settlement from that exact receipt, never from elapsed time.
+
+Prepared rows without launch artifacts remain recoverable preparation failures.
+Publication without a spawn receipt does not authorize a blind second spawn;
+recovery uses the existing exact process evidence or reports uncertainty.
+Completion of a provider Run does not close its Session. Session readiness and
+completion have their own transaction boundary.
+
+The store owns current Work attribution. Launch artifacts retain original
+inputs and cannot answer current ancestry after bind. Renaming/binding never
+rewrites them. Native provider IDs, client attachment and stop receipts live
+with the Run's operational state in SQLite, not mutable files beside it. These
+receipts describe exact processes; a stored `active` label alone is not liveness.
+
+Run listing filters indexed row fields before its result limit. Detailed output,
+replay and usage may read the selected Run's evidence files. Usage attribution
+joins current Run parents, so it follows bind; provider counters remain original
+observations. Retry/failover attempts stay within one Run and use distinct usage
+streams. Missing counters remain unknown; settlement never invents provider
+finality or sums cumulative checkpoints.
+
+Run/Session storage is required locally. No live PM request, Wave listener or
+daemon is required for an unbound launch. Database failures are reported before
+spawn rather than manufacturing an unindexed file-only Run.
+
+## Tracked Work and bounded Task advancement
+
+```text
+Task trigger -> claim current invocation -> execute captured node
+                                         -> settle, stop, or await Session
+```
+
+A Task's current root invocation owns its runtime child invocations. Claims
+fence invocation ID, cursor version, worker generation and the exact Run. A
+late result cannot advance a replacement invocation even if numeric versions
+repeat. Settlement validates the original successful Run before consuming a
+navigation candidate, then atomically updates the cursor and domain evidence.
+
+Recovery uses the saved graph, including unchosen Xor branches and human policy,
+after source files change or disappear. Missing process evidence is uncertainty,
+not proof of death. Interruption retains execution history; restart closes the
+previous invocation and creates another. Finishing retains the invocation with
+terminal status and clears the Task's current root, without completing Work or
+selecting a successor Flow.
+
+Independent helpers may carry the same Task and use separately authorized
+Git/PR operations. Their Runs have no invocation membership and cannot settle
+its cursor. Wave service availability is not a prerequisite for Task progress.
+
+Work status remains `Ready | Done | Abandoned`. Binding an independent Run to
+terminal Work is attribution, not a reopen or a new worker claim. Unresolved
+Sessions remain visible even when their associated Work is terminal.
+
+Chapter rotation shares the Task write boundary for transfers and retirement.
+It preserves active invocation, claim, Run, Session, PR and worktree identity
+when moving started unfinished Tasks to a successor Project in the same Wave.
+The repository's current Chapter changes atomically after every participating
+Wave's plan is prepared; external provider updates are resumable operations,
+not a distributed SQL transaction.
+
+## Durable communication
+
+Task steering posts Linear comments. The Task's advancement claim identifies
+the live recipient. Independent attributed Runs do not receive steering.
+Workers refresh comments into local delivery events and starting context;
+publication, seed inclusion, and provider acceptance are distinct evidence.
+Steering an idle Task starts nothing. Wave guidance travels as extra
+instructions to `wave/operate`.
+
+```bash
+lf task steer INF-123 "keep the public name"
+```
+
+### Questions and sessions
+
+```bash
+lf ask "Review this migration with me"
+lf session list --task INF-123 --json
+lf session open <run-id> --json
+lf session rename <run-id> "Migration review"
+lf session bind <run-id> --task INF-123 --json
+lf session ready "Ready for review"
+lf session complete <run-id>
+```
+
+All three Session kinds are rows selected by the same query. Session identity
+is its unique Run FK. Flow review preparation creates its Run and Session before
+provider launch; an Ask creates a child Run with the caller's Task/Wave and a
+Session holding the request. Standalone interactive launches use the same rows.
+There is no concatenation of file scans and runtime boundaries to build a list.
+
+Open resumes native history on the same Run. Retrying an unpublished launch
+keeps that reserved identity. If an unrecoverable published launch requires a
+replacement, the old Run/Session remains historical; a new Run has its own
+Session. An exact boundary transaction attaches the replacement and retains its
+relationship to the previous attempt. It never silently changes a Session's Run.
+
+Rename updates the title and provenance atomically; an agent's generated title
+cannot overwrite a human title. Bind delegates to the Run ancestry validator.
+The same operation and Rust-owned availability reason serve every UI surface.
+
+Ready saves the summary and leaves the Session open. Complete persists the
+closed state and final feedback before provider teardown or continuation.
+An Ask returns that saved result to its waiting caller, including keyed retries.
+A Flow review supplies feedback to the next step; the following deciding Run
+chooses an edge. Provider exit, pane close and readiness do not complete reviews.
+Completed rows remain history and default lists select open rows.
+
+The terminal pool belongs to the desktop window. Bind and rename retain the
+pane, provider client, scrollback and draft. A detached PTY cradle can host a
+client before the UI arrives; it owns neither Session identity nor completion.
+
+## Flow execution
+
+```bash
+lf task run INF-123                  # invoke the Project's Flow
+lf task run INF-124 --flow incident  # explicit template override
+lf task advance INF-123             # drive the saved invocation
+lf task restart INF-123 --flow feature
+```
+
+A Flow is an authored template. Expansion resolves composed sub-Flows and
+captures every Skill, router and Xor alternative before execution. An invocation
+stores that fully expanded graph plus cursor, return counts and claims in one
+row. Changing the Project's Flow affects future invocations only. Templates may
+be displayed folded; the running invocation exposes its expanded nodes.
+Fully expanded means no unresolved template references; backward edges and
+unchosen Xor alternatives remain finite graph structure. It does not mean
+preallocating an unbounded number of future loop passes.
+
+Every executable invocation has a Task. Direct Skill and inline-prompt Runs
+can remain taskless; a Wave attribution alone does not supply invocation
+ownership. Flow execution uses the Task's invocation driver.
+
+Nodes have local typed IDs. Template composition does not create invocation
+parents. Runtime entry into a nested loop body creates a child invocation for
+that pass, linked to the parent's entry node. Child and parent belong to the
+same Task. The parent records which child it awaits; child completion and parent
+resumption settle together. Retrying reuses the same child; a new pass creates
+a new child. There is no path-string node identity or separate occurrence row.
+
+Each invocation keeps local loop return counts. A Run captures the iteration
+tuple along its invocation's ancestry at launch; later cursor movement cannot
+change that tuple. The constructor validates it against the locked invocation
+chain. An execution location is invocation ID, node ID and tuple; it is a value,
+not an independently stored object.
+
+Backward edges name earlier nodes in the captured graph. Counts measure progress
+without imposing a pass budget. `loop-decide` records Advance or Iterate under
+its exact Run authority. A candidate becomes effective only after that Run
+succeeds; failed/interrupted Runs cannot decide. Mechanical operation retries
+require checking prior effects; cursor recovery alone cannot prove exactly-once
+external effects.
+
+`lf flow blocked` opens a keyed Ask for the decision boundary. Completing it
+returns evidence for reassessment and never chooses a verdict. Human nodes use
+`flow_review` Sessions. Their saved feedback survives restart, source deletion
+and repeated completion calls. Claims and pending review links settle under the
+same invocation transaction; there is no file-backed cursor adapter.
+
+The Wave scheduler continues to run finite `wave/operate` Runs. Wave journal
+history and process ownership remain separate. Historical Wave continuations
+are preserved recovery evidence; inspect with `lf wave recover <name>` and
+explicitly disposition unresolved work. Missing termination evidence never
+permits replacement of an unknown active attempt.
+
+## Task delivery algorithm
+
+A Task binds planning to one active remote branch, managed Git worktree, and
+PR. Any checkout tracking that origin branch identifies the Task; the stored
+path is placement, not identity. The current delivery implementation can rotate
+a settled Task onto a later serial branch. Once that happens, the old branch no
+longer identifies the Task. Collapsing the Task lifetime to one Linear-associated
+branch remains a separate delivery simplification.
+
+```text
+Linear Issue
+    |
+    v
+Task row ----> managed worktree ----> commits
+    |                                  |
+    |                                  v
+    +-----------------------------> GitHub PR
+                                       |
+                              checks / repair / merge
+                                       |
+                              complete Task
+```
+
+1. `lf task prepare` resolves one Linear Issue inside one Project and creates
+   or reuses Task Work, its worktree, and its serial PR identity. It starts no
+   boundary Run.
+2. Independent `lf --task ...` Runs may work in that substrate directly.
+   `lf task run` selects a Flow when none is active and ensures its exact
+   invocation has one worker through the same execution components.
+3. `lf commit` snapshots the worktree. `lf pr publish` creates or refreshes the
+   current PR without opening a browser.
+4. `lf pr submit` leaves the exact-head merge click to a person. `lf pr arm`
+   requests exact-head auto-merge and returns; `lf pr land` watches through
+   merge. All three operate on Task delivery state when it exists and require
+   no Flow-driving claim or execution receipt.
+5. PR landing is fenced by landing generation. The supervisor repairs current
+   failing checks; a moved head requires fresh evidence. An unchanged head may
+   pass or merge, and explicit land resumes a previously blocked operation.
+6. Merge completes the Task. Follow-up or simultaneously dependent work uses a
+   separate Task, optionally stacked on the parent's PR.
+
+GitHub remains merge truth. SQLite stores the observed PR/head/check/disposition
+needed to resume safely; it cannot declare an unmerged PR merged.
+
+## OS locks and allowed contention
+
+Loopflow uses advisory OS file locks for exact local critical sections. The
+open file descriptor holds authority; the JSON file is a readable receipt.
+Process death releases the kernel lock even if the receipt remains, so the next
+operation can clean or explicitly adopt stale metadata.
+
+### Git mutation and rebase locks
+
+For a Git worktree, `absolute_git_dir` selects the real Git directory, including
+the linked-worktree case. Rebase coordination lives beneath it:
+
+```text
+<absolute-git-dir>/loopflow/rebase-owner.json
+```
+
+Provider Runs receive no worktree writer token. Commit, PR mutation, restart
+checkpointing, and land take short OS-held locks only around their exact Git
+mutation. Independent agents may edit and run concurrently; the shared
+worktree remains the durable blackboard.
+
+A rebase takes an exclusive lock on `rebase-owner.json` for the complete Git
+sequencer lifetime. New agent launches refuse while that rebase lock is live.
+The exact `LF_GIT_OPERATION_ID` lets only the operation's recovery child
+continue or abort inside the fence. A raw or crashed rebase can be adopted only
+through the explicit adoption path, which mints a new id.
+
+Therefore:
+
+- agent + agent is allowed;
+- reader/build/test + agent is allowed;
+- rebase + independent agent is blocked in both start orders;
+- rebase + its exact recovery child is allowed;
+- stale JSON with no OS lock is not a live owner;
+- raw Git outside Loopflow is not compelled by these advisory locks.
+
+### Short mutation and machine locks
+
+`<absolute-git-dir>/lf-pr-mutation.lock` serializes only Task PR/head mutation
+sections; a second such operation fails fast while the first guard is alive.
+Wave locator locks serialize listener/relocation filesystem ownership. A
+`<store>.migration.lock` serializes backup plus schema application. The current
+promotion operation holds `$HOME/.lf/promotion.lock` exclusively for its full
+upgrade transaction. These locks do not turn a Run id into authority.
+
+## Process ownership and control
+
+Run records contain no process owner. A PID, tmux name, ambient process group,
+Work identity, parent Run, writer lock, or telemetry row is insufficient signal
+authority. The process that directly spawned a child may cancel its own child
+handle; that local capability is not recoverable cross-process control.
+
+Generic cross-process Work/Task interrupt therefore refuses without exact
+ownership evidence. If durable Run control is added, the launcher must create a
+fresh process scope and publish an owner receipt containing PID plus kernel
+birth identity, boot/Home identity, and the exact process group/session/native
+scope. Every later signal must revalidate it. File inbox envelopes can provide
+durable stop/steer; a same-version socket may optimize latency but cannot be the
+required protocol.
+
+## Homes and process topology
+
+```text
+Loopflow.app / shell / external harness
+                 |
+                 v
+                lf ---------------- Linear / GitHub / provider auth
+                 |
+       planning SQLite + repository/Git
+                 |
+                 v
+          Task CLI ----- exact invocation claim
+                                              |
+                                              v
+                                      provider harness
+                                              |
+                                              v
+                                      Home-local Run record
+```
+
+`lfd` starts eligible placed Wave listeners, reconciles services and webhook
+deliveries, and serves Home endpoints. The Wave listener owns HTTP, discovery,
+journal, and the resident child it directly spawned. Crossing Homes is an
+explicit `lf ssh` hop whose target proves its Home identity.
+
+### Multi-Home placement and execution
+
+`HomeId` is stable machine identity. Its observed SSH route may change without
+moving Work. `Placement` maps one `WorkRef` to one Home and can independently
+enable or disable automatic startup.
+
+```text
+origin Home                         target Home
+-----------                         -----------
+lf work place ... home_B  ------->  HomeId = home_B
+
+lf ssh home_B start wave_X
+        |
+        `--- SSH transport --------> target `lf start wave_X`
+                                      |
+                                      v
+                                     lfd
+                                      |
+                                      v
+                                Wave listener/resident
+                                      |
+                                      v
+                               local provider + Run record
+```
+
+The operating sequence is:
+
+1. `lf home observe` records a stable Home id and current route.
+2. `lf work place` records where a Wave/Task belongs.
+3. A local command acts on the current Home. `lf ssh <home> ...` runs the same
+   command on the target Home after verifying identity.
+4. `lfd` starts only eligible, enabled Work placed on that Home.
+5. The target uses its own planning store, repository/worktree, provider homes,
+   service manager, OS locks, and Run directory.
+
+Run records and process observations are not replicated. To inspect another
+Home, run the reader there through `lf ssh`. Foreground SSH may explicitly
+forward selected account authority; detached processes must use credentials
+installed on the target.
+
+Wave selection always resolves `(canonical repository, slug)` to one UUID.
+Bare-slug diagnostics fail when more than one repository owns the slug; no
+read or mutation chooses one by order. A scoped lookup repairs an equivalent
+legacy path spelling to the canonical repository in one transaction.
+`lf work relocate wave <uuid>` is the only semantic locator mutation: it fences
+the Wave chord, moves authored files and the journal, commits the new locator
+transactionally, and leaves PM, Work, and Home-placement rows joined to the
+unchanged UUID. A target-local `.lf/tmp/wave-relocations/<uuid>.json` receipt
+bridges the filesystem/SQLite commit boundary; retrying after a committed crash
+finishes verified source cleanup, then removes the receipt. Repository moves
+also require compatible configured PM Teams so relocation cannot impersonate
+the separate `lf pm reteam` operation.
+
+## Promotion and long-running old processes
+
+1. Verify and install immutable versioned artifacts.
+2. Copy the selected planning store, apply the candidate schema to that
+   isolated copy, and prove the candidate can read it.
+3. Atomically repoint the launcher used by future top-level processes.
+4. Let already-running processes continue with their selected executable.
+5. Restart only the Home services and app surfaces actually being replaced.
+6. Recover or roll back from the persisted artifact-selection receipt.
+7. Garbage-collect old artifacts separately from activation.
+
+The machine-wide promotion lock serializes artifact selection and service
+replacement. It does not discover, drain, stop, or settle Runs and it is not
+held by ordinary harnesses. Store cloning remains useful because preview can
+prove a candidate schema without mutating the selected store.
+
+An already-running `lf` retains its executable and selected store path.
+A Run-schema cutover must account for those writers before activation. On the first published-to-development switch, the process may keep
+writing successfully to the prior production store after new commands select
+the cloned development store; those writes become invisible to the new
+selection. A later development-to-development promotion may reuse and migrate
+the selected store, so an old writer may instead fail against changed schema.
+Promotion pauses and replaces the known services it owns but does not discover
+every shell or provider process. The clone proves candidate readability; it
+does not provide cross-store write continuity or old-schema compatibility.
+
+## Truth and projections
+
+The map is the ownership index. Truth remains distributed across Home-local
+SQLite, repository files and Git, the Wave journal, Linear, GitHub, and provider
+homes or Doppler; none is a fallback authority for another.
+
+Intentional copies stay read projections:
+
+<!-- architecture-projections:start -->
+| Projection | Authority copied | Freshness and consumer |
+| --- | --- | --- |
+| [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs) / `pm_snapshots` | Linear planning | Atomic PM sync replacement; `lf status`, `lf roadmap`, and the Mac app read it but never author through it. |
+| [`TaskLinearObservation`](../rust/loopflow/src/work/task/mod.rs) / `task_linear_observations` | Linear Issue state | Reconciliation records provider evidence before applying lifecycle changes. |
+| [`GithubObservation`](../rust/loopflow/src/work/task/mod.rs) / `task_prs`, `ci_incidents` | GitHub PR/check state | Webhook or foreground reads update Task delivery evidence; GitHub remains merge truth. |
+| `tests/fixtures/dto/` | Rust `lf --json` DTOs | Rust and Swift fixture tests reject required-field or enum drift. |
+| `tests/fixtures/migrations/` | Ordinal-free migration drafts and the Python canonicalizer | Rust build/runtime and Python release tests reject ordering, body-byte, checksum, and graph-error drift. |
+<!-- architecture-projections:end -->
+
+`lf status` and `lf roadmap` derive Task conditions from Work, invocation and
+PR facts. Sessions are one query joining Session and Run rows; all Run filters
+use those same ancestry fields. No projection acquires launch, Work-mutation,
+credential or signal authority. UI grouping is cached presentation, not another
+attribution store.
+
+## Extension rules
+
+| Area | Safe extension | Architectural constraint |
+| --- | --- | --- |
+| Run queries | Add an index or projection for a measured query | The Run row owns identity and attribution; files hold launch/provider evidence, never fallback ancestry |
+| Multi-Home views | Fan out read-only commands through `lf ssh` | Do not centralize Run ownership or silently mix local and remote scope |
+| Process control | Publish birth-validated ownership at the launcher spawn seam | No PID/tmux/Work/telemetry inference |
+| Planning input | Add a naturally keyed fact or provider observation | Do not create a global input revision protocol |
+| Provider support | Add a provider adapter, account route, and normalized stream mapping | Provider credentials/finality remain provider-authored |
+| Promotion | Add artifact roles or service adapters within the locked switch transaction | Artifact activation does not depend on Run discovery |
+
+A new writer must have one authoritative model. Avoid backend dispatch between
+old and new representations, dual authoritative SQLite/filesystem records, mandatory
+collector daemons, or planning capabilities derived from observation data.
+
+## Appendix: compatibility seams
+
+Compatibility survives only when it crosses immutable external history. Each
+seam names its translation and deletion boundary; none is a second current
+model.
+
+<!-- architecture-shims:start -->
+| Seam | Current concept | Source and removal boundary |
+| --- | --- | --- |
+| `shim:legacy-chat-import` | Old journal turns become one immutable Wave conversation epoch. | [`ConversationEpochImport`](../rust/loopflow/src/controller/wave/journal.rs); remove only when old journals are no longer supported. |
+| `shim:retired-op` / `lf op` | Rejected namespace returns the surviving top-level command name. | [`Commands`](../rust/loopflow/src/lf/mod.rs); remove when external callers no longer need the diagnostic tombstone. |
+| `shim:rams-alias` | Installed `rams/rams` command resolves to the Skill model. | [`SkillSource`](../rust/loopflow/src/lf/discovery.rs); remove when the external single-file command is no longer supported. |
+| `shim:retired-app-replacement` | Promotion removes the previously shipped app bundle after the current app commits. | [`AppPromotion`](../rust/loopflow/src/lf/commands/install.rs); remove after the retired bundle name is outside supported installs. |
+<!-- architecture-shims:end -->
+
+## Appendix: historical-only vocabulary
+
+The scanner matches exact phrases, not overloaded words. Provider resume
+sessions, tmux sessions, and `session.launch` are current. The authored chat
+reference `project:<slug>` is also current; it is not the old Linear-label PM
+model.
+
+<!-- architecture-vocabulary:start -->
+| Retired term | Allowed scopes | Current language |
+| --- | --- | --- |
+| `Project Session`, `Task Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; conversational Session is a child of Run, not a Work executor. |
+| `session context`, `LF_SESSION` | — | Stable Work identity plus `LF_RUN_ID`/`LF_RUN_DIR` execution evidence. |
+| `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, synchronous questions, and review FlowSteps. |
+| `pm.linear_project`, `projects/<slug>.md` | `release/` | `pm.linear_initiative`; Linear Initiative → Project → Issue. |
+| `machine-local host`, `machine-global command`, `machine-global mutation`, `machine-global reservation` | — | Home-local keeper, command, mutation, or reservation. |
+<!-- architecture-vocabulary:end -->
+
+The following storage vocabulary names retired representations, not alternate
+read paths. Their bytes survive only as migration input or historical evidence.
+
+| Historical representation | Current owner |
+| --- | --- |
+| Wave-scoped Chapter / `wave_chapters` | Repository Chapter and unique (Wave, Chapter) Project |
+| Recommended Flow / `flows.recommended` | Project's `flow` template selection |
+| `FlowPosition`, `PinnedTaskFlow`, `task_flow_positions` | Flow invocation row: captured graph and execution state together |
+| `FlowRun`, `flows/<id>/position.json` | Flow invocation row |
+| Subject selector list on a Run | Typed Run parents and `work_source` |
+| Four Session projections, Ask files, composite boundary Session IDs | `sessions`, keyed by Run ID |
+| Session name/resolution and provider attachment sidecars | Session attributes and Run operational data in SQLite |
+| Step occurrence / path-string node key | Invocation ID, local node ID, captured iteration tuple |
+
+Canonical migrations, migration fixtures, and release notes retain historical
+names because changing shipped evidence would rewrite history. Operational docs
+and current runtime source do not. Chapter archives under `.lf/chapters/` are
+dated evidence, excluded from live vocabulary and compatibility-seam discovery.
+
+## Authority and failure invariants
+
+- Repository Chapter × Wave identifies one Project; Task belongs to that
+  Project. No recursive or orphan Projects.
+- A Wave UUID is stable across rename and repository rehome; repository-scoped
+  locators are unique, and bare slugs are never mutation authority.
+- Linear owns current Project/Task planning; SQLite projections never become an
+  authoring fallback.
+- Wave operation reads its Project in the repository's current Chapter.
+  Rotation changes the repository boundary together; partial external work is
+  visible and resumable.
+- An ad-hoc Skill Run needs no planning parent or PM service; it still records
+  a validated row in its Home's SQLite store before launch.
+- Every Loopflow-mediated harness launch publishes one immutable manifest
+  before spawn and creates at most one immutable terminal receipt.
+- JSONL telemetry is best effort and never gates launch or settlement.
+- Run parentage, Work attribution, outcome, and usage are evidence only.
+- Work status describes planning convergence; process and Run activity are
+  separate observations. One Work may concern zero, one, or many Runs.
+- Generic Run ids stored in Steer and Task history are opaque provenance unless
+  a reader independently resolves their Run record; resolution never grants
+  authority.
+- Cross-process signaling requires an exact process ownership receipt and
+  current OS birth identity; a Run or Session row alone is not that receipt.
+- OS file-lock ownership is scoped to its documented local critical section;
+  it never grants Work or credential authority.
+- Multiple independent agent writers may coexist. A live rebase excludes them;
+  only its exact recovery child may enter that sequencer.
+- A Flow invocation or an Ask caller may await a Session's explicit completion.
+- Agent readiness and process exit are never resolutions. Complete releases an
+  Ask or returns review feedback to the next Flow step. A deciding Run
+  records Advance/Iterate under its own exact Run authority.
+- Another Work perspective is an ordinary `lf --as` Run; Steer appends durable
+  correction.
+- Terminal Work does not hide or complete its unresolved Sessions.
+- Promotion preview may migrate an isolated store clone. Activation of a new
+  artifact and writes by older planning binaries are separate concerns.
+- Commands that observe Runs, usage, or processes are Home-local unless the
+  caller explicitly routes them through `lf ssh`.
+- DTO fields are required unless their type is explicitly optional.
+
+## Drift proof
+
+```bash
+uv run python scripts/check_architecture.py
+```
+
+The bounded check materializes the live schema (including drafts), discovers
+root CLI families, binaries/internal process commands, both local HTTP routers,
+provider kinds, literal Rust subprocess edges, read projections, declared
+shims, and exact stale vocabulary. Every discovered item must occur exactly
+once in the map or its named inventory. It validates the map's source links and
+reports mapped/discovered counts. The vocabulary scan covers active top-level
+docs, product docs, prompts, scripts, website code, production Python/Rust/Swift
+trees, migration SQL, and release history. Generated `website/docs/` is excluded
+because the authoritative `docs/` source is already scanned. Historical
+allowances must shelter at least one current match, so dead scopes fail instead
+of becoming a permanent allowlist; declared compatibility seams must retain
+their exact source marker. The check does not pretend to interpret every Rust
+type or sentence.
+
+CI runs the same command for every proposed merge. The weekly Architecture
+Drift workflow retains the JSON result as time-based evidence. A new owner,
+projection, shim, or API either maps to an existing concept or updates this page
+in the same change.

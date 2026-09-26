@@ -52,9 +52,9 @@ lf task run DES-124 --stack-on DES-123                # dependent Task, separate
 ```
 
 `--task` and `--wave` run a named skill, Flow or inline prompt about existing Work
-without advancing its managed Flow position. A direct bound Flow has its own
+without advancing its current invocation. A direct bound Flow has its own
 invocation; attribution does not claim the Task worker's cursor. The most
-specific selector is the Run subject: a Task implies its Wave. Broader
+specific selector is the Run's typed parent: a Task implies its Wave. Broader
 selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
 Markdown snapshot. Wave binding uses its repository. Several Runs may concern the same Work
@@ -706,7 +706,723 @@ lf runs run_ab12 --final         # print the last durable provider conclusion
 lf runs run_ab12 --events        # print its event stream verbatim
 lf usage --project parser        # direct Run usage for one Project
 lf usage --task INF-123 --json   # direct Run evidence for one Task
+lf session list                  # Sessions, Work paths, actions and unavailable reasons
+lf session open run_ab12         # resume an open conversation after provider exit
+lf session open run_ab12 --try   # let the provider arbitrate an active session
+lf session open run_ab12 --replace # stop Loopflow's client, then continue here
+lf session open run_ab12 --json --replace # prepare a takeover command without stopping it yet
+lf session complete run_ab12     # finish it; provider history remains resumable
+lf replay run_ab12               # launch that request as a child Run
+lf usage --days 30              # direct provider-authored usage per Run
+lf usage --days 0 --json        # all RunSnapshot rows; zero means all time
+lf ci --since 7d                # CI repair attempts, latency, and outcomes
+lf ci --since 7d --json         # complete machine-wide incident receipt
+lf ps                            # one OS-live process and call-tree snapshot
+lf ps --json                     # versioned flat nodes with stable parent ids
+lf top                           # refresh the same snapshot every two seconds on a TTY
+lf top --json                    # emit once; redirected output also emits once without ANSI
+lf prune --dry-run               # list stale receipts and registered orphan process groups
+lf prune                         # remove those receipts and reap those process groups
+lf doctor                       # audit continuity, identity, lineage, coverage, receipts
+lf doctor --json                # machine-readable audit
+```
+
+`lf ls` reads the local Wave registry. `--current` excludes abandoned and retired
+registrations. `lf roadmap --all` spans repositories without inheriting the
+launching process's Wave; an explicit `--wave` still scopes the query.
+
+```bash
+lf work forget wave <wave-id> --dry-run --json
+lf work forget wave <wave-id> --json
+```
+
+Forget an abandoned, disabled, empty registration after removing its authored
+`GOAL.md`. The command leaves repository files alone and refuses registrations
+with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
+Use the installed Home's `lf`; development binaries operate on their own Home.
+
+`lf status` focuses one Wave's local
+planning and runtime projection. `lf roadmap` overlays the current
+Linear-backed plan without creating a second runtime model. `lf activity`
+orders durable Work creation, Run, Task PR, and Steer facts; it reuses
+`WorkRef` identity and does not read reconstructable Task or Project wake
 events. `lf runs`, `lf replay`, and `lf usage` select Run rows from the Home's
 SQLite store. Task and Wave filters use indexed typed fields; Project filters
 join through the Task's Project. Detail reads open only the selected evidence
 artifacts.
+
+`lf runs --active` discovers existing receipts once and checks current processes.
+Waiting native clients count while their owned process remains live; unfinished
+Run metadata alone does not. Exact native receipts and current Exec capture
+bindings supply ownership. No history window, result cap or new launcher marker
+is required. The one-shot cold scan still grows with retained history.
+
+On macOS, `--watch --json` keeps that reader alive, follows filesystem publication,
+and emits newline-delimited snapshots every two seconds. Unchanged warm reads
+recheck live candidates without enumerating historical Runs. Send
+`{"action":"refresh"}` on stdin for an immediate read or `{"action":"rescan"}`
+after sleep/wake or to retry discovery. Closing stdin or stdout exits only this
+reader. Notification loss requests a full cold rescan; errors remain explicit.
+Linux supports one-shot reads and reports continuous discovery as unsupported.
+
+JSON includes required `discovery` (`scanning`, `ready`, `unavailable`), `home`,
+`observed_at`, optional `task`, `runs`, and `gaps`. Empty `runs` confirms no active
+Runs only when discovery is ready and gaps are empty. Missing or ambiguous
+ownership stays incomplete. A replaced Home requires a fresh reader; repeated
+read failures wait for a request instead of repeatedly scanning history.
+Use one unfiltered Home observation for several Task views, matching each row's
+typed `work`, never its checkout. Wave/Project filters remain history reads.
+
+The `--parent` drill resolves one exact Run and returns all direct children
+without the seven-day presentation cap. The one-Run `--final` read projects the
+last durable provider conclusion from normalized conversation events. Records
+without a phase receipt are labeled and expose streamed prose from their last
+completed provider turn. It does not parse vendor output or invent a conclusion
+for an unsettled Run.
+Replay uses the immutable prompt, agent/model, non-secret provider account ID,
+and tool boundary recorded before spawn; it never reconstructs those inputs
+from current planning or prompt configuration. Managed Claude/Codex replay
+resolves that account ID through the current Home's deterministic credential
+directory or an explicit forwarded lease; replay uses the same validated Run
+creation path as any other launch.
+None of these commands silently queries or aggregates another Home.
+
+`lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
+attach `lf` processes to call records; exact ancestry attaches provider
+processes. Completed calls and launches disappear. Unclaimed providers remain
+separate because Loopflow has no exact authority to attach or signal them.
+Elapsed time never implies death.
+
+Both commands open the live Home ledger and ownership registry read-only. This
+also applies under `scripts/dev-lf`: source builds can inspect real activity
+without gaining migration or write authority over the installed database.
+`lf prune` is the separate write boundary. It removes dead Exec receipts and
+reaps only OpenCode process groups whose registered owner is absent. It never
+kills unclaimed provider PIDs; inspect exact targets with `--dry-run` first.
+
+```bash
+lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route
+lf --account claude=jack@ --account codex=loopflow-eng@ implement
+lf --only-account codex=manabot-eng@ review             # no fallback login
+```
+
+`--account <email-prefix>` prefers each matching managed login before its
+provider's normal route. The first preferred attempt bypasses stored health;
+a missing credential continues through the healthy fallback route.
+`--only-account` restricts the launch and its children to exactly the
+selected provider accounts. Both flags are repeatable and accept
+`claude=<selector>` or `codex=<selector>`. They cannot be combined.
+
+Use the flags for Claude and Codex terminal sessions too (`--tui`): logging
+into a managed login with a bare `codex login` creates a second session and
+evicts the managed one ("needs re-login"); entering through lf shares one
+session.
+
+Without an account flag, managed Claude and Codex launches use the repository
+route, then the default route. If neither exists, all automatic managed logins
+are eligible and Loopflow skips known cooling or limited accounts. If no
+managed login exists, the provider CLI uses its ambient default credentials.
+
+`lf usage` selects the same Home-local Run rows as `lf runs`, ordered newest
+first, and reads their provider usage evidence.
+`--days` filters by Run start time and defaults to 30; zero selects all recorded
+Runs. `--wave`, `--project`, and `--task` apply the same Work attribution drill
+as `lf runs`; the table names the most specific Work on each row. JSON remains
+the filtered direct `RunSnapshot` array. Each row preserves provider-authored
+cumulative counters once per usage stream. Omitted counters stay unknown,
+provider final receipts are counted explicitly, and evidence gaps remain visible.
+Run settlement never invents provider finality.
+
+A Run is one Home-local row with immutable launch artifacts and append-only
+provider evidence. The row owns current attribution and lifecycle. The manifest
+retains launch inputs and causal parent; terminal evidence supports recoverable
+settlement. Bind changes current attribution without rewriting launch evidence. Provider
+retry/failover remains inside that Run as distinct attempts and usage streams.
+No owner receipt means no process signal authority.
+
+`lf ci` reads durable CI incidents from the local Home store. One failed head is
+one attempt; later passing and merge observations close every open attempt on
+that PR. `--wave` and `--repo owner/repo` filter the same local report.
+
+`lf doctor` also prints the binary's build provenance, the resolved database
+path, and the latest known and applied migrations. Those fields still print
+when the database is too new or came from a divergent development build.
+
+The `continuity` check reads installed cron activation and scheduled receipts.
+Only the latest due interval for each cron is live: a missing receipt names the
+cron, Home, expected interval, and `lf cron history` command. Pre-activation and
+older ledger gaps remain visible history without keeping every later doctor
+red. A failed target still proves the scheduler fired; its own receipt and
+target error remain the actionable evidence.
+
+## Measuring Codebase Weight
+
+```bash
+lf tokens                       # lines and model tokens by tracked path
+lf tokens --days 365            # daily history, grouped by file extension
+lf tokens --json                # token-weighted tree for other tools
+```
+
+`lf tokens` counts with the same tokenizer used by the context budget. It skips
+untracked and non-UTF-8 files; a symlink counts its tracked link text instead of
+duplicating its target; history walks git blobs without checking them out.
+
+## What's Included by Default
+
+Every skill automatically includes:
+
+| Context | Default | How to disable |
+|---------|---------|----------------|
+| **Agent doc** (AGENTS.md / CLAUDE.md / STYLE.md) | ✓ included | — |
+| **Loopflow operating guidance** | ✓ included | `--no-loopflow` |
+| **scratch/** | ✓ included | — |
+| **wave/** | ✓ included | — |
+
+## What's Opt-In
+
+These require explicit flags or config:
+
+| Context | How to enable |
+|---------|---------------|
+| **Docs** (files, globs, directories) | `--docs README.md,docs/` or `docs:` config |
+| **Raw diff** (line-by-line changes) | `--diff` |
+| **Branch files** (full changed file bodies) | `--diff-files` |
+| **Clipboard** | `-c` / `--clipboard` |
+| **Chrome automation** | `--chrome` |
+
+See [Configuration](config.md) for setting defaults via config file.
+
+## Examples
+
+### Debug with clipboard
+
+```bash
+# Run tests, copy the error
+lf debug -c
+```
+
+### Prefetch docs into context
+
+```bash
+lf qa --docs src/api/
+```
+
+Gathers `*.md` under `src/api/` into context before the prompt runs. Unlike
+the old area scope, `--docs` only prefetches—it doesn't restrict which
+files the agent touches.
+
+### Use a different model
+
+```bash
+lf implement: add caching -m codex
+```
+
+### Disable loopflow operating guidance
+
+```bash
+lf gate --no-loopflow
+```
+
+`LOOPFLOW.md` carries loopflow-specific guidance for inline execution and
+mechanical git/PR operations. Tier skills add scoped delegation. Use
+`--no-loopflow` for a leaner prompt.
+
+### Include clipboard content
+
+```bash
+lf debug -c    # include current clipboard text in the prompt
+```
+
+### Launch Claude, Codex, or OpenCode interactively
+
+```bash
+lf design                 # direct TTY → uses session.launch (default: tui)
+lf gate --tui             # force a terminal handoff for a normally-headless skill
+lf : "fix the bug" --ide -m codex   # force the Codex app instead
+```
+
+`--tui` opens Claude, Codex, or OpenCode in the terminal. `--ide` opens Claude
+or Codex in its app. Both override the repo default. Set `session.launch: ide`
+in `.lf/config.yaml` to make the app the default for direct interactive
+skills. Automated flow nodes and `--batch` remain headless.
+
+Inside a Task's worktree, a launch without `--task`/`--wave`/`--as` belongs to
+that Task: its Session lists the Task as Work and `lf runs --task` finds it.
+An explicit selection still wins, and a branch no Task tracks stays unbound.
+
+### External skills
+
+```bash
+lf npx/vercel-labs/deep-research   # fetch + run from the npx skills catalog
+lf npx/explain-code                # already-cached skill (no network)
+```
+
+`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The core `task/` / `project/` / `wave/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
+
+## PR Operations
+
+The publish/submit/arm/land contract every launched agent receives is
+`rust/loopflow/src/engine/builtins/LOOPFLOW.md` — that file is canonical for
+agent-facing semantics; this section is the user reference.
+
+### lf pr publish
+
+Push and create or refresh a PR, then print its state and URL. Opens no
+browser — this is the headless publication command agents use.
+
+```bash
+lf pr publish
+lf pr publish --title "area: short title" --body "## Summary ..."
+lf -m codex pr publish        # one-off agent override for copy generation
+```
+
+When `-m` is omitted, copy generation uses `agent:` from `.lf/config.yaml` or
+`~/.lf/config.yaml`. Use the `pr` ops skill to generate `--title`/`--body`
+with agent judgment. When task gate has written cached PR copy, publication
+consumes it and removes the gate-owned copy/review files before its first
+commit or push. Other `scratch/` state remains untouched. Publication never
+fetches to integrate, rebases, rewrites Task stack metadata, or launches
+conflict recovery. A PR may remain behind its base until `lf rebase`, `lf gate`,
+`lf pr submit`, `lf pr arm`, or `lf pr land` owns integration. Push or GitHub failure returns
+an error and presents nothing.
+
+### lf pr open
+
+Publish (same as `lf pr publish`), then open the PR for review — the GitHub
+page in the browser. The explicit, user-initiated review action; agents use
+`publish`, `submit`, `arm`, or `land`. If launching the browser fails, only `open`
+fails — the PR is already published and its URL printed.
+
+### lf pr submit
+
+Prepare the exact PR head, assign it to you, and stop for your merge click.
+Nothing merges automatically. Task and non-Task branches use the same command.
+
+```bash
+lf pr submit
+```
+
+Inside a managed Task worktree, `submit` records a user-owned exact-head merge
+request in the Task PR state. It does not advance or consult the Task's Flow
+invocation. Use `-c` to complete the Task after merge or `--next <slug>` to
+rotate its serial PR chain.
+
+### lf pr arm
+
+Prepare the exact PR head, request auto-merge, and return without watching.
+
+```bash
+lf pr arm
+lf pr arm -c
+lf pr arm --next parser-proof
+```
+
+Task disposition is recorded for the exact armed head, but completion and
+rotation wait for a later authoritative merged observation.
+
+Preparing a replacement head disables pending auto-merge or removes the PR
+from GitHub's merge queue before pushing, then arms the updated head.
+
+### lf pr land
+
+Prepare and arm the PR, then watch GitHub until merged or actionably blocked.
+Failing required checks launch one bounded `ci-fix` agent for the exact failed
+head. That agent rebases first, repairs and verifies, then pushes and enables
+auto-merge with the original Task disposition. The watcher observes the new
+head and completes after merge; it does not publish or re-arm repairs.
+
+```bash
+lf pr land                    # land one PR; the Task stays open
+lf pr land -c                 # land, then complete the owning Task
+lf pr land --next parser-proof  # name the next serial Task PR
+```
+
+On Task PRs, arm and land record the same head-and-disposition request with Auto
+as the operator. `--match-head-commit` fences the arming command; Loopflow
+revokes Auto before its own later head mutation. Land applies completion or
+rotation only after GitHub reports the PR merged. Concurrent Loopflow
+finalization and push commands in one worktree are refused rather than
+interleaved.
+
+Task publication persists a non-empty reviewer-facing title and body for the
+current head. A published PR with missing or stale copy remains actionable, as
+does a PR whose auto-merge settlement is not armed. Only a current-head Auto
+merge request with Complete disposition records the terminal `lf pr land -c`
+intent.
+
+Task PR copy leads with the benefit of its own change:
+
+```markdown
+Understand what merging this PR will do
+
+Reviewers can see whether merging this change completes the Task or leaves
+follow-up work, without reconstructing its execution history.
+
+> [!NOTE]
+> **Task:** [Make Task PR copy explain intent and lifecycle · LOO-249](https://linear.app/...)
+> **PR lifecycle:** Merging PR 1 completes the Task.
+
+## Try it
+
+Read the opening summary, then follow the Task link in the note below it.
+You should be able to distinguish this PR's change from the broader Task and
+see whether merging completes the Task or leaves it open.
+```
+
+The opening summary is the first Markdown paragraph. Loopflow inserts its
+managed Task block after that paragraph, preserving the authored title and
+remaining body. Refresh replaces the block instead of accumulating history.
+The exact Task identifier, name, provider link, PR sequence, and merge
+consequence come from durable delivery state. Publication alone does not
+request Task settlement. Refreshing the same head preserves and describes an
+existing merge request; publishing a changed head clears superseded intent.
+Task lifecycle phase is intentionally absent.
+Generated or gate-authored prose describes this increment's meaningful changes
+and puts a useful **Try it** walkthrough last. Test and lint evidence belongs
+in **Checks** or CI, never in the walkthrough. Ordinary non-Task PR copy is unchanged.
+
+If a Task's work already merged and rotation left a provably empty unpublished
+successor, `lf pr land -c` completes over the merged PR without creating
+another one. This is a delivery-state decision and needs no invocation claim.
+
+Submit, arm, and land clear `scratch/`, preserve a recovery ref, collapse the
+authored range to one tree-identical commit, replay that commit onto the pinned
+target, verify it, and push once. Ordinary `lf rebase` keeps commit history.
+
+### lf pr abandon
+
+Close the PR, remove the worktree, delete the branch.
+
+```bash
+lf pr abandon feature-branch
+lf pr abandon feature-branch --force   # skip confirmation, allow dirty
+```
+
+## lf commit
+
+```bash
+lf commit                     # stage all changes, generate a message, commit
+lf commit -m "message"        # override the generated message
+lf commit -p                  # commit and push
+lf commit --no-add            # commit only what is already staged
+```
+
+## lf rebase
+
+Plan or update the current branch against the right base.
+
+```bash
+lf rebase          # update the branch
+lf rebase --plan   # show the strategy without changing git
+lf rebase origin/main          # explicit target
+```
+
+Every invocation fetches current upstream and updates the local default branch,
+including when called from a sibling worktree. Main fast-forwards when possible;
+divergent unpublished commits are retained through a merge. Main is never pushed.
+The caller then integrates that updated local main (or its explicit/stacked
+target). An already-current main does not skip a behind caller's rebase.
+Staged, unstaged and untracked edits are saved and restored. If restoration
+conflicts, the error names the retained stash. `--plan` stays read-only and
+describes locally known refs without fetching.
+
+Rebase publishes the resulting branch to `origin` with a lease. If the remote
+branch was deleted, it recreates it even when local tracking is stale. Unseen
+remote changes or a branch recreated during the push still reject publication.
+
+Classifies the branch before mutating git: disposable branches can reset to
+their base, authored work uses a normal rebase path. Clean updates stay
+mechanical. A conflict keeps the first sequencer in place for one authorized
+recovery agent; Loopflow verifies the pinned target, branch, dirty state, and
+remote head before reporting success. If `scratch/` needs to survive a reset,
+Loopflow stashes it under `.lf/tmp/scratch-stash/` and restores it afterward.
+Loopflow records reviewed conflict resolutions with command-scoped rerere and
+keeps auto-staging disabled. Repeating the same conflict reuses that resolution
+mechanically and stages only its unmerged paths.
+
+Keep conflict resolution local when the branch is too large or sensitive to
+hand to another agent:
+
+```bash
+lf rebase --manual
+# edit the conflict paths printed by lf
+lf rebase --continue   # stages only the current conflict paths; repeat
+lf rebase --abort      # restore the pre-rebase branch
+```
+
+Manual recovery stays local and never pushes. `--continue` and `--abort`
+atomically adopt a stale Loopflow operation after its owner dies. A rebase
+started with raw Git has no owner record, so name that destructive intent:
+
+```bash
+lf rebase --continue --adopt
+lf rebase --abort --adopt
+```
+
+Plain `lf rebase` never adopts or aborts an existing Git operation.
+
+## lf install
+
+```bash
+lf install             # install the latest published Loopflow from any directory
+lf install schedule    # update Loopflow at login and weekly (macOS)
+lf install schedule daily  # weekly, daily, hourly, or 5min
+```
+
+Updates the installed CLI, daemon, and macOS application through verified
+release downloads and the existing promotion transaction. Requires no Git
+repository, source checkout, Python, uv, or Homebrew. An already-current,
+complete release skips asset downloads; missing or stale artifacts are repaired.
+Use `lf rebase` for checkout updates and your project's own tools for dependency
+setup.
+
+To restore a retained development Home while promoting a local build:
+
+```bash
+local-bin/lf install promote --from-build local-bin/lf --reuse-home local-<id> \
+  --cli-target ~/.local/bin/lf --daemon-source local-bin/lfd --daemon-target ~/.local/bin/lfd \
+  --app-source local-bin/Loopflow.app --app-target /Applications/Loopflow.app --preview
+```
+
+Remove `--preview` to apply. `--reuse-home` reads the prior installation receipt
+and preserves that Home's chapter bindings, Tasks and Runs. `--fresh` instead
+forks published data into a new development Home; it does not carry history from
+another development installation.
+
+When a release contains the exact draft SQL already applied in a retained Home,
+local promotion preserves that Home's data and adopts the release receipt without
+rerunning the SQL. Its preview checks the draft order, checksums and resulting
+schema. Changed or unmatched drafts still require explicit recovery.
+
+For an older `lf` whose install command requires a source checkout, upgrade once
+with the external installer, then use `lf install` for subsequent updates:
+
+```bash
+curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
+```
+
+The external installer verifies release assets and enters the same promotion
+transaction. The hidden `scripts/install.py refresh` entrypoint remains for older
+installed CLIs: it delegates to the release installer without recursing into the
+old CLI. Keep it until those installed callers can upgrade without it. The old
+`pull-local-bin.sh` entrypoint has been removed.
+
+The scheduled job invokes the installed `lf install`, with stable tool paths and
+logs at `~/Library/Logs/Loopflow/refresh.log`. It runs at login and on the selected
+cadence: weekly on Monday at 09:00 (the default), daily at 09:00, hourly on the
+hour, or every five minutes on clock multiples of five. All times are local;
+launchd coalesces sleeping calendar intervals into one run at wake. Rerun
+`lf install schedule` to update an existing job and remove its old source-checkout
+dependency. Failed downloads or promotion remain nonzero and can be retried.
+Linux supports `lf install`; automatic scheduling currently requires macOS.
+
+`lf list`, authentication, profiles, Home identity, and machine inspection also
+work outside repositories. `lf route show` displays defaults there;
+`lf route set --repo owner/name` selects a repository explicitly. Inside a
+repository, catalog and listing commands use its context. Outside, `lf ls`,
+`lf roadmap`, and `lf session list` show machine-wide records.
+
+## lf wt
+
+Inspect, switch, and clean worktrees. Normal roadmap work starts with
+`lf task run <issue-id>`; `lf wt` remains a low-level Git primitive. Place
+dependent roadmap work through `lf task run CHILD --stack-on PARENT`, not
+`lf wt`.
+
+```bash
+lf wt create next             # refresh main, then create a sibling from it
+lf wt create next --plan      # preview placement without fetching or writing
+lf wt switch bugs             # by directory name, identity leaf, or full branch
+lf wt list                    # worktrees as a tree; --format json
+lf wt list --sync             # refresh main before listing
+lf wt ci                      # CI status for the current branch
+lf wt prune --dry-run         # show terminal or week-stale worktrees
+lf wt prune                   # remove them and their local branches
+```
+
+`create`, `list --sync`, and `prune` fetch and integrate current upstream into
+main, preserving unpublished commits and local edits. Refresh failures stop
+the command. `create --plan` and `prune --dry-run` preview without fetching or
+updating main; they do not establish upstream freshness.
+
+`prune` never removes a worktree with uncommitted files. It removes clean
+worktrees immediately when the remote branch is gone, the work landed, or the
+current-head PR closed. It also removes a clean branch after seven days without
+branch activity when no current-head PR is open. Main, the current worktree,
+nonterminal Tasks, and worktrees owned by live processes remain protected.
+Use `lf wt remove NAME --force` for an explicit destructive override.
+
+`lfd` runs a lossless sweep on startup and every 15 minutes: only clean
+landed, remotely deleted, or terminal Task worktrees are removed. Disable
+with `autoprune: false` in config. Subscribe the daemon to GitHub merge and
+branch-deletion webhooks by defining `LF_GITHUB_WEBHOOK_URL` and
+`LF_GITHUB_WEBHOOK_SECRET` in Doppler; the secret travels over stdin and
+never appears in process arguments or the service file.
+
+## lf cron
+
+Reconcile a Wave's `GOAL.md` schedules onto its placed macOS Home and inspect
+each launchd firing through durable receipts.
+
+```bash
+lf cron preflight --wave infrastructure
+lf cron sync --wave infrastructure
+lf cron list --wave infrastructure --json
+lf cron trigger --wave infrastructure --flow <flow> --wait --timeout 15m
+lf cron history --wave infrastructure --days 35
+```
+
+`preflight` proves the installed release binary, Wave placement, authoritative
+checkout, target catalog, and fixed-daily schedules without changing launchd.
+`sync` repeats those checks before changing
+launchd, refuses a Home that does not own the Wave placement, and prunes jobs
+removed from the declaration. It preserves each unchanged job's activation
+timestamp; changing its Home, schedule, target, or identity starts a new
+obligation. Jobs execute through the installed release `lf` with a secret-free
+host environment. Each firing writes a running receipt before the target starts
+and atomically replaces it with `succeeded` or `failed`; an interrupted runner
+remains visibly stale. Logs stay under
+`<repo>/.lf/logs/`, while receipts survive checkout replacement under
+`<LF_HOME>/cron/receipts/`.
+
+`trigger` asks launchd to fire the installed job; it never bypasses the
+configured path. `history` defaults to 35 days so nightly, weekly, credential,
+and host-drift observation windows share one evidence surface.
+
+## lf pm
+
+Read and edit a Wave's Linear planning state. Each Wave maps to an Initiative;
+its Project in each repository Chapter maps to a Linear Project; Tasks are
+Issues. `sync` refreshes the local planning projection. Chapter identity and
+execution records retain their own SQLite authority.
+
+```bash
+lf pm status                                # linked waves and task counts
+lf pm init --wave designer --team-key DSG   # connect Wave; establish repo Team once
+lf pm sync --wave designer                  # refresh SQLite from Linear
+lf pm sync --plan                           # report drift without writing
+lf pm show --wave designer                  # read; refresh when stale
+lf pm show --wave designer --no-sync        # cache-only agent/app read
+lf wave update-plan --wave designer --plan plan.json
+lf wave new-chapter --chapter 2026-09 --plan chapter.json --dry-run --json
+lf wave new-chapter --chapter 2026-09 --plan chapter.json --json
+lf wave history --wave designer --json
+lf status designer --chapter 2026-08 --json
+lf pm task create --wave designer --title "Dark mode"
+lf pm task update --id 1207... --title "Refine dark mode"
+lf pm task comments --id 1207... --json       # read the complete comment thread
+lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
+lf pm rename --wave designer --title "Designer"   # rename the Initiative
+lf pm reteam                            # dry-run the repository-wide Team migration
+lf pm reteam --apply                    # migrate when no Task Run can write old ids
+lf pm doctor                            # flag ownership and title drift
+```
+
+`update-plan` replaces one Wave's current Project content. `new-chapter`
+advances the repository clock for every Wave together; `chapter.json` supplies
+all Wave plans. See [Waves](waves.md#the-planning-model) for the envelope,
+preview, transfer and retry rules. `history --wave` filters a repository's
+chapter history to one Wave; it does not define an independent clock.
+
+Connect Linear first with `doppler run -- lf auth linear`. `lf pm init` pins the Initiative
+into `GOAL.md` and the repository Team into `.lf/config.yaml`. Every Wave in
+that repository reuses the Team and Task prefix (`LOO-1`, `LOO-2`); Initiatives
+and Project membership decide which Wave owns a Task. `pm init --all` discovers
+nested `GOAL.md` files recursively and initializes them against the same Team.
+When no Initiative is pinned, init links one exact title match, creates one
+when absent, and fails on duplicates. Creation fails closed unless the
+repository Team and its Git-origin claim both validate.
+
+```yaml
+# .lf/config.yaml
+pm:
+  provider: linear
+  linear_team: "stable-team-uuid"
+```
+
+Linear's Projects view is flat, so provider titles use
+`<canonical Wave path> — <Project>`; nested Waves remain legible as
+`Survival / Infrastructure — Gmail`. Loopflow resolves ownership from stable
+Initiative and Project ids, then strips that presentation prefix and keeps the
+canonical slug. `show` serves
+snapshots younger than an hour without a network request, tries a
+five-second refresh for older ones, and refuses to silently serve a snapshot
+older than a week. Use `--no-sync` in agents and UI paths so rendering never
+waits on Linear.
+
+Fresh PM operations renew expiring Linear credentials automatically and store
+the rotated access/refresh pair together. Temporary endpoint failures get one
+retry within the read deadline; `--sync` reports failure if it cannot obtain a
+fresh snapshot. Retry a temporary failure with `lf pm sync --wave <wave>`.
+Reconnect with `doppler run -- lf auth linear` only when the error identifies a
+missing credential or unusable refresh grant/client configuration. A timeout
+during persistence can leave its outcome pending; the next read checks the
+stored credential before attempting another exchange.
+
+`lf pm reteam` migrates every linked Wave onto the repository Team. It
+**defaults to a dry run** and only mutates with `--apply`; it defers an issue
+while a Task Run can still write its old identifier. Completed issues move too.
+Loopflow first attaches the destination Team to every Project, comments and
+moves Issues by UUID, narrows Projects to exactly that Team, repairs Wave-path
+titles, verifies every association, refreshes every snapshot, and only then
+removes legacy Wave Team fields. Interrupted runs keep a legacy sentinel and
+resume without duplicating comments or moves.
+
+## lf release
+
+Mechanical release subcommands; `lf release run` is the full workflow.
+
+```bash
+lf release run patch          # full release workflow
+lf release run minor          # close/reuse a patch, then publish the cycle milestone
+lf release check              # exact commits in the target range
+lf release notes 1.2.3        # narrative notes from decisions + commits + PRs
+lf release notes 0.13.0 --preview  # print cycle notes since v0.12.0; no release writes
+lf release notes 0.12.0 --preview  # existing version: end at v0.12.0, not today's HEAD
+lf release bump 1.2.3         # bump manifests
+lf release tag 1.2.3          # create + push git tag
+lf release publish v1.2.3 --notes RELEASE_NOTES.md --asset dist/lf.tar.gz
+lf release publish v1.2.3 --finalize
+lf release status             # workflow + GitHub Release status
+```
+
+`release.targets.<name>.publisher` is an argv list for the credentialed host
+publisher. `lf release run` invokes that command with `check`, then with
+`prepare --tag ... --artifacts ... --output ...` before tagging, and finally
+with `publish --tag ... --artifacts ...` after tagging. The candidate phase
+builds the merged commit under a disposable ref, validates the installer and
+migration authority, notarizes the DMG, and records the exact artifact hashes.
+Only that prepared candidate receives the immutable version tag. Publication
+consumes the prepared bytes from an exact-tag worktree. For patch releases,
+no merged changes is a successful no-op. A minor completes a closing patch only
+when changes remain, otherwise reuses the latest patch. Its notes span the
+preceding `.0` tag; both releases share a product snapshot. Retrying an interrupted
+minor finishes its recorded pair. An incomplete latest tag resumes; it never cuts a newer tag
+around a failed publication. Use `{repo}` in a publisher argument to name the
+current synchronized repository; `LF_RELEASE_SOURCE_REPO` names the leased
+candidate or exact-tag worktree.
+
+| Path | What it holds |
+|------|--------------|
+| `release/unreleased/DECISIONS.md` | Append-only ledger of release-worthy decisions during the current cycle |
+| `release/vX.Y.Z/DECISIONS.md` | Archived decision ledger for a shipped version |
+| `release/vX.Y.Z/NOTES.md` | Snapshot of that version's release notes |
+| `RELEASE_NOTES.md` | Always-latest release notes at the repo root |
+
+Interactive runs append durable product and process decisions to the
+unreleased ledger; headless runs do not. The release workflow promotes
+`release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` as the
+intent source, the exact git range as shipped-behavior truth, and merged PRs as
+narrative context, then archives the generated notes. If the ledger is absent,
+notes fall back to commits and PR history. Headless release automation needs no
+healthy notes provider. Missing CLIs, cooldowns, rate limits, quota or
+authentication failures, and provider outages write deterministic notes from
+bounded context. Unknown skill failures and missing, stale-version, or
+oversized output keep the release gate red. `lf release status` reports note
+quality and gate safety separately from workflow and GitHub Release completion.
+Configure repository-specific verification, preparation, and completion
+evidence under `release.targets`; see [Configuration](config.md).
+
+## See Also
+
+[The Agent API](agent-api.md) · [Conducting](conducting.md) · [Authoring](authoring.md) · [Get Started](getting-started.md) · [Configuration](config.md)

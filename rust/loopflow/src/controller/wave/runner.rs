@@ -63,7 +63,6 @@ use crate::controller::wave::resident::ListenerClient;
 use crate::controller::wave::runtime::InboxItem;
 use crate::controller::wave::supervisor::sleep_until_opt;
 use crate::controller::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
-use crate::durable::WorkRef;
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::id::WaveId;
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -327,15 +326,10 @@ async fn wave_metric_context(
             ),
         };
         let wave = match planning {
-            Some(planning) => {
-                let WorkRef::Wave(wave_id) = &planning.work else {
-                    return Err(anyhow!("resident planning does not carry a Wave identity"));
-                };
-                store
-                    .get_wave(wave_id)
-                    .await?
-                    .ok_or_else(|| anyhow!("resident Wave is absent from the registry"))?
-            }
+            Some(planning) => store
+                .get_wave(&planning.wave_id)
+                .await?
+                .ok_or_else(|| anyhow!("resident Wave is absent from the registry"))?,
             None => {
                 let locator = crate::work::wave::WaveLocator::discover(origin_repo, wave_name)?;
                 store
@@ -479,7 +473,7 @@ pub async fn run_loop(
 
 struct WavePlanning {
     store: Arc<Store>,
-    work: WorkRef,
+    wave_id: WaveId,
 }
 
 async fn wave_planning(wave: &str) -> Result<Option<WavePlanning>> {
@@ -499,10 +493,7 @@ async fn wave_planning(wave: &str) -> Result<Option<WavePlanning>> {
             registered.name()
         ));
     }
-    Ok(Some(WavePlanning {
-        store,
-        work: WorkRef::Wave(wave_id),
-    }))
+    Ok(Some(WavePlanning { store, wave_id }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1563,7 +1554,6 @@ mod tests {
                 body: None,
                 activity: None,
             },
-            Vec::new(),
             None,
         );
 

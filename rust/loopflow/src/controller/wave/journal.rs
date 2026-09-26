@@ -1071,16 +1071,14 @@ pub fn run_completed_turn(
 }
 
 /// Re-queue `ids` into `pending`: each id known in `messages` and not already
-/// pending is appended, in `ids` order. Returns the ids actually restored —
-/// unknown or still-pending ids are skipped (idempotent by construction).
-/// Shared by the fold (`MessagesRequeued` events) and the live runtime, which
-/// journals exactly what this restored.
+/// pending is appended, in `ids` order. Unknown or still-pending ids are skipped.
+/// Shared by terminal turn replay, historical `MessagesRequeued` events, and
+/// the live runtime.
 pub fn restore_pending(
     pending: &mut Vec<PendingMessage>,
     messages: &HashMap<MessageId, PendingMessage>,
     ids: &[MessageId],
-) -> Vec<MessageId> {
-    let mut restored = Vec::new();
+) {
     for id in ids {
         if pending.iter().any(|message| &message.id == id) {
             continue;
@@ -1092,10 +1090,8 @@ pub fn restore_pending(
         // Retired Wave input remains readable, but never resumes steering.
         if message.op == MessageOp::Message {
             pending.push(message.clone());
-            restored.push(id.clone());
         }
     }
-    restored
 }
 
 /// Fold journal events into the thread — the pure function the in-memory

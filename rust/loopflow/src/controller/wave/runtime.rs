@@ -1096,18 +1096,13 @@ impl WaveRuntime {
     /// Record an already-finalized turn as its full event triple
     /// (`TurnStarted` + `TurnItem`s + `TurnFinished`) and commit it. Text
     /// becomes a `Message` item so the fold reproduces it. Does not touch the
-    /// loop state — this is for instantaneous turns (injected narration), not
-    /// loop turns.
-    pub fn append_finalized_turn(
-        &self,
-        turn: ChatTurn,
-        answers: Vec<MessageId>,
-        reply_to: Option<MessageId>,
-    ) -> ChatTurn {
+    /// loop state or scheduler claims — chat replies and injected narration
+    /// append independently of governance attempts.
+    pub fn append_finalized_turn(&self, turn: ChatTurn, reply_to: Option<MessageId>) -> ChatTurn {
         let mut inner = self.inner();
         let started = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
-            answers,
+            answers: Vec::new(),
             body: turn.body.clone().map(Box::new),
         });
         let turn_id = format!("turn-{}", started.seq);
@@ -1277,7 +1272,6 @@ impl WaveRuntime {
                 body: None,
                 activity: None,
             },
-            Vec::new(),
             Some(message_id),
         );
     }
@@ -1699,7 +1693,7 @@ mod tests {
             .try_deliver(MessageOp::Message, "what's the top task?".into(), None)
             .expect("journal write")
             .expect("chat message");
-        runtime.append_finalized_turn(progress_turn("The top task is LOO-258."), Vec::new(), None);
+        runtime.append_finalized_turn(progress_turn("The top task is LOO-258."), None);
 
         let all = runtime.read_channel(None);
         assert_eq!(all.len(), 2);
@@ -1731,7 +1725,7 @@ mod tests {
 
         // This can be governance news that happened to finish after the participant
         // message; chronology does not prove that it answered the message.
-        runtime.append_finalized_turn(progress_turn("unrelated task finished"), Vec::new(), None);
+        runtime.append_finalized_turn(progress_turn("unrelated task finished"), None);
 
         let triggers = runtime.unanswered_chat_tail();
         assert_eq!(triggers.len(), 1);
@@ -1885,8 +1879,8 @@ mod tests {
     fn turns_get_monotonic_ids_from_the_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let a = rt.append_finalized_turn(progress_turn("one"), Vec::new(), None);
-        let b = rt.append_finalized_turn(progress_turn("two"), Vec::new(), None);
+        let a = rt.append_finalized_turn(progress_turn("one"), None);
+        let b = rt.append_finalized_turn(progress_turn("two"), None);
         assert!(turn_seq(&b.id) > turn_seq(&a.id));
         assert_eq!(rt.thread_snapshot().len(), 2);
     }

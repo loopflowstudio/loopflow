@@ -215,10 +215,17 @@ entry has no ordinary callers.
 One terminal governance event closes the attempt and restores noncompleted input
 claims, including on journal replay. Separate terminal and requeue writes leave
 a crash window. Independent chat replies append finalized turns without taking
-the open governance turn. `Inner.open` alone controls acceptance of turn output;
+the open governance turn or accepting scheduler claims. Claim restoration updates
+the queue directly; it no longer supplies IDs to a separate live requeue writer.
+`Inner.open` alone controls acceptance of turn output;
 pause and force-finalization already remove that authority. Keep late-delta and
 next-turn tests when deleting a redundant flag, and name any logging change:
 late output now follows the existing no-open-turn warning path.
+
+Resident planning carries `WaveId` directly. Every construction already named a
+Wave; a general `WorkRef` only introduced an impossible non-Wave branch in metric
+lookup. Keep registry lookup and name validation. Narrowing this internal value
+does not change persisted identities or wire DTOs.
 
 Cutover records one disposition against the original journal sequence and
 invocation IDs before old attempts can be changed. Only the captured idle default
@@ -282,3 +289,18 @@ green default-gate receipt or live acceptance is claimed.
 The checkpoint and cited scratch paths were verified in local Git history;
 remote availability was not checked. The gate establishes the checks above;
 it does not establish deployment, PM mutation or shipment.
+
+The subsequent compression checkpoint `392cadb66aa1ea1c84f02c7b20fcee9e9008680c`
+records its proof in `scratch/compress-wave-contracts.md`. It removed the unused
+restored-ID return, the always-empty finalized-turn claims argument, and the
+general planning identity. The diff preserves emitted events and wire shapes;
+`TurnStarted.answers` remains available to governance and historical replay.
+Historical Playhead decoding, shared invocation values and Swift retry grouping
+still have recovery readers and must survive removal of their former live owner.
+
+That checkpoint records passing `cargo fmt --all -- --check`, `git diff --check`
+and `cargo clippy --all-targets -- -D warnings`, covering production, test and
+benchmark callers. Behavioral suites were not rerun for these unused-contract
+removals. This later static pass does not extend the earlier gate or resolve its
+live acceptance limits. This memory curation inspected the source and recorded
+evidence; it adds no behavioral test result.

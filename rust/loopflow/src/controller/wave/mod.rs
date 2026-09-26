@@ -647,7 +647,7 @@ mod tests {
 
     /// Inject a finalized assistant turn, as a completed loop turn would land.
     fn narrate(runtime: &WaveRuntime, text: &str) {
-        runtime.append_finalized_turn(progress_turn(text), Vec::new(), None);
+        runtime.append_finalized_turn(progress_turn(text), None);
     }
 
     /// Boot just the HTTP surface over a runtime we control, without a

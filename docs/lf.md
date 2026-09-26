@@ -27,7 +27,9 @@ lf task status EXP-12                # progress, blockers, and delivery state
 lf task wait EXP-12 --until terminal --timeout 15m
 ```
 
-Task execution prepares its worktree and retains its workflow position.
+Task execution prepares its worktree and retains its Flow invocation: the
+captured graph, cursor, and return counts. The Project supplies the default Flow;
+`lf task run EXP-12 --flow code` selects an explicit override.
 Repeating `run` continues the Task or reports its active worker. Connected
 Task creation requires the Wave's planning service; direct workflows do not.
 
@@ -46,6 +48,18 @@ lf session complete SESSION_ID       # return feedback to its caller
 Comments reach the Task's advancing worker; idle Tasks retain them without
 starting execution. Completing a review returns feedback. The following flow
 step decides whether to advance or revise; closing the terminal does neither.
+
+A Session is one conversation on one Run. Its name, readiness, and completion
+belong to the Session; its Task, Wave, provider, and Flow membership come from
+the Run. Landing a PR does not detach its Sessions. Run ancestry is nullable:
+an invocation implies a Task, and a Task implies a Wave. Constructors fill omitted
+ancestors and refuse mismatches.
+
+Chapter is the repository's planning clock. Each Wave has one Project per
+Chapter, containing Tasks, KRs, metric targets, and a Flow template. Rotation
+advances all Waves together; started unfinished Tasks retain their identity,
+worktree, PR, and invocation. See [the planning model](waves.md#the-planning-model)
+and [record ownership](architecture-reference.md#core-models-and-apis).
 
 ## Inspect work
 

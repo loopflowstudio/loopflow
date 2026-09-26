@@ -37,36 +37,58 @@ do not depend on keeping a chat window open.
 
 ## The planning model
 
-Open a Wave to see its enduring objective and current KRs, targets, and Tasks directly. Waves are
-durable responsibilities with memory, cadence, chat, and metrics. Each has one
-current chapter plan, stored in an internal Linear Project.
+```bash
+lf roadmap --json
+lf wave history --wave infrastructure --json
+lf status infrastructure --chapter 2026-09 --json
+```
 
-At a chapter boundary that Project is replaced. Its metric targets, KRs, and Flow
-recommendation start fresh. Started unfinished Tasks move with the same issue,
-worktree, PR, and Flow. Untouched backlog is deleted from Linear with its normal
-retention period; local Task and PR history remain. Completed Tasks stay in
-history. Missing evidence never authorizes retirement.
+Open a Wave for its objective, current Tasks, KRs and metric targets. Open
+chapter history to inspect its plan and dated evidence at an earlier boundary.
+A Wave's memory, cadence, budget, chat and metric instruments endure across
+those boundaries.
 
-Retry an interrupted rotation with the same chapter ID. Before activation,
-preview rereads predecessor plans and Tasks, including newly filed work,
-without changing the saved receipt. After activation, the recorded boundary
-stays fixed and retries reconcile its pending operations. Refreshed completion
-remains historical even after local backlog retirement; conflicting start
-evidence leaves the transition unresolved. Retry previews include pending recovery
-of moves and deletions using the same dispositions as application. A lost deletion
-response requires explicit provider trash evidence; absence from a list or an
-unreadable issue leaves the transition unresolved. Retry the same chapter ID.
-If someone reassigns a Task outside the recorded chapter transition, preview
-and retry report a membership conflict. Reconcile its parent before retrying;
-rotation leaves that Task's provider state unchanged.
-If a known Task is missing from the provider's list, rotation reads it by issue
-identity. Unavailable evidence stops cutover; it never silently drops the Task.
-If the current chapter itself is missing from the portfolio list, PM reads
-recover its content and Tasks using the recorded chapter identity. An unreadable
-chapter stops rotation before provider changes; historical chapters stay closed.
-Rotation archives each recorded predecessor by identity. A missing portfolio
-row is not proof of archival; retries recognize an archive that succeeded
-before its response was lost.
+A Chapter is a repository-wide planning clock. Every Wave shares the current
+Chapter. Each (Wave, Chapter) pair has exactly one Project holding that Wave's
+Tasks, KRs, targets and Flow template. A Wave with no work has an empty Project.
+Linear Projects hold the plans; the repository's Chapter links them together.
+Current workspace navigation is Wave → Task. History exposes the Project for
+a selected Wave and Chapter without making Project another operator.
+
+Rotate every Wave together:
+
+```bash
+lf wave new-chapter --chapter 2026-10 --plan chapter.json --dry-run --json
+lf wave new-chapter --chapter 2026-10 --plan chapter.json --json
+```
+
+`chapter.json` contains a complete plan for every Wave, keyed by stable Wave ID:
+
+```json
+{
+  "plans": {
+    "<infrastructure-wave-id>": {"flow":"feature","metric_targets":[],"krs":[]},
+    "<product-wave-id>": {"flow":"feature","metric_targets":[],"krs":[]}
+  }
+}
+```
+
+The preview lists all affected Waves and Task dispositions. Empty plans are
+explicit; omitting a Wave cannot silently retire its backlog. Each successor
+Project gets fresh KRs, targets and Flow selection. Started unfinished Tasks
+keep their identity, worktree, PR and captured invocation when transferred;
+untouched backlog is abandoned and completed Tasks remain historical.
+Unavailable evidence never counts as untouched work.
+
+Retry an interrupted operation with the same Chapter ID. Preparation refreshes
+provider membership and resolves missing listed Tasks by stable identity.
+Activation changes the repository's current Chapter once all Wave plans are
+prepared; it never exposes a successful half-rotated local plan. External Task
+moves and Project retirement can remain visibly pending after activation.
+Retries use the recorded boundary, settle lost responses against provider
+state, and preserve unexpected external reassignments for reconciliation.
+Historical targets, KR judgments and dated readings stay frozen even when a
+transferred Task ships later.
 
 ## The Goal
 
@@ -137,11 +159,12 @@ observations into the local store.
 Set targets in the chapter plan, not the instrument contract:
 
 ```json
-{"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"flows":{"recommended":null},"krs":[]}
+{"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"flow":"feature","krs":[]}
 ```
 
-Apply it with `lf wave new-chapter --wave <wave> --chapter <id> --plan plan.json`.
-Change the current plan with `lf wave update-plan --wave <wave> --plan plan.json`.
+Apply this complete Wave plan with
+`lf wave update-plan --wave <wave> --plan plan.json`. For a new Chapter, include
+it in the repository-wide [chapter plan](#the-planning-model).
 An omitted metric has no target in that chapter; its observations remain visible
 without a pass/fail verdict. Changing a target preserves instrument identity,
 revision, and measurement history. Rotation freezes the previous targets and
@@ -345,7 +368,7 @@ lf wave update-plan --wave infra --plan plan.json
 `plan.json` contains the complete current plan:
 
 ```json
-{"metric_targets":[],"flows":{"recommended":"task-design"},"krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
+{"metric_targets":[],"flow":"task-design","krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
 ```
 
 The Wave objective names who benefits and what improves. Chapter KRs prove observable outcomes
@@ -354,9 +377,10 @@ copies the previous content or checked KRs.
 
 ## Linear
 
-Tasks live in Linear; there are no local task lists. A wave maps to an
-Initiative, each chapter to an internal Linear Project, each task to an Issue. Connect
-once — `lf wave connect` links or creates the Wave Initiative and establishes one
+Tasks live in Linear; there are no local task lists. A Wave maps to an
+Initiative, its Project for each Chapter maps to a Linear Project, and each
+Task maps to an Issue. Chapter itself is the repository's clock. Connect
+once — `lf pm init` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
@@ -389,13 +413,23 @@ lf task run INF-124 --stack-on INF-123     # dependent work before the parent me
 lf task run INF-125 --flow incident
 ```
 
-Task Work advances through one active remote branch and PR to `main`. Its chapter
-may recommend one Flow; `--flow` overrides it for this Task worker. Launch pins
-the complete Flow definition and exact position until it completes or parks at
-a review boundary. Completion clears that Flow state and leaves the Task open
-for a later worker or explicit delivery command. After a merge or abandonment,
-Loopflow rotates the worktree onto the next branch. The Task inherits the
-wave's `GOAL.md` and `MEMORY.md` plus its current chapter KRs and metric targets.
+Task Work advances through one active remote branch and PR to `main`. Its
+Project's Flow supplies the default; `--flow` selects any other template.
+Launch creates an invocation containing the expanded graph and its execution
+state. Source edits and chapter transfers do not change that captured graph.
+Finished and replaced invocations remain history; the Task has at most one
+current root invocation. Completion leaves Task Work open until an explicit
+completion or delivery operation settles it.
+
+Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
+KRs and targets. Explicit PR rotation selects the next serial branch while
+preserving the Task's worktree directory.
+
+Runs carry nullable Task/Wave fields; Sessions read those fields through their
+Runs. Launching `lf` in a registered Task checkout binds automatically unless
+an explicit selector overrides it. A later bind can attach a conversation to
+a done or landed Task without reopening Work. See [Sessions](lf.md#sessions)
+for rename, bind, and the distinction between ancestry and Flow membership.
 
 Each Task PR keeps its own benefit-focused title. After the opening summary,
 Loopflow adds the canonical Task name, Linear link, and merge consequence.

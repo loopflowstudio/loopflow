@@ -2,9 +2,13 @@
 
 LOO-298 · Infrastructure · 2026-09-26
 
-Status: documentation specification for Jack's `review-design` boundary.
-Jack approved the target model, not every mechanism below. No implementation,
-schema change, provider mutation or real-Home migration is part of this slice.
+Status: documentation specification updated through interactive review.
+The current participant (name unresolved) approved proceeding with taskless
+Invocations, Session owning Runs plus a current Run, and Flow / Invocation
+naming. This supersedes the earlier Session-as-Run-child and Task-required
+Invocation model. No implementation, schema change, provider mutation or
+real-Home migration is part of this review slice. See
+[review feedback](data-model-review-feedback.md) for approval scope and assumptions.
 
 ## Problem
 
@@ -37,8 +41,8 @@ an independent conversation stays independent of that Task's invocation.
 
 ```sh
 lf --interactive : "Review the parser"
-lf session rename <run-id> "Parser review"
-lf session bind <run-id> --task INF-123 --json
+lf session rename <session-id> "Parser review"
+lf session bind <session-id> --task INF-123 --json
 lf session list --task INF-123 --json
 lf runs --task INF-123 --json
 ```
@@ -56,8 +60,11 @@ not a claim that these commands already work in this checkout.
 The canonical field and invariant contract is
 [Architecture Reference](../docs/architecture-reference.md#core-models-and-apis).
 The short model is Repository → Chapter, Chapter × Wave → Project → Task →
-Flow invocation → Run → Session. Run can omit invocation, Task and Wave in
-that order; Session never has independent ancestry. Authored Flow templates,
+Flow invocation → Run for Task-owned execution; Session separately owns Runs
+and selects its current Run. Flow invocations may
+also have no Task; their Runs still carry exact invocation membership. A present
+Task implies Wave, but invocation does not imply Task. Session never has
+independent ancestry. Authored Flow templates,
 Wave files and large immutable evidence remain files. Mutable product facts
 have SQLite owners.
 
@@ -88,9 +95,11 @@ Internal commits are sequencing, not independently shipped dual-write phases.
 
 `runs` is the record, not a manifest index that can be rebuilt and discarded.
 Indexes begin with `(task_id, created_at, id)`, `(wave_id, created_at, id)` and
-`(invocation_id, created_at, id)`. Sessions use `run_id` as their primary key/FK
-and an open-state index. Query filters apply before pagination. A joined Session
-read obtains Run ancestry/provider/cwd without scanning all Run directories or
+`(invocation_id, created_at, id)`. Runs also index `(session_id, created_at, id)`.
+Sessions have a stable Session ID, a `current_run_id` FK and an open-state index.
+`Session.runs` queries Run's nullable `session_id`, not a duplicate stored list.
+Query filters apply before pagination. A joined Session
+read obtains current Run ancestry/provider/cwd without scanning all Run directories or
 calling launch preparation. Detailed transcript/usage reads can open artifacts
 for the already selected Runs.
 
@@ -106,12 +115,13 @@ Run parent. Project-level historic launch context remains in immutable evidence.
 | --- | --- |
 | Direct Skill, inline prompt, interactive CLI | Resolve explicit selectors, else registered checkout Task; reserve one Run and optional Session |
 | Wave/Project operation | Independent Run with Wave attribution; no invocation authority |
-| Task driver | Claim invocation; create its exact Run with node and launch-time iteration tuple |
+| Flow driver (Task-owned or taskless) | Claim invocation; create its exact Run with node and launch-time iteration tuple; copy the invocation's nullable Task |
 | Human Flow step | Reserve Run + `flow_review` Session and bind the pending boundary atomically |
 | Ask | Child Run with causal caller ID, inherited Task/Wave, independent membership; `ask` Session stores request, retry key and result |
 | Replay | New Run with inherited ancestry; causality is not authority to join the previous invocation |
-| Bind | Update Run parents/provenance through the same validator; no name, graph, node or process change |
+| Bind | Update current Run parents/provenance through the same validator; no name, graph, node or process change; historical Run scope is an explicit assumption below |
 | Rename | Update Session title/provenance with human-over-generated ordering |
+| Replace conversational Run | Append a Run under the same Session; compare the expected current Run, then update current Run and any pending review attempt atomically; preserve earlier Runs and Session attributes |
 | Ready/Complete | Persist Session feedback; Complete closes once and settles the exact waiting boundary before teardown |
 | Provider start/attach/stop | Update Run-owned native identity and exact process receipts; reconcile liveness against the OS |
 
@@ -138,8 +148,12 @@ store. Never infer signal permission from `sessions.state = active`.
 
 ### Validation and denormalization audit
 
-The three parent checks are `Run.invocation.task == Run.task`,
-`Run.task.project.wave == Run.wave`, and `child_invocation.task == parent.task`.
+The three parent checks are `Run.invocation.task == Run.task` when invocation
+is present, `Run.task.project.wave == Run.wave` when Task is present, and
+`child_invocation.task == parent.task` when a runtime parent is present.
+Invocation Task is nullable; the equality checks include null. Taskless Flow
+Runs retain their node and tuple and may have a Wave or no Wave. The one-current-
+root-per-Task constraint applies only to Task-owned invocations.
 Constructors fill omitted ancestors; explicit mismatches fail atomically.
 The reference groups these with planning and structural constraints. Import,
 bind and parent-changing writes use the same checks as launch.
@@ -149,9 +163,10 @@ bind and parent-changing writes use the same checks as launch.
 | Task Wave vs Project Wave | Remove stored Task Wave; derive through Project |
 | Project Wave/Chapter repository | Validate same repository; unique pair; one current Chapter per repository |
 | Run Task/Wave and invocation/Task | Retain nullable indexed parents; validate in the write transaction |
-| Invocation parent/Task, current root | Same Task, acyclic parent chain, one current root; restart closes the old tree |
-| Session Task/Wave/provider/cwd | Remove; join Run |
-| Session ID/Run ID | One identity: `run_id` PK, no separately mutable ID |
+| Invocation parent/Task, current root | Same nullable Task, acyclic parent chain, one current root per Task when Task-owned; restart closes the old tree |
+| Session Task/Wave/provider/cwd | Read through current Run; cross-Run bind scope remains an explicit review assumption |
+| Session ID/Run ID | Distinct identities: Session owns Runs through `runs.session_id` |
+| Session current Run/Run Session | Validate `session.current_run.session_id == session.id`; reserve both in one transaction; a late replacement cannot overwrite a newer current pointer |
 | Node/cursor/return counts | One invocation cursor; node must belong to captured graph; no parallel flat cursor projections |
 | Run tuple vs mutable invocation counts | Launch-time snapshot; validate while holding the chain, then immutable, never compare it to later counters |
 | Session readiness in Flow/Ask and Session | Session owns feedback; invocation stores only pending Run reference and settlement identity |
@@ -167,6 +182,15 @@ or make authored work eligible for automatic abandonment. An invocation-owned
 Run cannot change Task without violating Jack's parent constraint. The universal
 Bind API reports that constraint from Rust; it is not a UI-only kind prohibition.
 Asks without invocation membership may bind independently of their caller.
+
+Cross-Run attribution is an implementation assumption, not a newly confirmed
+product decision: preserve the existing Run-owned ancestry model, project the
+Session through its current Run, and let replacement inherit that attribution.
+Bind updates the current Run; it does not bulk-rewrite earlier Runs. Each Run's
+usage follows its own attribution. If Session-wide historical binding is needed,
+resolve that ownership explicitly before extending the operation; do not silently
+add a second Task field or rewrite invocation membership. The participant's
+approval covered cross-Run identity, not this unasked consequence.
 
 New membership is known by construction. Old missing capture is not proof of
 independence. Proposed stored `membership_known` distinguishes that missingness
@@ -199,12 +223,18 @@ root without selecting a successor or completing Task Work.
 
 One list query returns all three kinds. Complete and Ready retain their current
 meaning; provider exit leaves resumable history rather than resolving a review.
-A published Run that cannot be recovered stays historical. Its replacement is
-a new Run/Session, linked as a retry; do not reparent an existing Session. An
-unpublished preparation retry retains its reserved Run ID. Migrate pane IDs once
-from old Ask/boundary IDs to their recorded Run IDs before the desktop reconnects.
+A published Run that cannot be recovered stays in its Session's history.
+Its replacement is a new Run belonging to that same Session, linked as a retry.
+Update `current_run_id` and the exact pending boundary atomically, rejecting a
+stale expected-current-Run value. Keep Session identity, name and feedback;
+delete `carry_session_name` rather than moving the copy into SQL. An unpublished
+preparation retry retains its reserved Run ID. Closed Sessions retain their last
+current Run. Migrate pane IDs once to stable Session IDs using the import mapping;
+Run replacement never changes the pane's Session key. This preserves UI identity,
+not a promise that a dead provider process or its native state can be recovered.
 
-Move Rust, Swift and JSON fixtures together. Session DTOs expose typed Run
+Move Rust, Swift and JSON fixtures together. Session DTOs expose distinct Session
+and current Run IDs, access to Run history, and typed current Run
 parents and membership once, plus Session attributes/actions; remove `work`,
 derived `work_path`, duplicate ancestor fields and Project variants. Required
 fields have no DTO defaults. Historical unknown membership stays explicit.
@@ -257,15 +287,19 @@ do not teach ordinary reads to create rows lazily or read old subjects forever.
    resolved in the report.
 4. Import captured invocations, cursors, pending reviews, claims and failures.
    Do not recompile templates. Map saved indices/paths to captured local nodes.
-   Retain original identity relationships and recovery facts. A taskless saved
-   invocation requires the explicit disposition described in the open items.
+   Retain original identity relationships and recovery facts. Import taskless
+   invocations with null Task, preserving their captures, progress and reviews;
+   no Task assignment or forced terminal disposition is required.
 5. Import Runs from manifests and exact receipts. Resolve subjects using stable
    IDs and unambiguous historical aliases, with ancestry used to disambiguate.
    Never use the launch resolver, active PR, cwd spelling or a current display
    label as historical authority. Preserve Declared/Inherited as recorded; do
    not retroactively relabel old inferred launches Checkout without evidence.
 6. Import Sessions from interactive evidence, pending/completed Asks and human
-   boundaries, keyed by their recorded Run. Carry names/provenance, readiness,
+   boundaries, preserving conversational identity separately from Run identity.
+   Map recorded replacements into that Session's Run history and select its
+   recorded current Run. Never merge conversations by matching name or cwd.
+   Carry names/provenance, readiness,
    completion, native identity and exact attachments. Old boundary records with
    no published Run reserve a prepared identity, not a fabricated successful Run.
    Missing execution capture remains Unknown. Ambiguous attribution is repaired
@@ -300,7 +334,7 @@ Read-only findings below are from this checkout after documentation checkpoint
 | Are the handoff's files already here? | `WorkspaceProjection.swift` is absent; `RunManifest` has subjects but no captured membership; `human_session.rs` has no rename writer. `PodiumModel.swift:50` owns readings; `SessionsView.swift:193` reconciles them. | Coordinate source integration later; do not promise deletion of code absent from this branch. |
 | Is there an old `runs` table to repurpose? | `0.12.15.001_release.sql:332` drops it and earlier execution tables; the schema checker discovers 31 live tables without `runs`. | Create the new record in a forward draft; preserve older-frontier history during migration, not by editing the earlier table creation. |
 | Are there still four Session sources? | `ops/human_session.rs:269` concatenates Task, Ask, standalone Flow and interactive lists. `:911` parses manifest subject IDs; it does not call the launch resolver in this base. | Four-owner defect is confirmed. The handoff's post-merge resolver bug is evidence from another tree, not a reproduced local symptom. This base also loses identifier-form ancestry. |
-| Can ordinary Flow invocations lack a Task? | `ops/flow_run.rs:34` stores optional Task/Wave selectors and `create` at `:149` persists them without Task ownership. | Approved invocation ⇒ Task conflicts with a working launch path. Expose the scope decision before implementation. |
+| Can ordinary Flow invocations lack a Task? | `ops/flow_run.rs:34` stores optional Task/Wave selectors and `create` at `:149` persists them without Task ownership. | Interactive review confirmed that Flows must remain taskless-capable. Invocation Task is nullable; use the same SQLite owner and execution machinery for both paths. |
 | Does the engine already have runtime loop children? | `engine/execution.rs:22` has a cursor child for Xor; `NestedCursor` has only Xor. Loop progress lives on a cursor. | A table rename is insufficient. Preserve routing and introduce runtime loop parentage deliberately; do not label Xor nesting as loop nesting. |
 | Is repository-wide rotation already atomic? | `store/sqlite/chapters.rs:33` clears current only for one Wave; `work/chapter.rs:51` gives Chapter one Wave. | Reuse provider recovery but change the aggregate and transaction boundary. |
 | Can Started writes disappear safely? | `chapters.rs:78` writes an event and `:97` combines it with position generation. Retirement rechecks those facts in its transaction. | Replace live started queries; retain historical start evidence and authored/PR/claim checks for retirement. |
@@ -315,7 +349,7 @@ No new live Home inventory or latency measurement was taken. The handoff's
 
 | Approach | Tradeoff | Why not |
 | --- | --- | --- |
-| Mutable manifest with typed parents and inline name | Smallest change; still scans files, Ask/Flow recovery remains elsewhere | Jack explicitly chose SQLite owners and Session as Run child. |
+| Mutable manifest with typed parents and inline name | Smallest change; still scans files, Ask/Flow recovery remains elsewhere | SQLite ownership was selected; the interactive review further makes Session a stable owner of Runs. |
 | Session table plus manifest-backed Runs | Makes rename easy; current attribution still crosses two owners and headless Runs need another mechanism | Preserves the defect and makes bind/usage disagree unless another adapter is added. |
 | One SQLite owner for every mutable product record | Larger coherent migration; simpler readers and common validation | Chosen. Complexity belongs in a bounded conversion and exact settlement, not perpetual reader dispatch. |
 
@@ -327,10 +361,15 @@ The cutover and deletion conditions rule out that outcome.
 
 ## Key decisions
 
-- Keep “Flow” for template and “Flow invocation” for execution, pending Jack's
-  naming review. Project's Flow is a default, never an override prohibition.
-- Session identity is its Run ID. Completion history survives; replacing a
-  published Run creates a new Session rather than copying a mutable identity.
+- Interactive review, 2026-09-26: the current participant (name unresolved)
+  requires taskless Flows. Invocation Task is nullable. Preserve taskless
+  execution and recovery through the same SQLite invocation owner and driver;
+  no synthetic planning records or separate legacy adapter.
+- Naming confirmed in interactive review: Flow is the template; Invocation is
+  an execution (Flow invocation in full). Project's Flow remains a default.
+- Session has its own ID, owns its Runs, and selects a current Run. Replacement
+  keeps the same Session, title and feedback; previous Runs remain history.
+  Validate the current Run belongs to the Session and fence replacement writes.
 - No code/test/fixture/migration changes in this slice. The existing doc edits
   were preserved with `lf commit` before this continuation.
 - Use table-only current readers after one import. Keep raw evidence and the
@@ -358,8 +397,13 @@ For the full implementation, collect these proofs on the final integrated bytes:
 
 1. **Ancestry matrix:** none, Wave-only, Task-only input, invocation-only input
    fill correctly; wrong Wave/Task, wrong parent, cycle, invalid node/tuple,
-   duplicate Session, duplicate current root and duplicate Project pair reject
+   duplicate Session ID, foreign current Run, duplicate current root and duplicate Project pair reject
    without partial writes. Race bind/launch against an ancestry-changing write.
+   Include taskless invocations with and without Wave attribution, nested
+   taskless children, and rejection of mismatched nullable Tasks. Launch a
+   taskless Flow through the CLI and resume its review after template removal.
+   Replace a Session's Run twice; retain its ID/name/feedback and both previous
+   Runs. Reject a late replacement or completion from the superseded Run.
 2. **One CLI reader:** isolated actual CLI launch, rename, bind/rebind/unbind,
    landed/done Task and explicit-selector-vs-checkout cases; Session and Run
    outputs agree. Usage moves attribution without changing counters or artifacts.
@@ -379,7 +423,8 @@ For the full implementation, collect these proofs on the final integrated bytes:
 6. **DTO/desktop:** shared fixtures in every consumer; bound Session absent from
    roadmap stays bound; Wave-only is orphan; cached projection changes on data
    changes only. Mounted PTY proof retains the same surface/draft across bind
-   and rename. Real installed proof is separate from fixture transport.
+   and rename; Run replacement retains the Session pane key and its Run history.
+   Real installed proof is separate from fixture transport.
 7. **Configured acceptance:** backed-up real Homes converted and read back via
    matching installed CLI/app; exercise the demo and preserve Run IDs, exact
    binary/store identities and failure evidence. No substituted development
@@ -399,6 +444,8 @@ Do not claim a full CI, deployed recovery or UI acceptance result from this spec
 - Creating tables while `session list` still reconstructs product records from
   four stores, or fallback reads that silently repair missing imports.
 - Rebinding execution membership to satisfy a requested ancestry change.
+- Replacing a Run by replacing its Session, copying its title, dropping earlier
+  Runs, or letting a late old Run change the current pointer or settle a review.
 - Inferring membership, Task or process authority from cwd text, provider identity,
   taskless missing capture, listener absence or a stored Active flag.
 - Destructively migrating while old writers can still publish sidecars.
@@ -406,7 +453,8 @@ Do not claim a full CI, deployed recovery or UI acceptance result from this spec
   or provider receipt merely because a new model cannot represent it yet.
 - Counting a prepared Run as provider success, a cursor as exactly-once external
   effects, a fixture as live proof, or renamed docs as implemented behavior.
-- Shipping a Taskless Flow regression without Jack seeing the decision.
+- Requiring a Task to execute or recover a Flow, inventing a synthetic Task,
+  or retaining a separate file-backed path for taskless invocations.
 
 ## Internal slices
 
@@ -443,6 +491,15 @@ schema checks.
 
 ## Slice ledger
 
+- 2026-09-26 interactive review: the current participant (name unresolved)
+  confirmed Session owns Runs plus a current Run, accepted Flow / Invocation
+  naming, and approved proceeding with those changes. Updated identity,
+  replacement, validators, migration, CLI examples and desktop proof. Cross-Run
+  bind scope remains an explicitly labeled implementation assumption.
+- 2026-09-26 interactive review: removed the proposed Task requirement for
+  Flows following explicit feedback from the current participant (name
+  unresolved). Updated model docs, contributor guidance, migration and proof
+  requirements. Other review items remain open; no overall approval recorded.
 - 2026-09-26: supplied worktree contained five documentation edits and the
   committed LOO-291 handoff. Preserved those edits at `ef817d4f9` through
   `lf commit`; no source changes were present.

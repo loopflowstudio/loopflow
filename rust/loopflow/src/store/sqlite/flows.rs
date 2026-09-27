@@ -268,23 +268,36 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowInvocation) -> StoreResult<
     let Some(attempt) = &flow.current_attempt else {
         return Ok(flow);
     };
-    match attempt.outcome.as_deref() {
-        None => Err(StoreError::InvalidAuthority(format!(
-            "Flow {id} is waiting for Run {}; its completion is not recorded",
-            attempt.run_id
-        ))),
-        Some("completed") => Ok(flow),
-        Some(outcome) => {
-            let mut cursor = flow.cursor.clone();
-            clear_candidate(&mut cursor);
-            let failure = TaskFlowBlocker::now(format!(
-                "{} Run {outcome}",
-                flow.step_name().unwrap_or_default()
-            ));
-            write_cursor_in(tx, &id, flow.version, &cursor, Some(&failure), false)?;
-            current_flow_in(tx, &id)
+    let outcome = match attempt.outcome.as_deref() {
+        Some(outcome) => outcome.to_owned(),
+        // An operation runs inside the driver that recorded it, and the caller
+        // is the only live driver: a receipt that never came is an
+        // interruption whose side effect may still have happened.
+        None if matches!(flow.current_step(), Some(ConcreteStep::Op(_))) => {
+            tx.execute(
+                "UPDATE runs SET outcome='interrupted', ended_at=?2 WHERE id=?1 AND outcome IS NULL",
+                params![attempt.run_id.as_str(), now_unix()],
+            )?;
+            "interrupted before its completion receipt; inspect its effect before retrying".into()
         }
+        None => {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Flow {id} is waiting for Run {}; its completion is not recorded",
+                attempt.run_id
+            )))
+        }
+    };
+    if outcome == "completed" {
+        return Ok(flow);
     }
+    let mut cursor = flow.cursor.clone();
+    clear_candidate(&mut cursor);
+    let failure = TaskFlowBlocker::now(format!(
+        "{} Run {outcome}",
+        flow.step_name().unwrap_or_default()
+    ));
+    write_cursor_in(tx, &id, flow.version, &cursor, Some(&failure), false)?;
+    current_flow_in(tx, &id)
 }
 
 fn require_attempt_authority(
@@ -403,7 +416,9 @@ impl SqliteStore {
 
     /// Settle the current attempt from its Run's row: a failed or interrupted
     /// Run blocks the Flow, a live Run keeps it waiting, a completed Run is
-    /// the step's completion.
+    /// the step's completion. The caller holds the Flow's `driver.lock`, so an
+    /// operation's Run without an outcome has no process left and settles as
+    /// interrupted.
     pub fn recover_flow(&self, id: &str) -> StoreResult<FlowInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -583,10 +598,12 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use crate::durable::{FlowInvocation, RunId};
-    use crate::engine::flow::RepeatPolicy;
+    use crate::engine::flow::{Op, RepeatPolicy};
     use crate::engine::invocation::QueuedInvocation;
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
-    use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use crate::engine::{
+        ConcreteOp, ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill,
+    };
     use crate::session::{Run, RunEnd};
     use crate::store::sqlite::SqliteStore;
 
@@ -609,7 +626,7 @@ mod tests {
         }
     }
 
-    fn attempt(store: &SqliteStore, invocation: &str) -> Run {
+    fn attempt(store: &SqliteStore, invocation: &str, skill: Option<&str>, provider: &str) -> Run {
         store
             .create_run(Run {
                 id: RunId::new(),
@@ -624,11 +641,33 @@ mod tests {
                 created_at: 1,
                 published: true,
                 cwd: "/repo".into(),
-                skill: Some("loop-decide".into()),
-                provider: Some("codex".into()),
+                skill: skill.map(str::to_owned),
+                provider: Some(provider.into()),
                 model: None,
                 caller_run_id: None,
                 ended: None,
+            })
+            .unwrap()
+    }
+
+    fn launched(store: &SqliteStore, steps: Vec<ConcreteStep>, index: usize) -> FlowInvocation {
+        store
+            .create_flow(&FlowInvocation {
+                invocation: QueuedInvocation::new("proof", steps).unwrap(),
+                cursor: ExecutionCursor {
+                    index,
+                    ..ExecutionCursor::default()
+                },
+                version: 0,
+                task_id: None,
+                wave_id: None,
+                cwd: "/repo".into(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                failure: None,
+                finished: false,
             })
             .unwrap()
     }
@@ -666,7 +705,7 @@ mod tests {
         assert!(store.recover_flow(&id).unwrap().current_attempt.is_none());
 
         // The step's Run is the attempt allowed to decide, at the version it saw.
-        let run = attempt(&store, &id);
+        let run = attempt(&store, &id, Some("loop-decide"), "codex");
         assert_eq!(run.node, Some(1));
         let iterate = verdict(FlowDecision::Iterate);
         assert!(store
@@ -722,7 +761,7 @@ mod tests {
         assert!(store.retry_flow(&id).is_err(), "nothing left to retry");
 
         // The second attempt completes; its decision survives to the settled edge.
-        let second = attempt(&store, &id);
+        let second = attempt(&store, &id, Some("loop-decide"), "codex");
         assert_eq!(second.attempt, Some(2));
         store
             .record_flow_decision(&id, retried.version, &second.id, &iterate)
@@ -758,5 +797,68 @@ mod tests {
         assert!(store
             .checkpoint_flow(&id, version - 1, &moved.cursor)
             .is_err());
+    }
+
+    /// The driver died while running an operation: its Run has no receipt and
+    /// its side effect may have happened. Recovery blocks for inspection;
+    /// `--retry` is the explicit replay.
+    #[test]
+    fn an_interrupted_operation_blocks_for_inspection_instead_of_replaying() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let steps = vec![
+            ConcreteStep::Op(ConcreteOp {
+                item: Op {
+                    command: "pr".into(),
+                    args: vec!["land".into()],
+                },
+                flow_parents: vec![],
+            }),
+            step("finish", None),
+        ];
+        let flow = launched(&store, steps, 0);
+        let id = flow.id().to_string();
+        let run = attempt(&store, &id, None, "loopflow");
+
+        let blocked = store.recover_flow(&id).unwrap();
+        let failure = blocked
+            .failure
+            .expect("an operation without a receipt blocks");
+        assert!(
+            failure
+                .reason
+                .starts_with("op: pr land Run interrupted before its completion receipt"),
+            "{}",
+            failure.reason
+        );
+        assert_eq!(
+            store
+                .run(&run.id)
+                .unwrap()
+                .unwrap()
+                .ended
+                .map(|end| end.outcome),
+            Some("interrupted".into())
+        );
+
+        let retried = store.retry_flow(&id).unwrap();
+        assert!(retried.failure.is_none() && retried.current_attempt.is_none());
+        let second = attempt(&store, &id, None, "loopflow");
+        assert_eq!(second.attempt, Some(2));
+        store
+            .end_run(
+                &second.id,
+                &RunEnd {
+                    outcome: "completed".into(),
+                    at: 2,
+                },
+            )
+            .unwrap();
+        let settled = store.recover_flow(&id).unwrap();
+        assert!(settled.failure.is_none());
+        assert_eq!(
+            settled.current_attempt.unwrap().outcome.as_deref(),
+            Some("completed")
+        );
     }
 }

@@ -9,6 +9,7 @@ use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use crate::ops::{commit_workflow, flow_run, CommitOptions, NullProgress, WorkBinding};
+use crate::run_record::{RunFlowMembership, RunFlowStep};
 use crate::store::SharedStore;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -631,11 +632,46 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         Ok(())
     }
 
+    /// An operation is an attempt like a skill launch: its Run row is the
+    /// receipt recovery reads, so an interrupted operation blocks for
+    /// inspection instead of replaying its side effect.
     async fn run_op(&self, ops: &crate::engine::ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
-        self.begin().await?;
-        eprintln!("op: {}", ops.item.display_name());
-        crate::ops::execute_flow_ops(&self.repo, &ops.item, &NullProgress)
-            .map_err(|error| anyhow!("op: {} failed: {error}", ops.item.display_name()))
+        let flow = self.begin().await?;
+        let name = ops.item.display_name();
+        eprintln!("op: {name}");
+        if flow
+            .current_attempt
+            .as_ref()
+            .is_some_and(|attempt| attempt.outcome.as_deref() == Some("completed"))
+        {
+            return Ok(());
+        }
+        let capture = crate::run_record::CaptureHandle::begin_with_context(
+            crate::run_record::RunSpec {
+                harness: "loopflow".into(),
+                model: None,
+                surface: "operation".into(),
+                cwd: self.repo.clone(),
+                repo: Some(self.repo.clone()),
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+                flow: RunFlowMembership::Step(RunFlowStep::of_flow(&flow)?),
+                work: flow.declared_work(),
+            },
+            &crate::trace::PreparedTurnContext::from_prompts(
+                "Loopflow mechanical Flow boundary",
+                &name,
+            ),
+        )?;
+        capture.record_input("operation", &name);
+        let result = crate::ops::execute_flow_ops(&self.repo, &ops.item, &NullProgress);
+        capture.finish(if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        })?;
+        result.map_err(|error| anyhow!("op: {name} failed: {error}"))
     }
 }
 

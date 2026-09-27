@@ -618,7 +618,7 @@ cutover; this preparatory reduction is not an independently publishable slice.
   assumptions. That review changed only documentation; the subsequent storage
   cut is described in the slice ledger.
 
-### Compression review (2026-09-26)
+### Projection-cut compression review (2026-09-26)
 
 No further executable reduction selected. The implemented model fits in one
 ownership map:
@@ -649,6 +649,44 @@ Resource preflight and safe recovery both still fail on the active
 and no other checkout's active build was removed. Existing formatting, Clippy
 and migration-check evidence applies to unchanged executable bytes; this pass
 changes only these working notes. The two focused commands above remain owed.
+
+### Invocation-retention compression review (2026-09-26)
+
+Reviewed `60639b3e6` from a clean working tree against the full amended design.
+No further executable reduction selected. The earlier compression table records
+the projection cut before invocation retention; `task_flow_positions` is now
+retired from current SQL, not an additional live owner.
+
+| Fact | Owner and consumer | Retained because |
+| --- | --- | --- |
+| Captured Task execution and lifetime | `flow_invocations`, selected by its partial current-Task index | Completion/restart preserve history; current reads exclude closed rows. No separate current-pointer table or compatibility view was added. |
+| Execution identity | Row `id`, checked against captured JSON `id` | SQL indexes identity; the capture carries it through engine and worker claims. The database equality constraint guards this duplication. |
+| Cursor and historical root inputs | `review_json`, `step_index`, `iteration` through `decode_flow_position` | Flat historical progress still consumes the root columns. Removing them requires conversion, not merely dropping current writes. |
+| Final claim, pending Run and feedback | Retained invocation row | Closed claims are evidence, not active authority. Chapter reads distinguish historical start evidence from current claims. Session ownership has not yet replaced these fields. |
+| Task execution API | `FlowPosition`, Store methods and Task controller | These still carry claims, review settlement and recovery. Renaming the wrapper alone would not unify ordinary Flow persistence. |
+| Conversation and client identity | `human_session` dispatch, Rust/Swift `SessionRecord`, `SessionsView` pane keys and DTO fixtures | The four sources and existing wire fields remain live. Their deletion depends on stable Session/Run owners and migration of all consumers. |
+
+Followed completion, restart, reopen, unclaimed review writes and claimed worker
+settlement through the immediate transactions in `store/sqlite/{durable,children}.rs`.
+Human completion compares the entire expected position; unclaimed updates match
+invocation ID; worker claims include that ID. Version reuse therefore still has
+an identity fence. Keep the distinct transaction predicates rather than hiding
+them behind a generic terminal-update helper. Historical migrations and their
+populated fixtures retain the old table intentionally.
+
+The two material product gaps persist: Session lookup decodes unrelated current
+Task invocations, and `open_boundary` clears feedback before replacement.
+Invocation retention fixes neither. No new fallback, stored human flag or
+parallel Session projection is selected. Taskless file persistence, Run/Session
+owners, Chapter scope, import, desktop integration and the final deletion
+research remain required by the full design.
+
+Preflight and safe recovery both fail at `main-view-task` **15.1 GiB / 12 GiB**,
+with **98.8 GiB** free. Recovery preserved the active foreign build. TESTING.md
+therefore still blocks product tests; no behavioral or materialized proof ran.
+Executable bytes are unchanged in this compression pass, so earlier static
+receipts retain their stated scope. Only this review note changed; its whitespace
+check does not clear the recorded branch-range whitespace failures.
 
 ## Measure
 

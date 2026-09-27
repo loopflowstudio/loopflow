@@ -1,8 +1,8 @@
 # LOO-312 assumptions and outstanding evidence
 
-- The selected step is now implement. The previous review notes are checkpointed.
-  This pass changes the existing installer's copied-app process lifecycle;
-  publication and landing remain outside this step.
+- The selected step is compress. The installer process lifecycle is checkpointed
+  at `e75ba2dc2`. Model review found no meaningful structural reduction; see
+  `compress-review.md`. Publication and landing remain outside this step.
 - The no-rendering constraint prevents the live baseline required before UI
   edits. Continue with installer-owned work and isolated process fixtures;
   do not substitute those fixtures for the baseline or clean-account trial.

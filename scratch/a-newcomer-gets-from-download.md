@@ -1,9 +1,9 @@
 # From install to an open Loopflow
 
-Status: interactive review decisions recorded; ready for Jack's review completion.
+Status: reviewed direction recorded; installer process lifecycle implemented.
 Product direction is confirmed below; implementation details and missing proof
 are identified separately and are not claims of acceptance.
-No product implementation or live Mac acceptance recorded.
+Full setup implementation and live Mac acceptance remain outstanding.
 Baseline: `102522bc25adc146d4b8cc3f343677ed8170f636`.
 Research performed 2026-09-26 (run-local date).
 

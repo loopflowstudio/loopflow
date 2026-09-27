@@ -522,3 +522,32 @@ deletes old evidence, so it waits for Jack.
 `pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers`
 failed once in the suite and once in three runs alone. It is outside this
 Task.
+
+## Task ↔ invocation (2026-09-27)
+
+Jack, in the interactive concept review at `e7f3e22fd`: "you should be able to
+run multiple flows at once on a task. but only one should be THE flow invocation
+for a task." A Task points at its one managed invocation
+(`tasks.current_invocation_id`, mirroring `sessions.current_run_id`); the
+partial unique index on `flow_invocations(task_id)` goes. Every Flow launched
+with `--task X` names X on its invocation and its Runs, including reviews, but
+`lf --task X flow foo` never becomes THE invocation; only `lf task run X
+[--flow foo]` moves the pointer. The
+Run validator returns to strict nullable equality with its invocation. This
+supersedes Cut 3's "review carries the Wave and no Task", Cut F's relaxed
+trigger, and Cut E's blanket refusal to bind a Flow review. The saved Flow
+driver and the Task driver become one executor over the invocation row; see
+[the concept review](concept-review.md).
+
+## Unwritable store and bind confirmation (2026-09-27)
+
+Jack, same review: "I guess refuse every launch for now." Every launch refuses
+when its Run row cannot be written; a Run without a row does not exist. This
+reverses Cut 3's warn-and-proceed rule and unblocks deleting `resolve_manifest`,
+the `prepared` marker and `terminal.json`-as-state.
+
+On bind confirmation Jack said "don't really know, just make the best UX." The
+review chose: the CLI prints the exact target and writes; the app owns a confirm
+step; binding to the Task a Session already has is a no-op success. This
+replaces Cut E's same-Task refusal and satisfies the earlier "confirm once"
+decision at the surface where a mis-click is possible.

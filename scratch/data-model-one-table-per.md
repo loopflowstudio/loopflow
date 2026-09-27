@@ -7,8 +7,12 @@ readers are single queries. The work is not finished. Several facts still have
 two implementations, listed under [One implementation](#one-implementation).
 Jack directed on 2026-09-27 that this design aim for the simplest possible
 system with no redundant implementation, starting with the taskless Flow
-cursor. Repository Chapters and Project-owned Flows are not built.
-The cut reports under [cutover/](cutover/) own actual results.
+cursor. The same day's [concept review](concept-review.md) recorded three
+decisions: a Task points at its one managed invocation while other Flows may
+name the Task; every launch refuses without its Run row; bind writes from the
+CLI and confirms in the app. [Cut H](cutover/cut-h-one-flow-driver.md) carries
+them through in five slices. Repository Chapters and Project-owned Flows are
+not built. The cut reports under [cutover/](cutover/) own actual results.
 
 ## One implementation
 
@@ -34,15 +38,15 @@ column is the single one that survives.
 
 | Fact or operation | Implementation A | Implementation B | Survivor |
 | --- | --- | --- | --- |
-| Flow cursor | Invocation row, for Task Flows | `flows/<id>/position.json`, for taskless Flows | Invocation row. In progress as Cut H |
-| Stale-writer fence on a Flow step | Position version | `StepToken` in the file | Position version |
-| Flow launch facts | Task and captured Flow columns | Fields of the JSON file | Columns on `flow_invocations` |
-| Run reserved but not launched | `runs.published` for Task reviews | `prepared` marker file, claimed by rename, for Asks and Flow reviews | One column with a compare-and-set |
-| Run outcome | `runs.outcome`, `runs.ended_at` | `terminal.json`, read by Flow and Task decision recovery | The row. The file stays as evidence only |
+| Flow cursor | Invocation row, for Task Flows | `flows/<id>/position.json`, for taskless Flows | Invocation row. Cut H2 |
+| Stale-writer fence on a Flow step | Position version | `StepToken` in the file | Position version. Cut H2 |
+| Flow launch facts | Task and captured Flow columns | Fields of the JSON file | `cwd`, `message`, `model` columns; selectors resolve to `task_id`/`wave_id`. Cut H2 |
+| Run reserved but not launched | `runs.published` for Task reviews | `prepared` marker file, claimed by rename, for Asks and Flow reviews | `published=0` with a compare-and-set. Cut H4 |
+| Run outcome | `runs.outcome`, `runs.ended_at` | `terminal.json`, read by Flow and Task decision recovery | The row. The file stays as evidence only. Cut H2/H4 |
 | Run parentage | `runs.invocation_id`, `task_id`, `wave_id` | Selector strings written into every manifest and `ActiveRun.subjects` | The columns. Removing the strings is a DTO and Swift change |
-| Run lookup by id prefix | Query on `runs.id` | `resolve_manifest` listing `runs/` | The query |
+| Run lookup by id prefix | Query on `runs.id` | `resolve_manifest` listing `runs/` | The query. Cut H4 |
 | Work filter for activity | SQL filter, used by Runs | `WorkCatalog`, used by PR, Steer and creation entries | SQL filter |
-| Task started | `tasks.started_at` | Started event written by a trigger | The column. The event stays only as chat history |
+| Task started | `tasks.started_at` | Started event written by a trigger | The column. Cut H3 |
 | Session title source | `session::TitleSource` | `SessionTitleSource` DTO with an unused `Unavailable` case | One enum |
 | Flow position table | `flow_invocations` | `task_flow_positions`, dropped by a draft but kept alive by a migration test | `flow_invocations` |
 
@@ -62,10 +66,9 @@ column is the single one that survives.
 
 There is one behavior, chosen by what the operation needs from the row.
 
-- A launch that needs nothing back proceeds, warns once, and is unrecorded.
-  Nothing replays it later. No sidecar.
-- An operation whose result returns through the row refuses. That is an Ask,
-  and a Flow, which cannot advance without its cursor.
+- Every launch refuses with the store error. Jack, 2026-09-27: "refuse every
+  launch for now." A Run without a row does not exist. No sidecar, no warning
+  path, no later replay. Cut H4.
 
 ### How a cut is judged
 

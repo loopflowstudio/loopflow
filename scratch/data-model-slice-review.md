@@ -1,5 +1,146 @@
 # Data model storage slice review
 
+## Current review: invocation retention
+
+2026-09-26 · LOO-298 · review-slice
+
+Reviewed HEAD `54abb81ff5deb165bc4e39473766efa53220d65b` against Task PR base
+`a48eeb6aed383123c51a6c6cc673591ae19b1417`; the working tree was clean.
+Scope: the complete branch change, with particular scrutiny of invocation
+retention at `60639b3e6`. Governing intent remains the
+[amended design](data-model-one-table-per.md),
+[review feedback](data-model-review-feedback.md), and
+[Session ownership decision](session-runs-and-current-run.md).
+The later participant's approval (name unresolved) supersedes the older Task
+title: taskless Invocations and Session owning Runs plus a current Run.
+
+**Disposition: not ready to publish.** Retaining Task invocations advances the
+approved architecture without adding a second Task writer. It does not complete
+the shared Invocation/Run/Session cutover and is explicitly not an independently
+publishable slice. Behavioral preservation remains unexecuted. This review
+changes only this note; no PR, Task, Home or Flow navigation mutation occurred.
+
+### Findings
+
+1. **The retained invocation is not yet a stable conversation owner.**
+   Completion now retains capture, cursor, pending Run, feedback and final claim
+   in `flow_invocations`; restart and authorized reopen mark the old row
+   replaced. However, Session discovery and exact review lookup still enumerate
+   current Task invocations and decode each one before selecting human steps
+   (`store/sqlite/durable.rs:392`, `ops/human_session.rs:1166`). An unrelated
+   malformed current capture can still prevent reaching a valid Session.
+   `open_boundary` still clears Ask feedback at `human_session.rs:780` and Task
+   review feedback at `:799` before replacement. Invocation retention does not
+   address either counterexample from the previous review. These are
+   source-traced findings, not executed reproductions in this review.
+2. **The implemented lifetime boundary is coherent at source level.**
+   The partial index selects one current invocation per Task. Current writes
+   and claims select `state='current'`; unclaimed position updates also match
+   invocation ID. Human completion reads and compares the entire expected
+   position inside an immediate transaction before closing it; worker completion
+   matches the serialized claim, including invocation identity. Chapter reads
+   retain historical execution while excluding closed claims from current
+   worker activity. No bounded source defect was found requiring another code
+   change in these paths. This is not a behavioral pass.
+3. **Verification is still blocked by the measured resource envelope.**
+   Preflight and safe recovery both fail at active
+   `jack-heart/main-view-task`: **15.3 GiB / 12 GiB**, with **98.8 GiB** free.
+   Recovery preserves the active foreign build. TESTING.md's
+   [resource rule](../TESTING.md#bounded-and-honest) says unresolved pressure
+   stops product tests. Therefore neither focused Rust execution nor disposable
+   materialized migration proof ran. No installed binary or private Home was
+   used as a substitute for the changed code.
+
+### Evidence matrix
+
+`pass (source)` describes inspected code only. Every full-design acceptance
+claim remains open; authored or previously compiled tests are not executed proof.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+| --- | --- | --- | --- | --- |
+| Slice: retain invocation lifetime | Completion/restart preserve execution and review history | One `flow_invocations` table; close instead of DELETE; identity matches capture JSON | Draft `retain_flow_invocations`; `durable.rs:1177`, `children.rs:275,355`, `durable.rs:906` | pass (source); execution gap |
+| Slice: stale writers and retirement | Reused versions cannot target a replacement; old execution cannot become untouched backlog | Invocation-ID update predicate, exact completion comparisons, historical chapter evidence and current-only claim query | `durable.rs:1030`; `children.rs:241,268`; `chapters.rs:98,101,125`; authored store tests | pass (source); execution gap |
+| Slice: populated conversion | Preserve prior bytes and reject ambiguous identity/ancestry atomically | Copies all retained columns; uniqueness, JSON-ID equality and Task FK; no compatibility view | `migrations.rs:4778` fixture compares bytes and uses savepoint rollback for duplicate IDs/dangling Tasks | gap: unrun; fixture uses direct SQL, not installed promotion |
+| Done 1: ancestry and Session validators | Nullable parent equality, structural checks, stable Session/current Run, fenced repeated replacement | Task FK and invocation identity constraint only; Run/Session owner APIs absent | Schema and current Store APIs | gap |
+| Done 2: one CLI reader | Launch/bind/rename; Session/Run/usage agree, including terminal Tasks | Manifest/subject reads remain; Session bind, rename and Task filter absent | `lf/mod.rs:721`, `lf/commands/runs.rs:51`, `ops/human_session.rs:269` | gap |
+| Done 3: execution preservation | Shared taskless/Task storage and driver, captured nesting and exact review recovery | Task history retained; ordinary Flow file persistence and existing cursor model remain | `ops/flow_run.rs:108,136`; new and existing recovery tests unrun | gap |
+| Done 4: Chapter operation | One repository boundary, frozen history, all-Wave transfer/retry | Activation still clears current only for one Wave | `store/sqlite/chapters.rs:39` | gap |
+| Done 5: populated Home import | Preserve old SQL/files, idempotence, interrupted publication and cutover | Forward Task migration only; no offline Home importer or rehearsal | Branch source/migration diff | gap |
+| Done 6: DTO/desktop | Stable Session pane across replacement/bind; typed ancestry and cached grouping | No Rust/Swift DTO, shared fixture or desktop change | Branch path inventory and current Session model | gap |
+| Done 7: configured acceptance | Backed-up actual Homes, matching CLI/app, retained identities and latency measurements | No Home inventory, conversion, promotion, mounted pane or configured demo performed | No runtime acceptance receipt | gap |
+| Done 8: deletion/consistency | Retired owners unreachable; docs match implementation; checks pass | Old Session/Run/taskless owners and Started writes remain; canonical docs are still the target spec | Negative searches and static results below | gap |
+
+### Negative architectural proof and static checks
+
+Searched current Rust callers, SQL writers, migrations, CLI and Session paths.
+The retired `task_flow_positions` table has no current SQL reader or writer;
+its remaining SQL occurrences are historical migration inputs and fixtures.
+There is no compatibility view or duplicate Task write. Historical root
+`step_index` and `iteration` still feed `decode_flow_position` and cannot be
+dropped before conversion. Final claims remain historical evidence, not active
+authority.
+
+The broader forbidden outcomes remain reachable: `human_session::list` still
+unions four sources; ordinary Flow `read`/`write` still use `position.json`;
+Run listing still scans manifests and matches subjects through `WorkCatalog`;
+provider identity, client receipts and Session resolution remain mutable files;
+`begin_chapter_task` and the retained trigger still write Started. These are
+existing incomplete cutover paths, not new adapters selected by this slice.
+They must disappear through the approved replacement before publication.
+
+| Check in this review | Result |
+| --- | --- |
+| Resource preflight, then `--recover` | FAIL as described above; no product test ran |
+| `cargo fmt --all --check` | PASS |
+| `uv run python scripts/check_migrations.py` | PASS: two ordered drafts, 52 shipped migrations unchanged |
+| `uv run python scripts/check_architecture.py` | FAIL: SQLite coverage 30/31, missing `wave_chapters`; other seven inventories pass |
+| Website environment: `uv run python ../scripts/render_architecture_html.py --check` | PASS |
+| `git diff --check a48eeb6aed383123c51a6c6cc673591ae19b1417` | FAIL: earlier draft dependency-header trailing space and copied patch context lines |
+| `git diff --check` for this review note | PASS |
+
+Prior Clippy and documentation-test receipts retain their recorded scope on
+unchanged executable/documentation bytes; they were not rerun here. The new
+table removes the earlier architecture inventory gap for `task_flow_positions`;
+it does not resolve Chapter ownership. Applied draft checksums and original
+copied patch evidence were not rewritten for whitespace. A clean working-note
+check cannot clear those branch-range failures.
+
+### Next action and proof
+
+Continue the approved coherent owner cutover, using
+[concept-review](concept-review.md) for the two binding consequences. Preserve
+current-Run-only binding as the recorded assumption, earlier Run attribution and
+usage, and atomic taskless null-to-Task rejection under nullable equality.
+Do not add another Session projection or restore the removed human column.
+
+The first Session proof must replace its Run twice, retain identity/title/feedback
+and both previous Runs, reject stale replacement and old-Run Ready/Complete,
+then consume the saved feedback once. The same valid Session must remain
+listable/openable beside an unrelated malformed invocation, with the latter's
+bytes and identified recovery problem preserved. Taskless review recovery must
+work after template removal through the same owner and exact settlement fences.
+
+Once preflight permits, run the isolated focused commands from TESTING.md:
+
+```sh
+cargo test -p loopflow --lib dropping_task_step_projection_preserves_execution_and_review_evidence
+cargo test -p loopflow --lib retaining_invocations_preserves_populated_execution_and_review_bytes
+cargo test -p loopflow --lib store::sqlite::durable::durable_store_tests
+cargo test -p loopflow --lib stale_human_decisions_cannot_target_a_replacement_invocation
+```
+
+Repeat populated migration proofs after materialization in a disposable exact
+source copy. Keep the real Home untouched during this proof. The complete
+Chapter, Home import/cutover, DTO/desktop, configured acceptance, measurement,
+and deletion obligations remain those in the design's eight Done When items.
+This review chooses no navigation edge.
+
+## Earlier review: projection-column removal
+
+The assessment below records the earlier HEAD. Its two-table architecture gap
+and 14.5 GiB resource reading are superseded by the current measurements above;
+its Session availability and incomplete-cutover findings remain applicable.
+
 2026-09-26 · LOO-298 · review-slice
 
 Reviewed HEAD `6580b27cd3ccf5726dbb28c3efbdfee5b7629a76` against Task PR base

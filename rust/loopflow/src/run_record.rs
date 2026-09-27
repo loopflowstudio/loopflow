@@ -79,7 +79,6 @@ pub(crate) struct RunSpec {
 pub struct RunFlowStep {
     pub task_id: Option<crate::work::task::TaskId>,
     pub task_pr_id: Option<crate::work::task::TaskPrId>,
-    pub boundary_key: String,
     pub invocation_id: String,
     pub flow: String,
     pub step: String,
@@ -97,7 +96,6 @@ impl RunFlowStep {
         Self {
             task_id: Some(position.task_id.clone()),
             task_pr_id,
-            boundary_key: position.cursor.boundary_key(),
             invocation_id: position.invocation.id.clone(),
             flow: position.invocation.flow.clone(),
             step: position.current().step,
@@ -118,7 +116,6 @@ impl RunFlowStep {
         Ok(Self {
             task_id: None,
             task_pr_id: None,
-            boundary_key: run.cursor.boundary_key(),
             invocation_id: run.id.clone(),
             flow: run.flow.clone(),
             step,
@@ -2105,53 +2102,6 @@ pub(crate) fn record_dir(lf_home: &Path, run_id: &RunId) -> Option<PathBuf> {
     Some(lf_home.join("runs").join(prefix).join(run_id.as_str()))
 }
 
-#[cfg(test)]
-pub(crate) fn observed_run_ids(selectors: &[String]) -> std::io::Result<Vec<RunId>> {
-    observed_run_ids_at(&crate::store::lf_home_dir(), selectors)
-}
-
-#[cfg(test)]
-fn observed_run_ids_at(lf_home: &Path, selectors: &[String]) -> std::io::Result<Vec<RunId>> {
-    let root = lf_home.join("runs");
-    let mut prefixes = match fs::read_dir(&root) {
-        Ok(entries) => entries.filter_map(Result::ok).collect::<Vec<_>>(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    prefixes.sort_by_key(|entry| entry.path());
-
-    let mut observed = Vec::new();
-    for prefix in prefixes {
-        let Ok(entries) = fs::read_dir(prefix.path()) else {
-            continue;
-        };
-        let mut runs = entries.filter_map(Result::ok).collect::<Vec<_>>();
-        runs.sort_by_key(|entry| entry.path());
-        for run in runs {
-            let Ok(bytes) = fs::read(run.path().join("manifest.json")) else {
-                continue;
-            };
-            let Ok(manifest) = serde_json::from_slice::<RunManifest>(&bytes) else {
-                continue;
-            };
-            if manifest.subjects.iter().any(|subject| {
-                selectors
-                    .iter()
-                    .any(|selector| selector == &subject.selector)
-            }) {
-                observed.push((manifest.created_at, manifest.run_id));
-            }
-        }
-    }
-    observed.sort_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .then_with(|| left.1.as_str().cmp(right.1.as_str()))
-    });
-    observed.dedup_by(|left, right| left.1 == right.1);
-    Ok(observed.into_iter().map(|(_, run_id)| run_id).collect())
-}
-
 fn prepare_manifest(
     spec: RunSpec,
     run_id: RunId,
@@ -2421,9 +2371,9 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        observed_run_ids_at, read_final_answer, read_provider_clients, read_provider_session,
-        read_run_snapshot, remove_provider_client, write_provider_client, CaptureHandle,
-        RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
+        read_final_answer, read_provider_clients, read_provider_session, read_run_snapshot,
+        remove_provider_client, write_provider_client, CaptureHandle, RunLaunchRequest,
+        RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
@@ -2608,7 +2558,6 @@ mod tests {
             let mut step = super::RunFlowStep {
                 task_id: Some(crate::work::task::TaskId::new()),
                 task_pr_id: Some(original.clone()),
-                boundary_key: "review".into(),
                 invocation_id: "invocation".into(),
                 flow: "feature".into(),
                 step: "review".into(),
@@ -3158,10 +3107,10 @@ mod tests {
         let second_id = second.run_id();
 
         assert_ne!(first_id, second_id);
-        let observed = observed_run_ids_at(home.path(), &[selector]).unwrap();
-        assert_eq!(observed.len(), 2);
-        assert!(observed.contains(&first_id));
-        assert!(observed.contains(&second_id));
+        for capture in [&first, &second] {
+            let manifest = super::read_manifest(&capture.artifact_dir()).unwrap();
+            assert_eq!(manifest.subjects[0].selector, selector);
+        }
         assert!(!first.artifact_dir().join("terminal.json").exists());
         assert!(!second.artifact_dir().join("terminal.json").exists());
     }

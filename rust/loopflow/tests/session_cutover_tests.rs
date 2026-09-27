@@ -1,4 +1,4 @@
-//! Interactive Sessions are `sessions` and `runs` rows from launch to completion.
+//! Interactive and Ask Sessions are `sessions` and `runs` rows from launch to completion.
 //! The real `lf` binary runs in a private Home; a script stands in for the provider.
 #![cfg(unix)]
 
@@ -39,6 +39,18 @@ impl Fixture {
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // `lf ask` hands its conversation to a background launcher. The test
+        // opens the Session itself, so the launcher only records its request.
+        let tmux = bin.join("tmux");
+        std::fs::write(
+            &tmux,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{}'\nif [ \"$1\" = has-session ]; then exit 1; fi\n",
+                home.path().join("tmux.log").display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
         Self {
             home,
             repo: TestRepo::new(),
@@ -113,7 +125,7 @@ impl Fixture {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(20);
+        let deadline = Instant::now() + PATIENCE;
         while self.launches().len() == before
             && Instant::now() < deadline
             && child.try_wait().unwrap().is_none()
@@ -184,6 +196,30 @@ impl Fixture {
             .unwrap_or_else(|error| panic!("Run {run_id} has no row: {error}"))
     }
 
+    fn run_dir(&self, run_id: &str) -> PathBuf {
+        self.home
+            .path()
+            .join("runs")
+            .join(&run_id[4..6])
+            .join(run_id)
+    }
+
+    /// `lf ask` as called from inside the caller's Run.
+    fn ask(&self, caller_run: &str, question: &str) -> Command {
+        let mut command = self.command(&["ask", question]);
+        command
+            .env("LF_RUN_ID", caller_run)
+            .env("LF_RUN_DIR", self.run_dir(caller_run))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    }
+
+    fn launcher_requests(&self) -> String {
+        std::fs::read_to_string(self.home.path().join("tmux.log")).unwrap_or_default()
+    }
+
     fn retired_files(&self) -> Vec<PathBuf> {
         fn walk(dir: &Path, found: &mut Vec<PathBuf>) {
             for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
@@ -192,6 +228,10 @@ impl Fixture {
                     walk(&path, found);
                 } else if ["session-name.json", "session-resolution.json"]
                     .contains(&entry.file_name().to_string_lossy().as_ref())
+                    || path
+                        .extension()
+                        .is_some_and(|extension| extension == "json")
+                        && dir.ends_with("human-sessions")
                 {
                     found.push(path);
                 }
@@ -199,9 +239,13 @@ impl Fixture {
         }
         let mut found = Vec::new();
         walk(&self.home.path().join("runs"), &mut found);
+        walk(&self.home.path().join("human-sessions"), &mut found);
         found
     }
 }
+
+/// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
+const PATIENCE: Duration = Duration::from_secs(180);
 
 const LAUNCH: [&str; 5] = ["--tui", "--model", "opencode", ":", "Review the parser"];
 
@@ -371,4 +415,321 @@ fn interactive_run_records_checkout_and_declared_work() {
     ]);
     assert_eq!(fixture.run_parents(&declared), parents("declared"));
     assert_eq!(fixture.count("sessions"), 3);
+}
+
+fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if let Some(found) = probe() {
+            return found;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+const BOUND_LAUNCH: [&str; 7] = [
+    "--task",
+    "INF-123",
+    "--tui",
+    "--model",
+    "opencode",
+    ":",
+    "Review the parser",
+];
+
+#[test]
+fn ask_session_is_rows_from_request_to_answer() {
+    let fixture = Fixture::new(true);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "task-binding",
+        &fixture.repo.head_sha(),
+    );
+    let (caller, caller_run) = fixture.attach(&BOUND_LAUNCH);
+
+    let asking = fixture
+        .ask(&caller_run, "Which release target?")
+        .spawn()
+        .unwrap();
+    let (id, first_run): (String, String) = wait_for("the Ask Session row", || {
+        fixture
+            .db()
+            .query_row(
+                "SELECT id, current_run_id FROM sessions WHERE kind='ask'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok()
+    });
+    wait_for("the conversation launcher", || {
+        fixture
+            .launcher_requests()
+            .contains("serve-ask")
+            .then_some(())
+    });
+    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (2, 2));
+    let inherited = (
+        Some(task.task.id.to_string()),
+        Some(task.task.wave_id.to_string()),
+        Some("inherited".to_string()),
+    );
+    assert_eq!(fixture.run_parents(&first_run), inherited);
+    let ask_run = |run_id: &str| -> (Option<String>, Option<String>, String) {
+        fixture
+            .db()
+            .query_row(
+                "SELECT invocation_id, caller_run_id, session_id FROM runs WHERE id=?1",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+    };
+    assert_eq!(
+        ask_run(&first_run),
+        (None, Some(caller_run.clone()), id.clone()),
+        "an Ask inherits work and its caller, never an invocation"
+    );
+
+    let listed = fixture.sessions();
+    let listed = listed
+        .iter()
+        .find(|session| session["id"] == id.as_str())
+        .unwrap_or_else(|| panic!("the Ask does not list: {listed:?}"));
+    assert_eq!(listed["kind"], "ask");
+    assert_eq!(listed["run_id"], first_run.as_str());
+    assert_eq!(listed["title"], "Which release target?");
+    assert_eq!(listed["title_source"], "generated");
+    assert_eq!(listed["state"], "waiting");
+    assert_eq!(
+        listed["work"],
+        serde_json::json!({"kind": "task", "id": task.task.id})
+    );
+    assert_eq!(listed["flow_membership"]["kind"], "independent");
+
+    let named = fixture.json(&["session", "rename", &first_run, "Launch notes", "--json"]);
+    assert_eq!(named["id"], id.as_str());
+    assert_eq!(named["title"], "Launch notes");
+    assert_eq!(named["title_source"], "human");
+
+    let inside = |run_id: &str, args: &[&str]| -> Output {
+        fixture
+            .command(args)
+            .env("LF_RUN_ID", run_id)
+            .env(
+                "LF_HUMAN_SESSION",
+                serde_json::json!({"kind": "ask", "id": id}).to_string(),
+            )
+            .output()
+            .unwrap()
+    };
+    let early = fixture.run(&["session", "complete", &id]);
+    assert!(
+        String::from_utf8_lossy(&early.stderr).contains("not marked this ready"),
+        "{early:?}"
+    );
+    let ready = inside(&first_run, &["session", "ready", "Ship to staging"]);
+    assert!(ready.status.success(), "{ready:?}");
+    let feedback = || -> (String, Option<String>, String, bool) {
+        fixture
+            .db()
+            .query_row(
+                "SELECT title, ready_summary, current_run_id, completed_at IS NOT NULL
+                 FROM sessions WHERE id=?1",
+                [&id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap()
+    };
+    assert_eq!(
+        feedback(),
+        (
+            "Launch notes".to_string(),
+            Some("Ship to staging".to_string()),
+            first_run.clone(),
+            false
+        )
+    );
+
+    // A consumed launch without provider history is replaced on the next open.
+    // The replacement is another Run of the same conversation.
+    std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
+    let (opened, second_run) = fixture.attach(&["session", "open", &id]);
+    assert_ne!(second_run, first_run);
+    assert_eq!(
+        feedback(),
+        (
+            "Launch notes".to_string(),
+            Some("Ship to staging".to_string()),
+            second_run.clone(),
+            false
+        )
+    );
+    assert_eq!(
+        ask_run(&second_run),
+        (None, Some(caller_run.clone()), id.clone())
+    );
+    assert_eq!(fixture.run_parents(&second_run), inherited);
+    let history: i64 = fixture
+        .db()
+        .query_row(
+            "SELECT count(*) FROM runs WHERE session_id=?1",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        history, 2,
+        "the replaced Run stays in the Session's history"
+    );
+    let stale = inside(&first_run, &["session", "ready", "Late answer"]);
+    assert!(!stale.status.success(), "{stale:?}");
+    assert_eq!(fixture.count("sessions"), 2);
+
+    let completed = fixture.run(&["session", "complete", &id]);
+    assert!(completed.status.success(), "{completed:?}");
+    let answer = asking.wait_with_output().unwrap();
+    assert!(answer.status.success(), "{answer:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&answer.stdout)
+            .matches("Ship to staging")
+            .count(),
+        1,
+        "{answer:?}"
+    );
+    assert!(feedback().3, "completion is a row update");
+    assert!(fixture
+        .sessions()
+        .iter()
+        .all(|session| session["id"] != id.as_str()));
+    let again = fixture.run(&["session", "complete", &id]);
+    assert!(!again.status.success(), "{again:?}");
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("already complete"),
+        "{again:?}"
+    );
+
+    fixture.release(opened);
+    fixture.release(caller);
+    assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
+}
+
+/// A store under a directory that cannot be written until `unlock`.
+struct LockedStore {
+    directory: PathBuf,
+}
+
+impl LockedStore {
+    fn new(fixture: &Fixture) -> Self {
+        let directory = fixture.home.path().join("locked");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o555)).unwrap();
+        Self { directory }
+    }
+
+    fn select(&self, command: &mut Command) {
+        let path = self.directory.join("loopflow.db");
+        command
+            .env("LF_DB_PATH", &path)
+            .env("LF_CONTROL_DB_PATH", &path);
+    }
+
+    fn unlock(&self) -> rusqlite::Connection {
+        std::fs::set_permissions(&self.directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+        rusqlite::Connection::open(self.directory.join("loopflow.db")).unwrap()
+    }
+}
+
+#[test]
+fn launch_proceeds_when_the_store_cannot_be_written() {
+    let fixture = Fixture::new(false);
+    let store = LockedStore::new(&fixture);
+    let mut launch = fixture.command(&LAUNCH);
+    store.select(&mut launch);
+    let output = launch.output().unwrap();
+    assert!(
+        output.status.success(),
+        "bookkeeping refused the launch: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let run_id = fixture.launches()[0].clone();
+
+    drop(store.unlock());
+    let mut list = fixture.command(&["session", "list", "--all", "--json"]);
+    store.select(&mut list);
+    let listed: Vec<Value> = serde_json::from_slice(&list.output().unwrap().stdout).unwrap();
+    assert_eq!(
+        listed,
+        Vec::<Value>::new(),
+        "an unrecorded Session does not list"
+    );
+
+    // The next operation that touches the Run records its Session.
+    let mut rename = fixture.command(&["session", "rename", &run_id, "Parser review", "--json"]);
+    store.select(&mut rename);
+    let renamed = rename.output().unwrap();
+    assert!(renamed.status.success(), "{renamed:?}");
+    let renamed: Value = serde_json::from_slice(&renamed.stdout).unwrap();
+    assert_eq!(renamed["run_id"], run_id.as_str());
+    assert_eq!(renamed["kind"], "interactive");
+    assert_eq!(renamed["title"], "Parser review");
+    let mut list = fixture.command(&["session", "list", "--all", "--json"]);
+    store.select(&mut list);
+    let listed: Vec<Value> = serde_json::from_slice(&list.output().unwrap().stdout).unwrap();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0]["id"], renamed["id"]);
+    let rows: (i64, i64) = store
+        .unlock()
+        .query_row(
+            "SELECT (SELECT count(*) FROM sessions), (SELECT count(*) FROM runs)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(rows, (1, 1));
+}
+
+#[test]
+fn ask_proceeds_when_the_store_cannot_be_written() {
+    let fixture = Fixture::new(true);
+    let (caller, caller_run) = fixture.attach(&LAUNCH);
+    let store = LockedStore::new(&fixture);
+    let mut ask = fixture.ask(&caller_run, "Which release target?");
+    store.select(&mut ask);
+    let mut asking = ask.spawn().unwrap();
+    let run_id = wait_for("the conversation launcher", || {
+        if let Some(status) = asking.try_wait().unwrap() {
+            panic!("bookkeeping refused the Ask: {status}");
+        }
+        let requests = fixture.launcher_requests();
+        let served = requests.split("serve-ask").nth(1)?;
+        let start = served.find("run_")?;
+        Some(served[start..start + 36].to_string())
+    });
+
+    let rows = store.unlock();
+    let mut rename = fixture.command(&["session", "rename", &run_id, "Launch notes", "--json"]);
+    store.select(&mut rename);
+    let renamed = rename.output().unwrap();
+    assert!(renamed.status.success(), "{renamed:?}");
+    let renamed: Value = serde_json::from_slice(&renamed.stdout).unwrap();
+    assert_eq!(renamed["kind"], "ask");
+    assert_eq!(renamed["run_id"], run_id.as_str());
+    assert_eq!(renamed["title"], "Launch notes");
+    let recorded: (String, String) = rows
+        .query_row(
+            "SELECT s.kind, s.request FROM sessions s WHERE s.current_run_id=?1",
+            [&run_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        recorded,
+        ("ask".to_string(), "Which release target?".to_string())
+    );
+
+    asking.kill().unwrap();
+    asking.wait().unwrap();
+    fixture.release(caller);
 }

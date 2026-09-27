@@ -774,7 +774,7 @@ pub enum SessionCommand {
     },
     /// Run one ad-hoc request in its durable terminal
     #[command(name = "serve-ask", hide = true)]
-    ServeAsk { id: String },
+    ServeAsk { run_id: crate::durable::RunId },
     /// Stop one exact native provider Run after its review completes
     #[command(name = "stop-run", hide = true)]
     StopRun { run_id: crate::durable::RunId },

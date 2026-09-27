@@ -83,18 +83,12 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
     let path = std::env::join_paths(paths).unwrap();
-    let id = format!("ask_{}", uuid::Uuid::new_v4().simple());
-    let sessions = home.path().join("human-sessions");
-    std::fs::create_dir(&sessions).unwrap();
-    let record = serde_json::json!({
-        "id": id, "parent_run_id": loopflow::durable::RunId::new(),
-        "parent_run_dir": home.path(), "work": null, "work_selector": null,
-        "title": "Keep this development review", "detail": "loop-decide",
-        "prompt": "Choose the next proof", "skill": "unblock",
-        "cwd": env!("CARGO_MANIFEST_DIR"), "model": "codex", "session_run_id": null,
-        "ready_summary": null, "status": "waiting", "retain_completed": true
-    });
-    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
+    let (id, ..) = prepare_ask(
+        home.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "codex",
+        "Keep this development review",
+    );
     let command = |binary: &str| {
         let mut command = Command::new(binary);
         command
@@ -160,58 +154,39 @@ fn development_session_handoff_keeps_its_binary_and_home() {
 }
 
 #[test]
-fn unopened_session_has_a_run_before_any_provider_is_started() {
+fn asked_session_has_a_run_before_any_provider_is_started() {
     let home = tempfile::tempdir().unwrap();
-    let sessions = home.path().join("human-sessions");
-    std::fs::create_dir(&sessions).unwrap();
-    // A stored Ask from before required Run references. Read-only discovery
-    // must not invent a Run; explicit opening prepares it without spawning.
-    let id = "ask_prepared-proof";
-    let record = serde_json::json!({
-        "id": id,
-        "parent_run_id": "run_00000000000000000000000000000002",
-        "parent_run_dir": home.path().join("parent"),
-        "work": null, "work_selector": null,
-        "title": "A question", "detail": "proof", "prompt": "Do not launch",
-        "cwd": env!("CARGO_MANIFEST_DIR"), "model": "codex",
-        "session_run_id": null, "ready_summary": null, "status": "waiting"
-    });
-    std::fs::write(
-        sessions.join(format!("{id}.json")),
-        serde_json::to_vec(&record).unwrap(),
-    )
-    .unwrap();
-    let before = run(home.path(), &["session", "list", "--all", "--json"]);
-    assert!(!before.status.success());
-    assert!(String::from_utf8_lossy(&before.stderr).contains("predates prepared Runs"));
-    assert!(!home.path().join("runs").exists());
-    let opened = run(home.path(), &["session", "open", id, "--json"]);
+    let (id, run_id, dir) = prepare_ask(
+        home.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "codex",
+        "Do not launch",
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["run_id"], run_id.as_str());
+    assert_eq!(manifest["parent_run_id"], CALLER);
+    let opened = run(home.path(), &["session", "open", &id, "--json"]);
     assert!(
         opened.status.success(),
         "{}",
         String::from_utf8_lossy(&opened.stderr)
     );
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    let run_id = opened["run_id"].as_str().unwrap();
+    assert_eq!(opened["run_id"], run_id.as_str());
     assert_eq!(opened["state"], "waiting");
-    assert_ne!(run_id, record["parent_run_id"].as_str().unwrap());
-    let dir = home.path().join("runs").join(&run_id[4..6]).join(run_id);
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-    assert_eq!(manifest["run_id"], run_id);
-    assert_eq!(manifest["parent_run_id"], record["parent_run_id"]);
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("terminal.json").exists());
-    let inspected = run(home.path(), &["runs", run_id, "--json"]);
+    let inspected = run(home.path(), &["runs", &run_id, "--json"]);
     assert!(
         inspected.status.success(),
         "{}",
         String::from_utf8_lossy(&inspected.stderr)
     );
     let inspected: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
-    assert_eq!(inspected["id"], run_id);
-    assert_eq!(inspected["parent_run_id"], record["parent_run_id"]);
+    assert_eq!(inspected["id"], run_id.as_str());
+    assert_eq!(inspected["parent_run_id"], CALLER);
     assert!(inspected["outcome"].is_null());
     let listed = run(home.path(), &["session", "list", "--all", "--json"]);
     assert!(
@@ -220,11 +195,7 @@ fn unopened_session_has_a_run_before_any_provider_is_started() {
         String::from_utf8_lossy(&listed.stderr)
     );
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    assert_eq!(listed[0]["run_id"], run_id);
-    let reopened = run(home.path(), &["session", "open", id, "--json"]);
-    assert!(reopened.status.success());
-    let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
-    assert_eq!(reopened["run_id"], run_id);
+    assert_eq!(listed[0]["run_id"], run_id.as_str());
     assert!(!dir.join("events.jsonl").exists());
 }
 
@@ -238,24 +209,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 
     for resume in [true, false] {
         let home = tempfile::tempdir().unwrap();
-        let sessions = home.path().join("human-sessions");
-        std::fs::create_dir(&sessions).unwrap();
-        let id = "ask_resume-proof";
-        let record = serde_json::json!({
-            "id": id,
-            "parent_run_id": "run_00000000000000000000000000000002",
-            "parent_run_dir": home.path().join("parent"),
-            "work": null, "work_selector": null,
-            "title": "Resume", "detail": "proof", "prompt": "Local proof",
-            "cwd": home.path(), "model": "opencode",
-            "session_run_id": null, "ready_summary": null, "status": "waiting"
-        });
-        std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
-        let prepared = run(home.path(), &["session", "open", id, "--json"]);
-        assert!(prepared.status.success(), "{:?}", prepared);
-        let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
-        let run_id = prepared["run_id"].as_str().unwrap();
-        let dir = home.path().join("runs").join(&run_id[4..6]).join(run_id);
+        let (id, run_id, dir) = prepare_ask(home.path(), home.path(), "opencode", "Local proof");
+        let (id, run_id) = (id.as_str(), run_id.as_str());
         // Old live Runs must survive the history reader's seven-day window.
         let mut manifest: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
@@ -323,7 +278,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // An upper bound: a debug `lf` on a busy machine launches slowly.
+        let deadline = Instant::now() + Duration::from_secs(180);
         while !evidence.exists() && Instant::now() < deadline && first.try_wait().unwrap().is_none()
         {
             std::thread::sleep(Duration::from_millis(20));
@@ -341,7 +297,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        // The provider waits on stdin indefinitely, so a slow machine cannot pass by accident.
+        let deadline = Instant::now() + Duration::from_secs(60);
         while second.try_wait().unwrap().is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -401,25 +358,82 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
     }
 }
 
-fn prepare_ask(home: &std::path::Path, id: &str, title: &str) -> (String, std::path::PathBuf) {
-    let sessions = home.join("human-sessions");
-    std::fs::create_dir_all(&sessions).unwrap();
-    let record = serde_json::json!({
-        "id": id,
-        "parent_run_id": "run_00000000000000000000000000000002",
-        "parent_run_dir": home.join("parent"),
-        "work": null, "work_selector": null,
-        "title": title, "detail": "proof", "prompt": "Do not launch",
-        "cwd": env!("CARGO_MANIFEST_DIR"), "model": "codex",
-        "session_run_id": null, "ready_summary": null, "status": "waiting"
+const CALLER: &str = "run_00000000000000000000000000000002";
+
+/// Ask through the real CLI from a stand-in caller Run, then stop the caller.
+/// The Session keeps waiting: (Session id, Run id, Run directory).
+fn prepare_ask(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    harness: &str,
+    question: &str,
+) -> (String, String, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+
+    let caller = home.join("caller");
+    std::fs::create_dir_all(&caller).unwrap();
+    let manifest = serde_json::json!({
+        "schema_version": 1, "run_id": CALLER, "parent_run_id": null,
+        "created_at": "2026-01-01T00:00:00Z", "harness": harness, "model": null,
+        "surface": "headless", "cwd": cwd, "repo": null, "worktree": null,
+        "skill": "proof", "subjects": [], "flow": null, "launch": null, "context": null,
+        "runtime_path": null, "runtime_digest": null, "host": "test", "boot_id": null
     });
-    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
-    let opened = run(home, &["session", "open", id, "--json"]);
-    assert!(opened.status.success(), "{opened:?}");
-    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    let run_id = opened["run_id"].as_str().unwrap().to_string();
-    let dir = home.join("runs").join(&run_id[4..6]).join(&run_id);
-    (run_id, dir)
+    std::fs::write(caller.join("manifest.json"), manifest.to_string()).unwrap();
+    // The background launcher only acknowledges; each test opens the Session itself.
+    let launcher = home.join("launcher");
+    std::fs::create_dir_all(&launcher).unwrap();
+    let tmux = launcher.join("tmux");
+    std::fs::write(
+        &tmux,
+        "#!/bin/sh\nif [ \"$1\" = has-session ]; then exit 1; fi\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut asking = command(home, &["ask", question])
+        .current_dir(cwd)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                launcher.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("LF_RUN_ID", CALLER)
+        .env("LF_RUN_DIR", &caller)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let stored = loop {
+        let stored = rusqlite::Connection::open_with_flags(
+            home.join("loopflow.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .and_then(|db| {
+            db.query_row(
+                "SELECT id, current_run_id FROM sessions WHERE kind='ask' AND request=?1",
+                [question],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+        });
+        if let Ok(stored) = stored {
+            break stored;
+        }
+        if asking.try_wait().unwrap().is_some() || Instant::now() >= deadline {
+            let _ = asking.kill();
+            panic!("lf ask stored no Session: {:?}", asking.wait_with_output());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    asking.kill().unwrap();
+    asking.wait().unwrap();
+    let dir = home.join("runs").join(&stored.1[4..6]).join(&stored.1);
+    (stored.0, stored.1, dir)
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
@@ -444,8 +458,13 @@ fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
 #[test]
 fn session_names_are_shared_and_human_names_win() {
     let home = tempfile::tempdir().unwrap();
-    let id = "ask_naming-proof";
-    let (run_id, dir) = prepare_ask(home.path(), id, "Which release target?");
+    let (id, run_id, dir) = prepare_ask(
+        home.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "codex",
+        "Which release target?",
+    );
+    let id = id.as_str();
     let seeded = listed(home.path(), id);
     assert_eq!(seeded["title"], "Which release target?");
     assert_eq!(seeded["title_source"], "generated");
@@ -478,7 +497,8 @@ fn session_names_are_shared_and_human_names_win() {
     let reopened = run(home.path(), &["session", "open", id, "--json"]);
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["title"], "Launch notes");
-    // Naming touches only the Run's name record, never provider state.
+    // Naming touches only the Session row, never the Run or provider state.
+    assert!(!dir.join("session-name.json").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("events.jsonl").exists());
     assert!(dir.join("prepared").exists());
@@ -493,28 +513,13 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     use std::time::{Duration, Instant};
 
     let home = tempfile::tempdir().unwrap();
-    let sessions = home.path().join("human-sessions");
-    std::fs::create_dir(&sessions).unwrap();
-    let id = "ask_rename-replacement";
-    let record = serde_json::json!({
-        "id": id,
-        "parent_run_id": "run_00000000000000000000000000000002",
-        "parent_run_dir": home.path().join("parent"),
-        "work": null, "work_selector": null,
-        "title": "Which release target?", "detail": "proof", "prompt": "Local proof",
-        "cwd": home.path(), "model": "opencode",
-        "session_run_id": null, "ready_summary": null, "status": "waiting"
-    });
-    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
-    let prepared = run(home.path(), &["session", "open", id, "--json"]);
-    assert!(prepared.status.success(), "{prepared:?}");
-    let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    let first_run = prepared["run_id"].as_str().unwrap().to_string();
-    let first_dir = home
-        .path()
-        .join("runs")
-        .join(&first_run[4..6])
-        .join(&first_run);
+    let (id, first_run, first_dir) = prepare_ask(
+        home.path(),
+        home.path(),
+        "opencode",
+        "Which release target?",
+    );
+    let id = id.as_str();
 
     // The operating instruction passes the Session's own `$LF_RUN_ID`, which
     // names the boundary's Run rather than the boundary. It must reach the
@@ -554,7 +559,8 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // An upper bound: a debug `lf` on a busy machine launches slowly.
+    let deadline = Instant::now() + Duration::from_secs(180);
     while !evidence.exists() && Instant::now() < deadline && opened.try_wait().unwrap().is_none() {
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -614,16 +620,26 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         listed(home.path(), id)["ready_summary"],
         serde_json::Value::Null
     );
-    let path = sessions.join(format!("{id}.json"));
-    let mut saved: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    saved["ready_summary"] = serde_json::json!("Ship to staging");
-    std::fs::write(&path, saved.to_string()).unwrap();
+    let ready = command(home.path(), &["session", "ready", "Ship to staging"])
+        .env("LF_RUN_ID", &replacement)
+        .env(
+            "LF_HUMAN_SESSION",
+            serde_json::json!({"kind": "ask", "id": id}).to_string(),
+        )
+        .output()
+        .unwrap();
+    assert!(ready.status.success(), "{ready:?}");
     let completed = run(home.path(), &["session", "complete", &replacement]);
     assert!(completed.status.success(), "{completed:?}");
-    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(
-        saved["status"],
-        serde_json::json!({"completed": {"summary": "Ship to staging"}})
+    assert!(String::from_utf8_lossy(&completed.stdout).contains("Ship to staging"));
+    let again = run(home.path(), &["session", "complete", id]);
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("already complete"),
+        "{again:?}"
     );
+    assert!(!home
+        .path()
+        .join("human-sessions")
+        .join(format!("{id}.json"))
+        .exists());
 }

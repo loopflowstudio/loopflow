@@ -1223,26 +1223,13 @@ fn decode_flow_position(
     let mut failure = failure_json
         .map(|failure| serde_json::from_str::<TaskFlowBlocker>(&failure))
         .transpose()?;
-    let root_index = usize::try_from(step_index).map_err(invalid_durable)?;
-    let root_iteration = u32::try_from(iteration).map_err(invalid_durable)?;
-    let saved = review_json
-        .as_deref()
-        .map(serde_json::from_str::<serde_json::Value>)
-        .transpose()?;
-    let cursor = match saved {
-        Some(value) if value.get("index").is_some() => serde_json::from_value(value)?,
-        _ => crate::engine::ExecutionCursor {
-            index: root_index,
-            iteration: root_iteration,
-            progress: decode_flow_progress(review_json.as_deref(), &mut failure, updated_at)?,
-            ..Default::default()
-        },
-    };
-    if cursor.index != root_index || cursor.iteration != root_iteration {
-        return Err(StoreError::InvalidData(
-            "stored Flow cursor does not match its root projection".into(),
-        ));
-    }
+    let cursor = decode_flow_cursor(
+        review_json.as_deref(),
+        step_index,
+        iteration,
+        &mut failure,
+        updated_at,
+    )?;
     let position = FlowPosition {
         cursor,
         task_id: TaskId::parse(&task_id).map_err(invalid_durable)?,
@@ -1261,6 +1248,35 @@ fn decode_flow_position(
     };
     validate_flow_position(&position.task_id, &position)?;
     Ok(position)
+}
+
+pub(super) fn decode_flow_cursor(
+    review_json: Option<&str>,
+    step_index: i64,
+    iteration: i64,
+    failure: &mut Option<TaskFlowBlocker>,
+    updated_at: OffsetDateTime,
+) -> StoreResult<crate::engine::ExecutionCursor> {
+    let root_index = usize::try_from(step_index).map_err(invalid_durable)?;
+    let root_iteration = u32::try_from(iteration).map_err(invalid_durable)?;
+    let saved = review_json
+        .map(serde_json::from_str::<serde_json::Value>)
+        .transpose()?;
+    let cursor = match saved {
+        Some(value) if value.get("index").is_some() => serde_json::from_value(value)?,
+        _ => crate::engine::ExecutionCursor {
+            index: root_index,
+            iteration: root_iteration,
+            progress: decode_flow_progress(review_json, failure, updated_at)?,
+            ..Default::default()
+        },
+    };
+    if cursor.index != root_index || cursor.iteration != root_iteration {
+        return Err(StoreError::InvalidData(
+            "stored Flow cursor does not match its root projection".into(),
+        ));
+    }
+    Ok(cursor)
 }
 
 fn validate_flow_position(task_id: &TaskId, position: &FlowPosition) -> StoreResult<()> {
@@ -2355,6 +2371,64 @@ mod durable_store_tests {
                 .unwrap(),
             crate::durable::WorkStatus::Ready
         );
+    }
+
+    #[test]
+    fn historical_review_cursor_can_reserve_a_replacement_attempt() {
+        for progress in [
+            r#"{"node_id":"decide","completed_passes":2,"direction":"keep scope"}"#,
+            r#"{"repeats":{"decide":2},"direction":"keep scope"}"#,
+        ] {
+            let (_dir, store, task_id) = store_with_task();
+            let mut position = autonomous_position(&task_id);
+            position.invocation = crate::durable::test_flow_invocation(
+                "review",
+                1,
+                "review-design",
+                Some("review"),
+                true,
+            );
+            position.cursor.index = 1;
+            position.cursor.iteration = 3;
+            position.session_run_id = Some(RunId::new());
+            position.ready_summary = Some("retained answer".into());
+            let position = store.set_flow_position(&task_id, &position).unwrap();
+            let session_id = super::super::sessions::review_id(&position).unwrap();
+            let original = store.session(&session_id).unwrap().unwrap();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE flow_invocations SET review_json=?2 WHERE id=?1",
+                    rusqlite::params![position.invocation.id, progress],
+                )
+                .unwrap();
+
+            let recovered = store.flow_position(&task_id).unwrap().unwrap();
+            let (reserved, replacement) = store.reserve_review_run(&recovered).unwrap();
+            assert_eq!(reserved.cursor, recovered.cursor);
+            assert_eq!(replacement.node, Some(1));
+            assert_eq!(replacement.iterations, original.1.iterations);
+            assert_eq!(replacement.attempt, Some(2));
+            let (session, _) = store.session(&session_id).unwrap().unwrap();
+            assert_eq!(session.id, original.0.id);
+            assert_eq!(session.title, original.0.title);
+            assert_eq!(session.ready_summary, original.0.ready_summary);
+            assert_eq!(session.current_run_id, replacement.id);
+            assert_eq!(store.session_runs(&session_id).unwrap().len(), 2);
+            let retained: String = store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT review_json FROM flow_invocations WHERE id=?1",
+                    [&position.invocation.id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, progress);
+        }
     }
 
     #[test]

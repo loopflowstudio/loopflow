@@ -8,7 +8,6 @@ use std::{
 use anyhow::{anyhow, Result};
 
 use crate::controller::wave::journal::short_id;
-use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
 pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot, DiscoveryState};
@@ -68,85 +67,39 @@ pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<RunSnapshot>, bool
     Ok((runs, truncated))
 }
 
-fn collect_child_runs_at(lf_home: &Path, parent: &str) -> Result<Vec<RunSnapshot>> {
-    let (_, manifest) = crate::run_record::resolve_manifest(lf_home, parent)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let parent_id = manifest.run_id.to_string();
-    crate::run_record::scan_runs_since(lf_home, 0)
-        .map_err(|error| anyhow!("Run records unavailable: {error}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| run.parent_run_id.as_deref() == Some(parent_id.as_str()))
-                .collect()
-        })
-}
-
-/// A Task's Runs are the rows that name it, launched or bound; each Run's
-/// evidence is read from its own record.
-fn collect_task_runs(selector: &str) -> Result<Vec<RunSnapshot>> {
+pub(crate) fn collect_runs_started_since(
+    filter: WorkFilter,
+    since: i64,
+) -> Result<Vec<RunSnapshot>> {
     let path = crate::store::observability_database_path()?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&path)?;
-    let task = match crate::durable::TaskId::parse(selector) {
-        Ok(id) => store.task(&id)?,
-        Err(_) => store.task_by_issue(selector)?,
-    };
-    let Some(task) = task else {
-        return Ok(Vec::new());
-    };
-    let home = crate::store::observability_home_dir();
-    let mut runs = Vec::new();
-    for run in store.task_runs(&task.id)? {
-        let dir = crate::run_record::record_dir(&home, &run.id)
-            .ok_or_else(|| anyhow!("Run {} has an invalid id", run.id))?;
-        match crate::run_record::read_run_snapshot(&dir) {
-            Ok(snapshot) => runs.push(snapshot),
-            // A Run launched on another Home keeps its record there.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(anyhow!("Run record unavailable: {error}")),
-        }
-    }
-    Ok(runs)
-}
-
-fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<RunSnapshot>> {
-    collect_runs_started_since_at(
+    let mut runs = collect_runs_at(
         &crate::store::observability_home_dir(),
+        &path,
         filter,
+        None,
         since,
-        &WorkCatalog::load()?,
-    )
-}
-
-pub(crate) fn collect_runs_started_since_at(
-    lf_home: &Path,
-    filter: WorkFilter,
-    since: i64,
-    catalog: &WorkCatalog,
-) -> Result<Vec<RunSnapshot>> {
-    crate::run_record::scan_runs_since(lf_home, since)
-        .map_err(|err| anyhow!("Run records unavailable: {err}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| catalog.matches_run(run, filter))
-                .collect()
-        })
-}
-
-/// The filtered Run definition without a presentation cap. Compound activity
-/// surfaces include both starts and finishes inside their requested window,
-/// then cap only after joining Runs to their other durable facts.
-pub(crate) fn collect_run_activity_since(
-    filter: WorkFilter,
-    since: i64,
-    catalog: &WorkCatalog,
-) -> Result<Vec<RunSnapshot>> {
-    let mut runs =
-        collect_runs_started_since_at(&crate::store::observability_home_dir(), filter, 0, catalog)?;
-    runs.retain(|run| run.started >= since || run.ended.is_some_and(|end| end >= since));
+    )?;
+    runs.retain(|run| run.started >= since);
     Ok(runs)
+}
+
+/// Runs are rows: one query selects them, and each Run's usage and launch
+/// evidence are read from its own record.
+fn collect_runs_at(
+    lf_home: &Path,
+    database: &Path,
+    filter: WorkFilter,
+    parent: Option<&str>,
+    since: i64,
+) -> Result<Vec<RunSnapshot>> {
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(database)?;
+    let runs = store.runs(filter.wave, filter.project, filter.task, parent, since)?;
+    let runs = crate::run_record::run_snapshots(lf_home, runs)
+        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+    Ok(runs.into_iter().map(|(_, snapshot)| snapshot).collect())
 }
 
 /// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent harness
@@ -158,19 +111,23 @@ pub fn list(
     task: Option<&str>,
     parent: Option<&str>,
 ) -> Result<()> {
+    let home = crate::store::observability_home_dir();
+    let filter = WorkFilter {
+        wave,
+        project,
+        task,
+    };
+    // A Task's Runs and a Run's children list whole; other drills are recent.
     let runs = match (parent, task) {
         (Some(parent), _) => {
-            collect_child_runs_at(&crate::store::observability_home_dir(), parent)?
+            let (_, manifest) = crate::run_record::resolve_manifest(&home, parent)
+                .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+            let database = crate::store::observability_database_path()?;
+            let parent = manifest.run_id.to_string();
+            collect_runs_at(&home, &database, filter, Some(&parent), 0)?
         }
-        (None, Some(task)) => collect_task_runs(task)?,
-        (None, None) => {
-            let (runs, _truncated) = collect_runs(WorkFilter {
-                wave,
-                project,
-                task: None,
-            })?;
-            runs
-        }
+        (None, Some(_)) => collect_runs_started_since(filter, 0)?,
+        (None, None) => collect_runs(filter)?.0,
     };
 
     if json {
@@ -398,113 +355,7 @@ pub(crate) fn format_tokens(value: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_child_runs_at, collect_runs_started_since_at, format_tokens};
-    use crate::lf::commands::WorkFilter;
-    use crate::run_record::{
-        CaptureHandle, RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution,
-    };
-
-    #[test]
-    fn work_drill_reads_record_subjects_without_a_sql_ledger() {
-        let home = tempfile::tempdir().unwrap();
-        for task in ["LOO-265", "LOO-999"] {
-            let capture = CaptureHandle::begin_at(
-                home.path(),
-                RunSpec {
-                    harness: "codex".to_string(),
-                    model: None,
-                    surface: "headless".to_string(),
-                    cwd: home.path().to_path_buf(),
-                    repo: Some(home.path().to_path_buf()),
-                    worktree: Some(home.path().to_path_buf()),
-                    skill: Some("implement".to_string()),
-                    subjects: vec![SubjectAttribution::declared(format!("task:{task}"))],
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                },
-            )
-            .unwrap();
-            capture.finish("completed").unwrap();
-        }
-
-        let runs = collect_runs_started_since_at(
-            home.path(),
-            WorkFilter {
-                wave: None,
-                project: None,
-                task: Some("LOO-265"),
-            },
-            0,
-            &super::WorkCatalog::default(),
-        )
-        .unwrap();
-
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].subject("task"), Some("LOO-265"));
-    }
-
-    #[test]
-    fn child_drill_reads_the_exact_parent_without_time_or_count_caps() {
-        let home = tempfile::tempdir().unwrap();
-        let parent = CaptureHandle::begin_at(
-            home.path(),
-            RunSpec {
-                harness: "codex".to_string(),
-                model: None,
-                surface: "headless".to_string(),
-                cwd: home.path().to_path_buf(),
-                repo: Some(home.path().to_path_buf()),
-                worktree: Some(home.path().to_path_buf()),
-                skill: Some("review-chapter".to_string()),
-                subjects: Vec::new(),
-                flow: crate::run_record::RunFlowMembership::Independent,
-            },
-        )
-        .unwrap();
-        let parent_id = parent.run_id();
-        let mut expected = Vec::new();
-        for _ in 0..=super::MAX_RUNS {
-            let child = CaptureHandle::begin_replay_at(
-                home.path(),
-                RunSpec {
-                    harness: "codex".to_string(),
-                    model: None,
-                    surface: "headless".to_string(),
-                    cwd: home.path().to_path_buf(),
-                    repo: Some(home.path().to_path_buf()),
-                    worktree: Some(home.path().to_path_buf()),
-                    skill: Some("project/review-chapter".to_string()),
-                    subjects: Vec::new(),
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                },
-                RunLaunchRequest {
-                    system_prompt: "system".to_string(),
-                    task_prompt: "task".to_string(),
-                    agent: "codex".to_string(),
-                    account_id: None,
-                    max_turns: None,
-                    write_scope: crate::engine::AgentWriteScope::Configured,
-                    execution_boundary: None,
-                    skip_permissions: false,
-                    chrome: false,
-                },
-                parent_id.clone(),
-            )
-            .unwrap();
-            let manifest_path = child.artifact_dir().join("manifest.json");
-            let mut manifest: RunManifest =
-                serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
-            manifest.created_at -= time::Duration::days(super::WINDOW_DAYS + 1);
-            std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
-            expected.push(child.run_id().to_string());
-        }
-
-        let children = collect_child_runs_at(home.path(), parent_id.as_str()).unwrap();
-
-        let mut actual: Vec<_> = children.into_iter().map(|child| child.id).collect();
-        actual.sort();
-        expected.sort();
-        assert_eq!(actual, expected);
-    }
+    use super::format_tokens;
 
     #[test]
     fn tokens_keep_the_compact_human_format() {

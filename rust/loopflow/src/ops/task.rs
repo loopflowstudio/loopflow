@@ -5542,10 +5542,14 @@ mod tests {
 
         launch_task_process(&store, &mut task, None).await.unwrap();
 
-        // A parked human boundary prepares its Session Run without launching a
-        // provider; everything else about the position is untouched.
+        // A parked human boundary keeps its Session's reserved Run without
+        // launching a provider; everything else about the position is untouched.
         let stored = store.flow_position(&task.id).await.unwrap().unwrap();
-        assert!(stored.session_run_id.is_some());
+        let sessions = store.open_sessions().await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].1.task_id, Some(task.id.clone()));
+        assert!(!sessions[0].1.published);
+        assert_eq!(stored.session_run_id, None);
         assert_eq!(stored.invocation, position.invocation);
         assert_eq!(stored.cursor, position.cursor);
         assert_eq!(stored.ready_summary, position.ready_summary);

@@ -37,18 +37,3 @@ pub(crate) struct WorkFilter<'a> {
     pub project: Option<&'a str>,
     pub task: Option<&'a str>,
 }
-
-impl WorkFilter<'_> {
-    pub(crate) fn matches(
-        &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-    ) -> bool {
-        self.wave.is_none_or(|expected| wave == Some(expected))
-            && self
-                .project
-                .is_none_or(|expected| project == Some(expected))
-            && self.task.is_none_or(|expected| task == Some(expected))
-    }
-}

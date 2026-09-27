@@ -1461,6 +1461,7 @@ fn _begin_implicit_capture(
         skill: None,
         subjects: Vec::new(),
         flow: crate::run_record::RunFlowMembership::Independent,
+        work: None,
     };
     let capture = if process.auto {
         CaptureHandle::begin_with_launch(

@@ -450,3 +450,50 @@ files recorded no completion time.
 **A name in `session-name.json` replaces a generated title on a stored row and
 never a human one.** A generated title suggested after the import would be
 replaced by the file's if the import ran again.
+
+## Cut F: every Run is a row (2026-09-27)
+
+Executive choices, recorded in [the cut report](cutover/cut-f-runs.md).
+Jack has not reviewed any of them.
+
+**A Flow's step Run may name a Task while its invocation names none.** This
+reverses Cut E's choice that such a Run names the Task and no invocation. A
+Flow launched with `--task` owns an invocation with no Task, because a Task's
+one current invocation is its managed Flow. The draft
+`name_tasks_on_flow_step_runs` relaxes the trigger: an invocation that names a
+Task still refuses a different one. The stricter reading, Wave only, made
+`lf --task X flow …` stop listing under the Task and stop starting it.
+
+**A saved Flow's review Runs still carry the Wave and no Task.** Cut 3's choice
+stands, so a Flow's step Runs and its review Runs share the invocation and can
+differ in Task. Bind still refuses a review.
+
+**An imported Run of a Flow step names its Task and Wave and no invocation.**
+The constructor checks a Run's position against the invocation's cursor, and
+an old Flow's cursor has moved on. The manifest keeps the membership.
+
+**A Run that names no Work inherits its caller's Task and Wave.** The caller is
+the Run in `LF_RUN_ID`. A caller with no row gives nothing.
+
+**A Run the store could not take is never recorded later.** Same rule as Cut
+3's Sessions. Its record stays on disk and `lf runs <id>` still reads it.
+
+**Listings read the row's end.** `terminal.json` is still written first and is
+still what Flow recovery reads. A Run whose end write failed lists as
+unterminated.
+
+**`RunSnapshot.subjects` comes from the row.** The field keeps its shape. A
+bound or inherited Run now lists its Work, and the selectors are current names:
+a renamed Project lists under its new slug.
+
+**`lf runs --wave`, `--project`, `lf usage` and `lf activity` list only Runs
+with rows.** An older Home lists nothing there until `lf session import` runs.
+
+**A claimed worker still counts as started.** `task_started` and
+`chapter_task_evidence` dropped their Started-event clauses and kept
+`worker_generation>0`. The Started event is still written because Wave chat
+renders it.
+
+**A test that failed before this cut was rewritten.**
+`parked_human_boundary_reports_blockers_without_provider_preflight` failed at
+`7714e218d`. It now asserts the review's Session and unpublished Run.

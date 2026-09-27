@@ -809,6 +809,28 @@ fn launch_proceeds_when_the_store_cannot_be_written() {
     );
     let run_id = fixture.launches()[0].clone();
 
+    // A headless Run launches the same way, and settles, without its row.
+    let mut headless = fixture.command(&["-b", "--model", "opencode", ":", "Tidy the parser"]);
+    store.select(&mut headless);
+    let output = headless.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "bookkeeping refused the launch: {stderr}"
+    );
+    let warnings: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("warning:"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "one warning line: {stderr}");
+    assert!(
+        warnings[0].contains("Run is not recorded")
+            && warnings[0].contains("unable to open database file"),
+        "the warning names the store error: {stderr}"
+    );
+    let unrecorded = fixture.launches()[1].clone();
+    assert!(fixture.run_dir(&unrecorded).join("terminal.json").is_file());
+
     // Nothing waits beside the Run and nothing records the Session later.
     let rows = store.unlock();
     let mut list = fixture.command(&["session", "list", "--all", "--json"]);
@@ -1222,6 +1244,44 @@ fn import_stores_each_old_session_once_with_its_name() {
             },
         ))
         .unwrap();
+    // Old Runs outside any Session had no rows: a settled headless Run a
+    // conversation launched, and an earlier step of a Flow.
+    let settled = |flow: Value, subjects: Value, parent: Value| -> String {
+        let id = RunId::new().to_string();
+        let dir = fixture.run_dir(&id);
+        sources.borrow_mut().push(write(
+            dir.join("manifest.json"),
+            json!({
+                "schema_version": 1, "run_id": id, "parent_run_id": parent,
+                "created_at": "2026-09-20T20:00:00Z", "harness": "opencode", "model": "gpt",
+                "surface": "headless", "cwd": repo, "repo": repo, "worktree": repo,
+                "skill": "implement", "subjects": subjects, "flow": flow, "launch": null,
+                "context": null, "runtime_path": null, "runtime_digest": null,
+                "host": "fixture", "boot_id": null
+            }),
+        ));
+        sources.borrow_mut().push(write(
+            dir.join("terminal.json"),
+            json!({
+                "schema_version": 1, "outcome": "failed",
+                "ended_at": "2026-09-20T20:05:00Z", "result_ref": null
+            }),
+        ));
+        id
+    };
+    let headless = settled(
+        independent.clone(),
+        json!([{"selector": "wave:task-pr-tests", "source": "declared"}]),
+        json!(interactive),
+    );
+    let step = settled(
+        json!({
+            "kind": "step", "task_id": null, "boundary_key": "0", "invocation_id": invocation,
+            "flow": "design", "step": "implement", "node": "0", "iterations": [[]]
+        }),
+        json!([{"selector": "task:INF-124", "source": "inherited"}]),
+        Value::Null,
+    );
     let evidence: Vec<(PathBuf, Vec<u8>)> = sources
         .into_inner()
         .into_iter()
@@ -1261,6 +1321,7 @@ fn import_stores_each_old_session_once_with_its_name() {
             ("ask", 1),
             ("flow_review", 1),
             ("task_review", 1),
+            ("run", 2),
             ("unchanged", 0),
         ] {
             assert_eq!(report[kind], count, "{kind}: {report}");
@@ -1277,6 +1338,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         ("ask", 0),
         ("flow_review", 0),
         ("task_review", 0),
+        ("run", 0),
         ("unchanged", 4),
     ] {
         assert_eq!(again[kind], count, "{kind}: {again}");
@@ -1299,7 +1361,76 @@ fn import_stores_each_old_session_once_with_its_name() {
     };
     assert_eq!(names(), expected);
     assert_eq!(fixture.count("sessions"), 4);
-    assert_eq!(fixture.count("runs"), 4);
+    assert_eq!(fixture.count("runs"), 6);
+    // (session, invocation, caller, provider, outcome, ended) of an imported Run.
+    type Imported = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        i64,
+    );
+    let imported = |run: &str| -> Imported {
+        fixture
+            .db()
+            .query_row(
+                "SELECT session_id, invocation_id, caller_run_id, provider, outcome, ended_at
+                 FROM runs WHERE id=?1",
+                [run],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap_or_else(|error| panic!("Run {run} has no row: {error}"))
+    };
+    let ended = 1_789_934_700;
+    assert_eq!(
+        imported(&headless),
+        (
+            None,
+            None,
+            Some(interactive.clone()),
+            "opencode".to_string(),
+            "failed".to_string(),
+            ended
+        )
+    );
+    assert_eq!(
+        fixture.run_parents(&headless),
+        (
+            None,
+            Some(task.task.wave_id.to_string()),
+            Some("declared".to_string())
+        )
+    );
+    assert_eq!(imported(&step).1, None, "its invocation has moved on");
+    assert_eq!(
+        fixture.run_parents(&step),
+        (
+            Some(sibling.id.to_string()),
+            Some(sibling.wave_id.to_string()),
+            Some("inherited".to_string()),
+        )
+    );
+    let listed = fixture.json(&["runs", "--task", "INF-124", "--json"]);
+    let mut listed: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| run["id"].as_str().unwrap())
+        .collect();
+    listed.sort();
+    let mut expected_runs = vec![interactive.as_str(), step.as_str()];
+    expected_runs.sort();
+    assert_eq!(listed, expected_runs);
     assert_eq!(
         fixture.run_parents(&interactive),
         (
@@ -1328,4 +1459,218 @@ fn import_stores_each_old_session_once_with_its_name() {
         }
     }
     assert_eq!(names(), expected);
+}
+
+#[test]
+fn every_launch_is_one_row_and_every_reader_lists_it_once() {
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "task-binding",
+        &fixture.repo.head_sha(),
+    );
+    let (task_id, wave_id) = (task.task.id.to_string(), task.task.wave_id.to_string());
+    let lf = fixture.repo.path().join(".lf");
+    std::fs::create_dir_all(lf.join("skills")).unwrap();
+    std::fs::create_dir_all(lf.join("flows")).unwrap();
+    std::fs::write(lf.join("skills/work-proof.md"), "Do the fixture work.").unwrap();
+    std::fs::write(lf.join("skills/review-proof.md"), "Review the fixture.").unwrap();
+    std::fs::write(
+        lf.join("flows/work-then-review.yaml"),
+        "- work-proof\n- step:\n    id: review\n    name: review-proof\n    human: true\n",
+    )
+    .unwrap();
+    let launch = |command: &mut Command| -> String {
+        let before = fixture.launches().len();
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fixture.launches()[before].clone()
+    };
+    const HEADLESS: [&str; 5] = ["-b", "--model", "opencode", ":", "Tidy the parser"];
+    let headless = |work: &[&str]| fixture.command(&[work, &HEADLESS[..]].concat());
+    // (invocation, session, caller) of one Run.
+    let membership = |run: &str| -> (Option<String>, Option<String>, Option<String>) {
+        fixture
+            .db()
+            .query_row(
+                "SELECT invocation_id, session_id, caller_run_id FROM runs WHERE id=?1",
+                [run],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap_or_else(|error| panic!("Run {run} has no row: {error}"))
+    };
+    let declared = Some("declared".to_string());
+
+    // A headless Run that names only a Wave.
+    let of_wave = launch(&mut headless(&["--wave", "task-pr-tests"]));
+    assert_eq!(
+        fixture.run_parents(&of_wave),
+        (None, Some(wave_id.clone()), declared.clone())
+    );
+    assert_eq!(membership(&of_wave), (None, None, None));
+
+    // A headless Run that names a Task, and a child agent it launches. The
+    // child names no Work and takes its caller's.
+    let of_task = launch(&mut headless(&["--task", "INF-123"]));
+    assert_eq!(
+        fixture.run_parents(&of_task),
+        (
+            Some(task_id.clone()),
+            Some(wave_id.clone()),
+            declared.clone()
+        )
+    );
+    let child = launch(
+        headless(&[])
+            .env("LF_RUN_ID", &of_task)
+            .env("LF_RUN_DIR", fixture.run_dir(&of_task)),
+    );
+    assert_eq!(
+        fixture.run_parents(&child),
+        (
+            Some(task_id.clone()),
+            Some(wave_id.clone()),
+            Some("inherited".to_string())
+        )
+    );
+    assert_eq!(membership(&child), (None, None, Some(of_task.clone())));
+
+    // A saved Flow: its headless step, then the review it waits at. Both
+    // Runs name the Flow's invocation.
+    let before = fixture.launches().len();
+    let waiting = fixture.run(&[
+        "--wave",
+        "task-pr-tests",
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-review",
+        "-b",
+        "--no-loopflow",
+    ]);
+    assert!(
+        String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
+        "{waiting:?}"
+    );
+    let step = fixture.launches()[before].clone();
+    let (review, invocation): (String, String) = fixture
+        .db()
+        .query_row(
+            "SELECT r.id, r.invocation_id FROM sessions s
+             JOIN runs r ON r.id=s.current_run_id WHERE s.kind='flow_review'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(membership(&step), (Some(invocation.clone()), None, None));
+    assert_eq!(
+        fixture.run_parents(&step),
+        (None, Some(wave_id.clone()), declared.clone())
+    );
+    assert_eq!(fixture.run_parents(&review), fixture.run_parents(&step));
+    let positions: Vec<(String, i64, i64)> = fixture
+        .db()
+        .prepare("SELECT id, node, attempt FROM runs WHERE invocation_id=?1 ORDER BY node")
+        .unwrap()
+        .query_map([&invocation], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(positions.len(), 2, "{positions:?}");
+    assert_eq!((&positions[0].0, positions[0].2), (&step, 1));
+    assert_eq!((&positions[1].0, positions[1].2), (&review, 1));
+    assert_ne!(positions[0].1, positions[1].1, "each step is its own node");
+
+    // Every settled Run's state is its row.
+    for run in [&of_wave, &of_task, &child, &step] {
+        let (outcome, ended): (Option<String>, Option<i64>) = fixture
+            .db()
+            .query_row(
+                "SELECT outcome, ended_at FROM runs WHERE id=?1",
+                [run],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome.as_deref(), Some("completed"), "{run}");
+        assert!(ended.is_some());
+    }
+
+    // One row per launch, and every reader lists each Run once.
+    assert_eq!(fixture.count("runs"), 5);
+    let listed =
+        |args: &[&str]| -> Vec<Value> { serde_json::from_value(fixture.json(args)).unwrap() };
+    let ids = |runs: &[Value]| -> Vec<String> {
+        let mut ids: Vec<String> = runs
+            .iter()
+            .map(|run| run["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+    let sorted = |mut runs: Vec<String>| {
+        runs.sort();
+        runs
+    };
+    let all = sorted(vec![
+        of_wave.clone(),
+        of_task.clone(),
+        child.clone(),
+        step.clone(),
+        review.clone(),
+    ]);
+    let of_wave_runs = listed(&["runs", "--wave", "task-pr-tests", "--json"]);
+    assert_eq!(ids(&of_wave_runs), all);
+    for run in &of_wave_runs {
+        let subjects: Vec<&str> = run["subjects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|subject| subject["selector"].as_str().unwrap())
+            .collect();
+        assert!(subjects.contains(&"wave:task-pr-tests"), "{run}");
+        assert_eq!(
+            subjects.contains(&"task:INF-123"),
+            [&of_task, &child].contains(&&run["id"].as_str().unwrap().to_string()),
+            "{run}"
+        );
+    }
+    assert_eq!(ids(&listed(&["runs", "--json"])), all);
+    assert_eq!(
+        ids(&listed(&["usage", "--wave", "task-pr-tests", "--json"])),
+        all
+    );
+    let of_task_runs = sorted(vec![of_task.clone(), child.clone()]);
+    for args in [
+        &["runs", "--task", "INF-123", "--json"][..],
+        &["runs", "--project", "task-pr-tests", "--json"][..],
+        &["usage", "--task", "INF-123", "--json"][..],
+    ] {
+        assert_eq!(ids(&listed(args)), of_task_runs, "{args:?}");
+    }
+    let children = listed(&["runs", "--parent", &of_task, "--json"]);
+    assert_eq!(ids(&children), vec![child.clone()]);
+    assert_eq!(children[0]["parent_run_id"], of_task.as_str());
+
+    let activity = fixture.json(&["activity", "--wave", "task-pr-tests", "--json"]);
+    let started = sorted(
+        activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["fact"]["kind"] == "run_started")
+            .map(|item| item["fact"]["run_id"].as_str().unwrap().to_string())
+            .collect(),
+    );
+    assert_eq!(started, all);
+
+    let sessions = fixture.sessions();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["run_id"], review.as_str());
 }

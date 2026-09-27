@@ -652,22 +652,6 @@ async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
     };
     if let Some(task) = store.get_task_by_issue(&item.id).await.map_err(error)? {
         evidence = store.chapter_task_evidence(&task.id).await.map_err(error)?;
-        let home = crate::store::observability_home_dir();
-        #[cfg(test)]
-        let home = super::pm::PM_TEST_CONTEXT
-            .try_with(|context| context.path.with_extension("runs"))
-            .unwrap_or(home);
-        evidence.begun |=
-            crate::run_record::scan_runs_since(&home, task.created_at.unix_timestamp())
-                .map_err(error)?
-                .iter()
-                .any(|run| {
-                    run.subject("task").is_some_and(|subject| {
-                        subject == task.id.as_str()
-                            || subject == task.plan.id.as_str()
-                            || subject == task.plan.identifier
-                    })
-                });
         let prs = store.task_prs(&task.id).await.map_err(error)?;
         evidence.published = prs
             .iter()

@@ -27,6 +27,7 @@ mod metrics;
 mod pr_landings;
 mod provider_deliveries;
 mod runs;
+pub use runs::ListedRun;
 pub(crate) mod sessions;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second

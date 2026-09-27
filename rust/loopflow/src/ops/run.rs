@@ -664,7 +664,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_run_drill_includes_named_workers_and_opaque_helpers() {
+    async fn task_run_drill_selects_rows_by_any_name_of_the_task() {
         let (directory, store) = test_store().await;
         let wave = Wave::new(
             WaveId::new(),
@@ -675,75 +675,71 @@ mod tests {
         let mut project = project(&wave, "desktop", "project-desktop");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
-        // Historical Run labels remain unchanged when the Project is renamed.
+        // A Run names its Task by id, so a renamed Project keeps its Runs.
         project.plan.slug = "desktop-renamed".into();
         store.update_project(&project).await.unwrap();
-        let catalog = crate::lf::commands::work_catalog::WorkCatalog::load_at(
-            &directory.path().join("registry.db"),
-        )
-        .unwrap();
-        let home = tempfile::tempdir().unwrap();
-        for subject in [
-            format!("task:{}", task.plan.identifier),
-            format!("task:{}", task.id),
-            "task:LOO-999".into(),
-        ] {
-            let mut subjects = vec![crate::run_record::SubjectAttribution::declared(
-                subject.clone(),
-            )];
-            if subject == format!("task:{}", task.plan.identifier) {
-                subjects.extend(["wave:runtime", "project:desktop"].map(|selector| {
-                    crate::run_record::SubjectAttribution::declared(selector.into())
-                }));
-            }
-            let capture = crate::run_record::CaptureHandle::begin_at(
-                home.path(),
-                crate::run_record::RunSpec {
-                    harness: "codex".into(),
-                    model: None,
-                    surface: "headless".into(),
-                    cwd: directory.path().to_path_buf(),
-                    repo: None,
-                    worktree: None,
-                    skill: Some("implement".into()),
-                    subjects,
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                },
-            )
+        let run =
+            |task_id: Option<TaskId>, caller: Option<crate::durable::RunId>| crate::session::Run {
+                id: crate::durable::RunId::new(),
+                session_id: None,
+                invocation_id: None,
+                node: None,
+                iterations: None,
+                attempt: None,
+                work_source: task_id
+                    .as_ref()
+                    .map(|_| crate::session::WorkSource::Declared),
+                task_id,
+                wave_id: None,
+                created_at: 1,
+                published: true,
+                cwd: directory.path().to_path_buf(),
+                skill: Some("implement".into()),
+                provider: Some("codex".into()),
+                model: None,
+                caller_run_id: caller,
+                ended: None,
+            };
+        let worker = store
+            .create_run(run(Some(task.id.clone()), None))
+            .await
             .unwrap();
-            capture.finish("completed").unwrap();
-        }
+        // A helper names no Work and takes its caller's.
+        let helper = store
+            .create_run(run(None, Some(worker.id.clone())))
+            .await
+            .unwrap();
+        assert_eq!(helper.task_id, Some(task.id.clone()));
+        assert_eq!(
+            helper.work_source,
+            Some(crate::session::WorkSource::Inherited)
+        );
+        store.create_run(run(None, None)).await.unwrap();
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
             task.plan.id.as_str(),
         ] {
-            let runs = crate::lf::commands::runs::collect_runs_started_since_at(
-                home.path(),
-                crate::lf::commands::WorkFilter {
-                    task: Some(selector),
-                    project: Some(project.id.as_str()),
-                    wave: Some(wave.name()),
-                },
-                0,
-                &catalog,
-            )
-            .unwrap();
+            let runs = store
+                .runs(
+                    Some(wave.name()),
+                    Some(project.id.as_str()),
+                    Some(selector),
+                    None,
+                    0,
+                )
+                .await
+                .unwrap();
             assert_eq!(runs.len(), 2);
-            for run in &runs {
-                assert_eq!(
-                    catalog.resolve_run(run).unwrap().work,
-                    WorkRef::Task(task.id.clone())
-                );
-                assert!(!catalog.matches_run(
-                    run,
-                    crate::lf::commands::WorkFilter {
-                        project: Some("other"),
-                        ..Default::default()
-                    }
-                ));
+            for listed in &runs {
+                assert_eq!(listed.run.task_id, Some(task.id.clone()));
+                assert_eq!(listed.project.as_deref(), Some("desktop-renamed"));
             }
+            let other = store.runs(None, Some("other"), Some(selector), None, 0);
+            assert!(other.await.unwrap().is_empty());
         }
+        let children = store.runs(None, None, None, Some(worker.id.as_str()), 0);
+        assert_eq!(children.await.unwrap()[0].run.id, helper.id);
     }
 
     #[tokio::test]

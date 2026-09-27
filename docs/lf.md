@@ -136,7 +136,7 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `research` | Answer a codebase question or investigate a decision with sourced evidence |
 | `5whys` | Root cause analysis on a bug fix |
 | `implement` | Build from a design doc |
-| `compress` | Simplify touched code |
+| `compress` | Simplify code and surrounding implementation related to the diff |
 | `gate` | Ship-ready code and reviewer-friendly docs |
 | `unbreak` | Repair a reported failure and verify the original workflow |
 | `debug` | Investigate a code failure, fix its cause and verify it |
@@ -380,6 +380,7 @@ pbpaste | lf task create --run --wave incidents
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --flow incident
+lf -m claude task run DES-126    # retain this agent for every Flow step
 lf task status DES-123
 lf task advance DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
@@ -474,11 +475,18 @@ replaced invocations stay readable; completion clears the current invocation
 without completing Task Work or selecting another Flow.
 
 A Project normally selects `feature`: design review, then implement → compress
-→ review-slice → concept-review → loop-decide. Iterate returns to implement;
+→ review-slice → loop-decide. Iterate returns to implement;
 Advance reaches `demo human:true`. Completing demo supplies feedback to a
 second loop-decide, whose edge can also return to implement. `pursue` starts at
 implementation; `task-design` finishes after its design review. PR delivery
 and Task completion remain explicit operations.
+
+A Task retains `-m` supplied to `task run`, `start`, `resume`, or `restart`.
+The chosen agent overrides every step's frontmatter. With no Task choice, the
+step's agent/default_agent applies, then checkout configuration. Omitting `-m`
+keeps the saved choice; `task status` shows the saved choice (`null` in JSON means default). A live Run keeps
+its captured agent; changing it immediately uses interrupt then resume with `-m`.
+
 
 ### Flow decisions and recovery
 
@@ -495,8 +503,9 @@ do not repeat when that edge is taken. Advance enters the remaining steps;
 Iterate traverses the declared section again. A slice is a unit of work within
 a pass. Task binding adds context and Task authority.
 
-The dedicated `loop-decide` step compares the previous direction with the pass's
-evidence after both reviews. Its exact Run records one navigation decision:
+`loop-decide` compares the caller's objective and previous direction with the
+available evidence and feedback. It works with any Flow; its exact Run records
+one navigation decision:
 
 ```sh
 lf flow decide advance "Evidence that this boundary's obligations are satisfied"
@@ -504,7 +513,15 @@ lf flow decide iterate "Remaining work, next action, and the proof to collect"
 lf flow blocked "What stalled, what was tried, and what needs human judgment"
 ```
 
-The reviews supply evidence; concept-review does not own navigation. Blocked is
+Implement moves a real consumer end to end and deletes the replaced path.
+Compress simplifies anything related to the diff; it leaves a
+diff, not another review document. Review-slice records executed proof, measured
+non-test additions/deletions, and remaining gaps in one short pass record.
+Review-slice reports a convergence blocker after two consecutive implementation
+passes replace nothing, or when a required proof cannot run. Loop-decide judges
+that finding against the supplied criteria and records Blocked with its reason.
+
+Compress edits code; review-slice supplies one review record per pass. Concept-review is interactive, on request or inside unblock, and does not own navigation. Blocked is
 a stopped execution outcome, separate from Advance/Iterate. Meaningful learning
 counts as progress; repeating a failure without new evidence calls for help.
 
@@ -513,8 +530,24 @@ duplicate calls join it and retries recover its saved completion. Its Session
 runs `unblock`, using concept-review with the human by default or addressing a
 specific missing input. Human Complete returns the summary and shared artifact
 changes to loop-decide for reassessment. It supplies evidence, not a navigation decision.
-If the blocker remains unresolved, report it instead of opening identical Asks.
-Invalid or missing decisions remain visible blockers.
+While a live Task decision waits, CLI status and the desktop show Blocked with
+its Run and unblock Session. Complete that Session to return feedback to the
+same caller; no Task resume is needed. Completed or earlier-boundary Asks do
+not keep that caller Blocked. If the blocker remains unresolved, report it
+instead of opening identical Asks.
+An alive Task body shows Stalled after five minutes without a Run event or
+sampled CPU progress in the body and its tool descendants. The Task worker
+samples every 15 seconds; missing samples, a changed body identity, and
+observations older than 45 seconds stay Unknown. Status names the Run and the
+same recovery in CLI and desktop: interrupt the Task, then resume it. A live
+unblock Session still shows Blocked. Observation never authorizes termination.
+
+If a Task decision Run exits without a valid verdict, its saved Flow becomes
+Blocked, retains that Run and failure reason, and opens the same keyed unblock
+Session. CLI status and the desktop use that shared projection. After completing
+the Session, run `lf task resume TASK`; its feedback seeds reassessment at the
+failed decision, without choosing Advance or Iterate. Retrying Session launch
+reuses its record, including after a launcher failure.
 A candidate decision takes effect only after its Run succeeds. Inspect any
 operation's effects before choosing `--retry`, since an interrupted operation
 may already have changed external state.

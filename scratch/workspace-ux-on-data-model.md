@@ -477,26 +477,45 @@ justified for this scratch-only design.
 
 ## This slice
 
-Repair return detail across folded composition boundaries, then finish dispatched
-recursive keyboard disclosure. Node descriptions read the complete original graph;
-layout and return endpoints keep using the folded projection. Prove both distinct
-returns across folded/expanded/folded states at the root and inside an XOR path,
-and preserve captured invocation detail and traversal counts.
+Assess the actual available LOO-298 source and fixtures against the parent
+contract checklist before integrating dependent UI. The completed folded-return
+and recursive keyboard repair remains covered by its existing proof; do not
+repeat it. Preserve the supplied concept review before editing.
 
-Use one focusable disclosure button on each recursive group, including empty
-groups and XOR alternatives. Dispatched Tab/Shift-Tab must reach the appropriate
-label; Right/Left expand/collapse, Space/Return toggle. Inspection invokes no Flow
-control. Hidden retained terminals must be ineligible for keyboard focus; both
-surfaces and the exact draft/child reply survive returning to the Session.
+The [parent assessment](workspace-parent-contracts.md) records the result:
+published `ca1be1116` already has ordered Task-attempt storage; local
+`d814eb617` additionally owns interactive Sessions in SQLite. Uncommitted Ask
+conversion is visible but is not a tested integration revision. All-kind Session
+ownership, bind confirmation/selected-Run fencing, final Started consumers,
+public position history and retained invocation/child projection remain missing.
+The existing exact historical Task lookup is child-owned and must survive
+integration. No new product decision is required.
 
-The [focused receipt](workspace-return-proof.md) owns observations, failures and
-executed evidence. Prior navigation/template receipts keep their original scope.
-The complete eight Done When obligations remain authoritative, including installed
-links, configured provider/draft proof, captures and Jack's verdict. Room/bind and
-attempt work still require the explicit LOO-298 contract checklist. No publication
-or Flow navigation decision is selected here.
+Do not implement a room or attempt UI on those incomplete contracts. When the
+parent conversion is available, reassess the named source and fixtures, integrate
+through `lf rebase`, then extend the shared attempt projection if needed. Prove
+failed A then current B at one position with independent Task Run C active:
+node detail, running line and Session chip identify B as attempt 2, while
+selection of A remains exact. Never infer ordinals in Swift or recreate parent
+storage. The complete eight Done When obligations and configured acceptance
+remain authoritative; this assessment selects no publication or Flow edge.
 
 ## Slice ledger
+
+- 2026-09-27 parent integration assessment: preserved the supplied concept review
+  at `33d582f97`. Shared `lf status infrastructure --json` now records parent
+  PR #1296 on LOO-298; fresh remote-head inspection confirms `ca1be1116`, while
+  the available local parent commit is `d814eb617`. `lf rebase --plan` selects
+  the correct parent tracking branch. No rebase applied because the complete
+  owner/consumer contracts remain absent, including Bind and public attempts.
+- Inspected the newer parent source, its five unchanged public fixture blobs,
+  prior proof receipts and a hashed bounded snapshot of unfinished Ask edits.
+  The [contract matrix](workspace-parent-contracts.md) distinguishes present
+  attempt storage/interactive ownership from missing all-kind conversion,
+  exact bind, Started consumers, retained/child history and public projection.
+  No product code or test bytes changed; no new behavioral pass, installation,
+  publication or Task disposition is claimed. Resume from a new parent contract
+  receipt, not another pass over the completed return/keyboard repair.
 
 - 2026-09-27 folded-return and keyboard repair: preserved the inherited draft at
   `502ba4601`, then reproduced root and XOR hidden-target labels in a mounted

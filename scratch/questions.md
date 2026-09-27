@@ -5,6 +5,18 @@ This inherited LOO-298 agenda remains evidence, not this Task's implementation p
 Its later `data-model-slice-review.md` reference was not copied into this checkout;
 those review claims retain their original limits and have not been revalidated here.
 
+## LOO-303 parent dependency assessment (2026-09-27)
+
+The [source/fixture receipt](workspace-parent-contracts.md) replaces the earlier
+local-only readiness assumption. Published LOO-298 `ca1be1116` has attempt
+storage; local `d814eb617` adds interactive Session rows. The Task now records
+PR #1296 correctly. Neither revision provides the complete all-kind Session,
+Bind, Started-consumer and public attempt/history contracts. Uncommitted Ask
+conversion is ongoing source evidence, not an integration revision. Keep this
+Task's parent-dependent slices pending that conversion; no duplicate storage or
+Swift attempt inference. No new user decision or repeated keyboard repair is
+needed. This is an implementation dependency, not a claim about parent liveness.
+
 ## LOO-303 recursive keyboard counterexample (2026-09-27)
 
 Dispatched Tab from Task details reached a hidden `GhosttyMetalView`: its

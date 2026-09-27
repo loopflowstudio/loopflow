@@ -70,6 +70,31 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        SessionCommand::Import { dry_run, json } => {
+            let store = open_shared_store().await?;
+            let report = crate::ops::session_import::import(&store, *dry_run).await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                return Ok(());
+            }
+            println!(
+                "{} {} interactive, {} Ask, {} Flow review and {} Task review Sessions; {} already stored.",
+                if *dry_run { "Would store" } else { "Stored" },
+                report.interactive,
+                report.ask,
+                report.flow_review,
+                report.task_review,
+                report.unchanged
+            );
+            for failure in &report.failed {
+                println!(
+                    "Not imported: {} — {}",
+                    failure.path.display(),
+                    failure.reason
+                );
+            }
+            Ok(())
+        }
         SessionCommand::Ready { summary } => {
             let text = required_text(summary, "ready summary")?;
             let store = open_shared_store().await?;

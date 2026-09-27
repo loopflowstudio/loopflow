@@ -215,8 +215,9 @@ impl SqliteStore {
             )?;
         }
         tx.execute(
-            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at)
-            VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at,
+                ready_summary,completed_at)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
                 session.id,
                 run.id.as_str(),
@@ -228,7 +229,9 @@ impl SqliteStore {
                 session.title,
                 title_source(session.title_source),
                 session.request,
-                session.created_at
+                session.created_at,
+                session.ready_summary,
+                session.completed_at
             ],
         )?;
         let run = super::runs::insert_run_in(&tx, run)?;
@@ -269,6 +272,21 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(run)
+    }
+
+    /// A review Run stored before providers were: take it from launch evidence.
+    pub fn fill_run_provider(
+        &self,
+        run: &RunId,
+        provider: &str,
+        model: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE runs SET provider=?2, model=?3 WHERE id=?1 AND provider IS NULL",
+            params![run.as_str(), provider, model],
+        )?;
+        Ok(())
     }
 
     /// Assign a Task to the Session's Runs. Closed Sessions bind too.

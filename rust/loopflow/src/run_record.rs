@@ -508,7 +508,7 @@ pub fn scan_runs_since(lf_home: &Path, since: i64) -> std::io::Result<Vec<RunSna
     Ok(runs)
 }
 
-fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
+pub(crate) fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
     let root = lf_home.join("runs");
     let prefixes = match fs::read_dir(&root) {
         Ok(entries) => entries,

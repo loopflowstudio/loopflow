@@ -479,24 +479,69 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-After the completed documentation review, remove Task execution's redundant
-Flow name, step name, node ID and human-policy SQL columns. Resolve all four
-through the captured invocation and cursor; Session review discovery uses the
-same decoder as exact Task reads. Keep claim/version fencing, readiness, failure
-and captured bytes unchanged. Add a forward draft and populated preservation
-proof, plus nested review discovery and existing worker settlement proofs.
+Retain Task invocation identity and history before moving the other execution
+owners. Replace `task_flow_positions` with invocation-keyed `flow_invocations`;
+one partial unique index selects each Task's current invocation. Completion
+and restart close that row instead of deleting capture, cursor, claim and review
+evidence. All Task writers select only the current row; stale Session writes
+must also match invocation identity when a replacement reuses version numbers.
+Chapter retirement reads historical execution evidence, while current claims
+exclude finished invocations. Keep the existing Task projection API for this
+internal cut; taskless file persistence and the Session union still await the
+coherent cutover and must not ship as competing owners.
 
-Root `step_index` / `iteration` still reconstruct pre-cursor historical review
-records. Their removal requires the explicit cursor conversion; this slice does
-not discard that evidence or introduce a second invocation owner. Full
-Invocation/Run/Session cutover, repository Chapter rotation and configured Home
-migration remain required before publication. No real Home is changed here.
-
-Focused proof: populated forward migration; nested human-step discovery and
-transition back to autonomous work; existing nested cursor and exact worker
-settlement checks. Formatting, Clippy and migration checks accompany the diff.
+Forward migration preserves all existing columns byte-for-byte and rejects
+ambiguous invocation IDs or dangling Task ownership rather than guessing.
+Focused proof covers populated conversion, autonomous and human completion,
+restart with reused versions, stale writes, retained feedback and retirement.
+Behavioral execution and materialized proof remain conditional on TESTING.md's
+resource preflight. No installed Home is changed by this slice.
 
 ## Slice ledger
+
+- 2026-09-26 invocation-retention checks: final `cargo fmt --all --check`,
+  `cargo clippy --all-targets -- -D warnings`, migration validation (two ordered
+  drafts, 52 shipped files unchanged), and working-diff whitespace pass. Clippy
+  compiles test targets but does not execute them. Architecture coverage is now
+  30/31 SQLite owners, with only `wave_chapters` missing; its other seven
+  inventories pass. Whole-branch whitespace still reports the older draft's
+  blank dependency header and copied patch context, unchanged in this cut.
+  The full-design Done When remains unsatisfied; there is no behavioral gate.
+
+- 2026-09-26 invocation retention: replaced Task's singleton position table with
+  `flow_invocations`, keyed by captured invocation identity. A partial unique
+  index selects one current Task invocation; completion, restart and authorized
+  reopen retain the previous row with its ending state/time. All Task writers
+  and readers now use that table; no compatibility view or duplicate write was
+  introduced. Nullable Task is supported by the schema, but ordinary/taskless
+  Flow execution still uses its existing file path and has not been converted.
+- 2026-09-26 preservation review: retained capture, cursor, feedback, pending Run,
+  claim and failure bytes on close. Current claim reads exclude closed rows;
+  chapter retirement still sees their historical execution. Added invocation-ID
+  comparison to unclaimed Session writes so version reuse cannot let an older
+  review overwrite a replacement. The old test that changed an invocation ID
+  in place now uses explicit restart and a fresh version, preserving its stale
+  completion counterexample. No current SQL writer addresses the retired table.
+- 2026-09-26 new focused proofs authored: populated forward migration compares
+  all retained bytes, exercises rollback for duplicate invocation IDs and missing
+  Task parents, and retains the first-start trigger. Store proofs retain human
+  feedback and final worker claims, reject duplicate completion/root identity and
+  stale writes after restart, and keep started Tasks out of backlog retirement.
+  The fixture applies its draft dependency explicitly before canonicalization;
+  it resolves both drafts by marker after materialization.
+- 2026-09-26 resource observation: preflight and safe recovery both fail at
+  `main-view-task` 15.3 GiB / 12 GiB, with 98.9 GiB free. No foreign build was
+  removed. Product tests, including the earlier two owed commands and the new
+  preservation proofs, remain unexecuted. No Home inventory/import, installed
+  promotion, provider launch, desktop proof or publication was attempted.
+- This is an internal invocation-lifetime cut, not completion of design slices
+  2–4. Session/Run tables and transactions, taskless persistence, shared driver,
+  bind/rename, DTO/Swift consumers, Chapter conversion, offline Home import and
+  deletion research remain. In particular, current Session discovery still
+  decodes unrelated current Task invocations, and replacing a conversational Run
+  still needs the stable Session transaction; retaining completed invocation
+  feedback does not solve either counterexample.
+
 
 - 2026-09-26 implementation: checkpointed reviewed documentation with `lf commit`.
   Selected removal of the four derived Task step columns as the first storage

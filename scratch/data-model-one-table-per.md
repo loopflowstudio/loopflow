@@ -2,15 +2,79 @@
 
 LOO-298 · Infrastructure · 2026-09-26
 
-Status: reviewed specification with partial storage implementation. Resource
-pressure cleared on 2026-09-26; all owed slice proofs have executed. The
-latest [slice review](data-model-slice-review.md) owns actual results.
-The current participant (name unresolved) approved proceeding with taskless
-Invocations, Session owning Runs plus a current Run, and Flow / Invocation
-naming. This supersedes the earlier Session-as-Run-child and Task-required
-Invocation model. The implemented cut removes four derived Task SQL columns;
-the full owner cutover and real-Home migration remain outstanding. See
-[review feedback](data-model-review-feedback.md) for approval scope and assumptions.
+Status on 2026-09-27: Sessions, Runs and Flow invocations are rows and their
+readers are single queries. The work is not finished. Several facts still have
+two implementations, listed under [One implementation](#one-implementation).
+Jack directed on 2026-09-27 that this design aim for the simplest possible
+system with no redundant implementation, starting with the taskless Flow
+cursor. Repository Chapters and Project-owned Flows are not built.
+The cut reports under [cutover/](cutover/) own actual results.
+
+## One implementation
+
+The goal is the smallest system that serves the product, not a second system
+beside the first. Three rules decide every remaining choice.
+
+1. **One owner per fact.** A fact is a column on its object's row. A copy
+   exists only with a validator, and a copy with no reader is deleted.
+2. **One code path per operation.** Optional parents are nullable columns, not
+   a second adapter. A Flow with a Task and a Flow without one run the same
+   driver, the same fence and the same recovery.
+3. **Adding a table is not progress until the old owner is deleted.** A cut
+   that leaves both is unfinished, and its report says so in its first line.
+
+A design that answers "where does X live" with "it depends on whether there is
+a Task", or on the Session kind, or on which command launched it, is the defect
+this Task exists to remove.
+
+### Redundant pairs still in the code
+
+Each row is one fact or operation with two implementations today. The right
+column is the single one that survives.
+
+| Fact or operation | Implementation A | Implementation B | Survivor |
+| --- | --- | --- | --- |
+| Flow cursor | Invocation row, for Task Flows | `flows/<id>/position.json`, for taskless Flows | Invocation row. In progress as Cut H |
+| Stale-writer fence on a Flow step | Position version | `StepToken` in the file | Position version |
+| Flow launch facts | Task and captured Flow columns | Fields of the JSON file | Columns on `flow_invocations` |
+| Run reserved but not launched | `runs.published` for Task reviews | `prepared` marker file, claimed by rename, for Asks and Flow reviews | One column with a compare-and-set |
+| Run outcome | `runs.outcome`, `runs.ended_at` | `terminal.json`, read by Flow and Task decision recovery | The row. The file stays as evidence only |
+| Run parentage | `runs.invocation_id`, `task_id`, `wave_id` | Selector strings written into every manifest and `ActiveRun.subjects` | The columns. Removing the strings is a DTO and Swift change |
+| Run lookup by id prefix | Query on `runs.id` | `resolve_manifest` listing `runs/` | The query |
+| Work filter for activity | SQL filter, used by Runs | `WorkCatalog`, used by PR, Steer and creation entries | SQL filter |
+| Task started | `tasks.started_at` | Started event written by a trigger | The column. The event stays only as chat history |
+| Session title source | `session::TitleSource` | `SessionTitleSource` DTO with an unused `Unavailable` case | One enum |
+| Flow position table | `flow_invocations` | `task_flow_positions`, dropped by a draft but kept alive by a migration test | `flow_invocations` |
+
+### What is allowed to stay outside a row, and why
+
+- **Kernel locks.** `human-sessions/*.lock` and a Flow's driver lock exclude
+  two live launchers. A row cannot hold a kernel lock. They carry no fact: the
+  directory may be deleted at rest with nothing lost. If a row fence can replace
+  the driver lock, it goes too.
+- **Run evidence.** Events, transcript, cost and the launch request stay in the
+  Run directory. They are payload, never identity, parentage or state.
+- **The import module.** `ops/session_import.rs` is the only code that knows an
+  old file shape. It is deleted once every Home has been imported. It is a
+  scheduled deletion, not a permanent part of the system.
+
+### One rule for an unwritable store
+
+There is one behavior, chosen by what the operation needs from the row.
+
+- A launch that needs nothing back proceeds, warns once, and is unrecorded.
+  Nothing replays it later. No sidecar.
+- An operation whose result returns through the row refuses. That is an Ask,
+  and a Flow, which cannot advance without its cursor.
+
+### How a cut is judged
+
+- It deletes the old owner in the same commit that moves the fact.
+- Net production lines go down, or the report explains in one sentence what
+  new capability the added lines buy.
+- It adds no trait, adapter or helper module to bridge old and new.
+- Its acceptance test asserts the old artifact is absent, not only that the
+  new one is present.
 
 ## Problem
 
@@ -473,6 +537,9 @@ Do not claim a full CI, deployed recovery or UI acceptance result from this spec
   effects, a fixture as live proof, or renamed docs as implemented behavior.
 - Requiring a Task to execute or recover a Flow, inventing a synthetic Task,
   or retaining a separate file-backed path for taskless invocations.
+- Keeping two implementations of one fact or operation, selected by Task
+  presence, Session kind or launching command. See [One implementation](#one-implementation).
+- Calling a cut done while the owner it replaced still has a reader or writer.
 
 ## Internal slices
 

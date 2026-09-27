@@ -283,3 +283,21 @@ publication race, not loss of a table in the new draft. The concurrent failing
 log is retained; the sequential passes do not repair or disprove it. The complete
 reader/cutover work must account for a newly visible but uninitialized store.
 Do not add a missing-table-as-empty fallback that could conceal failed migration.
+
+## Session cutover required next (2026-09-26)
+
+Jack Heart's comment `50cf5b12-8a17-4390-a6a1-be69a50cbb7f` requires the next
+implement pass to switch one complete reader and delete its old authority.
+The selected path is Session list/lookup, including Ask, interactive and taskless
+Flow recording/import in that same pass. Remove four-source concatenation, old
+ID dispatch, derived Session ancestry, name sidecars and title copying together.
+Measure non-test additions/removals against the merge-base and report
+`human_session.rs`'s non-test line count; above 2,351 is not a cutover. A lower
+count still needs reachable-path deletion proof. This is an explicit direction,
+not an open product question or authorization for unverified real-Home activation.
+
+The attempt-history review reproduced and repaired a cursor-decoder disagreement
+that broke historical review replacement. Its 49 source-suite passes have the
+boundaries recorded in [the review](data-model-slice-review.md). That bounded
+repair does not satisfy the requested Session cutover. The review names exact
+remaining dependencies; another owner-only foundation is not the next action.

@@ -892,19 +892,41 @@ fn interactive_run(built: &PromptBuild, spec: &crate::run_record::RunSpec) -> cr
         skill: spec.skill.clone(),
         provider: Some(spec.harness.clone()),
         model: spec.model.clone(),
+        caller_run_id: None,
     }
 }
 
 /// An interactive launch is a conversation: its Session and first Run are
-/// stored together before the provider starts.
+/// stored together before the provider starts. Bookkeeping never refuses the
+/// launch: a store that cannot take the rows leaves them beside the Run.
 fn reserve_interactive_session(run: crate::session::Run) -> crate::store::StoreResult<()> {
-    let path = crate::store::database_path_from_env()
-        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-    let title = run
-        .skill
-        .clone()
-        .unwrap_or_else(|| crate::engine::naming::word_pair(run.id.as_str()));
-    crate::store::sqlite::SqliteStore::new(&path)?.create_interactive_session(&title, run)?;
+    let session = crate::session::Session {
+        id: run.session_id.clone().unwrap_or_default(),
+        current_run_id: run.id.clone(),
+        kind: crate::session::SessionKind::Interactive,
+        title: run
+            .skill
+            .clone()
+            .unwrap_or_else(|| crate::engine::naming::word_pair(run.id.as_str())),
+        title_source: crate::session::TitleSource::Generated,
+        request: None,
+        ready_summary: None,
+        completed_at: None,
+        created_at: run.created_at,
+    };
+    let stored = crate::store::database_path_from_env()
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+        .and_then(|path| crate::store::sqlite::SqliteStore::new(&path))
+        .and_then(|store| store.create_session(session.clone(), run.clone()));
+    if let Err(error) = stored {
+        let deferred =
+            crate::ops::unrecorded_session::defer(&crate::ops::unrecorded_session::Reservation {
+                session,
+                run,
+            });
+        tracing::warn!(%error, ?deferred,
+            "Session is not stored yet; it will not list until it is");
+    }
     Ok(())
 }
 

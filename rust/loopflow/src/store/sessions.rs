@@ -38,19 +38,35 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session_for_run(&run_id)).await
     }
 
-    pub async fn open_interactive_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
-        run_sqlite(&self.sqlite, |store| store.open_interactive_sessions()).await
+    pub async fn run(&self, id: &RunId) -> StoreResult<Option<Run>> {
+        let id = id.clone();
+        run_sqlite(&self.sqlite, move |store| store.run(&id)).await
     }
 
-    pub async fn complete_interactive_session(
-        &self,
-        id: &str,
-        expected_run: &RunId,
-    ) -> StoreResult<()> {
+    pub async fn create_session(&self, session: Session, run: Run) -> StoreResult<(Session, Run)> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.create_session(session, run)
+        })
+        .await
+    }
+
+    pub async fn replace_session_run(&self, expected_run: &RunId, run: Run) -> StoreResult<Run> {
+        let expected_run = expected_run.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.replace_session_run(&expected_run, run)
+        })
+        .await
+    }
+
+    pub async fn open_conversations(&self) -> StoreResult<Vec<(Session, Run)>> {
+        run_sqlite(&self.sqlite, |store| store.open_conversations()).await
+    }
+
+    pub async fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
         let id = id.to_string();
         let expected_run = expected_run.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_interactive_session(&id, &expected_run)
+            store.complete_session(&id, &expected_run)
         })
         .await
     }

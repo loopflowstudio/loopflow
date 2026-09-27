@@ -9,7 +9,7 @@ use crate::store::{StoreError, StoreResult};
 
 /// Column order read by `read_run`.
 pub(super) const RUN_COLUMNS: &str = "id,session_id,invocation_id,task_id,wave_id,work_source,
-    created_at,published,cwd,skill,node,iterations,attempt,provider,model";
+    created_at,published,cwd,skill,node,iterations,attempt,provider,model,caller_run_id";
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -34,6 +34,7 @@ pub(super) fn read_run(
     let attempt = row.get(offset + 12)?;
     let provider = row.get(offset + 13)?;
     let model = row.get(offset + 14)?;
+    let caller: Option<String> = row.get(offset + 15)?;
     Ok((|| {
         Ok(Run {
             id: RunId::parse(&id).map_err(invalid)?,
@@ -68,6 +69,10 @@ pub(super) fn read_run(
             skill,
             provider,
             model,
+            caller_run_id: caller
+                .map(|id| RunId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
         })
     })())
 }
@@ -149,7 +154,7 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
     conn.execute(
         &format!(
             "INSERT INTO runs({RUN_COLUMNS})
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"
         ),
         params![
             run.id.as_str(),
@@ -166,7 +171,8 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
             iterations,
             run.attempt,
             run.provider,
-            run.model
+            run.model,
+            run.caller_run_id.as_ref().map(RunId::as_str)
         ],
     )?;
     Ok(run)
@@ -231,6 +237,17 @@ pub(super) fn require_attempt_in(
 }
 
 impl super::SqliteStore {
+    pub fn run(&self, id: &RunId) -> StoreResult<Option<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!("SELECT {RUN_COLUMNS} FROM runs WHERE id=?1"),
+            [id.as_str()],
+            |row| read_run(row, 0),
+        )
+        .optional()?
+        .transpose()
+    }
+
     pub fn position_runs(
         &self,
         invocation: &str,

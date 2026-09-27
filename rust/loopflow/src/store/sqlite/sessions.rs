@@ -9,10 +9,10 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_source,
-    s.ready_summary, s.completed_at, s.created_at, s.kind,
+    s.ready_summary, s.completed_at, s.created_at, s.kind, s.request,
     r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
     r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt,
-    r.provider, r.model
+    r.provider, r.model, r.caller_run_id
     FROM sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Session, Run)>> {
@@ -24,7 +24,8 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
     let completed_at = row.get(5)?;
     let created_at = row.get(6)?;
     let kind: String = row.get(7)?;
-    let run = super::runs::read_run(row, 8)?;
+    let request = row.get(8)?;
+    let run = super::runs::read_run(row, 9)?;
     Ok((|| {
         let run_id = RunId::parse(&run_id).map_err(invalid)?;
         Ok((
@@ -43,6 +44,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
                     "generated" => TitleSource::Generated,
                     _ => return Err(invalid("unknown Session title provenance")),
                 },
+                request,
                 ready_summary,
                 completed_at,
                 created_at,
@@ -54,6 +56,13 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
+}
+
+fn title_source(source: TitleSource) -> &'static str {
+    match source {
+        TitleSource::Human => "human",
+        TitleSource::Generated => "generated",
+    }
 }
 
 pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<(Session, Run)>> {
@@ -156,29 +165,71 @@ impl SqliteStore {
         .transpose()
     }
 
-    /// Reserve an interactive conversation and its first Run together.
-    pub fn create_interactive_session(&self, title: &str, run: Run) -> StoreResult<(Session, Run)> {
-        let id = run
-            .session_id
-            .clone()
-            .ok_or_else(|| invalid("an interactive Run belongs to its Session"))?;
+    /// Reserve a conversation and its first Run together. A keyed Ask names
+    /// its Session by its key, so reserving it again returns the first one.
+    pub fn create_session(&self, session: Session, run: Run) -> StoreResult<(Session, Run)> {
+        if run.session_id.as_deref() != Some(session.id.as_str())
+            || run.id != session.current_run_id
+        {
+            return Err(invalid("a Session's first Run is its current Run"));
+        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) = session_in(&tx, &session.id)? {
+            return Ok(existing);
+        }
         tx.execute(
-            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,created_at)
-            VALUES(?1,?2,'interactive',?3,'generated',?4)",
-            params![id, run.id.as_str(), title, run.created_at],
+            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at)
+            VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                session.id,
+                run.id.as_str(),
+                match session.kind {
+                    SessionKind::Interactive => "interactive",
+                    SessionKind::Ask => "ask",
+                    SessionKind::FlowReview =>
+                        return Err(invalid("a review is reserved by its invocation")),
+                },
+                session.title,
+                title_source(session.title_source),
+                session.request,
+                session.created_at
+            ],
         )?;
         super::runs::insert_run_in(&tx, run)?;
-        let created = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
+        let created = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(created)
     }
 
-    pub fn open_interactive_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
+    /// Append an attempt to a conversation. Title and feedback stay on the Session.
+    pub fn replace_session_run(&self, expected_run: &RunId, run: Run) -> StoreResult<Run> {
+        let id = run
+            .session_id
+            .clone()
+            .ok_or_else(|| invalid("a replacement Run belongs to its Session"))?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = super::runs::insert_run_in(&tx, run)?;
+        if tx.execute(
+            "UPDATE sessions SET current_run_id=?3 WHERE id=?1 AND current_run_id=?2
+             AND kind!='flow_review' AND completed_at IS NULL",
+            params![id, expected_run.as_str(), run.id.as_str()],
+        )? != 1
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Session changed before its Run was replaced".into(),
+            ));
+        }
+        tx.commit()?;
+        Ok(run)
+    }
+
+    /// Open interactive and Ask Sessions. Reviews list through their invocation.
+    pub fn open_conversations(&self) -> StoreResult<Vec<(Session, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND s.kind='interactive'
+            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND s.kind IN ('interactive','ask')
              ORDER BY s.created_at, s.id"
         ))?;
         let rows = query.query_map([], read_session)?;
@@ -186,11 +237,13 @@ impl SqliteStore {
     }
 
     /// Completion closes the conversation; its Runs and provider history remain.
-    pub fn complete_interactive_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
+    /// An Ask closes only with the answer its caller is waiting for.
+    pub fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
             "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
-             AND kind='interactive' AND completed_at IS NULL",
+             AND completed_at IS NULL
+             AND (kind='interactive' OR (kind='ask' AND ready_summary IS NOT NULL))",
             params![id, expected_run.as_str(), crate::store::rows::now_unix()],
         )? != 1
         {
@@ -240,14 +293,10 @@ impl SqliteStore {
                 "Session changed before rename".into(),
             ));
         }
-        let source = match source {
-            TitleSource::Human => "human",
-            TitleSource::Generated => "generated",
-        };
         tx.execute(
             "UPDATE sessions SET title=?2, title_source=?3
              WHERE id=?1 AND (title_source='generated' OR ?3='human')",
-            params![id, title.trim(), source],
+            params![id, title.trim(), title_source(source)],
         )?;
         tx.commit()?;
         Ok(())
@@ -261,16 +310,14 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
             "UPDATE sessions SET ready_summary=?3 WHERE id=?1 AND current_run_id=?2
-             AND completed_at IS NULL AND EXISTS(SELECT 1 FROM runs r
+             AND completed_at IS NULL AND (kind='ask' OR EXISTS(SELECT 1 FROM runs r
                  JOIN flow_invocations f ON f.id=r.invocation_id
                  WHERE r.id=?2 AND r.published=1 AND f.pending_session_id=?1 AND f.state='current'
-                 AND f.claim_json IS NULL)",
+                 AND f.claim_json IS NULL))",
             params![id, expected_run.as_str(), summary.trim()],
         )? != 1
         {
-            return Err(StoreError::InvalidAuthority(
-                "review Session is stale".into(),
-            ));
+            return Err(StoreError::InvalidAuthority("Session is stale".into()));
         }
         // Readiness invalidates an in-flight completion's snapshot as well.
         tx.execute(
@@ -403,6 +450,7 @@ fn insert_review_run_in(
             skill: Some(position.current().step),
             provider: None,
             model: None,
+            caller_run_id: None,
         },
     )?;
     Ok(())

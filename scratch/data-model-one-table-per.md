@@ -545,6 +545,17 @@ required. All eight Done When obligations still govern publication.
 
 ## Slice ledger
 
+- 2026-09-26 first-assignment slice review: reproduced a missed chapter
+  eligibility consumer that rejected an unpublished reserved Run after
+  successor activation but before Task transfer. Changed that query to read
+  `tasks.started_at`, retaining historical evidence during conversion.
+  All 18 affected durable-store tests pass; an actual isolated CLI proof
+  reports Started before/after assignment consistently in status and roadmap
+  without PR publication or provider artifacts. The repaired lifecycle also
+  passes on the retained canonical source copy. Formatting, all-target Clippy
+  and working-diff whitespace pass. The [current slice review](data-model-slice-review.md)
+  records the counterexample, evidence matrix and remaining full-design gaps.
+  No intermediate publication.
 - 2026-09-26 first-assignment implementation: preserved the supplied concept
   review unchanged through `lf commit`, then added the forward
   `record_task_first_run` draft. Run insertion/binding set `tasks.started_at`

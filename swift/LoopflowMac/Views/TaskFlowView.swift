@@ -406,7 +406,7 @@ struct TaskFlowView: View {
             return "\(name) finished · its pinned definition is not retained. Preview: \(previewName)"
         case .none:
             if task.runtime?.started == true {
-                return "Flow not started · independent Runs exist"
+                return "No Flow recorded"
             }
             return "Not started · No runs yet."
         }

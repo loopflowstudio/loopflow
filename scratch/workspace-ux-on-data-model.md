@@ -6,6 +6,8 @@ Status: approved in interactive review on 2026-09-26 with the Project-template /
 Task-invocation presentation correction below. The current participant's name
 is unresolved. Navigation is implemented with local proof and a
 [slice review](workspace-navigation-review.md); installed acceptance remains owed.
+The [template slice review](workspace-template-review.md) records the later
+navigation/template checks, status correction and remaining acceptance.
 Source inspected at `c832aaede633a8996bf694dfb7ae2579dbabce3a`.
 The supplied placement stacks this Task on LOO-298 / PR #1296. That is placement
 evidence, not evidence that its owner conversion is complete or merged.
@@ -498,6 +500,15 @@ attempt authority is recreated here. No publication or Flow navigation decision
 is selected by this implementation step.
 
 ## Slice ledger
+
+- 2026-09-27 template review: actual CLI catalog checks and 16 focused Swift
+  checks pass. Reproduced and repaired Started being presented as proof of
+  independent Run membership; the status now says "No Flow recorded" while
+  keeping the template. Five affected Flow checks and the extended dispatched
+  failed-inventory Return proof pass, as does Xcode app/test-runner compilation.
+  The [review matrix](workspace-template-review.md) retains parent-contract,
+  installed/keyboard/visual acceptance and architecture gaps. No publication
+  or Flow navigation decision.
 
 - 2026-09-27 navigation repairs and template implementation: preserved the supplied
   concept review through `lf commit`, reproduced both navigation defects, and

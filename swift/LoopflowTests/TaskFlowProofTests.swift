@@ -213,6 +213,16 @@ struct TaskFlowProofTests {
         #expect((try? find("flow-node-4")) == nil, "a new source revision starts folded")
         #expect(await source.controls.isEmpty)
 
+        // Started alone does not establish historical Run membership.
+        model.select(.task(id: "issue-later"))
+        try await settle(window)
+        #expect(try text("task-flow-status") == "No Flow recorded")
+        _ = try find("flow-template-feature")
+        #expect((try? find("task-flow-iteration")) == nil)
+        #expect(await source.controls.isEmpty)
+        model.select(.task(id: "issue-available"))
+        try await settle(window)
+
         // Typeahead: Cancel keeps the recommendation; choosing previews only.
         try find("task-flow-name").button().tap()
         try await settle(window)

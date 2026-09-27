@@ -1679,6 +1679,16 @@ impl CaptureHandle {
         Self::begin_with_id_and_parent(spec, RunId::new(), None, true, None, Some(context))
     }
 
+    pub(crate) fn begin_reserved_with_context(
+        spec: RunSpec,
+        run_id: RunId,
+        context: &crate::trace::PreparedTurnContext,
+    ) -> StoreResult<Self> {
+        let home = crate::store::authority_home_dir();
+        let parent = inherited_parent().and_then(|id| verified_parent(&home, id));
+        Self::begin_at_with_id(&home, spec, run_id, parent, None, Some(context))
+    }
+
     pub(crate) fn begin_replay_at(
         lf_home: &Path,
         spec: RunSpec,

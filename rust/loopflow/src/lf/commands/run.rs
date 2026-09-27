@@ -788,7 +788,13 @@ fn begin_run_capture(
         subjects,
         flow: crate::ops::flow_run::capture_membership()?,
     };
-    let capture = if let Some(id) = crate::ops::human_session::prepared_run_id()? {
+    let capture = if let Some((run_id, membership)) = crate::ops::human_session::reserved_run()? {
+        let spec = crate::run_record::RunSpec {
+            flow: membership,
+            ..spec
+        };
+        crate::run_record::CaptureHandle::begin_reserved_with_context(spec, run_id, &built.context)
+    } else if let Some(id) = crate::ops::human_session::prepared_run_id()? {
         crate::run_record::CaptureHandle::start_prepared(
             &crate::store::lf_home_dir(),
             &id,
@@ -809,6 +815,7 @@ fn begin_run_capture(
         crate::run_record::CaptureHandle::begin_with_context(spec, &built.context)
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
+    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
     capture.record_input("initial", &built.context.task.text);
     crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)

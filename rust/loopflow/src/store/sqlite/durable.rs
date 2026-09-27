@@ -2119,7 +2119,7 @@ mod durable_store_tests {
         assert_eq!(store.session(&session_id).unwrap().unwrap().1, run);
 
         store
-            .publish_review_run(&session_id, &run.id, reserved.version)
+            .publish_review_run(&session_id, &run.id, reserved.version, "codex", None)
             .unwrap();
         assert!(store.task_started(&task_id).unwrap());
         store
@@ -2188,13 +2188,19 @@ mod durable_store_tests {
                 .finish_human_task_boundary(&task, &stale, "late completion")
                 .is_err());
             assert!(store
-                .publish_review_run(&session_id, runs.last().unwrap(), reserved.version)
+                .publish_review_run(
+                    &session_id,
+                    runs.last().unwrap(),
+                    reserved.version,
+                    "codex",
+                    None
+                )
                 .is_err());
             store
-                .publish_review_run(&session_id, &run.id, reserved.version)
+                .publish_review_run(&session_id, &run.id, reserved.version, "codex", None)
                 .unwrap();
             assert!(store
-                .publish_review_run(&session_id, &run.id, reserved.version)
+                .publish_review_run(&session_id, &run.id, reserved.version, "codex", None)
                 .is_err());
             runs.push(run.id);
             position = store.flow_position(&task_id).unwrap().unwrap();
@@ -2265,7 +2271,7 @@ mod durable_store_tests {
                 [broken.as_str()]).unwrap();
         }
         assert_eq!(
-            store.open_review_sessions().unwrap(),
+            store.open_sessions().unwrap(),
             vec![(session.clone(), current)]
         );
         assert!(store
@@ -2287,7 +2293,7 @@ mod durable_store_tests {
         assert!(completed.completed_at.is_some());
         assert_eq!(completed.ready_summary, session.ready_summary);
         assert_eq!(store.session_runs(&session_id).unwrap(), history);
-        assert!(store.open_review_sessions().unwrap().is_empty());
+        assert!(store.open_sessions().unwrap().is_empty());
         let events = store.task_events_after(&task_id, 0).unwrap();
         assert_eq!(
             events
@@ -2319,7 +2325,7 @@ mod durable_store_tests {
 
         store.restart_task_flow(&task, "checkpoint").unwrap();
         assert!(store.flow_position(&task_id).unwrap().is_none());
-        assert!(store.open_review_sessions().unwrap().is_empty());
+        assert!(store.open_sessions().unwrap().is_empty());
         assert_eq!(
             retained_invocation(&store, &original.invocation.id),
             (original.clone(), "replaced".into())
@@ -2363,7 +2369,7 @@ mod durable_store_tests {
             .unwrap();
 
         assert!(store.flow_position(&task_id).unwrap().is_none());
-        assert!(store.open_review_sessions().unwrap().is_empty());
+        assert!(store.open_sessions().unwrap().is_empty());
         assert_eq!(
             retained_invocation(&store, &position.invocation.id),
             (position.clone(), "completed".into())
@@ -2637,7 +2643,7 @@ mod durable_store_tests {
     fn review_discovery_follows_the_captured_nested_step() {
         let (_dir, store, task_id) = store_with_task();
         let mut position = autonomous_position(&task_id);
-        assert!(store.open_review_sessions().unwrap().is_empty());
+        assert!(store.open_sessions().unwrap().is_empty());
         let review = crate::durable::test_flow_invocation(
             "captured",
             0,
@@ -2668,7 +2674,7 @@ mod durable_store_tests {
         position.session_run_id = Some(RunId::new());
         position.ready_summary = Some("retain the reviewed scope".into());
         let mut saved = store.set_flow_position(&task_id, &position).unwrap();
-        let sessions = store.open_review_sessions().unwrap();
+        let sessions = store.open_sessions().unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].0.ready_summary, saved.ready_summary);
         assert_eq!(Some(&sessions[0].1.id), saved.session_run_id.as_ref());
@@ -2682,7 +2688,7 @@ mod durable_store_tests {
         saved.ready_summary = None;
         let saved = store.set_flow_position(&task_id, &saved).unwrap();
         assert_eq!(saved.current().step, "implement");
-        assert!(store.open_review_sessions().unwrap().is_empty());
+        assert!(store.open_sessions().unwrap().is_empty());
         assert!(store.set_flow_position(&task_id, &position).is_err());
         assert_eq!(store.flow_position(&task_id).unwrap(), Some(saved));
     }

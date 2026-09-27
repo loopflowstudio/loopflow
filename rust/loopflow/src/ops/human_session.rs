@@ -10,10 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::{FlowPosition, RunId, WorkRef};
 use crate::engine::Skill;
-use crate::ops::unrecorded_session::{self, Reservation};
-use crate::run_record::{
-    ProviderSessionRef, RunManifest, SessionName, SessionTitleSource, RUN_DIR_ENV,
-};
+use crate::run_record::{ProviderSessionRef, RunManifest, SessionTitleSource, RUN_DIR_ENV};
 use crate::session::{Run, Session, WorkSource};
 use crate::store::SharedStore;
 use crate::work::task::{Task, TaskId};
@@ -199,15 +196,6 @@ fn require_session_action(
     Ok(())
 }
 
-fn flow_actions(position: &FlowPosition) -> Vec<SessionAction> {
-    let state = if position.ready_summary.is_some() {
-        SessionState::Ready
-    } else {
-        SessionState::Waiting
-    };
-    session_actions(SessionKind::Flow, state)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: String,
@@ -221,8 +209,8 @@ pub struct SessionRecord {
     pub title_source: SessionTitleSource,
     pub flow_membership: SessionFlowMembership,
     pub detail: String,
-    /// The provider harness recorded on the Session's Run manifest; absent
-    /// when that Run is on another Home or its manifest cannot be read.
+    /// The provider its current Run launched with; absent until a review's
+    /// first launch records one.
     pub provider: Option<String>,
     pub cwd: String,
     pub state: SessionState,
@@ -231,9 +219,9 @@ pub struct SessionRecord {
     pub terminal_ids: Vec<String>,
 }
 
-/// Whether a Session's conversation is an occurrence of its Task's managed
-/// Flow. Membership comes only from the Flow position or the Run's recorded
-/// capture, never from matching Task, checkout, provider, or skill.
+/// Whether a Session's conversation is an occurrence of a Flow. Membership
+/// comes only from its Run's invocation, never from matching Task, checkout,
+/// provider, or skill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionFlowMembership {
@@ -266,71 +254,14 @@ pub enum SessionFlowOccurrence {
 
 impl SessionFlowMembership {
     fn of_position(position: &FlowPosition) -> Self {
-        Self::of_step(
-            crate::run_record::RunFlowStep::of(position),
-            SessionFlowOccurrence::Current,
-        )
-    }
-
-    /// Membership in the exact captured occurrence, placed relative to its Flow.
-    pub(crate) fn of_step(
-        step: crate::run_record::RunFlowStep,
-        occurrence: SessionFlowOccurrence,
-    ) -> Self {
+        let step = crate::run_record::RunFlowStep::of(position);
         Self::Step {
             flow: step.flow,
             invocation_id: step.invocation_id,
             step: step.step,
             node: step.node,
             iterations: step.iterations,
-            occurrence,
-        }
-    }
-}
-
-/// Project a Run's recorded membership, checking whether its Flow has moved on.
-async fn run_flow_membership(
-    store: &SharedStore,
-    manifest: Option<&RunManifest>,
-    run_id: &RunId,
-) -> SessionFlowMembership {
-    let Some(manifest) = manifest else {
-        return SessionFlowMembership::Unknown {
-            reason: format!("Run {run_id} is not recorded on this Home"),
-        };
-    };
-    match &manifest.flow {
-        None => SessionFlowMembership::Unknown {
-            reason: format!("Run {run_id} predates recorded Flow membership"),
-        },
-        Some(crate::run_record::RunFlowMembership::Independent) => {
-            SessionFlowMembership::Independent
-        }
-        Some(crate::run_record::RunFlowMembership::Step(step)) => {
-            let occurrence = match &step.task_id {
-                Some(task_id) => store
-                    .flow_position(task_id)
-                    .await
-                    .map(|position| step.occurrence(position.as_ref()))
-                    .map_err(|error| error.to_string()),
-                None => crate::ops::flow_run::read(&step.invocation_id)
-                    .map(|run| {
-                        if run.finished {
-                            SessionFlowOccurrence::Past
-                        } else if run.cursor.boundary_key() == step.boundary_key {
-                            SessionFlowOccurrence::Current
-                        } else {
-                            SessionFlowOccurrence::Earlier
-                        }
-                    })
-                    .map_err(|error| error.to_string()),
-            };
-            match occurrence {
-                Ok(occurrence) => SessionFlowMembership::of_step(step.clone(), occurrence),
-                Err(error) => SessionFlowMembership::Unknown {
-                    reason: format!("Flow {} is unavailable: {error}", step.invocation_id),
-                },
-            }
+            occurrence: SessionFlowOccurrence::Current,
         }
     }
 }
@@ -339,37 +270,26 @@ async fn run_flow_membership(
 /// its linked Run id, through `find_session`.
 #[derive(Debug)]
 enum SessionTarget {
-    Interactive {
-        session: Session,
-        run: Run,
-    },
-    Ask {
-        session: Session,
-        run: Run,
-    },
+    /// An interactive Session, an Ask, or a saved Flow's review.
+    Row { session: Session, run: Run },
+    /// A Task's review also settles its Task's invocation.
     Flow {
         task: Box<Task>,
         position: FlowPosition,
         run_id: RunId,
     },
-    StandaloneFlow(crate::ops::flow_run::StepToken),
 }
 
 pub(crate) async fn ask(
-    store: Option<SharedStore>,
+    store: &SharedStore,
     question: &str,
     skill: Option<&str>,
 ) -> Result<String> {
     let id = format!("ask_{}", uuid::Uuid::new_v4().simple());
-    let Reservation { session, run } = reserve_ask(store.as_ref(), id, question, skill).await?;
-    if let Err(error) = launch_ask(&session, &run).await {
-        // Nothing was stored for a conversation that never opened.
-        let _ = unrecorded_session::forget(&run.id);
-        return Err(error);
-    }
-    record_ask(store.as_ref(), &run.id).await;
+    let (session, run) = reserve_ask(store, id, question, skill).await?;
+    launch_ask(&session, &run).await?;
     report_ask_wait(&session.id);
-    wait_for_ask(store, &session.id, &run.id).await
+    wait_for_ask(store, &session.id).await
 }
 
 /// Reuse one Ask for an exact Flow boundary, including its completed result.
@@ -388,11 +308,7 @@ pub(crate) async fn ask_once(
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
     let (session, run) = match store.session(&id).await? {
         Some(found) => found,
-        None => {
-            let reserved = reserve_ask(Some(store), id.clone(), question, skill).await?;
-            record_ask(Some(store), &reserved.run.id).await;
-            (reserved.session, reserved.run)
-        }
+        None => reserve_ask(store, id.clone(), question, skill).await?,
     };
     if session.completed_at.is_none()
         && run_is_prepared(&run.id)?
@@ -408,7 +324,7 @@ pub(crate) async fn ask_once(
     if session.completed_at.is_none() {
         report_ask_wait(&id);
     }
-    wait_for_ask(Some(store.clone()), &id, &run.id).await
+    wait_for_ask(store, &id).await
 }
 
 fn report_ask_wait(id: &str) {
@@ -417,14 +333,14 @@ fn report_ask_wait(id: &str) {
     );
 }
 
-/// Prepare an Ask's Session and first Run, kept beside the Run until stored.
-/// Work and the caller come from the asking Run; its invocation never does.
+/// Store an Ask's Session with its first Run prepared. Work and the caller
+/// come from the asking Run; its invocation never does.
 async fn reserve_ask(
-    store: Option<&SharedStore>,
+    store: &SharedStore,
     id: String,
     question: &str,
     skill: Option<&str>,
-) -> Result<Reservation> {
+) -> Result<(Session, Run)> {
     let question = question.trim();
     if question.is_empty() {
         bail!("question cannot be empty");
@@ -434,57 +350,41 @@ async fn reserve_ask(
     if let Some(skill) = skill {
         crate::engine::load_skill(skill, &cwd).context("load Ask skill")?;
     }
-    let (task_id, wave_id) = match store {
-        Some(store) => caller_work(store, &caller).await,
-        None => (None, None),
-    };
-    let run = prepare_ask_run(Run {
-        id: caller.run_id.clone(),
-        session_id: Some(id.clone()),
-        invocation_id: None,
-        node: None,
-        iterations: None,
-        attempt: None,
-        work_source: wave_id.as_ref().map(|_| WorkSource::Inherited),
-        task_id,
-        wave_id,
-        created_at: 0,
-        published: true,
-        cwd,
-        skill: skill.map(str::to_string),
-        provider: Some(caller.harness),
-        model: caller.model,
-        caller_run_id: Some(caller.run_id),
-    })?;
-    let reservation = Reservation {
-        session: Session {
-            id,
-            current_run_id: run.id.clone(),
-            kind: crate::session::SessionKind::Ask,
-            title: question_title(question),
-            title_source: crate::session::TitleSource::Generated,
-            request: Some(question.to_string()),
-            ready_summary: None,
-            completed_at: None,
-            created_at: run.created_at,
+    let (task_id, wave_id) = caller_work(store, &caller).await;
+    let run = prepare_run(
+        Run {
+            id: caller.run_id.clone(),
+            session_id: Some(id.clone()),
+            invocation_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
+            work_source: wave_id.as_ref().map(|_| WorkSource::Inherited),
+            task_id,
+            wave_id,
+            created_at: 0,
+            published: true,
+            cwd,
+            skill: skill.map(str::to_string),
+            provider: Some(caller.harness),
+            model: caller.model,
+            caller_run_id: Some(caller.run_id),
         },
-        run,
+        // An Ask is a human boundary requested by a Run, never a Flow step.
+        crate::run_record::RunFlowMembership::Independent,
+    )?;
+    let session = Session {
+        id,
+        current_run_id: run.id.clone(),
+        kind: crate::session::SessionKind::Ask,
+        title: question_title(question),
+        title_source: crate::session::TitleSource::Generated,
+        request: Some(question.to_string()),
+        ready_summary: None,
+        completed_at: None,
+        created_at: run.created_at,
     };
-    unrecorded_session::defer(&reservation)?;
-    Ok(reservation)
-}
-
-/// Store the Ask now when the store can take it; otherwise the next
-/// operation that touches its Run does.
-async fn record_ask(store: Option<&SharedStore>, run_id: &RunId) {
-    let recorded = match store {
-        Some(store) => unrecorded_session::record(store, run_id).await.map(|_| ()),
-        None => Err(anyhow!("the store is unavailable")),
-    };
-    if let Err(error) = recorded {
-        tracing::warn!(%run_id, error = %format!("{error:#}"),
-            "Ask Session is not stored yet; it will not list until it is");
-    }
+    Ok(store.create_session(session, run, None).await?)
 }
 
 /// The asking Run's Task and Wave. A headless caller has no row yet, so its
@@ -509,8 +409,9 @@ async fn caller_work(
     }
 }
 
-/// Prepare another attempt of an Ask; `run` supplies everything but identity.
-fn prepare_ask_run(run: Run) -> Result<Run> {
+/// Prepare an attempt of a waiting Session; `run` supplies everything but
+/// its identity and ordinal.
+pub(crate) fn prepare_run(run: Run, flow: crate::run_record::RunFlowMembership) -> Result<Run> {
     let id = crate::run_record::CaptureHandle::prepare(
         crate::run_record::RunSpec {
             harness: run.provider.clone().unwrap_or_default(),
@@ -519,18 +420,18 @@ fn prepare_ask_run(run: Run) -> Result<Run> {
             cwd: run.cwd.clone(),
             repo: None,
             worktree: Some(run.cwd.clone()),
-            skill: None,
+            skill: run.skill.clone(),
             subjects: work_selector(&run)
                 .map(crate::run_record::SubjectAttribution::declared)
                 .into_iter()
                 .collect(),
-            // An Ask is a human boundary requested by a Run, never a Flow step.
-            flow: crate::run_record::RunFlowMembership::Independent,
+            flow,
         },
         run.caller_run_id.clone(),
     )?;
     Ok(Run {
         id,
+        attempt: None,
         created_at: crate::store::rows::now_unix(),
         ..run
     })
@@ -557,14 +458,10 @@ pub(crate) async fn prepare(
 }
 
 pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
-    let mut sessions = list_flow_sessions(store).await?;
-    for session in crate::ops::flow_session::list()? {
-        sessions.push(attribute_standalone_session(store, session).await?);
+    let mut sessions = Vec::new();
+    for (session, run) in store.open_sessions().await? {
+        sessions.push(surface(store, &session, &run).await?);
     }
-    for (session, run) in store.open_conversations().await? {
-        sessions.push(conversation_surface(store, &session, &run).await?);
-    }
-    sessions.sort_by(|left, right| left.title.cmp(&right.title).then(left.id.cmp(&right.id)));
     Ok(sessions)
 }
 
@@ -574,7 +471,7 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
     // Membership outlives a pending boundary. Never reinterpret a retained
     // attempt's manifest as an independent conversation or current actor.
     let owned = match RunId::parse(session_id) {
-        Ok(run_id) => session_of_run(store, &run_id).await?,
+        Ok(run_id) => store.session_for_run(&run_id).await?,
         Err(_) => store.session(session_id).await?,
     };
     if let Some((session, current)) = owned {
@@ -582,16 +479,10 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
             .await
             .map(Some);
     }
-    if let Some(token) = crate::ops::flow_session::parse_id(session_id)? {
-        return Ok(Some(SessionTarget::StandaloneFlow(token)));
-    }
-    if let Some(target) = find_boundary_for_run(session_id)? {
-        return Ok(Some(target));
-    }
     match crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), session_id) {
         Ok((_, manifest)) => {
             // Prefix selectors also resolve through the canonical Run's owner.
-            let Some((session, current)) = session_of_run(store, &manifest.run_id).await? else {
+            let Some((session, current)) = store.session_for_run(&manifest.run_id).await? else {
                 bail!("Run {} does not belong to a Session", manifest.run_id);
             };
             owned_target(store, manifest.run_id.as_str(), session, current)
@@ -601,14 +492,6 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(anyhow!("Session record unavailable: {error}")),
     }
-}
-
-/// The Session owning `run_id`, recording its waiting reservation first.
-async fn session_of_run(store: &SharedStore, run_id: &RunId) -> Result<Option<(Session, Run)>> {
-    if let Some(found) = store.session_for_run(run_id).await? {
-        return Ok(Some(found));
-    }
-    unrecorded_session::record(store, run_id).await
 }
 
 async fn owned_target(
@@ -624,28 +507,29 @@ async fn owned_target(
             current.id
         );
     }
-    match session.kind {
-        crate::session::SessionKind::FlowReview => {}
-        crate::session::SessionKind::Interactive => {
-            if session.completed_at.is_some() {
-                bail!("Session {} is already complete", session.id);
-            }
-            return Ok(SessionTarget::Interactive {
-                session,
-                run: current,
-            });
-        }
-        crate::session::SessionKind::Ask => {
-            if session.completed_at.is_some() {
-                bail!("Ask session {:?} is already complete", session.id);
-            }
-            return Ok(SessionTarget::Ask {
-                session,
-                run: current,
-            });
-        }
+    if session.completed_at.is_some() {
+        bail!("Session {} is already complete", session.id);
     }
-    let (task, position) = find_flow_session(store, &session.id).await?;
+    let task_id = match (session.kind, current.task_id.clone()) {
+        (crate::session::SessionKind::FlowReview, Some(task_id)) => task_id,
+        _ => {
+            return Ok(SessionTarget::Row {
+                session,
+                run: current,
+            })
+        }
+    };
+    let position = store
+        .flow_position(&task_id)
+        .await?
+        .ok_or_else(|| anyhow!("Session {} invocation is no longer current", session.id))?;
+    if flow_id(&position)? != session.id {
+        bail!("Session {} is no longer waiting", session.id);
+    }
+    let task = store
+        .get_task(&task_id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
     let (latest, _) = store
         .session(&session.id)
         .await?
@@ -704,13 +588,8 @@ impl NativeRun {
 
 async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<SessionRecord> {
     match target {
-        SessionTarget::Interactive { session, run } | SessionTarget::Ask { session, run } => {
-            conversation_surface(store, session, run).await
-        }
+        SessionTarget::Row { session, run } => surface(store, session, run).await,
         SessionTarget::Flow { task, position, .. } => flow_surface(store, task, position).await,
-        SessionTarget::StandaloneFlow(token) => {
-            attribute_standalone_session(store, crate::ops::flow_session::surface(token)?).await
-        }
     }
 }
 
@@ -720,24 +599,15 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
         bail!("ready summary cannot be empty");
     }
     let run_id = active_run_id()?;
-    let token = active_session_token()?;
-    match token {
+    let id = match active_session_token()? {
         HumanSessionToken::StandaloneFlow { token } => {
-            crate::ops::flow_session::mark_ready(&token, &run_id, summary)?
+            format!("flow:{}:{}", token.invocation, token.boundary)
         }
-        HumanSessionToken::Flow { token } => {
-            store
-                .ready_session(&flow_token_id(&token), &run_id, summary)
-                .await?;
-        }
-        HumanSessionToken::Ask { id } => {
-            let lock_id = id.clone();
-            let _lock =
-                tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
-            session_of_run(store, &run_id).await?;
-            store.ready_session(&id, &run_id, summary).await?;
-        }
-    }
+        HumanSessionToken::Flow { token } => flow_token_id(&token),
+        HumanSessionToken::Ask { id } => id,
+    };
+    // The store fences readiness on the Session's current Run.
+    store.ready_session(&id, &run_id, summary).await?;
     Ok(())
 }
 
@@ -793,10 +663,9 @@ pub(crate) async fn completion_worktree(
         .ok_or_else(|| session_not_found(session_id))?
     {
         SessionTarget::Flow { task, .. } => Ok(Some(task.worktree.clone())),
-        SessionTarget::StandaloneFlow(token) => {
-            crate::ops::flow_session::worktree(&token).map(Some)
+        SessionTarget::Row { session, run } => {
+            Ok((session.kind == crate::session::SessionKind::FlowReview).then_some(run.cwd))
         }
-        SessionTarget::Interactive { .. } | SessionTarget::Ask { .. } => Ok(None),
     }
 }
 
@@ -921,13 +790,14 @@ async fn serve_flow_locked(
     }
 }
 
-pub(crate) async fn serve_ask(store: Option<SharedStore>, run_id: &RunId) -> Result<()> {
-    let store = store.as_ref();
-    let (session, _) = ask_attempt(store, run_id)
+pub(crate) async fn serve_ask(store: &SharedStore, run_id: &RunId) -> Result<()> {
+    let (session, _) = store
+        .session_for_run(run_id)
         .await?
         .ok_or_else(|| anyhow!("Ask Run {run_id} no longer exists"))?;
     let launch_lock = lock_session_launch(&session.id)?;
-    let (session, run) = ask_attempt(store, run_id)
+    let (session, run) = store
+        .session(&session.id)
         .await?
         .ok_or_else(|| anyhow!("Ask Run {run_id} no longer exists"))?;
     if session.completed_at.is_some() {
@@ -938,41 +808,45 @@ pub(crate) async fn serve_ask(store: Option<SharedStore>, run_id: &RunId) -> Res
         // infer death of its native client; explicit open owns native resume.
         return Ok(());
     }
-    serve_ask_locked(store, &session, &run, launch_lock).await
+    serve_locked(store, &session, &run, launch_lock).await
 }
 
-/// An Ask attempt's rows, or its reservation while no store can take them.
-async fn ask_attempt(
-    store: Option<&SharedStore>,
-    run_id: &RunId,
-) -> Result<Option<(Session, Run)>> {
-    if let Some(store) = store {
-        if let Ok(Some(found)) = session_of_run(store, run_id).await {
-            return Ok(Some(found));
-        }
-    }
-    Ok(unrecorded_session::read(run_id)?.map(|reserved| (reserved.session, reserved.run)))
+/// What a waiting Session's agent carries to act on its own Session.
+fn session_token(session: &Session) -> Result<HumanSessionToken> {
+    Ok(match session.kind {
+        crate::session::SessionKind::FlowReview => HumanSessionToken::StandaloneFlow {
+            token: crate::ops::flow_session::token(&session.id)?,
+        },
+        _ => HumanSessionToken::Ask {
+            id: session.id.clone(),
+        },
+    })
 }
 
-async fn serve_ask_locked(
-    store: Option<&SharedStore>,
+/// Launch the prepared Run of an Ask or of a saved Flow's review.
+async fn serve_locked(
+    store: &SharedStore,
     session: &Session,
     run: &Run,
     launch_lock: File,
 ) -> Result<()> {
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let mut command = tokio::process::Command::new(lf);
+    let token = session_token(session)?;
     command
-        .args(ask_launch_args(store, session, run).await)
         .current_dir(&run.cwd)
-        .env(
-            HUMAN_SESSION_ENV,
-            serde_json::to_string(&HumanSessionToken::Ask {
-                id: session.id.clone(),
-            })?,
-        );
+        .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
+    match &token {
+        HumanSessionToken::StandaloneFlow { token } => {
+            crate::ops::flow_session::launch(&mut command, token)?
+        }
+        _ => {
+            command.args(ask_launch_args(store, session, run).await);
+        }
+    }
     let mut child = spawn_session_run(&mut command, &run.id).await?;
     drop(launch_lock);
+    // Provider termination never completes a Session.
     let status = child.wait().await.context("wait for session agent")?;
     if status.success() {
         Ok(())
@@ -981,7 +855,7 @@ async fn serve_ask_locked(
     }
 }
 
-async fn ask_launch_args(store: Option<&SharedStore>, session: &Session, run: &Run) -> Vec<String> {
+async fn ask_launch_args(store: &SharedStore, session: &Session, run: &Run) -> Vec<String> {
     let mut args = vec![
         "--tui".to_string(),
         "--model".to_string(),
@@ -991,7 +865,7 @@ async fn ask_launch_args(store: Option<&SharedStore>, session: &Session, run: &R
     ];
     // The conversation's prompt carries its Work only while launch can resolve
     // it; the Run row keeps the attribution either way.
-    if let (Some(store), Some(selector)) = (store, work_selector(run)) {
+    if let Some(selector) = work_selector(run) {
         if crate::ops::resolve_work_binding(store, &run.cwd, &selector)
             .await
             .is_ok()
@@ -1015,7 +889,11 @@ fn work_selector(run: &Run) -> Option<String> {
     }
 }
 
-pub(crate) fn publish_run_binding(run_id: &RunId) -> Result<()> {
+pub(crate) fn publish_run_binding(
+    run_id: &RunId,
+    provider: &str,
+    model: Option<&str>,
+) -> Result<()> {
     let raw = std::env::var_os(REVIEW_RUN_ENV)
         .ok_or_else(|| anyhow!("review Run has no launch reservation"))?;
     std::env::remove_var(REVIEW_RUN_ENV);
@@ -1025,7 +903,13 @@ pub(crate) fn publish_run_binding(run_id: &RunId) -> Result<()> {
     }
     let store =
         crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
-    store.publish_review_run(&reservation.session_id, run_id, reservation.version)?;
+    store.publish_review_run(
+        &reservation.session_id,
+        run_id,
+        reservation.version,
+        provider,
+        model,
+    )?;
     Ok(())
 }
 
@@ -1052,11 +936,9 @@ pub(crate) async fn open(
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     match &target {
-        SessionTarget::StandaloneFlow(token) => {
-            let session = crate::ops::flow_session::open(token, mode, resume).await?;
-            attribute_standalone_session(store, session).await
-        }
-        SessionTarget::Interactive { session, run } => {
+        SessionTarget::Row { session, run }
+            if session.kind == crate::session::SessionKind::Interactive =>
+        {
             let native = NativeRun::of(session, run)?;
             let provider_session = native.history(session)?;
             if resume {
@@ -1076,7 +958,7 @@ pub(crate) async fn open(
                 OpenMode::Replace => {}
                 OpenMode::Refuse | OpenMode::Try => {}
             }
-            let mut session = conversation_surface(store, session, run).await?;
+            let mut session = surface(store, session, run).await?;
             if resume {
                 crate::lf::commands::util::resume_session(
                     &native.provider,
@@ -1123,13 +1005,13 @@ pub(crate) async fn open(
             }
             Ok(session)
         }
-        SessionTarget::Ask { session, run } => {
+        SessionTarget::Row { session, run } => {
             if mode != OpenMode::Refuse {
                 bail!("--replace and --try apply only to interactive provider sessions");
             }
-            let mut surface = conversation_surface(store, session, run).await?;
+            let mut surface = surface(store, session, run).await?;
             if resume {
-                surface.run_id = open_ask(store, &session.id).await?;
+                surface.run_id = open_waiting(store, &session.id).await?;
             }
             Ok(surface)
         }
@@ -1158,37 +1040,40 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     }
     require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
     match &target {
-        SessionTarget::Interactive { session, run } => {
+        SessionTarget::Row { session, run }
+            if session.kind == crate::session::SessionKind::Interactive =>
+        {
             let native = NativeRun::of(session, run)?;
             crate::lf::commands::util::stop_provider_session(&native.dir, &native.provider)?;
-            store
-                .complete_session(&session.id, &run.id)
-                .await?;
+            store.complete_session(&session.id, &run.id).await?;
         }
-        SessionTarget::Ask { session, run } => {
+        SessionTarget::Row { session, run } => {
             let lock_id = session.id.clone();
             let _lock =
                 tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
-            store.complete_session(&session.id, &run.id).await?;
-            // The answer is durable before teardown can interrupt this caller
-            // or fail. A cleanup failure must not strand the waiting caller.
-            if let Err(error) = stop_native_run(&run.id) {
-                tracing::warn!(session_id = %session.id, run_id = %run.id,
-                    error = %format!("{error:#}"),
-                    "Ask completion saved, but its native Session could not be stopped");
+            if session.kind == crate::session::SessionKind::FlowReview {
+                crate::ops::flow_session::complete(store, session, run).await?;
+            } else {
+                store.complete_session(&session.id, &run.id).await?;
+                // The answer is durable before teardown can interrupt this caller
+                // or fail. A cleanup failure must not strand the waiting caller.
+                if let Err(error) = stop_native_run(&run.id) {
+                    tracing::warn!(session_id = %session.id, run_id = %run.id,
+                        error = %format!("{error:#}"),
+                        "Ask completion saved, but its native Session could not be stopped");
+                }
             }
         }
         SessionTarget::Flow { task, position, .. } => {
             complete_flow(store, task, position).await?;
         }
-        SessionTarget::StandaloneFlow(token) => {
-            crate::ops::flow_session::complete(token).await?;
-        }
     }
     Ok(session)
 }
 
-async fn open_ask(store: &SharedStore, id: &str) -> Result<RunId> {
+/// Open an Ask or a saved Flow's review: resume its native history, else
+/// launch its prepared Run, else append another attempt to the Session.
+async fn open_waiting(store: &SharedStore, id: &str) -> Result<RunId> {
     loop {
         let (_, observed) = store
             .session(id)
@@ -1209,7 +1094,7 @@ async fn open_ask(store: &SharedStore, id: &str) -> Result<RunId> {
             continue;
         }
         let mut launch_lock = Some(launch_lock);
-        let token = HumanSessionToken::Ask { id: id.to_string() };
+        let token = session_token(&session)?;
         if resume_native_run(&run.id, &token, &mut launch_lock)? {
             return Ok(run.id);
         }
@@ -1218,16 +1103,22 @@ async fn open_ask(store: &SharedStore, id: &str) -> Result<RunId> {
         let run = if run_is_prepared(&run.id)? {
             run
         } else {
+            let flow = match &token {
+                HumanSessionToken::StandaloneFlow { token } => {
+                    crate::ops::flow_session::membership(token)?
+                }
+                _ => crate::run_record::RunFlowMembership::Independent,
+            };
             let replaced = run.id.clone();
             store
-                .replace_session_run(&replaced, prepare_ask_run(run)?)
+                .replace_session_run(&replaced, prepare_run(run, flow)?)
                 .await?
         };
-        serve_ask_locked(
-            Some(store),
+        serve_locked(
+            store,
             &session,
             &run,
-            launch_lock.expect("unresumed Ask retains its launch lock"),
+            launch_lock.expect("an unresumed Session retains its launch lock"),
         )
         .await?;
         return Ok(run.id);
@@ -1282,33 +1173,6 @@ async fn open_flow_locked(
     .await
 }
 
-/// A replacement Run continues the same Session, so it keeps that Session's
-/// name. Copy it before the boundary publishes the new Run.
-pub(crate) fn carry_session_name(
-    session_id: &str,
-    previous: Option<&RunId>,
-    next: Option<&RunId>,
-) -> Result<()> {
-    let (Some(previous), Some(next)) = (previous, next) else {
-        return Ok(());
-    };
-    if previous == next {
-        return Ok(());
-    }
-    let (Some(from), Some(to)) = (local_session_run_dir(previous), local_session_run_dir(next))
-    else {
-        return Ok(());
-    };
-    let Some(name) =
-        crate::run_record::read_session_name(&from).context("read replaced Session name")?
-    else {
-        return Ok(());
-    };
-    crate::run_record::write_session_name(&to, &name.title, name.source)
-        .with_context(|| format!("carry Session {session_id} name to its replacement Run"))?;
-    Ok(())
-}
-
 pub(crate) fn run_is_prepared(run_id: &RunId) -> Result<bool> {
     match crate::run_record::resolve_manifest(
         &crate::store::observability_home_dir(),
@@ -1324,58 +1188,105 @@ pub(crate) fn stop_run(run_id: &RunId) -> Result<()> {
     stop_native_run(run_id)
 }
 
-/// An interactive or Ask Session, read from its row and its current Run.
-async fn conversation_surface(
-    store: &SharedStore,
-    session: &Session,
-    run: &Run,
-) -> Result<SessionRecord> {
-    let asked = session.kind == crate::session::SessionKind::Ask;
-    let kind = if asked {
-        SessionKind::Ask
-    } else {
-        SessionKind::Interactive
-    };
-    let native = NativeRun::of(session, run)?;
-    let clients = native.clients()?;
-    let state = if asked && session.completed_at.is_some() {
-        SessionState::Closed
-    } else if asked && session.ready_summary.is_some() {
-        SessionState::Ready
-    } else if !clients.is_empty() {
-        SessionState::Active
-    } else if session.completed_at.is_some()
-        || crate::run_record::read_provider_session(&native.dir)?.is_some()
-    {
-        SessionState::Closed
-    } else {
-        SessionState::Waiting
+/// A Session as its row and its current Run describe it.
+async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<SessionRecord> {
+    let kind = match session.kind {
+        crate::session::SessionKind::Interactive => SessionKind::Interactive,
+        crate::session::SessionKind::Ask => SessionKind::Ask,
+        crate::session::SessionKind::FlowReview => SessionKind::Flow,
     };
     let work = match (&run.task_id, &run.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
+    // Only a Task's review can wait on another Home.
+    let remote = match (&work, &run.invocation_id) {
+        (Some(work @ WorkRef::Task(_)), Some(_)) => {
+            let placement = store.placement(work).await?;
+            let home = store
+                .home_by_id(&placement.home_id)
+                .await?
+                .ok_or_else(|| anyhow!("Session {} Home disappeared", session.id))?;
+            (home.route != "local").then_some(home.id)
+        }
+        _ => None,
+    };
+    let dir = local_session_run_dir(&run.id)
+        .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
+    let clients = match &run.provider {
+        Some(provider) if remote.is_none() => {
+            crate::lf::commands::util::active_provider_clients(&dir, provider)?
+        }
+        _ => Vec::new(),
+    };
+    let launched = match remote {
+        Some(_) => run.published,
+        None => crate::run_record::read_provider_session(&dir)?.is_some(),
+    };
+    let state = if session.completed_at.is_some() {
+        SessionState::Closed
+    } else if session.ready_summary.is_some() {
+        SessionState::Ready
+    } else if !clients.is_empty() {
+        SessionState::Active
+    } else if launched {
+        SessionState::Closed
+    } else {
+        SessionState::Waiting
+    };
+    let mut actions = session_actions(kind, state);
+    let flow_membership = match (&run.invocation_id, &run.task_id) {
+        (None, _) => SessionFlowMembership::Independent,
+        (Some(invocation), None) => match store.waiting_flow(&session.id).await? {
+            Some((flow, node)) => SessionFlowMembership::Step {
+                flow,
+                invocation_id: invocation.clone(),
+                step: run.skill.clone().unwrap_or_default(),
+                node: Some(node),
+                iterations: run.iterations.clone(),
+                occurrence: SessionFlowOccurrence::Current,
+            },
+            None => SessionFlowMembership::Unknown {
+                reason: format!("Flow {invocation} no longer waits at this review"),
+            },
+        },
+        (Some(_), Some(task)) => match store.flow_position(task).await {
+            Ok(Some(position)) if flow_id(&position).ok().as_deref() == Some(&session.id) => {
+                SessionFlowMembership::of_position(&position)
+            }
+            Ok(_) => SessionFlowMembership::Unknown {
+                reason: "Run membership evidence is unavailable".into(),
+            },
+            Err(crate::store::StoreError::InvalidData(reason)) => {
+                for action in &mut actions {
+                    action.unavailable_reason = Some(reason.clone());
+                }
+                SessionFlowMembership::Unknown { reason }
+            }
+            Err(error) => return Err(error.into()),
+        },
+    };
     Ok(SessionRecord {
         id: session.id.clone(),
         run_id: run.id.clone(),
         kind,
         wave_id: run.wave_id.clone(),
-        work_path: session_work_path(store, work.as_ref()).await?,
+        work_path: session_work_path(store, run).await?,
         work,
-        actions: session_actions(kind, state),
+        actions,
         title: session.title.clone(),
-        title_source: wire_title_source(session.title_source),
-        // An Ask is a human boundary requested by a Run, never a Flow step.
-        flow_membership: SessionFlowMembership::Independent,
-        detail: if asked {
-            run.skill
-                .clone()
-                .unwrap_or_else(|| "Request for input".to_string())
-        } else {
-            launch_model(run)
+        title_source: match session.title_source {
+            crate::session::TitleSource::Human => SessionTitleSource::Human,
+            crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
-        provider: Some(native.provider),
+        flow_membership,
+        detail: match (kind, &run.skill) {
+            (SessionKind::Interactive, _) => launch_model(run),
+            (_, Some(skill)) => skill.clone(),
+            (_, None) => "Request for input".to_string(),
+        },
+        provider: run.provider.clone(),
         cwd: run.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -1383,7 +1294,7 @@ async fn conversation_surface(
             .into_iter()
             .filter_map(|client| client.terminal_id)
             .collect(),
-        open_argv: human_open_argv(None, None, &session.id)?,
+        open_argv: human_open_argv(remote.as_ref(), Some(&run.cwd), &session.id)?,
     })
 }
 
@@ -1396,87 +1307,25 @@ fn launch_model(run: &Run) -> String {
     }
 }
 
-fn wire_title_source(source: crate::session::TitleSource) -> SessionTitleSource {
-    match source {
-        crate::session::TitleSource::Human => SessionTitleSource::Human,
-        crate::session::TitleSource::Generated => SessionTitleSource::Generated,
-    }
-}
-
-async fn attribute_standalone_session(
-    store: &SharedStore,
-    mut session: SessionRecord,
-) -> Result<SessionRecord> {
-    let (dir, manifest) = crate::run_record::resolve_manifest(
-        &crate::store::observability_home_dir(),
-        session.run_id.as_str(),
-    )?;
-    session.work = crate::run_record::attributed_work(store, &manifest).await;
-    session.wave_id = session_wave_id(store, session.work.as_ref()).await?;
-    session.work_path = session_work_path(store, session.work.as_ref()).await?;
-    session.terminal_ids =
-        crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?
-            .into_iter()
-            .filter_map(|client| client.terminal_id)
-            .collect();
-    Ok(session)
-}
-
-async fn session_wave_id(
-    store: &SharedStore,
-    work: Option<&WorkRef>,
-) -> Result<Option<crate::id::WaveId>> {
-    Ok(match work {
-        Some(WorkRef::Wave(id)) => Some(id.clone()),
-        Some(WorkRef::Task(id)) => store.get_task(id).await?.map(|task| task.wave_id),
-        Some(WorkRef::Project(id)) => store.get_project(id).await?.map(|project| project.wave_id),
-        None => None,
-    })
-}
-
-async fn session_work_path(store: &SharedStore, work: Option<&WorkRef>) -> Result<Option<String>> {
-    let Some(work) = work else { return Ok(None) };
-    let mut labels = Vec::new();
-    if let WorkRef::Task(id) = work {
-        match store.get_task(id).await? {
-            Some(task) => labels.push(task.plan.identifier),
-            None => return Ok(Some(format!("Task {id} (unavailable)"))),
-        }
-    }
-    if let Some(id) = session_wave_id(store, Some(work)).await? {
-        labels.push(match store.get_wave(&id).await? {
-            Some(wave) => wave.name().to_string(),
-            None => format!("Wave {id} (unavailable)"),
-        });
-    } else if let WorkRef::Project(id) = work {
-        return Ok(Some(format!("Historical Work {id} (unavailable)")));
-    }
-    labels.reverse();
-    Ok(Some(labels.join(" / ")))
-}
-
-/// The stored name, else the seed: the invoked skill for skill Sessions, the
-/// question for Asks, or a stable `magical-musical` pair for raw Sessions.
-pub(crate) fn session_name(dir: Option<&Path>, seed: String) -> Result<SessionName> {
-    let stored = match dir {
-        Some(dir) => crate::run_record::read_session_name(dir).context("read Session name")?,
-        None => None,
+async fn session_work_path(store: &SharedStore, run: &Run) -> Result<Option<String>> {
+    let Some(wave_id) = &run.wave_id else {
+        return Ok(None);
     };
-    Ok(stored.unwrap_or(SessionName {
-        title: seed,
-        source: SessionTitleSource::Generated,
+    let wave = match store.get_wave(wave_id).await? {
+        Some(wave) => wave.name().to_string(),
+        None => format!("Wave {wave_id} (unavailable)"),
+    };
+    Ok(Some(match &run.task_id {
+        None => wave,
+        Some(id) => match store.get_task(id).await? {
+            Some(task) => format!("{wave} / {}", task.plan.identifier),
+            None => format!("Task {id} (unavailable)"),
+        },
     }))
 }
 
 fn local_session_run_dir(run_id: &RunId) -> Option<PathBuf> {
     crate::run_record::record_dir(&crate::store::observability_home_dir(), run_id)
-}
-
-/// The provider recorded on a local Run's manifest. Never guessed from
-/// configuration: an unreadable or remote Run has no recorded provider here.
-pub(crate) fn recorded_provider(dir: Option<&Path>) -> Option<String> {
-    let manifest = crate::run_record::read_manifest(dir?).ok()?;
-    Some(manifest.harness)
 }
 
 /// Rename a Session through its Run and return the authoritative record.
@@ -1499,28 +1348,26 @@ pub(crate) async fn rename(
         SessionTitleSource::Generated => crate::session::TitleSource::Generated,
         SessionTitleSource::Unavailable => bail!("unavailable is not a title source"),
     };
-    if let SessionTarget::Interactive { session, run } | SessionTarget::Ask { session, run } =
-        &target
-    {
-        // A Run selector names that attempt; the Session id names the conversation.
-        let expected_run = (session_id != session.id).then_some(&run.id);
-        store
-            .rename_session(&session.id, expected_run, title, title_source)
-            .await?;
-        let (session, run) = store
-            .session(&session.id)
-            .await?
-            .ok_or_else(|| session_not_found(session_id))?;
-        return conversation_surface(store, &session, &run).await;
-    }
-    let expected_run = match &target {
+    let (run_id, position) = match &target {
+        SessionTarget::Row { session, run } => {
+            // A Run selector names that attempt; the Session id names the conversation.
+            let expected_run = (session_id != session.id).then_some(&run.id);
+            store
+                .rename_session(&session.id, expected_run, title, title_source)
+                .await?;
+            let (session, run) = store
+                .session(&session.id)
+                .await?
+                .ok_or_else(|| session_not_found(session_id))?;
+            return surface(store, &session, &run).await;
+        }
         SessionTarget::Flow {
             run_id, position, ..
-        } if session_id != flow_id(position)? => Some(run_id.clone()),
-        _ => None,
+        } => (run_id, position),
     };
+    let id = flow_id(position)?;
+    let expected_run = (session_id != id).then(|| run_id.clone());
     // Retain the caller's exact/prefix selector while waiting for replacement.
-    let id = boundary_id(&target)?;
     let pending_lock = tokio::task::spawn_blocking(move || lock_session_launch(&id));
     #[cfg(test)]
     action_test::after_lookup("rename", session_id).await;
@@ -1529,48 +1376,16 @@ pub(crate) async fn rename(
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     if let SessionTarget::Flow { position, .. } = &target {
-        let id = flow_id(position)?;
         store
-            .rename_session(&id, expected_run.as_ref(), title, title_source)
+            .rename_session(
+                &flow_id(position)?,
+                expected_run.as_ref(),
+                title,
+                title_source,
+            )
             .await?;
-        return session_surface(store, &target).await;
     }
-    let session = session_surface(store, &target).await?;
-    let dir = local_session_run_dir(&session.run_id)
-        .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
-    crate::run_record::write_session_name(&dir, title, source)
-        .map_err(|error| anyhow!("cannot rename Session {}: {error}", session.id))?;
     session_surface(store, &target).await
-}
-
-/// The durable id of a boundary Session, whichever id resolved it.
-fn boundary_id(target: &SessionTarget) -> Result<String> {
-    Ok(match target {
-        SessionTarget::Interactive { session, .. } | SessionTarget::Ask { session, .. } => {
-            session.id.clone()
-        }
-        SessionTarget::Flow { position, .. } => flow_id(position)?,
-        SessionTarget::StandaloneFlow(token) => crate::ops::flow_session::session_id(token),
-    })
-}
-
-/// The waiting standalone Flow boundary whose linked Run is `run_id`.
-fn find_boundary_for_run(run_id: &str) -> Result<Option<SessionTarget>> {
-    if RunId::parse(run_id).is_err() {
-        return Ok(None);
-    }
-    for (run, token) in crate::ops::flow_session::reviews()? {
-        if run
-            .active
-            .and_then(|boundary| boundary.run_id)
-            .as_ref()
-            .map(RunId::as_str)
-            == Some(run_id)
-        {
-            return Ok(Some(SessionTarget::StandaloneFlow(token)));
-        }
-    }
-    Ok(None)
 }
 
 fn session_not_found(id: &str) -> anyhow::Error {
@@ -1671,34 +1486,6 @@ fn stop_native_run(run_id: &RunId) -> Result<()> {
     crate::lf::commands::util::stop_provider_session(&dir, &manifest.harness)
 }
 
-pub(crate) fn native_session_state(
-    run_id: Option<&RunId>,
-    ready_summary: Option<&str>,
-) -> Result<SessionState> {
-    if ready_summary.is_some() {
-        return Ok(SessionState::Ready);
-    }
-    let Some(run_id) = run_id else {
-        return Ok(SessionState::Waiting);
-    };
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(SessionState::Waiting);
-        }
-        Err(error) => return Err(error).context("resolve Session Run"),
-    };
-    if !crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?.is_empty() {
-        return Ok(SessionState::Active);
-    }
-    if crate::run_record::read_provider_session(&dir)?.is_some() {
-        Ok(SessionState::Closed)
-    } else {
-        Ok(SessionState::Waiting)
-    }
-}
-
 pub(crate) async fn token_is_current(
     store: &SharedStore,
     token: &FlowSessionToken,
@@ -1708,136 +1495,6 @@ pub(crate) async fn token_is_current(
         .await?
         .as_ref()
         .is_some_and(|position| token_matches(token, position)))
-}
-
-async fn list_flow_sessions(store: &SharedStore) -> Result<Vec<SessionRecord>> {
-    let mut records = Vec::new();
-    for (session, run) in store.open_review_sessions().await? {
-        records.push(review_surface(store, &session, &run).await?);
-    }
-    Ok(records)
-}
-
-async fn review_surface(
-    store: &SharedStore,
-    session: &crate::session::Session,
-    run: &crate::session::Run,
-) -> Result<SessionRecord> {
-    let task_id = run
-        .task_id
-        .as_ref()
-        .ok_or_else(|| anyhow!("Task review lacks its Task"))?;
-    let work = WorkRef::Task(task_id.clone());
-    let placement = store.placement(&work).await?;
-    let home = store
-        .home_by_id(&placement.home_id)
-        .await?
-        .ok_or_else(|| anyhow!("Session {} Home disappeared", session.id))?;
-    let runtime = if session.completed_at.is_some() {
-        SessionState::Closed
-    } else if home.route == "local" {
-        native_session_state(
-            run.published.then_some(&run.id),
-            session.ready_summary.as_deref(),
-        )?
-    } else if session.ready_summary.is_some() {
-        SessionState::Ready
-    } else if run.published {
-        SessionState::Closed
-    } else {
-        SessionState::Waiting
-    };
-    let (position, execution_error) = match store.flow_position(task_id).await {
-        Ok(position) => (position, None),
-        Err(crate::store::StoreError::InvalidData(reason)) => (None, Some(reason)),
-        Err(error) => return Err(error.into()),
-    };
-    let dir = local_session_run_dir(&run.id);
-    let flow_membership = if let Some(reason) = &execution_error {
-        SessionFlowMembership::Unknown {
-            reason: reason.clone(),
-        }
-    } else if let Some(manifest) = dir
-        .as_deref()
-        .and_then(|dir| crate::run_record::read_manifest(dir).ok())
-    {
-        run_flow_membership(store, Some(&manifest), &run.id).await
-    } else if let Some(position) = position
-        .as_ref()
-        .filter(|position| flow_id(position).ok().as_deref() == Some(session.id.as_str()))
-    {
-        SessionFlowMembership::of_position(position)
-    } else {
-        SessionFlowMembership::Unknown {
-            reason: "Run membership evidence is unavailable".into(),
-        }
-    };
-    let mut actions = position
-        .as_ref()
-        .filter(|position| flow_id(position).ok().as_deref() == Some(session.id.as_str()))
-        .map(flow_actions)
-        .unwrap_or_else(|| session_actions(SessionKind::Flow, runtime));
-    if let Some(reason) = &execution_error {
-        for action in &mut actions {
-            action.unavailable_reason = Some(reason.clone());
-        }
-    }
-    Ok(SessionRecord {
-        run_id: run.id.clone(),
-        title_source: wire_title_source(session.title_source),
-        work_path: session_work_path(store, Some(&work)).await?,
-        actions,
-        flow_membership,
-        provider: recorded_provider(dir.as_deref()),
-        terminal_ids: Vec::new(),
-        id: session.id.clone(),
-        kind: SessionKind::Flow,
-        work: Some(work),
-        wave_id: run.wave_id.clone(),
-        title: session.title.clone(),
-        detail: run.skill.clone().unwrap_or_default(),
-        cwd: run.cwd.display().to_string(),
-        state: runtime,
-        ready_summary: session.ready_summary.clone(),
-        open_argv: human_open_argv(
-            (home.route != "local").then_some(&home.id),
-            Some(&run.cwd),
-            &session.id,
-        )?,
-    })
-}
-
-async fn find_flow_session(store: &SharedStore, session_id: &str) -> Result<(Task, FlowPosition)> {
-    find_flow_session_optional(store, session_id)
-        .await?
-        .ok_or_else(|| anyhow!("session {session_id:?} is no longer waiting"))
-}
-
-async fn find_flow_session_optional(
-    store: &SharedStore,
-    session_id: &str,
-) -> Result<Option<(Task, FlowPosition)>> {
-    let Some((session, run)) = store.session(session_id).await? else {
-        return Ok(None);
-    };
-    if session.completed_at.is_some() {
-        bail!("Session {session_id} is already complete");
-    }
-    let task_id = run
-        .task_id
-        .ok_or_else(|| anyhow!("review Session has no Task"))?;
-    let position = store
-        .flow_position(&task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Session {session_id} invocation is no longer current"))?;
-    if flow_id(&position)? != session.id {
-        bail!("Session {session_id} is no longer waiting");
-    }
-    let task = store
-        .get_task(&task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
-    Ok(Some((task, position)))
 }
 
 async fn flow_surface(
@@ -1851,7 +1508,7 @@ async fn flow_surface(
         .session(&id)
         .await?
         .ok_or_else(|| session_not_found(&id))?;
-    review_surface(store, &session, &run).await
+    surface(store, &session, &run).await
 }
 
 pub(crate) fn human_open_argv(
@@ -2163,26 +1820,16 @@ fn question_title(question: &str) -> String {
     }
 }
 
-async fn wait_for_ask(mut store: Option<SharedStore>, id: &str, run_id: &RunId) -> Result<String> {
+async fn wait_for_ask(store: &SharedStore, id: &str) -> Result<String> {
     loop {
-        // While the rows wait beside the Run there is nothing to read, and a
-        // waiting caller must not be the one to initialize a store.
-        let reserved = unrecorded_session::read(run_id)?.is_some();
-        if store.is_none() && !reserved {
-            store = crate::store::open_existing_store()
-                .await
-                .map(std::sync::Arc::new);
-        }
-        if let Some(store) = store.as_ref().filter(|_| !reserved) {
-            let (session, _) = store
-                .session(id)
-                .await?
-                .ok_or_else(|| anyhow!("session {id:?} disappeared before resolution"))?;
-            if session.completed_at.is_some() {
-                return session
-                    .ready_summary
-                    .ok_or_else(|| anyhow!("Ask {id} completed without an answer"));
-            }
+        let (session, _) = store
+            .session(id)
+            .await?
+            .ok_or_else(|| anyhow!("session {id:?} disappeared before resolution"))?;
+        if session.completed_at.is_some() {
+            return session
+                .ready_summary
+                .ok_or_else(|| anyhow!("Ask {id} completed without an answer"));
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
@@ -2242,7 +1889,6 @@ mod tests {
     use crate::durable::{FlowPosition, RunId};
     use crate::engine::{prepare_launch_prompt, Config, LaunchPromptInput, Surface};
     use crate::lf::{Cli, Commands};
-    use crate::ops::unrecorded_session;
     use crate::run_record::{
         preferred_work_selector, AttributionSource, RunManifest, SubjectAttribution,
     };
@@ -2335,7 +1981,7 @@ mod tests {
     }
 
     async fn open_asks(store: &SharedStore) -> Vec<(Session, Run)> {
-        let mut open = store.open_conversations().await.unwrap();
+        let mut open = store.open_sessions().await.unwrap();
         open.retain(|(session, _)| session.kind == SessionKind::Ask);
         open
     }
@@ -2371,11 +2017,7 @@ mod tests {
 
     /// A stored Ask whose launch was consumed without provider history.
     async fn consumed_ask(store: &SharedStore, id: String, question: &str) -> (Session, Run) {
-        let reserved = reserve_ask(Some(store), id, question, None).await.unwrap();
-        let stored = unrecorded_session::record(store, &reserved.run.id)
-            .await
-            .unwrap()
-            .unwrap();
+        let stored = reserve_ask(store, id, question, None).await.unwrap();
         std::fs::remove_file(run_dir(&stored.1).join("prepared")).unwrap();
         stored
     }
@@ -2393,7 +2035,14 @@ mod tests {
             let caller = std::env::var("LF_RUN_ID").unwrap();
             let key = "/private/checkout/invocation/decision/visit-1";
             let first = ask_once(&store, key, "Choose a policy", Some("unblock"));
-            let duplicate = ask_once(&store, key, "Changed retry text", Some("unblock"));
+            // Concurrent callers race for the launch lock, so the retry
+            // starts once the first request's Session is stored.
+            let duplicate = async {
+                while store.session(&keyed_id(key)).await.unwrap().is_none() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                ask_once(&store, key, "Changed retry text", Some("unblock")).await
+            };
             let independent =
                 ask_once(&store, "invocation/decision/visit-2", "Second choice", None);
             let human = async {
@@ -2461,12 +2110,7 @@ mod tests {
             };
             let (result, ()) = tokio::join!(ask_once(&store, key, "replacement", None), human);
             assert_eq!(result.unwrap(), "Recovered");
-            assert_eq!(
-                wait_for_ask(Some(store.clone()), &id, &first_run.id)
-                    .await
-                    .unwrap(),
-                "Recovered"
-            );
+            assert_eq!(wait_for_ask(&store, &id).await.unwrap(), "Recovered");
         });
     }
 
@@ -2480,7 +2124,7 @@ mod tests {
             let (session, run) = consumed_ask(&store, keyed_id(key), "Keep native ownership").await;
             // No tmux launcher and no native history do not grant replacement
             // authority. Even a delayed serve command must join.
-            serve_ask(Some(store.clone()), &run.id).await.unwrap();
+            serve_ask(&store, &run.id).await.unwrap();
             assert!(tokio::time::timeout(
                 Duration::from_millis(100),
                 ask_once(&store, key, "retry", None)
@@ -2501,12 +2145,7 @@ mod tests {
             super::mark_ready(&store, "Resolved").await.unwrap();
             super::complete(&store, &session.id).await.unwrap();
             assert!(super::mark_ready(&store, "Late readiness").await.is_err());
-            assert_eq!(
-                wait_for_ask(Some(store.clone()), &session.id, &run.id)
-                    .await
-                    .unwrap(),
-                "Resolved"
-            );
+            assert_eq!(wait_for_ask(&store, &session.id).await.unwrap(), "Resolved");
             assert!(open_asks(&store).await.is_empty());
         });
     }
@@ -2524,7 +2163,7 @@ mod tests {
                 .await
                 .unwrap();
             let lock = super::lock_session_launch(&session.id).unwrap();
-            let mut reopening = Box::pin(super::open_ask(&store, &session.id));
+            let mut reopening = Box::pin(super::open_waiting(&store, &session.id));
             assert!(
                 tokio::time::timeout(Duration::from_millis(200), reopening.as_mut())
                     .await
@@ -2546,9 +2185,7 @@ mod tests {
                 .to_string()
                 .contains("already complete"));
             assert_eq!(
-                wait_for_ask(Some(store.clone()), &session.id, &run.id)
-                    .await
-                    .unwrap(),
+                wait_for_ask(&store, &session.id).await.unwrap(),
                 "Accepted direction"
             );
             assert_eq!(store.session_runs(&session.id).await.unwrap().len(), 1);
@@ -2596,9 +2233,7 @@ mod tests {
             answer(&store, &session, &run, "Try the narrower proof").await;
 
             assert_eq!(
-                wait_for_ask(Some(store.clone()), &session.id, &run.id)
-                    .await
-                    .unwrap(),
+                wait_for_ask(&store, &session.id).await.unwrap(),
                 "Try the narrower proof"
             );
             assert!(open_asks(&store).await.is_empty());
@@ -2614,12 +2249,10 @@ mod tests {
             let store = home.store().await;
             let human = async {
                 let (session, run) = wait_until_asks(&store, 1).await.remove(0);
-                assert!(unrecorded_session::read(&run.id).unwrap().is_none());
                 answer(&store, &session, &run, "Ordinary answer").await;
                 session.id
             };
-            let (result, id) =
-                tokio::join!(ask(Some(store.clone()), "Plain question", None), human);
+            let (result, id) = tokio::join!(ask(&store, "Plain question", None), human);
             assert_eq!(result.unwrap(), "Ordinary answer");
             let (closed, _) = store.session(&id).await.unwrap().unwrap();
             assert!(closed.completed_at.is_some());
@@ -2777,14 +2410,29 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
+        let run = |task_id: Option<crate::work::task::TaskId>| Run {
+            id: RunId::new(),
+            session_id: None,
+            invocation_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id,
+            wave_id: Some(wave.id().clone()),
+            work_source: None,
+            created_at: 1,
+            published: true,
+            cwd: directory.path().to_path_buf(),
+            skill: None,
+            provider: None,
+            model: None,
+            caller_run_id: None,
+        };
         assert_eq!(
-            super::session_work_path(
-                &store,
-                Some(&crate::durable::WorkRef::Wave(wave.id().clone()))
-            )
-            .await
-            .unwrap()
-            .as_deref(),
+            super::session_work_path(&store, &run(None))
+                .await
+                .unwrap()
+                .as_deref(),
             Some("product")
         );
         let now = time::OffsetDateTime::now_utc();
@@ -2833,28 +2481,19 @@ mod tests {
                 Some(subject.clone())
             );
         }
+        let unbound = Run {
+            wave_id: None,
+            ..run(None)
+        };
         assert_eq!(
-            super::session_wave_id(&store, Some(&subject))
-                .await
-                .unwrap(),
-            Some(wave.id().clone())
+            super::session_work_path(&store, &unbound).await.unwrap(),
+            None
         );
-        assert_eq!(
-            super::session_work_path(&store, Some(&subject))
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("product")
-        );
-        assert_eq!(super::session_work_path(&store, None).await.unwrap(), None);
         let missing = crate::work::task::TaskId::new();
         assert_eq!(
-            super::session_work_path(
-                &store,
-                Some(&crate::durable::WorkRef::Task(missing.clone()))
-            )
-            .await
-            .unwrap(),
+            super::session_work_path(&store, &run(Some(missing.clone())))
+                .await
+                .unwrap(),
             Some(format!("Task {missing} (unavailable)"))
         );
     }
@@ -3073,8 +2712,15 @@ mod tests {
             created_at: 1,
         };
         let runtime = tokio::runtime::Runtime::new().unwrap();
+        let store: SharedStore = std::sync::Arc::new(
+            runtime
+                .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+                    checkout.path().join("registry.db"),
+                )))
+                .unwrap(),
+        );
 
-        let args = runtime.block_on(ask_launch_args(None, &session, &run));
+        let args = runtime.block_on(ask_launch_args(&store, &session, &run));
         let cli = Cli::try_parse_from(std::iter::once("lf".to_string()).chain(args)).unwrap();
         let Some(Commands::Skill { name, args }) = cli.command else {
             panic!("selected Ask must use the ordinary skill command")
@@ -3107,7 +2753,7 @@ mod tests {
         assert_eq!(prepared.config.cwd.as_deref(), Some(checkout.path()));
 
         let inline = Run { skill: None, ..run };
-        let args = runtime.block_on(ask_launch_args(None, &session, &inline));
+        let args = runtime.block_on(ask_launch_args(&store, &session, &inline));
         let cli = Cli::try_parse_from(std::iter::once("lf".to_string()).chain(args)).unwrap();
         assert!(matches!(cli.command, Some(Commands::Inline { .. })));
     }

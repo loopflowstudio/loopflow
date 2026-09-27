@@ -23,6 +23,7 @@ pub mod project;
 mod rebase;
 mod release;
 mod run;
+pub(crate) mod session_import;
 pub mod task;
 pub mod task_actions;
 pub(crate) mod task_destination;

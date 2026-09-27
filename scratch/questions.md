@@ -417,3 +417,36 @@ them.
 
 **`lf session list --task` was not added.** The design's demo names it; this
 cut's brief did not.
+
+## Cut D: one-time import of old Session files (2026-09-27)
+
+Executive choices, recorded in [the cut report](cutover/cut-d-import.md).
+Jack has not reviewed any of them.
+
+**The command is `lf session import`, with `--dry-run`.** It imports the Home it
+runs in. The earlier sketch's `--from <home>` was dropped: every other command
+selects its Home the same way, and a copy is imported by running there.
+
+**An imported interactive Session keeps its Run id as its Session id.** Old
+Homes named these Sessions by their Run, so links and habits still resolve, and
+the id makes a second import a no-op. New launches get a separate Session id.
+
+**A terminal Run of a Flow step with no stored Session is reported, not
+imported.** Old Homes listed these as interactive Sessions. They were attempts
+of a review, and storing them as independent conversations would misstate
+that. On the copy of the installed Home this was six Runs. They no longer list.
+
+**A Run whose manifest names an unregistered Task or Wave is reported, not
+imported as an orphan.** Importing it without its Work would drop the
+attribution silently. None occurred on the copy.
+
+**`started_at` for a Task first named by an imported Run is the time of the
+import.** The report lists those Tasks so the inference is visible. Seven on
+the copy.
+
+**A completed Ask or review closes at its file's modification time.** The old
+files recorded no completion time.
+
+**A name in `session-name.json` replaces a generated title on a stored row and
+never a human one.** A generated title suggested after the import would be
+replaced by the file's if the import ran again.

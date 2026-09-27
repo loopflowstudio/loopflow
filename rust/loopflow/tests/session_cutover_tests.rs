@@ -1098,3 +1098,234 @@ fn session_list_reads_a_taskless_review_from_sql() {
     assert!(!flows.exists(), "reading a Session recreates no Flow file");
     assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
 }
+
+/// One Session of each origin, as an old Home kept them in files.
+#[test]
+fn import_stores_each_old_session_once_with_its_name() {
+    use loopflow::durable::{FlowPosition, RunId};
+    use loopflow::engine::invocation::QueuedInvocation;
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use serde_json::json;
+
+    let fixture = Fixture::new(false);
+    let home = fixture.home.path();
+    let repo = fixture.repo.path();
+    let task = support::register_unrun_task(home, repo, "session-import", &fixture.repo.head_sha());
+    // The Task review starts its own Task; the interactive Session names another.
+    let sibling_worktree = fixture.repo.create_named_worktree("import-sibling");
+    let sibling =
+        support::register_sibling_task(&task, "INF-124", "import-sibling", &sibling_worktree);
+    let write = |path: PathBuf, value: Value| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        path
+    };
+    let sources = std::cell::RefCell::new(Vec::new());
+    // A conversation's Run record: manifest, provider history and its name.
+    let record = |title: &str, source: &str, flow: Value, subjects: Value| -> String {
+        let id = RunId::new().to_string();
+        let dir = fixture.run_dir(&id);
+        sources.borrow_mut().push(write(
+            dir.join("manifest.json"),
+            json!({
+                "schema_version": 1, "run_id": id, "parent_run_id": null,
+                "created_at": "2026-09-20T20:00:00Z", "harness": "opencode", "model": null,
+                "surface": "tui", "cwd": repo, "repo": repo, "worktree": repo,
+                "skill": null, "subjects": subjects, "flow": flow, "launch": null,
+                "context": null, "runtime_path": null, "runtime_digest": null,
+                "host": "fixture", "boot_id": null
+            }),
+        ));
+        sources.borrow_mut().push(write(
+            dir.join("session-name.json"),
+            json!({"schema_version": 1, "title": title, "source": source}),
+        ));
+        write(
+            dir.join("provider-session.json"),
+            json!({"schema_version": 1, "provider_session_id": format!("ses_{id}"), "account_id": null}),
+        );
+        id
+    };
+    let independent = json!({"kind": "independent"});
+
+    let interactive = record(
+        "Parser review",
+        "human",
+        independent.clone(),
+        json!([{"selector": "task:INF-124", "source": "declared"}]),
+    );
+    let asked = record(
+        "Release target",
+        "generated",
+        independent.clone(),
+        json!([]),
+    );
+    sources.borrow_mut().push(write(
+        home.join("human-sessions/ask_release.json"),
+        json!({
+            "id": "ask_release", "parent_run_id": interactive,
+            "parent_run_dir": fixture.run_dir(&interactive), "work": null,
+            "work_selector": null, "title": "Which release?", "detail": "opencode",
+            "prompt": "Which release carries the parser?", "skill": null, "cwd": repo,
+            "model": "opencode", "session_run_id": asked, "ready_summary": null,
+            "status": "waiting"
+        }),
+    ));
+    let broken = home.join("human-sessions/ask_broken.json");
+    std::fs::write(&broken, "{").unwrap();
+
+    let review = ConcreteStep::Skill(ConcreteSkill {
+        skill: Skill {
+            content: Some("Review the design with the person.".into()),
+            ..Skill::named("review-design")
+        },
+        policy: OccurrencePolicy {
+            id: Some("review".into()),
+            human: true,
+            ..Default::default()
+        },
+        flow_parents: vec![],
+    });
+    let invocation = uuid::Uuid::new_v4().to_string();
+    let boundary = uuid::Uuid::new_v4().to_string();
+    let reviewed = record("Design review", "human", Value::Null, json!([]));
+    sources.borrow_mut().push(write(
+        home.join("flows").join(&invocation).join("position.json"),
+        json!({
+            "id": invocation, "flow": "design", "cwd": repo, "steps": [review.clone()],
+            "cursor": ExecutionCursor::default(), "message": null, "model": "opencode",
+            "wave": null, "task": null, "as_work": null,
+            "active": {
+                "id": boundary, "run_id": reviewed, "run_dir": fixture.run_dir(&reviewed),
+                "completed": false, "ready_summary": "Keep the old parser"
+            },
+            "failure": null, "finished": false
+        }),
+    ));
+
+    let task_review = record("Task review", "human", Value::Null, json!([]));
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(task.store.set_flow_position(
+            &task.task.id,
+            FlowPosition {
+                task_id: task.task.id.clone(),
+                invocation: QueuedInvocation::new("captured", vec![review]).unwrap(),
+                session_run_id: Some(RunId::parse(&task_review).unwrap()),
+                ready_summary: None,
+                cursor: ExecutionCursor::default(),
+                version: 0,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        ))
+        .unwrap();
+    let evidence: Vec<(PathBuf, Vec<u8>)> = sources
+        .into_inner()
+        .into_iter()
+        .map(|path| {
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+
+    let names = || -> Vec<(String, String, String)> {
+        let mut names: Vec<_> = fixture
+            .sessions()
+            .iter()
+            .map(|session| {
+                (
+                    session["title"].as_str().unwrap().to_string(),
+                    session["kind"].as_str().unwrap().to_string(),
+                    session["run_id"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(
+        names().len(),
+        1,
+        "before the import only the stored Task review lists"
+    );
+
+    let planned = fixture.json(&["session", "import", "--dry-run", "--json"]);
+    assert_eq!(fixture.count("sessions"), 1, "a dry run stores nothing");
+    let first = fixture.json(&["session", "import", "--json"]);
+    for report in [&planned, &first] {
+        for (kind, count) in [
+            ("interactive", 1),
+            ("ask", 1),
+            ("flow_review", 1),
+            ("task_review", 1),
+            ("unchanged", 0),
+        ] {
+            assert_eq!(report[kind], count, "{kind}: {report}");
+        }
+        assert_eq!(report["tasks_started"], json!([sibling.id]), "{report}");
+        let failed = report["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 1, "{report}");
+        assert_eq!(failed[0]["path"], json!(broken));
+        assert!(!failed[0]["reason"].as_str().unwrap().is_empty());
+    }
+    let again = fixture.json(&["session", "import", "--json"]);
+    for (kind, count) in [
+        ("interactive", 0),
+        ("ask", 0),
+        ("flow_review", 0),
+        ("task_review", 0),
+        ("unchanged", 4),
+    ] {
+        assert_eq!(again[kind], count, "{kind}: {again}");
+    }
+    assert_eq!(again["tasks_started"], json!([]));
+
+    let expected = {
+        let mut expected = vec![
+            ("Design review".to_string(), "flow".to_string(), reviewed),
+            (
+                "Parser review".to_string(),
+                "interactive".to_string(),
+                interactive.clone(),
+            ),
+            ("Release target".to_string(), "ask".to_string(), asked),
+            ("Task review".to_string(), "flow".to_string(), task_review),
+        ];
+        expected.sort();
+        expected
+    };
+    assert_eq!(names(), expected);
+    assert_eq!(fixture.count("sessions"), 4);
+    assert_eq!(fixture.count("runs"), 4);
+    assert_eq!(
+        fixture.run_parents(&interactive),
+        (
+            Some(sibling.id.to_string()),
+            Some(sibling.wave_id.to_string()),
+            Some("declared".to_string()),
+        )
+    );
+    let feedback: String = fixture
+        .db()
+        .query_row(
+            "SELECT ready_summary FROM sessions WHERE id=?1",
+            [format!("flow:{invocation}:{boundary}")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(feedback, "Keep the old parser");
+
+    // The files stay as evidence and nothing reads them again.
+    for (path, bytes) in &evidence {
+        assert_eq!(&std::fs::read(path).unwrap(), bytes, "{}", path.display());
+    }
+    for (path, _) in &evidence {
+        if !path.ends_with("manifest.json") && !path.ends_with("position.json") {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    assert_eq!(names(), expected);
+}

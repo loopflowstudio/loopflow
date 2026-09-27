@@ -21,6 +21,7 @@ mod migration_schema;
 pub mod migrations;
 mod pr_landings;
 pub mod rows;
+mod sessions;
 pub mod sqlite;
 mod token_crypto;
 

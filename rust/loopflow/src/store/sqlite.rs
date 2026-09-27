@@ -25,6 +25,7 @@ mod ci_incidents;
 mod durable;
 mod metrics;
 mod pr_landings;
+pub(crate) mod sessions;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

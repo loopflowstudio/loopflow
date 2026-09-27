@@ -138,7 +138,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let begun: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='started')
-             OR EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND (worker_generation>0 OR session_run_id IS NOT NULL))",
+             OR EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND worker_generation>0)
+             OR EXISTS(SELECT 1 FROM runs WHERE task_id=?1 AND published=1)",
             [task.as_str()], |row| row.get(0),
         )?;
         let claimed: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE state='current' AND task_id=?1 AND claim_json IS NOT NULL)", [task.as_str()], |row| row.get(0))?;
@@ -166,7 +167,8 @@ impl SqliteStore {
         tx.execute(
             "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
              AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='started')
-             AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND (worker_generation>0 OR claim_json IS NOT NULL OR session_run_id IS NOT NULL))",
+             AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND (worker_generation>0 OR claim_json IS NOT NULL))
+             AND NOT EXISTS(SELECT 1 FROM runs WHERE task_id=?1 AND published=1)",
             params![task.as_str(), super::super::rows::now_unix()],
         )?;
         let retired = tx.query_row(

@@ -75,6 +75,12 @@ Tighten the artifact to:
 
 For an additive series, describe the keystone fully and list the intended follow-ups precisely enough for `launch-plan` to encode. Do not file them yet. Before finishing, reread the artifact and present the consequential scope, keystone boundary, follow-ups, and open assumptions.
 
+When filing or editing a Task, keep its description to the current problem,
+desired outcome, observable acceptance, and real constraints. Put dated planning
+and execution updates in authorized Task comments, with links to detailed evidence.
+Comments may be collapsed: keep current blockers, dependencies, and accepted scope
+visible in the description. Reconcile changed scope instead of appending amendments.
+
 ## Existing-design handoff
 
 When the user asks to file a Task and run a Flow from an existing design,

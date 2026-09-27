@@ -929,12 +929,17 @@ fn select_task_worker_flow_from_project(
     project: &crate::pm::PmProject,
     requested: Option<&str>,
 ) -> OpsResult<String> {
-    let recommended = project
+    let selected = requested.unwrap_or_else(|| recommended_task_flow(project));
+    load_task_flow(repo, selected).map(|(name, _)| name)
+}
+
+/// The Flow a Task starts without an explicit selection.
+pub(crate) fn recommended_task_flow(project: &crate::pm::PmProject) -> &str {
+    project
         .flows
         .as_ref()
-        .and_then(|flows| flows.recommended.as_deref());
-    let selected = requested.or(recommended).unwrap_or("feature");
-    load_task_flow(repo, selected).map(|(name, _)| name)
+        .and_then(|flows| flows.recommended.as_deref())
+        .unwrap_or("feature")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4397,7 +4402,7 @@ pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_restart(issue: &str, advice: Option<String>) -> OpsResult<Task> {
+pub fn task_restart(issue: &str, advice: Option<String>, flow: Option<String>) -> OpsResult<Task> {
     let issue = issue.to_string();
     let advice = advice
         .map(|value| value.trim().to_string())
@@ -4409,10 +4414,14 @@ pub fn task_restart(issue: &str, advice: Option<String>) -> OpsResult<Task> {
             }
         })
         .transpose()?;
-    block_on_task(async move { restart_task_async(&issue, advice).await })
+    block_on_task(async move { restart_task_async(&issue, advice, flow).await })
 }
 
-async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Task> {
+async fn restart_task_async(
+    issue: &str,
+    advice: Option<String>,
+    flow: Option<String>,
+) -> OpsResult<Task> {
     let store = task_store().await?;
     let mut task = store
         .get_task_by_issue(issue)
@@ -4434,6 +4443,11 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
         }
         WorkStatus::Ready => {}
     }
+    // Reject an unusable replacement before any refresh, checkpoint, or stop so
+    // the pinned Flow and its worker stay exactly as they were.
+    if let Some(flow) = flow.as_deref() {
+        load_task_flow(&task.worktree, flow)?;
+    }
 
     let resolved = crate::ops::task_pm::resolve_task_async(
         &task.worktree,
@@ -4442,7 +4456,7 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
     )
     .await?;
     let selected_flow =
-        select_task_worker_flow_from_project(&task.worktree, &resolved.project, None)?;
+        select_task_worker_flow_from_project(&task.worktree, &resolved.project, flow.as_deref())?;
     let mut project = store
         .get_project_by_project(&resolved.project.id)
         .await
@@ -4930,16 +4944,20 @@ mod tests {
 
         launch_task_process(&store, &mut task, None).await.unwrap();
 
-        assert_eq!(
-            store.flow_position(&task.id).await.unwrap(),
-            Some(position.clone())
-        );
+        // A parked human boundary prepares its Session Run without launching a
+        // provider; everything else about the position is untouched.
+        let stored = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert!(stored.session_run_id.is_some());
+        assert_eq!(stored.invocation, position.invocation);
+        assert_eq!(stored.cursor, position.cursor);
+        assert_eq!(stored.ready_summary, position.ready_summary);
+        assert!(stored.failure.is_none());
         assert_eq!(
             store.task_events_after(&task.id, 0).await.unwrap().len(),
             event_count
         );
 
-        let mut blocked = position;
+        let mut blocked = stored;
         blocked.failure = Some(crate::durable::TaskFlowBlocker {
             reason: "Saved instructions are unavailable; explicitly restart this Task".to_string(),
             restart_required: true,
@@ -5202,6 +5220,12 @@ mod tests {
             select_task_worker_flow_from_project(repo.path(), &project, Some("incident")).unwrap(),
             "incident"
         );
+        for skill in ["design", "ship-5whys"] {
+            assert_eq!(
+                select_task_worker_flow_from_project(repo.path(), &project, Some(skill)).unwrap(),
+                skill
+            );
+        }
     }
 
     #[test]

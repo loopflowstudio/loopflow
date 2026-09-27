@@ -7,6 +7,7 @@ pub mod error;
 pub mod event;
 pub mod execution;
 pub mod flow;
+pub mod flow_graph;
 pub mod git;
 pub mod identity;
 pub mod launch;

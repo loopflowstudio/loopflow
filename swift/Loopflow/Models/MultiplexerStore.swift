@@ -12,15 +12,6 @@ public enum SpatialDirection: Equatable, Sendable {
     case down
 }
 
-public enum PaneColor: CaseIterable, Sendable {
-    case blue
-    case amber
-    case green
-    case rose
-    case violet
-    case cyan
-}
-
 /// Owns the immutable layout tree outside SwiftUI. Views receive snapshots via
 /// a notification and send every mutation back through this reference layer.
 @MainActor
@@ -28,9 +19,8 @@ public final class MultiplexerStore {
     public private(set) var layout: LayoutNode
     public private(set) var focusedPaneId: String
     public private(set) var zoomedPaneId: String?
+    public private(set) var shellCommands: [String: [String]] = [:]
 
-    private var paneColors: [String: PaneColor] = [:]
-    private var nextColorIndex = 0
     private var closedState: ClosedState?
 
     public init(layout: LayoutNode = .defaultLayout()) {
@@ -38,9 +28,6 @@ public final class MultiplexerStore {
         let first = layout.firstPane
         focusedPaneId = first.id
         zoomedPaneId = nil
-        for pane in layout.allPanes {
-            _ = _assignColor(to: pane.id)
-        }
     }
 
     public var focusedPane: PaneState {
@@ -61,11 +48,6 @@ public final class MultiplexerStore {
         }
     }
 
-    public func color(for paneId: String) -> PaneColor {
-        if let color = paneColors[paneId] { return color }
-        return _assignColor(to: paneId)
-    }
-
     public func setFocusedPane(_ paneId: String) {
         guard layout.pane(for: paneId) != nil, focusedPaneId != paneId else { return }
         focusedPaneId = paneId
@@ -84,7 +66,6 @@ public final class MultiplexerStore {
         layout = layout.splitting(paneId, axis: axis, newPane: pane)
         focusedPaneId = pane.id
         zoomedPaneId = nil
-        _ = _assignColor(to: pane.id)
         closedState = nil
         _notify()
         return pane
@@ -98,10 +79,11 @@ public final class MultiplexerStore {
         closedState = ClosedState(
             layout: layout,
             focusedPaneId: focusedPaneId,
-            zoomedPaneId: zoomedPaneId,
-            paneColors: paneColors,
-            nextColorIndex: nextColorIndex
+            zoomedPaneId: zoomedPaneId
         )
+        // Undo may restore a shell pane, but must never replay a completed or
+        // interrupted conversation's initial launch command.
+        shellCommands.removeValue(forKey: paneId)
         if layout.allPanes.count == 1 {
             layout = layout.replacingContent(of: paneId, with: .empty)
             zoomedPaneId = nil
@@ -110,7 +92,6 @@ public final class MultiplexerStore {
         }
         guard let updated = layout.removing(paneId) else { return }
         layout = updated
-        paneColors.removeValue(forKey: paneId)
         if zoomedPaneId == paneId { zoomedPaneId = nil }
         if focusedPaneId == paneId {
             focusedPaneId = _nearestPane(to: paneId, in: closedState?.layout)
@@ -124,8 +105,6 @@ public final class MultiplexerStore {
         layout = closedState.layout
         focusedPaneId = closedState.focusedPaneId
         zoomedPaneId = closedState.zoomedPaneId
-        paneColors = closedState.paneColors
-        nextColorIndex = closedState.nextColorIndex
         self.closedState = nil
         _notify()
     }
@@ -136,9 +115,12 @@ public final class MultiplexerStore {
             return
         }
 
-        if focusedPane.content == .shell {
+        switch focusedPane.content {
+        case .shell, .monitor:
             _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
             return
+        case .empty, .session:
+            break
         }
 
         layout = layout.replacingContent(
@@ -149,15 +131,33 @@ public final class MultiplexerStore {
         _notify()
     }
 
-    public func newShell() {
+    public func newShell(command: [String] = []) {
         if focusedPane.content == .empty {
+            shellCommands[focusedPaneId] = command
             layout = layout.replacingContent(of: focusedPaneId, with: .shell)
         } else {
-            _ = _split(focusedPaneId, axis: .vertical, content: .shell)
+            if let pane = _split(focusedPaneId, axis: .vertical, content: .shell) {
+                shellCommands[pane.id] = command
+                _notify()
+            }
             return
         }
         closedState = nil
         _notify()
+    }
+
+    /// Reveal one Task's observation beside existing terminals, never replacing them.
+    public func showMonitor(taskId: String) {
+        let content = PaneContent.monitor(taskId: taskId)
+        if let pane = layout.allPanes.first(where: { $0.content == content }) {
+            setFocusedPane(pane.id)
+        } else if focusedPane.content == .empty {
+            layout = layout.replacingContent(of: focusedPaneId, with: content)
+            closedState = nil
+            _notify()
+        } else {
+            _ = _split(focusedPaneId, axis: .vertical, content: content)
+        }
     }
 
     public func toggleZoom(_ paneId: String) {
@@ -215,14 +215,17 @@ public final class MultiplexerStore {
             guard case .session(let id) = pane.content else { return false }
             return !sessionIds.contains(id)
         }
-        guard !stale.isEmpty else { return }
+        let undoIsStale = closedState?.layout.allPanes.contains { pane in
+            guard case .session(let id) = pane.content else { return false }
+            return !sessionIds.contains(id)
+        } == true
+        guard !stale.isEmpty || undoIsStale else { return }
 
         for pane in stale {
             if layout.allPanes.count == 1 {
                 layout = .leaf(PaneState(id: pane.id, content: .empty))
             } else if let updated = layout.removing(pane.id) {
                 layout = updated
-                paneColors.removeValue(forKey: pane.id)
             }
         }
         if layout.pane(for: focusedPaneId) == nil {
@@ -233,14 +236,6 @@ public final class MultiplexerStore {
         }
         closedState = nil
         _notify()
-    }
-
-    private func _assignColor(to paneId: String) -> PaneColor {
-        let colors = PaneColor.allCases
-        let color = colors[nextColorIndex % colors.count]
-        nextColorIndex += 1
-        paneColors[paneId] = color
-        return color
     }
 
     private func _notify() {
@@ -352,7 +347,5 @@ public final class MultiplexerStore {
         let layout: LayoutNode
         let focusedPaneId: String
         let zoomedPaneId: String?
-        let paneColors: [String: PaneColor]
-        let nextColorIndex: Int
     }
 }

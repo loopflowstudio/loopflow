@@ -18,7 +18,7 @@ use crate::store::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
-const EXEC_PROCESS_ROOT: &str = "runtime/exec-processes";
+pub(crate) const EXEC_PROCESS_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 

@@ -391,7 +391,7 @@ fn _read_executable_references(
     conn: &rusqlite::Connection,
 ) -> rusqlite::Result<Vec<(String, String, String, String)>> {
     let mut statement = conn.prepare(
-        "SELECT 'wave', w.id, 'wave', w.repo
+        "SELECT 'wave', w.id, 'wave/operate', w.repo
          FROM work_placements placement
          JOIN waves w ON w.id=placement.wave_id
          WHERE placement.enabled=1
@@ -813,9 +813,26 @@ mod compatibility_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
         crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+        let conn = rusqlite::Connection::open(&store).unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at, work_state)
+             VALUES ('w-ready', 'ready', ?1, 0, 'ready')",
+            [directory.path().to_str().unwrap()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
+             SELECT 'w-ready', id, 1, 0 FROM homes WHERE route='local'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
         let compatibility = _read_local_executable_compatibility(&store);
         assert!(
-            matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
+            matches!(
+                compatibility,
+                ExecutableCompatibility::Compatible { references: 1 }
+            ),
             "{compatibility:?}"
         );
     }
@@ -2386,23 +2403,28 @@ fn promote_local_candidate(
     sync_skills: bool,
     preview_only: bool,
     fresh: bool,
+    reuse_home: Option<&str>,
 ) -> Result<()> {
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     let root = crate::machine_install::root()?;
     let state = crate::machine_install::read_state(&root)?;
-    let preview_store = match &state {
-        crate::machine_install::MachineInstallState::Settled(active)
+    let retained = reuse_home
+        .map(|id| crate::machine_install::retained_development_home(&root, id))
+        .transpose()?;
+    let preview_store = match (&state, &retained) {
+        (crate::machine_install::MachineInstallState::Switching(receipt), _) => {
+            return Err(anyhow!(
+                "install switch {} is unsettled; recover it before another promotion",
+                receipt.id
+            ));
+        }
+        (_, Some(selection)) => selection.store.clone(),
+        (crate::machine_install::MachineInstallState::Settled(active), None)
             if active.selection.source == crate::machine_install::InstallSource::Development
                 && !fresh =>
         {
             active.selection.store.clone()
-        }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; recover it before another promotion",
-                receipt.id
-            ))
         }
         _ => crate::store::production_database_path(),
     };
@@ -2445,6 +2467,9 @@ fn promote_local_candidate(
         })
         .transpose()?;
     if !fresh
+        && retained
+            .as_ref()
+            .is_none_or(|home| home.installation_id == prior.selection.installation_id)
         && matches!(preview.verdict, Verdict::Promote)
         && active_install_matches_candidate(
             &root,
@@ -2479,15 +2504,24 @@ fn promote_local_candidate(
         &prepared.daemon_binary,
         artifacts.app_source,
     )?;
-    let reuse =
-        prior.selection.source == crate::machine_install::InstallSource::Development && !fresh;
+    let reused_home = retained.as_ref().or_else(|| {
+        (prior.selection.source == crate::machine_install::InstallSource::Development && !fresh)
+            .then_some(&prior.selection)
+    });
+    let reuse = reused_home.is_some();
     let installation_id = if reuse {
-        prior.selection.installation_id.clone()
+        reused_home
+            .expect("reuse has an existing Home")
+            .installation_id
+            .clone()
     } else {
         format!("local-{}", Uuid::new_v4().simple())
     };
     let target_store = if reuse {
-        prior.selection.store.clone()
+        reused_home
+            .expect("reuse has an existing Home")
+            .store
+            .clone()
     } else {
         crate::machine_install::account_home()?
             .join(".lf-dev/installed")
@@ -2703,6 +2737,7 @@ fn delegate_local_promotion(
     sync_skills: bool,
     preview_only: bool,
     fresh: bool,
+    reuse_home: Option<&str>,
 ) -> Result<()> {
     let mut command = Command::new(build);
     command
@@ -2733,6 +2768,9 @@ fn delegate_local_promotion(
     if fresh {
         command.arg("--fresh");
     }
+    if let Some(home) = reuse_home {
+        command.arg("--reuse-home").arg(home);
+    }
     stamp_next_promote_hop(&mut command, current_promote_hop());
     let status = command
         .status()
@@ -2751,6 +2789,7 @@ fn delegate_to_active_coordinator(
     sync_skills: bool,
     preview_only: bool,
     fresh: bool,
+    reuse_home: Option<&str>,
 ) -> Result<()> {
     let mut command = Command::new(coordinator);
     command
@@ -2782,6 +2821,9 @@ fn delegate_to_active_coordinator(
     }
     if fresh {
         command.arg("--fresh");
+    }
+    if let Some(home) = reuse_home {
+        command.arg("--reuse-home").arg(home);
     }
     stamp_next_promote_hop(&mut command, current_promote_hop());
     let status = command.status().with_context(|| {
@@ -3468,10 +3510,11 @@ pub fn promote(
     from_build: Option<&Path>,
     coordinated_build: Option<&Path>,
     fresh: bool,
+    reuse_home: Option<&str>,
 ) -> Result<()> {
-    if fresh && from_build.is_none() && coordinated_build.is_none() {
+    if (fresh || reuse_home.is_some()) && from_build.is_none() && coordinated_build.is_none() {
         return Err(anyhow!(
-            "--fresh requires --from-build during local promotion"
+            "--fresh and --reuse-home require --from-build during local promotion"
         ));
     }
     guard_promote_hop()?;
@@ -3507,6 +3550,15 @@ pub fn promote(
         .transpose()?
         .unwrap_or_else(|| current.clone());
 
+    if reuse_home.is_some()
+        && read_binary_preflight(&candidate)?.candidate.authority
+            != MigrationAuthority::ValidationOnly
+    {
+        return Err(anyhow!(
+            "--reuse-home requires an unpublished development build"
+        ));
+    }
+
     if let crate::machine_install::MachineInstallState::Settled(active) = &state {
         if active.selection.source == crate::machine_install::InstallSource::Development {
             let candidate_identity = read_binary_preflight(&candidate)?.candidate;
@@ -3523,6 +3575,7 @@ pub fn promote(
                         sync_skills,
                         preview_only,
                         fresh,
+                        reuse_home,
                     );
                 }
                 return promote_local_candidate(
@@ -3531,6 +3584,7 @@ pub fn promote(
                     sync_skills,
                     preview_only,
                     fresh,
+                    reuse_home,
                 );
             }
             let coordinator = active
@@ -3553,6 +3607,7 @@ pub fn promote(
                     sync_skills,
                     preview_only,
                     fresh,
+                    reuse_home,
                 );
             }
             return promote_published_from_machine_install(
@@ -3572,9 +3627,23 @@ pub fn promote(
         let build = fs::canonicalize(build)
             .with_context(|| format!("resolve local promotion build {}", build.display()))?;
         if build != current {
-            return delegate_local_promotion(&build, &artifacts, sync_skills, preview_only, fresh);
+            return delegate_local_promotion(
+                &build,
+                &artifacts,
+                sync_skills,
+                preview_only,
+                fresh,
+                reuse_home,
+            );
         }
-        return promote_local_candidate(artifacts, &build, sync_skills, preview_only, fresh);
+        return promote_local_candidate(
+            artifacts,
+            &build,
+            sync_skills,
+            preview_only,
+            fresh,
+            reuse_home,
+        );
     }
     match state {
         crate::machine_install::MachineInstallState::Settled(_) => {

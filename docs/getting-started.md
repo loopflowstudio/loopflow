@@ -114,8 +114,8 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf design                                # review one exact design artifact
-lf launch-plan                           # keep the core here; launch independent Tasks
+lf --task DES-123 design                  # design skill with Task context
+lf flow launch-plan                      # plan the core → implement → gate → demo → land
 lf build                                 # one code → reviewable Task slice
 lf ship                                  # final Task gate → learnings → land
 ```

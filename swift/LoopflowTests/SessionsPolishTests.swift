@@ -7,41 +7,6 @@ import Testing
 @Suite("Sessions polish")
 @MainActor
 struct SessionsPolishTests {
-    @Test("A Session viewed in a pane reads VIEWING")
-    func viewingStatus() throws {
-        let item = SessionItem(record: try record(kind: "interactive"), state: .live)
-        #expect(sessionRowStatus(item, hasOpenPane: true) == "VIEWING")
-    }
-
-    @Test("A live Session without a pane reads RUNNING, not OPEN")
-    func runningStatus() throws {
-        let item = SessionItem(record: try record(kind: "interactive"), state: .live)
-        #expect(sessionRowStatus(item, hasOpenPane: false) == "RUNNING")
-    }
-
-    @Test("A Session attached in another terminal reads ELSEWHERE even with a pane")
-    func elsewhereStatus() throws {
-        let item = SessionItem(record: try record(kind: "interactive"), state: .elsewhere)
-        #expect(sessionRowStatus(item, hasOpenPane: false) == "ELSEWHERE")
-        // The elsewhere pane shows the explanation, not a terminal, so the
-        // badge keeps naming the real condition.
-        #expect(sessionRowStatus(item, hasOpenPane: true) == "ELSEWHERE")
-    }
-
-    @Test("Launch and failure states stay distinct")
-    func transientStatuses() throws {
-        let opening = SessionItem(record: try record(kind: "interactive"), state: .opening)
-        let failed = SessionItem(record: try record(kind: "interactive"), state: .failed("boom"))
-        #expect(sessionRowStatus(opening, hasOpenPane: false) == "OPENING…")
-        #expect(sessionRowStatus(failed, hasOpenPane: false) == "RETRY")
-    }
-
-    @Test("A non-interactive live row keeps its Session state label")
-    func flowKeepsStateLabel() throws {
-        let item = SessionItem(record: try record(kind: "flow", state: "ready"), state: .live)
-        #expect(sessionRowStatus(item, hasOpenPane: false) == "READY")
-    }
-
     @Test("One window's registry retains a repo workspace across visits")
     func registryRetainsWorkspacePerRepo() {
         let registry = SessionsWorkspaceRegistry()
@@ -91,7 +56,7 @@ struct SessionsPolishTests {
             from: Data(
                 """
                 {
-                  "id": "polish",
+                  "id": "polish", "run_id": "polish",
                   "kind": "\(kind)",
                   "work": null,
                   "title": "Polish fixture",
@@ -99,6 +64,9 @@ struct SessionsPolishTests {
                   "cwd": "/tmp",
                   "state": "\(state)",
                   "ready_summary": null,
+                  "work_path": "product / Desktop / LOO-291",
+                  "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
+                  "title_source": "generated", "flow_membership": {"kind": "independent"}, "terminal_ids": [],
                   "open_argv": ["lf", "session", "open", "polish"]
                 }
                 """.utf8

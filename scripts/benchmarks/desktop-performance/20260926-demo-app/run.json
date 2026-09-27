@@ -1,0 +1,13 @@
+{
+  "process": "Loopflow",
+  "pid": 25062,
+  "seconds": 90,
+  "started_at": "2026-09-26T12:53:04.668569",
+  "ended_at": "2026-09-26T13:00:16.064815",
+  "xctrace": "recorded",
+  "template": "Animation Hitches",
+  "host": {
+    "macos": "26.0.1",
+    "cpu": "Apple M4 Max"
+  }
+}

@@ -471,6 +471,110 @@ fn ambient_wave_id_resolves_the_wave_it_names() {
 }
 
 #[test]
+fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
+    let home = tempfile::tempdir().unwrap();
+    let first = seed(home.path(), "one");
+    let second = seed(home.path(), "two");
+    for ambient in [first.id().as_str(), "stale-wave-id"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["roadmap", "--all", "--json"])
+            .env("LF_HOME", home.path())
+            .env_remove("LF_DB_PATH")
+            .env_remove("LF_CONTROL_HOME")
+            .env_remove("LF_CONTROL_DB_PATH")
+            .env_remove("LF_TRACE_ID")
+            .env("LF_WAVE_ID", ambient)
+            .current_dir("/")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let ids = value["waves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|wave| wave["wave"]["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, [first.id().as_str(), second.id().as_str()]);
+    }
+}
+
+#[test]
+fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
+    let home = tempfile::tempdir().unwrap();
+    let current = seed(home.path(), "current");
+    let abandoned = seed(home.path(), "accidental");
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let work = loopflow::durable::WorkRef::Wave(abandoned.id().clone());
+    store.abandon(&work, "accidental registration").unwrap();
+    store.set_work_enabled(&work, false).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(args)
+            .env("LF_HOME", home.path())
+            .env_remove("LF_DB_PATH")
+            .env_remove("LF_CONTROL_HOME")
+            .env_remove("LF_CONTROL_DB_PATH")
+            .env_remove("LF_WAVE_ID")
+            .env_remove("LF_TRACE_ID")
+            .current_dir(home.path().join("repo"))
+            .output()
+            .unwrap()
+    };
+    let listing = run(&["ls", "--all", "--current", "--json"]);
+    assert!(
+        listing.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listing.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], current.id().as_str());
+    let preview = run(&[
+        "work",
+        "forget",
+        "wave",
+        abandoned.id().as_str(),
+        "--dry-run",
+        "--json",
+    ]);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    assert!(store.get_wave(abandoned.id()).unwrap().is_some());
+    store.set_work_enabled(&work, true).unwrap();
+    assert!(store.forget_wave(abandoned.id(), false).is_err());
+    assert!(store.get_wave(abandoned.id()).unwrap().is_some());
+    store.set_work_enabled(&work, false).unwrap();
+    let deleted = run(&["work", "forget", "wave", abandoned.id().as_str(), "--json"]);
+    assert!(
+        deleted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&deleted.stderr)
+    );
+    assert!(store.get_wave(abandoned.id()).unwrap().is_none());
+    assert!(store.get_wave(current.id()).unwrap().is_some());
+
+    assert!(store.forget_wave(current.id(), false).is_err());
+    let project = test_project(&current, "retained", OffsetDateTime::now_utc());
+    store.insert_project(&project).unwrap();
+    store
+        .abandon(
+            &loopflow::durable::WorkRef::Wave(current.id().clone()),
+            "historical",
+        )
+        .unwrap();
+    assert!(store.forget_wave(current.id(), false).is_err());
+    assert!(store.get_wave(current.id()).unwrap().is_some());
+}
+
+#[test]
 fn accepted_metric_evidence_is_identical_in_status_roadmap_and_text() {
     let home = tempfile::tempdir().expect("tempdir");
     let wave = seed(home.path(), "product");

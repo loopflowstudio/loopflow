@@ -4,12 +4,11 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
-    @Test("starts with one focused, colored empty pane")
+    @Test("starts with one focused empty pane")
     func startsWithOnePane() {
         let store = MultiplexerStore()
         #expect(store.layout.allPanes.count == 1)
         #expect(store.focusedPane.content == .empty)
-        #expect(store.color(for: store.focusedPaneId) == .blue)
     }
 
     @Test("split adds and focuses a distinct pane")
@@ -20,7 +19,6 @@ struct MultiplexerStoreTests {
         #expect(store.layout.allPanes.count == 2)
         #expect(store.focusedPaneId == pane.id)
         #expect(pane.content == .empty)
-        #expect(store.color(for: pane.id) != store.color(for: first))
     }
 
     @Test("loading an open session jumps to its pane without duplicating it")
@@ -163,6 +161,26 @@ struct MultiplexerStoreTests {
         #expect(store.layout.allPanes.count == 1)
         #expect(store.focusedPane.content == .empty)
         #expect(store.pane(forSessionId: "session-1") == nil)
+    }
+
+    @Test("Undo restores a hidden Session only while shared evidence retains it", arguments: [false, true])
+    func hiddenSessionReconciliation(retained: Bool) {
+        let store = MultiplexerStore()
+        store.newShell()
+        let shellPane = store.focusedPaneId
+        store.load(sessionId: "session-1")
+        store.close(store.focusedPaneId)
+
+        store.reconcileSessions(retained ? ["session-1"] : [])
+
+        #expect(store.canUndoClose == retained)
+        store.undoClose()
+        #expect((store.pane(forSessionId: "session-1") != nil) == retained)
+        #expect(store.layout.pane(for: shellPane)?.content == .shell)
+        if !retained {
+            #expect(store.layout.allPanes.map(\.id) == [shellPane])
+            #expect(store.focusedPaneId == shellPane)
+        }
     }
 
     @Test("focus left follows visual geometry instead of tree order")

@@ -185,10 +185,6 @@ pub async fn resolve_work_selection(
         } else {
             task.worktree.clone()
         };
-        store
-            .begin_chapter_task(&task.id)
-            .await
-            .map_err(run_error)?;
         return Ok(WorkBinding {
             subjects: vec![
                 format!("wave:{}", wave.name()),
@@ -232,6 +228,41 @@ pub async fn resolve_work_selection(
     }
 
     Err(run_error("select a Task or Wave"))
+}
+
+/// The Task whose current PR branch this checkout tracks, bound exactly as
+/// `--task` binds it. Jack decided on 2026-09-26 that an `lf` launch inside a
+/// Task worktree belongs to that Task; a branch no Task owns stays unbound, and
+/// so does a branch whose PR already landed with no PR after it (the checkout
+/// no longer tracks that Task's work). The binding's cwd is the checkout that
+/// proved it, never the registered path.
+pub async fn resolve_checkout_binding(
+    store: &SharedStore,
+    repo: &Path,
+) -> OpsResult<Option<WorkBinding>> {
+    let Some(task) = crate::ops::task::task_for_checkout(store, repo).await? else {
+        return Ok(None);
+    };
+    if store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(run_error)?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let id = task.id.to_string();
+    let mut binding = resolve_work_selection(
+        store,
+        repo,
+        WorkSelection {
+            task: Some(&id),
+            wave: None,
+        },
+    )
+    .await?;
+    binding.cwd = crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    Ok(Some(binding))
 }
 
 async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResult<Wave> {
@@ -523,6 +554,7 @@ mod tests {
                     worktree: None,
                     skill: Some("implement".into()),
                     subjects,
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap();

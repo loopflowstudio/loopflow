@@ -757,8 +757,9 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 /// Apply the exact draft manifest embedded in an installed development build.
 ///
 /// Drafts are durable only in the disposable installed-development store. The
-/// release ledger remains untouched, and reuse accepts only an exact applied
-/// prefix so edited, removed, or reordered SQL requires an explicit fresh fork.
+/// release ledger adopts only byte-identical drafts packaged by a later release.
+/// Reuse otherwise accepts only an exact applied prefix; changed, unmatched or
+/// reordered SQL requires an explicit fresh fork.
 pub(crate) fn apply_installed_development_sqlite(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
@@ -768,6 +769,7 @@ pub(crate) fn apply_installed_development_sqlite(
         .iter()
         .any(|table| table == DEVELOPMENT_MIGRATIONS_TABLE);
     if has_draft_ledger {
+        adopt_released_development_drafts(conn, drafts)?;
         _validate_canonical_history_for_development(conn)?;
     } else {
         apply_sqlite(conn)?;
@@ -853,6 +855,82 @@ struct AppliedDevelopmentMigration {
     id: String,
     name: String,
     checksum: String,
+}
+
+/// A release packages draft SQL that may already have run in this Home. Move
+/// its receipts, never replay the SQL (which can transform existing data).
+fn adopt_released_development_drafts(
+    conn: &rusqlite::Connection,
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<()> {
+    let applied = applied_versions(conn)?;
+    let pending = pending_migrations(&applied, MIGRATIONS)?;
+    if pending.is_empty() {
+        return Ok(());
+    }
+    validate_applied_checksums(conn, MIGRATIONS)?;
+    let development = _applied_development_migrations(conn)?;
+    let mut consumed = 0;
+    for migration in pending {
+        let Some(sql) = migration.sql.strip_prefix("-- draft: ") else {
+            return Err(_incompatible_development_store(format!(
+                "release {} has no draft provenance",
+                migration.version()
+            )));
+        };
+        for block in sql.split("\n\n-- draft: ") {
+            let Some((name, body)) = block.split_once('\n') else {
+                return Err(_incompatible_development_store(format!(
+                    "release {} has incomplete draft provenance",
+                    migration.version()
+                )));
+            };
+            // The release packer separates blocks with a blank line and emits
+            // exactly one final newline. Only identical draft bytes are adopted.
+            let body = format!("{}\n", body.trim_end_matches('\n'));
+            let checksum = hex::encode(Sha256::digest(body.as_bytes()));
+            if !development
+                .get(consumed)
+                .is_some_and(|draft| draft.name == name && draft.checksum == checksum)
+            {
+                return Err(_incompatible_development_store(format!(
+                    "release {} does not match applied draft {name}",
+                    migration.version()
+                )));
+            }
+            consumed += 1;
+        }
+    }
+    let remaining = &development[consumed..];
+    _validate_applied_draft_prefix(remaining, drafts)?;
+    conn.execute_batch("BEGIN EXCLUSIVE")?;
+    let result = (|| {
+        for migration in pending {
+            let parent = migration_prefix_fingerprint(&applied_versions(conn)?, MIGRATIONS)?;
+            insert_applied_migration(conn, migration, &parent)?;
+        }
+        conn.execute(
+            "DELETE FROM development_migrations WHERE position < ?1",
+            [consumed as i64],
+        )?;
+        // Preserve IDs, timestamps and checksums of drafts not yet released.
+        for (position, draft) in remaining.iter().enumerate() {
+            conn.execute(
+                "UPDATE development_migrations SET position = ?1 WHERE id = ?2",
+                (position as i64, &draft.id),
+            )?;
+        }
+        _validate_development_schema(conn, &drafts[..remaining.len()])?;
+        validate_foreign_keys(conn)?;
+        validate_applied_checksums(conn, MIGRATIONS)
+    })();
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT").map_err(StoreError::from),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
 }
 
 fn _validate_draft_manifest(drafts: &[crate::build_info::MigrationDraft]) -> StoreResult<()> {
@@ -1943,7 +2021,9 @@ mod tests {
     use std::sync::mpsc::sync_channel;
     use std::time::Duration;
 
+    use super::_applied_development_migrations;
     use rusqlite::OptionalExtension;
+    use sha2::{Digest, Sha256};
 
     use super::{
         active_namespace, applied_versions, apply_installed_development_sqlite, apply_set,
@@ -2049,6 +2129,140 @@ mod tests {
         );
         let error = apply_installed_development_sqlite(&conn, &[changed]).unwrap_err();
         assert!(error.to_string().contains("--fresh"));
+    }
+
+    #[test]
+    fn installed_development_home_keeps_chapters_when_its_draft_is_released() {
+        let conn = chapter_development_home();
+        let receipt: String = conn
+            .query_row("SELECT receipt FROM wave_chapters", [], |r| r.get(0))
+            .unwrap();
+        assert!(validate_installed_development_sqlite(&conn, &[]).is_err());
+        apply_installed_development_sqlite(&conn, &[]).unwrap();
+        validate_installed_development_sqlite(&conn, &[]).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT receipt FROM wave_chapters", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            receipt
+        );
+        assert!(_applied_development_migrations(&conn).unwrap().is_empty());
+        let history = applied_versions(&conn).unwrap();
+        apply_installed_development_sqlite(&conn, &[]).unwrap();
+        assert_eq!(applied_versions(&conn).unwrap(), history);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM wave_chapters", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn installed_development_release_keeps_unreleased_drafts() {
+        let conn = chapter_development_home();
+        let draft = development_draft(
+            "22222222222222222222222222222222",
+            "chapter_annotation",
+            &[],
+            "CREATE TABLE chapter_annotation (note TEXT);",
+        );
+        conn.execute_batch(draft.sql).unwrap();
+        conn.execute(
+            "INSERT INTO chapter_annotation VALUES ('keep this note')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO development_migrations
+             SELECT COUNT(*), ?1, ?2, ?3, 2 FROM development_migrations",
+            (draft.id, draft.name, draft.checksum),
+        )
+        .unwrap();
+        apply_installed_development_sqlite(&conn, std::slice::from_ref(&draft)).unwrap();
+        validate_installed_development_sqlite(&conn, std::slice::from_ref(&draft)).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT note FROM chapter_annotation", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "keep this note"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT position, id, applied_at FROM development_migrations",
+                [],
+                |r| Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?
+                ))
+            )
+            .unwrap(),
+            (0, draft.id.to_string(), 2)
+        );
+    }
+
+    #[test]
+    fn installed_development_release_rejects_changed_evidence_without_losing_data() {
+        for schema_changed in [false, true] {
+            let conn = chapter_development_home();
+            if schema_changed {
+                conn.execute_batch("ALTER TABLE wave_chapters ADD COLUMN unexpected TEXT;")
+                    .unwrap();
+            } else {
+                conn.execute("UPDATE development_migrations SET checksum = 'changed'", [])
+                    .unwrap();
+            }
+            let history = applied_versions(&conn).unwrap();
+            let drafts = _applied_development_migrations(&conn).unwrap();
+            let schema = product_schema(&conn).unwrap();
+            assert!(apply_installed_development_sqlite(&conn, &[]).is_err());
+            assert_eq!(applied_versions(&conn).unwrap(), history);
+            assert_eq!(_applied_development_migrations(&conn).unwrap(), drafts);
+            assert_eq!(product_schema(&conn).unwrap(), schema);
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM wave_chapters", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+    }
+
+    fn chapter_development_home() -> rusqlite::Connection {
+        let conn = open();
+        let (index, _, _) = draft_location("wave_chapters");
+        apply_set(&conn, &MIGRATIONS[..index]).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE development_migrations (
+                position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+        // Model a development Home whose applied drafts now span every pending
+        // release, including releases appended after wave_chapters shipped.
+        for migration in &MIGRATIONS[index..] {
+            let sql = migration.sql.strip_prefix("-- draft: ").unwrap();
+            for block in sql.split("\n\n-- draft: ") {
+                let (name, body) = block.split_once('\n').unwrap();
+                let body = format!("{}\n", body.trim_end_matches('\n'));
+                conn.execute_batch(&body).unwrap();
+                conn.execute(
+                    "INSERT INTO development_migrations
+                     SELECT COUNT(*), ?1, ?1, ?2, 1 FROM development_migrations",
+                    (name, hex::encode(Sha256::digest(body.as_bytes()))),
+                )
+                .unwrap();
+            }
+        }
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('demo-wave', 'product', '/repo', 1);
+             INSERT INTO wave_chapters (wave_id, chapter_id, project_id, current, receipt)
+             VALUES ('demo-wave', 'accepted-chapter', 'provider-project', 1,
+                     '{\"phase\":\"complete\",\"authored\":\"preserve the original plan\"}');"
+        ).unwrap();
+        conn
     }
 
     #[test]

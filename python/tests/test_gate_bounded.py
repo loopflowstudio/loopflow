@@ -530,7 +530,9 @@ def test_build_and_test_commands_share_the_four_worker_budget():
 
     assert clippy.argv[clippy.argv.index("--jobs") + 1] == jobs
     assert jobs in tests.argv
-    for command in (swift[0], swift[2]):
+    for command in (
+        command for command in swift if command.label in {"swift-cli", "swift", "swift-build"}
+    ):
         assert command.argv[command.argv.index("--jobs") + 1] == jobs
     xcodebuild = next(command for command in loopflow if command.label == "xcodebuild")
     assert xcodebuild.argv[xcodebuild.argv.index("-jobs") + 1] == jobs

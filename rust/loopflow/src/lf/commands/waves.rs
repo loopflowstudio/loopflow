@@ -172,6 +172,10 @@ pub struct TaskRuntimeSnapshot {
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
+    /// Durable evidence that work began: a launched Run, a worker report or
+    /// finished Flow, or a published PR. `false` means none is recorded, not
+    /// proof that nothing ever ran; preparing a checkout never sets it.
+    pub started: bool,
 }
 
 /// A Task's derived operating condition. Sessions own review actions; this state
@@ -189,6 +193,7 @@ pub enum TaskConditionState {
 pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
+pub use crate::ops::task_flow::TaskFlowSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -239,6 +244,8 @@ pub struct TaskWorkspaceSnapshot {
     /// Task settles. `None` is explicit for legacy Tasks with no PR record.
     pub branch: Option<String>,
     pub worktree: String,
+    /// Existence on the reading Home; unknown when the filesystem check fails.
+    pub local_exists: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,6 +257,7 @@ pub struct TaskDetailSnapshot {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
+    pub flow: TaskFlowSnapshot,
     pub prs: Vec<PrSnapshot>,
     pub active_pr: Option<String>,
 }
@@ -489,6 +497,7 @@ pub struct RoadmapTask {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
+    pub flow: TaskFlowSnapshot,
     pub active_pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -510,7 +519,7 @@ fn scope_waves_to_repo(waves: Vec<Wave>, all: bool) -> Result<Vec<Wave>> {
         .collect())
 }
 
-pub fn ls(json: bool, all: bool) -> Result<()> {
+pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
@@ -523,7 +532,10 @@ pub fn ls(json: bool, all: bool) -> Result<()> {
         let waves = scope_waves_to_repo(waves, all)?;
         let mut snapshots = Vec::with_capacity(waves.len());
         for wave in waves {
-            snapshots.push(snapshot_wave(&store, &wave).await?);
+            let snapshot = snapshot_wave(&store, &wave).await?;
+            if !current || current_wave(&snapshot) {
+                snapshots.push(snapshot);
+            }
         }
         snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
         if json {
@@ -533,6 +545,10 @@ pub fn ls(json: bool, all: bool) -> Result<()> {
         }
         Ok(())
     })
+}
+
+fn current_wave(wave: &WaveSnapshot) -> bool {
+    wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
 /// `lf status [wave]` — one Wave's Work hierarchy, Runs, and loop.
@@ -592,6 +608,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
+    let include_history = wave.is_some();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let evaluation_time = now();
@@ -608,11 +625,13 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
             }
             return Ok(());
         };
-        // The ONE ambient-Wave rule: `--wave` wins, else `LF_WAVE_ID` (durable
-        // UUID or repository-scoped registered name). Roadmap is the one
-        // command where `NoContext` is a valid default — it lists every wave.
-        // A stale UUID is a loud error, never a silent drop to global scope.
-        let env_wave_id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
+        // An explicit all-repositories query must not inherit the Wave of
+        // the process that launched the GUI. An explicit --wave still wins.
+        let env_wave_id = if all {
+            None
+        } else {
+            std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
+        };
         let repo = crate::repo::find_repo_root().ok();
         let waves = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),
@@ -645,6 +664,9 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {
             let snapshot = snapshot_wave(&store, wave).await?;
+            if !include_history && !current_wave(&snapshot) {
+                continue;
+            }
             let task_snapshots = wave_tasks(&store, wave, false)
                 .await
                 .unwrap_or_else(|error| WaveTasks {
@@ -737,6 +759,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         next_move: detail.next_move,
         condition: detail.condition,
         actions: detail.actions,
+        flow: detail.flow,
         active_pr,
         section,
     }
@@ -860,6 +883,7 @@ fn snapshot_task_runtime(
     execution: &crate::ops::task_execution::TaskExecutionSnapshot,
     task: &Task,
     status: WorkStatus,
+    started: bool,
 ) -> TaskRuntimeSnapshot {
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
     let (provider, _) = crate::engine::config::parse_agent(config.agent());
@@ -873,6 +897,7 @@ fn snapshot_task_runtime(
         status,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
+        started,
     }
 }
 
@@ -956,7 +981,10 @@ async fn snapshot_tasks(
         let runtime_task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
-        details.push(snapshot_task_detail(store, item, runtime_task, probe_pr_empty).await?);
+        let recommended = recommended_flow(&planning.projects, &item.project_id);
+        details.push(
+            snapshot_task_detail(store, item, runtime_task, recommended, probe_pr_empty).await?,
+        );
     }
 
     for task in &tasks {
@@ -996,7 +1024,10 @@ async fn snapshot_tasks(
             team_id: String::new(),
             assignee: None,
         };
-        details.push(snapshot_task_detail(store, item, Some(task), probe_pr_empty).await?);
+        let recommended = crate::ops::task::recommended_task_flow(plan).to_string();
+        details.push(
+            snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
+        );
     }
     details.sort_by(|left, right| {
         left.task
@@ -1029,10 +1060,19 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
     }
 }
 
+fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> String {
+    projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .map_or("feature", crate::ops::task::recommended_task_flow)
+        .to_string()
+}
+
 async fn snapshot_task_detail(
     store: &SharedStore,
     item: PmItem,
     task: Option<&Task>,
+    recommended: String,
     probe_pr_empty: bool,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match task {
@@ -1042,16 +1082,22 @@ async fn snapshot_task_detail(
     let latest = prs.last();
     let active = prs.iter().find(|pr| pr.is_active());
     let observed_at = now();
-    let (runtime, execution) = match task {
+    let (runtime, execution, flow_record) = match task {
         Some(task) => {
-            let execution = crate::ops::task_execution::task_execution(store, &task.id).await?;
+            let (execution, flow_record) =
+                crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
             let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
+            let started = store.task_started(&task.id).await?
+                || prs
+                    .iter()
+                    .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
             (
-                Some(snapshot_task_runtime(&execution, task, status)),
+                Some(snapshot_task_runtime(&execution, task, status, started)),
                 Some(execution),
+                flow_record,
             )
         }
-        None => (None, None),
+        None => (None, None, crate::ops::task_flow::TaskFlowRecord::None),
     };
     let reference = task_reference(&item, task, active, &prs);
     let worktree_blocker = match task {
@@ -1166,6 +1212,25 @@ async fn snapshot_task_detail(
         Some(task) => current_direction(store, &task.id).await?,
         None => None,
     };
+    let flow_controls = crate::ops::task_flow::task_flow_controls(
+        &flow_record,
+        &crate::ops::task_flow::TaskFlowGate {
+            identifier: &item.identifier,
+            status: runtime.as_ref().map(|runtime| &runtime.status),
+            plan_completed: item.completed,
+            execution: execution.as_ref(),
+            worktree_blocker: worktree_blocker
+                .as_ref()
+                .map(|blocker| blocker.reason.as_str()),
+            launch_refusal: launch_refusal.as_deref(),
+            resume_refusal: resume_refusal.as_deref(),
+        },
+    );
+    let flow = TaskFlowSnapshot {
+        recommended,
+        record: flow_record,
+        controls: flow_controls,
+    };
     Ok(TaskDetailSnapshot {
         task: task_summary(item),
         reference,
@@ -1174,6 +1239,7 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
+        flow,
         prs: prs
             .iter()
             .map(|pr| {
@@ -1398,6 +1464,7 @@ fn task_reference(
             slug: task.workspace_slug.clone(),
             branch,
             worktree: task.worktree.display().to_string(),
+            local_exists: task.worktree.try_exists().ok(),
         }
     });
     TaskReferenceSnapshot {
@@ -2384,6 +2451,7 @@ mod tests {
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
+            started: true,
         };
         let next_move = NextMove {
             owner: NextMoveOwner::Task,
@@ -2489,6 +2557,7 @@ mod tests {
                         reason: "terminal".into(),
                         updated_at: "2026-07-21T00:00:00Z".into(),
                         provider: "codex".into(),
+                        started: true,
                     };
                     let terminal = derive_task_condition(
                         Some(&runtime),

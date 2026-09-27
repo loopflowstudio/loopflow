@@ -87,9 +87,14 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    loopholes close. Check a real example: can someone without the transcript
    understand the benefit and current problem before opening tools? Keep the
    Task's problem distinct from the design's solution. Trace competing rules
-   through examples, handoffs, later edits, and mechanical rendering. Review a
-   second revision after scope changes, not just the first draft. Put resulting
-   guidance only in authorship surfaces that exercise it.
+   through examples, handoffs, later edits, and mechanical rendering. For Task
+   authors, check the description with comments collapsed: the current problem,
+   desired outcome, acceptance, and real blockers must still make sense. Dated
+   planning/execution updates belong in authorized comments; raw receipts belong
+   behind links. Test a later scope change: reconcile the brief instead of stacking
+   amendments, preserving the decision history and unresolved contrary evidence.
+   Apply this second-revision check to other artifacts too. Put resulting guidance
+   only in authorship surfaces that exercise it.
 
 6. **Deliver at the source.** Update the named customer file or return reviewed
    prompt text. Do not create a second copy in documentation. Summarize the

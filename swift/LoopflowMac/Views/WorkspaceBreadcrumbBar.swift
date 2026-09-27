@@ -1,0 +1,267 @@
+import Loopflow
+import SwiftUI
+
+/// The workspace's one toolbar: the Wave → Task → Session drill-down on the
+/// left, the surface's controls on the right. It sits in the sidebar tone and
+/// its bottom hairline continues the sidebar's right hairline, so frame and
+/// navigation read as one inverted L. Ancestors navigate upward; the final
+/// crumb names the exact Session, chooses among its siblings, and renames it
+/// in place through the shared Session authority.
+struct WorkspaceBreadcrumbBar<Trailing: View>: View {
+    @Bindable var model: PodiumModel
+    let crumb: WorkspaceBreadcrumb?
+    let onOpenSession: (SessionRecord) -> Void
+    let onMonitor: (String) -> Void
+    @ViewBuilder var trailing: Trailing
+    @Environment(\.palette) private var palette
+    @State private var showsMembershipDetails = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let crumb { crumbs(crumb) }
+            Spacer(minLength: 10)
+            trailing
+            if model.navigation.content == .details {
+                WorkspaceGlyphButton(
+                    "sidebar.right",
+                    label: model.navigation.showsActivity ? "Hide Activity" : "Show Activity",
+                    identifier: "workspace-toggle-activity"
+                ) { model.navigation.showsActivity.toggle() }
+            }
+            if let task = crumb?.task {
+                WorkspaceGlyphButton(
+                    "waveform.path.ecg", label: "Monitor", identifier: "task-show-monitor-\(task.task.id)"
+                ) { onMonitor(task.task.id) }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .font(Typography.text)
+        .tint(palette.textSecondary)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 40)
+        .background(palette.surfaceMuted)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+        .accessibilityIdentifier("workspace-toolbar")
+    }
+
+    private func crumbs(_ crumb: WorkspaceBreadcrumb) -> some View {
+        HStack(spacing: 6) {
+            if let wave = crumb.wave {
+                Button(wave.roadmap.wave.name) { model.select(wave.id.work) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.textSecondary)
+                    .accessibilityIdentifier("breadcrumb-wave")
+            }
+            if let task = crumb.task {
+                separator
+                // The Task overview shows its title once below; inside a
+                // Session the ancestor carries the title to navigate upward.
+                if crumb.session != nil {
+                    // The ancestor's title gives way first when the bar is narrow.
+                    Button(task.task.task.name) { model.select(task.id.work) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(-2)
+                        .help(task.task.task.name)
+                        .accessibilityIdentifier("breadcrumb-task")
+                }
+                if let url = task.task.reference.issueUrl {
+                    Link(destination: url) {
+                        Text(task.task.task.identifier)
+                            .font(Typography.code(12))
+                            .underline(color: palette.accentInk.opacity(0.35))
+                    }
+                    .foregroundStyle(palette.accentInk)
+                        .accessibilityIdentifier("breadcrumb-issue")
+                } else {
+                    Text(task.task.task.identifier).font(Typography.code(12)).foregroundStyle(palette.textTertiary)
+                }
+            }
+            if let session = crumb.session {
+                if crumb.wave != nil { separator }
+                sessionCrumb(session, siblings: crumb.siblings)
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private var separator: some View {
+        Text("/").foregroundStyle(palette.borderStrong)
+    }
+
+    @ViewBuilder
+    private func sessionCrumb(_ session: SessionRecord, siblings: [SessionRecord]) -> some View {
+        if let draft = model.navigation.renaming, draft.sessionId == session.id {
+            TextField("Session name", text: Binding(
+                get: { model.navigation.renaming?.text ?? draft.text },
+                set: { model.navigation.renaming?.text = $0 }
+            ))
+            .textFieldStyle(.plain)
+            .frame(minWidth: 140, maxWidth: 260)
+            .disabled(draft.submitting)
+            .onSubmit { Task { await model.commitSessionRename() } }
+            .onExitCommand { model.cancelSessionRename() }
+            .accessibilityIdentifier("session-rename-field")
+            Button("Save") { Task { await model.commitSessionRename() } }
+                .disabled(draft.submitting)
+                .accessibilityIdentifier("session-rename-save")
+            Button("Cancel") { model.cancelSessionRename() }
+                .disabled(draft.submitting)
+            if let error = draft.error {
+                Text(error)
+                    .foregroundStyle(Color.statusWarning)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("session-rename-error")
+            }
+        } else {
+            if siblings.count > 1 {
+                Menu(session.title) {
+                    ForEach(siblings) { record in
+                        Button(record.title) { onOpenSession(record) }
+                            .accessibilityIdentifier("breadcrumb-session-\(record.id)")
+                    }
+                }
+                .fixedSize()
+                .accessibilityIdentifier("breadcrumb-session")
+            } else {
+                Text(session.title)
+                    .font(Typography.textStrong)
+                    .accessibilityIdentifier("breadcrumb-session")
+            }
+            if session.titleSource == .unavailable {
+                Text("name on its Home")
+                    .foregroundStyle(palette.textSecondary)
+                    .help("This Session's canonical name lives on the Home that runs it.")
+            } else {
+                Button {
+                    model.beginSessionRename(session)
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .help("Rename this Session")
+                .accessibilityLabel("Rename Session")
+                .accessibilityIdentifier("session-rename")
+            }
+            if case .step = session.flowMembership {
+                Button {
+                    if let target = flowTarget(session) {
+                        model.select(target.task.id.work)
+                        var draft = model.navigation.flowDrafts[target.task.task.id] ?? TaskFlowDraft()
+                        draft.selectedNode = target.node
+                        model.navigation.flowDrafts[target.task.task.id] = draft
+                    } else {
+                        showsMembershipDetails = true
+                    }
+                } label: { membershipChip(session) }
+                    .buttonStyle(.plain)
+                    .help(flowTarget(session) == nil ? membershipHelp(session.flowMembership) : "Show this step in the Flow")
+                    .accessibilityIdentifier("session-flow-membership")
+                    .popover(isPresented: $showsMembershipDetails) {
+                        Text(membershipUnavailable(session))
+                            .font(Typography.body(13))
+                            .padding(14)
+                            .frame(maxWidth: 320)
+                            .accessibilityIdentifier("session-flow-unavailable")
+                    }
+            } else {
+                membershipChip(session)
+                    .help(membershipHelp(session.flowMembership))
+                    .accessibilityIdentifier("session-flow-membership")
+            }
+        }
+    }
+
+    /// Membership is a fact, so it reads as quiet mono text; blue stays with
+    /// running work and loop regions.
+    private func membershipChip(_ session: SessionRecord) -> some View {
+        Text(session.flowMembership.label)
+            .font(Typography.mono)
+            .foregroundStyle(membershipColor(session.flowMembership))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .layoutPriority(-1)
+    }
+
+    private func flowTarget(_ session: SessionRecord) -> (task: WorkspaceTask, node: FlowNodeSelection)? {
+        guard let task = crumb?.task,
+              case let .step(_, invocation, _, node?, _, occurrence) = session.flowMembership,
+              occurrence != .past,
+              case .pinned(let pinned) = task.task.flow.record,
+              pinned.invocationId == invocation,
+              pinned.graph.node(node) != nil else { return nil }
+        return (task, FlowNodeSelection(invocationId: invocation, node: node))
+    }
+
+    private func membershipUnavailable(_ session: SessionRecord) -> String {
+        guard case let .step(_, _, _, node, _, occurrence) = session.flowMembership else {
+            return membershipHelp(session.flowMembership)
+        }
+        if node == nil { return "This Session predates recorded Flow step locations." }
+        if occurrence == .past { return "This Session belongs to an earlier Flow run. Its diagram is no longer available here." }
+        return "This Session's Flow diagram is unavailable in the current Task reading."
+    }
+
+    private func membershipColor(_ membership: SessionFlowMembership) -> Color {
+        if case .step = membership { return palette.textSecondary }
+        return palette.textTertiary
+    }
+
+    private func membershipHelp(_ membership: SessionFlowMembership) -> String {
+        switch membership {
+        case .step(_, _, _, _, _, .current):
+            "This conversation is the Flow's current step."
+        case .step(_, _, _, _, _, .earlier):
+            "This conversation belonged to an earlier step of the Flow's current run."
+        case .step(_, _, _, _, _, .past):
+            "This conversation belonged to a Flow run that has since finished or restarted."
+        case .independent:
+            "This conversation is not part of the Task's managed Flow."
+        case .unknown(let reason):
+            reason
+        }
+    }
+}
+
+extension WorkspaceBreadcrumbBar where Trailing == EmptyView {
+    init(model: PodiumModel, crumb: WorkspaceBreadcrumb?,
+         onOpenSession: @escaping (SessionRecord) -> Void, onMonitor: @escaping (String) -> Void) {
+        self.init(model: model, crumb: crumb, onOpenSession: onOpenSession, onMonitor: onMonitor) { EmptyView() }
+    }
+}
+
+/// A toolbar action as a quiet glyph: no border, a hover tint, a 28pt target.
+struct WorkspaceGlyphButton: View {
+    let systemImage: String
+    let label: String
+    let identifier: String
+    let action: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    init(_ systemImage: String, label: String, identifier: String, action: @escaping () -> Void) {
+        self.systemImage = systemImage
+        self.label = label
+        self.identifier = identifier
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13))
+                .foregroundStyle(hovering ? palette.accentInk : palette.textTertiary)
+                .frame(width: 28, height: 28)
+                .background(hovering ? palette.accentInk.opacity(0.08) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(identifier)
+    }
+}

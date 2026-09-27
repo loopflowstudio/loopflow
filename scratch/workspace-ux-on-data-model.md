@@ -8,6 +8,8 @@ is unresolved. Navigation is implemented with local proof and a
 [slice review](workspace-navigation-review.md); installed acceptance remains owed.
 The [template slice review](workspace-template-review.md) records the later
 navigation/template checks, status correction and remaining acceptance.
+The [return-detail review](workspace-return-review.md) verifies the subsequent
+folded-target and recursive keyboard repair; configured acceptance remains owed.
 Source inspected at `c832aaede633a8996bf694dfb7ae2579dbabce3a`.
 The supplied placement stacks this Task on LOO-298 / PR #1296. That is placement
 evidence, not evidence that its owner conversion is complete or merged.

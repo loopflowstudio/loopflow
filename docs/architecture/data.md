@@ -18,8 +18,7 @@ different evidence for different questions.
 
 ```text
 repository files + Git        authored goals, memory, Skills, Flows, code
-planning SQLite               local planning, delivery and Task review Sessions
-Flow position files           ordinary invocation definitions and continuation
+planning SQLite               local planning, delivery, Flow invocations and Sessions
 human Ask files               waiting conversations and completion summaries
 Wave journal JSONL            conversation and resident event history
 Run record files              one Home's provider-launch evidence
@@ -34,7 +33,7 @@ kernel locks                  live local exclusion authority
 | What is this Wave trying to do? | `wave/<name>/GOAL.md` and `MEMORY.md` |
 | What Projects and Tasks exist? | Linear, through the bounded PM projection |
 | What Task boundary should resume? | Work domain state joined to its exact `flow_invocations` row |
-| What ordinary Flow boundary should resume? | the invocation's Home-local `flows/<id>/position.json` |
+| What saved Flow step should resume? | its `flow_invocations` row: cursor, current attempt Run and failure |
 | What human input is pending? | Session projections of Task/ordinary Flow boundaries and human Ask records |
 | Which Runs worked on this Wave or Task? | `runs` rows |
 | What did one provider launch emit? | the Run record on the Home that launched it |
@@ -130,7 +129,7 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | authored Wave intent and evidence contracts | ordinary reviewed file edits |
 | `.lf/journal/waves/<name>/journal.jsonl` | conversation and resident events | append-only with crash-tail repair |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | provider-launch manifest, streams, terminal | publish once, append, settle once |
-| current Home `flows/<invocation-id>/position.json` | ordinary Flow's captured definition, cursor, active boundary, failure and completion; a human review's Runs, title, feedback and completion are its `sessions` row | position lock plus atomic replacement; driver lock serializes continuation |
+| current Home `flows/<invocation-id>/driver.lock` | saved Flow driver exclusion only; the Flow's definition, cursor, launch facts, current attempt, failure and completion are its `flow_invocations` row | kernel-held lock, no contents |
 | current Home `human-sessions/.<hash>.launch.lock` | Session launch exclusion only; an Ask's question, caller, readiness and answer are its `sessions` row and its Runs | kernel-held lock, no contents |
 | provider account homes | provider-native login and resume state | provider adapter owns format |
 | absolute Git directory `loopflow/` | writer and rebase receipts | kernel-held lock plus readable JSON |

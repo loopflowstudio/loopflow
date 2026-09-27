@@ -907,7 +907,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         .as_array()
         .unwrap()
         .iter()
-        .find(|s| s["id"].as_str().unwrap().starts_with("flow:"))
+        .find(|s| s["kind"] == "flow")
         .unwrap();
     // A Flow about the Task names it on its review too, without becoming the
     // Task's Flow.

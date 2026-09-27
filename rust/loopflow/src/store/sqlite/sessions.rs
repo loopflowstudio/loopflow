@@ -2,8 +2,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::{FlowPosition, RunId, TaskId};
-use crate::engine::invocation::QueuedInvocation;
+use crate::durable::{FlowInvocation, FlowPosition, RunId, TaskId};
 use crate::engine::ExecutionCursor;
 use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
@@ -173,18 +172,18 @@ impl SqliteStore {
     }
 
     /// Reserve a Session and its first Run together; reserving an id again
-    /// returns the first one. `review` is the saved Flow a review waits in,
-    /// stored at the cursor of this review and naming the Run's Task.
+    /// returns the first one. `review` is the saved Flow a review waits in;
+    /// the import stores a Flow it meets for the first time here.
     pub fn create_session(
         &self,
         session: Session,
         run: Run,
-        review: Option<(&QueuedInvocation, &ExecutionCursor)>,
+        review: Option<&FlowInvocation>,
     ) -> StoreResult<(Session, Run)> {
         if run.session_id.as_deref() != Some(session.id.as_str())
             || run.id != session.current_run_id
             || review.is_some() != (session.kind == SessionKind::FlowReview)
-            || review.map(|(invocation, _)| &invocation.id) != run.invocation_id.as_ref()
+            || review.map(FlowInvocation::id) != run.invocation_id.as_deref()
         {
             return Err(invalid(
                 "a Session is reserved with its first Run, a review with its invocation",
@@ -195,8 +194,8 @@ impl SqliteStore {
         if let Some(existing) = session_in(&tx, &session.id)? {
             return Ok(existing);
         }
-        if let Some((invocation, cursor)) = review {
-            save_flow_in(&tx, invocation, cursor, run.task_id.as_ref())?;
+        if let Some(flow) = review {
+            super::flows::insert_flow_in(&tx, flow)?;
         }
         tx.execute(
             "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at,
@@ -226,19 +225,6 @@ impl SqliteStore {
         let created = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(created)
-    }
-
-    /// A saved Flow's invocation at the step it is about to run. It names the
-    /// Task the Flow was launched for, as its Runs do, without becoming that
-    /// Task's Flow.
-    pub fn save_flow(
-        &self,
-        invocation: &QueuedInvocation,
-        cursor: &ExecutionCursor,
-        task: Option<&TaskId>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        save_flow_in(&conn, invocation, cursor, task)
     }
 
     /// Append an attempt to a Session. Title and feedback stay on the Session.
@@ -423,33 +409,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-}
-
-fn save_flow_in(
-    conn: &Connection,
-    invocation: &QueuedInvocation,
-    cursor: &ExecutionCursor,
-    task: Option<&TaskId>,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO flow_invocations(id,task_id,invocation_json,step_index,iteration,
-            position_version,worker_generation,updated_at,review_json,state)
-         VALUES(?1,?7,?2,?3,?4,1,0,?5,?6,'current')
-         ON CONFLICT(id) DO UPDATE SET step_index=excluded.step_index,
-            iteration=excluded.iteration, review_json=excluded.review_json,
-            updated_at=excluded.updated_at, position_version=position_version+1,
-            pending_session_id=NULL, current_run_id=NULL",
-        params![
-            invocation.id,
-            serde_json::to_string(invocation)?,
-            i64::try_from(cursor.index).map_err(invalid)?,
-            i64::from(cursor.iteration),
-            crate::store::rows::now_unix(),
-            serde_json::to_string(cursor)?,
-            task.map(TaskId::as_str)
-        ],
-    )?;
-    Ok(())
 }
 
 pub(super) fn review_id(position: &FlowPosition) -> StoreResult<String> {

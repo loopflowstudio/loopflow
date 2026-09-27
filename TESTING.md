@@ -771,12 +771,14 @@ When adding features that need manual verification, write or extend a script in 
 
 ## Boundary-specific checks
 
-When changing Flow boundary or prepared Run ownership, include the Flow Run
-recovery tests. Human boundaries prepare their Run before provider launch;
-fixtures must start that Run instead of binding a fresh capture.
+When changing Flow step or prepared Run ownership, include the invocation
+store tests and the saved-Flow cutover proofs. Human boundaries prepare their
+Run before provider launch; fixtures must start that Run instead of binding a
+fresh capture.
 
 ```bash
-cargo test -p loopflow --lib ops::flow_run::tests
+cargo test -p loopflow --lib store::sqlite::flows
+cargo nextest run -p loopflow --test session_cutover_tests -E 'test(a_task_flow_runs_on_its_row) | test(a_taskless_step_records)'
 ```
 
 Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming

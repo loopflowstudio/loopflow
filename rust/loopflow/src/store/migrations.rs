@@ -4968,6 +4968,65 @@ mod tests {
     }
 
     #[test]
+    fn pointing_tasks_at_invocations_names_the_task_on_earlier_task_flows() {
+        let conn = open();
+        let name = "point_task_at_invocation";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES('wave','wave','/repo',1);
+             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','project',1);
+             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('task','project','task','INF-1','/repo',1);
+             INSERT INTO flow_invocations(id,task_id,invocation_json,step_index,iteration,
+                position_version,worker_generation,updated_at,state)
+                VALUES('managed','task','{\"id\":\"managed\"}',0,0,1,0,1,'current'),
+                       ('about',NULL,'{\"id\":\"about\"}',0,0,1,0,1,'current'),
+                       ('taskless',NULL,'{\"id\":\"taskless\"}',0,0,1,0,1,'current');
+             -- Cut F: a `--task` Flow's step Run named the Task; Cut 3: its review carried the Wave.
+             INSERT INTO runs(id,invocation_id,task_id,wave_id,created_at,published,cwd)
+                VALUES('step','about','task','wave',1,1,'/repo'),
+                       ('review','about',NULL,'wave',2,1,'/repo'),
+                       ('free','taskless',NULL,NULL,3,1,'/repo');",
+        )
+        .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+
+        let one = |sql: &str| -> String {
+            conn.query_row(sql, [], |row| row.get::<_, Option<String>>(0))
+                .unwrap()
+                .unwrap_or_default()
+        };
+        assert_eq!(one("SELECT current_invocation_id FROM tasks"), "managed");
+        assert_eq!(
+            one("SELECT CAST(count(*) AS TEXT) FROM runs r JOIN flow_invocations f ON f.id=r.invocation_id
+                 WHERE f.task_id IS NOT r.task_id"),
+            "0",
+            "every Run agrees with its invocation on the Task"
+        );
+        assert_eq!(
+            one("SELECT task_id FROM flow_invocations WHERE id='about'"),
+            "task"
+        );
+        assert_eq!(one("SELECT task_id FROM runs WHERE id='review'"), "task");
+        assert_eq!(
+            one("SELECT task_id FROM flow_invocations WHERE id='taskless'"),
+            ""
+        );
+        assert_eq!(one("SELECT task_id FROM runs WHERE id='free'"), "");
+        assert!(conn
+            .execute("UPDATE tasks SET current_invocation_id='taskless'", [])
+            .is_err());
+    }
+
+    #[test]
     fn session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints() {
         let conn = open();
         let name = "own_sessions_and_runs";

@@ -11,6 +11,27 @@ UPDATE tasks SET current_invocation_id=(
     SELECT id FROM flow_invocations WHERE task_id=tasks.id AND state='current'
 );
 DROP INDEX task_current_invocation;
+
+-- Before this draft a Flow launched with `--task` named the Task on its step
+-- Runs only; its invocation and its review Runs carried no Task. Where a
+-- taskless invocation's Runs name exactly one Task, the invocation and its
+-- Task-less Runs take it. An invocation whose Runs never named a Task stays
+-- taskless. The relaxed Run triggers are still in force here.
+WITH named AS (
+    SELECT f.id AS invocation, min(r.task_id) AS task_id, min(r.wave_id) AS wave_id
+    FROM flow_invocations f JOIN runs r ON r.invocation_id=f.id AND r.task_id IS NOT NULL
+    WHERE f.task_id IS NULL GROUP BY f.id HAVING count(DISTINCT r.task_id)=1
+)
+UPDATE runs SET
+    task_id=(SELECT task_id FROM named WHERE invocation=runs.invocation_id),
+    wave_id=COALESCE(wave_id, (SELECT wave_id FROM named WHERE invocation=runs.invocation_id))
+WHERE task_id IS NULL AND invocation_id IN (SELECT invocation FROM named)
+    AND (wave_id IS NULL OR wave_id=(SELECT wave_id FROM named WHERE invocation=runs.invocation_id));
+UPDATE flow_invocations SET task_id=(
+    SELECT min(task_id) FROM runs WHERE invocation_id=flow_invocations.id
+) WHERE task_id IS NULL AND EXISTS (SELECT 1 FROM runs WHERE invocation_id=flow_invocations.id)
+    AND (SELECT count(DISTINCT task_id) + max(task_id IS NULL) FROM runs
+         WHERE invocation_id=flow_invocations.id)=1;
 CREATE TRIGGER validate_task_invocation BEFORE UPDATE OF current_invocation_id ON tasks
 WHEN NEW.current_invocation_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM flow_invocations WHERE id=NEW.current_invocation_id AND task_id=NEW.id

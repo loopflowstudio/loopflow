@@ -2412,13 +2412,12 @@ mod planning_tests {
     }
 
     async fn human_task_fixture() -> (SharedStore, Task, FlowPosition) {
-        let database = tempfile::tempdir().unwrap().keep().join("registry.db");
-        human_task_fixture_at(&database).await
+        let (store, task, position, _) = human_task_fixture_with_database().await;
+        (store, task, position)
     }
 
-    async fn human_task_fixture_at(
-        database: &std::path::Path,
-    ) -> (SharedStore, Task, FlowPosition) {
+    async fn human_task_fixture_with_database(
+    ) -> (SharedStore, Task, FlowPosition, std::path::PathBuf) {
         let repository =
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
@@ -2528,7 +2527,7 @@ mod planning_tests {
         store.create_task(&task, &pr).await.unwrap();
         let mut flow = super::start_task_flow(&task, "task-design").unwrap();
         flow.cursor.index = 1;
-        (store, task, flow)
+        (store, task, flow, database)
     }
 
     #[tokio::test]
@@ -3225,6 +3224,37 @@ mod planning_tests {
                 if invocation_id == &position.invocation.id
         ));
 
+        let home = crate::store::observability_home_dir();
+        let first_dir = crate::run_record::record_dir(&home, &first.id).unwrap();
+        std::fs::create_dir_all(&first_dir).unwrap();
+        let manifest = crate::run_record::RunManifest {
+            schema_version: 1,
+            run_id: first.id.clone(),
+            parent_run_id: None,
+            created_at: time::OffsetDateTime::now_utc(),
+            harness: "codex".into(),
+            model: None,
+            surface: "tui".into(),
+            cwd: task.worktree.clone(),
+            repo: None,
+            worktree: None,
+            skill: None,
+            subjects: Vec::new(),
+            flow: Some(crate::run_record::RunFlowMembership::Step(
+                crate::run_record::RunFlowStep::of(&position),
+            )),
+            launch: None,
+            context: None,
+            runtime_path: None,
+            runtime_digest: None,
+            host: "test".into(),
+            boot_id: None,
+        };
+        std::fs::write(
+            first_dir.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.flow_position(&task.id).await.unwrap().unwrap();
         let (_, replacement) = store.reserve_review_run(&position).await.unwrap();
@@ -3254,6 +3284,269 @@ mod planning_tests {
         assert_eq!(history.len(), 2);
         assert!(history.iter().any(|run| run.id == first.id));
         assert!(history.iter().any(|run| run.id == replacement.id));
+        let historical = human_session::rename(
+            &store,
+            first.id.as_str(),
+            "Old actor",
+            SessionTitleSource::Human,
+        )
+        .await
+        .unwrap_err();
+        assert!(historical
+            .to_string()
+            .contains(&format!("historical attempt of Session {id}")));
+        assert!(!first_dir.join("session-name.json").exists());
+        let prefix = &first.id.as_str()[..16];
+        assert!(
+            human_session::rename(&store, prefix, "Old prefix", SessionTitleSource::Human)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("historical attempt of Session")
+        );
+        assert!(human_session::open(
+            &store,
+            first.id.as_str(),
+            human_session::OpenMode::Refuse,
+            false
+        )
+        .await
+        .is_err());
+        assert!(human_session::complete(&store, first.id.as_str())
+            .await
+            .is_err());
+
+        ready_review(&store, &task, "Keep this answer").await;
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        let (_, third) = store.reserve_review_run(&position).await.unwrap();
+        ready_review(&store, &task, "Keep this answer").await;
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(position.session_run_id.as_ref(), Some(&third.id));
+        assert!(store
+            .ready_session(&id, &first.id, "stale answer")
+            .await
+            .is_err());
+        let previous_actor = std::env::var_os("LF_RUN_ID");
+        std::env::set_var("LF_RUN_ID", first.id.as_str());
+        let stale_actor = human_session::require_current_review_actor(&store, &position).await;
+        match previous_actor {
+            Some(value) => std::env::set_var("LF_RUN_ID", value),
+            None => std::env::remove_var("LF_RUN_ID"),
+        }
+        assert!(stale_actor.is_err());
+        store
+            .finish_human_task_boundary(&task, &position, "complete once")
+            .await
+            .unwrap();
+        assert!(store
+            .finish_human_task_boundary(&task, &position, "late completion")
+            .await
+            .is_err());
+        let error = human_session::rename(
+            &store,
+            first.id.as_str(),
+            "Closed actor",
+            SessionTitleSource::Human,
+        )
+        .await
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains(&format!("historical attempt of Session {id}")));
+        assert!(!first_dir.join("session-name.json").exists());
+        assert!(human_session::rename(
+            &store,
+            third.id.as_str(),
+            "Closed actor",
+            SessionTitleSource::Human
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("already complete"));
+        let (closed, current) = store.session(&id).await.unwrap().unwrap();
+        assert!(closed.completed_at.is_some());
+        assert_eq!(closed.title, "Parser review");
+        assert_eq!(closed.ready_summary.as_deref(), Some("Keep this answer"));
+        assert_eq!(current.id, third.id);
+        assert_eq!(store.session_runs(&id).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn review_publication_retry_preserves_identity_and_claims_sql_once() {
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, task, flow) = human_task_fixture().await;
+        let position = store.set_flow_position(&task.id, flow).await.unwrap();
+        let session_id = human_session::flow_id(&position).unwrap();
+        let (reserved, run) = store.reserve_review_run(&position).await.unwrap();
+        let spec = crate::run_record::RunSpec {
+            harness: "codex".into(),
+            model: None,
+            surface: "tui".into(),
+            cwd: task.worktree.clone(),
+            repo: None,
+            worktree: None,
+            skill: None,
+            subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
+                &reserved,
+            )),
+        };
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+        let interrupted = crate::run_record::CaptureHandle::begin_reserved_with_context(
+            spec.clone(),
+            run.id.clone(),
+            &context,
+            |_| {
+                Err(crate::store::StoreError::InvalidAuthority(
+                    "interrupted before SQL publication".into(),
+                ))
+            },
+        );
+        assert!(interrupted.is_err());
+        let dir =
+            crate::run_record::record_dir(&crate::store::authority_home_dir(), &run.id).unwrap();
+        let original = std::fs::read(dir.join("manifest.json")).unwrap();
+        assert!(!dir.join("terminal.json").exists());
+        let (retry, same_run) = store.reserve_review_run(&reserved).await.unwrap();
+        assert_eq!(same_run, run);
+        assert_eq!(retry, reserved);
+        let capture = crate::run_record::CaptureHandle::begin_reserved_with_context(
+            spec.clone(),
+            run.id.clone(),
+            &context,
+            |id| {
+                store
+                    .sqlite
+                    .publish_review_run(&session_id, id, retry.version)
+            },
+        )
+        .unwrap();
+        assert_eq!(capture.run_id(), run.id);
+        assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
+        assert_eq!(store.session_runs(&session_id).await.unwrap().len(), 1);
+        assert!(
+            store
+                .session(&session_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .1
+                .published
+        );
+        assert!(
+            crate::run_record::CaptureHandle::begin_reserved_with_context(
+                spec,
+                run.id.clone(),
+                &context,
+                |id| store
+                    .sqlite
+                    .publish_review_run(&session_id, id, retry.version),
+            )
+            .is_err()
+        );
+        assert!(!dir.join("terminal.json").exists());
+        // Publication alone does not establish that a provider started or died.
+        // The real Open path must retain this uncertain attempt, not replace it.
+        let error = human_session::open(&store, &session_id, human_session::OpenMode::Refuse, true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("launch status is unresolved"));
+        assert_eq!(
+            store
+                .session(&session_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .0
+                .current_run_id,
+            run.id
+        );
+        assert_eq!(store.session_runs(&session_id).await.unwrap().len(), 1);
+        capture.finish("interrupted").unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_list_and_open_preserve_valid_reviews_beside_unreadable_captures() {
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, task, flow, database) = human_task_fixture_with_database().await;
+        let position = store.set_flow_position(&task.id, flow).await.unwrap();
+        let id = human_session::flow_id(&position).unwrap();
+        let conn = rusqlite::Connection::open(database).unwrap();
+        let mut broken_review_id = None;
+        for human in [false, true] {
+            let broken_id = TaskId::new();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                SELECT ?1,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
+                rusqlite::params![broken_id.as_str(), task.id.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO work_placements(task_id,home_id,enabled,placed_at)
+                SELECT ?1,home_id,enabled,placed_at FROM work_placements WHERE task_id=?2",
+                rusqlite::params![broken_id.as_str(), task.id.as_str()],
+            )
+            .unwrap();
+            let mut broken = position.clone();
+            broken.cursor = Default::default();
+            broken.task_id = broken_id.clone();
+            broken.invocation = crate::durable::test_flow_invocation(
+                "broken",
+                0,
+                "review-design",
+                Some("review"),
+                human,
+            );
+            broken.version = 0;
+            store
+                .set_flow_position(&broken_id, broken.clone())
+                .await
+                .unwrap();
+            if human {
+                broken_review_id = Some(human_session::flow_id(&broken).unwrap());
+            }
+            let corrupt = serde_json::json!({"id": broken.invocation.id, "flow": "broken", "steps": "unreadable"}).to_string();
+            conn.execute(
+                "UPDATE flow_invocations SET invocation_json=?2 WHERE task_id=?1",
+                rusqlite::params![broken_id.as_str(), corrupt],
+            )
+            .unwrap();
+            let records = human_session::list(&store).await.unwrap();
+            assert!(records.iter().any(|record| record.id == id));
+            let opened = human_session::open(&store, &id, human_session::OpenMode::Refuse, false)
+                .await
+                .unwrap();
+            assert_eq!(opened.id, id);
+            if let Some(broken_id) = &broken_review_id {
+                let record = records
+                    .iter()
+                    .find(|record| &record.id == broken_id)
+                    .unwrap();
+                assert!(
+                    matches!(&record.flow_membership, SessionFlowMembership::Unknown { reason } if reason.contains("saved Invocation is unreadable"))
+                );
+                assert!(record
+                    .actions
+                    .iter()
+                    .all(|action| action.unavailable_reason.is_some()));
+                assert!(human_session::open(
+                    &store,
+                    broken_id,
+                    human_session::OpenMode::Refuse,
+                    false
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("saved Invocation is unreadable"));
+            }
+            let retained: String = conn
+                .query_row(
+                    "SELECT invocation_json FROM flow_invocations WHERE task_id=?1",
+                    [broken_id.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, corrupt);
+        }
     }
 
     #[tokio::test]

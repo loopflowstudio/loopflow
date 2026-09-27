@@ -678,14 +678,32 @@ pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
 /// Resolve a Session id, or the Run id linked to it. An Ask or Flow Run
 /// names its waiting boundary, so `$LF_RUN_ID` inside a review targets it.
 async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<SessionTarget>> {
+    // Membership outlives a pending boundary. Never reinterpret a retained
+    // attempt's manifest as an independent conversation or current actor.
+    let owned = match RunId::parse(session_id) {
+        Ok(run_id) => store.session_for_run(&run_id).await?,
+        Err(_) => store.session(session_id).await?,
+    };
+    if let Some((session, current)) = owned {
+        return review_target(store, session_id, &session, &current)
+            .await
+            .map(Some);
+    }
     if let Some(token) = crate::ops::flow_session::parse_id(session_id)? {
         return Ok(Some(SessionTarget::StandaloneFlow(token)));
     }
-    if let Some(target) = find_boundary_for_run(store, session_id).await? {
+    if let Some(target) = find_boundary_for_run(session_id)? {
         return Ok(Some(target));
     }
     match crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), session_id) {
         Ok((dir, manifest)) => {
+            // Prefix selectors also resolve through the canonical Run's owner.
+            if let Some((session, current)) = store.session_for_run(&manifest.run_id).await? {
+                return review_target(store, manifest.run_id.as_str(), &session, &current)
+                    .await
+                    .map(Some);
+            }
+
             if !crate::run_record::has_interactive_history(&dir, &manifest)? {
                 bail!("Run {} is not an interactive Session", manifest.run_id);
             }
@@ -706,13 +724,36 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
         }
         return Ok(Some(SessionTarget::Ask(record)));
     }
-    let Some((task, position)) = find_flow_session_optional(store, session_id).await? else {
-        return Ok(None);
-    };
-    Ok(Some(SessionTarget::Flow {
+    Ok(None)
+}
+
+async fn review_target(
+    store: &SharedStore,
+    selector: &str,
+    session: &crate::session::Session,
+    current: &crate::session::Run,
+) -> Result<SessionTarget> {
+    if selector != session.id && selector != current.id.as_str() {
+        bail!(
+            "Run {selector} is a historical attempt of Session {}; current Run is {}",
+            session.id,
+            current.id
+        );
+    }
+    let (task, position) = find_flow_session(store, &session.id).await?;
+    if selector != session.id
+        && current.published
+        && position.session_run_id.as_ref() != Some(&current.id)
+    {
+        bail!(
+            "Session {} changed its current Run during lookup; open the Session again",
+            session.id
+        );
+    }
+    Ok(SessionTarget::Flow {
         task: Box::new(task),
         position,
-    }))
+    })
 }
 
 /// Interactive provider history that open and complete act on.
@@ -1058,16 +1099,16 @@ fn ask_launch_args(record: &AskSessionRecord) -> Vec<String> {
 }
 
 pub(crate) fn publish_run_binding(run_id: &RunId) -> Result<()> {
-    if let Some(raw) = std::env::var_os(REVIEW_RUN_ENV) {
-        std::env::remove_var(REVIEW_RUN_ENV);
-        let reservation: ReviewRunReservation = serde_json::from_str(&raw.to_string_lossy())?;
-        if reservation.run_id != *run_id {
-            bail!("review Run differs from its reservation");
-        }
-        let store =
-            crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
-        store.publish_review_run(&reservation.session_id, run_id, reservation.version)?;
+    let raw = std::env::var_os(REVIEW_RUN_ENV)
+        .ok_or_else(|| anyhow!("review Run has no launch reservation"))?;
+    std::env::remove_var(REVIEW_RUN_ENV);
+    let reservation: ReviewRunReservation = serde_json::from_str(&raw.to_string_lossy())?;
+    if reservation.run_id != *run_id {
+        bail!("review Run differs from its reservation");
     }
+    let store =
+        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    store.publish_review_run(&reservation.session_id, run_id, reservation.version)?;
     Ok(())
 }
 
@@ -1273,6 +1314,12 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
                 .is_empty()
         {
             bail!("review Run still has native history or an active client");
+        }
+        if crate::run_record::read_run_snapshot(&dir)?
+            .outcome
+            .is_none()
+        {
+            bail!("review Run {run_id} has no terminal outcome; launch status is unresolved, so Open cannot authorize a replacement");
         }
     }
     serve_flow_locked(store.clone(), token, launch_lock).await?;
@@ -1562,7 +1609,7 @@ fn boundary_id(target: &SessionTarget) -> Result<String> {
 }
 
 /// The waiting Ask or Flow boundary whose linked Run is `run_id`.
-async fn find_boundary_for_run(store: &SharedStore, run_id: &str) -> Result<Option<SessionTarget>> {
+fn find_boundary_for_run(run_id: &str) -> Result<Option<SessionTarget>> {
     if RunId::parse(run_id).is_err() {
         return Ok(None);
     }
@@ -1583,27 +1630,6 @@ async fn find_boundary_for_run(store: &SharedStore, run_id: &str) -> Result<Opti
         {
             return Ok(Some(SessionTarget::Ask(record)));
         }
-    }
-    for (_, run) in store.open_review_sessions().await? {
-        if run.id.as_str() != run_id {
-            continue;
-        }
-        let task_id = run
-            .task_id
-            .as_ref()
-            .ok_or_else(|| anyhow!("Task review lacks its Task"))?;
-        let position = store
-            .flow_position(task_id)
-            .await?
-            .ok_or_else(|| anyhow!("review invocation is no longer current"))?;
-        let task = store
-            .get_task(&position.task_id)
-            .await?
-            .ok_or_else(|| anyhow!("Task {} disappeared", position.task_id))?;
-        return Ok(Some(SessionTarget::Flow {
-            task: Box::new(task),
-            position,
-        }));
     }
     Ok(None)
 }
@@ -1679,6 +1705,9 @@ pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Re
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error).context("resolve Session Run"),
     };
+    let Some(provider_session) = crate::run_record::read_provider_session(&dir)? else {
+        return Ok(false);
+    };
     crate::lf::commands::util::require_provider_session_launch(&dir)?;
     let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
     crate::lf::commands::util::replace_provider_clients(
@@ -1687,9 +1716,6 @@ pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Re
         &clients,
         crate::run_record::ProviderClientStopReason::Moved,
     )?;
-    let Some(provider_session) = crate::run_record::read_provider_session(&dir)? else {
-        return Ok(false);
-    };
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::lf::commands::util::resume_session_with_env(
@@ -1789,9 +1815,17 @@ async fn review_surface(
     } else {
         SessionState::Waiting
     };
-    let position = store.flow_position(task_id).await?;
+    let (position, execution_error) = match store.flow_position(task_id).await {
+        Ok(position) => (position, None),
+        Err(crate::store::StoreError::InvalidData(reason)) => (None, Some(reason)),
+        Err(error) => return Err(error.into()),
+    };
     let dir = local_session_run_dir(&run.id);
-    let flow_membership = if let Some(manifest) = dir
+    let flow_membership = if let Some(reason) = &execution_error {
+        SessionFlowMembership::Unknown {
+            reason: reason.clone(),
+        }
+    } else if let Some(manifest) = dir
         .as_deref()
         .and_then(|dir| crate::run_record::read_manifest(dir).ok())
     {
@@ -1806,6 +1840,16 @@ async fn review_surface(
             reason: "Run membership evidence is unavailable".into(),
         }
     };
+    let mut actions = position
+        .as_ref()
+        .filter(|position| flow_id(position).ok().as_deref() == Some(session.id.as_str()))
+        .map(flow_actions)
+        .unwrap_or_else(|| session_actions(SessionKind::Flow, runtime));
+    if let Some(reason) = &execution_error {
+        for action in &mut actions {
+            action.unavailable_reason = Some(reason.clone());
+        }
+    }
     Ok(SessionRecord {
         run_id: run.id.clone(),
         title_source: match session.title_source {
@@ -1813,10 +1857,7 @@ async fn review_surface(
             crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
         work_path: session_work_path(store, Some(&work)).await?,
-        actions: position
-            .as_ref()
-            .map(flow_actions)
-            .unwrap_or_else(|| session_actions(SessionKind::Flow, runtime)),
+        actions,
         flow_membership,
         provider: recorded_provider(dir.as_deref()),
         terminal_ids: Vec::new(),

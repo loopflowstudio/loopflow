@@ -27,7 +27,7 @@ use crate::work::task::{
     TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::durable::{create_project_work, create_task_work};
+use super::durable::{create_project_work, create_task_work, TASK_INVOCATION};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -285,8 +285,10 @@ impl SqliteStore {
         super::sessions::complete_review_in(&transaction, expected)?;
         validate_task_project(&transaction, task)?;
         if transaction.execute(
-            "UPDATE flow_invocations SET state='completed', ended_at=?3
-             WHERE state='current' AND task_id=?1 AND position_version=?2",
+            &format!(
+                "UPDATE flow_invocations SET state='completed', ended_at=?3
+                 WHERE {TASK_INVOCATION} AND position_version=?2"
+            ),
             params![
                 task.id.as_str(),
                 i64::try_from(expected.version)
@@ -299,6 +301,10 @@ impl SqliteStore {
                 "Task review position changed before completion".to_string(),
             ));
         }
+        transaction.execute(
+            "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
+            [task.id.as_str()],
+        )?;
         insert_task_event_in(
             &transaction,
             task,
@@ -386,8 +392,14 @@ impl SqliteStore {
         validate_task_project(&transaction, task)?;
         let task_work = task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?;
         transaction.execute(
-            "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE state='current' AND task_id=?1",
+            &format!(
+                "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE {TASK_INVOCATION}"
+            ),
             params![task.id.as_str(), now_unix()],
+        )?;
+        transaction.execute(
+            "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
+            [task.id.as_str()],
         )?;
         let parameters = task_params(task);
         transaction.execute(

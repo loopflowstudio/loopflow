@@ -441,6 +441,22 @@ pub(crate) async fn prepare(
     flow_surface(store, task, position).await
 }
 
+/// The Task whose own Flow waits at this Run's review: the Run's invocation is
+/// the one the Task points at. Any other review naming a Task is a Flow about it.
+async fn managed_review(
+    store: &SharedStore,
+    run: &Run,
+) -> crate::store::StoreResult<Option<(crate::durable::TaskId, FlowPosition)>> {
+    let (Some(task_id), Some(invocation)) = (&run.task_id, &run.invocation_id) else {
+        return Ok(None);
+    };
+    Ok(store
+        .flow_position(task_id)
+        .await?
+        .filter(|position| position.invocation.id == *invocation)
+        .map(|position| (task_id.clone(), position)))
+}
+
 pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     let mut sessions = Vec::new();
     for (session, run) in store.open_sessions().await? {
@@ -494,19 +510,17 @@ async fn owned_target(
     if session.completed_at.is_some() {
         bail!("Session {} is already complete", session.id);
     }
-    let task_id = match (session.kind, current.task_id.clone()) {
-        (crate::session::SessionKind::FlowReview, Some(task_id)) => task_id,
-        _ => {
-            return Ok(SessionTarget::Row {
-                session,
-                run: current,
-            })
+    let Some((task_id, position)) = managed_review(store, &current).await? else {
+        if session.kind == crate::session::SessionKind::FlowReview
+            && store.waiting_flow(&session.id).await?.is_none()
+        {
+            bail!("Session {} is no longer waiting", session.id);
         }
+        return Ok(SessionTarget::Row {
+            session,
+            run: current,
+        });
     };
-    let position = store
-        .flow_position(&task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Session {} invocation is no longer current", session.id))?;
     if flow_id(&position)? != session.id {
         bail!("Session {} is no longer waiting", session.id);
     }
@@ -1171,9 +1185,14 @@ async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<Se
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
-    // Only a Task's review can wait on another Home.
-    let remote = match (&work, &run.invocation_id) {
-        (Some(work @ WorkRef::Task(_)), Some(_)) => {
+    let managed = match managed_review(store, run).await {
+        Ok(managed) => Ok(managed),
+        Err(crate::store::StoreError::InvalidData(reason)) => Err(reason),
+        Err(error) => return Err(error.into()),
+    };
+    // Only a Task's own review can wait on another Home.
+    let remote = match (&work, &managed) {
+        (Some(work @ WorkRef::Task(_)), Ok(Some(_))) => {
             let placement = store.placement(work).await?;
             let home = store
                 .home_by_id(&placement.home_id)
@@ -1207,9 +1226,23 @@ async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<Se
         SessionState::Waiting
     };
     let mut actions = session_actions(kind, state);
-    let flow_membership = match (&run.invocation_id, &run.task_id) {
+    let flow_membership = match (&run.invocation_id, managed) {
         (None, _) => SessionFlowMembership::Independent,
-        (Some(invocation), None) => match store.waiting_flow(&session.id).await? {
+        (Some(_), Ok(Some((_, position))))
+            if flow_id(&position).ok().as_deref() == Some(&session.id) =>
+        {
+            SessionFlowMembership::of_position(&position)
+        }
+        (Some(_), Ok(Some(_))) => SessionFlowMembership::Unknown {
+            reason: "Run membership evidence is unavailable".into(),
+        },
+        (Some(_), Err(reason)) => {
+            for action in &mut actions {
+                action.unavailable_reason = Some(reason.clone());
+            }
+            SessionFlowMembership::Unknown { reason }
+        }
+        (Some(invocation), Ok(None)) => match store.waiting_flow(&session.id).await? {
             Some((flow, node)) => SessionFlowMembership::Step {
                 flow,
                 invocation_id: invocation.clone(),
@@ -1221,21 +1254,6 @@ async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<Se
             None => SessionFlowMembership::Unknown {
                 reason: format!("Flow {invocation} no longer waits at this review"),
             },
-        },
-        (Some(_), Some(task)) => match store.flow_position(task).await {
-            Ok(Some(position)) if flow_id(&position).ok().as_deref() == Some(&session.id) => {
-                SessionFlowMembership::of_position(&position)
-            }
-            Ok(_) => SessionFlowMembership::Unknown {
-                reason: "Run membership evidence is unavailable".into(),
-            },
-            Err(crate::store::StoreError::InvalidData(reason)) => {
-                for action in &mut actions {
-                    action.unavailable_reason = Some(reason.clone());
-                }
-                SessionFlowMembership::Unknown { reason }
-            }
-            Err(error) => return Err(error.into()),
         },
     };
     Ok(SessionRecord {
@@ -1372,6 +1390,10 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
         Err(_) => store.get_task_by_issue(task).await?,
     }
     .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
+    eprintln!(
+        "Binding {} to {} ({}). Permanent.",
+        session.id, task.plan.identifier, task.plan.title
+    );
     let (session, run) = store
         .bind_session(&session.id, &task.id)
         .await

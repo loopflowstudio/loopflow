@@ -114,9 +114,10 @@ impl Store {
         &self,
         invocation: QueuedInvocation,
         cursor: ExecutionCursor,
+        task: Option<TaskId>,
     ) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| {
-            store.save_flow(&invocation, &cursor)
+            store.save_flow(&invocation, &cursor, task.as_ref())
         })
         .await
     }

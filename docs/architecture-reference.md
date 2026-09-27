@@ -196,7 +196,7 @@ preserves repeated attempts rather than deduplicating by position.
 | Validator | Enforced contract | Mutation boundary |
 | --- | --- | --- |
 | Planning ancestry | Project's Wave and Chapter name the same repository; `(wave_id, chapter_id)` is unique; a repository has one current Chapter; Task's Wave is derived from its Project | Plan writes and atomic chapter activation |
-| Invocation structure | Invocation has an optional Task; parent has the same nullable Task; parent chain is acyclic and describes runtime entry; node exists in the captured expanded graph; one current root per Task when Task-owned | Invocation creation, child entry, cursor settlement, restart |
+| Invocation structure | Invocation has an optional Task; parent has the same nullable Task; parent chain is acyclic and describes runtime entry; node exists in the captured expanded graph; a Task's current invocation names that Task | Invocation creation, child entry, cursor settlement, restart |
 | Run ancestry | Invocation supplies its nullable Task; a present Task fills Wave; supplied parents must match. An invocation-owned Run has a valid node/iteration tuple even when taskless; an independent Run has neither. Membership never changes through bind; Task assignment is write-once and existing Wave is retained; Started timestamp presence equals Task Run existence | All Run creation, binding, import and ancestry-changing writes |
 
 SQLite foreign keys, uniqueness and nullability constraints back these APIs.

@@ -96,8 +96,9 @@ capture, cursor or exact claim. Session completion and boundary settlement share
 a transaction; Run replacement preserves the Session title and saved feedback.
 Cursor checkpoints retain an existing Session unchanged; reservation, publication
 and Ready own updates to its current Run and feedback.
-A partial unique index selects one current invocation per
-Task. Run reservation and publication compare invocation identity, version and
+`tasks.current_invocation_id` points at the one invocation that advances a
+Task; other Flows launched for the Task name it on their invocation and Runs
+without becoming its Flow. Run reservation and publication compare invocation identity, version and
 current Run; Ready rejects a superseded Run. Chapter
 retirement retains evidence from earlier invocations, while only the current
 invocation can hold an active worker claim. SQL `step_index` and

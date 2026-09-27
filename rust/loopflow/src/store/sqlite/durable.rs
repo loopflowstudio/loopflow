@@ -2013,6 +2013,77 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn bind_fills_every_run_of_a_session_and_refuses_another_wave() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let other_wave = WaveId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'other','/repo',1)",
+                [other_wave.as_str()],
+            )
+            .unwrap();
+        let open = |id: &str, wave: Option<WaveId>| {
+            let run = Run {
+                id: RunId::new(),
+                session_id: Some(id.to_string()),
+                invocation_id: None,
+                node: None,
+                iterations: None,
+                attempt: None,
+                task_id: None,
+                wave_id: wave,
+                work_source: None,
+                created_at: 1,
+                published: true,
+                cwd: "/repo".into(),
+                skill: None,
+                provider: None,
+                model: None,
+                caller_run_id: None,
+            };
+            let session = crate::session::Session {
+                id: id.to_string(),
+                current_run_id: run.id.clone(),
+                kind: crate::session::SessionKind::Interactive,
+                title: id.to_string(),
+                title_source: crate::session::TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            };
+            store.create_session(session, run, None).unwrap().1
+        };
+        let first = open("orphan", None);
+        let replacement = store
+            .replace_session_run(
+                &first.id,
+                Run {
+                    id: RunId::new(),
+                    ..first.clone()
+                },
+            )
+            .unwrap();
+        open("elsewhere", Some(other_wave));
+
+        let (_, current) = store.bind_session("orphan", &task_id).unwrap();
+        assert_eq!(current.id, replacement.id);
+        for run in store.session_runs("orphan").unwrap() {
+            assert_eq!(run.task_id, Some(task_id.clone()));
+            assert_eq!(run.wave_id, Some(task.wave_id.clone()));
+            assert_eq!(run.work_source, Some(WorkSource::Bound));
+        }
+        let refused = store.bind_session("elsewhere", &task_id).unwrap_err();
+        assert!(refused.to_string().contains("Wave other"), "{refused}");
+        assert_eq!(store.session("elsewhere").unwrap().unwrap().1.task_id, None);
+        assert_eq!(store.task_runs(&task_id).unwrap().len(), 2);
+    }
+
+    #[test]
     fn competing_run_assignments_start_only_the_winning_task() {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;

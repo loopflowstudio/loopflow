@@ -106,20 +106,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn begin_chapter_task(&self, task: &TaskId) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = crate::durable::WorkRef::Task(task.clone());
-        super::durable::require_ready_work(&tx, &work)?;
-        super::durable::require_current_task_chapter(&tx, &work)?;
-        tx.execute("INSERT INTO task_events(task_id,kind_json,created_at)
-            SELECT ?1,'{\"kind\":\"started\"}',?2 WHERE NOT EXISTS(
-              SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='started')",
-            params![task.as_str(), super::super::rows::now_unix()])?;
-        tx.commit()?;
-        Ok(())
-    }
-
     /// Run assignment starts a Task, including an unpublished reservation.
     /// Retain historical execution evidence until all launch paths import Runs.
     pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {

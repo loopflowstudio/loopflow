@@ -358,14 +358,18 @@ fn observing_and_preparing_a_task_are_not_execution() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let starts = || {
-        runtime
-            .block_on(task.store.task_events_after(&task.task.id, 0))
+    // Started is `tasks.started_at`, set by the first Run that names the Task.
+    let started_at = || -> Option<i64> {
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
-            .into_iter()
-            .filter(|event| event.kind == loopflow::work::task::TaskEventKind::Started)
-            .count()
+            .query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.task.id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap()
     };
+    let starts = || started_at().iter().count();
     // The shared evidence the desktop sidebar consumes.
     let started = || {
         runtime
@@ -451,6 +455,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
         bin.path().display(),
         std::env::var("PATH").unwrap()
     );
+    let mut first = None;
     for _ in 0..2 {
         let launched = run_lf(
             repo.path(),
@@ -463,12 +468,14 @@ fn observing_and_preparing_a_task_are_not_execution() {
             "{}",
             String::from_utf8_lossy(&launched.stderr)
         );
-        assert_eq!(
-            starts(),
-            1,
-            "independent execution records the existing Started event once"
-        );
+        assert_eq!(starts(), 1, "independent execution starts its Task");
         assert!(started(), "a launched Run is durable start evidence");
+        assert_eq!(
+            *first.get_or_insert(started_at()),
+            started_at(),
+            "a later Run leaves Started alone"
+        );
+        std::thread::sleep(std::time::Duration::from_secs(1));
     }
 }
 
@@ -561,13 +568,16 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let sibling =
         support::register_sibling_task(&task, "INF-124", "task-sibling", &sibling_worktree);
     let runtime = tokio::runtime::Runtime::new().unwrap();
+    // Started is `tasks.started_at`, set by the first Run that names the Task.
     let starts = |id: &loopflow::work::task::TaskId| {
-        runtime
-            .block_on(task.store.task_events_after(id, 0))
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
-            .into_iter()
-            .filter(|event| event.kind == loopflow::work::task::TaskEventKind::Started)
-            .count()
+            .query_row(
+                "SELECT count(*) FROM tasks WHERE id=?1 AND started_at IS NOT NULL",
+                [id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
     };
     let events = || {
         runtime

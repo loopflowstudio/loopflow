@@ -123,7 +123,10 @@ workspace and offer Retry. Only one workspace window receives a link.
 Wave details show the objective, current chapter plan/KRs, the current Project's
 Flow template, all Tasks and chapter history. Templates fold composed Flows;
 click a group or its disclosure control to expand it. Repeated uses disclose
-independently, and both return edges remain visible at folded boundaries.
+independently, and both return edges remain visible at folded boundaries. Tab to
+a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
+this includes nested and empty groups and XOR paths. Inspecting a return names
+its target step even while the containing Flow is folded.
 Task previews use the same template view until an invocation exists, including
 Tasks with independent conversations. Captured invocations keep their expanded
 graph. Changing a template resets its disclosure; it does not change a capture.

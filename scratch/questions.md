@@ -5,6 +5,19 @@ This inherited LOO-298 agenda remains evidence, not this Task's implementation p
 Its later `data-model-slice-review.md` reference was not copied into this checkout;
 those review claims retain their original limits and have not been revalidated here.
 
+## LOO-303 recursive keyboard counterexample (2026-09-27)
+
+Dispatched Tab from Task details reached a hidden `GhosttyMetalView`: its
+`acceptsFirstResponder` remained true after SwiftUI disabled the retained host.
+The focused template cut now carries that existing enabled state into AppKit
+responder eligibility. This fixes input isolation without changing host mounting,
+terminal lifetime, or the deferred one-mount control-room design. Native disclosure
+controls also need a keyboard target at every recursive level. The unhosted
+proof drives AppKit key-view recalculation after layout changes; its initial
+backward-Tab failures do not establish an installed-app defect. A shared style retains
+its existing expansion owner while handling pointer and keyboard on one button.
+These are observed local counterexamples, not installed acceptance.
+
 ## LOO-303 interactive review (2026-09-26)
 
 The current participant (name unresolved) clarified that “wave flows” means

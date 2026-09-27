@@ -475,31 +475,42 @@ justified for this scratch-only design.
 
 ## This slice
 
-Navigation repairs and folded templates now implement the independent next cut.
-The palette derives visible and submitted selection from current rows, and keeps
-at most 20 repository-local recent descriptors. Historical Task activation uses
-the existing exact reader with stable identity validation; selectedTaskEvidence
-remains the sole selected-detail owner. Local proof now includes repeated Session
-activation, removed/empty/failed inventory, and two mounted windows with two
-links racing a click.
+Repair return detail across folded composition boundaries, then finish dispatched
+recursive keyboard disclosure. Node descriptions read the complete original graph;
+layout and return endpoints keep using the folded projection. Prove both distinct
+returns across folded/expanded/folded states at the root and inside an XOR path,
+and preserve captured invocation detail and traversal counts.
 
-The shared Rust resolver retains composition before flattening execution. Catalog
-DTOs expose distinct repeated/empty group IDs, XOR children and a resolved content
-revision. Task previews, catalog inspection and the current Project's Flow on the
-Wave page share folded disclosure and preserve both return edges at group
-boundaries. The Wave summary uses the existing Task default resolver. Captured
-invocations still use their captured expanded graph; independent Runs leave the
-Flow template visible.
+Use one focusable disclosure button on each recursive group, including empty
+groups and XOR alternatives. Dispatched Tab/Shift-Tab must reach the appropriate
+label; Right/Left expand/collapse, Space/Return toggle. Inspection invokes no Flow
+control. Hidden retained terminals must be ineligible for keyboard focus; both
+surfaces and the exact draft/child reply survive returning to the Session.
 
-The [current proof](workspace-template-proof.md) records focused Rust/Swift and
-mounted terminal results, counterexamples, source review and exact limits. These
-are local proofs, not installed Launch Services, configured provider, visual or
-Jack's acceptance. The complete eight Done When obligations remain authoritative.
-The next dependent cut requires the LOO-298 contract checklist; no room/bind or
-attempt authority is recreated here. No publication or Flow navigation decision
-is selected by this implementation step.
+The [focused receipt](workspace-return-proof.md) owns observations, failures and
+executed evidence. Prior navigation/template receipts keep their original scope.
+The complete eight Done When obligations remain authoritative, including installed
+links, configured provider/draft proof, captures and Jack's verdict. Room/bind and
+attempt work still require the explicit LOO-298 contract checklist. No publication
+or Flow navigation decision is selected here.
 
 ## Slice ledger
+
+- 2026-09-27 folded-return and keyboard repair: preserved the inherited draft at
+  `502ba4601`, then reproduced root and XOR hidden-target labels in a mounted
+  workspace. Detail reads the original graph recursively; projected layout and
+  return endpoints stay unchanged. Shared recursive disclosure handles Tab,
+  arrows, Space and Return with the existing expansion state. Dispatched Tab
+  exposed hidden terminals accepting focus; AppKit eligibility now follows the
+  existing enabled input without releasing surfaces or changing host ownership.
+- Focused final Swift proof passes nine tests, including both distinct returns,
+  root/XOR fold transitions, captured traversal counts, nested/empty disclosure,
+  exact focus, unchanged PTY buffers, retained draft/child reply, palette, Monitor,
+  click-focus and paste routing. Source review kept original/projection roles
+  separate and added no Run/Session writer. The [receipt](workspace-return-proof.md)
+  records failures, fixture key-loop correction and final compile evidence.
+  All parent-contract and configured-acceptance obligations remain; no publication
+  or Flow navigation decision.
 
 - 2026-09-27 template review: actual CLI catalog checks and 16 focused Swift
   checks pass. Reproduced and repaired Started being presented as proof of

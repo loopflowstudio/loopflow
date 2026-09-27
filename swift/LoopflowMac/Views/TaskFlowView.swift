@@ -505,6 +505,7 @@ private struct TemplateDisclosures: View {
                 } label: {
                     Text("\(name) · \(item.nodeKeys.count) steps").font(Typography.mono)
                 }
+                .disclosureGroupStyle(TemplateDisclosureStyle())
                 .accessibilityIdentifier("template-group-\(id)")
             case .node(let key, let paths):
                 if !paths.isEmpty {
@@ -515,9 +516,42 @@ private struct TemplateDisclosures: View {
                                 let branch = FlowGraph(name: name, steps: path.steps)
                                 TemplateDiagram(graph: branch, items: paths[name]!, expanded: $expanded)
                             }
-                        }.font(Typography.mono)
+                        }
+                        .disclosureGroupStyle(TemplateDisclosureStyle())
+                        .font(Typography.mono)
                     }
                 }
+            }
+        }
+    }
+}
+
+private struct TemplateDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Button { configuration.isExpanded.toggle() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 12)
+                        .accessibilityHidden(true)
+                    configuration.label
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable(interactions: .edit)
+            .onKeyPress(keys: [.space, .return, .rightArrow, .leftArrow]) { press in
+                switch press.key {
+                case .rightArrow: configuration.isExpanded = true
+                case .leftArrow: configuration.isExpanded = false
+                default: configuration.isExpanded.toggle()
+                }
+                return .handled
+            }
+            .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            if configuration.isExpanded {
+                configuration.content.padding(.leading, 16)
             }
         }
     }

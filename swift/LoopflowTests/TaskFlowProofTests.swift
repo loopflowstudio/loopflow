@@ -219,15 +219,64 @@ struct TaskFlowProofTests {
         try await source.crossingReturns()
         await model.loadFlowCatalog(force: true)
         try await settle(window)
+        let inputBeforeInspection = surfaces.map(terminalText)
+        #expect(inputBeforeInspection[0].contains(draft))
+        #expect(terminals.allSatisfy { !$0.acceptsFirstResponder })
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(window.contentView)
+        for _ in 0..<30 where focusedLabel(in: window) != "build · 1 steps" {
+            try press("\t", keyCode: 48, in: window)
+            try await settle(window)
+        }
+        try #require(focusedLabel(in: window) == "build · 1 steps")
         for prefix in ["", "3/fix/"] {
-            print("return proof path: \(prefix)")
             if !prefix.isEmpty {
-                let path = try #require(accessible(window.contentView!).first { ax($0, "Label") as? String == "xor-route · fix" })
-                try clickElement(path, in: window)
+                try press("\t", keyCode: 48, in: window)
+                try await settle(window)
+                #expect(focusedLabel(in: window) == "xor-route · fix")
+                try press("\u{f703}", keyCode: 124, in: window)
+                try await settle(window)
+                try press("\t", keyCode: 48, in: window)
                 try await settle(window)
             }
+            #expect(focusedLabel(in: window) == "build · 1 steps")
+            func expanded(_ suffix: String) -> Bool {
+                model.navigation.expandedTemplateGroups["crossing-returns"]?.contains(prefix + suffix) == true
+            }
+            try press("\u{f703}", keyCode: 124, in: window)
+            try await settle(window)
+            #expect(expanded("outer"))
+            try press("\t", keyCode: 48, in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "edit · 1 steps")
+            try press(" ", keyCode: 49, in: window)
+            try await settle(window)
+            #expect(expanded("inner"))
+            try press("\t", keyCode: 48, in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "empty · 0 steps")
+            try press("\r", keyCode: 36, in: window)
+            try await settle(window)
+            #expect(expanded("empty"))
+            #expect(try find("template-group-\(prefix)empty").find(text: "No steps").string() == "No steps")
+            try press("\u{f702}", keyCode: 123, in: window)
+            try await settle(window)
+            #expect(!expanded("empty"))
+            try press("\u{19}", keyCode: 48, modifiers: [.shift], in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "edit · 1 steps")
+            try press("\u{f702}", keyCode: 123, in: window)
+            try await settle(window)
+            #expect(!expanded("inner"))
+            try press("\u{19}", keyCode: 48, modifiers: [.shift], in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "build · 1 steps")
+            try press("\u{f702}", keyCode: 123, in: window)
+            try await settle(window)
+            #expect(!expanded("outer"))
+        }
+        for prefix in ["", "3/fix/"] {
             for expanded in [false, true, false] {
-                print("return proof expanded: \(expanded)")
                 let group = try find("template-group-\(prefix)outer").disclosureGroup()
                 if expanded {
                     try group.expand()
@@ -236,16 +285,19 @@ struct TaskFlowProofTests {
                 } else { try group.collapse() }
                 try await settle(window)
                 for (number, key) in ["1", "2"].enumerated() {
-                    print("return proof node: \(prefix)\(key)")
                     #expect(try text("task-flow-loop-\(prefix)\(key)") == "Loop \(number + 1)")
                     try pressElement("flow-node-\(prefix)\(key)", in: window)
                     try await settle(window)
-                    let detail = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }.joined(separator: " | ")
-                    #expect(detail.contains("Iterate returns to implement"), "detail: \(detail)")
+                    let expected = prefix.isEmpty ? "implement" : "fix-implement"
+                    let details = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }
+                        .filter { $0.hasPrefix("Iterate returns to") }
+                    #expect(details.contains("Iterate returns to \(expected)"))
+                    #expect(details.allSatisfy { $0 == "Iterate returns to implement" || $0 == "Iterate returns to fix-implement" })
                 }
             }
         }
         #expect(await source.controls.isEmpty, "template inspection never starts work")
+        #expect(surfaces.map(terminalText) == inputBeforeInspection, "disclosure keys never reach a PTY")
 
         // Started alone does not establish historical Run membership.
         model.select(.task(id: "issue-later"))
@@ -292,8 +344,8 @@ struct TaskFlowProofTests {
         for key in ["3", "5"] {
             try pressElement("flow-node-\(key)", in: window)
             try await settle(window)
-            let detail = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }.joined(separator: " | ")
-            #expect(detail.contains("Iterate returns to implement · taken 1×"))
+            let details = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }
+            #expect(details.contains { $0.contains("Iterate returns to implement · taken 1×") })
         }
         try captureIfRequested(window, name: "task-flow-pinned")
 
@@ -350,8 +402,17 @@ struct TaskFlowProofTests {
         }
     }
 
+    private func press(_ character: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [], in window: NSWindow) throws {
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            let event = try #require(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: character, charactersIgnoringModifiers: character, isARepeat: false, keyCode: keyCode))
+            NSApp.sendEvent(event)
+        }
+    }
+
     private func ax(_ element: NSObject, _ property: String) -> Any? {
-        let key = "accessibility" + property
+        let key = property == "Focused" ? "isAccessibilityFocused" : "accessibility" + property
         guard element.responds(to: NSSelectorFromString(key)) else { return nil }
         return element.value(forKey: key)
     }
@@ -361,25 +422,23 @@ struct TaskFlowProofTests {
         return [element] + ((ax(element, "Children") as? [Any]) ?? []).flatMap { accessible($0) }
     }
 
-    private func pressElement(_ id: String, in window: NSWindow) throws {
-        let element = try #require(accessible(window.contentView!).first { ax($0, "Identifier") as? String == id })
-        try clickElement(element, in: window)
+    private func focusedLabel(in window: NSWindow) -> String? {
+        accessible(window.contentView!).first { ax($0, "Focused") as? Bool == true }
+            .flatMap { ax($0, "Label") as? String }
     }
 
-    private func clickElement(_ element: NSObject, in window: NSWindow) throws {
-        let frame = try #require(ax(element, "Frame") as? NSValue).rectValue
-        let point = window.convertPoint(fromScreen: CGPoint(x: frame.midX, y: frame.midY))
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            let event = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-            window.sendEvent(event)
-        }
+    private func pressElement(_ id: String, in window: NSWindow) throws {
+        let element = try #require(accessible(window.contentView!).first { ax($0, "Identifier") as? String == id })
+        let action = NSSelectorFromString("accessibilityPerformPress")
+        try #require(element.responds(to: action))
+        element.perform(action)
     }
 
     private func settle(_ window: NSWindow) async throws {
         window.contentView?.layoutSubtreeIfNeeded()
         window.layoutIfNeeded()
+        // Drive AppKit's dynamic key loop in this unhosted window, alongside layout.
+        window.recalculateKeyViewLoop()
         if let content = window.contentView,
            let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
             content.cacheDisplay(in: content.bounds, to: bitmap)
@@ -436,9 +495,10 @@ private actor FlowSource {
     func crossingReturns() throws {
         var entries = try #require(JSONSerialization.jsonObject(with: Data(catalog.utf8)) as? [[String: Any]])
         func steps(_ prefix: String) -> [[String: Any]] {
-            (0...2).map { index in
-                ["key": "\(prefix)\(index)", "id": NSNull(),
-                 "label": index == 0 ? "implement" : "loop-decide", "kind": "skill",
+            (0...2).map { index -> [String: Any] in
+                let target = prefix.isEmpty ? "implement" : "fix-implement"
+                return ["key": "\(prefix)\(index)", "id": NSNull(),
+                 "label": index == 0 ? target : "loop-decide", "kind": "skill",
                  "human": false, "returns_to": index == 0 ? NSNull() : "\(prefix)0",
                  "parents": ["feature"], "paths": []]
             }

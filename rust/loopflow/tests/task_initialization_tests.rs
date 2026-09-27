@@ -434,8 +434,8 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("roadmap condition reason")
         .contains("is initializing worktree"));
-    let projected =
-        task_snapshot(&task_status("INF-123").expect("read Task")).expect("project Task status");
+    let projected = task_snapshot(&task_status(Some("INF-123")).expect("read Task"))
+        .expect("project Task status");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));
 
     rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -497,7 +497,7 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let status = task_status("INF-123").expect("status survives the absent worktree");
+    let status = task_status(Some("INF-123")).expect("status survives the absent worktree");
     let snapshot = task_snapshot(&status).expect("project missing-worktree status");
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));

@@ -1,0 +1,319 @@
+"""Run the real CLI through a local HTTPS proxy with synthetic Linear state."""
+
+import json
+import os
+import sqlite3
+import ssl
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+    def do_CONNECT(self) -> None:
+        assert self.path == "api.linear.app:443"
+        self.send_response(200)
+        self.end_headers()
+        self.connection = self.server.tls.wrap_socket(self.connection, server_side=True)
+        self.rfile = self.connection.makefile("rb")
+        self.wfile = self.connection.makefile("wb")
+        self.close_connection = False
+
+    def do_POST(self) -> None:
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        query, variables = request["query"], request.get("variables", {})
+        state = self.server.state
+        project = state["project"]
+        issue = state["issue"]
+        page = {"hasNextPage": False, "endCursor": None}
+        if "query ListTeams" in query:
+            data = {
+                "teams": {
+                    "nodes": [
+                        {
+                            "id": "team-task-pr-tests",
+                            "name": "Fixture",
+                            "key": "INF",
+                            "description": state["claim"],
+                        }
+                    ]
+                }
+            }
+        elif "query IssueOwnership" in query:
+            data = {"issue": issue if not issue["trashed"] else None}
+        elif "query IssueDeletion" in query:
+            data = {"issue": {"trashed": issue["trashed"]}}
+        elif "mutation DeleteIssue" in query:
+            assert variables["id"] == issue["id"]
+            issue["trashed"] = True
+            state["deletes"] += 1
+            data = {"issueDelete": {"success": True, "entity": None}}
+        elif "query ListInitiatives" in query:
+            data = {
+                "initiatives": {
+                    "nodes": [
+                        {
+                            "id": "initiative-task-pr-tests",
+                            "name": "Task PR Tests",
+                            "description": "",
+                        }
+                    ],
+                    "pageInfo": page,
+                }
+            }
+        elif "mutation UpdateInitiative" in query:
+            data = {"initiativeUpdate": {"initiative": {"id": variables["id"]}}}
+        elif "mutation UpdateProject" in query:
+            project.update({key: variables[key] for key in ["name", "description", "content"]})
+            data = {"projectUpdate": {"project": {"id": variables["id"]}}}
+        elif "query ListInitiativeProjects" in query:
+            data = {"initiative": {"projects": {"nodes": [project], "pageInfo": page}}}
+        elif "query ListProjectIssues" in query:
+            data = {
+                "project": {
+                    "issues": {"nodes": [] if issue["trashed"] else [issue], "pageInfo": page}
+                }
+            }
+        else:
+            raise AssertionError(query)
+        body = json.dumps({"data": data}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def main() -> None:
+    fixture = json.loads(Path(sys.argv[1]).read_text())
+    root, repo = Path(fixture["home"]), Path(fixture["repo"])
+    cert, key = root / "cert.pem", root / "tls.key"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-subj",
+            "/CN=api.linear.app",
+            "-addext",
+            "subjectAltName=DNS:api.linear.app",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    leaf, leaf_key, csr = root / "leaf.pem", root / "leaf.key", root / "leaf.csr"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(leaf_key),
+            "-out",
+            str(csr),
+            "-subj",
+            "/CN=api.linear.app",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    extensions = root / "extensions"
+    extensions.write_text("basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:api.linear.app\n")
+    subprocess.run(
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-in",
+            str(csr),
+            "-CA",
+            str(cert),
+            "-CAkey",
+            str(key),
+            "-CAcreateserial",
+            "-out",
+            str(leaf),
+            "-days",
+            "1",
+            "-extfile",
+            str(extensions),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    tls.load_cert_chain(leaf, leaf_key)
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", "https://github.com/loopflowstudio/fixture.git"],
+        cwd=repo,
+        check=True,
+    )
+    (repo / ".lf").mkdir(exist_ok=True)
+    (repo / ".lf/config.yaml").write_text(
+        "pm:\n  provider: linear\n  linear_team: team-task-pr-tests\n"
+    )
+    wave = repo / "wave/task-pr-tests"
+    wave.mkdir(parents=True, exist_ok=True)
+    (wave / "GOAL.md").write_text(
+        "---\npm:\n  linear_initiative: initiative-task-pr-tests\n---\nKeep work.\n"
+    )
+    authored = repo / "authored.txt"
+    authored.write_text("preserve authored work\n")
+    project = {
+        "id": fixture["project"],
+        "name": "Task PR Tests",
+        "description": "",
+        "content": "",
+        "initiatives": {"nodes": [{"id": "initiative-task-pr-tests"}]},
+        "teams": {"nodes": [{"id": "team-task-pr-tests"}]},
+    }
+    issue = {
+        "id": fixture["issue"],
+        "identifier": "INF-123",
+        "title": "Keep history",
+        "description": "",
+        "url": None,
+        "sortOrder": 1,
+        "prioritySortOrder": 1,
+        "assignee": None,
+        "state": {"type": "completed"},
+        "team": {"id": "team-task-pr-tests"},
+        "project": project,
+        "trashed": False,
+    }
+    dbpath = root / "loopflow.db"
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("LF_")
+        and k.lower() not in ("http_proxy", "https_proxy", "all_proxy", "no_proxy")
+    }
+    env.update(
+        LF_HOME=str(root),
+        LF_DB_PATH=str(dbpath),
+        LF_PROVIDER_TOKEN_KEY_PATH=str(root / "provider.key"),
+        SSL_CERT_FILE=str(cert),
+        SSL_CERT_DIR=str(root / "empty-certs"),
+    )
+    (root / "empty-certs").mkdir()
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server, sqlite3.connect(dbpath) as db:
+        server.tls = tls
+        server.state = {
+            "project": project,
+            "issue": issue,
+            "claim": "<!-- loopflow-repository: loopflowstudio/fixture -->",
+            "deletes": 0,
+        }
+        env["HTTPS_PROXY"] = f"http://127.0.0.1:{server.server_port}"
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            db.execute(
+                "UPDATE tasks SET work_state='done',work_terminal_at=123 WHERE id=?",
+                (fixture["task"],),
+            )
+            db.commit()
+            before = db.execute("SELECT * FROM tasks").fetchall()
+            prs = db.execute("SELECT * FROM task_prs").fetchall()
+            for selector in ["INF-123", fixture["task"]]:
+                result = subprocess.run(
+                    [fixture["lf"], "task", "delete", selector],
+                    cwd=repo,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                assert result.returncode == 0, result.stderr
+                assert "INF-123: deleted" in result.stdout
+                assert (
+                    "Retained PR: https://github.com/loopflowstudio/fixture/pull/1" in result.stderr
+                )
+            assert server.state["deletes"] == 1 and issue["trashed"]
+            assert issue["state"]["type"] == "completed"
+            assert db.execute("SELECT * FROM tasks").fetchall() == before
+            assert db.execute("SELECT * FROM task_prs").fetchall() == prs
+            assert db.execute("SELECT issue_id FROM task_deletions").fetchall() == [
+                (fixture["issue"],)
+            ]
+            assert authored.read_text() == "preserve authored work\n"
+            for args in [["wave", "sync", "task-pr-tests"], ["doctor", "--planning", "--json"]]:
+                result = subprocess.run(
+                    [fixture["lf"], *args],
+                    cwd=repo,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                assert result.returncode == 0, result.stderr
+            for group, verb in [("pm", "sync"), ("work", "status")]:
+                result = subprocess.run(
+                    [fixture["lf"], group, verb],
+                    cwd=repo,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                assert result.returncode != 0, f"{group} still dispatches"
+            # A separate unfinished fixture keeps the same retained checkout/PR.
+            db.execute("DELETE FROM task_deletions")
+            db.execute("UPDATE tasks SET work_state='ready',work_terminal_at=NULL")
+            db.commit()
+            issue["trashed"], issue["state"]["type"] = False, "unstarted"
+            result = subprocess.run(
+                [fixture["lf"], "task", "delete", "INF-123"],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+            assert issue["trashed"] and issue["state"]["type"] == "unstarted"
+            assert db.execute("SELECT work_state FROM tasks").fetchone() == ("abandoned",)
+            assert db.execute("SELECT * FROM task_prs").fetchall() == prs
+            assert authored.read_text() == "preserve authored work\n"
+            # An unplaced issue uses the identical binary entry point.
+            issue["id"], issue["identifier"], issue["trashed"] = "unplaced-issue", "INF-124", False
+            result = subprocess.run(
+                [fixture["lf"], "task", "delete", "INF-124"],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+            assert issue["trashed"] and server.state["deletes"] == 3
+            assert db.execute("SELECT count(*) FROM tasks").fetchone() == (1,)
+        finally:
+            server.shutdown()
+            thread.join()
+    print(
+        "real CLI: provider trash confirmed; local removal, Done history "
+        "and authored files preserved"
+    )
+
+
+if __name__ == "__main__":
+    main()

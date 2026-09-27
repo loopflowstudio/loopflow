@@ -520,10 +520,10 @@ async fn prepare_ask_record(
         crate::engine::load_skill(skill, &cwd).context("load Ask skill")?;
     }
     let (work_selector, work) = match preferred_work_selector(&manifest) {
-        Some(selector) => match crate::ops::resolve_work_binding(store, &cwd, &selector).await {
-            Ok(binding) => (Some(selector), Some(binding.work)),
-            Err(_) => (None, None),
-        },
+        Some(selector) => {
+            let binding = crate::ops::resolve_work_binding(store, &cwd, &selector).await?;
+            (Some(selector), Some(binding.work))
+        }
         None => (None, None),
     };
     let model = match &manifest.model {
@@ -1136,6 +1136,9 @@ pub(crate) async fn open(
         }
         SessionTarget::Interactive { dir, manifest } => {
             let provider_session = provider_history(dir, manifest)?;
+            if resume {
+                crate::lf::commands::util::require_provider_session_launch(dir)?;
+            }
             let active_clients =
                 crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?;
             match mode {
@@ -1201,16 +1204,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     match &target {
         SessionTarget::Interactive { dir, manifest } => {
             provider_history(dir, manifest)?;
-            let active_clients =
-                crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?;
-            crate::lf::commands::util::replace_provider_clients(
-                dir,
-                &manifest.harness,
-                &active_clients,
-                crate::run_record::ProviderClientStopReason::Completed,
-            )?;
-            crate::run_record::resolve_provider_session(dir)
-                .map_err(|error| anyhow!("cannot complete Session {}: {error}", manifest.run_id))?;
+            crate::lf::commands::util::stop_provider_session(dir, &manifest.harness)?;
         }
         SessionTarget::Ask(record) => {
             complete_ask(&record.id).await?;
@@ -1688,6 +1682,7 @@ pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Re
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error).context("resolve Session Run"),
     };
+    crate::lf::commands::util::require_provider_session_launch(&dir)?;
     let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
     crate::lf::commands::util::replace_provider_clients(
         &dir,
@@ -1714,22 +1709,11 @@ pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Re
 
 fn stop_native_run(run_id: &RunId) -> Result<()> {
     let home = crate::store::observability_home_dir();
-    let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error).context("resolve Session Run"),
-    };
-    let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
-    crate::lf::commands::util::replace_provider_clients(
-        &dir,
-        &manifest.harness,
-        &clients,
-        crate::run_record::ProviderClientStopReason::Completed,
-    )?;
-    if crate::run_record::read_provider_session(&dir)?.is_some() {
-        crate::run_record::resolve_provider_session(&dir)?;
-    }
-    Ok(())
+    let (dir, manifest) = crate::run_record::resolve_manifest(&home, run_id.as_str())
+        .with_context(|| {
+            format!("cannot confirm Session Run {run_id} stopped: manifest unavailable")
+        })?;
+    crate::lf::commands::util::stop_provider_session(&dir, &manifest.harness)
 }
 
 pub(crate) fn native_session_state(
@@ -2637,6 +2621,28 @@ mod tests {
             );
             assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
         });
+    }
+
+    #[test]
+    fn session_stop_requires_a_readable_run_manifest() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        let run_id = RunId::new();
+        assert!(super::stop_run(&run_id)
+            .unwrap_err()
+            .to_string()
+            .contains("manifest unavailable"));
+        let dir = crate::run_record::record_dir(home.home.path(), &run_id).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), b"invalid manifest").unwrap();
+        assert!(super::stop_run(&run_id)
+            .unwrap_err()
+            .to_string()
+            .contains("manifest unavailable"));
+        assert_eq!(
+            std::fs::read(dir.join("manifest.json")).unwrap(),
+            b"invalid manifest"
+        );
     }
 
     #[test]

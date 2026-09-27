@@ -7,8 +7,8 @@ use crate::work::project::{
     ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
-    LinearObservationApply, LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLinearObservation, TaskPr, TaskPrId,
+    LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 
@@ -30,11 +30,15 @@ impl Store {
         .await
     }
 
-    pub async fn reopen_task(&self, task: &Task, pr: Option<&TaskPr>) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.cloned();
+    pub async fn update_task_plan(
+        &self,
+        task_id: &TaskId,
+        plan: &crate::planning::TaskPlan,
+    ) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let plan = plan.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reopen_task(&task, pr.as_ref())
+            store.update_task_plan(&task_id, &plan)
         })
         .await
     }
@@ -49,6 +53,20 @@ impl Store {
         let agent = agent.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.set_task_agent(&task_id, &agent)
+        })
+        .await
+    }
+
+    pub async fn update_task_pm_writeback(
+        &self,
+        task_id: &TaskId,
+        state: &PmWritebackState,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let state = state.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_task_pm_writeback(&task_id, &state, updated_at)
         })
         .await
     }
@@ -163,12 +181,14 @@ impl Store {
     pub(crate) async fn restart_task_flow(
         &self,
         task: &Task,
+        expected: Option<&FlowPosition>,
         checkpoint_head: &str,
     ) -> StoreResult<()> {
+        let expected = expected.cloned();
         let task = task.clone();
         let checkpoint_head = checkpoint_head.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.restart_task_flow(&task, &checkpoint_head)
+            store.restart_task_flow(&task, expected.as_ref(), &checkpoint_head)
         })
         .await
     }
@@ -355,15 +375,6 @@ impl Store {
         .await
     }
 
-    pub async fn complete_task_after_pr(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_task_after_pr(&task, &pr)
-        })
-        .await
-    }
-
     pub async fn task_linear_observation(
         &self,
         task_id: &TaskId,
@@ -476,11 +487,6 @@ impl Store {
     pub async fn create_project(&self, project: &Project) -> StoreResult<()> {
         let project = project.clone();
         run_sqlite(&self.sqlite, move |store| store.insert_project(&project)).await
-    }
-
-    pub async fn reopen_project(&self, project: &Project) -> StoreResult<()> {
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| store.reopen_project(&project)).await
     }
 
     pub async fn update_project(&self, project: &Project) -> StoreResult<()> {

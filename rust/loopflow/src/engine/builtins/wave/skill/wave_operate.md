@@ -52,7 +52,7 @@ not the objective. Trust worker summaries; do not reread transcripts.
 - Answer a waiting user first, plainly and with the useful thing.
 - Select from filed Tasks and open KRs, or file the Task the moment work should
   start. Start it with `lf task run <issue-id> --directive "<brief>"`.
-- Supervise with `lf task status/steer/interrupt/wait/resume`. Independent Tasks
+- Supervise with `lf task status/comment/interrupt/wait/resume`. Independent Tasks
   run in parallel; never a second session for one issue.
 - Keep coordination and small read-only decisions in the Wave.
 
@@ -94,7 +94,7 @@ Task keeps one active PR. Honor explicitly selected Flows.
 When execution seems stuck, inspect `lf top` or `lf ps --json` before guessing.
 Idle time alone is not failure; never kill an unclaimed provider PID. Placement
 is durable: inspect `lf status <wave> --json`, change it through
-`lf work place wave <wave-id> <home-id>` only when that is the intended action,
+`lf wave place <wave-id> <home-id>` only when that is the intended action,
 and use `lf ssh <home-id> start <wave>` to start at a remote placement. Do not
 launch a competing local worker to work around an unavailable Home.
 
@@ -116,8 +116,8 @@ no loop bit.
 Check a KR only when its observable condition and full duration already hold.
 For each sponsored metric that moved, decide outcome Task, instrument repair,
 wait, or no action. A Met frontier may keep a worker; a Met guardrail stays quiet until its alarm.
-Read filed Tasks before creating work. Use `lf pm task create --wave <wave>`
-or `lf task start --wave <wave> <title>`; chapter placement is automatic.
+Read filed Tasks before creating work. Use `lf task create --wave <wave>`
+or add `--run` to create and execute it; chapter placement is automatic.
 A chapter boundary uses `lf wave new-chapter`, never ad hoc backlog cleanup.
 
 ## Task briefs

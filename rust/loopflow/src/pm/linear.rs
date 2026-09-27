@@ -6,6 +6,9 @@ use tokio::time::sleep;
 use tracing::warn;
 
 #[cfg(test)]
+mod deletion_tests;
+
+#[cfg(test)]
 use crate::pm::PmKr;
 use crate::pm::{
     parse_project_content, project_slug, render_project_content, IssueComment, IssueObservation,
@@ -271,9 +274,15 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
   }
 }"#;
 
-const LIST_CANCELED_WORKFLOW_STATES_QUERY: &str = r#"query CanceledWorkflowStates($teamId: ID!) {
-  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
-    nodes { id }
+const ISSUE_DELETION_QUERY: &str = r#"query IssueDeletion($id: String!) {
+  issue(id: $id) {
+    trashed
+  }
+}"#;
+
+const DELETE_ITEM_MUTATION: &str = r#"mutation DeleteIssue($id: String!) {
+  issueDelete(id: $id) {
+    success
   }
 }"#;
 
@@ -550,14 +559,14 @@ impl LinearClient {
         if let Some(name) = expected_name.filter(|name| !team.name.eq_ignore_ascii_case(name)) {
             return Err(PmError::Message(format!(
                 "repository {repository} is already bound to Linear Team {} ({}, key {}); \
-                 it cannot rebind through --team-name {name:?}. Run repository-wide `lf pm reteam` instead.",
+                 it cannot rebind through --team-name {name:?}. Run repository-wide `lf repo reteam` instead.",
                 team.name, team.id, team.key
             )));
         }
         if let Some(key) = expected_key.filter(|key| !team.key.eq_ignore_ascii_case(key.trim())) {
             return Err(PmError::Message(format!(
                 "repository {repository} is already bound to Linear Team {} ({}, key {}); \
-                 it cannot rebind through --team-key {key:?}. Run repository-wide `lf pm reteam` instead.",
+                 it cannot rebind through --team-key {key:?}. Run repository-wide `lf repo reteam` instead.",
                 team.name, team.id, team.key
             )));
         }
@@ -590,7 +599,7 @@ impl LinearClient {
             ))),
             None => Err(PmError::Message(format!(
                 "Linear team {} ({}, key {}) has no Loopflow repository claim; \
-                 run `lf pm init --team-key {}` to claim it for {repository}",
+                 run `lf wave connect --team-key {}` to claim it for {repository}",
                 team.name, team.id, team.key, team.key
             ))),
         }
@@ -600,7 +609,7 @@ impl LinearClient {
         self.team_id.clone().ok_or_else(|| {
             PmError::Message(
                 "Linear write requires repository `pm.linear_team` in .lf/config.yaml; \
-                 run `lf pm init --wave <wave> --team-key <KEY>`"
+                 run `lf wave connect --wave <wave> --team-key <KEY>`"
                     .to_string(),
             )
         })
@@ -1017,29 +1026,46 @@ impl LinearClient {
             .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
     }
 
-    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let states: WorkflowStatesData = self
-            .graphql(
-                LIST_CANCELED_WORKFLOW_STATES_QUERY,
-                json!({ "teamId": team_id }),
-            )
-            .await?;
-        let state = states
-            .workflow_states
-            .nodes
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                PmError::Message(format!("no canceled workflow state for team {team_id}"))
+    /// Only an explicit trash flag confirms deletion. Inaccessible or missing
+    /// issues are unresolved, including after a lost mutation response.
+    pub async fn item_is_deleted(&self, item_id: &str) -> PmResult<bool> {
+        let response: IssueDeletionData = self
+            .graphql(ISSUE_DELETION_QUERY, json!({ "id": item_id }))
+            .await
+            .map_err(|cause| {
+                PmError::Message(format!(
+                    "cannot read deletion state for Linear issue {item_id}: {cause}"
+                ))
             })?;
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item_id, "stateId": state.id }),
-            )
-            .await?;
-        Ok(())
+        let issue = response.issue.ok_or_else(|| {
+            PmError::Message(format!(
+                "Linear issue {item_id} is unavailable; absence does not confirm deletion"
+            ))
+        })?;
+        Ok(issue.trashed == Some(true))
+    }
+
+    /// Trash with Linear's ordinary retention, preserving workflow outcome.
+    pub async fn delete_item(&self, item_id: &str) -> PmResult<()> {
+        if matches!(self.item_is_deleted(item_id).await, Ok(true)) {
+            return Ok(());
+        }
+        let result: PmResult<DeleteItemData> = self
+            .graphql(DELETE_ITEM_MUTATION, json!({ "id": item_id }))
+            .await;
+        let cause = match result {
+            Ok(response) if response.issue_delete.success => return Ok(()),
+            Ok(_) => "Linear returned issueDelete.success=false".to_string(),
+            Err(cause) => cause.to_string(),
+        };
+        let confirmation = match self.item_is_deleted(item_id).await {
+            Ok(true) => return Ok(()),
+            Ok(false) => "the issue is not confirmed in trash".to_string(),
+            Err(cause) => cause.to_string(),
+        };
+        Err(PmError::Message(format!(
+            "Linear deletion of {item_id} is unconfirmed: {cause}; readback: {confirmation}"
+        )))
     }
 
     pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
@@ -1420,6 +1446,22 @@ struct WebhookCreateData {
 #[derive(Deserialize)]
 struct WebhookCreateNode {
     webhook: IdNode,
+}
+
+#[derive(Deserialize)]
+struct IssueDeletionData {
+    issue: Option<IssueDeletionNode>,
+}
+
+#[derive(Deserialize)]
+struct IssueDeletionNode {
+    trashed: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct DeleteItemData {
+    #[serde(rename = "issueDelete")]
+    issue_delete: SuccessPayload,
 }
 
 #[derive(Deserialize)]
@@ -2841,7 +2883,7 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("already bound"));
-        assert!(error.to_string().contains("lf pm reteam"));
+        assert!(error.to_string().contains("lf repo reteam"));
         assert_eq!(requests.lock().await.len(), 1);
     }
 

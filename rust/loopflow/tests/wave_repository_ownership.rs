@@ -302,9 +302,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         &home,
         &repo_b,
         &[
-            "work",
-            "place",
             "wave",
+            "place",
             alpha.id().as_str(),
             foreign_home.as_str(),
             "--json",
@@ -439,16 +438,14 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         &home,
         &repo_a,
         &[
-            "work",
-            "relocate",
             "wave",
+            "relocate",
             alpha.id().as_str(),
             "--name",
             "platform",
             "--json",
         ],
     );
-    assert_eq!(relocation["kind"], "relocated");
     assert_eq!(relocation["wave_id"], alpha.id().as_str());
     assert_eq!(relocation["waves_moved"], 2);
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
@@ -574,18 +571,16 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
     let disabled = lf(
         &home,
         &target,
-        &["work", "disable", "wave", wave.id().as_str(), "--json"],
+        &["wave", "disable", wave.id().as_str(), "--json"],
     );
-    assert_eq!(disabled["kind"], "disabled");
     assert!(!disabled["enabled"].as_bool().unwrap());
 
     let relocated = lf(
         &home,
         &target,
         &[
-            "work",
-            "relocate",
             "wave",
+            "relocate",
             wave.id().as_str(),
             "--repo",
             target.to_str().unwrap(),

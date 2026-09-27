@@ -264,7 +264,7 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 | `home` | Optional HomeId, hostname, or IP allowed to start the Wave automatically |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules, fired by the wave's resident loop |
-| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
+| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf wave connect`) |
 
 The repository owns PM provider and Team authority in `.lf/config.yaml`:
 
@@ -280,11 +280,11 @@ the repository Team and owns only its Initiative.
 `owner` and `home` say where automatic startup is wanted. Both are optional and
 independent. They are policy, not authorization or observed runtime state.
 Execution placement remains durable state: use
-`lf work place wave <wave-id> <home-id>`. Bare `lf start` and `lfd` require both
+`lf wave place <wave-id> <home-id>`. Bare `lf start` and `lfd` require both
 the authored policy and recorded placement to match; named `lf start <wave>` is
 an explicit local override.
 Whether this machine may pursue Work is Home-local registry state. Change it
-with `lf work enable|disable <wave|project|task> <id>`; these commands never edit
+with `lf wave enable|disable <wave>`; these commands never edit
 the goal or another repository file.
 
 ### Writing KRs

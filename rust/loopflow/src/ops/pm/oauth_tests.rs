@@ -1,62 +1,30 @@
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::http::StatusCode;
 use serde_json::json;
-use tempfile::TempDir;
 use tokio::sync::Barrier;
 use tracing::instrument::WithSubscriber;
 
+use super::test_fixture::{now, token, Fixture};
 use super::{
     linear_refresh_lock, pm_show_async, resolve_local_pm_token, PmRefresh, PmShowOptions,
     PmTestContext, PM_TEST_CONTEXT,
 };
 use crate::durable::Author;
-use crate::id::WaveId;
 use crate::ops::error::OpsResult;
 use crate::ops::NullProgress;
 use crate::planning::{LinearProjectId, ProjectPlan};
 use crate::pm::test_server::{self, json_response, QueuedResponse};
 use crate::pm::{PmProviderKind, PmSnapshot};
 use crate::provider_auth::{LinearRefreshError, LINEAR_REFRESH_CONFIG, LINEAR_REFRESH_URL};
-use crate::store::{
-    open_ephemeral_store, CredentialType, PmSnapshotRow, ProviderToken, StorageConfig, Store,
-};
+use crate::store::{open_ephemeral_store, PmSnapshotRow, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::wave::Wave;
 
-struct Fixture {
-    directory: TempDir,
-    database: PathBuf,
-    store: Arc<Store>,
-}
-
 impl Fixture {
-    async fn new() -> Self {
-        let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("registry.db");
-        let store = Arc::new(
-            open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-                .await
-                .unwrap(),
-        );
-        Self {
-            directory,
-            database,
-            store,
-        }
-    }
-
-    fn context(&self, graphql_url: &str) -> PmTestContext {
-        PmTestContext {
-            path: self.database.clone(),
-            store: self.store.clone(),
-            graphql_url: graphql_url.into(),
-        }
-    }
-
     async fn resolve(&self, url: &str) -> OpsResult<Option<String>> {
         scoped(
             self.context(""),
@@ -66,59 +34,12 @@ impl Fixture {
         .await
     }
 
-    async fn seed(&self, expires_at: i64) -> ProviderToken {
-        let token = token("A1", "R1", expires_at);
-        self.store.upsert_provider_token(&token).await.unwrap();
-        token
-    }
-
     async fn assert_token(&self, expected: &ProviderToken) {
         let current = self.store.get_provider_token("linear").await.unwrap();
         assert!(
             current.as_ref() == Some(expected),
             "credential generation changed"
         );
-    }
-
-    async fn planning_repo(&self) -> (PathBuf, Wave) {
-        let repo = self.directory.path().join("repo");
-        std::fs::create_dir_all(repo.join(".lf")).unwrap();
-        // Local fixture history only; no installed Home or remote is touched.
-        for args in [
-            vec!["init", "-q"],
-            vec![
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/loopflowstudio/fixture.git",
-            ],
-        ] {
-            assert!(std::process::Command::new("git")
-                .args(args)
-                .current_dir(&repo)
-                .status()
-                .unwrap()
-                .success());
-        }
-        std::fs::write(
-            repo.join(".lf/config.yaml"),
-            "pm:\n  provider: linear\n  linear_team: team-1\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(repo.join("wave/product")).unwrap();
-        std::fs::write(
-            repo.join("wave/product/GOAL.md"),
-            "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n",
-        )
-        .unwrap();
-        let repo = std::fs::canonicalize(repo).unwrap();
-        let wave = Wave::new(
-            WaveId::new(),
-            "product".into(),
-            repo.to_string_lossy().into_owned(),
-        );
-        self.store.create_wave(&wave).await.unwrap();
-        (repo, wave)
     }
 
     async fn seed_snapshot(&self, wave: &Wave) -> PmSnapshotRow {
@@ -143,23 +64,6 @@ fn failure_message<T>(result: OpsResult<T>) -> String {
     match result {
         Err(error) => error.to_string(),
         Ok(_) => panic!("operation should fail"),
-    }
-}
-
-fn now() -> i64 {
-    time::OffsetDateTime::now_utc().unix_timestamp()
-}
-
-fn token(access: &str, refresh: &str, expires_at: i64) -> ProviderToken {
-    ProviderToken {
-        provider: "linear".into(),
-        access_token: access.into(),
-        refresh_token: Some(refresh.into()),
-        oauth_client_id: Some("fixture-client".into()),
-        expires_at: Some(expires_at),
-        login: Some("fixture".into()),
-        updated_at: now(),
-        credential_type: CredentialType::OAuth,
     }
 }
 
@@ -195,7 +99,6 @@ async fn forced_read(repo: &Path) -> OpsResult<super::PmShowResult> {
         repo,
         &PmShowOptions {
             wave: Some("product".into()),
-            project: None,
             refresh: PmRefresh::Force,
         },
         &NullProgress,
@@ -653,11 +556,12 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
     assert!(result.is_err());
     assert!(start.elapsed() < Duration::from_secs(6));
     assert_eq!(requests.lock().await.len(), 1);
-    conn.execute_batch("ROLLBACK").unwrap();
-    // Joining serialization proves any cancelled persistence closure has settled.
+    // Keep SQLite blocked until the cancelled persistence closure settles;
+    // releasing it first races the closure's own deadline and can permit a commit.
     let guard = linear_refresh_lock(&fixture.database, Instant::now() + Duration::from_secs(2))
         .await
         .unwrap();
+    conn.execute_batch("ROLLBACK").unwrap();
     fixture.assert_token(&original).await;
     assert_eq!(
         fixture.store.pm_snapshot(wave.id()).await.unwrap(),

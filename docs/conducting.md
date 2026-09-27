@@ -121,7 +121,7 @@ Reading is half; the system stays steerable while it runs.
 ```bash
 lf --wave <wave> wave/operate "ship the parser fix first"
 lf chat --follow                              # replay and tail the conversation
-lf task steer INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
+lf task comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf task interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved Sessions
 lf session open <session-id> --json           # recover one exact conversation
@@ -160,7 +160,7 @@ Task workspace shells run directly in the app's terminal.
 
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.
-Use `lf task steer` for durable Task direction,
+Use `lf task comment` for durable Task direction,
 `lf --as` for another agent perspective, and `lf ask` for a new review boundary.
 
 ## Next

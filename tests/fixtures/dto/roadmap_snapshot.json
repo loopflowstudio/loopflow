@@ -715,7 +715,7 @@
           "status": "ready",
           "owner": "wave",
           "reason": "Task's owning Project is absent from the current PM snapshot",
-          "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
+          "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"
         }
       ]
     },
@@ -750,7 +750,7 @@
       "chapter": null,
       "tasks": {
         "state": "unavailable",
-        "reason": "no local PM snapshot for wave/context; run `lf pm sync`"
+        "reason": "no local PM snapshot for wave/context; run `lf wave sync`"
       },
       "unavailable_tasks": []
     }

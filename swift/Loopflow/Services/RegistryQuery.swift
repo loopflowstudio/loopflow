@@ -207,7 +207,7 @@ public struct RegistryQuery: Sendable {
     /// One planning Task's complete comment thread. Read-only; works before
     /// the Task is prepared or started.
     public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
-        let stdout = try await run(["pm", "task", "comments", "--id", id, "--wave", wave, "--json"], cwd)
+        let stdout = try await run(["task", "comment", id, "--wave", wave, "--json"], cwd)
         return try Self.decode(TaskComments.self, from: stdout)
     }
 
@@ -221,7 +221,7 @@ public struct RegistryQuery: Sendable {
 
     public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
         _ = try await run([
-            "pm", "task", "update", "--id", id, "--wave", wave, "--notes=\(text)",
+            "task", "edit", id, "--wave", wave, "--notes=\(text)",
         ], cwd)
     }
 
@@ -293,7 +293,7 @@ public struct RegistryQuery: Sendable {
         cwd: String?,
         sync: Bool = false
     ) async throws -> WavePlan {
-        if sync { _ = try await run(["pm", "sync", "--wave", wave], cwd) }
+        if sync { _ = try await run(["wave", "sync", wave], cwd) }
         let stdout = try await run(["status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
         return WavePlan(objective: objective, chapter: snapshot.chapter)

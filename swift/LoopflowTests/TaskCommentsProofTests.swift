@@ -79,7 +79,7 @@ struct TaskCommentsProofTests {
         try await settle(window)
         #expect(try label("task-comments-toggle") == "Comments, 3, collapsed")
         #expect((try? find("task-comments-thread")) == nil)
-        #expect(await source.reads.first == ["pm", "task", "comments", "--id", "issue-review", "--wave", "product", "--json"])
+        #expect(await source.reads.first == ["task", "comment", "issue-review", "--wave", "product", "--json"])
 
         // Expanding rereads and shows actual authorship, dates and Markdown.
         try find("task-comments-toggle").button().tap()
@@ -211,9 +211,9 @@ private actor CommentSource {
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return session
         case ("flow", "list"): return "[]"
-        case ("pm", "task") where args.dropFirst(2).first == "comments":
+        case ("task", "comment"):
             reads.append(args)
-            let issue = args[args.firstIndex(of: "--id")! + 1]
+            let issue = args[2]
             let ids: [String]
             switch replies[issue] {
             case .thread(let chosen): ids = chosen

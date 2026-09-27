@@ -2649,6 +2649,118 @@ mod tests {
     }
 
     #[test]
+    fn task_issue_identities_migration_preserves_confirmation_and_planning() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_issue_identities");
+        if !_draft_is_canonical("task_issue_identities") && !_draft_is_canonical("task_deletions") {
+            conn.execute_batch(&current_draft_sql("task_deletions"))
+                .unwrap();
+        }
+        conn.execute_batch(
+            r#"INSERT INTO waves(id,name,repo,created_at) VALUES('wave_history','history','/repo',100);
+             INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at)
+               VALUES('wave_history','deleted','FIX-1',150);
+             INSERT INTO pm_snapshots(wave_id,provider,initiative,synced_at,payload)
+               VALUES('wave_history','linear','initiative',200,'{"items":[{"id":"observed"}]}');
+             INSERT INTO wave_chapters(wave_id,chapter_id,project_id,current,receipt)
+               VALUES('wave_history','old','linear-project',1,'{"tasks":[{"applied":true}]}');"#,
+        ).unwrap();
+        conn.execute_batch(&current_draft_sql("task_issue_identities"))
+            .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM task_issue_identities", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT issue_id,identifier,confirmed_at FROM task_deletions",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?
+                ))
+            )
+            .unwrap(),
+            ("deleted".into(), "FIX-1".into(), 150)
+        );
+        assert_eq!(
+            conn.query_row("SELECT payload FROM pm_snapshots", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            r#"{"items":[{"id":"observed"}]}"#
+        );
+        assert_eq!(
+            conn.query_row("SELECT receipt FROM wave_chapters", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            r#"{"tasks":[{"applied":true}]}"#
+        );
+    }
+
+    #[test]
+    fn task_deletions_migration_preserves_terminal_history_without_inventing_confirmation() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_deletions");
+        conn.execute_batch(
+            r#"INSERT INTO waves(id,name,repo,created_at) VALUES('wave_history','history','/repo',100);
+             INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at)
+               VALUES('project_history','wave_history','linear-project',100,200);
+             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,updated_at,work_state,work_terminal_at)
+               VALUES('task_old','project_history','old-issue','FIX-1',100,200,'abandoned',150),
+                     ('task_done','project_history','done-issue','FIX-2',100,200,'done',160);
+             INSERT INTO pm_snapshots(wave_id,provider,initiative,synced_at,payload)
+               VALUES('wave_history','linear','initiative',200,'{"items":[{"id":"old-issue"}]}');
+             INSERT INTO wave_chapters(wave_id,chapter_id,project_id,current,receipt)
+               VALUES('wave_history','old','linear-project',1,'{"tasks":[{"applied":true}]}');"#
+        ).unwrap();
+        conn.execute_batch(&current_draft_sql("task_deletions"))
+            .unwrap();
+        let rows = conn
+            .prepare("SELECT id,work_state,work_terminal_at,updated_at FROM tasks ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("task_done".into(), "done".into(), 160, 200),
+                ("task_old".into(), "abandoned".into(), 150, 200)
+            ]
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM task_deletions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT payload FROM pm_snapshots", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            r#"{"items":[{"id":"old-issue"}]}"#
+        );
+        assert_eq!(
+            conn.query_row("SELECT receipt FROM wave_chapters", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            r#"{"tasks":[{"applied":true}]}"#
+        );
+    }
+
+    #[test]
     fn landing_repair_counter_removal_preserves_supervision() {
         let conn = open();
         let name = "remove_landing_repair_counter";

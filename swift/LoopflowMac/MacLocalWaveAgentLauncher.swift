@@ -11,7 +11,7 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
-struct TaskStartReceipt: Decodable, Sendable, Equatable {
+struct TaskCreateReceipt: Decodable, Sendable, Equatable {
     let issueIdentifier: String
     let project: String
     let wave: String
@@ -49,11 +49,11 @@ enum LocalWaveAgentLauncher {
         title: String,
         wave: String,
         directive: String
-    ) throws -> TaskStartReceipt {
+    ) throws -> TaskCreateReceipt {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try controlLfPath()
         let stdout = try runCheckedOutput(
-            taskStartCommand(
+            taskCreateCommand(
                 lfPath: lfPath,
                 title: title,
                 wave: wave,
@@ -61,7 +61,7 @@ enum LocalWaveAgentLauncher {
             ),
             cwd: origin
         )
-        return try taskStartReceipt(stdout)
+        return try taskCreateReceipt(stdout)
     }
 
     /// Resume existing Task Flow state without creating another worktree.
@@ -119,27 +119,27 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "run", issue]
     }
 
-    static func taskStartCommand(
+    static func taskCreateCommand(
         lfPath: String,
         title: String,
         wave: String,
         directive: String
     ) -> [String] {
         [
-            lfPath, "task", "start", "--wave", wave, title,
-            "--directive", directive,
+            lfPath, "task", "create", "--run", "--wave", wave, "--title", title,
+            "--notes", directive,
             "--json",
         ]
     }
 
-    static func taskStartReceipt(_ stdout: String) throws -> TaskStartReceipt {
+    static func taskCreateReceipt(_ stdout: String) throws -> TaskCreateReceipt {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
-            return try decoder.decode(TaskStartReceipt.self, from: Data(stdout.utf8))
+            return try decoder.decode(TaskCreateReceipt.self, from: Data(stdout.utf8))
         } catch {
             throw LocalLfError(
-                errorDescription: "lf task start returned an invalid receipt: \(error.localizedDescription)"
+                errorDescription: "lf task create --run returned an invalid receipt: \(error.localizedDescription)"
             )
         }
     }

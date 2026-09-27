@@ -9,7 +9,7 @@ KRs, and the Flow recommendation. Never create a second objective or inherit
 omitted targets. Each metric_targets entry names metric_id and target
 ({"kind":"at_least","value":0.95} or {"kind":"at_most","value":10}).
 Started unfinished Tasks move automatically. Untouched backlog expires as
-abandoned/canceled. Completed Tasks remain historical. Code, worktrees, PRs,
+retired locally and deleted from Linear. Completed Tasks remain historical. Code, worktrees, PRs,
 Flow positions, Wave memory, and chat survive.
 
 ## Brief, then accept direction
@@ -61,11 +61,11 @@ Save actual JSON output and exit status as the application receipt. The same
 Wave/chapter ID is the idempotency key: retry an incomplete operation with the
 same content and ID. Never mint another ID to escape an error. The API refreshes
 Task facts, preserves starts racing with rotation, switches one binding, moves
-active Tasks, cancels untouched backlog, and archives the predecessor resumably.
+active Tasks, deletes untouched Linear backlog, and archives the predecessor resumably.
 Never reimplement this as PM create/move/close/archive commands. Never restart
 moved Tasks or count abandoned backlog as completed work.
 
-File accepted fresh Tasks through `lf pm task create --wave <wave> --title
+File accepted fresh Tasks through `lf task create --wave <wave> --title
 <title> --notes <description>`. The Wave resolves the current chapter. Rotation
 itself never launches workers. Record failures and unresolved dispositions;
 partial application is pending, never prose success. Seal `draft.md` as

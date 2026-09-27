@@ -41,7 +41,7 @@ fn task_comments_keep_authorship_and_require_every_field() {
         thread.comments[2].author,
         TaskCommentAuthor::Person { name: None }
     );
-    // What `lf pm task comments --json` prints is exactly what Swift decodes,
+    // What `lf task comment ISSUE --json` prints is exactly what Swift decodes,
     // including explicit nulls Swift requires to be present.
     assert_eq!(
         serde_json::to_value(&thread).unwrap(),

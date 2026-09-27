@@ -1964,7 +1964,7 @@ mod tests {
             assert!(!prompt.contains("LOO-267"));
 
             let orchestrates = matches!(name, "loopflow" | "wave/operate");
-            for procedure in ["lf task restart", "lf work place", "lf ps --json"] {
+            for procedure in ["lf task restart", "lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),
                     orchestrates,

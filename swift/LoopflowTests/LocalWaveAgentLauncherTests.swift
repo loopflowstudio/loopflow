@@ -46,14 +46,14 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "run", "W2-131",
         ])
-        #expect(LocalWaveAgentLauncher.taskStartCommand(
+        #expect(LocalWaveAgentLauncher.taskCreateCommand(
             lfPath: lf,
             title: "Refine LOOPFLOW.md 5e41e69b",
             wave: "context-lab",
             directive: "Refine text for LOOPFLOW.md."
         ) == [
-            lf, "task", "start", "--wave", "context-lab", "Refine LOOPFLOW.md 5e41e69b",
-            "--directive", "Refine text for LOOPFLOW.md.",
+            lf, "task", "create", "--run", "--wave", "context-lab", "--title", "Refine LOOPFLOW.md 5e41e69b",
+            "--notes", "Refine text for LOOPFLOW.md.",
             "--json",
         ])
         #expect(LocalWaveAgentLauncher.taskResumeCommand(lfPath: lf, issue: "W2-131") == [
@@ -77,8 +77,8 @@ struct LocalWaveAgentLauncherTests {
     }
 
     @Test("Task start uses the exact CLI receipt as workspace identity")
-    func taskStartReceiptDecodes() throws {
-        let receipt = try LocalWaveAgentLauncher.taskStartReceipt("""
+    func taskCreateReceiptDecodes() throws {
+        let receipt = try LocalWaveAgentLauncher.taskCreateReceipt("""
         {
           "issue_identifier": "W2-201",
           "project": "auditability",
@@ -86,7 +86,7 @@ struct LocalWaveAgentLauncherTests {
         }
         """)
 
-        #expect(receipt == TaskStartReceipt(
+        #expect(receipt == TaskCreateReceipt(
             issueIdentifier: "W2-201",
             project: "auditability",
             wave: "product"

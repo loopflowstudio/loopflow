@@ -285,7 +285,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
             ).fetchall()
             started = time.monotonic()
             result = _run(
-                [str(lf), "pm", "show", "--wave", "product", "--sync", "--json"], cwd=repo, env=env
+                [str(lf), "status", "product", "--sync", "--json"], cwd=repo, env=env
             )
             elapsed = time.monotonic() - started
             assert elapsed < 8, "planning read exceeded its bounded failure allowance"

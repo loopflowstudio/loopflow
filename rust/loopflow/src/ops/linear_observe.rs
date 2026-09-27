@@ -48,11 +48,23 @@ pub(crate) async fn publish_task_steer(
     task: &Task,
     text: &str,
 ) -> OpsResult<String> {
+    let client = super::pm::issue_client(&task.worktree).await?;
+    let comment_id = publish_issue_comment(&client, task.plan.id.as_str(), text).await?;
+    refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
+        "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
+    )))?;
+    Ok(comment_id)
+}
+
+pub(crate) async fn publish_issue_comment(
+    client: &LinearClient,
+    issue: &str,
+    text: &str,
+) -> OpsResult<String> {
     let text = text.trim();
     if text.is_empty() {
         return Err(OpsError::Message("Task direction cannot be empty".into()));
     }
-    let client = super::pm::issue_client(&task.worktree).await?;
     let marker = format!("<!-- loopflow-steer:{} -->", uuid::Uuid::new_v4());
     let name = crate::engine::config::launch_user_name()
         .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -66,14 +78,10 @@ pub(crate) async fn publish_task_steer(
         ),
         None => text.to_string(),
     };
-    let comment_id = publish_comment(&client, task.plan.id.as_str(), &text, &marker).await?;
-    refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
-        "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
-    )))?;
-    Ok(comment_id)
+    publish_comment(client, issue, &text, &marker).await
 }
 
-async fn publish_comment(
+pub(crate) async fn publish_comment(
     client: &LinearClient,
     issue_id: &str,
     text: &str,
@@ -86,7 +94,7 @@ async fn publish_comment(
         Err(error) => match client.find_comment_with_marker(issue_id, marker).await {
             Ok(Some(id)) => Ok(id),
             _ => Err(OpsError::Message(format!(
-                "Linear did not confirm this steering comment: {error}. Check Linear for {marker} before resubmitting; no local-only steer was accepted."
+                "Linear did not confirm this comment: {error}. Check Linear for {marker} before resubmitting; no local-only comment was accepted."
             ))),
         },
     }
@@ -112,8 +120,7 @@ pub(crate) fn comment_revision_id(id: &str, revision: Option<&str>) -> String {
 }
 
 /// The person a comment speaks for. Explicit steering can be published through
-/// an integration account: its recorded requester wins, and an older anonymous
-/// steer stays anonymous.
+/// an integration account: its recorded requester wins over the Linear author.
 pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option<String> {
     let requester = if is_steer(body) {
         body.split_once("<!-- loopflow-requester:")
@@ -125,6 +132,7 @@ pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option
     requester
         .as_deref()
         .and_then(crate::engine::config::normalize_user_name)
+        .or_else(|| author_name.and_then(crate::engine::config::normalize_user_name))
 }
 
 pub(crate) fn render_comment(
@@ -333,13 +341,13 @@ pub(crate) mod tests {
             super::render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
         assert!(rendered.contains("by \"Jack\""));
         assert!(!rendered.contains("Account Owner"));
-        let anonymous = super::render_comment(
+        let legacy = super::render_comment(
             "old",
             "prototype\n<!-- loopflow-steer:old -->",
             Some("publisher"),
             Some("Account Owner"),
         );
-        assert!(!anonymous.contains(" by "));
+        assert!(legacy.contains("by \"Account Owner\""));
     }
 
     fn comment(id: &str, body: &str, author: Option<&str>) -> IssueComment {

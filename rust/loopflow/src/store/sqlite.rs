@@ -47,6 +47,29 @@ pub(crate) struct WorkIdentity {
     pub created_at: Option<i64>,
 }
 
+fn deleted_task_issues_in(
+    conn: &Connection,
+    wave_id: &WaveId,
+) -> StoreResult<std::collections::HashSet<String>> {
+    let mut statement = conn.prepare("SELECT issue_id FROM task_deletions WHERE wave_id=?1")?;
+    let rows = statement.query_map([wave_id.as_str()], |row| row.get::<_, String>(0))?;
+    rows.map(|row| row.map_err(StoreError::from)).collect()
+}
+
+fn record_task_deletion_in(
+    conn: &Connection,
+    wave_id: &WaveId,
+    issue_id: &str,
+    identifier: &str,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at)
+         VALUES(?1,?2,?3,?4) ON CONFLICT(wave_id,issue_id) DO NOTHING",
+        params![wave_id.as_str(), issue_id, identifier, now_unix()],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
     let conn = Connection::open_with_flags(
         path,
@@ -599,22 +622,119 @@ impl SqliteStore {
 
     pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT wave_id, provider, initiative, synced_at, payload
+        let mut snapshot = conn
+            .query_row(
+                "SELECT wave_id, provider, initiative, synced_at, payload
              FROM pm_snapshots WHERE wave_id = ?1",
-            params![wave_id],
-            |row| {
-                Ok(PmSnapshotRow {
-                    wave_id: row.get(0)?,
-                    provider: row.get(1)?,
-                    initiative: row.get(2)?,
-                    synced_at: row.get(3)?,
-                    payload: row.get(4)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(StoreError::from)
+                params![wave_id],
+                |row| {
+                    Ok(PmSnapshotRow {
+                        wave_id: row.get(0)?,
+                        provider: row.get(1)?,
+                        initiative: row.get(2)?,
+                        synced_at: row.get(3)?,
+                        payload: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(StoreError::from)?;
+        if let Some(snapshot) = &mut snapshot {
+            // Leave malformed snapshots to the existing diagnostic owner.
+            if let Ok(mut payload) = serde_json::from_str::<serde_json::Value>(&snapshot.payload) {
+                if let Some(items) = payload
+                    .get_mut("items")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    let removed = deleted_task_issues_in(&conn, wave_id)?;
+                    let count = items.len();
+                    items.retain(|item| {
+                        item.get("id")
+                            .and_then(serde_json::Value::as_str)
+                            .is_none_or(|id| !removed.contains(id))
+                    });
+                    if items.len() != count {
+                        snapshot.payload = serde_json::to_string(&payload)?;
+                    }
+                }
+            }
+        }
+        Ok(snapshot)
+    }
+
+    pub(crate) fn retain_task_issue_identity(
+        &self,
+        wave_id: &WaveId,
+        issue_id: &str,
+        identifier: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO task_issue_identities (wave_id,issue_id,identifier) VALUES (?1,?2,?3)
+             ON CONFLICT(issue_id) DO UPDATE SET
+               wave_id=excluded.wave_id, identifier=excluded.identifier",
+            params![wave_id.as_str(), issue_id, identifier],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn task_issue_identity(
+        &self,
+        wave_id: &WaveId,
+        issue: &str,
+    ) -> StoreResult<Option<(String, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT issue_id,identifier FROM task_issue_identities
+                 WHERE wave_id=?1 AND (issue_id=?2 OR identifier=?2)",
+                params![wave_id.as_str(), issue],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    pub(crate) fn task_deletion(
+        &self,
+        wave_id: &WaveId,
+        issue: &str,
+    ) -> StoreResult<Option<(String, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT issue_id,identifier FROM task_deletions
+             WHERE wave_id=?1 AND (issue_id=?2 OR identifier=?2)",
+                params![wave_id.as_str(), issue],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    /// Reconcile native removal while retaining terminal outcomes and delivery history.
+    pub(crate) fn confirm_task_deletion(
+        &self,
+        wave_id: &WaveId,
+        issue_id: &str,
+        identifier: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE tasks SET work_state='abandoned', work_terminal_at=?2
+             WHERE external_issue_id=?1 AND work_state='ready'",
+            params![issue_id, now_unix()],
+        )?;
+        record_task_deletion_in(&tx, wave_id, issue_id, identifier)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn deleted_task_issues(
+        &self,
+        wave_id: &WaveId,
+    ) -> StoreResult<std::collections::HashSet<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        deleted_task_issues_in(&conn, wave_id)
     }
 
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

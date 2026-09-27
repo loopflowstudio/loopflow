@@ -195,14 +195,14 @@ mod tests {
         let design = get_builtin_skill("design").expect("design prompt");
         let scan_waves = get_builtin_skill("scan").expect("scan prompt");
 
-        // The roadmap lives in Linear, reached via `lf pm` — no local N-*.md files.
-        assert!(update_wave.contains("lf pm"));
+        // The roadmap lives in Linear, reached via `lf wave sync` — no local N-*.md files.
+        assert!(update_wave.contains("lf status"));
         assert!(update_wave.contains("MEMORY.md"));
         assert!(!update_wave.contains("1-fix-broken-build.md"));
-        assert!(design.contains("lf pm"));
+        assert!(design.contains("lf status"));
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
-        assert!(scan_waves.contains("lf pm show"));
+        assert!(scan_waves.contains("lf status"));
         assert!(WAVES_DOC.contains("GOAL.md"));
         assert!(WAVES_DOC.contains("Linear"));
         assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
@@ -253,7 +253,7 @@ mod tests {
         for contract in [
             "Do not create a manifest, receipt, marker, or new planning state",
             "Keep that core in this Task",
-            "lf task start",
+            "lf task create --run",
             "--flow <chosen-flow>",
             "lf task prepare <issue> --json",
             "lf task run <issue> --flow <chosen-flow>",
@@ -360,7 +360,7 @@ mod tests {
         assert!(task.contains("lf pr land"));
         assert!(task.contains("pinned final flow"));
         assert!(!task.contains("lf pm task done"));
-        assert!(task.contains("lf pm task create"));
+        assert!(task.contains("lf task create"));
 
         assert!(get_builtin_flow("task").is_none());
         assert!(get_builtin_flow("task-design")

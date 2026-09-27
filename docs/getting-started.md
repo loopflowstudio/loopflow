@@ -93,9 +93,9 @@ lf : "add type hints to utils.py"
 Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf task start --wave <wave> "add OAuth login"
+lf task create --run --wave <wave> --title "add OAuth login"
 lf task status <issue-id>
-lf task steer <issue-id> "support passkeys too"
+lf task comment <issue-id> "support passkeys too"
 lf task wait <issue-id> --until terminal
 ```
 
@@ -224,7 +224,7 @@ Bootstrap the remote identity once:
 lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
 lf ls --json
-lf work place wave <wave-id> <home-id>    # record origin-side planning state
+lf wave place <wave-id> <home-id>    # record origin-side planning state
 lf ssh <home-id> start shipper
 ```
 

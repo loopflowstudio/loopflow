@@ -199,7 +199,7 @@ struct WaveChatTranscriptTests {
             text: "I’m using `wave/mutate` to judge the accepted controls. "
                 + "The receipts show both are incorporated. Product’s objective, "
                 + "portfolio, KRs, and memory remain unchanged.",
-            items: [command("c0", "lf pm show")],
+            items: [command("c0", "lf status")],
             body: provenance(step: "wave/mutate")
         )
 

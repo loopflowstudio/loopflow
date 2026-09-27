@@ -1404,7 +1404,12 @@ pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
             if backoff_secs > 0 {
                 thread::sleep(Duration::from_secs(backoff_secs));
             }
-            if upstream_branch(&worktree).is_some() {
+            if crate::engine::git::origin_branch(&worktree)
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(branch.as_str())
+            {
                 return;
             }
             if push_branch_with_upstream(&worktree, &branch).is_ok() {

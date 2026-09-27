@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmUpdateOptions};
+use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmTaskUpdate, PmUpdateOptions};
 use crate::pm::{PmItem, PmPortfolioValidator, PmProject};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -22,7 +22,6 @@ pub fn load_wave(repo: &Path, wave: &str, refresh: PmRefresh) -> OpsResult<PmSho
         repo,
         &PmShowOptions {
             wave: Some(wave.to_string()),
-            project: None,
             refresh,
         },
         &crate::ops::NullProgress,
@@ -34,7 +33,6 @@ async fn load_wave_async(repo: &Path, wave: &str, refresh: PmRefresh) -> OpsResu
         repo,
         &PmShowOptions {
             wave: Some(wave.to_string()),
-            project: None,
             refresh,
         },
         &crate::ops::NullProgress,
@@ -67,7 +65,7 @@ pub(crate) async fn resolve_task_async(
     let (wave, item_id) = match matches.len() {
         0 => {
             return Err(OpsError::Message(format!(
-                "task {issue:?} is absent from local PM snapshots. Run `lf pm sync --wave <wave>`."
+                "task {issue:?} is absent from local PM snapshots. Run `lf wave sync --wave <wave>`."
             )))
         }
         1 => matches.pop().expect("one task match"),
@@ -85,15 +83,9 @@ pub(crate) async fn resolve_task_async(
         .cloned()
         .ok_or_else(|| {
             OpsError::Message(format!(
-                "task {issue:?} disappeared from wave/{wave}; run `lf pm sync --wave {wave}`"
+                "task {issue:?} disappeared from wave/{wave}; run `lf wave sync --wave {wave}`"
             ))
         })?;
-    if item.completed || matches!(item.state.as_deref(), Some("canceled" | "duplicate")) {
-        return Err(OpsError::Message(format!(
-            "task {} is already complete and cannot start a Task",
-            item.identifier
-        )));
-    }
     let project = project_for_item(&snapshot, &item, &team_id)?;
     Ok(ResolvedTask {
         snapshot,
@@ -142,28 +134,30 @@ async fn repository_snapshots_async(repo: &Path, team_id: &str) -> OpsResult<Vec
     Ok(snapshots)
 }
 
-pub fn create_and_load_task(
+pub(crate) async fn create_and_load_task<T, F, Fut>(
     repo: &Path,
     wave: &str,
     title: &str,
     report: &str,
     marker: &str,
-) -> OpsResult<ResolvedTask> {
-    let result = crate::ops::pm::pm_create_task_idempotent(
-        repo,
-        wave,
-        title,
-        report,
-        marker,
-        &crate::ops::NullProgress,
-    )?;
-    if let Err(error) = load_wave(repo, wave, PmRefresh::Force) {
+    prepare: F,
+) -> OpsResult<(ResolvedTask, T)>
+where
+    F: FnOnce(Option<PmItem>, PmProject) -> Fut,
+    Fut: std::future::Future<Output = OpsResult<T>>,
+{
+    let (issue, prepared) =
+        crate::ops::pm::pm_create_task_idempotent(repo, wave, title, report, marker, prepare)
+            .await?;
+    if let Err(error) = load_wave_async(repo, wave, PmRefresh::Force).await {
         return Err(OpsError::Message(format!(
-            "Linear task {} is committed, but the local wave/{wave} snapshot could not refresh: {error}. No new Task or worktree was created. Run `lf pm sync --wave {wave}`, then `lf task run {}`. Retrying `lf task start` is also safe because the Linear task carries an idempotency marker.",
-            result.id, result.id
+            "Linear task {issue} is committed, but the local wave/{wave} snapshot could not refresh: {error}. No new Task or worktree was created. Retry the same `lf task create` command, retaining its original options, to refresh the snapshot and reuse the issue's creation marker."
         )));
     }
-    resolve_task(repo, &result.id, PmRefresh::Never)
+    Ok((
+        resolve_task_async(repo, &issue, PmRefresh::Never).await?,
+        prepared,
+    ))
 }
 
 pub async fn complete_task(
@@ -172,18 +166,14 @@ pub async fn complete_task(
     item_id: &str,
     pr: Option<&str>,
 ) -> OpsResult<()> {
-    // main's `pm_update_async` completes the Linear mutation and refreshes the
-    // snapshot in one call, returning `Err` if either step fails; a successful
-    // return means the write-back is reconciled.
     crate::ops::pm::pm_update_async(
         repo,
         &PmUpdateOptions {
             wave: Some(wave.to_string()),
-            id: Some(item_id.to_string()),
-            title: None,
-            notes: None,
-            status: Some("done".to_string()),
-            pr: pr.map(str::to_string),
+            id: item_id.to_string(),
+            update: PmTaskUpdate::Complete {
+                pr: pr.map(str::to_string),
+            },
         },
         &crate::ops::NullProgress,
     )
@@ -191,33 +181,11 @@ pub async fn complete_task(
     Ok(())
 }
 
-pub async fn retry_complete_task(
-    repo: &Path,
-    wave: &str,
-    item_id: &str,
-    pr: Option<&str>,
-) -> OpsResult<()> {
-    let snapshot = load_wave_async(repo, wave, PmRefresh::Force).await?;
-    let item = snapshot
-        .items
-        .iter()
-        .find(|item| item.id == item_id)
-        .ok_or_else(|| {
-            OpsError::Message(format!(
-                "completed task {item_id} is absent from refreshed wave/{wave} snapshot"
-            ))
-        })?;
-    if item.completed || matches!(item.state.as_deref(), Some("canceled" | "duplicate")) {
-        return Ok(());
-    }
-    complete_task(repo, wave, item_id, pr).await
-}
-
 fn project_for_item(snapshot: &PmShowResult, item: &PmItem, team_id: &str) -> OpsResult<PmProject> {
     if item.team_id != team_id {
         return Err(OpsError::Message(format!(
             "task {} belongs to Linear Team {}, expected repository Team {}; \
-             run `lf pm sync --plan` and repair repository ownership",
+             run `lf doctor --planning` and repair repository ownership",
             item.identifier, item.team_id, team_id
         )));
     }
@@ -235,7 +203,7 @@ fn project_for_item(snapshot: &PmShowResult, item: &PmItem, team_id: &str) -> Op
     validate_project_ownership(snapshot, &project, team_id)?;
     if item.project != project.slug {
         return Err(OpsError::Message(format!(
-            "task {} carries stale Project slug {:?}, expected {:?}; run `lf pm sync --wave {}`",
+            "task {} carries stale Project slug {:?}, expected {:?}; run `lf wave sync --wave {}`",
             item.identifier, item.project, project.slug, snapshot.wave
         )));
     }

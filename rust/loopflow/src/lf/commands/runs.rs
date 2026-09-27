@@ -25,15 +25,13 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
             crate::store::StorageConfig::sqlite(crate::store::observability_database_path()?);
         let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
         let task = match task {
-            Some(task) => Some(
-                crate::ops::resolve_work_binding(
-                    &store,
-                    &std::env::current_dir()?,
-                    &format!("task:{task}"),
-                )
-                .await?
-                .work,
-            ),
+            Some(task) => Some(crate::durable::WorkRef::Task(
+                store
+                    .get_task_by_issue(task)
+                    .await?
+                    .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?
+                    .id,
+            )),
             None => None,
         };
         Ok::<_, anyhow::Error>((home, store, task))

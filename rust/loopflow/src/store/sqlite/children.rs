@@ -22,12 +22,12 @@ use crate::work::project::{
     ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
-    AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
-    LinearObservationOutcome, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
-    TaskEvent, TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
+    CiObservation, GithubObservation, GithubPr, LinearObservationApply, LinearObservationOutcome,
+    PmWritebackState, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::durable::{create_project_work, create_task_work, reopen_work_in, work_for_child_in};
+use super::durable::{create_project_work, create_task_work};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -61,35 +61,34 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Reopen the stable Task while preserving product identity and direction.
-    pub fn reopen_task(&self, task: &Task, pr: Option<&TaskPr>) -> StoreResult<()> {
-        validate_task(task)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, task).map_err(|error| {
-            StoreError::InvalidData(format!("validate reopened Task owner: {error}"))
-        })?;
-        let parameters = task_params(task);
-        transaction
-            .execute(
-                TASK_UPDATE,
-                rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-            )
-            .map_err(|error| StoreError::InvalidData(format!("update reopened Task: {error}")))?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
-        reopen_work_in(&transaction, &work)
-            .map_err(|error| StoreError::InvalidData(format!("reopen Task Work: {error}")))?;
-        if let Some(pr) = pr {
-            validate_task_pr(pr)?;
-            if pr.task_id != task.id || pr.phase() != PrPhase::Working {
-                return Err(StoreError::InvalidData(
-                    "a reopened Task requires its own Working PR".to_string(),
-                ));
-            }
-            insert_task_pr(&transaction, pr)?;
+    pub fn update_task_plan(&self, task_id: &TaskId, plan: &TaskPlan) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE tasks SET issue_identifier=?2, issue_title=?3, issue_description=?4,
+                 pm_snapshot_synced_at=?5 WHERE id=?1 AND external_issue_id=?6",
+            params![
+                task_id.as_str(),
+                plan.identifier,
+                plan.title,
+                plan.description,
+                plan.pm_snapshot_synced_at,
+                plan.id.as_str()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
         }
-        transaction.commit()?;
         Ok(())
+    }
+
+    pub fn update_task_pm_writeback(
+        &self,
+        task_id: &TaskId,
+        state: &PmWritebackState,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        update_task_pm_writeback_in(&conn, task_id, state, updated_at)
     }
 
     pub fn update_task(&self, task: &Task) -> StoreResult<()> {
@@ -351,7 +350,12 @@ impl SqliteStore {
         Ok(position)
     }
 
-    pub(crate) fn restart_task_flow(&self, task: &Task, checkpoint_head: &str) -> StoreResult<()> {
+    pub(crate) fn restart_task_flow(
+        &self,
+        task: &Task,
+        expected: Option<&FlowPosition>,
+        checkpoint_head: &str,
+    ) -> StoreResult<()> {
         validate_task(task)?;
         if checkpoint_head.trim().is_empty() {
             return Err(StoreError::InvalidData(
@@ -360,6 +364,21 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::durable::require_ready_work(
+            &transaction,
+            &crate::durable::WorkRef::Task(task.id.clone()),
+        )?;
+        let current = super::durable::flow_position_in(&transaction, &task.id)?;
+        if current.as_ref() != expected
+            || current
+                .as_ref()
+                .is_some_and(|position| position.claim.is_some())
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task execution changed before restart; stop the current worker before retrying"
+                    .into(),
+            ));
+        }
         validate_task_project(&transaction, task)?;
         let task_work = task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?;
         transaction.execute(
@@ -450,14 +469,7 @@ impl SqliteStore {
                 return Err(StoreError::NotFound);
             }
         }
-        let parameters = task_params(task);
-        if transaction.execute(
-            TASK_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )? == 0
-        {
-            return Err(StoreError::NotFound);
-        }
+        update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
         complete_task_work_in(&transaction, task)?;
         transaction.commit()?;
         Ok(())
@@ -470,7 +482,9 @@ impl SqliteStore {
 
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = format!("{TASK_COLUMNS} WHERE t.external_issue_id=?1 OR t.issue_identifier=?1");
+        let query = format!(
+            "{TASK_COLUMNS} WHERE t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1"
+        );
         let mut statement = conn.prepare(&query)?;
         let rows = statement.query_map(params![issue], map_task_row)?;
         let mut tasks = Vec::new();
@@ -511,10 +525,10 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (query, parameter): (String, Option<&dyn ToSql>) = match wave_id {
             Some(wave_id) => (
-                format!("{TASK_COLUMNS} WHERE p.wave_id=?1 ORDER BY t.updated_at DESC"),
+                format!("{TASK_COLUMNS} WHERE p.wave_id=?1 AND {TASK_VISIBLE} ORDER BY t.updated_at DESC"),
                 Some(wave_id as &dyn ToSql),
             ),
-            None => (format!("{TASK_COLUMNS} ORDER BY t.updated_at DESC"), None),
+            None => (format!("{TASK_COLUMNS} WHERE {TASK_VISIBLE} ORDER BY t.updated_at DESC"), None),
         };
         let mut statement = conn.prepare(&query)?;
         let mut tasks = Vec::new();
@@ -627,34 +641,6 @@ impl SqliteStore {
         let outcome = settle_task_pr_merged_in(&transaction, settled, merged_at)?;
         transaction.commit()?;
         Ok(outcome)
-    }
-
-    pub fn complete_task_after_pr(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
-        validate_task(task)?;
-        validate_task_pr(pr)?;
-        if pr.task_id != task.id
-            || pr.phase() != PrPhase::Merged
-            || pr.after_merge() != AfterMerge::CompleteTask
-        {
-            return Err(StoreError::InvalidData(
-                "Task completion after merge requires its merged CompleteTask PR".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, task)?;
-        settle_task_pr_on(&transaction, pr)?;
-        let parameters = task_params(task);
-        if transaction.execute(
-            TASK_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )? == 0
-        {
-            return Err(StoreError::NotFound);
-        }
-        complete_task_work_in(&transaction, task)?;
-        transaction.commit()?;
-        Ok(())
     }
 
     pub fn task_linear_observation(
@@ -913,20 +899,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn reopen_project(&self, project: &Project) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let parameters = project_params(project);
-        transaction.execute(
-            PROJECT_REOPEN_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        let work = work_for_child_in(&transaction, &ChildRef::Project(project.id.clone()))?;
-        reopen_work_in(&transaction, &work)?;
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub fn update_project(&self, project: &Project) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1170,6 +1142,26 @@ fn matching_claim_in(
     Ok(current)
 }
 
+fn update_task_pm_writeback_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    state: &PmWritebackState,
+    updated_at: OffsetDateTime,
+) -> StoreResult<()> {
+    let changed = conn.execute(
+        "UPDATE tasks SET pm_writeback_json=?2, updated_at=?3 WHERE id=?1",
+        params![
+            task_id.as_str(),
+            serde_json::to_string(state).expect("Task PM writeback state must serialize"),
+            updated_at.unix_timestamp(),
+        ],
+    )?;
+    if changed == 0 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
 fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
     let state: String = conn.query_row(
         "SELECT work_state FROM tasks WHERE id=?1",
@@ -1237,6 +1229,21 @@ fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
     Ok(())
 }
 
+fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreResult<()> {
+    let deleted: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?1 AND issue_id=?2)",
+        params![task.wave_id.as_str(), task.plan.id.as_str()],
+        |row| row.get(0),
+    )?;
+    if deleted {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Task {} was deleted; create a new Task",
+            task.plan.identifier
+        )));
+    }
+    Ok(())
+}
+
 fn insert_initial_task(
     conn: &rusqlite::Transaction<'_>,
     task: &Task,
@@ -1245,6 +1252,7 @@ fn insert_initial_task(
     validate_task(task)?;
     validate_initial_task_pr(task, pr)?;
     validate_task_project(conn, task)?;
+    require_task_not_deleted(conn, task)?;
     let expired: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM projects p JOIN wave_chapters c ON c.wave_id=p.wave_id AND c.current=1
          WHERE p.id=?1 AND p.external_project_id != c.project_id)",
@@ -1319,6 +1327,9 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     abandon_requested_at, abandon_reason, created_at, updated_at, agent
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+)";
+const TASK_VISIBLE: &str = "NOT EXISTS (
+    SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id
 )";
 const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
@@ -1971,12 +1982,6 @@ pub(super) const PROJECT_SELECT: &str = "SELECT
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
     created_at, updated_at, iteration
     FROM projects WHERE id=?1";
-const PROJECT_REOPEN_UPDATE: &str = "UPDATE projects SET
-    wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
-    project_prompt_context=?6, pm_snapshot_synced_at=?7,
-    abandon_requested_at=?8, abandon_reason=?9,
-    created_at=?10, updated_at=?11, iteration=?12
-    WHERE id=?1";
 const PROJECT_FACT_UPDATE: &str = "UPDATE projects SET
     wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
     project_prompt_context=?6, pm_snapshot_synced_at=?7,

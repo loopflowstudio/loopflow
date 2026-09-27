@@ -658,7 +658,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf pm sync")),
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf wave sync")),
         "missing provider identity should be actionable: {result:?}"
     );
     assert!(!github_marker.exists(), "GitHub must not mutate");
@@ -708,7 +708,7 @@ fn serial_task_pr_publication_restores_task_context() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
 
-    let persisted_task = task_status("INF-123").expect("reconcile Task PR");
+    let persisted_task = task_status(Some("INF-123")).expect("reconcile Task PR");
     let snapshot = loopflow::ops::task::task_snapshot(&persisted_task).expect("snapshot Task");
     assert!(!matches!(snapshot.status, WorkStatus::Done));
     assert!(
@@ -718,7 +718,7 @@ fn serial_task_pr_publication_restores_task_context() {
         ),
         "manual merge reconciliation should use the bounded REST observation: {persisted_task:?}"
     );
-    let cached_task = task_status("INF-123").expect("reuse partial merge-time observation");
+    let cached_task = task_status(Some("INF-123")).expect("reuse partial merge-time observation");
     assert!(
         matches!(
             cached_task.observation,
@@ -856,7 +856,7 @@ fn completing_land_discards_an_empty_successor_without_a_controller() {
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
-    task_status("INF-123").expect("reconcile merged Task PR");
+    task_status(Some("INF-123")).expect("reconcile merged Task PR");
 
     let restore = Command::new("git")
         .current_dir(repo.path())
@@ -959,7 +959,7 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto-merge request");
 
-    task_status("INF-123").expect("reconcile changed head");
+    task_status(Some("INF-123")).expect("reconcile changed head");
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -1162,7 +1162,7 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let persisted_task = task_status("INF-123").expect("reconcile completing PR");
+    let persisted_task = task_status(Some("INF-123")).expect("reconcile completing PR");
     assert!(
         matches!(
             persisted_task.observation,
@@ -1213,7 +1213,7 @@ fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let persisted_task = task_status("INF-123").expect("reconcile watched PR merge");
+    let persisted_task = task_status(Some("INF-123")).expect("reconcile watched PR merge");
     let snapshot = task_snapshot(&persisted_task).expect("snapshot Task");
     assert!(!matches!(snapshot.status, WorkStatus::Done));
     let prs = runtime
@@ -1256,7 +1256,7 @@ fn repeated_status_of_merged_task_records_completion_once() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let first = task_status("INF-123").expect("first completed status");
+    let first = task_status(Some("INF-123")).expect("first completed status");
     let first_snapshot = task_snapshot(&first).expect("first completed snapshot");
     assert_eq!(first_snapshot.status, WorkStatus::Done);
     let first_events = runtime
@@ -1271,7 +1271,7 @@ fn repeated_status_of_merged_task_records_completion_once() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .expect("read completed Work");
-    let second = task_status("INF-123").expect("repeated completed status");
+    let second = task_status(Some("INF-123")).expect("repeated completed status");
     let second_snapshot = task_snapshot(&second).expect("repeated completed snapshot");
     let second_state: (String, i64) = conn
         .query_row(
@@ -1320,7 +1320,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
     repo.create_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
 
-    let result = task_complete("INF-123", "done".to_string());
+    let result = task_complete(repo.path(), "INF-123", "done".to_string());
     let message = result
         .expect_err("an unpublished working PR must block completion")
         .to_string();

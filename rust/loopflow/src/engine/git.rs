@@ -200,7 +200,7 @@ pub fn checkout_new_branch_from(
     branch: &str,
     start_point: &str,
 ) -> Result<(), GitError> {
-    git_stdout(repo, &["checkout", "-b", branch, start_point])?;
+    git_stdout(repo, &["checkout", "--no-track", "-b", branch, start_point])?;
     Ok(())
 }
 
@@ -864,7 +864,7 @@ pub fn worktree_move(repo: &Path, old_path: &Path, new_path: &Path) -> Result<()
 /// How to set up the branch when creating a worktree.
 #[derive(Debug)]
 pub enum WorktreeBranch<'a> {
-    /// `git worktree add -b <branch> <path> <start_point>`
+    /// `git worktree add --no-track -b <branch> <path> <start_point>`
     New { start_point: &'a str },
     /// `git worktree add --track -b <branch> <path> <remote>`
     Track { remote: &'a str },
@@ -885,6 +885,7 @@ pub fn worktree_add(
             vec![
                 "worktree",
                 "add",
+                "--no-track",
                 "-b",
                 branch,
                 path_str.as_ref(),

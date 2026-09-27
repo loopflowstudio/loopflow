@@ -1983,13 +1983,13 @@ Body:
 ## Usage
 
 ```bash
-lf pm init
+lf wave connect
 ```"#;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "pm: add linear provider".to_string(),
-                body: "## Usage\n\n```bash\nlf pm init\n```".to_string(),
+                body: "## Usage\n\n```bash\nlf wave connect\n```".to_string(),
             })
         );
     }

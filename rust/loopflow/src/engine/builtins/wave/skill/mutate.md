@@ -53,7 +53,7 @@ of what changed and why. This step is both composer and performer.
 
 4. **Play it immediately.** Apply each mutation through its owner:
    - edit wave YAML for config changes
-   - edit the chapter plan with `lf wave update-plan` and Tasks with `lf pm task`;
+   - edit the chapter plan with `lf wave update-plan` and Tasks with `lf task`;
      never create another Project or write a local planning mirror
    - create or remove wave directories only when lifecycle pressure requires it
 

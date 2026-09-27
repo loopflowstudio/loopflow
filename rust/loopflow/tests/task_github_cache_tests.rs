@@ -119,7 +119,8 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         home.path(),
     );
 
-    let first = task_status("INF-123").expect("REST status succeeds despite GraphQL exhaustion");
+    let first =
+        task_status(Some("INF-123")).expect("REST status succeeds despite GraphQL exhaustion");
     assert!(matches!(&first.observation, Observation::Fresh { .. }));
     let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
     assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
@@ -141,7 +142,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         .block_on(task.store.flow_position(&task.task.id))
         .unwrap()
         .is_none());
-    let cached = task_status("INF-123").expect("cached status succeeds");
+    let cached = task_status(Some("INF-123")).expect("cached status succeeds");
     assert!(matches!(cached.observation, Observation::Cached { .. }));
 
     let log_text = fs::read_to_string(&log).expect("read gh log");
@@ -168,7 +169,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
         home.path(),
     );
 
-    let first = task_status("INF-123").expect("REST failure degrades instead of failing");
+    let first = task_status(Some("INF-123")).expect("REST failure degrades instead of failing");
     let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
     assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
     let (reason, first_retry_at) = match first.observation {
@@ -200,7 +201,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
             .unwrap()
             > previous_interrupt
     );
-    let cached = task_status("INF-123").expect("cached degraded status succeeds");
+    let cached = task_status(Some("INF-123")).expect("cached degraded status succeeds");
     match &cached.observation {
         Observation::Degraded {
             reason, retry_at, ..

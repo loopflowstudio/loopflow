@@ -47,17 +47,19 @@ current chapter plan, stored in an internal Linear Project.
 
 At a chapter boundary that Project is replaced. Its metric targets, KRs, and Flow
 recommendation start fresh. Started unfinished Tasks move with the same issue,
-worktree, PR, and Flow. Untouched backlog is canceled; completed Tasks stay in
-history. Missing evidence never authorizes abandonment.
+worktree, PR, and Flow. Untouched backlog is deleted from Linear with its normal
+retention period; local Task and PR history remain. Completed Tasks stay in
+history. Missing evidence never authorizes retirement.
 
 Retry an interrupted rotation with the same chapter ID. Before activation,
 preview rereads predecessor plans and Tasks, including newly filed work,
 without changing the saved receipt. After activation, the recorded boundary
 stays fixed and retries reconcile its pending operations. Refreshed completion
 remains historical even after local backlog retirement; conflicting start
-evidence leaves the transition unresolved instead of canceling the Task again.
-Retry previews include pending recovery of moves and cancellations whose
-provider responses were lost, using the same dispositions as application.
+evidence leaves the transition unresolved. Retry previews include pending recovery
+of moves and deletions using the same dispositions as application. A lost deletion
+response requires explicit provider trash evidence; absence from a list or an
+unreadable issue leaves the transition unresolved. Retry the same chapter ID.
 If someone reassigns a Task outside the recorded chapter transition, preview
 and retry report a membership conflict. Reconcile its parent before retrying;
 rotation leaves that Task's provider state unchanged.
@@ -288,8 +290,8 @@ lf start                      # start eligible repo Waves on this machine
 lf pause shipper              # keep serving but refuse new turns
 lf resume shipper             # enable queued and future turns
 lf stop shipper               # stop this machine's Wave
-lf work disable task task_... # exclude one Task from automatic pursuit
-lf work enable task task_...  # restore eligibility
+lf task disable task_... # exclude one Task from automatic pursuit
+lf task enable task_...  # restore eligibility
 ```
 
 With a name, `lf start` is an explicit instruction: it records this machine as
@@ -300,7 +302,7 @@ Work inherits its parent's recorded Home once. Record a different Wave Home
 directly:
 
 ```bash
-lf work place wave <wave-id> <home-id>
+lf wave place <wave-id> <home-id>
 ```
 
 Placement is planning state. Run records do not own it or prove that a process
@@ -310,8 +312,8 @@ A Wave name is local to its canonical repository. Its UUID remains stable when
 the name or repository changes, so relocation is separate from Home placement:
 
 ```bash
-lf work relocate wave <wave-id> --name platform
-lf work relocate wave <wave-id> --repo ../moved-repository
+lf wave relocate <wave-id> --name platform
+lf wave relocate <wave-id> --repo ../moved-repository
 ```
 
 Stop the Wave and its descendants first. Relocation preserves its Linear
@@ -319,7 +321,7 @@ Initiative projection, Work state, journal, authored files, and Home placement.
 It does not copy or rewrite Home-local Run records. A repository move carries
 the complete Wave chord, and renaming a Wave carries descendants whose authored
 paths are nested below it. Configured source and target PM Teams must match;
-use `lf pm reteam` for an intentional provider ownership change. Divergent
+use `lf repo reteam` for an intentional provider ownership change. Divergent
 target files fail closed instead of being merged, and retry finishes cleanup
 if the locator committed before a crash.
 
@@ -335,7 +337,7 @@ conversation.
 `lf stop <wave>` records `enabled = false` in this Home's SQLite registry. A new
 `lfd` process reads the same control and leaves the Wave off. `lf start <wave>`
 enables it again. Change `owner`, `home`, or placement to move ownership; use
-`lf work enable|disable` to control otherwise assigned Work without producing a
+`lf wave enable|disable` to control otherwise assigned Work without producing a
 repository diff.
 
 `home: localhost`, `home: 127.0.0.1`, and `home: ::1` always match the current
@@ -351,7 +353,7 @@ the route locally and start the Wave there:
 ```bash
 lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
-lf work place wave <wave-id> <home-id>    # record origin-side planning state
+lf wave place <wave-id> <home-id>    # record origin-side planning state
 lf ssh <home-id> start shipper
 ```
 
@@ -396,17 +398,17 @@ copies the previous content or checked KRs.
 
 Tasks live in Linear; there are no local task lists. A wave maps to an
 Initiative, each chapter to an internal Linear Project, each task to an Issue. Connect
-once — `lf pm init` links or creates the Wave Initiative and establishes one
+once — `lf wave connect` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
 ```bash
-lf pm init --wave infra --team-key LOO     # first Wave establishes the repo Team
-lf pm init --all                           # all nested Waves reuse it
-lf pm sync --wave infra                    # refresh the local SQLite snapshot
-lf pm show --wave infra --no-sync          # deterministic cache-only read
-lf pm task create --wave infra --title "Daemon data integrity"
-lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
+lf wave connect --wave infra --team-key LOO     # first Wave establishes the repo Team
+lf wave connect --all                           # all nested Waves reuse it
+lf wave sync --wave infra                    # refresh the local SQLite snapshot
+lf status infra --no-sync          # deterministic cache-only read
+lf task create --wave infra --title "Daemon data integrity"
+lf task complete 1207... --summary "Dark mode delivered"
 ```
 
 A managed Project belongs to exactly one Initiative and exactly the repository
@@ -420,8 +422,8 @@ Every concrete file-writing change begins with a Linear task and runs as a
 durable Task Work in its own stable sibling worktree:
 
 ```bash
-lf task start --wave <wave> "add retry to token refresh"
-pbpaste | lf task start --wave incidents
+lf task create --run --wave <wave> --title "add retry to token refresh"
+pbpaste | lf task create --run --wave incidents
 lf task prepare INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
 lf task run INF-123
@@ -451,6 +453,13 @@ lf pr land --next parser-proof   # merge this PR, then rotate to the next
 lf pr land -c                    # merge this PR, then complete the Task
 lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 ```
+
+`task complete` also finishes planning-only Tasks without creating a checkout.
+It records the summary once in Linear; repeating the command preserves it.
+Placed Tasks still require a clean checkout and settled PRs. If their local
+completion reports pending PM writeback, repeat the same command to reconcile
+Linear without changing the original completion. Canceled and duplicate issues
+cannot be changed to completed through this command.
 
 Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
 PRs, but it still needs one concrete finish line.
@@ -482,7 +491,7 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The Wave reads its chapter and Tasks with `lf pm show --no-sync`, judges the
+The Wave reads its chapter and Tasks with `lf status --no-sync`, judges the
 KR evidence, and starts Task Work for every independent
 file-writing change. Each shipped PR folds into memory and closes its task.
 

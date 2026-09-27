@@ -42,10 +42,11 @@ Run, PR, and Steer facts retain their existing Work, Run, author, and GitHub
 identities. Rust and Swift both round-trip it; The Podium filters this one
 history instead of maintaining a second activity store.
 
-`pm_show.json` pins the repository-owned Linear hierarchy read by `lf pm show`
-and the app: a Project carries exactly one Wave Initiative and the repository
+`pm_show.json` pins the internal planning snapshot used by Task resolution
+and status refresh: a Project carries exactly one Wave Initiative and the repository
 Team; its Task carries the stable Project and Team ids used for ownership.
 The shared `LOO-*` identifier and canonical Project name remain presentation;
-the provider's Wave-qualified title is normalized before this wire boundary.
+the provider's Wave-qualified title is normalized before this reader returns.
+It is not a CLI/app DTO; Wave detail and roadmap fixtures cover those boundaries.
 
 `task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Run and interrupt → resume reason across CLI and desktop.

@@ -54,7 +54,7 @@ selection. Follow the repo style guide.
   `lf pr open` only when a person explicitly asked to see the PR for review.
 - Do not land or complete the Task from this loop. The pinned final flow owns
   its gate, learning record, and landing disposition.
-- File a concrete follow-up with `lf pm task create` when new work belongs later
+- File a concrete follow-up with `lf task create` when new work belongs later
   under the owning Wave. Describe the current problem, desired outcome, observable
   acceptance, and real constraints. Put dated progress in authorized Task comments;
   keep current blockers visible in the brief when comments are collapsed. Filing

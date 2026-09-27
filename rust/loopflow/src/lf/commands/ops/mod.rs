@@ -15,7 +15,7 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, discover_target, Target};
 use crate::lf::output::{column_width, Colors};
-use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
+use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
@@ -670,269 +670,169 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
     Ok(())
 }
 
-pub fn run_pm(cmd: &PmCommand) -> Result<()> {
-    let progress = &CliProgress;
-    let repo_root = crate::repo::working_directory()?;
-    // The one ambient-Wave rule for every PM arm: `--wave` wins, else
-    // `LF_WAVE_ID` (durable UUID or repository-scoped registered name).
-    // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
-    // --wave" behavior outside a managed process; a stale id is a loud error.
-    let ambient_wave = |explicit: Option<&str>| -> Result<Option<String>> {
-        use crate::work::wave::context::WaveResolveError;
-        match crate::work::wave::context::resolve_managed_wave_sync(Some(&repo_root), explicit) {
-            Ok(wave) => Ok(Some(wave.name().to_string())),
-            Err(WaveResolveError::NoContext) => Ok(None),
-            Err(other) => Err(other.into()),
-        }
-    };
+fn planning_wave(repo: &std::path::Path, explicit: Option<&str>) -> Result<Option<String>> {
+    use crate::work::wave::context::WaveResolveError;
+    match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
+        Ok(wave) => Ok(Some(wave.name().to_string())),
+        Err(WaveResolveError::NoContext) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
 
-    match cmd {
-        PmCommand::Init {
-            wave,
-            wave_flag,
-            all,
-            team_key,
-            team_name,
-        } => {
-            let targets = if *all {
-                crate::ops::pm::list_local_waves(&repo_root)?
-            } else {
-                let explicit = wave.as_deref().or(wave_flag.as_deref());
-                // pm init is a creation flow: an explicit --wave may name a
-                // wave not yet registered (it links a wave directory to
-                // Linear, not a registry row). Normalize-only for explicit;
-                // ambient still uses the shared validating resolver.
-                let name = if let Some(raw) = explicit {
-                    crate::ops::normalize_wave_name(raw)
-                        .ok_or_else(|| anyhow!("--wave requires a non-empty wave name"))?
-                } else {
-                    ambient_wave(None)?
-                        .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?
-                };
-                vec![name]
-            };
-            for wave in targets {
-                let result = crate::ops::pm::pm_init(
-                    &repo_root,
-                    &crate::ops::pm::PmInitOptions {
-                        wave: Some(wave),
-                        team_key: team_key.clone(),
-                        team_name: team_name.clone(),
-                    },
-                    progress,
-                )?;
-                let initiative_state = if result.created { "created" } else { "linked" };
-                let team_state = if result.team_created {
-                    format!(
-                        ", repository Team {} created ({}-*)",
-                        result.team_id, result.team_key
-                    )
-                } else {
-                    format!(
-                        ", repository Team {} adopted ({}-*)",
-                        result.team_id, result.team_key
-                    )
-                };
-                println!(
-                    "{}: Linear Initiative {} ({initiative_state}){team_state}",
-                    result.wave, result.initiative_id
-                );
-            }
-        }
-        PmCommand::Show {
-            wave,
-            json,
-            sync,
-            no_sync,
-        } => {
-            let refresh = if *sync {
-                crate::ops::pm::PmRefresh::Force
-            } else if *no_sync {
-                crate::ops::pm::PmRefresh::Never
-            } else {
-                crate::ops::pm::PmRefresh::Auto
-            };
-            let options = crate::ops::pm::PmShowOptions {
-                wave: ambient_wave(wave.as_deref())?,
-                project: None,
-                refresh,
-            };
-            let result = if *json {
-                crate::ops::pm::pm_show(&repo_root, &options, &crate::ops::NullProgress)?
-            } else {
-                crate::ops::pm::pm_show(&repo_root, &options, progress)?
-            };
-            crate::lf::commands::waves::status(Some(&result.wave), *json)?;
-        }
-        PmCommand::Status { wave } => {
-            let result = crate::ops::pm::pm_status(
-                &repo_root,
-                &crate::ops::pm::PmStatusOptions {
-                    wave: ambient_wave(wave.as_deref())?,
-                },
-                progress,
-            )?;
-            if result.waves.is_empty() {
-                println!("no PM-linked waves");
-            } else {
-                for wave in result.waves {
-                    println!(
-                        "{}: Linear Initiative `{}` ({}) — {} open / {} total",
-                        wave.wave, wave.initiative_name, wave.initiative, wave.open, wave.total
-                    );
-                }
-            }
-        }
-        PmCommand::Rename { wave, title } => {
-            let result = crate::ops::pm::pm_rename(
-                &repo_root,
-                &crate::ops::pm::PmRenameOptions {
-                    wave: ambient_wave(wave.as_deref())?,
-                    title: title.clone(),
-                },
-                progress,
-            )?;
-            println!(
-                "{}: renamed Linear Initiative {} to `{}`",
-                result.wave, result.initiative, result.title
-            );
-        }
-        PmCommand::Task { cmd } => match cmd {
-            PmTaskCommand::Create { wave, title, notes } => {
-                let result = crate::ops::pm::pm_update(
-                    &repo_root,
-                    &crate::ops::pm::PmUpdateOptions {
-                        wave: ambient_wave(wave.as_deref())?,
-                        id: None,
-                        title: Some(title.clone()),
-                        notes: notes.clone(),
-                        status: None,
-                        pr: None,
-                    },
-                    progress,
-                )?;
-                println!("{}: created task {}", result.wave, result.id);
-            }
-            PmTaskCommand::Update {
-                id,
-                wave,
-                title,
-                notes,
-            } => {
-                let result = crate::ops::pm::pm_update(
-                    &repo_root,
-                    &crate::ops::pm::PmUpdateOptions {
-                        wave: ambient_wave(wave.as_deref())?,
-                        id: Some(id.clone()),
-                        title: title.clone(),
-                        notes: notes.clone(),
-                        status: None,
-                        pr: None,
-                    },
-                    progress,
-                )?;
-                println!("{}: updated task {}", result.wave, result.id);
-            }
-            PmTaskCommand::Comments { id, wave, json } => {
-                let result = crate::ops::pm::pm_task_comments(
-                    &repo_root,
-                    ambient_wave(wave.as_deref())?.as_deref(),
-                    id,
-                )?;
-                if *json {
-                    println!("{}", serde_json::to_string(&result)?);
-                } else if result.comments.is_empty() {
-                    println!("{}: no comments", result.identifier);
-                } else {
-                    for comment in &result.comments {
-                        let author = match &comment.author {
-                            crate::ops::pm::TaskCommentAuthor::Person { name } => {
-                                name.as_deref().unwrap_or("unnamed person")
-                            }
-                            crate::ops::pm::TaskCommentAuthor::Integration => "integration",
-                        };
-                        let date = comment.created_at.as_deref().unwrap_or("date unavailable");
-                        println!("── {author} · {date}\n{}\n", comment.body.trim_end());
-                    }
-                }
-            }
-            PmTaskCommand::Done { id, wave, pr } => {
-                let result = crate::ops::pm::pm_update(
-                    &repo_root,
-                    &crate::ops::pm::PmUpdateOptions {
-                        wave: ambient_wave(wave.as_deref())?,
-                        id: Some(id.clone()),
-                        title: None,
-                        notes: None,
-                        status: Some("done".to_string()),
-                        pr: pr.clone(),
-                    },
-                    progress,
-                )?;
-                let linked = match result.linked_pr {
-                    Some(pr) => format!(", linked {pr}"),
-                    None => String::new(),
-                };
-                println!("{}: closed task {}{linked}", result.wave, result.id);
-            }
-        },
-        PmCommand::Doctor => {
-            let result = crate::ops::pm::pm_sync(
-                &repo_root,
-                &crate::ops::pm::PmSyncOptions {
-                    wave: None,
-                    plan: true,
-                },
-                progress,
-            )?;
-            print_pm_sync_result(&result);
-        }
-        PmCommand::Sync { wave, plan } => {
-            let result = crate::ops::pm::pm_sync(
-                &repo_root,
-                &crate::ops::pm::PmSyncOptions {
-                    wave: ambient_wave(wave.as_deref())?,
-                    plan: *plan,
-                },
-                progress,
-            )?;
-            print_pm_sync_result(&result);
-        }
-        PmCommand::Reteam { apply } => {
-            let result = crate::ops::pm::pm_reteam(
-                &repo_root,
-                &crate::ops::pm::PmReteamOptions { apply: *apply },
-                progress,
-            )?;
-            print_pm_reteam_result(&result);
-        }
-        PmCommand::Webhook { cmd } => run_pm_webhook(&repo_root, cmd)?,
+pub fn connect_wave(
+    repo_root: &std::path::Path,
+    wave: Option<&str>,
+    all: bool,
+    team_key: Option<&str>,
+    team_name: Option<&str>,
+) -> Result<()> {
+    let progress = &CliProgress;
+    let ambient_wave = |explicit| planning_wave(repo_root, explicit);
+    let targets = if all {
+        crate::ops::pm::list_local_waves(repo_root)?
+    } else {
+        let explicit = wave;
+        // Wave connection is a creation flow: an explicit --wave may name a
+        // wave not yet registered (it links a wave directory to
+        // Linear, not a registry row). Normalize-only for explicit;
+        // ambient still uses the shared validating resolver.
+        let name = if let Some(raw) = explicit {
+            crate::ops::normalize_wave_name(raw)
+                .ok_or_else(|| anyhow!("--wave requires a non-empty wave name"))?
+        } else {
+            ambient_wave(None)?
+                .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?
+        };
+        vec![name]
+    };
+    for wave in targets {
+        let result = crate::ops::pm::pm_init(
+            repo_root,
+            &crate::ops::pm::PmInitOptions {
+                wave: Some(wave),
+                team_key: team_key.map(str::to_string),
+                team_name: team_name.map(str::to_string),
+            },
+            progress,
+        )?;
+        let initiative_state = if result.created { "created" } else { "linked" };
+        let team_state = if result.team_created {
+            format!(
+                ", repository Team {} created ({}-*)",
+                result.team_id, result.team_key
+            )
+        } else {
+            format!(
+                ", repository Team {} adopted ({}-*)",
+                result.team_id, result.team_key
+            )
+        };
+        println!(
+            "{}: Linear Initiative {} ({initiative_state}){team_state}",
+            result.wave, result.initiative_id
+        );
     }
     Ok(())
+}
+
+pub fn rename_wave(repo_root: &std::path::Path, wave: &str, title: &str) -> Result<()> {
+    let progress = &CliProgress;
+    let result = crate::ops::pm::pm_rename(
+        repo_root,
+        &crate::ops::pm::PmRenameOptions {
+            wave: Some(wave.to_string()),
+            title: title.to_string(),
+        },
+        progress,
+    )?;
+    println!(
+        "{}: renamed Linear Initiative {} to `{}`",
+        result.wave, result.initiative, result.title
+    );
+    Ok(())
+}
+
+pub fn sync_planning(
+    repo: &std::path::Path,
+    wave: Option<&str>,
+    all: bool,
+    plan: bool,
+    json: bool,
+) -> Result<()> {
+    let wave = if all {
+        None
+    } else {
+        planning_wave(repo, wave)?
+    };
+    let result = crate::ops::pm::pm_sync(
+        repo,
+        &crate::ops::pm::PmSyncOptions { wave, plan },
+        &CliProgress,
+    )?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"actions": result.actions, "diagnostics": result.diagnostics})
+            )?
+        );
+    } else {
+        print_pm_sync_result(&result);
+    }
+    Ok(())
+}
+
+pub fn refresh_status(wave: Option<&str>) -> Result<String> {
+    let repo = crate::repo::working_directory()?;
+    let result = crate::ops::pm::pm_show(
+        &repo,
+        &crate::ops::pm::PmShowOptions {
+            wave: planning_wave(&repo, wave)?,
+            refresh: crate::ops::pm::PmRefresh::Force,
+        },
+        &crate::ops::NullProgress,
+    )?;
+    Ok(result.wave)
+}
+
+pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
+    let repo = crate::repo::working_directory()?;
+    match cmd {
+        RepoCommand::Reteam { apply } => {
+            let result = crate::ops::pm::pm_reteam(
+                &repo,
+                &crate::ops::pm::PmReteamOptions { apply: *apply },
+                &CliProgress,
+            )?;
+            print_pm_reteam_result(&result);
+            Ok(())
+        }
+        RepoCommand::Webhook { cmd } => run_pm_webhook(&repo, cmd),
+    }
 }
 
 /// The Linear webhook receiver and its one-time registration. The signing secret
 /// is read from the environment (sourced from Doppler), never a flag or the
 /// store, so a raw value never lands in shell history or a process listing.
-fn run_pm_webhook(repo_root: &std::path::Path, cmd: &crate::lf::PmWebhookCommand) -> Result<()> {
-    use crate::lf::PmWebhookCommand;
+fn run_pm_webhook(repo_root: &std::path::Path, cmd: &crate::lf::RepoWebhookCommand) -> Result<()> {
+    use crate::lf::RepoWebhookCommand;
 
     let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").unwrap_or_default();
     if secret.is_empty() {
         return Err(anyhow!(
-            "set LF_LINEAR_WEBHOOK_SECRET to a non-empty value (source it from Doppler: `doppler run -- lf pm webhook ...`)"
+            "set LF_LINEAR_WEBHOOK_SECRET to a non-empty value (source it from Doppler: `doppler run -- lf repo webhook ...`)"
         ));
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let client = crate::ops::pm::linear_client(repo_root).await?;
         match cmd {
-            PmWebhookCommand::Register { url, .. } => {
+            RepoWebhookCommand::Register { url, .. } => {
                 let id = client.create_webhook(url, &secret).await?;
                 println!("registered Linear webhook {id} → {url}");
                 Ok(())
             }
-            PmWebhookCommand::Serve { addr, .. } => {
+            RepoWebhookCommand::Serve { addr, .. } => {
                 let viewer = client.viewer_id().await?;
                 let store = std::sync::Arc::new(
                     crate::store::open_existing_store()
@@ -943,7 +843,7 @@ fn run_pm_webhook(repo_root: &std::path::Path, cmd: &crate::lf::PmWebhookCommand
                     .parse()
                     .map_err(|error| anyhow!("invalid --addr {addr:?}: {error}"))?;
                 println!(
-                    "lf pm webhook · serving Linear deliveries on http://{socket}/linear/webhook"
+                    "lf repo webhook · serving Linear deliveries on http://{socket}/linear/webhook"
                 );
                 crate::webhook::serve(store, secret.into_bytes(), viewer, socket).await
             }

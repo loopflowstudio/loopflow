@@ -12,7 +12,7 @@
 //! Forwarded authority: GitHub (`gh`), Claude/Codex agent OAuth, and — the
 //! capability beyond the shell prototype — the PM/Linear token, which lives in
 //! store rather than the environment. The remote `resolve_pm_token` reads
-//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf pm` works.
+//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf wave sync` works.
 //!
 //! Secrets policy: `lf ssh` forwards specific resolved secrets, never the
 //! Doppler token that could fetch them all. The Doppler login/CLI token is a

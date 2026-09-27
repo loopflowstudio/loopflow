@@ -20,6 +20,9 @@ Edit `user.name` to correct it; remove it or leave it blank to use Git again.
 Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
 preference. Direct interactive and batch launches use the resolved name, and `lf ssh`
 carries the caller's name rather than reading the destination owner's name.
+A non-empty `LF_USER_NAME` overrides these sources for a launched request; an
+empty or whitespace-only value falls through to personal configuration and Git.
+Steering comments prefer their recorded requester, then Linear's author name.
 Names describe people; they do not grant authority or establish who wrote an
 older request. Unattributed background Task and Wave work remains unattributed.
 

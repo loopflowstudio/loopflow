@@ -29,9 +29,9 @@ code or in the skill that exercises them, and durable lessons in Wave memory.
   `lf wave update-plan --wave <wave> --plan <plan.json>`. Preserve unrelated
   authored content. The objective belongs to the Wave; never add a chapter
   objective. KRs prove outcomes, not task counts or implementation activity.
-- Close shipped Tasks with `lf pm task done --id <issue>`; correct stale wording
-  with `lf pm task update --id <issue> --title "…" --notes "…"`.
-- File useful discoveries with `lf pm task create --wave <wave> --title "…" --notes "…"`.
+- Close shipped Tasks with `lf task complete <issue> --summary "<outcome>"`; correct stale wording
+  with `lf task edit <issue> --title "…" --notes "…"`.
+- File useful discoveries with `lf task create --wave <wave> --title "…" --notes "…"`.
   Filing does not authorize starting a worker.
 - Enduring metric contracts live under `wave/<wave>/metrics/`. They belong to
   the Wave and retain their identity across chapters. Targets belong to the
@@ -45,7 +45,7 @@ chapter as incidental cleanup.
 ## New Wave
 
 Author GOAL and MEMORY. Local memory curation stops there. When connecting the
-Wave to durable planning, initialize with `lf pm init --wave <wave>`. This
+Wave to durable planning, initialize with `lf wave connect --wave <wave>`. This
 provisions the first empty chapter. Author its plan through `lf wave update-plan`.
 Do not create another Project or introduce a Project operator.
 

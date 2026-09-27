@@ -61,7 +61,7 @@ impl Special {
 
 struct Cmd {
     id: &'static str,
-    /// Subcommand path for the completeness guard (e.g. `["pm", "show"]`).
+    /// Subcommand path for the completeness guard (e.g. `["wave", "sync"]`).
     path: &'static [&'static str],
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
@@ -76,6 +76,10 @@ struct Cmd {
 /// these exist as real clap leaves but does not discover them via the
 /// `wave`-arg walk.
 const AMBIENT_ONLY: &[&[&str]] = &[];
+
+/// Task identity selects its owning Wave; an optional Wave only checks that
+/// ownership. Ambient Wave selection must not redirect an explicit Task.
+const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
 /// Commands whose optional `--wave` narrows a machine-wide result instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
@@ -92,6 +96,8 @@ const FILTER_ONLY: &[&[&str]] = &[
 /// resolve ambient context. Cron keeps these explicit because scheduled host
 /// operations must name the installed Wave whose authority they validate.
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
+    &["wave", "rename"],
+    &["wave", "relocate"],
     &["cron", "preflight"],
     &["cron", "sync"],
     &["cron", "run"],
@@ -122,25 +128,6 @@ const COMMANDS: &[Cmd] = &[
         },
     },
     Cmd {
-        id: "pm show",
-        path: &["pm", "show"],
-        base_args: &["pm", "show", "--no-sync", "--json"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm status",
-        path: &["pm", "status"],
-        base_args: &["pm", "status"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Read,
-        special: Special {
-            global_default: true,
-            ..Special::NONE
-        },
-    },
-    Cmd {
         id: "chat history",
         path: &["chat"],
         base_args: &["chat", "--history", "--json"],
@@ -155,17 +142,6 @@ const COMMANDS: &[Cmd] = &[
         wave_form: WaveForm::Positional,
         kind: Kind::Read,
         special: Special::NONE,
-    },
-    Cmd {
-        id: "pm sync plan",
-        path: &["pm", "sync"],
-        base_args: &["pm", "sync", "--plan"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Read,
-        special: Special {
-            global_default: true,
-            ..Special::NONE
-        },
     },
     Cmd {
         id: "wave history",
@@ -191,63 +167,23 @@ const COMMANDS: &[Cmd] = &[
         },
     },
     Cmd {
-        id: "pm init",
-        path: &["pm", "init"],
-        base_args: &["pm", "init"],
+        id: "wave connect",
+        path: &["wave", "connect"],
+        base_args: &["wave", "connect"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special::NONE,
     },
     Cmd {
-        id: "pm sync",
-        path: &["pm", "sync"],
-        base_args: &["pm", "sync"],
+        id: "wave sync",
+        path: &["wave", "sync"],
+        base_args: &["wave", "sync"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special {
             global_default: true,
             ..Special::NONE
         },
-    },
-    Cmd {
-        id: "pm rename",
-        path: &["pm", "rename"],
-        base_args: &["pm", "rename", "--title", "Renamed"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm task create",
-        path: &["pm", "task", "create"],
-        base_args: &["pm", "task", "create", "--title", "T"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm task update",
-        path: &["pm", "task", "update"],
-        base_args: &["pm", "task", "update", "--id", "W2-999"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm task done",
-        path: &["pm", "task", "done"],
-        base_args: &["pm", "task", "done", "--id", "W2-999"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "pm task comments",
-        path: &["pm", "task", "comments"],
-        base_args: &["pm", "task", "comments", "--id", "W2-999", "--json"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Read,
-        special: Special::NONE,
     },
     Cmd {
         id: "cron add",
@@ -265,9 +201,9 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
-        id: "task start",
-        path: &["task", "start"],
-        base_args: &["task", "start", "Fixture task"],
+        id: "task create",
+        path: &["task", "create"],
+        base_args: &["task", "create", "--title", "Fixture task"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special::NONE,
@@ -367,7 +303,7 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // Creation flows may name the Wave being registered.
-    if env.id == "explicit-unknown" && matches!(cmd.id, "pm init" | "wave new-chapter") {
+    if env.id == "explicit-unknown" && matches!(cmd.id, "wave connect" | "wave new-chapter") {
         return Outcome::Resolved;
     }
 
@@ -710,6 +646,7 @@ fn registry_is_complete() {
         .collect();
     let filter_paths: HashSet<Vec<String>> = FILTER_ONLY
         .iter()
+        .chain(ISSUE_OWNED)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
     let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
@@ -745,7 +682,7 @@ fn registry_is_complete() {
 
     // 5. Every ambient-only, filter-only, and explicit-only command must exist
     //    as a real clap leaf. Explicit-only commands must require `wave`.
-    for path in AMBIENT_ONLY.iter().chain(FILTER_ONLY) {
+    for path in AMBIENT_ONLY.iter().chain(FILTER_ONLY).chain(ISSUE_OWNED) {
         assert!(
             find_clap_command(&root, path).is_some(),
             "classified command {:?} does not exist in the clap tree",

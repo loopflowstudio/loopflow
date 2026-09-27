@@ -47,7 +47,7 @@ a separate design.
 For problem-first work:
 
 ```bash
-lf task start --wave <wave> "<desired experience>" --flow <chosen-flow> <<'BRIEF'
+lf task create --run --wave <wave> --title "<desired experience>" --flow <chosen-flow> <<'BRIEF'
 <short user-problem brief>
 BRIEF
 ```
@@ -88,6 +88,10 @@ saved feedback to the next step. The following loop-decide owns navigation.
 The `advance` skill resolves the next action from a review, Task, or unbound
 design. State what actually started after checking status.
 
+Use `lf task delete ISSUE` to remove a Task from Linear and reconcile its local
+record. Read any partial-outcome report and retry the same command. Authored files
+and retained PRs survive; deletion does not certify process termination.
+
 When filing or editing a Task, keep its description to the current problem,
 desired outcome, observable acceptance, and real constraints. Put dated planning
 and execution updates in authorized Task comments, with links to detailed evidence.
@@ -102,7 +106,7 @@ a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
 
 ```bash
-lf pm task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
+lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf task prepare <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue> --flow <chosen-flow>
@@ -139,7 +143,7 @@ for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. `owner`/`home` in GOAL only filter automatic
-startup; placement is changed through `lf work place wave <wave-id> <home-id>`.
+startup; placement is changed through `lf wave place <wave-id> <home-id>`.
 Use `lf home id`, then `lf start <wave>` locally or
 `lf ssh <home-id> start <wave>` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can

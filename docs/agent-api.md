@@ -34,7 +34,7 @@ A Wave directing a task is the internal case:
 lf task prepare INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent bounded Run
 lf task run INF-123                                  # start built-in Task automation
-lf task steer INF-123 "take the smaller approach"    # post a Linear Task comment
+lf task comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                # block until it settles
 ```
@@ -65,8 +65,8 @@ not permission to move a Task's Flow position.
 ```bash
 lf task prepare INF-123                      # ensure Work and worktree only
 lf task run INF-123                          # run an existing Linear issue
-lf task start --wave <wave> "add passkeys"    # create the issue, then run it
-pbpaste | lf task start --wave <wave>         # report from stdin; first line is the title
+lf task create --run --wave <wave> --title "add passkeys"    # create the issue, then run it
+pbpaste | lf task create --run --wave <wave>         # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123       # dependent work before the parent PR merges
 ```
 
@@ -83,12 +83,12 @@ merge, then replays only child-authored commits onto `main`.
 ## Steer
 
 ```bash
-lf task steer INF-123 "keep the public API"          # post a Linear Task comment
+lf task comment INF-123 "keep the public API"          # post a Linear Task comment
 lf --wave <wave> wave/operate "prioritize the parser"
 lf --wave <wave> wave/operate "reassess Project priorities"
 ```
 
-Comment on the Linear Task directly, or use `task steer`. Both reach only the
+Comment on the Linear Task directly, or use `task comment`. Both reach only the
 worker advancing that Task. Independent Runs sharing its worktree or using
 `--task`/`--as` do not subscribe to steering. With no active worker, comments
 wait for explicit advancement; steering never starts execution.
@@ -103,16 +103,14 @@ live correction is consumed.
 `lf task interrupt INF-123` appends a durable interrupt comment;
 the active Task worker observes it and ends the current provider turn so the
 next boundary re-reads direction. With no live worker it remains durable input.
-Generic `lf work interrupt` refuses because it does not publish an exact process
-owner. Loopflow never guesses signal authority from a Run id, Work id, PID, or
+Loopflow never guesses signal authority from a Run id, Work id, PID, or
 tmux name. Project operations are ordinary finite Runs; they have no resident
 process to interrupt, resume, wait for, or attach to.
 
 Work survives its provider process. `lf task resume INF-123` starts a fresh
 boundary without losing durable direction, the worktree, or the Task PR. `lf
-task run` never reopens terminal Work: a person can use
-`lf task recover` to restart an abandoned Task on the same worktree, while a
-completed Task requires a new Linear task.
+task run` never reopens terminal Work. Create a new Task for new work;
+`lf task status ISSUE` retains deliberate historical lookup.
 
 Automated Task commit, PR, and completion commands also re-check current PM
 ownership. If Linear moved the issue to another Project, the Task operation
@@ -128,6 +126,11 @@ skills. Edit their definition or goal when the guidance should persist.
 `wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
 the ordinary repository workflow; the file is truth, running Wave or not, and
 there is no separate CLI or server surface for it.
+
+Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
+after an incomplete operation, even after planning refresh or chapter replacement.
+Missing provider data does not confirm deletion.
+Deletion preserves authored files and retained PRs; it does not certify process termination.
 
 ## Ship
 

@@ -1,4 +1,4 @@
-//! `lf pm task comments` against an isolated Linear GraphQL fixture.
+//! `lf task comment ISSUE` against an isolated Linear GraphQL fixture.
 
 use std::sync::Arc;
 
@@ -6,7 +6,7 @@ use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use super::{pm_task_comments_async, PmTestContext, TaskCommentAuthor, PM_TEST_CONTEXT};
+use super::{task_comment_async, PmTestContext, TaskCommentAuthor, PM_TEST_CONTEXT};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +20,7 @@ enum Thread {
 struct Provider {
     thread: Thread,
     queries: Vec<String>,
+    posted: Vec<Value>,
 }
 
 fn comment(id: &str, created: Option<&str>, body: Option<&str>, user: Value) -> Value {
@@ -55,6 +56,15 @@ async fn graphql(
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
             "project":{"id":"project-1","name":"Chapter","description":"","content":"",
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
+    } else if query.contains("mutation CreateComment") {
+        let node = comment(
+            "posted-1",
+            Some("2026-09-27T00:00:00Z"),
+            vars["body"].as_str(),
+            Value::Null,
+        );
+        provider.posted.push(node);
+        json!({"commentCreate":{"comment":{"id":"posted-1"}}})
     } else if query.contains("query IssueObservation") {
         assert_eq!(
             vars["id"], "issue-uuid",
@@ -64,7 +74,7 @@ async fn graphql(
             return Json(json!({"errors":[{"message":"rate limited"}]}));
         }
         let comments = match thread {
-            Thread::Empty => page(vec![], None, false),
+            Thread::Empty => page(provider.posted.clone(), None, false),
             _ => page(
                 vec![comment(
                     "c-3",
@@ -86,7 +96,7 @@ async fn graphql(
                     comment(
                         "c-1",
                         Some("2026-09-22T08:00:00Z"),
-                        Some("- first\n  - nested\n\n[spec](https://example.com)"),
+                        Some("- first\n  - nested\n\n[spec](https://example.com)\n\n<!-- loopflow-steer:legacy -->"),
                         json!({"id":"person-2","displayName":"Maya","name":null}),
                     ),
                     comment("c-bot", None, None, Value::Null),
@@ -114,7 +124,7 @@ async fn graphql(
 }
 
 #[tokio::test]
-async fn task_comments_read_every_page_in_written_order_without_writes() {
+async fn task_comments_read_and_publish_without_placement() {
     let directory = tempfile::tempdir().unwrap();
     let repo = directory.path().join("repo");
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
@@ -171,6 +181,7 @@ async fn task_comments_read_every_page_in_written_order_without_writes() {
     let provider = Arc::new(Mutex::new(Provider {
         thread: Thread::Paged,
         queries: Vec::new(),
+        posted: Vec::new(),
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -185,7 +196,7 @@ async fn task_comments_read_every_page_in_written_order_without_writes() {
     };
     PM_TEST_CONTEXT
         .scope(context, async {
-            let read = pm_task_comments_async(&repo, Some("product"), "FIX-7")
+            let read = task_comment_async(&repo, None, "FIX-7", None)
                 .await
                 .unwrap();
             assert_eq!(read.identifier, "FIX-7");
@@ -208,7 +219,7 @@ async fn task_comments_read_every_page_in_written_order_without_writes() {
             );
             assert_eq!(
                 read.comments[1].body,
-                "- first\n  - nested\n\n[spec](https://example.com)"
+                "- first\n  - nested\n\n[spec](https://example.com)\n\n<!-- loopflow-steer:legacy -->"
             );
             // An explicit steer through an integration still speaks for its requester.
             assert_eq!(
@@ -223,37 +234,51 @@ async fn task_comments_read_every_page_in_written_order_without_writes() {
                 Some("2026-09-24T12:00:00Z")
             );
 
-            let wrong_wave = pm_task_comments_async(&repo, Some("other"), "FIX-7")
+            let wrong_wave = task_comment_async(&repo, Some("other"), "FIX-7", None)
                 .await
                 .unwrap_err();
             assert!(wrong_wave.to_string().contains("belongs to wave/product"));
 
             provider.lock().await.thread = Thread::Empty;
-            let empty = pm_task_comments_async(&repo, Some("product"), "FIX-7")
+            let empty = task_comment_async(&repo, Some("product"), "FIX-7", None)
                 .await
                 .unwrap();
             assert!(empty.comments.is_empty());
 
             provider.lock().await.thread = Thread::MissingCursor;
-            let truncated = pm_task_comments_async(&repo, Some("product"), "FIX-7")
+            let truncated = task_comment_async(&repo, Some("product"), "FIX-7", None)
                 .await
                 .unwrap_err();
             assert!(truncated.to_string().contains("continuation cursor"));
 
             provider.lock().await.thread = Thread::Failing;
-            let failed = pm_task_comments_async(&repo, Some("product"), "FIX-7")
+            let failed = task_comment_async(&repo, Some("product"), "FIX-7", None)
                 .await
                 .unwrap_err();
             assert!(failed.to_string().contains("rate limited"));
+            assert!(provider.lock().await.queries.iter().all(|query| !query.trim_start().starts_with("mutation")), "reading the thread cannot publish anything");
+
+            provider.lock().await.thread = Thread::Empty;
+            let published = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name")).await.unwrap();
+            assert_eq!(published.comments.len(), 1);
+            assert!(published.comments[0].body.starts_with("Keep the public name"));
+            assert!(published.comments[0].body.contains("<!-- loopflow-steer:"));
+            let readback = task_comment_async(&repo, None, "FIX-7", None).await.unwrap();
+            assert_eq!(published, readback);
+            assert_eq!(provider.lock().await.posted.len(), 1);
+            provider.lock().await.thread = Thread::Failing;
+            let failed_read = task_comment_async(&repo, None, "FIX-7", Some("A second instruction")).await.unwrap_err().to_string();
+            assert!(failed_read.contains("Posted Linear comment posted-1"), "{failed_read}");
+            assert!(failed_read.contains("do not post it again"), "{failed_read}");
+            provider.lock().await.thread = Thread::Empty;
+            let confirmed = task_comment_async(&repo, None, "FIX-7", None).await.unwrap();
+            assert_eq!(confirmed.comments.len(), 2);
+            assert_eq!(provider.lock().await.posted.len(), 2);
+            assert!(store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;
     server.abort();
 
-    let provider = provider.lock().await;
-    assert!(provider
-        .queries
-        .iter()
-        .all(|query| !query.trim_start().starts_with("mutation")));
     // Reading a thread registers no Work and prepares nothing.
     assert!(store.list_waves(None).await.unwrap().is_empty());
 }

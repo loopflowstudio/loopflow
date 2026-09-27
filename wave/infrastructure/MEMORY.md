@@ -2,6 +2,71 @@
 
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
+## Task deletion and command ownership (LOO-305, branch evidence 2026-09-27)
+
+[Task removal and command consolidation · LOO-305](https://linear.app/loopflow/issue/LOO-305)
+owns [Task command consolidation · PR #1302](https://github.com/loopflowstudio/loopflow/pull/1302).
+Jack's final scope is provider/local deletion, removal of `pm`/`work`, compression
+and delivery through the saved Flow. Execution settlement remains deferred.
+The accepted command map and detailed proofs survive in local commit
+`4a14c0a47dc6e04be9668fb72b737828565a931d`:
+[design](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/cancel-linear-issues-through-lf.md),
+[implementation evidence](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/implementation-evidence.md),
+[demo](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/task-deletion-installed-demo.md),
+and [compression/rebase proof](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/deletion-namespace-compression.md).
+Remote availability was not checked. These are branch results, not shipment.
+
+- **Commands follow their objects.** Task owns create/status/edit/comment/run/
+  complete/delete; Wave owns connection, sync and placement; repo owns reteam
+  and webhooks; `doctor --planning` owns diagnostics. `pm`/`work` and Task
+  abandon/recover have no aliases. Older command spellings below are historical.
+  Current mechanics live in [CLI docs](../../docs/lf.md) and
+  [planning architecture](../../docs/architecture/planning.md).
+- **Identity, confirmation and outcome differ.** Observed issue identity survives
+  refresh/chapter replacement but never authorizes a new provider mutation.
+  Fresh ownership authorizes deletion; acknowledgement or explicit trash evidence
+  confirms it. Missing membership proves neither. Manual confirmation atomically
+  retires Ready Tasks and preserves terminal times, Done outcomes, PRs and Git.
+  Chapter confirmation shares the insertion while retaining its own classification
+  and receipt transaction. Stale snapshots cannot erase positive confirmation;
+  old abandonment/applied receipts cannot manufacture it.
+- **Prepare before filing.** Planning-only creation allocates no checkout or
+  Task row and needs no agent account. Execution creation consumes validated
+  placement, pinned base, Flow/auth and selected Task agent. Retry markers survive
+  notes edits and reuse persisted identity/title. Post-create allocation failure
+  remains recovery work; do not replace preflight with compensating deletion.
+- **Completion and planning have separate writers.** Check provider terminal
+  conflicts before new local Done, including the confirming refresh. Retain merged
+  PR evidence for retries; narrow writes preserve refreshed planning and execution
+  facts. Repeated completion preserves its original event/time.
+- **Checkout identity is its own branch.** Upstream is tracking information and
+  may name main or a stack parent. New branches disable automatic base tracking;
+  publication establishes their own origin branch. Historical Run attribution
+  resolves retained identity independently of launch eligibility. Blank participant
+  overrides fall through to configured/Git names; markerless steers use the
+  provider author without rewriting comments.
+- **Removal is not termination.** A completed capture and released claim can
+  leave a live Exec without an exact Task join. Native per-Run locking cannot
+  establish Task-wide admission or landing settlement. The retained reproduction
+  and deferred scope are in the design's linked evidence; complete Session/Run/
+  activity disappearance and process settlement remain unproven.
+
+The recorded Linux real-binary deletion proof used synthetic Linear and disposable
+stores; macOS platform TLS ignored its child-only CA setting. TESTING.md owns
+that fixture contract. The source demo deleted LOO-299–302 against configured
+Linear, retried successfully and verified refreshed Wave/roadmap absence. It also
+advanced installed-Home drafts and broke the older installed CLI. Jack's later
+steer forbids branch-binary access to that Home and any branch promotion;
+[Installation incident · LOO-321](https://linear.app/loopflow/issue/LOO-321) owns
+recovery. The demo's promotion handoff is superseded. All further source proofs
+use disposable Homes with inherited LF_* authority removed.
+
+Rebase retained main's shortened Flow and Task-agent semantics. Compression moved
+Task scenarios out of OAuth tests and removed duplicated setup/cases, without
+counting moved lines as deleted. Recorded focused checks and Clippy passed;
+no full gate or installed acceptance follows. This curation changes no chapter,
+Task disposition or delivery state.
+
 ## Task convergence (LOO-319, branch evidence 2026-09-27)
 
 [Make the default Task Flow converge, and let a Task choose its agent · LOO-319](https://linear.app/loopflow/issue/LOO-319)
@@ -60,7 +125,7 @@ withdrawn; subsequent delivery belongs to the Flow. Configured Claude launch and
 resume, a real five-minute stall, and rendered desktop agreement remain unverified.
 The retained real Codex policy proof predates the generic loop-decide revision;
 it does not establish fresh policy execution. These gaps are not passing results
-or proof of Task completion. Do not run this branch's binary against the installed
+or proof of Task completion. Do not run LOO-305's branch binary against the installed
 Home: Jack reported that its drafts broke installed `lf` (LOO-321). Use disposable
 fixture stores for source verification; credential repair remains out of scope.
 
@@ -695,7 +760,7 @@ local configuration, optional provider connection and later PM setup. Today's
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.
 - **Environment configures a process; it must never decide what the process is.** An earlier runtime chose between booting a listener and being a resident from inherited environment, so a promoted wave could attach to its parent's listener with the parent's token. The current `lf wave` surface keeps that role explicit.
-- **Current PM truth and durable Work history have different lifetimes** (learned 2026-07-21). A terminal Project omitted from the current PM snapshot can still own non-terminal historical Task Work. Wave reads must render the current PM hierarchy and classify the stranded Project/Task separately as Wave-owned degraded evidence; they must not fail the whole join, delete history, or synthesize a PM Project. Recovery must use the stable Work id (`lf work abandon task <work-id>`) because higher-level Task commands may inspect a historical worktree that no longer exists.
+- **Current PM truth and durable Work history have different lifetimes** (learned 2026-07-21). A terminal Project omitted from the current PM snapshot can still own non-terminal historical Task Work. Wave reads must render the current PM hierarchy and classify the stranded Project/Task separately as Wave-owned degraded evidence; they must not fail the whole join, delete history, or synthesize a PM Project. Preserve stable identity when the historical checkout is absent. LOO-305 removes the old local-only `work abandon` recovery command; inspect retained facts with explicit `lf task status <task-id>`. Missing Project evidence alone never authorizes provider deletion.
 - **Terminal Task state and current PM routing are authorization boundaries**
   (learned 2026-07-21). An open Linear issue, inherited direction, or sibling
   completion is evidence, never permission to reopen `Done` or `Abandoned`
@@ -778,8 +843,7 @@ local configuration, optional provider connection and later PM setup. Today's
 - **Superseded — label model (PR #852):** one Linear project per wave, Loopflow projects as `project:<slug>` issue labels. Was the incremental-migration bridge; the native hierarchy above replaces it and reads legacy labels only as migration input.
 - **Open (native hierarchy):** standing quality-frontier projects have no natural Linear completion date; the API allows date-less projects, so leaving frontier bets undated is a product convention, not a schema blocker — don't force a target date on them.
 - **Vocabulary discipline.** Say "Linear project" for the Linear object, "project" for a Loopflow measured bet. No fourth noun — "space" and "provider container" were considered and rejected as user-facing words.
-- **`sync --plan` diagnoses; it never guesses.** It reports renamed/stranded Linear projects, unassigned tasks, and labels naming no local project. Ambiguous task moves stay in the plan output for review.
-- **Open question:** `lf pm doctor` and `lf pm sync --plan` are byte-for-byte identical (both call `pm_sync` with `plan: true`). `doctor` earns its keep only as a memorable read-only verb. Collapsing it is a product-surface call, deliberately left to Jack.
+- **`doctor --planning` diagnoses; it never guesses.** LOO-305 consolidates the former `pm doctor` and `pm sync --plan` entry points here. Ambiguous Task moves remain diagnostic findings for review; diagnosis does not apply them.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 

@@ -700,8 +700,9 @@ lf session import             # store them; run once per Home
 A Home that ran a release older than the Session tables kept its
 conversations in files: interactive Run records, Asks under `human-sessions/`,
 saved Flow reviews in `flows/<id>/position.json`, and names in
-`session-name.json`. `import` stores each as a Session with its Runs and reports
-every file it could not store with the reason. The files stay in place and no
+`session-name.json`. `import` stores each as a Session with its Runs, stores
+every other Run record as a Run, and reports every file it could not store
+with the reason. The files stay in place and no
 other command reads them. Running it again stores nothing new.
 
 `open` resumes provider-native history. `ready` saves feedback without closing

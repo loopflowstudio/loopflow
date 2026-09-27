@@ -75,6 +75,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<crate::durable::R
             .collect(),
         // A replay re-executes recorded inputs; it is not the Flow occurrence.
         flow: crate::run_record::RunFlowMembership::Independent,
+        work: None,
     };
     let capture = CaptureHandle::begin_replay_at(home, spec, replay_launch.clone(), source.run_id)
         .map_err(|error| anyhow!("failed to publish replay Run before launch: {error}"))?;
@@ -221,6 +222,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":5,"o
                 skill: Some("implement".to_string()),
                 subjects: Vec::new(),
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
             },
             request.clone(),
         )

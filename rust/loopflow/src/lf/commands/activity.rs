@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::durable::{Author, SteerComment, WorkRef};
-use crate::lf::commands::runs::{collect_run_activity_since, RunSnapshot};
+use crate::lf::commands::runs::RunSnapshot;
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
@@ -143,10 +143,17 @@ fn build_snapshot(
         }
     }
 
-    let runs = collect_run_activity_since(filter, since, &catalog)?;
-    for run in runs {
-        if let Some(work) = catalog.resolve_run(&run) {
-            entries.extend(run_entries(&run, work, since));
+    let runs = store.runs(filter.wave, filter.project, filter.task, None, since)?;
+    let runs = crate::run_record::run_snapshots(&crate::store::observability_home_dir(), runs)
+        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+    for (run, snapshot) in runs {
+        let work = match (run.task_id, run.wave_id) {
+            (Some(task), _) => WorkRef::Task(task),
+            (None, Some(wave)) => WorkRef::Wave(wave),
+            (None, None) => continue,
+        };
+        if let Some(work) = catalog.owners.get(&work) {
+            entries.extend(run_entries(&snapshot, work, since));
         }
     }
 

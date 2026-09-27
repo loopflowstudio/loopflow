@@ -1179,6 +1179,51 @@ DTO/desktop conversion, offline import, configured acceptance, measurements and
 deletion research. Existing architecture/branch-whitespace gaps and supplied
 publication/stacking reports remain unresolved. No intermediate publication.
 
+### First-assignment compression review (2026-09-26)
+
+Reviewed `a891fde1c` from a clean tree, following the branch model against
+`4cd64be3d` through Run construction, Session transactions, assignment triggers,
+Task writes, Started/retirement readers, CLI usage and Swift projections.
+No further executable reduction selected. The amended approval and Jack's final
+write-once bind/set-once timestamp decisions govern. Model before and after:
+
+| Fact | Owner | Retention decision |
+| --- | --- | --- |
+| Run ancestry | `runs`; transactional constructor and SQL parent constraints | Construction fills omitted ancestors; constraints also protect imports and parent-changing writes. Neither replaces the other. |
+| First Task assignment time | `tasks.started_at`; Run INSERT/null-to-Task UPDATE triggers | One assignment boundary covers reservation, bind and import. Keep both event triggers; SQLite distinguishes insertion from update. |
+| Timestamp validity | Task timestamp validators and last-Run deletion constraint | Presence requires retained Run evidence; set-once time cannot be recomputed from `created_at`. Ordinary Task planning UPDATEs omit the column and cannot overwrite it. |
+| Conversation and attempts | `sessions`, current Run and `runs.session_id` | Keep title/feedback independent of attempt replacement, with exact current-Run and invocation fences. |
+| Historical execution outside SQL Runs | Started events, invocation generations and manifest evidence | Still consumed by current launch/retirement paths; delete only with their caller conversion and populated import. |
+
+Two downstream readers need explicit attention during that conversion.
+`lf/commands/waves.rs` adds PR publication/merge evidence after calling
+`task_started`; changing the Store query alone will not make roadmap's displayed
+Started exclusively column-derived. `ops/chapter.rs::disposition` also scans
+manifest subjects for begun evidence. Move that attribution read to Runs while
+retaining retirement's separate authored-work, PR, claim and unknown-evidence
+checks. These are source observations of remaining scope, not new definitions
+of Started. Removing either path now would hide evidence with no SQL Run yet.
+
+The four-source Session list, Ask feedback reset/name copy, taskless file driver,
+manifest-backed Run/usage selection and Swift Work/path grouping still have live
+callers. `session_run_ids` prevents SQL-owned attempts from reappearing as
+independent interactive conversations; it is not yet disposable. Historical
+Session-input columns and migration fixtures remain conversion evidence.
+No interface, field, migration, fallback or test was removed for cosmetic gain.
+
+Inspected `.lf/tmp/loo298-first-assignment/results.txt` and assignment/import
+logs. All 435 recorded Rust/Cargo input files match their retained source hashes.
+Reuse the latest six distinct source-library passes and the recorded canonical
+assignment/import/retirement and two CLI status proofs with their original limits;
+no product tests or resource sample were repeated in this note-only pass.
+Those receipts do not prove bind confirmation, all-kind ownership, configured
+providers, real-Home conversion or desktop retention.
+
+Only this review note changed; working-diff whitespace passes. All eight Done
+When obligations remain, including common execution ownership, repository Chapter
+scope, import, all consumers and the final deletion research. No intermediate
+publication or Flow navigation is selected.
+
 ## Measure
 
 The [2026-09-26 slice review](data-model-slice-review.md) records the current

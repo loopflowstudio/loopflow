@@ -497,3 +497,28 @@ renders it.
 **A test that failed before this cut was rewritten.**
 `parked_human_boundary_reports_blockers_without_provider_preflight` failed at
 `7714e218d`. It now asserts the review's Session and unpublished Run.
+
+## Cut G: deletion (2026-09-27)
+
+Executive choices, recorded in [the cut report](cutover/cut-g-deletion.md) and
+[the research](cutover/cut-g-deletion-research.md). Jack has not reviewed any
+of them.
+
+**The saved Flow's position file stays the cursor owner.** The brief asked for
+the invocation row to own it if reachable. It was not. Four decisions come
+first: which of the Flow's launch facts become columns; whether the step token
+becomes the position version, which changes stored review Session ids; how
+`lf flow decide` and `lf flow route` fence a write with no Task; and whether a
+saved Flow may still run when the store cannot be written.
+
+**A Flow step's record path is derived, not stored.** `recover` finds the
+Run's record under the Home of the process recovering it.
+
+**Two import-only columns were left in place.** Nothing reads
+`historical_session_run_id` or `historical_ready_summary`. Dropping them
+deletes old evidence, so it waits for Jack.
+
+**A flaky test was left alone.**
+`pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers`
+failed once in the suite and once in three runs alone. It is outside this
+Task.

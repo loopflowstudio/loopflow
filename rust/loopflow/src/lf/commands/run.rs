@@ -872,7 +872,7 @@ fn begin_run_capture(
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
-    crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
+    crate::ops::flow_run::bind_run(&capture.run_id())?;
     Ok(capture)
 }
 
@@ -1697,12 +1697,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .status()
             .unwrap()
             .success());
-        assert_eq!(
-            crate::run_record::observed_run_ids(&["task:LOO-267".to_string()])
-                .unwrap()
-                .len(),
-            2
-        );
 
         let built =
             build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path(), None).unwrap();

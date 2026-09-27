@@ -24,7 +24,6 @@ pub(crate) struct StepToken {
 pub(crate) struct Boundary {
     pub id: String,
     pub run_id: Option<RunId>,
-    pub run_dir: Option<PathBuf>,
     pub completed: bool,
 }
 
@@ -229,7 +228,7 @@ pub(crate) fn capture_membership() -> Result<crate::run_record::RunFlowMembershi
     Ok(RunFlowMembership::Step(RunFlowStep::of_flow(&run)?))
 }
 
-pub(crate) fn bind_run(run_id: &RunId, run_dir: &Path) -> Result<()> {
+pub(crate) fn bind_run(run_id: &RunId) -> Result<()> {
     let Some(token) = token()? else { return Ok(()) };
     update(&token.invocation, |run| {
         let human = run.is_human()?;
@@ -242,7 +241,6 @@ pub(crate) fn bind_run(run_id: &RunId, run_dir: &Path) -> Result<()> {
         // A review's Runs belong to its Session.
         if active.run_id.is_none() && !human {
             active.run_id = Some(run_id.clone());
-            active.run_dir = Some(run_dir.to_path_buf());
         }
         Ok(())
     })
@@ -358,8 +356,12 @@ pub(crate) fn recover(id: &str) -> Result<()> {
             ConcreteStep::Op(op) => format!("op: {}", op.item.display_name()),
         };
         let active = run.active.as_mut().expect("active boundary checked above");
-        if let Some(dir) = &active.run_dir {
-            let snapshot = crate::run_record::read_run_snapshot(dir)?;
+        let dir = active
+            .run_id
+            .as_ref()
+            .and_then(|id| crate::run_record::record_dir(&crate::store::lf_home_dir(), id));
+        if let Some(dir) = dir {
+            let snapshot = crate::run_record::read_run_snapshot(&dir)?;
             match snapshot.status() {
                 "completed" => active.completed = true,
                 "failed" | "interrupted" => {
@@ -418,7 +420,6 @@ pub(crate) fn begin_boundary(id: &str) -> Result<(StepToken, bool)> {
         let boundary = run.active.get_or_insert_with(|| Boundary {
             id: uuid::Uuid::new_v4().to_string(),
             run_id: None,
-            run_dir: None,
             completed: false,
         });
         let boundary_id = boundary.id.clone();
@@ -572,7 +573,7 @@ mod tests {
             let (token, _) = begin_boundary(&run.id).unwrap();
             std::env::set_var(FLOW_STEP_ENV, serde_json::to_string(&token).unwrap());
             let capture = home.capture();
-            bind_run(&capture.run_id(), &capture.artifact_dir()).unwrap();
+            bind_run(&capture.run_id()).unwrap();
             let decision = verdict(FlowDecision::Iterate);
             record_decision(&token, &capture.run_id(), &decision).unwrap();
             record_decision(&token, &capture.run_id(), &decision).unwrap();
@@ -635,7 +636,7 @@ mod tests {
         std::env::set_var(FLOW_STEP_ENV, serde_json::to_string(&token).unwrap());
         // A review's Runs belong to its Session, so its launch binds nothing.
         let capture = home.capture();
-        bind_run(&capture.run_id(), &capture.artifact_dir()).unwrap();
+        bind_run(&capture.run_id()).unwrap();
         assert_eq!(
             super::capture_membership().unwrap(),
             crate::run_record::RunFlowMembership::Independent
@@ -660,7 +661,7 @@ mod tests {
         let saved = read(&run.id).unwrap();
         let boundary = saved.active.as_ref().unwrap();
         assert_eq!(boundary.id, token.boundary);
-        assert_eq!((&boundary.run_id, &boundary.run_dir), (&None, &None));
+        assert_eq!(boundary.run_id, None);
         assert!(!boundary.completed);
         assert!(saved.cursor.progress.verdict.is_none());
         let encoded = serde_json::to_value(&saved).unwrap();
@@ -758,7 +759,7 @@ mod tests {
             let (other_token, _) = begin_boundary(&other.id).unwrap();
             std::env::set_var(FLOW_STEP_ENV, serde_json::to_string(&token).unwrap());
             let capture = home.capture();
-            bind_run(&capture.run_id(), &capture.artifact_dir()).unwrap();
+            bind_run(&capture.run_id()).unwrap();
             super::record_route(&token, &capture.run_id(), "chosen").unwrap();
             super::record_route(&token, &capture.run_id(), "chosen").unwrap();
             assert!(super::record_route(&token, &RunId::new(), "chosen").is_err());

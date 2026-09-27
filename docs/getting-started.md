@@ -9,7 +9,17 @@ lf init
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
-Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode).
+### Before you install
+
+| You need | For |
+|---|---|
+| macOS or Linux | Everything |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode), signed in | Every run. Loopflow uses the one you have; these have their own cost |
+| `git`, and a project in a git repository | Every run |
+| [GitHub CLI](https://cli.github.com) (`gh`), signed in | Pull requests |
+| A [Linear](https://linear.app) workspace | Tasks and Waves |
+
+A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 
 ### Setup Paths
 

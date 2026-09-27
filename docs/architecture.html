@@ -403,35 +403,43 @@ a:focus-visible,
 }
 
 /* Capabilities */
-.capabilities-section {
+.capabilities-section,
+.problems-section,
+.definition-section {
     max-width: 980px;
     margin: 0 auto;
     padding: 60px 24px;
 }
-.capabilities-section h2 {
+.capabilities-section h2,
+.problems-section h2,
+.definition-section h2 {
     font-family: var(--font-serif);
     font-size: 28px;
     font-weight: 400;
     margin-bottom: 28px;
     color: var(--burgundy);
 }
-.capabilities-grid {
+.capabilities-grid,
+.problems-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px 48px;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 32px 40px;
 }
 @media (max-width: 768px) {
-    .capabilities-grid {
+    .capabilities-grid,
+    .problems-grid {
         grid-template-columns: 1fr;
     }
 }
-.capability-item h3 {
+.capability-item h3,
+.problem-item h3 {
     font-family: var(--font-serif);
     font-size: 20px;
     color: var(--burgundy);
     margin-bottom: 4px;
 }
-.capability-item p {
+.capability-item p,
+.problem-item p {
     font-size: 15px;
     color: var(--text-secondary);
     line-height: 1.6;
@@ -1808,7 +1816,9 @@ h3:hover .anchor-link,
 
 /* Mac app option (download page) */
 .mac-app-option {
-    margin-top: 2.5rem;
+    margin-bottom: 2.5rem;
+    padding-bottom: 2.5rem;
+    border-bottom: 1px solid var(--border);
 }
 
 .mac-app-option .btn {
@@ -1841,6 +1851,86 @@ h3:hover .anchor-link,
     font-family: var(--font-mono);
     font-size: 0.9em;
     color: var(--text);
+}
+
+/* Flow diagrams (homepage) */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+.flow-figure {
+    margin: 0 0 32px;
+    overflow-x: auto;
+}
+.flow-diagram {
+    display: block;
+    width: 100%;
+    min-width: 640px;
+    height: auto;
+    font-family: var(--font-sans);
+}
+.flow-person {
+    fill: var(--bg);
+    stroke: var(--burgundy);
+    stroke-width: 2;
+}
+.flow-auto {
+    fill: var(--bg-subtle);
+    stroke: var(--border);
+    stroke-width: 1.5;
+}
+.flow-edge {
+    fill: none;
+    stroke: var(--text-secondary);
+    stroke-width: 1.5;
+}
+.flow-back {
+    stroke-dasharray: 5 4;
+}
+.flow-arrowhead {
+    fill: var(--text-secondary);
+}
+.flow-node-label {
+    font-size: 16px;
+    fill: var(--burgundy);
+}
+.flow-node-small {
+    font-size: 12.5px;
+    fill: var(--text);
+}
+.flow-plain {
+    font-size: 16px;
+    fill: var(--text);
+}
+.flow-edge-label {
+    font-size: 12.5px;
+    fill: var(--text-secondary);
+}
+.problems-section {
+    padding-top: 20px;
+}
+.problem-item .problem {
+    margin-bottom: 6px;
+}
+.problem-item .solve {
+    color: var(--text);
+}
+.definition-section p {
+    max-width: 720px;
+    margin-bottom: 14px;
+    color: var(--text-secondary);
+}
+.definition-section .scale-heading {
+    margin-top: 48px;
+}
+.install-facts {
+    margin-top: 18px;
+    font-size: 14px;
+    color: var(--text-secondary);
 }
 
 /* Portable-only additions. The shared docs system lives in website/static/style.css. */
@@ -2332,7 +2422,7 @@ compatibility seams, and retired vocabulary.</p>        <nav aria-label="Documen
 <footer>
   <div class="container">
     <div class="footer-text">
-      <p>Loopflow — Living software. Conducted by you.</p>
+      <p>Loopflow, a software instrument.</p>
       <p class="built-by">
 Built by <a href="https://github.com/loopflowstudio" target="_blank" rel="noopener noreferrer" aria-label="Loopflow Studio (opens in new tab)" class="external-link">Loopflow Studio</a>      </p>
     </div>

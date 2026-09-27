@@ -1,61 +1,60 @@
 # Loopflow
 
-Run one useful prompt first:
+A software instrument. It doesn't make the software for you. You make the
+software through it.
 
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 lf init
-lf debug -c        # copy an error to the clipboard, watch it fix
 ```
 
-That command assembles the skill, repository guidance, scratch notes, and
-clipboard into one prompt. It launches the configured provider and writes one
-Home-local Run record. The Run records what happened; it does not reserve the
-repository, control a Wave, or become planning state.
+AI can build a lot of software fast. It can also spend all day going in
+circles, and it's hard to tell which is happening. Loopflow keeps track, so
+you can see what got done and what still needs you.
 
-The same building block runs **Waves**: persistent agents that coordinate
-chapter plans and Tasks, remember what they learn, and stay steerable.
-There is no Loopflow server at the center. Repo files hold authored behavior;
-Linear and GitHub hold shared coordination and delivery facts; each Home keeps
-its local execution records. `lf ssh` runs the same local commands on another
-Home.
+Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+or [Codex](https://github.com/openai/codex), which have their own cost.
 
-## Build outward
+## The pieces
 
-| Add this | When you need it | Truth lives in |
+Loopflow is built from a few pieces. Each one is small, and most are plain
+text files you can open and change.
+
+| Piece | What it is | Where it lives |
 |---|---|---|
-| **Skill** | One repeatable agent action | `.lf/skills/*.md` |
-| **Flow** | Several bounded actions in order | `.lf/flows/*.yaml` |
-| **Wave** | A durable goal, memory, cadence, and project selection | `wave/<name>/` plus local placement |
-| **Project** | A measured bet with KRs | Linear |
-| **Task** | One concrete change in its own worktree | Linear, Git, and GitHub |
-| **Run** | Evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
+| **Skill** | One step: instructions for the AI, written as a text file | `.lf/skills/*.md` |
+| **Flow** | Steps in order. One that can go back and try again is a loopflow | `.lf/flows/*.yaml` |
+| **Task** | One piece of work with a finish line, done in its own copy of your project | Linear, Git, and GitHub |
+| **Wave** | A goal Loopflow keeps working on, with its own memory and schedule | `wave/<name>/` |
+| **Project** | The current plan for a Wave, with results you can check | Linear |
+| **Run** | A record of one time the AI coding tool was started | `$LF_HOME/runs/` on the computer that ran it |
 
-Each layer owns one kind of fact. None needs a universal current execution
-record to coordinate the others.
+Each piece keeps one kind of fact, so you always know where to look. New
+terms are in the [Glossary](glossary.md).
 
-Start a Wave after authoring `wave/engbot/GOAL.md`:
+The Mac app shows all of this in one window: your goals, their tasks, and
+the conversations that need you. It reads the same information the commands
+below print, so anything you see in the app you can also ask for in a
+terminal.
 
 ```bash
-lf start engbot
-lf --wave <wave> wave/operate "ship the parser fix first"
-lf status engbot
+lf start engbot                                   # start a Wave you wrote at wave/engbot/GOAL.md
+lf --wave engbot wave/operate "ship the parser fix first"
+lf status engbot                                  # where it stands
 lf stop engbot
 ```
 
-**Loopflow** (macOS) presents the same conversation and work map. It is a
-client of the same local `lf --json` reads, not another source of truth.
-
 ## Read by area
 
-| Where you are | What to read |
+| You want to | Read |
 |---|---|
-| Just installed, want to try it | [Get Started](getting-started.md) |
-| Automating with a persistent agent | [Waves](waves.md) |
-| Writing skills, flows, and goals | [Authoring](authoring.md) |
-| Writing an agent that drives other agents | [The Agent API](agent-api.md) |
-| Watching and steering many agents | [Conducting](conducting.md) |
-| Looking up a command | [`lf` reference](lf.md) |
+| Install it and try one piece of work | [Get Started](getting-started.md) |
+| See what got done and what needs you | [Conducting](conducting.md) |
+| Give it a goal to keep working on | [Waves](waves.md) |
+| Change how it works | [Authoring](authoring.md) |
+| Drive it from another AI agent | [The Agent API](agent-api.md) |
+| Look up a word | [Glossary](glossary.md) |
+| Look up a command | [`lf` reference](lf.md) |
 
 ## Shape one run
 
@@ -141,4 +140,4 @@ carry the operating contract (`LOOPFLOW.md`) — these pages are the long form.
 
 ## Reference
 
-[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)
+[Glossary](glossary.md) · [`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)

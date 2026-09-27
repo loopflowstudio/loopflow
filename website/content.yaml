@@ -3,12 +3,9 @@
 
 homepage:
   hero:
-    tagline: "Living software, conducted by you."
+    tagline: "A software instrument."
     subline: >-
-      Waves keep a goal, remember what they learn, and stay steerable while
-      replaceable agents do the work. Projects carry measurable bets; Tasks
-      carry concrete changes. Each machine keeps its own evidence and no
-      Loopflow server sits at the center.
+      It doesn't make the software for you. You make the software through it.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
   showcase:
@@ -18,37 +15,133 @@ homepage:
         caption: "A Wave: its goal, its work, and a conversation you can steer."
 
   pillars:
-    heading: "What makes it alive"
+    heading: "One task at a time"
+    diagram_alt: >-
+      You ask, and you make the plan together. It builds and checks, then
+      you review the demo. If the result is not right yet, it
+      builds again and shows you another demo. Otherwise the work is done.
     items:
-      - title: "Agents conduct agents"
+      - title: "Make the plan"
         description: >-
-          `lf` is the API. A wave delegates a Task with `lf task run`, adds
-          durable input with `lf task steer`, and reads the same status and
-          evidence surfaces you do. The same verbs you type.
-      - title: "The whole lifecycle, not just the code"
+          You say what you want. You work out the plan together and it
+          writes it down.
+      - title: "Let it build"
         description: >-
-          Plans live in Linear. PRs publish, survive review, and land after
-          required checks pass. CI failures get repaired; releases cut on a
-          cadence; worktrees clean themselves up. Waves run the process
-          around the code — building, deploying, and maintaining software,
-          not just writing it.
-      - title: "Self-organizing, all the way down"
+          It works in small steps and checks each one. Watch, or go do
+          something else.
+      - title: "See the result"
         description: >-
-          Waves supervise projects; projects supervise tasks. Stable Work
-          preserves purpose while each mediated provider launch leaves a
-          Home-local Run record. Waves fold durable learning into memory.
-          Coordination lives in the repo, Linear, and GitHub — no Loopflow
-          server sits between them.
-      - title: "The whole system on one screen"
-        description: >-
-          `lf roadmap` buckets every open task by what it needs from you.
-          Inspect live local processes, durable Work, and provider-authored
-          usage without inventing one central ledger. The Mac app renders the
-          same JSON the CLI reads.
+          It shows you what it made, working. Not right yet? It goes back
+          and builds again.
+
+  problems:
+    heading: "What it helps with"
+    items:
+      - title: "It goes in circles"
+        problem: >-
+          AI can build a lot of software fast. It can also spend all day
+          going in circles, and it's hard to tell which is happening.
+        solve: >-
+          Loopflow keeps track, so you can see what got done and what still
+          needs you.
+      - title: "It says it's done"
+        problem: >-
+          Finished and working are not the same thing.
+        solve: >-
+          Loopflow shows you the result running before anything counts as
+          done.
+      - title: "You lose the thread"
+        problem: >-
+          The more you hand off, the more there is to catch up on.
+        solve: >-
+          Loopflow checks in at the plan and at the demo. Step in closer
+          whenever you like.
+      - title: "It forgets"
+        problem: >-
+          Every new session starts from zero.
+        solve: >-
+          Loopflow writes down what it learned and brings it to the next
+          task.
+      - title: "Tasks trip over each other"
+        problem: >-
+          Two things in progress at once can undo each other.
+        solve: >-
+          Each task gets its own copy of your project, so work in progress
+          never collides.
+      - title: "It's not how you'd do it"
+        problem: >-
+          Everyone works differently.
+        solve: >-
+          Every step is a plain text file. Change any of them.
+
+  definition:
+    heading: "What is a loopflow?"
+    diagram_alt: >-
+      The default flow, step by step: kickoff, review plan, implement,
+      compress, review, decide, review demo, decide, done. Review plan and
+      review demo need a person. Each decide step can return to implement.
+    paragraphs:
+      - >-
+        A flow is a directed graph of steps. Each step gives an agent one
+        bounded job. In a pipeline, steps run in order and the graph has no
+        cycles.
+      - >-
+        A loopflow is a flow with at least one backward edge. A deciding
+        step looks at the work so far and either continues forward or
+        returns to an earlier step. The steps in between form the loop
+        body, and they repeat until the deciding step moves on.
+
+  scale:
+    heading: "Works for one person or a whole company"
+    text: >-
+      Everyone runs it on their own computer, set up their own way. Nobody
+      has to buy it or get it approved. A team can start with one person
+      who already uses it.
 
   building_blocks:
-    heading: "Building blocks"
+    heading: "Every step is a file you can change"
     items:
+      - label: "A skill"
+        filename: ".lf/skills/implement.md"
+        content: |
+          Turn the design doc into working code.
+
+          ## Workflow
+          1. Understand the design
+          2. Implement data structures and functions
+          3. Verify with tests and done-when checks
+
+      - label: "A flow"
+        filename: ".lf/flows/feature.yaml"
+        content: |
+          - kickoff
+          - step:
+              id: review_plan
+              name: review-design
+              human: true
+          - step:
+              id: implement
+              name: implement
+          - compress
+          - review-slice
+          - step:
+              id: decide
+              name: loop-decide
+              repeat:
+                from: implement
+          - step:
+              id: review_demo
+              name: demo
+              human: true
+      - label: "A task"
+        filename: "terminal"
+        content: |
+          lf task start "Unify token validation" \
+            --project unified-sign-in
+          lf task steer AUTH-12 \
+            "prefer the middleware approach"
+          lf task status AUTH-12 --json
+          lf pr land -c
       - label: "A wave"
         filename: "wave/auth/GOAL.md"
         content: |
@@ -64,39 +157,14 @@ homepage:
           Read current Projects, KR proof, and Project-owned metrics. Route
           the most important gap to its owning Project; record only
           strategy-changing learning in memory.
-      - label: "A project"
-        filename: "Linear · created via lf pm"
-        content: |
-          lf pm project create --wave auth \
-            --title "Unified sign-in" \
-            --definition "One auth path across
-              web and desktop." \
-            --kr "Over one week of real sign-ins,
-              every flow rides the new path
-              unattended — zero rescues."
-      - label: "A task"
-        filename: "terminal"
-        content: |
-          lf task start "Unify token validation" \
-            --project unified-sign-in
-          lf task steer AUTH-12 \
-            "prefer the middleware approach"
-          lf task status AUTH-12 --json
-          lf pr land -c
-      - label: "A skill"
-        filename: ".lf/skills/implement.md"
-        content: |
-          Turn the design doc into working code.
-
-          ## Workflow
-          1. Understand the design
-          2. Implement data structures and functions
-          3. Verify with tests and done-when checks
 
   install:
     heading: "Get Loopflow"
-    note: "The Mac app bundles the CLI; every wave it runs is steerable from either."
-    cli_label: "Or just the CLI (macOS or Linux):"
+    facts: >-
+      Free and open source · Runs on your computer · Every step is a file
+      you can change · Needs Claude Code or Codex, which have their own cost
+    note: "The Mac app includes the command line tool."
+    cli_label: "Or just the command line tool (macOS or Linux):"
     command_display: |
       curl -fsSL https://loopflow.studio/install.sh | sh
       lf init

@@ -295,7 +295,7 @@ Set the default harness, with an optional model.
 |---|---|
 | **CLI** | `lf gate -m codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then `codex`) |
+| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode` installed on this machine) |
 
 ```yaml
 agent: codex          # harness default
@@ -306,8 +306,8 @@ Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific model
 
 Four built-in skills intentionally default to Claude: `kickoff`,
 `review-design`, `review-slice`, and `prompt`. Every other unconfigured
-built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
-an explicit override.
+built-in skill uses Codex when it is installed, then Claude, then OpenCode. A
+CLI `-m` or authored `agent:` config remains an explicit override.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex

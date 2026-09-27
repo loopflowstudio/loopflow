@@ -2161,6 +2161,21 @@ fn format_timeout(timeout: Option<Duration>) -> String {
         .unwrap_or_else(|| "unknown duration".to_string())
 }
 
+/// What to tell someone whose agent CLI is missing.
+pub fn missing_agent_message(cli: &str) -> String {
+    let hint = match cli {
+        "claude" => {
+            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf auth claude`."
+        }
+        "codex" => {
+            "Install it with `npm install -g @openai/codex`, then sign in with `lf auth codex`."
+        }
+        "opencode" => "Install it with `npm install -g opencode-ai`.",
+        _ => "Install it, or choose another agent with `-m claude` or `-m codex`.",
+    };
+    format!("'{cli}' is not installed. {hint}")
+}
+
 /// Check if a CLI is available.
 pub fn check_cli_available(cli: &str) -> bool {
     static CACHE: OnceLock<Mutex<std::collections::HashMap<String, bool>>> = OnceLock::new();

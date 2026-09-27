@@ -2433,7 +2433,7 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         required: false,
         macos_only: false,
         brew: None,
-        fallback: "lf init",
+        fallback: "npm install -g @anthropic-ai/claude-code",
     },
     SystemDep {
         name: "codex",

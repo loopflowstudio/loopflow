@@ -1,0 +1,41 @@
+<svg class="flow-diagram" viewBox="0 0 940 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="flow-full-title">
+  <title id="flow-full-title">The default flow, every step</title>
+  <defs>
+    <marker id="arrow-full" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="flow-arrowhead"/>
+    </marker>
+  </defs>
+  <rect x="4" y="40" width="88" height="44" rx="6" class="flow-auto"/>
+  <text x="48" y="67" class="flow-node-small" text-anchor="middle">kickoff</text>
+  <rect x="112" y="40" width="88" height="44" rx="6" class="flow-person"/>
+  <text x="156" y="67" class="flow-node-small" text-anchor="middle">review plan</text>
+  <rect x="220" y="40" width="88" height="44" rx="6" class="flow-auto"/>
+  <text x="264" y="67" class="flow-node-small" text-anchor="middle">implement</text>
+  <rect x="328" y="40" width="88" height="44" rx="6" class="flow-auto"/>
+  <text x="372" y="67" class="flow-node-small" text-anchor="middle">compress</text>
+  <rect x="436" y="40" width="88" height="44" rx="6" class="flow-auto"/>
+  <text x="480" y="67" class="flow-node-small" text-anchor="middle">review</text>
+  <rect x="544" y="40" width="88" height="44" rx="6" class="flow-auto"/>
+  <text x="588" y="67" class="flow-node-small" text-anchor="middle">decide</text>
+  <rect x="652" y="40" width="88" height="44" rx="6" class="flow-person"/>
+  <text x="696" y="67" class="flow-node-small" text-anchor="middle">review demo</text>
+  <rect x="760" y="40" width="88" height="44" rx="6" class="flow-auto"/>
+  <text x="804" y="67" class="flow-node-small" text-anchor="middle">decide</text>
+  <line x1="92" y1="62" x2="110" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <line x1="200" y1="62" x2="218" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <line x1="308" y1="62" x2="326" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <line x1="416" y1="62" x2="434" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <line x1="524" y1="62" x2="542" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <line x1="632" y1="62" x2="650" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <line x1="740" y1="62" x2="758" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <line x1="848" y1="62" x2="880" y2="62" class="flow-edge" marker-end="url(#arrow-full)"/>
+  <text x="910" y="67" class="flow-node-small" text-anchor="middle">done</text>
+  <path d="M588 84 L588 120 L276 120 L276 86" class="flow-edge flow-back" marker-end="url(#arrow-full)"/>
+  <path d="M804 84 L804 150 L252 150 L252 86" class="flow-edge flow-back" marker-end="url(#arrow-full)"/>
+  <text x="430" y="114" class="flow-edge-label" text-anchor="middle">not yet</text>
+  <text x="530" y="144" class="flow-edge-label" text-anchor="middle">not yet</text>
+  <rect x="4" y="172" width="14" height="14" rx="3" class="flow-person"/>
+  <text x="26" y="184" class="flow-edge-label">needs a person</text>
+  <rect x="150" y="172" width="14" height="14" rx="3" class="flow-auto"/>
+  <text x="172" y="184" class="flow-edge-label">runs on its own</text>
+</svg>

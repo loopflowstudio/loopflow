@@ -179,8 +179,6 @@ struct GhReleasePr {
     state: String,
     #[serde(default, rename = "mergeCommit")]
     merge_commit: Option<GhPrMergeCommit>,
-    #[serde(default)]
-    url: Option<String>,
     #[serde(default, rename = "headRefOid")]
     head_ref_oid: Option<String>,
 }
@@ -1058,11 +1056,11 @@ fn release_single(
                     progress,
                 )?
             }
-            _ => {
-                let url = pr.url.unwrap_or_else(|| format!("PR #{}", pr.number));
+            state => {
                 return Err(OpsError::Message(format!(
-                    "{url} was closed without merging; remove or rename the release branch before retrying"
-                )));
+                    "release PR #{} has unexpected state {state}",
+                    pr.number
+                )))
             }
         }
     } else {
@@ -2453,14 +2451,19 @@ fn find_release_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhReleasePr>> 
             "--state",
             "all",
             "--json",
-            "number,state,mergeCommit,url,headRefOid",
-            "--limit",
-            "1",
+            "number,state,mergeCommit,headRefOid",
         ],
     )?;
-    let mut prs: Vec<GhReleasePr> = serde_json::from_str(&output)
+    let prs: Vec<GhReleasePr> = serde_json::from_str(&output)
         .map_err(|err| OpsError::Parse(format!("failed to parse release PR: {err}")))?;
-    Ok(prs.pop())
+    Ok(current_release_pr(prs))
+}
+
+/// A release PR closed without merging is a withdrawn attempt. GitHub keeps it
+/// under the branch name forever, so it must not stand in for this version's
+/// release: the open or merged PR does, and with neither the release starts fresh.
+fn current_release_pr(prs: Vec<GhReleasePr>) -> Option<GhReleasePr> {
+    prs.into_iter().find(|pr| pr.state != "CLOSED")
 }
 
 enum ReleasePrWait {
@@ -4030,6 +4033,25 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn withdrawn_release_pr_does_not_block_the_version() {
+        let pr = |number, state: &str| GhReleasePr {
+            number,
+            state: state.to_string(),
+            merge_commit: None,
+            head_ref_oid: None,
+        };
+
+        let only_withdrawn = current_release_pr(vec![pr(1303, "CLOSED")]);
+        assert!(only_withdrawn.is_none());
+
+        let retried = current_release_pr(vec![pr(1305, "OPEN"), pr(1303, "CLOSED")]);
+        assert_eq!(retried.map(|pr| pr.number), Some(1305));
+
+        let released = current_release_pr(vec![pr(1304, "CLOSED"), pr(1300, "MERGED")]);
+        assert_eq!(released.map(|pr| pr.number), Some(1300));
+    }
 
     #[test]
     fn cycle_context_keeps_early_and_late_changes_before_detail() {

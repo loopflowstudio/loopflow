@@ -144,6 +144,9 @@ jobs:
         # Native proofs share AppKit's main actor; concurrent suites starve
         # async observations and invalidate their timing budgets.
         run: swift test --package-path swift --no-parallel -Xswiftc -gnone
+        # This step hangs intermittently in an observation cancellation test.
+        # Without a limit a hang holds the PR for GitHub's six-hour default.
+        timeout-minutes: 20
       - name: Check Swift multiplatform boundaries
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
       - name: Prove the control room renders its four states distinctly

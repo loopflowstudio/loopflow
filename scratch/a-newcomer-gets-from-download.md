@@ -1,76 +1,151 @@
 # From install to an open Loopflow
 
-Status: proposed design for LOO-312. Kickoff only; no product implementation or
-live Mac acceptance recorded. Baseline: `102522bc25adc146d4b8cc3f343677ed8170f636`.
+Status: interactive review decisions recorded; ready for Jack's review completion.
+Product direction is confirmed below; implementation details and missing proof
+are identified separately and are not claims of acceptance.
+No product implementation or live Mac acceptance recorded.
+Baseline: `102522bc25adc146d4b8cc3f343677ed8170f636`.
 Research performed 2026-09-26 (run-local date).
 
 ## Problem
 
 Kim or Scott should be able to install Loopflow on a Mac without a coding tool,
-open it, connect a coding tool, and see one useful next action. The current
+open it, connect a coding tool and GitHub, and see one useful next action. The current
 instructions assume a working shell PATH, an authenticated coding tool, and a
 Git project. The primary window offers no obvious way to acquire those first
 two things or open the third.
 
 Jack's accepted direction in `wave/growth/MEMORY.md` makes the Mac app the
 primary experience and puts direct AI interaction in its embedded terminal.
-This design serves that direction. It does not require Linear, GitHub, a Wave,
-or a completed Task to finish setup. LOO-316 owns creating a project and a first
-Task from nothing; LOO-306 owns the wider app and terminal walkthrough.
+This design serves that direction. It does not require Linear, a Wave, or a
+completed Task to finish setup. Jack's review direction makes Linear optional
+sharing across the product, not merely optional during setup. Jack confirmed
+early GitHub sign-in as part of initial setup, before **Open project…**.
+LOO-316 owns creating a project and a first Task from nothing; LOO-306 owns
+the wider app and terminal walkthrough.
+
+## Interactive review direction
+
+Jack said: "not require linear at all and just have it be an optional sharing
+mechanism." The intended local experience must therefore include ordinary
+planning and Tasks without Linear, not just a direct-conversation exception.
+This is a product direction; current init instructions still describe
+Linear-backed Tasks and planning. This design must not claim that removing a
+sign-in prompt removes the underlying dependency. LOO-316 is the existing
+related Task for first local work; the complete planning/storage change and
+its ownership still need to be resolved. No planning records were changed.
+
+After considering requiring GitHub, Jack confirmed: "make sure theyre signed in
+asap" in response to initial setup versus first publication. GitHub sign-in
+belongs in initial setup, before **Open project…**; do not postpone it until
+delivery. Reuse existing `lf auth github` and account for its `gh` executable
+dependency on a clean Mac. Verify and reuse an existing sign-in. Authentication
+does not authorize creating repositories or publishing code automatically.
+
+See [account requirements review](account-requirements-review.md) and
+[init review](init-setup-review.md). Jack chose "drag to app -> open" as the
+primary acquisition path. See [DMG review](dmg-first-launch-review.md). Jack
+prefers scoped sessions and is content to avoid an init conversation here.
+Initial setup uses app actions; a repo-wide init is a separate possibility,
+not part of this Task. The mechanism for installing `gh` is an implementation
+detail to resolve under the no-package-manager constraint.
 
 ## The demo
 
 In a fresh macOS account with no coding tool or developer package manager,
-follow the Mac installation instructions, open Loopflow, choose a coding tool,
-install it and sign in from the app. Setup changes to **Open project…**; clicking
+download the DMG, drag Loopflow into Applications and open it in Finder, without
+running a Terminal command. First launch activates the installed app through
+the existing installation authority. Choose a coding tool,
+install it and sign in from the app, then connect GitHub. Existing verified
+sign-ins need no repeat login. Setup changes to **Open project…**; clicking
 it opens a folder chooser in that same window. A new Terminal window also runs
 `lf --version` without repairing PATH.
 
 An additional integration check opens an existing local Git test project and
-gets a provider response through **New conversation**, without a planning or
-GitHub account. That proves that “connected” means usable by Loopflow; it does
+gets a provider response through **New conversation**, without a Linear
+account, with GitHub connected during setup. The response
+proves that “connected” means usable by Loopflow; it does
 not turn an existing project into a prerequisite for reaching the setup finish.
 
 ## Approach
 
-### One documented installation path
+### Existing `lf init` and the setup boundary
 
-Use the existing verified full Mac shell installer for this release. The Mac
-app remains the working experience; Terminal is used once to install it.
-`release/install.sh` already downloads a pinned release, checks digests and the
-app signature, and delegates activation to the downloaded `lf install promote`.
-Do not build another bootstrapper into Swift.
+Interactive review inspected `lf init` after Jack asked whether kickoff had
+considered it. It is an agent-run skill, defined in
+`rust/loopflow/src/engine/builtins/ops/skill/init.md`, not a standalone bootstrap
+command. It already discovers installed agents and account state, guides
+connections and configuration, and ends with an evidence-backed next command.
+It supports direct skills without Linear, although its opening prioritizes
+Waves, shared planning, and delivery and offers the desktop only at the end.
 
-Change the homepage/download Mac CTA to the Mac installation instructions,
-rather than directly to `Loopflow-latest.dmg`. Explain how to open Terminal,
-paste the installation command, and then open the installed app. Keep the DMG
-available in release assets as a manual distribution artifact; do not present
-dragging it into Applications as equivalent to verified machine installation
-without a separate proof. This CTA change is a proposal, not an accepted copy
-decision from Jack.
+The launcher requires an installed harness before the skill can run
+(`rust/loopflow/src/lf/commands/run.rs`, `launch_prompt`). The skill's instruction
+to stop and offer installation commands when no harness exists cannot bootstrap
+its own execution. It also assumes a repository context. These are source
+observations, not a live onboarding trial.
 
-Update `docs/getting-started.md`'s opening only, with matching download-page
-instructions. Remove the immediate `lf init` step: neither a project nor an
-initialized repository is required to install and open the app. Put the
-coding-tool setup in the app section, with its separate cost stated beside any
-claim that Loopflow is free. Leave the broader docs rewrite to LOO-306/309.
+Jack clarified that init was an option to consider, that Loopflow prefers scoped
+sessions, and that a repo-wide init might fit better: "if we can get by without
+it, great". This Task therefore uses deterministic app actions for installation
+and account connection. It does not launch an onboarding conversation, create
+a synthetic Session scope, or require init after choosing a project. The
+existing repo init remains available separately; redesigning it is out of scope.
+Reuse installation and auth operations underneath the app rather than copying
+the broad init skill into Swift. See `scratch/init-setup-review.md`.
 
-After successful promotion, the installer prints the actual app path and an
-executable, correctly quoted `open` command. The documented default path opens
-that app explicitly; installation itself does not unexpectedly launch a GUI in
-headless use. Linux and `--cli-only` output must not promise an installed app.
+### Download, drag into Applications, open
 
-For an unwritable default `/Applications`, select and create `~/Applications`.
-An explicit `LF_APPLICATIONS_DIR` remains authoritative and reports a concrete
-write error. Keep updates at the installed app's recorded location. Reconcile
-the target selection in `install/published.rs` with the shell bootstrap so
-`lf install` does not later create a second app in `/Applications`. Promotion
-and its receipt remain the installation authority. Do not add sudo or relax
-signature, digest, migration, or recovery checks.
+Jack confirmed this primary path during review. Keep the website's direct DMG
+download. The Mac instructions show opening that download, dragging Loopflow
+into Applications, and opening the installed app. No external Terminal command
+or shell installer is required. The shell installer remains a supported CLI
+route; it is not the fallback used to declare the Mac acceptance complete.
+
+First launch must activate the copied bundle and its bundled `lf`/`lfd` through
+the existing Rust installation owner before normal registry reads and sessions
+start. Swift presents progress, a concrete failure and retry, and the provider
+setup screen after activation settles. It invokes the bundled helper directly;
+no preexisting PATH entry, daemon, coding tool, Git project, or install receipt
+is assumed. A settled matching installation is reused on subsequent launches.
+
+Add the minimum repo-independent bundle-activation entry to the existing
+installer. Reuse preflight, retained artifacts, the promotion lock, migration
+checks, machine entry registration, receipt, and recovery; do not implement
+these decisions in Swift. Activation uses the bundle the person opened, not a
+fresh download of whichever release is latest. Verify the signed bundle and
+matching bundled artifacts through the existing validation owners. Preserve
+release digest verification wherever downloading remains involved.
+
+The coordinator must survive a GUI exit or replacement and reopen the activated
+app when necessary. Existing promotion has quiesce/resume behavior, but its
+first-install case with a running unregistered app is not yet proven. Resolve
+that case in the same owner. Prove safe staging when the opened bundle is also
+the target, interrupted activation and retry, and repeated opens without an
+activation/restart loop. An old or incompatible bundle must not silently replace
+a newer active installation or advance an unsupported store.
+
+Use the actual copied app location as the installation target and record it for
+updates. Support `~/Applications` when `/Applications` is unwritable, with a
+Finder-based instruction in the install docs. Do not request sudo. If opened
+directly on the mounted DMG, explain the drag step and allow retry after moving;
+do not register the mounted image as the permanent installation. Reconcile
+`install/published.rs` and the shell installer with the recorded destination so
+updates do not create a second copy in `/Applications`. An explicit
+`LF_APPLICATIONS_DIR` remains authoritative for the CLI route.
+
+Update the opening of `docs/getting-started.md` and matching download-page
+instructions. Put coding-tool and GitHub setup in the app section, with the
+coding tool's separate cost beside any claim that Loopflow is free. Remove
+`lf init` from the required newcomer sequence; keep its separate repository
+setup documentation accurate. Leave the broader rewrite to LOO-306/309.
+Retain accurate shell-installer completion output for CLI users: actual paths
+and a correctly quoted optional `open` command, without launching a GUI from
+headless installation. Linux and `--cli-only` never promise an installed app.
 
 ### Make terminal installation durable
 
-After successful promotion, `release/install.sh` adds one clearly marked,
+After successful activation, the installation owner adds one clearly marked,
 idempotent PATH block to the default Mac zsh's interactive startup file
 (`${ZDOTDIR:-$HOME}/.zshrc`). The block conditionally prepends the actual install
 directory. Preserve unrelated content, including a missing final newline;
@@ -78,13 +153,16 @@ quote paths with spaces or shell metacharacters as literals. Reinstallation
 replaces the owned block rather than appending duplicates. Do not infer
 persistent configuration from the installer's current PATH alone.
 
-The installer cannot alter its parent shell. Its output and CLI instructions
+Share this operation between app activation and shell installation, with one
+implementation in the existing Rust installer. The shell installer cannot alter
+its parent shell. Its output and CLI instructions
 must still include an immediate `export PATH=...` command for that shell.
 Opening a new interactive zsh session must resolve `lf` automatically. For
 other shells, retain explicit shell-appropriate/manual PATH instructions;
 automatic configuration in this Task is limited to the default Mac zsh.
-Report an unwritable startup file as installed-but-PATH-unconfigured with the
-exact repair, without rolling back a valid app installation.
+Report an unwritable startup file as installed-but-PATH-unconfigured with an
+in-app retry and exact repair detail, without rolling back a valid app
+installation. Normal successful DMG installation requires no manual shell work.
 
 Before making this change, isolate HOME and ZDOTDIR in *all* shell installer
 fixtures. They currently inherit the developer's HOME and set only a custom
@@ -113,8 +191,14 @@ to own setup. Closing the setup terminal interrupts its foreground operation;
 returning rechecks actual state and offers retry. Never interpret dismissal,
 a subprocess spawn, or an installer exit alone as successful authentication.
 
-Once a tool is installed, the primary action is **Sign in**. Once connected,
-the primary action is **Open project…**, with a brief explanation that a project
+Once a tool is installed, the primary action is **Sign in**. Once the coding
+tool is connected, establish GitHub sign-in through the existing auth owner.
+If `gh` is absent, offer its installation as part of setup; if signed out,
+offer **Connect GitHub**. Verify existing sign-in and skip completed steps.
+Failed or canceled connection leaves an actionable retry. The mechanism for
+acquiring `gh` is still to be specified; do not assume Homebrew is present.
+Once both accounts are connected, the primary action is **Open project…**,
+with a brief explanation that a project
 is a folder of files and currently must use Git. The chooser reuses
 `PortfolioService.addRepo` and `RepoScanner.mainRepository`, then selects that
 repository on the current `PodiumModel`. A canceled chooser keeps the action;
@@ -193,7 +277,7 @@ installed-tool ordering when no explicit setup choice or configuration exists.
 | Is npm required? | Both official provider docs now offer native macOS installers; see sources below. | Install without Node, npm or Homebrew as prerequisites. |
 | What happens with no tools? | `default_agent()` falls back to Codex; `missing_agent_message` then gives a Codex/npm-only instruction. Availability checks are cached. | Distinguish implicit absence from an explicit provider request; re-probe after install. |
 | Is the claimed empty screen current? | Code: primary launch is `PodiumView` → `WorkspaceNavigator` when no repo is selected. Its menu can contain no repository and no actions. “Author a Wave” belongs to `WorkSurfaceView`; `WavesView` is a different scene. | Change the actual primary boundary. Live confirmation remains required before UI implementation. |
-| Does the download button run this installer? | No. `website/content.yaml` points at `Loopflow-latest.dmg`; the full verified installer is a separate path. The DMG bundles lf/lfd, but this research did not prove drag-install activation. | Choose one proven activation mechanism for the documented route; proposed CTA change is explicit. |
+| Does the download button run this installer? | No. `website/content.yaml` points at `Loopflow-latest.dmg`; the full verified installer is a separate path. The DMG bundles lf/lfd, but this research did not prove drag-install activation. | Jack chose to retain DMG acquisition; implement and prove activation from first app launch. |
 | Can a standard account use the current app installer? | The shell installer exits if `/Applications` is unwritable. An explicit target already exists. | Select a user-writable target without sudo and keep later updates at that target. |
 | Can setup work with no repo? | Current conversation launch requires repo scope. Native terminal surfaces and provider-auth commands need no project concept. | Give setup a shell surface, not a fabricated conversation/Task. |
 | Can readiness reuse auth text verbatim? | No JSON mode exists; service status can prefer a stored token, and Codex's broker uses file token extraction. | Add a typed native-status observation in the existing owner. Do not treat cached token presence as live execution proof. |
@@ -218,16 +302,19 @@ of this branch or a clean account. No clean Mac account was created.
 | Approach | Tradeoff | Why not |
 |---|---|---|
 | Repair docs and add Open project only | Small; leaves provider install and auth in separate websites/terminals. | Does not take responsibility for getting an absent coding tool connected or detecting a failed setup. |
-| DMG-first self-installing app | Best eventual download experience; can hide even the initial Terminal step. | Not selected here: activation, app restart during promotion, bundled-helper registration, and recovery would need another bootstrap entry point plus a real clean-account proof. Keeping that unresolved dependency while claiming a shorter path would hide work. |
-| Existing full installer plus native app setup | One initial Terminal action; existing release activation and provider auth retain ownership. | Chosen. Carries all three walls through to an observable next action without inventing project creation. |
+| DMG-first app with first-launch activation | Requires activation, restart, registration, and recovery to work from a copied app. | Selected by Jack during review. Reuse the installation owner and prove this path on a clean account. |
+| Existing full installer plus native app setup | Reuses the existing shell bootstrap but requires an external Terminal action. | Superseded by Jack's DMG choice. Retained as the separate CLI installation route. |
 
 ## Key decisions
 
+- Use scoped app actions for setup. No init conversation or fabricated Session;
+  repo-wide init remains a separate possibility outside this Task.
+- GitHub sign-in is part of initial setup before **Open project…**, confirmed
+  by Jack during review. Linear remains optional sharing.
 - The finish is an open, connected app with **Open project…**, not a completed
   Task. This matches LOO-312 and does not borrow unfinished LOO-316 behavior.
-- Use the full installer as the documented entry; do not imply that changing
-  shell PATH repairs unproven DMG activation. Reconsider this choice during
-  design review if direct-DMG installation is a binding requirement.
+- Download the DMG, drag into Applications, and open. Jack confirmed this
+  entry path; first-launch activation through the existing installer is in scope.
 - Selecting a coding tool must affect actual future launches. Write the one
   existing config authority only on verified success.
 - Sign-in is not entitlement or quota verification. A real conversation is the
@@ -240,37 +327,48 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## Scope
 
-- In scope: documented full Mac install route; PATH persistence; writable app
+- In scope: documented DMG-first Mac install route and first-launch activation;
+  shared PATH persistence; writable app
   destination and update consistency; guided Codex/Claude installation and
-  existing auth; primary-window setup and project picker; missing-tool errors;
+  existing auth; early GitHub sign-in and supplying `gh` when absent;
+  primary-window setup and project picker; missing-tool errors;
   focused docs/download changes and proofs.
-- Out of scope: project creation, Git initialization, first local Task, Linear
+- Out of scope: an init conversation or repo-init redesign; project creation,
+  Git initialization, first local Task, Linear
   onboarding, GitHub delivery, Wave creation, flow visualizations, broad doctor
-  dependency cleanup, general docs rewrite, pricing promises, and a new DMG
-  self-bootstrapper. No changes to the Wave's paused state or planning records.
+  dependency cleanup, general docs rewrite, pricing promises, and a second
+  installation authority. No changes to the Wave's paused state or planning records.
 
 ## Done when
 
-1. In an actual fresh macOS account, start with no lf, coding tool, npm,
+1. In an actual fresh macOS account, start with no lf, coding tool, gh, npm,
    Homebrew, repository, or saved app preferences. Follow the exact documented
-   installation route through opening the app. Capture OS/account type, release
+   DMG download → drag → open route with no external Terminal command. Observe
+   first-launch activation and any restart through to setup. Capture OS/account type, release
    or candidate identity, install destination, each action, and exact failures.
    A simulated HOME on a developer account does not satisfy this check.
 2. Complete native installation and real browser sign-in for one supported
-   provider. Loopflow then offers **Open project…**; the chooser works and
+   provider and GitHub, including acquiring `gh` without a developer package
+   manager. Loopflow then offers **Open project…**; the chooser works and
    cancellation preserves the action. Repeat the provider path for the other
    guided provider in a separate clean state before claiming both are supported.
 3. Close/reopen the app and a Terminal window. State is re-observed, not remembered
    as a success boolean, and `lf --version` resolves. A repeat install produces
-   no duplicate PATH block; an update retains the same app destination.
+   no duplicate PATH block or activation/restart loop; an update retains the
+   same app destination. Prove retry after interrupted activation and existing
+   installation handling, including an older copied bundle. Test the
+   `~/Applications` destination and launching from the mounted DMG separately.
 4. Open an existing local fixture project and send a harmless prompt through
-   the real app conversation launch. Observe a provider reply. No Linear or
-   GitHub connection is needed. Record CLT/Git availability separately: this
+   the real app conversation launch. Observe a provider reply. No Linear
+   connection is needed; GitHub sign-in was established during setup. Record
+   CLT/Git availability separately: this
    follow-on proof must not introduce a hidden prerequisite for opening setup.
 5. Focused automated proofs cover the owned shell block, escaped paths,
    unwritable profile, repeat install, CLI-only behavior, target selection,
-   status failures, installation failure/retry, provider choice and config
-   precedence, same-window repository selection, and retained returning-user
+   first-launch activation/registration/recovery, status failures,
+   installation failure/retry, provider choice and config
+   precedence, GitHub missing/signed-out/connected/failed observations and retry,
+   same-window repository selection, and retained returning-user
    navigation. Stubs prevent network/auth side effects and assert visible
    outcomes. DTO fixtures round-trip in Rust and Swift.
 6. Run affected suites once at gate: installer pytest; focused Rust installer,
@@ -284,6 +382,8 @@ of this branch or a clean account. No clean Mac account was created.
 
 - Declaring clean-account or live UI acceptance from these code reads, fixtures,
   a screenshot of a different build, or a HOME override.
+- Counting shell-installer success as proof of the DMG path, requiring an
+  initial external Terminal command, or registering a mounted DMG permanently.
 - Writing the current Mac walkthrough from code before opening the running app.
 - Changing only WavesView while leaving the primary no-repository view stranded.
 - Calling a downloaded/installed binary authenticated, parsing auth prose, or
@@ -291,7 +391,7 @@ of this branch or a clean account. No clean Mac account was created.
 - Adding another credential store, default-agent preference, repository list,
   installation authority, or onboarding-complete flag.
 - Auto-installing a provider, signing in, or changing defaults merely on launch.
-- Requiring npm, Homebrew, Rust, uv, Doppler, Linear, GitHub, or a project just to
+- Requiring npm, Homebrew, Rust, uv, Doppler, Linear, or a project just to
   open and set up Loopflow on the documented Mac path.
 - Replacing user shell configuration, writing to the host from tests, requesting
   sudo, or bypassing release validation to make the demo pass.
@@ -299,30 +399,33 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## Internal slices
 
-1. **Observe and repair installation.** Record the primary window in a running
-   baseline app on a fresh account before UI edits. Isolate installer tests;
-   implement PATH persistence, writable app destination/update consistency and
-   accurate completion instructions. Prove actual fresh-shell command discovery.
-2. **Connect a coding tool.** Add the small native installer operation and typed
+1. **Activate a dragged app.** Record the running baseline before UI edits.
+   Trace and implement the copied-bundle entry into the existing promotion
+   owner, including first-install app restart and durable helper registration.
+   Isolate installer fixtures before profile writes; share PATH persistence
+   across both install entries and retain the actual app destination on update.
+   Prove the clean-account drag/open path and fresh-shell command discovery.
+2. **Connect a coding tool and GitHub.** Add the small native installer operation and typed
    native-status projection in existing owners, reuse login, persist explicit
    default selection, and fix implicit no-tool diagnostics. Prove missing →
-   installed → connected and failure/retry without a repo.
+   installed → connected and failure/retry without a repo. Supply `gh` when
+   absent and establish GitHub sign-in before offering **Open project…**.
 3. **Carry setup through the primary window.** Reuse embedded shell and repo
    selection, implement setup actions and rechecks, preserve existing sessions.
    Prove the provider reply through a real local project.
-4. **Close the public path.** Update the download CTA and narrow docs, perform
+4. **Close the public path.** Retain the DMG CTA and update narrow docs, perform
    the clean-account acceptance and public-channel trial when released. Keep
    the entire target above intact while implementing these internal cuts.
 
 ## This slice
 
-Kickoff has produced the design and baseline evidence. The first executable cut
-is slice 1: isolated installer fixtures and durable zsh command discovery.
-Focused proof: real `release/install.sh` with fixture transport/promotion followed
-by a new interactive zsh resolving the fixture from the chosen install directory.
-Repeat it with a spaced home and twice-installed profile. This deliberately
-proves shell behavior only; obtain the live baseline before proceeding to UI
-implementation and before writing a current-state walkthrough.
+Review changed the first executable cut to copied-app activation. First inspect
+the machine entry gate and promotion behavior for an unregistered bundled helper
+and a running app with no prior installation receipt. Record a live baseline,
+then connect first launch to the existing owner and prove settled registration,
+restart/retry, and the no-op on reopening. Use isolated fixtures for focused
+behavioral proofs; the actual fresh-account drag/open trial remains required.
+The earlier shell-only slice is supporting coverage, not the primary finish.
 
 ## Slice ledger
 

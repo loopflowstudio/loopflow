@@ -621,6 +621,49 @@ Rust/navigation receipts retain only their prior scope. All full-design acceptan
 and parent-integration obligations remain open; no publication or navigation edge
 is selected.
 
+## Template compression (2026-09-27)
+
+Reviewed `3f84174d0` from a clean tree against the active base `c832aaede`,
+following navigation, exact roadmap lookup, shared template resolution, capture,
+catalog DTOs, Swift presentation, fixtures and user docs. Jack's approved
+light-only/no-teardown scope remains unchanged.
+
+| Fact | Owner | Reduction or retention |
+| --- | --- | --- |
+| Resolved composition and content revision | Rust's existing Flow resolution traversal | Keep distinct composition uses and the one flattening implementation. Captured `ConcreteStep` remains the execution input; a template tree is not an invocation. |
+| Template node semantics and topology | Catalog `FlowGraph`; template items reference its keys | Keep graph plus disclosure structure: the tree adds boundaries and empty groups without copying node policy. No wire or persisted shape changed. |
+| Visible template diagram and group activation | Shared Swift `TemplateDiagram` | Root and XOR paths now use one projection/render/click-to-expand path instead of two copies. |
+| Projection inputs | `FlowTemplateProjection(graph:items:expanded:)` | Removed `FlowTemplate.project` and the public construction helper used to fabricate an empty revision for a branch. Projection requires items, not a catalog revision. All callers migrated; no adapter remains. |
+| Disclosure and selected node | Repository navigation owns expanded group IDs by revision; each diagram owns its inspected node | Retain these different lifetimes. The revision-keyed subtree resets local inspection; the redundant root inspection state and explicit reset hook are removed. |
+| Historical destination and selected details | Bounded recent descriptors and `selectedTaskEvidence`, respectively | Keep both: one permits revisiting; the other owns the selected detail. Exact readback/generation fencing remains separate from terminal lifetime. |
+
+Simulated source review checked the shared diagram at root and XOR callers,
+revision-driven state replacement, return-edge remapping and every removed API's
+caller. The existing five-test Flow filter passes: shared fixtures retain repeated
+and empty groups, XOR, both returns and full-expansion equivalence; the mounted
+production proof retains Task/Wave disclosure, revision reset, controls, captured
+execution and the two owned terminals' draft/companion behavior. Tests now construct
+the projection directly; no capability assertion was deleted. User documentation
+still describes the same behavior and needs no wording change.
+
+Resource preflight passes (94.5 GiB free). The isolated, nice +10, four-worker,
+serial Swift command has a 900-second process-group limit and completes in
+35.8 seconds (7.1 seconds executing). Swift platform boundaries and working-diff
+whitespace pass. Logs: `.lf/tmp/workspace-navigation/compress-template-*`.
+XcodeGen and signed ad-hoc Xcode `build-for-testing` pass (47.8 seconds for the
+build), compiling the app and runners through the terminal fallback configuration.
+Hosted UI tests did not run. The mounted Swift proof uses fixture transport and
+owned cat PTYs, not configured providers or installed acceptance.
+
+Intentionally retained the Session union/Work DTOs, unmatched-roadmap grouping,
+reverse lookup, hidden checkout host and Task-based running line. Source still
+has no Bind command or authoritative position/attempt projection. Removing these
+consumers before the parent conversion would remove capability. No persistence,
+Rust resolver, wire fixture, navigation or provider ownership changed; previous
+receipts retain only their recorded scope. The inherited `wave_chapters` owner-map
+gap, parent checklist, installed cold/warm links, configured provider/bind proof,
+captures and Jack's verdict remain open. No publication or Flow navigation decision.
+
 ## Measure
 
 Reuse existing `hierarchy_interaction_ms` and `task_workspace_ready_ms`; keep them

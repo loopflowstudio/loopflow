@@ -168,11 +168,6 @@ public func flowIterationLabel(_ levels: [[UInt32]]) -> String? {
 public struct FlowTemplate: Decodable, Sendable, Hashable {
     public let revision: String
     public let items: [FlowTemplateItem]
-
-    public init(revision: String, items: [FlowTemplateItem]) {
-        self.revision = revision
-        self.items = items
-    }
 }
 
 public indirect enum FlowTemplateItem: Decodable, Sendable, Hashable, Identifiable {
@@ -220,10 +215,8 @@ public indirect enum FlowTemplateItem: Decodable, Sendable, Hashable, Identifiab
 public struct FlowTemplateProjection {
     public let graph: FlowGraph
     public let visibleKeys: [String: String]
-}
 
-extension FlowTemplate {
-    public func project(_ graph: FlowGraph, expanded: Set<String>) -> FlowTemplateProjection {
+    public init(graph: FlowGraph, items: [FlowTemplateItem], expanded: Set<String>) {
         var visible: [String: String] = [:]
         func nodes(_ items: [FlowTemplateItem]) -> [FlowNode] {
             items.flatMap { item -> [FlowNode] in
@@ -245,7 +238,7 @@ extension FlowTemplate {
                 }
             }
         }
-        let projected = FlowGraph(name: graph.name, steps: nodes(items))
-        return FlowTemplateProjection(graph: projected, visibleKeys: visible)
+        self.graph = FlowGraph(name: graph.name, steps: nodes(items))
+        visibleKeys = visible
     }
 }

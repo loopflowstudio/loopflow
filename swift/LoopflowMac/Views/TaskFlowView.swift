@@ -460,7 +460,6 @@ struct FlowTemplateView: View {
     let graph: FlowGraph
     let template: FlowTemplate
     @Bindable var navigation: WorkspaceNavigation
-    @State private var inspected: String?
 
     private var expanded: Binding<Set<String>> {
         Binding(get: { navigation.expandedTemplateGroups[template.revision] ?? [] },
@@ -478,21 +477,11 @@ struct FlowTemplateView: View {
     }
 
     var body: some View {
-        let projection = template.project(graph, expanded: expanded.wrappedValue)
         VStack(alignment: .leading, spacing: Spacing.sm) {
             TemplateDisclosures(items: template.items, graph: graph, expanded: expanded)
-            FlowDiagram(graph: projection.graph, pinned: nil, inspected: Binding(
-                get: { inspected },
-                set: { key in
-                    if let key, template.items.contains(where: { $0.groupIDs.contains(key) }) {
-                        expanded.wrappedValue.insert(key)
-                        inspected = nil
-                    } else { inspected = key }
-                }
-            ), templateSpans: Self.spans(graph, projection: projection))
+            TemplateDiagram(graph: graph, items: template.items, expanded: expanded)
         }
         .id(template.revision)
-        .onChange(of: template.revision) { _, _ in inspected = nil }
         .accessibilityIdentifier("flow-template-\(graph.name)")
     }
 }
@@ -524,7 +513,7 @@ private struct TemplateDisclosures: View {
                             AnyView(TemplateDisclosures(items: paths[name]!, graph: graph, expanded: $expanded))
                             if let node = graph.node(key), let path = node.paths.first(where: { $0.name == name }) {
                                 let branch = FlowGraph(name: name, steps: path.steps)
-                                TemplatePathDiagram(graph: branch, items: paths[name]!, expanded: $expanded)
+                                TemplateDiagram(graph: branch, items: paths[name]!, expanded: $expanded)
                             }
                         }.font(Typography.mono)
                     }
@@ -534,13 +523,13 @@ private struct TemplateDisclosures: View {
     }
 }
 
-private struct TemplatePathDiagram: View {
+private struct TemplateDiagram: View {
     let graph: FlowGraph
     let items: [FlowTemplateItem]
     @Binding var expanded: Set<String>
     @State private var inspected: String?
     var body: some View {
-        let projection = FlowTemplate(revision: "", items: items).project(graph, expanded: expanded)
+        let projection = FlowTemplateProjection(graph: graph, items: items, expanded: expanded)
         FlowDiagram(graph: projection.graph, pinned: nil, inspected: Binding(
             get: { inspected },
             set: { key in

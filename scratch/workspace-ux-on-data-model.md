@@ -753,6 +753,53 @@ check passes. Parent integration, installed links, configured drafts/attempts/bi
 live captures, Jack's verdict, final deletion and the inherited `wave_chapters`
 owner-map gap remain open. No publication or Flow navigation decision occurred.
 
+## Parent-assessment compression (2026-09-27)
+
+Reviewed clean HEAD `4573a669a` against `c832aaede`, including the latest
+[parent contract assessment](workspace-parent-contracts.md). No meaningful
+executable reduction selected. The latest slice changes assessment notes only;
+all executable, fixture and user-documentation bytes remain identical to
+`792a3ce40`. Model before and after this pass:
+
+| Fact | Owner | Retention decision |
+| --- | --- | --- |
+| Exact Task identity and planning | Shared roadmap reader and durable planning records | Keep exact lookup in that reader; it does not prepare work or require an active PR. |
+| Selected historical page / recent destination | `selectedTaskEvidence` / bounded destination descriptors | The former renders the selected page; the latter permits exact readback after leaving it. Combining them would create a historical snapshot cache. |
+| Resolved template / captured execution | `resolve_flow` and its one flattening implementation / invocation capture | Composition describes disclosure, including repeated and empty groups; it cannot replace captured execution or supply runtime parentage. |
+| Hidden target semantics / visible arrow endpoint | Original graph / ephemeral folded projection | Detail must retain the original target while layout places the arrow at a visible group. Neither needs copied labels. |
+| Disclosure and terminal input | Existing expansion bindings and AppKit enabled-input eligibility | Pointer and keyboard share state. Input eligibility is separate from requested focus and retained surface lifetime. |
+| Session identity, ancestry and attempts | Parent Session/Run/invocation transactions | Public consumer conversion is incomplete in the assessed parent revisions; local presentation must not become a second authority. |
+
+Followed Rust resolution and exact roadmap changes through RegistryQuery,
+catalog DTOs, Swift navigation/template consumers, fixtures, behavioral tests
+and `swift/README.md` / `docs/lf.md`. Also inspected Session joins and current-Run
+fences, the four-source public inventory, Task Flow projection, reverse Session
+lookup and the hidden checkout host. The two Task-detail paths converge at
+`openTaskDestination`; the sidebar's Session shortcut intentionally remains
+separate. No wrapper or fallback on this path can be removed merely because the
+parent has newer storage types.
+
+Checked the assessment's pinned parent `d814eb617` directly: Run carries
+node/iterations/attempt, `position_runs` orders those stored attempts, and
+`select_attempt_in` fences the current Run with invocation version and pending
+Session identity. These are distinct from the child's still-missing public
+attempt/history projection. The assessment remains dated evidence, not a fresh
+parent-status read. No new integration source or readiness claim is made here.
+
+Intentionally retained the Session union, Work/path DTO consumers,
+roadmap-based grouping, reverse lookup and hidden terminal host. Their approved
+removal requires the common Session contracts and working room/attempt
+replacements. Removing them now would lose reachable behavior. No interface,
+schema, compatibility path or capability test changed.
+
+Verified that only scratch notes changed after the repaired executable revision.
+The retained `return-review-swift.log` records nine passing tests in five suites;
+`return-xcode.log` records successful build-for-testing. Reuse those receipts
+within their fixture/owned-PTY and compile scopes; no behavioral tests, builds or
+resource recovery were repeated. This note's whitespace check passes. The parent
+dependency, installed acceptance and inherited `wave_chapters` inventory gap
+remain open. No publication, Task disposition or Flow navigation was selected.
+
 ## Measure
 
 Reuse existing `hierarchy_interaction_ms` and `task_workspace_ready_ms`; keep them

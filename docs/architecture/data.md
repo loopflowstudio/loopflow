@@ -109,9 +109,10 @@ invocation and cannot advance that Task's managed position.
 The Session draft converts captured Task reviews, including selected XOR
 children, without reading templates. Old pending Run and feedback columns are
 retained under historical names solely for offline import evidence; current
-readers and writers use Session rows. Unmapped historical captures and the other
-conversation kinds still require the full Home importer. The draft must not be
-promoted as a complete Home conversion.
+readers and writers use Session rows. `lf session import` stores the other
+conversation kinds from an older Home's files, once, and gives the converted
+Task reviews their names and providers. Earlier attempts of a review and
+captures the draft could not map are reported, not stored.
 
 Store open uses a short OS migration lock around backup plus schema
 application. A current schema does not take the database write lock merely to

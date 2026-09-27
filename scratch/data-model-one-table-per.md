@@ -543,6 +543,26 @@ All eight complete-design Done When obligations still govern publication.
 
 ## Slice ledger
 
+- 2026-09-26 Session cutover attempt: preserved the supplied concept review
+  unchanged in `ca1be1116d` through `lf commit`. Resource preflight passed
+  (96.5 GiB free; this checkout 4.0/12 GiB). The attempted Session-kind,
+  reservation and lookup extension did not convert the launch/Ask/taskless
+  writers or supply the importer. Withdrew every executable and schema edit;
+  retaining it would repeat the owner-only foundation Jack explicitly rejected.
+  The withdrawn draft is diagnostic material under
+  `.lf/tmp/loo298-session-cutover/`, outside runtime and committed inputs.
+- This attempt did **not** complete the selected slice. No new external blocker
+  or product decision was found. The existing dependency map in the slice review
+  remains accurate: general capture in `lf/commands/run.rs::begin_run_capture`,
+  Ask persistence in `ops/human_session.rs::{read_ask_record,write_ask_record}`,
+  and taskless persistence in `ops/flow_run.rs::{read,write,update}` must convert
+  with the all-kind importer before SQL-only inventory is activated. No new
+  behavioral proof, migration rehearsal, publication or installed mutation ran.
+  Runtime delta for this attempt is zero; the recorded merge-base measure remains
+  +1,617 / -556, zero deleted files, and 2,350 non-test lines in
+  `human_session.rs` (2,351 including the test attribute). The full cutover,
+  rather than another foundation, remains the next required implementation.
+
 - 2026-09-26 attempt-history review: reproduced replacement of a historical
   review failing with `missing field index`. Run location and Flow position had
   different cursor decoders. Extracted and reused the existing historical/current

@@ -11,51 +11,42 @@ fn project_error(message: impl Into<String>) -> OpsError {
     OpsError::Message(message.into())
 }
 
-fn block_on_project<T>(future: impl std::future::Future<Output = OpsResult<T>>) -> OpsResult<T> {
-    tokio::runtime::Runtime::new()
-        .map_err(|error| project_error(format!("failed to build project runtime: {error}")))?
-        .block_on(future)
-}
-
 async fn project_store() -> OpsResult<SharedStore> {
     open_existing_store().await.map(Arc::new).ok_or_else(|| {
         project_error("no Loopflow registry on this machine; start the owning Wave first")
     })
 }
 
-pub(crate) fn ensure_project_for_task(
+pub(crate) async fn resolve_project_for_task(
     repo: &Path,
-    resolved: &crate::ops::task_pm::ResolvedTask,
+    wave_name: &str,
+    project_id: &str,
 ) -> OpsResult<Project> {
-    let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.snapshot.wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave_name)
         .map_err(|error| project_error(error.to_string()))?;
-    block_on_project(async move {
-        let store = project_store().await?;
-        let wave = store
-            .get_wave_at(&locator)
-            .await
-            .map_err(|cause| project_error(cause.to_string()))?
-            .ok_or_else(|| project_error("owning Wave is not initialized"))?;
-        let current = store
-            .chapter(wave.id(), None)
-            .await
-            .map_err(|cause| project_error(cause.to_string()))?
-            .ok_or_else(|| project_error("Wave has no chapter; run `lf wave new-chapter`"))?;
-        if current.project_id != resolved.project.id {
-            return Err(project_error(
-                "this plan is chapter history; use the Wave's current chapter",
-            ));
-        }
-        store
-            .get_project_by_project(&current.project_id)
-            .await
-            .map_err(|cause| project_error(cause.to_string()))?
-            .ok_or_else(|| {
-                project_error(
-                    "current chapter record is unavailable; resume its chapter transition",
-                )
-            })
-    })
+    let store = project_store().await?;
+    let wave = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|cause| project_error(cause.to_string()))?
+        .ok_or_else(|| project_error("owning Wave is not initialized"))?;
+    let current = store
+        .chapter(wave.id(), None)
+        .await
+        .map_err(|cause| project_error(cause.to_string()))?
+        .ok_or_else(|| project_error("Wave has no chapter; run `lf wave new-chapter`"))?;
+    if current.project_id != project_id {
+        return Err(project_error(
+            "this plan is chapter history; use the Wave's current chapter",
+        ));
+    }
+    store
+        .get_project_by_project(&current.project_id)
+        .await
+        .map_err(|cause| project_error(cause.to_string()))?
+        .ok_or_else(|| {
+            project_error("current chapter record is unavailable; resume its chapter transition")
+        })
 }
 
 pub(crate) fn project_plan(
@@ -80,7 +71,7 @@ pub(crate) fn ensure_clean_main(repo: &Path, subject: &str) -> OpsResult<std::pa
     let main = std::fs::canonicalize(&main).unwrap_or(main);
     if worktree != main {
         return Err(project_error(format!(
-            "cannot run {subject} from {}: Wave turns require the canonical main checkout; run existing work with `lf task run <issue-id>` or create it with `lf task start --wave <wave> \"<title>\"`",
+            "cannot run {subject} from {}: Wave turns require the canonical main checkout; run existing work with `lf task run <issue-id>` or file it with `lf task create --wave <wave> --title \"<title>\"`",
             worktree.display()
         )));
     }

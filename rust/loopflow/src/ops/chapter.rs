@@ -106,7 +106,7 @@ pub(crate) async fn read_chapter(
         .pm_snapshot(wave.id())
         .await
         .map_err(error)?
-        .ok_or_else(|| error("chapter evidence unavailable; run `lf pm sync --wave <wave>`"))?;
+        .ok_or_else(|| error("chapter evidence unavailable; run `lf wave sync --wave <wave>`"))?;
     let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&row.payload).map_err(error)?;
     let plan = snapshot
         .projects
@@ -472,8 +472,17 @@ pub(crate) async fn rotate(
     chapter.error = None;
     store.save_chapter(&chapter, false).await.map_err(error)?;
     if let Err(cause) = apply_rotation(repo, &store, &wave, &ctx, &mut chapter).await {
-        chapter.error = Some(cause.to_string());
-        store.save_chapter(&chapter, false).await.map_err(error)?;
+        let failure = format!(
+            "{cause}; retry `lf wave new-chapter --wave {} --chapter {}`",
+            wave.name(),
+            chapter.id.as_str()
+        );
+        chapter.error = Some(failure.clone());
+        store.save_chapter(&chapter, false).await.map_err(|cause| {
+            error(format!(
+                "{failure}; failed to persist chapter recovery: {cause}"
+            ))
+        })?;
     }
     Ok(chapter)
 }
@@ -553,6 +562,46 @@ async fn refresh_disposition(
     chapter: &Chapter,
     recorded: &ChapterTask,
 ) -> OpsResult<ChapterTask> {
+    let local = store
+        .get_task_by_issue(&recorded.task.id)
+        .await
+        .map_err(error)?;
+    let retired = if let Some(task) = &local {
+        store
+            .chapter_task_evidence(&task.id)
+            .await
+            .map_err(error)?
+            .abandoned
+    } else {
+        false
+    };
+    // A retired issue may no longer support the ordinary ownership read. The
+    // captured boundary supplies identity; only positive provider evidence can
+    // acknowledge a deletion whose response or local receipt was lost.
+    if chapter.activated_at.is_some()
+        && (recorded.disposition == TaskDisposition::Abandon || retired)
+        && ctx
+            .client
+            .item_is_deleted(&recorded.task.id)
+            .await
+            .map_err(error)?
+    {
+        let mut decision = recorded.clone();
+        if local.is_some() {
+            let current = disposition(store, recorded.task.clone()).await?;
+            if !retired || current.disposition != TaskDisposition::Historical {
+                decision.disposition = TaskDisposition::Unresolved;
+                decision.reason = format!(
+                    "Linear deletion conflicts with local retirement: {}",
+                    current.reason
+                );
+                return Ok(decision);
+            }
+        }
+        decision.disposition = TaskDisposition::Abandon;
+        decision.reason = "reconcile confirmed Linear deletion".into();
+        return Ok(decision);
+    }
     let (fresh, _) = ctx
         .client
         .issue_ownership(&recorded.task.id)
@@ -582,27 +631,12 @@ async fn refresh_disposition(
             decision.task.state.as_deref(),
             Some("backlog" | "unstarted" | "triage" | "canceled")
         )
-    {
-        let retired = if let Some(task) = store
-            .get_task_by_issue(&recorded.task.id)
-            .await
-            .map_err(error)?
-        {
-            store
-                .chapter_task_evidence(&task.id)
-                .await
-                .map_err(error)?
-                .abandoned
-        } else {
-            false
-        };
-        if retired
+        && (retired
             || (recorded.disposition == TaskDisposition::Abandon
-                && decision.task.state.as_deref() == Some("canceled"))
-        {
-            decision.disposition = TaskDisposition::Abandon;
-            decision.reason = "reconcile recorded backlog retirement".into();
-        }
+                && decision.task.state.as_deref() == Some("canceled")))
+    {
+        decision.disposition = TaskDisposition::Abandon;
+        decision.reason = "reconcile recorded backlog retirement".into();
     }
     Ok(decision)
 }
@@ -772,16 +806,10 @@ async fn apply_rotation(
         let local = store.get_task_by_issue(&original.id).await.map_err(error)?;
         if decision.disposition == TaskDisposition::Abandon {
             if let Some(task) = &local {
-                let retired = store
-                    .chapter_task_evidence(&task.id)
+                if !store
+                    .retire_chapter_backlog(&task.id)
                     .await
                     .map_err(error)?
-                    .abandoned;
-                if !retired
-                    && !store
-                        .retire_chapter_backlog(&task.id)
-                        .await
-                        .map_err(error)?
                 {
                     decision = disposition(store, decision.task).await?;
                     if decision.disposition == TaskDisposition::Abandon {
@@ -811,9 +839,7 @@ async fn apply_rotation(
                 }
             }
             TaskDisposition::Abandon => {
-                if decision.task.state.as_deref() != Some("canceled") {
-                    ctx.client.cancel_item(&original.id).await.map_err(error)?;
-                }
+                ctx.client.delete_item(&original.id).await.map_err(error)?;
             }
             TaskDisposition::Historical => {}
             TaskDisposition::Unresolved => {
@@ -823,8 +849,10 @@ async fn apply_rotation(
                 )))
             }
         }
-        chapter.tasks[index].applied = true;
-        store.save_chapter(chapter, false).await.map_err(error)?;
+        *chapter = store
+            .record_chapter_task_applied(chapter, &original.id)
+            .await
+            .map_err(error)?;
     }
     // External Task filing can race with cutover. Never archive unseen work.
     let mut added = false;

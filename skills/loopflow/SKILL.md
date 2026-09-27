@@ -63,14 +63,14 @@ Delegation must make the problem smaller: delegate only a strict subset that
 can finish independently; never hand off the whole seed or the one blocker
 between you and completion.
 
-Use `lf task`, `lf project`, `lf wave`, and `lf pm` only when the active skill
+Use `lf task`, `lf wave`, and `lf repo` only when the active skill
 or the user explicitly asks for orchestration. Do not inspect planning state,
 guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
 lf task run <issue-id>                       # durable Task Work, own worktree
-lf task steer <issue-id> "smaller approach"  # redirect its active turn
+lf task comment <issue-id> "smaller approach" # post direction for the Task advancer
 lf task status <issue-id> --json             # inspect durable state
 lf task wait <issue-id> --until terminal
 ```
@@ -99,7 +99,7 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
-lf work place wave <wave-id> <home-id>          # only while no Run is live
+lf wave place <wave-id> <home-id>          # only while no Run is live
 lf start <wave>                                 # start it on this machine
 lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home

@@ -136,9 +136,9 @@ homepage:
       - label: "A task"
         filename: "terminal"
         content: |
-          lf task start "Unify token validation" \
-            --project unified-sign-in
-          lf task steer AUTH-12 \
+          lf task create --run --wave auth \
+            --title "Unify token validation"
+          lf task comment AUTH-12 \
             "prefer the middleware approach"
           lf task status AUTH-12 --json
           lf pr land -c

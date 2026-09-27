@@ -20,6 +20,8 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
+    #[error("Task {issue} is {state} and cannot be completed")]
+    TaskCompletionConflict { issue: String, state: String },
     #[error("rebase onto {onto} failed ({detail})")]
     RebaseConflict {
         onto: String,

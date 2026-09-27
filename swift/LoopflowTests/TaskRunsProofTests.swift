@@ -215,7 +215,7 @@ private actor RunSource {
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return session
         case ("flow", "list"): return "[]"
-        case ("pm", "task") where args.dropFirst(2).first == "comments":
+        case ("task", "comment"):
             return #"{"identifier":"fixture","comments":[]}"#
         case ("runs", "--task"):
             reads.append(args)

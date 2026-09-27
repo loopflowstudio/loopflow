@@ -158,13 +158,13 @@ Read its `wave/<name>/GOAL.md`, then verify its shared state:
 ```bash
 lf status <wave> --json
 lf roadmap --wave <wave> --json
-lf pm show --wave <wave> --no-sync
+lf status <wave> --no-sync
 ```
 
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf pm init --wave <wave>
+lf wave connect --wave <wave>
 ```
 
 The first Wave establishes the repository Team and defaults its key from the
@@ -232,7 +232,7 @@ lf home observe <home-id> ssh://<user>@<host>
 lf ssh <home-id> auth status
 lf ssh <home-id> route show
 lf ls --json
-lf work place wave <wave-id> <home-id>
+lf wave place <wave-id> <home-id>
 lf home probe <wave> --json
 lf ssh <home-id> start <wave>
 ```

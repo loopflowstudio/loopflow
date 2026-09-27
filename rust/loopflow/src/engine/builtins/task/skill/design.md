@@ -21,7 +21,7 @@ Flow. Launching a draft does not approve it.
 ## Orientation
 
 - Read `scratch/` and the repo agent guide. Continue an existing design instead of re-deriving it.
-- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf pm show --wave <wave>` only when its chapter state is material; never infer a Wave or repair PM access as a prerequisite.
+- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf status <wave>` only when its chapter state is material; never infer a Wave or repair PM access as a prerequisite.
 - Write the design to `scratch/<workspace-slug>.md`. Put unresolved assumptions in `scratch/questions.md`.
 
 ## Surface
@@ -89,7 +89,7 @@ a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
 
 ```bash
-lf pm task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
+lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf task prepare <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue> --flow <chosen-flow>

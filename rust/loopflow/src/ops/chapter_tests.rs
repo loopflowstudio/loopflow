@@ -30,9 +30,12 @@ struct Provider {
     lose_create: bool,
     lose_move: bool,
     lose_archive: bool,
-    lose_cancel: BTreeSet<String>,
+    fail_delete: BTreeSet<String>,
+    lose_delete: BTreeSet<String>,
     unlisted: BTreeSet<String>,
     unreadable: BTreeSet<String>,
+    fail_snapshot: bool,
+    stale_lists: bool,
 }
 
 fn page(nodes: Vec<Value>) -> Value {
@@ -53,26 +56,35 @@ async fn graphql(
     let data = if query.contains("query ListTeams") {
         json!({"teams": page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ListInitiativeProjects") {
+        if provider.fail_snapshot {
+            return Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
+        }
         json!({"initiative": {"projects": page(provider.projects.iter().filter(|(id, _)| !provider.archived.contains(*id) && !provider.unlisted.contains(*id)).map(|(_, project)| project.clone()).collect())}})
     } else if query.contains("query ListProjectIssues") {
-        json!({"project": {"issues": page(provider.issues.iter().filter(|(id, issue)| !provider.unlisted.contains(*id) && issue["project"]["id"] == vars["projectId"]).map(|(_, issue)| issue.clone()).collect())}})
+        json!({"project": {"issues": page(provider.issues.iter().filter(|(id, issue)| !provider.unlisted.contains(*id) && ((issue["trashed"] != true && issue["project"]["id"] == vars["projectId"]) || (provider.stale_lists && issue["trashed"] == true))).map(|(_, issue)| issue.clone()).collect())}})
     } else if query.contains("query ProjectOwnership") {
         if provider.unreadable.contains(id) {
             return Json(json!({"data":{"project":null}}));
         }
         json!({"project": provider.projects.get(id)})
+    } else if query.contains("query IssueDeletion") {
+        if provider.unreadable.contains(id) {
+            return Json(json!({"data":{"issue":null}}));
+        }
+        json!({"issue": provider.issues.get(id)})
     } else if query.contains("query IssueOwnership") {
         if provider.unreadable.contains(id) {
             return Json(json!({"data":{"issue":null}}));
         }
         let mut issue = provider.issues[id].clone();
+        if issue["trashed"] == true {
+            return Json(json!({"errors":[{"message":"trashed issue ownership unavailable"}]}));
+        }
         let project = issue["project"]["id"].as_str().unwrap();
         issue["project"] = provider.projects[project].clone();
         json!({"issue": issue})
     } else if query.contains("query IssueTeam") {
         json!({"issue": {"team": {"id":"team-1"}}})
-    } else if query.contains("query CanceledWorkflowStates") {
-        json!({"workflowStates": {"nodes":[{"id":"canceled"}]}})
     } else if query.contains("query UnstartedWorkflowStates") {
         json!({"workflowStates":{"nodes":[{"id":"unstarted","position":1.0}]}})
     } else if query.contains("mutation CreateIssue") {
@@ -110,12 +122,16 @@ async fn graphql(
             return Json(json!({"errors":[{"message":"lost move response"}]}));
         }
         json!({"issueUpdate":{"issue":{"id":id}}})
-    } else if query.contains("mutation SetIssueState") {
-        provider.issues.get_mut(id).unwrap()["state"] = json!({"type":"canceled"});
-        if provider.lose_cancel.remove(id) {
-            return Json(json!({"errors":[{"message":"lost cancel response"}]}));
+    } else if query.contains("mutation DeleteIssue") {
+        if provider.fail_delete.remove(id) {
+            return Json(json!({"errors":[{"message":"deletion unavailable"}]}));
         }
-        json!({"issueUpdate":{"issue":{"id":id}}})
+        provider.issues.get_mut(id).unwrap()["trashed"] = json!(true);
+        if provider.lose_delete.remove(id) {
+            provider.unreadable.insert(id.into());
+            return Json(json!({"errors":[{"message":"lost delete response"}]}));
+        }
+        json!({"issueDelete":{"success":true}})
     } else if query.contains("mutation ArchiveProject") {
         provider.archived.insert(id.into());
         provider.projects.get_mut(id).unwrap()["archivedAt"] = json!("2026-09-24T12:00:00Z");
@@ -252,7 +268,7 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
         .with_state(provider.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let context = PmTestContext {
-        path: database,
+        path: database.clone(),
         store: store.clone(),
         graphql_url: url,
     };
@@ -282,22 +298,18 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
             assert_eq!(initial.error, None);
             assert_eq!(initial.phase, ChapterPhase::Complete);
             assert_eq!(provider.lock().await.projects.len(), 1);
-            let filed = crate::ops::pm::pm_update_async(
+            let (filed, ()) = crate::ops::pm::pm_create_task_idempotent(
                 &repo,
-                &crate::ops::pm::PmUpdateOptions {
-                    wave: Some("product".into()),
-                    id: None,
-                    title: Some("Untouched work".into()),
-                    notes: None,
-                    status: None,
-                    pr: None,
-                },
-                &crate::ops::NullProgress,
+                "product",
+                "Untouched work",
+                "",
+                "<!-- loopflow-task-start:chapter-fixture -->",
+                |_, _| async { Ok(()) },
             )
             .await
             .unwrap();
             assert_eq!(
-                provider.lock().await.issues[&filed.id]["project"]["id"],
+                provider.lock().await.issues[&filed]["project"]["id"],
                 initial.project_id
             );
             let name = provider.lock().await.projects[&initial.project_id]["name"]
@@ -323,8 +335,8 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
                     issue("racing", "unstarted", &initial.project_id, &name),
                 );
                 provider.lose_move = true;
-                provider.lose_cancel.insert("backlog".into());
-                provider.lose_cancel.insert("filed".into());
+                provider.fail_delete.insert("backlog".into());
+                provider.lose_delete.insert("filed".into());
             }
             let second = NewChapterRequest {
                 wave: Some("product".into()),
@@ -460,6 +472,30 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
                 "late".into(),
                 issue("late", "unstarted", &initial.project_id, &name),
             );
+            let late_checkout = directory.path().join("late");
+            assert!(std::process::Command::new("git")
+                .args(["clone", "-q"])
+                .arg(&task_checkout)
+                .arg(&late_checkout)
+                .status().unwrap().success());
+            assert!(std::process::Command::new("git")
+                .args(["checkout", "-qb", "late"])
+                .current_dir(&late_checkout)
+                .status().unwrap().success());
+            let mut late = backlog.clone();
+            late.id = TaskId::new();
+            late.plan.id = LinearIssueId::new("late").unwrap();
+            late.plan.identifier = "FIX-late".into();
+            late.worktree = late_checkout.clone();
+            late.workspace_slug = "late".into();
+            let mut late_pr = pr.clone();
+            late_pr.id = TaskPrId::new();
+            late_pr.task_id = late.id.clone();
+            late_pr.slug = "late".into();
+            late_pr.branch = "late".into();
+            store.create_task(&late, &late_pr).await.unwrap();
+            let late = store.get_task(&late.id).await.unwrap().unwrap();
+            let late_prs = store.task_prs(&late.id).await.unwrap();
             let original_content = provider.lock().await.projects[&initial.project_id]["content"].clone();
             provider.lock().await.projects.get_mut(&initial.project_id).unwrap()["content"] =
                 json!(original_content.as_str().unwrap().replace("First proof", "Revised while preparing"));
@@ -554,25 +590,101 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
             assert!(conflict.error.as_ref().unwrap().contains("start evidence"));
             assert_eq!(provider.lock().await.mutations, mutations);
             assert_eq!(conflict.tasks.iter().find(|task| task.task.id == "backlog").unwrap().disposition, TaskDisposition::Unresolved);
-            // A completion after the lost cancel response must not be canceled again.
+            // Completion after a refused deletion must remain historical.
             provider.lock().await.issues.get_mut("backlog").unwrap()["state"] =
                 json!({"type":"completed"});
-            let canceled = rotate(&repo, &second, false).await.unwrap();
-            assert!(canceled.error.as_ref().unwrap().contains("lost cancel response"));
+            let unconfirmed = rotate(&repo, &second, false).await.unwrap();
+            assert!(unconfirmed.error.as_ref().unwrap().contains("lost delete response"));
+            assert!(unconfirmed.error.as_ref().unwrap().contains("absence does not confirm deletion"));
+            assert!(unconfirmed.error.as_ref().unwrap().contains("lf wave new-chapter --wave product --chapter two"));
+            assert!(!unconfirmed.tasks.iter().find(|task| task.task.id == "filed").unwrap().applied);
             assert_eq!(provider.lock().await.issues["backlog"]["state"]["type"], "completed");
-            assert_eq!(provider.lock().await.issues["filed"]["state"]["type"], "canceled");
+            assert_eq!(provider.lock().await.issues["filed"]["trashed"], true);
+            // A restarted operation cannot turn list absence into confirmation.
+            let unavailable = rotate(&repo, &second, false).await.unwrap();
+            assert!(unavailable.error.as_ref().unwrap().contains("absence does not confirm deletion"));
+            assert!(!unavailable.tasks.iter().find(|task| task.task.id == "filed").unwrap().applied);
+            assert!(!store.deleted_task_issues(wave.id()).await.unwrap().contains("filed"));
+            provider.lock().await.unreadable.remove("filed");
             let mutations = provider.lock().await.mutations;
             let preview = rotate(&repo, &second, true).await.unwrap();
             assert_eq!(preview.tasks.iter().find(|task| task.task.id == "filed").unwrap().disposition, TaskDisposition::Abandon);
             assert_eq!(preview.tasks.iter().find(|task| task.task.id == "backlog").unwrap().disposition, TaskDisposition::Historical);
             assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().unwrap(), canceled);
+            assert_eq!(store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().unwrap(), unavailable);
+            // Provider success followed by a failed local receipt must keep the
+            // original registered Task/PR and reconcile without live ownership.
+            let connection = rusqlite::Connection::open(&database).unwrap();
+            connection.execute_batch("CREATE TRIGGER fail_deletion_receipt
+                BEFORE UPDATE OF receipt ON wave_chapters
+                WHEN NEW.chapter_id='two' AND EXISTS (
+                    SELECT 1 FROM json_each(NEW.receipt, '$.tasks')
+                    WHERE json_extract(value, '$.task.id')='late'
+                      AND json_extract(value, '$.applied')=1)
+                BEGIN SELECT RAISE(ABORT, 'fixture deletion receipt failure'); END;")
+                .unwrap();
+            let failure = rotate(&repo, &second, false).await.unwrap();
+            let error = failure.error.as_ref().unwrap();
+            assert!(error.contains("fixture deletion receipt failure"));
+            assert!(!failure.tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
+            assert!(error.contains("lf wave new-chapter --wave product --chapter two"));
+            assert!(!store.deleted_task_issues(wave.id()).await.unwrap().contains("late"));
+            assert!(store.list_tasks(Some(wave.id())).await.unwrap().iter().any(|task| task.id == late.id));
+            assert_eq!(provider.lock().await.issues["late"]["trashed"], true);
+            assert!(store.chapter_task_evidence(&late.id).await.unwrap().abandoned);
+            assert_eq!(store.get_task(&late.id).await.unwrap().unwrap(), late);
+            assert_eq!(store.task_prs(&late.id).await.unwrap(), late_prs);
+            assert!(late_checkout.exists());
+            assert!(!store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().unwrap()
+                .tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
+            connection.execute_batch("DROP TRIGGER fail_deletion_receipt").unwrap();
+            // Missing local evidence cannot settle an unapplied deletion receipt.
+            let unavailable_checkout = directory.path().join("late-unavailable");
+            std::fs::rename(&late_checkout, &unavailable_checkout).unwrap();
+            let mutations = provider.lock().await.mutations;
+            let unavailable = rotate(&repo, &second, false).await.unwrap();
+            assert!(unavailable.error.as_ref().is_some_and(|error| error.contains("evidence")),
+                "missing checkout must remain unresolved: phase={:?}, error={:?}", unavailable.phase, unavailable.error);
+            assert!(!unavailable.tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
+            assert_eq!(provider.lock().await.mutations, mutations);
+            std::fs::rename(&unavailable_checkout, &late_checkout).unwrap();
+            let authored = late_checkout.join("late-work.txt");
+            std::fs::write(&authored, "Work appeared after retirement").unwrap();
+            let mutations = provider.lock().await.mutations;
+            let conflict = rotate(&repo, &second, false).await.unwrap();
+            assert!(conflict.error.as_ref().unwrap().contains("start evidence"));
+            assert_eq!(provider.lock().await.mutations, mutations);
+            assert!(!conflict.tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
+            assert!(authored.exists());
+            std::fs::remove_file(authored).unwrap();
             provider.lock().await.lose_archive = true;
             let archived = rotate(&repo, &second, false).await.unwrap();
             assert_eq!(archived.phase, ChapterPhase::Transferring);
             assert!(archived.error.as_ref().unwrap().contains("lost archive response"));
             assert!(provider.lock().await.archived.contains(&initial.project_id));
+            {
+                let mut state = provider.lock().await;
+                state.unreadable.insert("late".into());
+                state.fail_snapshot = true;
+            }
             let mutations = provider.lock().await.mutations;
+            let stale = rotate(&repo, &second, false).await.unwrap();
+            assert_eq!(stale.phase, ChapterPhase::Transferring);
+            assert!(stale.error.as_ref().unwrap().contains("snapshot unavailable"));
+            assert!(stale.tasks.iter().all(|task| task.applied));
+            let removed = store.deleted_task_issues(wave.id()).await.unwrap();
+            assert!(removed.contains("late"));
+            assert!(removed.contains("filed"));
+            assert!(!removed.contains("backlog"));
+            assert!(!removed.contains("done"));
+            assert!(!store.list_tasks(Some(wave.id())).await.unwrap().iter().any(|task| task.id == late.id));
+            // Last-good planning must not restore removed issues during an outage.
+            let cached: crate::pm::PmSnapshot = serde_json::from_str(
+                &store.pm_snapshot(wave.id()).await.unwrap().unwrap().payload).unwrap();
+            assert!(!cached.items.iter().any(|item| removed.contains(&item.id)));
+
+            assert_eq!(provider.lock().await.mutations, mutations);
+            provider.lock().await.fail_snapshot = false;
             let complete = rotate(&repo, &second, false).await.unwrap();
             assert_eq!(provider.lock().await.mutations, mutations);
             assert_eq!(
@@ -582,6 +694,8 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
                 complete.error
             );
             assert!(complete.tasks.iter().all(|task| task.applied));
+            assert_eq!(store.get_task(&late.id).await.unwrap().unwrap(), late);
+            assert_eq!(store.task_prs(&late.id).await.unwrap(), late_prs);
             std::fs::write(&metric_path, instrument_file).unwrap();
             let mutations = provider.lock().await.mutations;
             assert_eq!(rotate(&repo, &second, false).await.unwrap(), complete);
@@ -591,8 +705,10 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
             assert!(state.archived.contains(&initial.project_id));
             assert_eq!(state.issues["active"]["project"]["id"], complete.project_id);
             assert_eq!(state.issues["backlog"]["state"]["type"], "completed");
-            assert_eq!(state.issues["filed"]["state"]["type"], "canceled");
-            assert_eq!(state.issues["late"]["state"]["type"], "canceled");
+            assert_eq!(state.issues["filed"]["trashed"], true);
+            assert_eq!(state.issues["filed"]["state"]["type"], "unstarted");
+            assert_eq!(state.issues["late"]["trashed"], true);
+            assert_eq!(state.issues["late"]["state"]["type"], "unstarted");
             assert_eq!(complete.tasks.iter().find(|task| task.task.id == "backlog").unwrap().disposition, TaskDisposition::Historical);
             assert_eq!(state.issues["done"]["project"]["id"], initial.project_id);
             assert_eq!(state.issues["racing"]["project"]["id"], complete.project_id);
@@ -602,9 +718,46 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
             let ctx = crate::ops::pm::resolve_context(&repo, "product")
                 .await
                 .unwrap();
-            crate::ops::pm::refresh_pm_snapshot(&repo, "product", &ctx)
+            provider.lock().await.stale_lists = true;
+            let refreshed = crate::ops::pm::refresh_pm_snapshot(&repo, "product", &ctx)
                 .await
                 .unwrap();
+            assert!(!refreshed.items.iter().any(|item| item.id == "late" || item.id == "filed"));
+            provider.lock().await.stale_lists = false;
+            // A delayed refresh can publish the old payload after deletion.
+            let current_snapshot = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+            let stale_snapshot = crate::store::PmSnapshotRow {
+                wave_id: wave.id().clone(), provider: "linear".into(),
+                initiative: "initiative-1".into(), synced_at: 1,
+                payload: serde_json::to_string(&crate::pm::PmSnapshot {
+                    projects: complete.predecessors.clone(),
+                    items: complete.tasks.iter().map(|task| task.task.clone()).collect(),
+                }).unwrap(),
+            };
+            store.put_pm_snapshot(stale_snapshot).await.unwrap();
+            let reopened = open_ephemeral_store(&StorageConfig::sqlite(database.clone())).await.unwrap();
+            let visible: crate::pm::PmSnapshot = serde_json::from_str(
+                &reopened.pm_snapshot(wave.id()).await.unwrap().unwrap().payload).unwrap();
+            assert!(!visible.items.iter().any(|item| item.id == "late" || item.id == "filed"));
+            assert!(visible.items.iter().any(|item| item.id == "done"));
+            assert!(visible.items.iter().any(|item| item.id == "backlog"));
+            assert!(!reopened.list_tasks(None).await.unwrap().iter().any(|task| task.id == late.id));
+            assert_eq!(reopened.get_task(&late.id).await.unwrap().unwrap(), late);
+            assert_eq!(reopened.task_prs(&late.id).await.unwrap(), late_prs);
+            assert!(reopened.chapter_task_evidence(&late.id).await.unwrap().abandoned);
+            let mut resurrected = backlog.clone();
+            resurrected.id = TaskId::new();
+            resurrected.project_id = reopened.get_project_by_project(&complete.project_id).await.unwrap().unwrap().id;
+            resurrected.plan.id = LinearIssueId::new("filed").unwrap();
+            resurrected.plan.identifier = "FIX-filed".into();
+            let mut resurrected_pr = pr.clone();
+            resurrected_pr.id = TaskPrId::new();
+            resurrected_pr.task_id = resurrected.id.clone();
+            resurrected_pr.branch = "resurrected".into();
+            let refusal = reopened.create_task(&resurrected, &resurrected_pr).await.unwrap_err();
+            assert!(refusal.to_string().contains("was deleted"));
+            assert!(reopened.get_task_by_issue("filed").await.unwrap().is_none());
+            store.put_pm_snapshot(current_snapshot).await.unwrap();
             let historical = read_chapter(&store, &wave, Some(&initial.id))
                 .await
                 .unwrap();

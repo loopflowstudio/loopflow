@@ -6,8 +6,12 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::durable::{FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
 use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
+use loopflow::engine::invocation::QueuedInvocation;
+use loopflow::engine::transitions::FlowDecision;
 use loopflow::engine::{expand_flow, load_flow};
+use loopflow::id::{ExecId, TraceId};
 use support::codex_app_server_script;
 use tempfile::TempDir;
 
@@ -63,29 +67,203 @@ fn write_executable(path: &Path, content: &str) {
 }
 
 fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::process::Output {
+    lf_command(repo, home, args, path).output().unwrap()
+}
+
+fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("LF_") {
+            command.env_remove(key);
+        }
+    }
     command
         .args(args)
         .current_dir(repo)
         .env("HOME", home)
         .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_BIN")
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .env("NO_COLOR", "1")
-        .env_remove("LF_RUN_ID")
-        .env_remove("LF_RUN_DIR")
-        .env_remove("LF_WAVE_ID")
-        .env_remove("LF_ACCOUNT_LEASE")
-        .env_remove("LF_HUMAN_SESSION")
-        .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_ID");
+        .env("NO_COLOR", "1");
     if let Some(path) = path {
         command.env("PATH", path);
     }
-    command.output().unwrap()
+    command
+}
+
+#[test]
+fn checkout_task_identity_ignores_main_and_parent_upstreams() {
+    for upstream in ["main", "parent-task"] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = TempDir::new().unwrap();
+        let child =
+            support::register_unrun_task(home.path(), repo.path(), "child-task", &repo.head_sha());
+        let parent_path = repo.create_named_worktree("parent-task");
+        let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
+        // Both tracking configurations are real Git refs, with no network.
+        run_git(repo.path(), &["push", "origin", "parent-task"]);
+        repo.create_branch("child-task");
+        run_git(
+            repo.path(),
+            &["branch", "--set-upstream-to", &format!("origin/{upstream}")],
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut child_pr = child.pr.clone();
+        if upstream == "parent-task" {
+            child_pr.parent_pr_id = Some(
+                runtime
+                    .block_on(child.store.active_task_pr(&parent.id))
+                    .unwrap()
+                    .unwrap()
+                    .id,
+            );
+            runtime
+                .block_on(child.store.update_task_pr(&child_pr))
+                .unwrap();
+        }
+        write_skill(repo.path(), "identity-proof", "Prove checkout identity.");
+        write_flow(repo.path(), "identity-proof", "- step:\n    id: work\n    name: identity-proof\n- step:\n    id: decide\n    name: identity-proof\n    repeat:\n      from: work\n");
+        let position = runtime
+            .block_on(child.store.set_flow_position(
+                &child.task.id,
+                FlowPosition {
+                    task_id: child.task.id.clone(),
+                    invocation: QueuedInvocation::load(repo.path(), "identity-proof").unwrap(),
+                    session_run_id: None,
+                    ready_summary: None,
+                    cursor: loopflow::engine::ExecutionCursor {
+                        index: 1,
+                        ..Default::default()
+                    },
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            ))
+            .unwrap();
+        let parent_before = runtime
+            .block_on(child.store.get_task(&parent.id))
+            .unwrap()
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: std::process::id(),
+            started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+        };
+        let claim = match runtime
+            .block_on(child.store.claim_task_worker(
+                &child.task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            ))
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            other => panic!("unexpected claim: {other:?}"),
+        };
+        let reviewer = RunId::new();
+        runtime
+            .block_on(
+                child
+                    .store
+                    .bind_task_worker_run(&child.task.id, &claim, &reviewer, &owner),
+            )
+            .unwrap();
+        let decision = lf_command(
+            repo.path(),
+            home.path(),
+            &["flow", "decide", "iterate", "Checkout proof"],
+            None,
+        )
+        .env("LF_RUN_ID", reviewer.as_str())
+        .output()
+        .unwrap();
+        assert!(
+            decision.status.success(),
+            "{upstream}: {}",
+            String::from_utf8_lossy(&decision.stderr)
+        );
+        let position = runtime
+            .block_on(child.store.flow_position(&child.task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            position.cursor.progress.verdict.unwrap().decision,
+            FlowDecision::Iterate
+        );
+        assert!(runtime
+            .block_on(child.store.flow_position(&parent.id))
+            .unwrap()
+            .is_none());
+
+        // A subdirectory still resolves the registered checkout.
+        let subdir = repo.path().join("nested");
+        fs::create_dir(&subdir).unwrap();
+        let status = run_lf(&subdir, home.path(), &["task", "status", "--json"], None);
+        assert!(
+            status.status.success(),
+            "{upstream}: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(status["task_id"], child.task.id.as_str(), "{status}");
+
+        let bin = TempDir::new().unwrap();
+        let launched = bin.path().join("launched");
+        write_executable(&bin.path().join("codex"), &format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"schema_version\":1,\"provider_session_id\":\"ses-'\"$LF_RUN_ID\"'\",\"account_id\":null}}' > \"$LF_RUN_DIR/provider-session.json\"\necho \"$LF_RUN_ID\" > '{}'\n", launched.display(),
+        ));
+        let path = format!(
+            "{}:{}",
+            bin.path().display(),
+            std::env::var("PATH").unwrap()
+        );
+        let launch = run_lf(
+            repo.path(),
+            home.path(),
+            &["--tui", "identity-proof", "--no-loopflow"],
+            Some(&path),
+        );
+        assert!(
+            launch.status.success(),
+            "{upstream}: {}",
+            String::from_utf8_lossy(&launch.stderr)
+        );
+        let run_id = fs::read_to_string(launched).unwrap();
+        let sessions = run_lf(
+            repo.path(),
+            home.path(),
+            &["session", "list", "--all", "--json"],
+            None,
+        );
+        assert!(
+            sessions.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sessions.stderr)
+        );
+        let sessions: serde_json::Value = serde_json::from_slice(&sessions.stdout).unwrap();
+        let session = sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["run_id"] == run_id.trim())
+            .unwrap();
+        assert_eq!(
+            session["work"],
+            serde_json::json!({"kind": "task", "id": child.task.id})
+        );
+        assert_eq!(
+            runtime
+                .block_on(child.store.get_task(&parent.id))
+                .unwrap()
+                .unwrap(),
+            parent_before
+        );
+    }
 }
 
 #[test]

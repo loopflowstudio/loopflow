@@ -26,8 +26,24 @@ worker claims share SQLite transactions; first execution survives Flow resets
 as a Task event. Local transfer updates only the parent; stale worker saves
 cannot restore it.
 
-Started unfinished Tasks move, untouched backlog is canceled, and terminal work
-stays historical. Uncertain evidence remains unresolved. Archived content and
+Started unfinished Tasks move, untouched backlog is deleted from Linear, and
+terminal work stays historical. Local retirement preserves Task and PR records.
+The provider writer accepts a deletion acknowledgement or explicit trash flag;
+missing or unreadable issues leave the transition unresolved. Retries retain
+captured identity without requiring ordinary issue ownership after deletion.
+Confirmation and the per-Task chapter receipt commit together. Confirmed removals
+stay out of current planning and retained Task lists, including stale snapshot
+reads; older abandonment receipts do not establish native deletion. Exact Task
+lookup and dated chapter history retain the original records.
+
+Manual Task deletion retains observed Wave/issue/identifier in
+`task_issue_identities` before the provider effect. Current planning replacement
+and chapter changes do not erase this retry identity. It confers neither current
+ownership nor removal: every new mutation resolves fresh provider ownership,
+and only acknowledgement or positive trash evidence enters `task_deletions`.
+The identity observation has no execution row or lifecycle state.
+
+Archived content and
 membership are read from the frozen boundary receipt, not today's moved Tasks.
 Task observations go directly to the Wave; its single operation judges KRs and
 selects work. Status and roadmap join current chapter planning directly to Tasks.
@@ -154,7 +170,7 @@ heads, landing generations, or OS locks.
 ## Steer
 
 ```bash
-lf task steer INF-123 "keep the public name"
+lf task comment INF-123 "keep the public name"
 ```
 
 Task steering posts a Linear issue comment. Direct Linear comments enter the

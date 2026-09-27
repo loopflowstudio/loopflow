@@ -949,31 +949,6 @@ pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) ->
     Ok(())
 }
 
-pub(crate) fn reopen_work_in(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
-    if let WorkRef::Task(task_id) = work {
-        conn.execute(
-            "DELETE FROM task_flow_positions WHERE task_id=?1",
-            [task_id.as_str()],
-        )?;
-    }
-    let (table, id) = work_table(work);
-    if conn.execute(
-        &format!(
-            "UPDATE {table} SET work_state='ready', work_terminal_at=NULL
-             WHERE id=?1 AND work_state IN ('done', 'abandoned')"
-        ),
-        [id],
-    )? != 1
-    {
-        return Err(StoreError::InvalidAuthority(format!(
-            "{} {} is not terminal",
-            work.kind(),
-            work.id()
-        )));
-    }
-    Ok(())
-}
-
 fn work_table(work: &WorkRef) -> (&'static str, &str) {
     match work {
         WorkRef::Wave(id) => ("waves", id.as_str()),

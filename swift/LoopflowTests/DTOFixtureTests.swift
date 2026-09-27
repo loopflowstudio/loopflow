@@ -196,7 +196,7 @@ struct DTOFixtureTests {
         #expect(product.wave.enabled)
         #expect(product.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(product.unavailableTasks[0].status == .ready)
-        #expect(product.unavailableTasks[0].recovery.contains("lf work abandon task task_40fbeea"))
+        #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
         #expect(tasks.map(\.section) == [.now, .waiting, .available, .later])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
@@ -206,7 +206,7 @@ struct DTOFixtureTests {
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
-        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf pm sync") == true)
+        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf wave sync") == true)
         #expect(!roadmap.waves[1].wave.enabled)
     }
 

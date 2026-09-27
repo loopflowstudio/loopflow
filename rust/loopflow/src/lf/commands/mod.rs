@@ -12,6 +12,7 @@ pub mod home;
 pub mod install;
 pub mod list;
 pub mod ops;
+pub mod placement;
 pub mod profile;
 pub mod replay;
 pub mod reply;
@@ -28,7 +29,6 @@ pub mod usage;
 pub mod util;
 pub mod wave_intent;
 pub mod waves;
-pub mod work;
 pub(crate) mod work_catalog;
 
 /// One drill over the Wave → Project → Task Work hierarchy.

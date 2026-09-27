@@ -15,7 +15,7 @@ use crate::engine::agent::check_cli_available;
 use crate::engine::error::LoadError;
 
 /// Request participant carried across foreground launches, including SSH.
-/// An empty value explicitly means unknown; it must not fall back to the host.
+/// Only a non-empty value overrides personal configuration and Git.
 pub const USER_NAME_ENV: &str = "LF_USER_NAME";
 
 #[derive(Debug, Deserialize)]
@@ -51,7 +51,10 @@ pub fn load_user_name() -> Result<Option<String>, LoadError> {
 /// Resolve a direct invocation's participant before execution moves Homes.
 pub fn launch_user_name() -> Result<Option<String>, LoadError> {
     match std::env::var(USER_NAME_ENV) {
-        Ok(name) => Ok(normalize_user_name(&name)),
+        Ok(name) => match normalize_user_name(&name) {
+            Some(name) => Ok(Some(name)),
+            None => load_user_name(),
+        },
         Err(std::env::VarError::NotPresent) => load_user_name(),
         Err(error) => Err(LoadError::InvalidFlow(format!(
             "Invalid {USER_NAME_ENV}: {error}"

@@ -65,7 +65,7 @@ Task's newest 50 Runs from the last seven days (`lf runs --task ID --json`) with
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.
 Below the Description, **Comments (n)** is collapsed and counts the Task's Linear
-thread (`lf pm task comments --id ID --json`, read when the Task is shown and
+thread (`lf task comment ID --json`, read when the Task is shown and
 again on expanding). A failed read keeps the earlier thread marked **May be out
 of date** with **Retry**; comments are never split out of the Description.
 Use **Inspect** or the row's context menu for details. Presentation changes never

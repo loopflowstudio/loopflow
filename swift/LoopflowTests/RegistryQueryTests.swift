@@ -795,7 +795,7 @@ struct RegistryQueryTests {
         let json = try String(contentsOf: fixture, encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
-            if args == ["pm", "sync", "--wave", "infrastructure"] { return "" }
+            if args == ["wave", "sync", "infrastructure"] { return "" }
             #expect(args == ["status", "infrastructure", "--json"])
             return json
         }

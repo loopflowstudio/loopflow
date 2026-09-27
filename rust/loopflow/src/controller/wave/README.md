@@ -104,8 +104,8 @@ explicitly takes over a live endpoint.
 Rename or rehome a stopped Wave by UUID:
 
 ```bash
-lf work relocate wave <wave-id> --name platform
-lf work relocate wave <wave-id> --repo ../moved-repository
+lf wave relocate <wave-id> --name platform
+lf wave relocate <wave-id> --repo ../moved-repository
 ```
 
 Relocation preserves the UUID, PM projection, Work and Run history, Home

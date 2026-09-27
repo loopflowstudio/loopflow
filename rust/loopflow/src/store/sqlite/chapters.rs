@@ -1,9 +1,9 @@
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::TaskId;
 use crate::id::WaveId;
 use crate::store::{StoreError, StoreResult};
-use crate::work::chapter::{Chapter, ChapterId, TaskStartEvidence};
+use crate::work::chapter::{Chapter, ChapterId, TaskDisposition, TaskStartEvidence};
 use crate::work::project::ProjectId;
 
 use super::SqliteStore;
@@ -39,20 +39,49 @@ impl SqliteStore {
     pub fn save_chapter(&self, chapter: &Chapter, activate: bool) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if activate {
-            tx.execute(
-                "UPDATE wave_chapters SET current=0 WHERE wave_id=?1",
-                [chapter.wave_id.as_str()],
-            )?;
-        }
-        tx.execute(
-            "INSERT INTO wave_chapters(wave_id,chapter_id,project_id,current,receipt) VALUES(?1,?2,?3,?4,?5)
-             ON CONFLICT(wave_id,chapter_id) DO UPDATE SET receipt=excluded.receipt,
-             current=CASE WHEN ?4 THEN 1 ELSE wave_chapters.current END",
-            params![chapter.wave_id.as_str(), chapter.id.as_str(), chapter.project_id, activate, serde_json::to_string(chapter)?],
-        )?;
+        save_chapter_in(&tx, chapter, activate)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Record a successfully applied effect; Abandon requires confirmed native deletion.
+    /// Historical receipts saved through save_chapter never create deletion evidence.
+    pub fn record_chapter_task_applied(
+        &self,
+        mut chapter: Chapter,
+        issue_id: &str,
+    ) -> StoreResult<Chapter> {
+        let task = chapter
+            .tasks
+            .iter_mut()
+            .find(|task| task.task.id == issue_id)
+            .filter(|task| task.disposition != TaskDisposition::Unresolved)
+            .ok_or_else(|| {
+                StoreError::InvalidData(
+                    "applying a chapter Task requires a resolved disposition".into(),
+                )
+            })?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if task.disposition == TaskDisposition::Abandon {
+            let executing: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
+                 WHERE p.wave_id=?1 AND t.external_issue_id=?2 AND (t.work_state='ready'
+                   OR EXISTS(SELECT 1 FROM task_flow_positions f WHERE f.task_id=t.id AND f.claim_json IS NOT NULL)))",
+                params![chapter.wave_id.as_str(), issue_id], |row| row.get(0),
+            )?;
+            if executing {
+                return Err(StoreError::InvalidAuthority(
+                    "Task resumed during chapter deletion; reconcile its execution before retrying"
+                        .into(),
+                ));
+            }
+            super::record_task_deletion_in(&tx, &chapter.wave_id, issue_id, &task.task.identifier)?;
+        }
+        task.applied = true;
+        save_chapter_in(&tx, &chapter, false)?;
+        tx.commit()?;
+        Ok(chapter)
     }
 
     pub fn move_chapter_task(&self, task: &TaskId, project: &ProjectId) -> StoreResult<()> {
@@ -128,20 +157,42 @@ impl SqliteStore {
         })
     }
 
-    /// Retire backlog under the same write lock as worker claims. If execution
-    /// won the race, the caller reclassifies it as started and transfers it.
+    /// Retire backlog under the same write lock as worker claims. Return whether
+    /// it is retired, preserving the original terminal time on retries. If
+    /// execution won the race, the caller reclassifies it and transfers it.
     pub fn retire_chapter_backlog(&self, task: &TaskId) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = tx.execute(
+        tx.execute(
             "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
              AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='started')
              AND NOT EXISTS(SELECT 1 FROM task_flow_positions WHERE task_id=?1 AND (worker_generation>0 OR claim_json IS NOT NULL OR session_run_id IS NOT NULL))",
             params![task.as_str(), super::super::rows::now_unix()],
         )?;
+        let retired = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND work_state='abandoned')",
+            [task.as_str()],
+            |row| row.get(0),
+        )?;
         tx.commit()?;
-        Ok(changed == 1)
+        Ok(retired)
     }
+}
+
+fn save_chapter_in(conn: &Connection, chapter: &Chapter, activate: bool) -> StoreResult<()> {
+    if activate {
+        conn.execute(
+            "UPDATE wave_chapters SET current=0 WHERE wave_id=?1",
+            [chapter.wave_id.as_str()],
+        )?;
+    }
+    conn.execute(
+            "INSERT INTO wave_chapters(wave_id,chapter_id,project_id,current,receipt) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(wave_id,chapter_id) DO UPDATE SET receipt=excluded.receipt,
+             current=CASE WHEN ?4 THEN 1 ELSE wave_chapters.current END",
+            params![chapter.wave_id.as_str(), chapter.id.as_str(), chapter.project_id, activate, serde_json::to_string(chapter)?],
+        )?;
+    Ok(())
 }
 
 #[cfg(test)]

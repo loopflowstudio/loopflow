@@ -2331,8 +2331,21 @@ pub(crate) async fn attributed_work(
     if exact.is_some() {
         return exact;
     }
-    // Historical Project subjects remain readable after Project launch selectors
-    // are removed. Resolve stored identity without reopening a planning workflow.
+    // Attribution is historical identity, independent of launch eligibility and
+    // the presence of an active PR or checkout.
+    if kind == "task" {
+        return match store.get_task_by_issue(id).await {
+            Ok(Some(task)) => Some(crate::durable::WorkRef::Task(task.id)),
+            Ok(None) => {
+                tracing::warn!(%selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, %selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
+                None
+            }
+        };
+    }
     if kind == "project" {
         return match store.get_project_by_project(id).await {
             Ok(Some(project)) => Some(crate::durable::WorkRef::Project(project.id)),

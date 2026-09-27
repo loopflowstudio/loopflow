@@ -306,23 +306,19 @@ fn repository_team_matrix() {
     }
 
     for (wave, issue) in [("survival", "LOO-1"), ("survival/infrastructure", "LOO-2")] {
-        let show = run_lf(
-            &home,
-            &repo,
-            &["pm", "show", "--wave", wave, "--no-sync", "--json"],
-        );
-        let stdout = assert_success(&show, "pm show");
+        let show = run_lf(&home, &repo, &["status", wave, "--no-sync", "--json"]);
+        let stdout = assert_success(&show, "Wave status");
         assert!(stdout.contains(issue), "{wave} snapshot lost {issue}");
 
         let run = run_lf(&home, &repo, &["task", "run", issue]);
         let error = String::from_utf8_lossy(&run.stderr);
         assert!(!run.status.success());
         assert!(
-            error.contains("already complete"),
+            error.contains("terminal and cannot start execution"),
             "unexpected task result: {error}"
         );
     }
-    let status = assert_success(&run_lf(&home, &repo, &["pm", "status"]), "pm status");
+    let status = assert_success(&run_lf(&home, &repo, &["ls", "--json"]), "Wave list");
     assert!(status.contains("survival"));
     assert!(status.contains("survival/infrastructure"));
     // An unreadable snapshot remains visible as unavailable evidence for its
@@ -355,8 +351,9 @@ fn repository_team_matrix() {
     let duplicate = run_lf(&home, &repo, &["task", "run", "LOO-1"]);
     let error = String::from_utf8_lossy(&duplicate.stderr);
     assert!(error.contains("belongs to both"), "{error}");
+    // Registry discovery remains available; planning reads reject ambiguity.
+    assert_success(&run_lf(&home, &repo, &["ls", "--json"]), "Wave list");
     for args in [
-        &["pm", "status"][..],
         &["status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
         &["roadmap", "--wave", "survival", "--json"][..],
@@ -438,20 +435,18 @@ fn repository_team_matrix() {
         &run_lf(
             &home,
             &legacy_repo,
-            &["pm", "show", "--wave", "product", "--no-sync", "--json"],
+            &["status", "product", "--no-sync", "--json"],
         ),
         "legacy cached read",
     );
     let blocked = run_lf(
         &home,
         &legacy_repo,
-        &[
-            "pm", "task", "create", "--wave", "product", "--title", "Blocked",
-        ],
+        &["task", "create", "--wave", "product", "--title", "Blocked"],
     );
     let error = String::from_utf8_lossy(&blocked.stderr);
     assert!(!blocked.status.success());
-    assert!(error.contains("lf pm reteam --apply"), "{error}");
+    assert!(error.contains("lf repo reteam --apply"), "{error}");
     assert!(error.contains("PRD-44"), "{error}");
 
     // PRD-44 leaves the repository Team as the sole PM authority after the

@@ -354,6 +354,9 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
 in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
+Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
+launch authority before reconciling a user merge. Pin the test executable when
+no child is launched; an installed `lf` on PATH can hide this missing fixture.
 Fixtures selecting a private `LF_HOME` must also clear and restore
 `LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
 control authority, and Run lookup otherwise reads outside the fixture's Home.
@@ -483,6 +486,20 @@ Long-running workflow tests for mechanical `lf` commands:
 tests/e2e/test_full_cycle.sh
 tests/e2e/test_rebase_conflict.sh
 ```
+
+Exercise Task deletion through the real CLI on Linux:
+
+```bash
+cargo test -p loopflow --test task_deletion_tests
+```
+
+Requires `uv`, Python and OpenSSL. The test creates an isolated Home/store and a
+local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
+only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
+setting, so this test is Linux-only. It verifies native removal, local retirement,
+completed history, retained PRs/files, retries, planning sync, diagnostics and
+rejection of the removed `pm`/`work` groups. No installation or live provider is
+used.
 
 Exercise Linear expiry and rejection through an installed development CLI:
 

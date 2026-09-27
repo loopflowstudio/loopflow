@@ -6,7 +6,7 @@ Its SSH route may change without changing its identity.
 
 ```bash
 lf home id
-lf work place wave product <home-id>
+lf wave place product <home-id>
 lf ssh <home-id> start product
 ```
 
@@ -38,7 +38,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/). The Home daemon lives in
 ```text
 origin Home                         target Home
 -----------                         -----------
-lf work place ... home_B  ------->  Placement(Work, home_B)
+lf wave place ... home_B  ------->  Placement(Work, home_B)
 
 lf ssh home_B start product
         |
@@ -122,7 +122,7 @@ Wave identity is a UUID. The readable Wave locator is `(canonical repository, sl
 A bare slug may be ambiguous across repositories and is not mutation authority.
 
 ```bash
-lf work relocate wave <wave-id> --repo <target> --name <slug>
+lf wave relocate <wave-id> --repo <target> --name <slug>
 ```
 
 Relocation fences the Wave listener and locator, moves authored files and the

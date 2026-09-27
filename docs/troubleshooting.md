@@ -52,7 +52,7 @@ Steer, or resume a stopped process through the same Task Work:
 ```bash
 lf session open <session-id>
 lf session complete <session-id>    # return saved review or Ask feedback
-lf task steer INF-123 "address the latest feedback"
+lf task comment INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123
 lf task resume INF-123 --reason "provider credentials repaired"

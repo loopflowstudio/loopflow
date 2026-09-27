@@ -125,12 +125,14 @@ pub fn classify_task(task: &PmItem, evidence: &TaskStartEvidence) -> (TaskDispos
         && (state == Some("started")
             || evidence.begun
             || evidence.published
-            || evidence.authored == Some(true))
+            || evidence.authored != Some(false))
     {
-        return (
-            TaskDisposition::Unresolved,
-            "local retirement conflicts with refreshed start evidence".into(),
-        );
+        let reason = if evidence.authored.is_none() {
+            "local retirement has unavailable checkout evidence"
+        } else {
+            "local retirement conflicts with refreshed start evidence"
+        };
+        return (TaskDisposition::Unresolved, reason.into());
     }
     if terminal || evidence.abandoned || evidence.completed {
         if evidence.worker_claimed {

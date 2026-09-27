@@ -841,6 +841,45 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     let (receipt, json, dry_run) = match command {
+        WaveCommand::Connect {
+            wave,
+            wave_flag,
+            all,
+            team_key,
+            team_name,
+        } => {
+            return loopflow::lf::commands::ops::connect_wave(
+                repo,
+                wave.as_deref().or(wave_flag.as_deref()),
+                *all,
+                team_key.as_deref(),
+                team_name.as_deref(),
+            )
+        }
+        WaveCommand::Sync {
+            wave,
+            wave_flag,
+            all,
+        } => {
+            return loopflow::lf::commands::ops::sync_planning(
+                repo,
+                wave.as_deref().or(wave_flag.as_deref()),
+                *all,
+                false,
+                false,
+            )
+        }
+        WaveCommand::Rename { wave, title } => {
+            return loopflow::lf::commands::ops::rename_wave(repo, wave, title)
+        }
+        WaveCommand::Forget { .. }
+        | WaveCommand::Place { .. }
+        | WaveCommand::Relocate { .. }
+        | WaveCommand::Enable { .. }
+        | WaveCommand::Disable { .. }
+        | WaveCommand::Retire { .. } => {
+            return loopflow::lf::commands::placement::wave(repo, command)
+        }
         WaveCommand::Serve { name, force } => {
             return loopflow::controller::wave::run(name, *force);
         }
@@ -928,6 +967,14 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> anyhow::Result<()> {
     match command {
+        TaskCommand::Enable { issue, json } | TaskCommand::Disable { issue, json } => {
+            loopflow::lf::commands::placement::task_enabled(
+                repo,
+                issue,
+                matches!(command, TaskCommand::Enable { .. }),
+                *json,
+            )
+        }
         TaskCommand::Advance { issue, json } => {
             let task = loopflow::ops::task::task_advance(issue)?;
             print_task(&task, *json)
@@ -974,32 +1021,46 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             )?;
             print_task(&task, *json)
         }
-        TaskCommand::Start {
+        TaskCommand::Create {
             wave,
             title,
+            notes,
+            run,
             name,
             flow,
             stack_on,
-            directive,
             json,
         } => {
-            let task = loopflow::ops::task::task_start(
+            let report = match notes {
+                Some(notes) => Some(notes.clone()),
+                None => piped_task_report()?,
+            };
+            let (issue, task) = loopflow::ops::task::task_create(
                 repo,
                 wave.as_deref(),
                 title.clone(),
-                piped_task_report()?,
-                loopflow::ops::task::TaskLaunchOptions {
+                report,
+                run.then(|| loopflow::ops::task::TaskLaunchOptions {
                     agent: agent.map(str::to_string),
                     name: name.clone(),
                     flow: flow.clone(),
                     stack_on: stack_on.clone(),
-                    directive: directive.clone(),
-                },
+                    directive: None,
+                }),
             )?;
-            print_task(&task, *json)
+            if let Some(task) = task {
+                print_task(&task, *json)
+            } else {
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&issue)?);
+                } else {
+                    println!("{} · {}", issue.identifier, issue.name);
+                }
+                Ok(())
+            }
         }
         TaskCommand::Status { issue, json } => {
-            let task = loopflow::ops::task::task_status(issue)?;
+            let task = loopflow::ops::task::task_status(issue.as_deref())?;
             print_task(&task, *json)
         }
         TaskCommand::Changes { issue, json } => {
@@ -1058,17 +1119,71 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             issue,
             summary,
             json,
-        } => {
-            let task = loopflow::ops::task::task_complete(issue, summary.clone())?;
-            print_task(&task, *json)
+        } => match loopflow::ops::task::task_complete(repo, issue, summary.clone())? {
+            Some(task) => print_task(&task, *json),
+            None => {
+                let resolved = loopflow::ops::pm::pm_resolve_task(repo, issue)?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&resolved.item)?);
+                } else {
+                    println!(
+                        "{}: completed {}",
+                        resolved.item.identifier, resolved.item.name
+                    );
+                }
+                Ok(())
+            }
+        },
+        TaskCommand::Delete { issue } => {
+            let identifier = loopflow::ops::task::task_delete(repo, issue)?;
+            println!("{identifier}: deleted");
+            Ok(())
         }
-        TaskCommand::Steer {
+        TaskCommand::Edit {
+            issue,
+            title,
+            notes,
+            wave,
+        } => {
+            let result = loopflow::ops::task::task_edit(
+                repo,
+                issue,
+                wave.as_deref(),
+                title.clone(),
+                notes.clone(),
+            )?;
+            println!("{}: updated task {}", result.wave, result.id);
+            Ok(())
+        }
+        TaskCommand::Comment {
             issue,
             message,
+            wave,
             json,
         } => {
-            let result = loopflow::ops::task::task_steer(issue, message.clone())?;
-            print_task_control(&result, *json)
+            let result = loopflow::ops::task::task_comment(
+                repo,
+                issue,
+                wave.as_deref(),
+                message.as_deref(),
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string(&result)?);
+            } else if result.comments.is_empty() {
+                println!("{}: no comments", result.identifier);
+            } else {
+                for comment in &result.comments {
+                    let author = match &comment.author {
+                        loopflow::ops::pm::TaskCommentAuthor::Person { name } => {
+                            name.as_deref().unwrap_or("unnamed person")
+                        }
+                        loopflow::ops::pm::TaskCommentAuthor::Integration => "integration",
+                    };
+                    let date = comment.created_at.as_deref().unwrap_or("date unavailable");
+                    println!("── {author} · {date}\n{}\n", comment.body.trim_end());
+                }
+            }
+            Ok(())
         }
         TaskCommand::Interrupt { issue, json } => {
             let result = loopflow::ops::task::task_interrupt(issue)?;
@@ -1111,22 +1226,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
                 agent.map(str::to_string),
             )?;
             print_task(&task, *json)
-        }
-        TaskCommand::Recover {
-            issue,
-            reason,
-            json,
-        } => {
-            let task = loopflow::ops::task::task_recover(issue, reason.clone())?;
-            print_task(&task, *json)
-        }
-        TaskCommand::Abandon {
-            issue,
-            reason,
-            json,
-        } => {
-            let result = loopflow::ops::task::task_abandon(issue, reason.clone())?;
-            print_task_control(&result, *json)
         }
     }
 }
@@ -1443,8 +1542,8 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Release { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_release(cmd))
             }
-            Some(Commands::Pm { cmd }) => {
-                in_directory_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
+            Some(Commands::Repo { cmd }) => {
+                in_directory_runtime(&args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
             Some(Commands::Home { cmd }) => loopflow::lf::commands::home::run(cmd),
             Some(Commands::SyncSkills { yes, no_prune }) => {
@@ -1458,6 +1557,18 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
+            Some(Commands::Wave {
+                cmd:
+                    cmd @ (WaveCommand::Connect { .. }
+                    | WaveCommand::Sync { .. }
+                    | WaveCommand::Rename { .. }
+                    | WaveCommand::Forget { .. }
+                    | WaveCommand::Place { .. }
+                    | WaveCommand::Relocate { .. }
+                    | WaveCommand::Enable { .. }
+                    | WaveCommand::Disable { .. }
+                    | WaveCommand::Retire { .. }),
+            }) => in_directory_runtime(&args, |repo| run_wave_command(repo, cmd)),
             Some(Commands::Wave { cmd }) => {
                 in_repo_runtime(&args, |repo| run_wave_command(repo, cmd))
             }
@@ -1486,12 +1597,14 @@ fn main() -> anyhow::Result<()> {
                 tokio::runtime::Runtime::new()?
                     .block_on(loopflow::controller::task::run_worker(task_id.clone()))
             }),
+            Some(Commands::Task {
+                cmd: cmd @ (TaskCommand::Enable { .. } | TaskCommand::Disable { .. }),
+            }) => in_directory_runtime(&args, |repo| {
+                run_task_command(repo, cmd, cli.model.as_deref())
+            }),
             Some(Commands::Task { cmd }) => in_repo_runtime(&args, |repo| {
                 run_task_command(repo, cmd, cli.model.as_deref())
             }),
-            Some(Commands::Work { cmd }) => {
-                in_directory_runtime(&args, |repo| loopflow::lf::commands::work::run(cmd, repo))
-            }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
             }
@@ -1531,7 +1644,14 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Prune { dry_run, json }) => {
                 loopflow::lf::commands::top::run_prune(*json, *dry_run)
             }
-            Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
+            Some(Commands::Doctor { json, planning }) => {
+                if *planning {
+                    let repo = loopflow::repo::working_directory()?;
+                    loopflow::lf::commands::ops::sync_planning(&repo, None, true, true, *json)
+                } else {
+                    loopflow::lf::commands::doctor::run(*json)
+                }
+            }
             Some(Commands::List) => loopflow::lf::commands::list::show_all(),
             Some(Commands::Ls { json, all, current }) => {
                 loopflow::lf::commands::waves::ls(*json, *all, *current)
@@ -1540,6 +1660,8 @@ fn main() -> anyhow::Result<()> {
                 wave,
                 chapter,
                 json,
+                sync,
+                no_sync: _,
             }) => {
                 if let Some(chapter) = chapter {
                     let id = loopflow::work::chapter::ChapterId::parse(chapter)
@@ -1576,7 +1698,17 @@ fn main() -> anyhow::Result<()> {
                     }
                     Ok(())
                 } else {
-                    loopflow::lf::commands::waves::status(wave.as_deref(), *json)
+                    let refreshed = if *sync {
+                        Some(loopflow::lf::commands::ops::refresh_status(
+                            wave.as_deref(),
+                        )?)
+                    } else {
+                        None
+                    };
+                    loopflow::lf::commands::waves::status(
+                        refreshed.as_deref().or(wave.as_deref()),
+                        *json,
+                    )
                 }
             }
             Some(Commands::Roadmap { wave, json, all }) => {
@@ -1756,7 +1888,7 @@ mod tests {
     };
 
     use clap::Parser;
-    use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand, WaveCommand};
+    use loopflow::lf::{Cli, Commands, PrCommand, TaskCommand, WaveCommand};
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     #[test]
@@ -1858,7 +1990,7 @@ mod tests {
             "commit",
             "auth",
             "release",
-            "pm",
+            "repo",
             "task",
             "flow",
             "skill",
@@ -2336,34 +2468,32 @@ mod tests {
 
     #[test]
     fn reorder_args_moves_flags_to_nested_owners() {
-        let args: Vec<String> = ["lf", "pm", "--wave", "systems", "show"]
+        let args: Vec<String> = ["lf", "wave", "--wave", "systems", "sync"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "pm", "show", "--wave", "systems"]);
+        assert_eq!(reordered, vec!["lf", "wave", "sync", "--wave", "systems"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Pm {
-                cmd: PmCommand::Show { .. }
+            Some(Commands::Wave {
+                cmd: WaveCommand::Sync { .. }
             })
         ));
 
         let args: Vec<String> = [
-            "lf", "pm", "task", "--wave", "systems", "create", "--title", "file it",
+            "lf", "task", "--wave", "systems", "create", "--title", "file it",
         ]
         .map(String::from)
         .to_vec();
         let reordered = reorder_args(args);
         assert_eq!(
             reordered,
-            vec!["lf", "pm", "task", "create", "--wave", "systems", "--title", "file it"]
+            vec!["lf", "task", "create", "--wave", "systems", "--title", "file it"]
         );
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Pm {
-                cmd: PmCommand::Task {
-                    cmd: PmTaskCommand::Create { .. }
-                }
+            Some(Commands::Task {
+                cmd: TaskCommand::Create { .. }
             })
         ));
 
@@ -2412,13 +2542,8 @@ mod tests {
             vec!["lf", "chat", "--wave", "systems", "shipped it"]
         );
 
-        let args: Vec<String> = ["lf", "pm", "show", "--wave", "systems"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(
-            reorder_args(args),
-            vec!["lf", "pm", "show", "--wave", "systems"]
-        );
+        let args: Vec<String> = ["lf", "status", "systems"].map(String::from).to_vec();
+        assert_eq!(reorder_args(args), vec!["lf", "status", "systems"]);
     }
 
     #[test]

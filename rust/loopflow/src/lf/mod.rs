@@ -326,10 +326,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Connect Waves to Linear and manage their Tasks
-    Pm {
+    /// Repository provider administration
+    Repo {
         #[command(subcommand)]
-        cmd: PmCommand,
+        cmd: RepoCommand,
     },
     /// Inspect this Home and observe routes to other Homes
     Home {
@@ -399,11 +399,6 @@ pub enum Commands {
     Task {
         #[command(subcommand)]
         cmd: TaskCommand,
-    },
-    /// Inspect and control stable Wave, Project, or Task Work
-    Work {
-        #[command(subcommand)]
-        cmd: WorkCommand,
     },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
@@ -477,6 +472,9 @@ pub enum Commands {
     },
     /// Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
     Doctor {
+        /// Diagnose repository planning without changing it
+        #[arg(long)]
+        planning: bool,
         /// Emit the audit as JSON
         #[arg(long)]
         json: bool,
@@ -508,6 +506,12 @@ pub enum Commands {
         /// Emit the status snapshot as JSON
         #[arg(long)]
         json: bool,
+        /// Refresh planning from Linear before reading
+        #[arg(long, conflicts_with = "no_sync")]
+        sync: bool,
+        /// Read cached planning
+        #[arg(long = "no-sync")]
+        no_sync: bool,
     },
     /// Show the current repository's roadmap: every open Task across the repo's
     /// Waves, joined to live evidence and bucketed into Now / Waiting /
@@ -644,7 +648,7 @@ pub enum Commands {
     #[command(
         name = "op",
         hide = true,
-        about = "Removed; the operations are top-level (`lf pr`, `lf rebase`, `lf wt`, `lf pm`)",
+        about = "Removed; the operations are top-level (`lf pr`, `lf rebase`, `lf wt`, `lf task`)",
         arg_required_else_help = true
     )]
     RetiredOp {
@@ -787,83 +791,6 @@ pub enum SessionCommand {
     StopRun { run_id: crate::durable::RunId },
 }
 
-#[derive(Subcommand, Debug)]
-pub enum WorkCommand {
-    /// Forget an abandoned, empty Wave registration without touching repository files
-    Forget {
-        #[arg(value_parser = ["wave"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show current Work state and placement
-    Status {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Record Wave Work's Home
-    Place {
-        #[arg(value_parser = ["wave"])]
-        kind: String,
-        id: String,
-        home_id: crate::durable::HomeId,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Rename or rehome stopped Wave Work without changing its identity
-    Relocate {
-        #[arg(value_parser = ["wave"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        repo: Option<PathBuf>,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Allow this Home to pursue Work
-    Enable {
-        #[arg(value_parser = ["wave", "task"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Prevent this Home from starting new pursuit of Work
-    Disable {
-        #[arg(value_parser = ["wave", "task"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Refuse interruption until Work has an exact process owner
-    Interrupt {
-        #[arg(value_parser = ["wave", "task"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Abandon the Work
-    Abandon {
-        #[arg(value_parser = ["wave", "task"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
 /// Name the surviving spelling for each retired `lf op` verb. Prompts, `.lf/`
 /// adaptations, and older installed binaries still say `lf op …`; a caller who
 /// types it should learn where the operation went, not that a skill named `op`
@@ -881,8 +808,9 @@ fn reject_retired_op(sub: &str) -> Result<String, String> {
         "submit" => "use `lf pr submit`".to_string(),
         "land" => "use `lf pr land`".to_string(),
         "dispatch" => "use `lf task run <issue-id>`".to_string(),
-        "auth" | "commit" | "cron" | "doctor" | "pm" | "rebase" | "release" | "sync-skills"
-        | "wt" => format!("use `lf {sub}`"),
+        "auth" | "commit" | "cron" | "doctor" | "rebase" | "release" | "sync-skills" | "wt" => {
+            format!("use `lf {sub}`")
+        }
         _ => "the operations are top-level now — see `lf --help`".to_string(),
     };
     Err(format!("`lf op {sub}` was removed; {hint}"))
@@ -902,6 +830,83 @@ pub struct WaveTargetArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
+    Connect {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Wave name (flag form; same as positional wave)
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
+        wave_flag: Option<String>,
+        /// Recursively initialize every Wave under wave/
+        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        all: bool,
+        /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
+        #[arg(long = "team-key")]
+        team_key: Option<String>,
+        /// Repository Team display name. Defaults to the repository name.
+        #[arg(long = "team-name")]
+        team_name: Option<String>,
+    },
+    /// Refresh shared planning from Linear
+    Sync {
+        wave: Option<String>,
+        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
+        wave_flag: Option<String>,
+        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        all: bool,
+    },
+    /// Rename the provider Initiative
+    Rename {
+        wave: String,
+        #[arg(long)]
+        title: String,
+    },
+    /// Forget an empty Wave registration, preserving authored files
+    Forget {
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Place a Wave on a Home
+    Place {
+        name: String,
+        home_id: crate::durable::HomeId,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rename or rehome a stopped Wave
+    Relocate {
+        wave: String,
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Allow local execution
+    Enable {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Prevent new local execution
+    Disable {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Retire the Wave, retaining history
+    Retire {
+        name: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Run the Wave listener in the foreground
     Serve {
         name: String,
@@ -949,6 +954,18 @@ pub enum WaveCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Allow local execution
+    Enable {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Prevent new local execution
+    Disable {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Continue the saved Task Flow; complete an interactive review through its Session
     Advance {
         issue: String,
@@ -987,29 +1004,35 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Create a Task in the Wave’s current chapter and start its worker
-    Start {
+    /// File a Task in the current chapter; optionally prepare and run it
+    Create {
         /// Wave name; defaults to the bound Wave
         #[arg(long)]
         wave: Option<String>,
         /// Task title; omitted when stdin supplies the report and first line
-        title: Option<String>,
         #[arg(long)]
+        title: Option<String>,
+        /// Description; defaults to a report read from stdin
+        #[arg(long)]
+        notes: Option<String>,
+        /// Validate placement and execution before filing, then run the Task
+        #[arg(long)]
+        run: bool,
+        #[arg(long, requires = "run")]
         name: Option<String>,
         /// Select a Flow for this Task worker; defaults to the chapter recommendation
-        #[arg(long, value_name = "FLOW")]
+        #[arg(long, value_name = "FLOW", requires = "run")]
         flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
-        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        #[arg(long = "stack-on", value_name = "PARENT_TASK", requires = "run")]
         stack_on: Option<String>,
-        #[arg(long)]
-        directive: Option<String>,
         #[arg(long)]
         json: bool,
     },
     /// Show durable Task facts and current worker evidence
     Status {
-        issue: String,
+        /// Task issue; defaults to the Task in this checkout
+        issue: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1033,7 +1056,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Complete a Task without requiring another pull request
+    /// Complete planning work, or a placed Task whose pull requests are settled
     Complete {
         issue: String,
         #[arg(long)]
@@ -1041,10 +1064,24 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Post a Linear Task comment; its advancing worker attempts live delivery
-    Steer {
+    /// Delete a Task from Linear and reconcile its local record
+    Delete { issue: String },
+    /// Edit a Task's title or notes, before or after placement
+    Edit {
         issue: String,
-        message: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(short = 'w', long)]
+        wave: Option<String>,
+    },
+    /// Read the comment thread, or append direction without starting execution
+    Comment {
+        issue: String,
+        message: Option<String>,
+        #[arg(short = 'w', long)]
+        wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1081,22 +1118,6 @@ pub enum TaskCommand {
         /// Replacement Flow; validated before any checkpoint or stop
         #[arg(long)]
         flow: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Explicitly recover an abandoned Task on the same worktree (User only)
-    Recover {
-        issue: String,
-        #[arg(long)]
-        reason: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Explicitly end a Task without merging
-    Abandon {
-        issue: String,
-        #[arg(long)]
-        reason: String,
         #[arg(long)]
         json: bool,
     },
@@ -1400,85 +1421,21 @@ pub enum CronCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum PmCommand {
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
-    Init {
-        /// Wave name (auto-detected if omitted)
-        wave: Option<String>,
-        /// Wave name (flag form; same as positional wave)
-        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
-        wave_flag: Option<String>,
-        /// Recursively initialize every Wave under wave/
-        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
-        all: bool,
-        /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
-        #[arg(long = "team-key")]
-        team_key: Option<String>,
-        /// Repository Team display name. Defaults to the repository name.
-        #[arg(long = "team-name")]
-        team_name: Option<String>,
-    },
-    /// Read the Wave's current chapter and Tasks
-    Show {
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Emit the task snapshot as JSON
-        #[arg(long)]
-        json: bool,
-        /// Force a refresh from Linear before reading
-        #[arg(long = "sync", conflicts_with = "no_sync")]
-        sync: bool,
-        /// Read the local cache only; never contact Linear
-        #[arg(long = "no-sync")]
-        no_sync: bool,
-    },
-    /// Show local PM status for linked waves
-    Status {
-        /// Wave name (all PM-enabled waves if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-    },
-    /// Compare Linear with local wave bindings
-    Doctor,
-    /// Move every linked wave onto the repository's one Linear team
+pub enum RepoCommand {
+    /// Reconcile linked Waves to the repository's Linear Team
     Reteam {
-        /// Execute the moves; without it, `reteam` only prints the plan (dry run)
         #[arg(long)]
         apply: bool,
     },
-    /// Refresh the local PM snapshot from Linear
-    Sync {
-        /// Wave name (all linked waves if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Compare without writing the SQLite snapshot
-        #[arg(long = "plan")]
-        plan: bool,
-    },
-    /// Rename the Linear Initiative backing a wave
-    Rename {
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Linear Initiative title
-        #[arg(long = "title")]
-        title: String,
-    },
-    /// Linear task operations
-    Task {
-        #[command(subcommand)]
-        cmd: PmTaskCommand,
-    },
-    /// Linear webhook receiver: stream user edits into Tasks
+    /// Register or serve Linear webhooks
     Webhook {
         #[command(subcommand)]
-        cmd: PmWebhookCommand,
+        cmd: RepoWebhookCommand,
     },
 }
 
 #[derive(Subcommand, Debug)]
-pub enum PmWebhookCommand {
+pub enum RepoWebhookCommand {
     /// Run the receiver that turns Linear edits into Task direction. Reads the
     /// signing secret from LF_LINEAR_WEBHOOK_SECRET (source it from Doppler).
     Serve {
@@ -1492,60 +1449,6 @@ pub enum PmWebhookCommand {
         /// Public HTTPS URL Linear will POST deliveries to
         #[arg(long)]
         url: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum PmTaskCommand {
-    /// Create a Linear task
-    Create {
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Task title
-        #[arg(long = "title")]
-        title: String,
-        /// Task notes/description
-        #[arg(long = "notes")]
-        notes: Option<String>,
-    },
-    /// Update a Linear task
-    Update {
-        /// Existing task id to edit
-        #[arg(long = "id")]
-        id: String,
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Task title
-        #[arg(long = "title")]
-        title: Option<String>,
-        /// Task notes/description
-        #[arg(long = "notes")]
-        notes: Option<String>,
-    },
-    /// Read a Linear task's comment thread (read-only)
-    Comments {
-        /// Existing task id
-        #[arg(long = "id")]
-        id: String,
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Close a Linear task and optionally link the shipped PR
-    Done {
-        /// Existing task id to close
-        #[arg(long = "id")]
-        id: String,
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// PR URL to attach as a comment
-        #[arg(long = "pr")]
-        pr: Option<String>,
     },
 }
 
@@ -1857,6 +1760,37 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
+    fn consolidated_commands_parse_without_old_namespaces() {
+        use clap::CommandFactory;
+        let command = Cli::command();
+        assert!(command.find_subcommand("pm").is_none());
+        assert!(command.find_subcommand("work").is_none());
+        for args in [
+            vec!["lf", "wave", "sync", "product"],
+            vec!["lf", "wave", "sync", "--all"],
+            vec!["lf", "wave", "rename", "product", "--title", "Product"],
+            vec!["lf", "task", "disable", "LOO-1"],
+            vec![
+                "lf",
+                "wave",
+                "place",
+                "product",
+                "home_00000000000000000000000000000001",
+            ],
+            vec!["lf", "repo", "webhook", "serve"],
+            vec!["lf", "doctor", "--planning", "--json"],
+            vec!["lf", "status", "product", "--sync"],
+            vec!["lf", "status", "product", "--no-sync"],
+        ] {
+            assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
+        }
+        for verb in ["abandon", "recover"] {
+            assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
+        }
+        assert!(Cli::try_parse_from(["lf", "status", "--sync", "--no-sync"]).is_err());
+    }
+
+    #[test]
     fn version_output_uses_the_embedded_build_identity() {
         let error = Cli::try_parse_from(["lf", "--version"]).expect_err("version exits");
         assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
@@ -1929,29 +1863,6 @@ mod tests {
     }
 
     #[test]
-    fn historical_projects_are_inspectable_but_not_controllable() {
-        assert!(
-            Cli::try_parse_from(["lf", "work", "status", "project", "proj_history", "--json"])
-                .is_ok()
-        );
-        for command in ["enable", "disable", "interrupt"] {
-            assert!(
-                Cli::try_parse_from(["lf", "work", command, "project", "proj_history"]).is_err()
-            );
-        }
-        assert!(Cli::try_parse_from([
-            "lf",
-            "work",
-            "abandon",
-            "project",
-            "proj_history",
-            "--reason",
-            "expired"
-        ])
-        .is_err());
-    }
-
-    #[test]
     fn chapter_and_task_commands_require_no_project_selector() {
         let preview = Cli::try_parse_from([
             "lf",
@@ -1974,14 +1885,15 @@ mod tests {
         let task = Cli::try_parse_from([
             "lf",
             "task",
-            "start",
+            "create",
             "--wave",
             "product",
+            "--title",
             "Ship the outcome",
         ])
         .unwrap();
         assert!(
-            matches!(task.command, Some(Commands::Task { cmd: TaskCommand::Start { wave: Some(wave), .. } }) if wave == "product")
+            matches!(task.command, Some(Commands::Task { cmd: TaskCommand::Create { wave: Some(wave), .. } }) if wave == "product")
         );
         assert!(Cli::try_parse_from(["lf", "--project", "old", "research"]).is_err());
     }
@@ -2432,10 +2344,10 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "pm", "init", "pm"]).expect("parse");
-        let Some(Commands::Pm {
+        let cli = Cli::try_parse_from(["lf", "wave", "connect", "pm"]).expect("parse");
+        let Some(Commands::Wave {
             cmd:
-                PmCommand::Init {
+                WaveCommand::Connect {
                     wave,
                     wave_flag,
                     all,
@@ -2546,18 +2458,51 @@ mod tests {
     }
 
     #[test]
-    fn task_start_uses_wave_and_allows_piped_title_omission() {
-        let cli = Cli::try_parse_from(["lf", "task", "start", "--wave", "product"])
-            .expect("parse Task start with Wave");
+    fn task_create_uses_wave_and_allows_piped_title_omission() {
+        let cli = Cli::try_parse_from(["lf", "task", "create", "--wave", "product"])
+            .expect("parse Task create with Wave");
         let Some(Commands::Task {
-            cmd: TaskCommand::Start { wave, title, .. },
+            cmd: TaskCommand::Create { wave, title, .. },
         }) = cli.command
         else {
-            panic!("expected task start command");
+            panic!("expected task create command");
         };
         assert_eq!(wave.as_deref(), Some("product"));
         assert_eq!(title, None);
-        assert!(Cli::try_parse_from(["lf", "task", "start"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "task", "create"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "task", "start", "old entry"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "pm", "task", "create", "--title", "old entry"])
+                .unwrap()
+                .command,
+            Some(Commands::External(_))
+        ));
+        assert!(Cli::try_parse_from(["lf", "task", "create", "--name", "placed"]).is_err());
+        assert!(Cli::try_parse_from([
+            "lf",
+            "task",
+            "create",
+            "--run",
+            "--directive",
+            "duplicate description"
+        ])
+        .is_err());
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "create",
+            "--run",
+            "--title",
+            "New task",
+            "--notes",
+            "Full report",
+            "--name",
+            "placed",
+        ])
+        .unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Create { run: true, title: Some(title), notes: Some(notes), .. } }) if title == "New task" && notes == "Full report")
+        );
     }
 
     #[test]
@@ -2612,6 +2557,15 @@ mod tests {
                 })
             }) if next == "released-upgrade-proof"
         ));
+    }
+
+    #[test]
+    fn task_deletion_accepts_issue_identity() {
+        let cli = Cli::try_parse_from(["lf", "task", "delete", "LOO-42"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Task {
+            cmd: TaskCommand::Delete { issue }
+        }) if issue == "LOO-42"));
+        assert!(Cli::try_parse_from(["lf", "task", "delete"]).is_err());
     }
 
     #[test]
@@ -2691,6 +2645,29 @@ mod tests {
     }
 
     #[test]
+    fn task_completion_has_one_public_command() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "complete",
+            "LOO-42",
+            "--summary",
+            "Delivered",
+            "--json",
+        ])
+        .unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Complete { issue, summary, json: true } }) if issue == "LOO-42" && summary == "Delivered")
+        );
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "pm", "task", "done", "--id", "LOO-42"])
+                .unwrap()
+                .command,
+            Some(Commands::External(_))
+        ));
+    }
+
+    #[test]
     fn task_interrupt_authors_no_direction() {
         let cli = Cli::try_parse_from(["lf", "task", "interrupt", "INF-123"])
             .expect("parse task interrupt");
@@ -2714,31 +2691,50 @@ mod tests {
     }
 
     #[test]
-    fn task_steer_is_the_only_authored_direction_command() {
+    fn task_comment_reads_and_writes_without_retired_commands() {
         let steer = Cli::try_parse_from([
             "lf",
             "task",
-            "steer",
+            "comment",
             "INF-123",
             "take the smaller approach",
         ])
-        .expect("parse task steer");
+        .expect("parse task comment");
         let Some(Commands::Task {
             cmd:
-                TaskCommand::Steer {
+                TaskCommand::Comment {
                     issue,
                     message,
                     json,
+                    wave: _,
                 },
         }) = steer.command
         else {
-            panic!("expected task steer command");
+            panic!("expected task comment command");
         };
         assert_eq!(issue, "INF-123");
-        assert_eq!(message, "take the smaller approach");
+        assert_eq!(message.as_deref(), Some("take the smaller approach"));
+        assert!(Cli::try_parse_from(["lf", "task", "comment", "INF-123"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["lf", "task", "edit", "INF-123", "--notes", "revised"]).is_ok()
+        );
+        for removed in ["update", "comments"] {
+            assert!(matches!(
+                Cli::try_parse_from(["lf", "pm", "task", removed, "--id", "INF-123"])
+                    .unwrap()
+                    .command,
+                Some(Commands::External(_))
+            ));
+        }
         assert!(!json);
 
-        for removed in ["follow-up", "acknowledge", "decide", "request-decision"] {
+        for removed in [
+            "steer",
+            "follow-up",
+            "acknowledge",
+            "decide",
+            "request-decision",
+        ] {
             assert!(
                 Cli::try_parse_from(["lf", "task", removed, "INF-123"]).is_err(),
                 "{removed} must not remain as a compatibility command"
@@ -2796,100 +2792,6 @@ mod tests {
                     json: true,
                 }
             }) if issue == "LOO-267" && advice == "replace the old runtime model"
-        ));
-    }
-
-    #[test]
-    fn task_recover_accepts_an_optional_audited_reason() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "recover",
-            "PRD-9",
-            "--reason",
-            "the abandoned work is still valid",
-            "--json",
-        ])
-        .expect("parse Task recovery");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Recover {
-                    issue,
-                    reason: Some(reason),
-                    json: true,
-                }
-            }) if issue == "PRD-9" && reason == "the abandoned work is still valid"
-        ));
-    }
-    #[test]
-    fn cli_parses_stable_work_controls() {
-        assert!(
-            Cli::try_parse_from(["lf", "work", "steer", "task", "task_1", "direction"]).is_err()
-        );
-        let project = Cli::try_parse_from(["lf", "project", "steer", "project", "direction"])
-            .expect("retired command names remain eligible for skill discovery");
-        assert!(matches!(project.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "work", "continue", "task", "task_1"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
-
-        assert!(Cli::try_parse_from([
-            "lf",
-            "work",
-            "advance",
-            "task",
-            "task_00000000000000000000000000000001",
-        ])
-        .is_err());
-        assert!(Cli::try_parse_from([
-            "lf",
-            "work",
-            "execute",
-            "task",
-            "task_00000000000000000000000000000001",
-        ])
-        .is_err());
-
-        let place = Cli::try_parse_from([
-            "lf",
-            "work",
-            "place",
-            "wave",
-            "wave_00000000000000000000000000000001",
-            "home_00000000000000000000000000000001",
-            "--json",
-        ])
-        .expect("parse Work placement");
-        assert!(matches!(
-            place.command,
-            Some(Commands::Work {
-                cmd: WorkCommand::Place { kind, id, json: true, .. }
-            }) if kind == "wave" && id == "wave_00000000000000000000000000000001"
-        ));
-        assert!(Cli::try_parse_from([
-            "lf",
-            "work",
-            "place",
-            "task",
-            "task_00000000000000000000000000000001",
-            "home_00000000000000000000000000000001",
-        ])
-        .is_err());
-
-        let disable = Cli::try_parse_from([
-            "lf",
-            "work",
-            "disable",
-            "task",
-            "task_00000000000000000000000000000001",
-            "--json",
-        ])
-        .expect("parse Work disable");
-        assert!(matches!(
-            disable.command,
-            Some(Commands::Work {
-                cmd: WorkCommand::Disable { kind, id, json: true }
-            }) if kind == "task" && id == "task_00000000000000000000000000000001"
         ));
     }
 
@@ -3067,10 +2969,10 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "pm", "init", "--all"]).expect("parse");
-        let Some(Commands::Pm {
+        let cli = Cli::try_parse_from(["lf", "wave", "connect", "--all"]).expect("parse");
+        let Some(Commands::Wave {
             cmd:
-                PmCommand::Init {
+                WaveCommand::Connect {
                     wave,
                     wave_flag,
                     all,
@@ -3093,8 +2995,8 @@ mod tests {
     fn pm_init_accepts_team_key_and_name() {
         let cli = Cli::try_parse_from([
             "lf",
-            "pm",
-            "init",
+            "wave",
+            "connect",
             "--wave",
             "product",
             "--team-key",
@@ -3103,9 +3005,9 @@ mod tests {
             "Product",
         ])
         .expect("parse");
-        let Some(Commands::Pm {
+        let Some(Commands::Wave {
             cmd:
-                PmCommand::Init {
+                WaveCommand::Connect {
                     team_key,
                     team_name,
                     ..
@@ -3121,66 +3023,23 @@ mod tests {
 
     #[test]
     fn pm_reteam_defaults_to_dry_run() {
-        let cli = Cli::try_parse_from(["lf", "pm", "reteam"]).expect("parse");
-        let Some(Commands::Pm {
-            cmd: PmCommand::Reteam { apply },
+        let cli = Cli::try_parse_from(["lf", "repo", "reteam"]).expect("parse");
+        let Some(Commands::Repo {
+            cmd: RepoCommand::Reteam { apply },
         }) = cli.command
         else {
             panic!("expected pm reteam command");
         };
         assert!(!apply);
 
-        let cli = Cli::try_parse_from(["lf", "pm", "reteam", "--apply"]).expect("parse apply");
-        let Some(Commands::Pm {
-            cmd: PmCommand::Reteam { apply },
+        let cli = Cli::try_parse_from(["lf", "repo", "reteam", "--apply"]).expect("parse apply");
+        let Some(Commands::Repo {
+            cmd: RepoCommand::Reteam { apply },
         }) = cli.command
         else {
             panic!("expected pm reteam command");
         };
         assert!(apply);
-    }
-
-    #[test]
-    fn pm_show_parses_refresh_modes() {
-        let cli = Cli::try_parse_from(["lf", "pm", "show", "--wave", "goals"]).expect("parse");
-        let Some(Commands::Pm {
-            cmd:
-                PmCommand::Show {
-                    wave,
-                    json,
-                    sync,
-                    no_sync,
-                },
-        }) = cli.command
-        else {
-            panic!("expected pm show command");
-        };
-        assert_eq!(wave.as_deref(), Some("goals"));
-        assert!(!json);
-        assert!(!sync);
-        assert!(!no_sync);
-
-        let cli = Cli::try_parse_from(["lf", "pm", "show", "--sync"]).expect("force sync");
-        let Some(Commands::Pm {
-            cmd: PmCommand::Show { sync, no_sync, .. },
-        }) = cli.command
-        else {
-            panic!("expected pm show command");
-        };
-        assert!(sync);
-        assert!(!no_sync);
-
-        let cli = Cli::try_parse_from(["lf", "pm", "show", "--no-sync"]).expect("cache-only read");
-        let Some(Commands::Pm {
-            cmd: PmCommand::Show { sync, no_sync, .. },
-        }) = cli.command
-        else {
-            panic!("expected pm show command");
-        };
-        assert!(!sync);
-        assert!(no_sync);
-
-        assert!(Cli::try_parse_from(["lf", "pm", "show", "--sync", "--no-sync"]).is_err());
     }
 
     #[test]

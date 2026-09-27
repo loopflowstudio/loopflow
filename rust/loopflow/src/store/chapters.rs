@@ -29,6 +29,19 @@ impl Store {
         .await
     }
 
+    pub async fn record_chapter_task_applied(
+        &self,
+        chapter: &Chapter,
+        issue_id: &str,
+    ) -> StoreResult<Chapter> {
+        let chapter = chapter.clone();
+        let issue_id = issue_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_chapter_task_applied(chapter, &issue_id)
+        })
+        .await
+    }
+
     pub async fn move_chapter_task(&self, task: &TaskId, project: &ProjectId) -> StoreResult<()> {
         let task = task.clone();
         let project = project.clone();

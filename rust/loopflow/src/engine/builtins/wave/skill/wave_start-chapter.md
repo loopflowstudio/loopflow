@@ -38,7 +38,7 @@ lf wave new-chapter --wave <wave> --chapter <id> --plan <plan.json> --dry-run --
 
 Return its exact receipt with the proposal. The API owns classification:
 started unfinished Tasks move with the same identity, worktree, PR and Flow;
-untouched backlog is abandoned/canceled; completed work stays historical;
+untouched backlog is retired locally and deleted from Linear; completed work stays historical;
 missing evidence stays unresolved. Preparing a Task alone is not execution.
 These are fixed lifecycle rules, not recommendations the proposal may override.
 New Tasks are freshly authored against the Wave objective and new KRs. Account for inherited

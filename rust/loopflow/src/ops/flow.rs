@@ -73,7 +73,10 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
             Ok(())
         }
         Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
-        Some(Commands::Doctor { json }) => crate::lf::commands::doctor::run(json)
+        Some(Commands::Doctor {
+            json,
+            planning: false,
+        }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
         Some(Commands::TelemetryScorecard { json }) => run_telemetry_scorecard(repo, json),
         _ => Err(unsupported()),

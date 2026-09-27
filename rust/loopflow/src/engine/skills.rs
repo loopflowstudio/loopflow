@@ -408,7 +408,7 @@ mod tests {
             let root = home.path().join(vendor).join("skills");
             let control = fs::read_to_string(root.join("loopflow/SKILL.md")).unwrap();
             assert!(control.contains("lf task restart"));
-            assert!(control.contains("lf work place"));
+            assert!(control.contains("lf wave place"));
             let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
             assert!(!implement.contains("lf task restart"));
             let learn = fs::read_to_string(root.join("record-learnings/SKILL.md")).unwrap();

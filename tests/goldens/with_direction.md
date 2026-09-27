@@ -95,7 +95,7 @@ can finish independently; never hand the whole seed to another agent, and never
 delegate the one blocker between you and completion. Resolve that blocker
 inline.
 
-`lf task`, `lf wave`, and `lf pm` are orchestration tools. Use
+`lf task`, `lf wave`, and `lf repo` are orchestration tools. Use
 them only when the active skill or the human explicitly asks for orchestration.
 Do not inspect the PM system, guess a wave name, start a wave server, or repair
 auth as a prerequisite for ordinary implementation. If explicitly requested
@@ -148,7 +148,7 @@ moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
-lf work place wave <wave-id> <home-id>          # change durable placement
+lf wave place <wave-id> <home-id>          # change durable placement
 lf start <wave>                                 # start it on this machine
 lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home

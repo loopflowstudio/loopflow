@@ -80,6 +80,7 @@ fn prepare_pr(
             // settles the Task without manufacturing an empty GitHub PR.
             clear_scratch(&repo_root, progress)?;
             crate::ops::task::task_complete(
+                &repo_root,
                 &issue,
                 "Completed over its merged pull request".to_string(),
             )?;

@@ -262,7 +262,7 @@ fn ensure_repository_team_compatible(wave: &Wave, target: &WaveLocator) -> Resul
     if let (Some(source_team), Some(target_team)) = (source_team, target_team) {
         if source_team != target_team {
             return Err(anyhow!(
-                "cannot rehome Wave {} from repository Team {} to {}; run `lf pm reteam` explicitly before relocating",
+                "cannot rehome Wave {} from repository Team {} to {}; run `lf repo reteam` explicitly before relocating",
                 wave.id(),
                 source_team,
                 target_team

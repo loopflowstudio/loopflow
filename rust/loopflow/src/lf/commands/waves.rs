@@ -729,7 +729,7 @@ async fn wave_tasks(store: &SharedStore, wave: &Wave, probe_pr_empty: bool) -> R
             Some(match result {
                 Err(error) => error.to_string(),
                 _ => format!(
-                    "no local chapter plan; run `lf pm sync --wave {}`",
+                    "no local chapter plan; run `lf wave sync --wave {}`",
                     wave.name()
                 ),
             }),
@@ -923,7 +923,7 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
         .items
         .retain(|item| item.project_id == chapter.project_id);
     if planning.projects.is_empty() {
-        anyhow::bail!("current chapter planning is unavailable; resume its transition or run `lf pm sync --wave {}`", wave.name());
+        anyhow::bail!("current chapter planning is unavailable; resume its transition or run `lf wave sync --wave {}`", wave.name());
     }
     Ok(Some(planning))
 }
@@ -931,7 +931,7 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
 fn decode_pm_planning(wave: &Wave, payload: &str) -> Result<PmSnapshot> {
     serde_json::from_str(payload).map_err(|err| {
         anyhow!(
-            "invalid PM snapshot for wave/{}; run `lf pm sync`: {err}",
+            "invalid PM snapshot for wave/{}; run `lf wave sync`: {err}",
             wave.name()
         )
     })
@@ -1053,10 +1053,7 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
         status,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
-        recovery: format!(
-            "lf work abandon task {} --reason \"Project is absent from the current PM snapshot\"",
-            task.id
-        ),
+        recovery: format!("lf task status {} --json", task.id),
     }
 }
 
@@ -2261,6 +2258,122 @@ mod tests {
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
     use crate::work::wave::Wave;
+
+    #[tokio::test]
+    async fn chapter_deletion_stays_absent_from_wave_and_roadmap_planning() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                database.clone(),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "product".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let mut item = crate::pm::PmItem {
+            id: "removed".into(),
+            identifier: "FIX-1".into(),
+            url: None,
+            name: "Untouched backlog".into(),
+            description: String::new(),
+            rank: 1,
+            completed: false,
+            state: Some("unstarted".into()),
+            project_id: "current".into(),
+            project: "current".into(),
+            team_id: "team".into(),
+            assignee: None,
+        };
+        let mut chapter = crate::work::chapter::Chapter {
+            predecessor_metrics: vec![],
+            id: crate::work::chapter::ChapterId::parse("one").unwrap(),
+            wave_id: wave.id().clone(),
+            wave: wave.name().into(),
+            project_id: "current".into(),
+            content: crate::ops::chapter::empty_plan(),
+            predecessors: vec![],
+            tasks: vec![crate::work::chapter::ChapterTask {
+                task: item.clone(),
+                disposition: crate::work::chapter::TaskDisposition::Abandon,
+                reason: "Untouched backlog expired".into(),
+                applied: true,
+                observed_at: 1,
+                at_boundary: true,
+            }],
+            phase: crate::work::chapter::ChapterPhase::Complete,
+            created_at: 1,
+            activated_at: Some(1),
+            completed_at: Some(2),
+            error: None,
+        };
+        let mut items = vec![item.clone()];
+        item.id = "completed".into();
+        item.identifier = "FIX-2".into();
+        item.completed = true;
+        item.state = Some("completed".into());
+        items.push(item);
+        let snapshot = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 1,
+            payload: serde_json::json!({"projects":[{
+                "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
+                "metric_targets":[], "flows":{"recommended":null}, "krs":[],
+                "initiative_ids":["initiative"], "team_ids":["team"]
+            }], "items":items})
+            .to_string(),
+        };
+        store.save_chapter(&chapter, true).await.unwrap();
+        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        // Old applied abandonment receipts do not imply native deletion.
+        let before = super::wave_tasks(&store, &wave, false).await.unwrap();
+        assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
+        chapter = store
+            .record_chapter_task_applied(&chapter, "removed")
+            .await
+            .unwrap();
+        for next_chapter in [false, true] {
+            if next_chapter {
+                chapter.id = crate::work::chapter::ChapterId::parse("two").unwrap();
+                chapter.project_id = "next".into();
+                chapter.tasks.clear();
+                store.save_chapter(&chapter, true).await.unwrap();
+            }
+            let mut stale = snapshot.clone();
+            let mut payload: serde_json::Value = serde_json::from_str(&stale.payload).unwrap();
+            payload["projects"][0]["id"] = serde_json::json!(chapter.project_id);
+            for item in payload["items"].as_array_mut().unwrap() {
+                item["project_id"] = serde_json::json!(chapter.project_id);
+            }
+            stale.payload = payload.to_string();
+            store.put_pm_snapshot(stale).await.unwrap();
+            let reopened = Arc::new(
+                crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    database.clone(),
+                ))
+                .await
+                .unwrap(),
+            );
+            let detail = super::wave_tasks(&reopened, &wave, false).await.unwrap();
+            let super::Evidence::Ok { items, .. } = detail.tasks else {
+                panic!("planning unavailable");
+            };
+            assert_eq!(items.len(), 1);
+            assert!(detail.unavailable_tasks.is_empty());
+            let roadmap = items
+                .into_iter()
+                .map(super::roadmap_task)
+                .collect::<Vec<_>>();
+            assert_eq!(roadmap[0].task.id, "completed");
+        }
+    }
 
     #[tokio::test]
     async fn wave_keeps_current_plan_visible_with_a_failed_preparing_chapter() {

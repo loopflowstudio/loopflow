@@ -81,7 +81,7 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 ```bash
 lf task prepare INF-123                               # durable Task Work + worktree, no controller
 lf task run INF-123                                   # start end-to-end Task automation
-lf task steer INF-123 "take the smaller approach"     # post a Linear comment for the Task advancer
+lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
@@ -152,7 +152,7 @@ In Loopflow.app, switching Sessions or closing a pane keeps its terminal live.
 | **Flow** | Chains skills together | `.lf/flows/*.yaml` |
 | **Wave** | Durable operating context: memory, cadence, chat, metrics | `wave/<name>/` |
 | **Chapter** | Fresh plan and KRs for one interval | Internal Linear Project, via `lf wave` |
-| **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf pm` |
+| **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf task` |
 | **Run** | Append-only evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
 | **Home** | Stable machine identity; its SSH route may move | local SQLite |
 

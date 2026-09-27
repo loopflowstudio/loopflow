@@ -34,7 +34,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 1. **Read wave configs.** For each member wave directory in the area:
    - `GOAL.md` — objective, cadence, policy, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
-   - `lf pm show --wave <wave> --json` — current chapter, KRs, and Tasks from SQLite
+   - `lf status <wave> --json` — current chapter, KRs, and Tasks from SQLite
    - `lf status <wave> --json` — the Wave-owned live metric portfolio
 
    Linear is the source of truth; there are no local Project or Task lists.

@@ -754,7 +754,7 @@ fn command_label(command: Option<&str>) -> String {
         return "lf".to_string();
     };
     let grouped = [
-        "home", "pm", "pr", "project", "radio", "task", "wave", "work",
+        "home", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
     ];
     let operation = grouped
         .contains(&command.as_str())

@@ -1353,8 +1353,12 @@ mod planning_tests {
                 replacement.version = 0;
                 replacement.claim = None;
                 let task = super::load_task(&self.store, &self.task_id).await?;
+                let stopped = self
+                    .store
+                    .release_task_worker(&self.task_id, position.claim.as_ref().unwrap())
+                    .await?;
                 self.store
-                    .restart_task_flow(&task, "fixture-checkpoint")
+                    .restart_task_flow(&task, Some(&stopped), "fixture-checkpoint")
                     .await?;
                 let replacement = self
                     .store
@@ -2794,7 +2798,14 @@ mod planning_tests {
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
 
-        store.restart_task_flow(&task, "deadbeef").await.unwrap();
+        let stopped = store
+            .release_task_worker(&task.id, &stale_claim)
+            .await
+            .unwrap();
+        store
+            .restart_task_flow(&task, Some(&stopped), "deadbeef")
+            .await
+            .unwrap();
         let replacement = store
             .set_flow_position(&task.id, human_flow.clone())
             .await

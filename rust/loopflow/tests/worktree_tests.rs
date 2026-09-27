@@ -3,10 +3,13 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 use std::{fs, path::PathBuf};
 
-use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
+use loopflow::engine::git::{
+    is_clean, origin_branch, worktree_add, worktree_move, worktree_remove, WorktreeBranch,
+};
 use loopflow::engine::worktrees::{
     create_named_worktree, list_worktrees, list_worktrees_local, prune_worktrees,
-    sibling_worktree_name_with_main, WorktreePrunePolicy,
+    push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
+    WorktreePrunePolicy,
 };
 use loopflow_test_support::TestRepo;
 
@@ -72,6 +75,60 @@ fn worktree_add_is_on_correct_branch() {
         .expect("git rev-parse");
     let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
     assert_eq!(branch, result.branch);
+}
+
+#[test]
+fn new_branches_never_track_their_main_or_stack_base() {
+    let repo = TestRepo::new();
+    git_stdout(repo.path(), &["branch", "parent"]);
+    git_stdout(repo.path(), &["push", "origin", "parent"]);
+    // Even an explicit user preference for inherited tracking cannot turn a
+    // Task's base into its upstream.
+    git_stdout(repo.path(), &["config", "branch.autoSetupMerge", "always"]);
+    let trees = tempfile::tempdir().unwrap();
+    for base in ["main", "parent"] {
+        let branch = format!("child-of-{base}");
+        let path = trees.path().join(&branch);
+        worktree_add(
+            repo.path(),
+            &path,
+            &branch,
+            WorktreeBranch::New {
+                start_point: &format!("origin/{base}"),
+            },
+        )
+        .unwrap();
+        assert_eq!(origin_branch(&path).unwrap(), None);
+        push_branch_with_upstream(&path, &branch).unwrap();
+        assert_eq!(
+            origin_branch(&path).unwrap().as_deref(),
+            Some(branch.as_str())
+        );
+        assert_eq!(
+            git_stdout(&path, &["rev-parse", "HEAD"]),
+            git_stdout(repo.path(), &["rev-parse", &format!("origin/{base}")])
+        );
+    }
+}
+
+#[test]
+fn upstream_sync_replaces_base_tracking_with_the_own_remote_branch() {
+    let repo = TestRepo::new();
+    repo.create_branch("child");
+    git_stdout(repo.path(), &["branch", "--set-upstream-to", "origin/main"]);
+    schedule_upstream_sync(repo.path().to_path_buf(), "child".to_string());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while origin_branch(repo.path()).unwrap().as_deref() != Some("child") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "own upstream was not published"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        git_stdout(repo.path(), &["rev-parse", "origin/child"]),
+        repo.head_sha()
+    );
 }
 
 #[test]

@@ -150,6 +150,17 @@ pub async fn resolve_work_selection(
             store.get_task_by_issue(value).await.map_err(run_error)?
         }
         .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
+        if store
+            .task_deletion(&task.wave_id, task.plan.id.as_str())
+            .await
+            .map_err(run_error)?
+            .is_some()
+        {
+            return Err(run_error(format!(
+                "Task {} was deleted and cannot be selected for execution",
+                task.plan.identifier
+            )));
+        }
         let wave = store
             .get_wave(&task.wave_id)
             .await
@@ -175,7 +186,7 @@ pub async fn resolve_work_selection(
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {} has no active PR", task.id)))?;
         let context = render_task_context(&task, &project.plan, &pr, wave.name(), &steers);
-        let cwd = if crate::engine::git::origin_branch(repo)
+        let cwd = if crate::engine::git::current_branch(repo)
             .ok()
             .flatten()
             .as_deref()
@@ -226,12 +237,12 @@ pub async fn resolve_work_selection(
     Err(run_error("select a Task or Wave"))
 }
 
-/// The Task whose current PR branch this checkout tracks, bound exactly as
+/// The Task whose current PR branch is checked out here, bound exactly as
 /// `--task` binds it. Jack decided on 2026-09-26 that an `lf` launch inside a
 /// Task worktree belongs to that Task; a branch no Task owns stays unbound, and
 /// so does a branch whose PR already landed with no PR after it (the checkout
-/// no longer tracks that Task's work). The binding's cwd is the checkout that
-/// proved it, never the registered path.
+/// no longer contains that Task's active work). The binding's cwd is the checkout
+/// that proved it, never the registered path.
 pub async fn resolve_checkout_binding(
     store: &SharedStore,
     repo: &Path,
@@ -514,6 +525,142 @@ mod tests {
         assert!(!runtime.context.contains("ADVANCER ONLY"));
         assert!(!prompts.context.contains("ADVANCER ONLY"));
         assert_eq!(store.task_steers(&task.id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolates the native Session and Ask environment.
+    async fn deleted_task_refuses_launch_selection_but_retains_run_attribution() {
+        let _environment = crate::journal::test_env_lock();
+        let (directory, store) = test_store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("jack/runtime-research");
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".into(),
+            repo.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let project = project(&wave, "runtime", "project-runtime");
+        store.create_project(&project).await.unwrap();
+        let task = task(&store, &wave, &project, repo.path().to_path_buf()).await;
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
+        let work = WorkRef::Task(task.id.clone());
+        let pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        std::fs::write(repo.path().join("authored.txt"), "keep this work").unwrap();
+
+        // Retirement alone is not confirmation, and historical identity is not
+        // itself permission to launch after native removal is confirmed.
+        store.abandon(&work, "fixture retirement").await.unwrap();
+        assert!(super::resolve_checkout_binding(&store, repo.path())
+            .await
+            .unwrap()
+            .is_some());
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
+                rusqlite::params![wave.id().as_str(), task.plan.id.as_str(), task.plan.identifier],
+            )
+            .unwrap();
+
+        for selector in [
+            task.id.as_str(),
+            task.plan.id.as_str(),
+            &task.plan.identifier,
+        ] {
+            let error = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("was deleted"));
+            let capture = crate::run_record::CaptureHandle::begin_at(
+                directory.path(),
+                crate::run_record::RunSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: repo.path().to_path_buf(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![crate::run_record::SubjectAttribution::declared(format!(
+                        "task:{selector}"
+                    ))],
+                    flow: crate::run_record::RunFlowMembership::Independent,
+                },
+            )
+            .unwrap();
+            let manifest = crate::run_record::read_manifest(&capture.artifact_dir()).unwrap();
+            assert_eq!(
+                crate::run_record::attributed_work(&store, &manifest).await,
+                Some(work.clone())
+            );
+            let previous = [
+                "LF_CONTROL_DB_PATH",
+                "LF_CONTROL_HOME",
+                "LF_HOME",
+                "LF_RUN_DIR",
+                "LF_RUN_ID",
+            ]
+            .map(|name| (name, std::env::var_os(name)));
+            std::env::set_var("LF_CONTROL_DB_PATH", directory.path().join("registry.db"));
+            std::env::set_var("LF_CONTROL_HOME", directory.path());
+            std::env::set_var("LF_HOME", directory.path());
+            std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
+            std::env::set_var("LF_RUN_ID", capture.run_id().as_str());
+            crate::run_record::write_provider_session(
+                &capture.artifact_dir(),
+                "saved-session",
+                None,
+            )
+            .unwrap();
+            let history = crate::run_record::read_provider_session(&capture.artifact_dir())
+                .unwrap()
+                .unwrap();
+            let resumed = crate::lf::commands::util::resume_session(
+                "codex",
+                None,
+                repo.path(),
+                &capture.run_id(),
+                &capture.artifact_dir(),
+                &history,
+            );
+            let asked = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                crate::ops::human_session::ask(&store, "Continue removed work", None),
+            )
+            .await;
+            for (name, value) in previous {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+            assert!(resumed.unwrap_err().to_string().contains("was deleted"));
+            assert!(asked
+                .expect("Ask must refuse before waiting")
+                .unwrap_err()
+                .to_string()
+                .contains("was deleted"));
+            assert!(
+                crate::run_record::read_provider_clients(&capture.artifact_dir())
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                !crate::run_record::provider_session_is_resolved(&capture.artifact_dir()).unwrap()
+            );
+        }
+        assert!(super::resolve_checkout_binding(&store, repo.path())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("was deleted"));
+        assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task.clone()));
+        assert_eq!(store.active_task_pr(&task.id).await.unwrap(), Some(pr));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("authored.txt")).unwrap(),
+            "keep this work"
+        );
     }
 
     #[tokio::test]

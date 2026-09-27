@@ -1252,19 +1252,12 @@ mod tests {
             "diff: false\ndiff_files: false\npaste: false\n",
         );
         let cli = Cli::parse_from(["lf", "--batch"]);
-        for caller in ["Jack", ""] {
+        for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
             let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
-            assert_eq!(
-                built.components.user_name.as_deref(),
-                if caller.is_empty() {
-                    None
-                } else {
-                    Some(caller)
-                }
-            );
-            assert!(!built.agent_config.task_prompt.contains("Host Owner"));
-            assert_eq!(built.agent_config.env["LF_USER_NAME"], caller);
+            assert_eq!(built.components.user_name.as_deref(), Some(expected));
+            assert!(built.agent_config.task_prompt.contains(expected));
+            assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
         }
         std::env::set_var("LF_USER_NAME", "Jack");
         let skill = Skill {
@@ -1538,6 +1531,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::durable::RUN_ID_ENV,
             crate::run_record::RUN_DIR_ENV,
             crate::run_record::PARENT_RUN_ID_ENV,
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
             "LF_WAVE_ID",
             "LF_ACCOUNT_LEASE",
         ];

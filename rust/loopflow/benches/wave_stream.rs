@@ -59,6 +59,7 @@ fn main() {
     println!("  connect replay   {replay} bytes");
 
     runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+        body: None,
         answers: Vec::new(),
     });
 

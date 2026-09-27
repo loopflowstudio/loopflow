@@ -51,11 +51,7 @@ struct WaveDetailPane: View {
     @State private var historyReference: String?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
-    // A shared singleton is externally owned, so it observes as an @ObservedObject.
-    // Wrapping it in @StateObject installs StateObject's create-and-own lifecycle
-    // during the first body pass, which fires the singleton's publisher mid-eval —
-    // an AttributeGraph dependency cycle at cold invocation and sheet presentation.
-    @ObservedObject private var terminalStore = TaskTerminalStore.shared
+    @StateObject private var terminalStore = TaskTerminalStore()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -343,68 +339,66 @@ struct WaveMetricPortfolioView: View {
 
     var body: some View {
         if !portfolio.metrics.isEmpty || !portfolio.contractIssues.isEmpty {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                portfolioHeader
-
-                if !official.isEmpty {
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        portfolioSectionLabel("Official measures", count: official.count)
-                        metricGroups(official)
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                WorkspaceSectionHeading(title: "Metrics", count: portfolio.metrics.count) {
+                    if presentation.requiresWorkCount > 0 {
+                        Label(
+                            countLabel(
+                                presentation.requiresWorkCount,
+                                singular: "measure needs work",
+                                plural: "measures need work"
+                            ),
+                            systemImage: "exclamationmark.circle.fill"
+                        )
+                        .font(Typography.caption(11))
+                        .foregroundStyle(Color.statusError)
                     }
-                    .accessibilityIdentifier("wave-metric-official")
                 }
+                .accessibilityIdentifier("wave-metric-summary")
 
-                if !candidates.isEmpty {
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        VStack(alignment: .leading, spacing: Spacing.xxs) {
-                            portfolioSectionLabel("Candidates", count: candidates.count)
-                            Text("Installed contracts still proving their instruments.")
-                                .font(Typography.caption(10))
-                                .foregroundStyle(palette.textSecondary)
+                Text(presentation.headline)
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+
+                if !portfolio.metrics.isEmpty {
+                    // One row per measure: official first, then candidates
+                    // still proving their instruments.
+                    VStack(spacing: 0) {
+                        WaveMetricTableHeader()
+                        ForEach(official) { metric in
+                            WaveMetricTableRow(metric: metric, candidate: false)
                         }
-                        metricGroups(candidates)
+                        ForEach(candidates) { metric in
+                            WaveMetricTableRow(metric: metric, candidate: true)
+                        }
                     }
-                    .padding(Spacing.md)
-                    .background(palette.surfaceMuted.opacity(0.48))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: CornerRadius.md)
-                            .stroke(palette.border.opacity(0.8), lineWidth: 1)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                    .accessibilityIdentifier("wave-metric-candidates")
+                    .workspacePanel()
+                    .accessibilityIdentifier(official.isEmpty ? "wave-metric-candidates" : "wave-metric-official")
                 }
 
                 if !portfolio.contractIssues.isEmpty {
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        HStack(spacing: Spacing.sm) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(Color.statusWarning)
-                            portfolioSectionLabel(
-                                "Contract issues",
-                                count: portfolio.contractIssues.count
-                            )
-                        }
-
-                        VStack(alignment: .leading, spacing: Spacing.sm) {
-                            ForEach(
-                                Array(portfolio.contractIssues.enumerated()),
-                                id: \.offset
-                            ) { _, issue in
-                                Text(issue.summary)
-                                    .font(Typography.caption(10))
-                                    .foregroundStyle(palette.text)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Label(
+                            countLabel(portfolio.contractIssues.count, singular: "contract issue", plural: "contract issues"),
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(Typography.caption(11).weight(.bold))
+                        .foregroundStyle(Color.statusWarning)
+                        ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
+                            Text(issue.summary)
+                                .font(Typography.caption(11))
+                                .foregroundStyle(palette.text)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .padding(Spacing.md)
-                    .background(Color.statusWarning.opacity(0.08))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: CornerRadius.md)
-                            .stroke(Color.statusWarning.opacity(0.25), lineWidth: 1)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                    .background(Color.statusWarning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(Color.statusWarning).frame(width: 2)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                     .accessibilityIdentifier("wave-metric-contract-issues")
                 }
             }
@@ -412,91 +406,106 @@ struct WaveMetricPortfolioView: View {
         }
     }
 
-    private var portfolioHeader: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text("Metrics")
-                    .font(Typography.sectionTitle(18))
-                    .foregroundStyle(palette.text)
-
-                Spacer()
-
-                if presentation.requiresWorkCount > 0 {
-                    Label(
-                        countLabel(
-                            presentation.requiresWorkCount,
-                            singular: "measure needs work",
-                            plural: "measures need work"
-                        ),
-                        systemImage: "exclamationmark.circle.fill"
-                    )
-                    .font(Typography.caption(10))
-                    .fontWeight(.medium)
-                    .foregroundStyle(Color.statusError)
-                }
-            }
-
-            Text(presentation.headline)
-                .font(Typography.body(12))
-                .foregroundStyle(palette.textSecondary)
-
-            HStack(spacing: Spacing.sm) {
-                summaryPill(countLabel(
-                    presentation.officialCount,
-                    singular: "official measure",
-                    plural: "official measures"
-                ))
-                summaryPill(countLabel(
-                    presentation.candidateCount,
-                    singular: "candidate",
-                    plural: "candidates"
-                ))
-                if presentation.contractIssueCount > 0 {
-                    summaryPill(
-                        countLabel(
-                            presentation.contractIssueCount,
-                            singular: "issue",
-                            plural: "issues"
-                        ),
-                        color: .statusWarning
-                    )
-                }
-            }
-        }
-        .accessibilityIdentifier("wave-metric-summary")
-    }
-
     private func countLabel(_ count: Int, singular: String, plural: String) -> String {
         "\(count) \(count == 1 ? singular : plural)"
     }
+}
 
-    private func summaryPill(_ text: String, color: Color? = nil) -> some View {
-        Text(text)
-            .font(Typography.caption(9))
-            .fontWeight(.medium)
-            .foregroundStyle(color ?? palette.textSecondary)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .background((color ?? palette.textSecondary).opacity(0.09))
-            .clipShape(Capsule())
-    }
+/// Column widths shared by the header and every metric row.
+private enum MetricColumns {
+    static let value: CGFloat = 96
+    static let target: CGFloat = 132
+    static let window: CGFloat = 64
+    static let state: CGFloat = 104
+}
 
-    private func portfolioSectionLabel(_ text: String, count: Int) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Text(text.uppercased())
-                .font(Typography.caption(9))
-                .fontWeight(.semibold)
-                .tracking(0.8)
-                .foregroundStyle(palette.textSecondary)
-            Text("\(count)")
-                .font(Typography.caption(9))
-                .foregroundStyle(palette.textSecondary)
+private struct WaveMetricTableHeader: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            cell("Measure").frame(maxWidth: .infinity, alignment: .leading)
+            cell("Value").frame(width: MetricColumns.value, alignment: .leading)
+            cell("Target").frame(width: MetricColumns.target, alignment: .leading)
+            cell("Window").frame(width: MetricColumns.window, alignment: .leading)
+            cell("State").frame(width: MetricColumns.state, alignment: .leading)
         }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, 7)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.border.opacity(0.8)).frame(height: 1) }
+        .accessibilityHidden(true)
     }
 
-    @ViewBuilder
-    private func metricGroups(_ metrics: [MetricReading]) -> some View {
-        ForEach(metrics) { metric in WaveMetricCard(metric: metric, owner: "Wave") }
+    private func cell(_ text: String) -> some View {
+        Text(text)
+            .textCase(.uppercase)
+            .font(Typography.caption(10.5).weight(.bold))
+            .tracking(0.6)
+            .foregroundStyle(palette.textTertiary)
+    }
+}
+
+private struct WaveMetricTableRow: View {
+    let metric: MetricReading
+    let candidate: Bool
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave")
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    Text(presentation.name)
+                        .font(Typography.body(13).weight(.bold))
+                        .foregroundStyle(palette.text)
+                        .lineLimit(1)
+                    if candidate {
+                        WorkspaceChip(text: "candidate", tone: .neutral)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(presentation.value)
+                    .font(Typography.code(12))
+                    .monospacedDigit()
+                    .foregroundStyle(palette.text)
+                    .frame(width: MetricColumns.value, alignment: .leading)
+                Text(presentation.target)
+                    .font(Typography.code(12))
+                    .foregroundStyle(palette.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: MetricColumns.target, alignment: .leading)
+                Text(presentation.window)
+                    .font(Typography.code(12))
+                    .foregroundStyle(palette.textSecondary)
+                    .frame(width: MetricColumns.window, alignment: .leading)
+                WorkspaceChip(text: presentation.state, tone: metric.evidence.tone)
+                    .frame(width: MetricColumns.state, alignment: .leading)
+            }
+            Text(detail(presentation))
+                .font(Typography.caption(11))
+                .foregroundStyle(metric.instrumented ? palette.textTertiary : Color.statusWarning)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let reason = presentation.reason {
+                Text(reason)
+                    .font(Typography.caption(11))
+                    .foregroundStyle(metric.evidence.stateColor)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, 8)
+        .overlay(alignment: .top) { Rectangle().fill(palette.border.opacity(0.45)).frame(height: 1) }
+        .accessibilityIdentifier("wave-metric")
+        .accessibilityElement(children: .combine)
+    }
+
+    private func detail(_ presentation: WaveMetricRowPresentation) -> String {
+        [presentation.description, presentation.instrumentState, presentation.freshness]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 }
 
@@ -565,94 +574,6 @@ struct WaveMetricRowPresentation: Equatable {
     }
 }
 
-private struct WaveMetricCard: View {
-    let metric: MetricReading
-    let owner: String
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        let presentation = WaveMetricRowPresentation(metric: metric, owner: owner)
-        HStack(spacing: 0) {
-            Rectangle()
-                .fill(metric.evidence.stateColor)
-                .frame(width: 3)
-
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Text(presentation.name)
-                        .font(Typography.body(13))
-                        .fontWeight(.semibold)
-                        .foregroundStyle(palette.text)
-                    Spacer(minLength: Spacing.xs)
-                    stateBadge(presentation.state)
-                }
-
-                Text(presentation.description)
-                    .font(Typography.body(11))
-                    .foregroundStyle(palette.textSecondary)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Text(presentation.value)
-                        .font(Typography.sectionTitle(18))
-                        .foregroundStyle(palette.text)
-                    Text("target \(presentation.target)")
-                        .font(Typography.caption(9))
-                        .foregroundStyle(palette.textSecondary)
-                    Spacer()
-                    Text("\(presentation.window) window")
-                        .font(Typography.caption(9))
-                        .foregroundStyle(palette.textSecondary)
-                }
-
-                HStack(spacing: Spacing.xs) {
-                    Text(presentation.instrumentState)
-                        .font(Typography.caption(9))
-                        .fontWeight(.medium)
-                        .foregroundStyle(metric.instrumented ? palette.textSecondary : Color.statusWarning)
-                    Text("·")
-                        .foregroundStyle(palette.textSecondary)
-                    Text(presentation.freshness)
-                        .font(Typography.caption(9))
-                        .foregroundStyle(palette.textSecondary)
-                        .lineLimit(1)
-                }
-
-                if let reason = presentation.reason {
-                    Text(reason)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(metric.evidence.stateColor)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(Spacing.md)
-        }
-        .background(palette.surface)
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .stroke(palette.border.opacity(0.85), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .accessibilityIdentifier("wave-metric")
-        .accessibilityElement(children: .combine)
-    }
-
-    private func stateBadge(_ state: String) -> some View {
-        Text(state.uppercased())
-            .font(Typography.caption(8))
-            .fontWeight(.bold)
-            .tracking(0.5)
-            .foregroundStyle(metric.evidence.stateColor)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .background(metric.evidence.stateColor.opacity(0.10))
-            .clipShape(Capsule())
-    }
-}
-
 private extension MetricReading {
     func format(_ value: Double) -> String {
         if unit == "ratio" {
@@ -695,6 +616,15 @@ private extension MetricEvidence {
         case .missed: return .statusError
         case .unknown, .untargeted: return .statusNeutral
         case .unavailable: return .statusWarning
+        }
+    }
+
+    var tone: WorkspaceTone {
+        switch self {
+        case .met: return .done
+        case .missed: return .blocked
+        case .unknown, .untargeted: return .neutral
+        case .unavailable: return .human
         }
     }
 
@@ -965,13 +895,22 @@ struct WaveChapterView: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Text("Chapter \(chapter.id)").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(chapter.krs) { kr in
-                Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
-                    .font(Typography.body(12)).textSelection(.enabled)
-                    .accessibilityValue(kr.holds ? "Holds" : "Open")
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Circle()
+                        .fill(kr.holds ? WorkspaceTone.done.ink : Color.clear)
+                        .overlay(Circle().strokeBorder(kr.holds ? WorkspaceTone.done.ink : palette.borderStrong, lineWidth: 1.5))
+                        .frame(width: 12, height: 12)
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    Text(kr.text)
+                        .font(Typography.body(13))
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(kr.holds ? "Holds" : "Open")
             }
             if chapter.phase != "complete" {
                 Text("Chapter transition in progress").foregroundStyle(Color.statusWarning)

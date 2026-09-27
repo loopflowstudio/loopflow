@@ -83,7 +83,7 @@ def SiteFooter():
     return Footer(
         Div(
             Div(
-                P("Loopflow — Living software. Conducted by you."),
+                P("Loopflow, a software instrument."),
                 P(
                     "Built by ",
                     A(
@@ -149,6 +149,9 @@ def _require_content_path(path: str) -> object:
 HERO_CONTENT = _require_content_path("homepage.hero")
 SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
 PILLARS_CONTENT = _require_content_path("homepage.pillars")
+PROBLEMS_CONTENT = _require_content_path("homepage.problems")
+DEFINITION_CONTENT = _require_content_path("homepage.definition")
+SCALE_CONTENT = _require_content_path("homepage.scale")
 BUILDING_BLOCKS_CONTENT = _require_content_path("homepage.building_blocks")
 INSTALL_CONTENT = _require_content_path("homepage.install")
 
@@ -158,6 +161,12 @@ for required_key in (
     "homepage.hero.loopflow_download_url",
     "homepage.showcase.items",
     "homepage.pillars.items",
+    "homepage.pillars.diagram_alt",
+    "homepage.problems.items",
+    "homepage.definition.paragraphs",
+    "homepage.definition.diagram_alt",
+    "homepage.scale.text",
+    "homepage.install.facts",
     "homepage.building_blocks.items",
     "homepage.install.command_display",
     "homepage.install.command_copy",
@@ -199,35 +208,35 @@ DOCS_AREAS = (
     DocArea(
         "Start",
         "start",
-        "Install Loopflow and follow one useful command all the way through.",
+        "Install Loopflow and take one piece of work from start to finish.",
         (
-            DocPage("Overview", "index", "The model and where to read next"),
+            DocPage("Overview", "index", "What Loopflow is, its pieces, and where to read next"),
             DocPage(
                 "Get started",
                 "getting-started",
-                "Install, run a Skill, build a feature, and go remote",
+                "Install it and take one piece of work from start to finish",
             ),
         ),
     ),
     DocArea(
         "Plan and conduct",
         "conduct",
-        "Give long-running work a purpose, then observe and redirect it.",
+        "Give Loopflow a goal to keep working on, then see where it stands and step in.",
         (
-            DocPage("Waves", "waves", "Goals, memory, Projects, Tasks, KRs, and cadence"),
+            DocPage("Waves", "waves", "Goals Loopflow keeps working on, and what they remember"),
             DocPage(
                 "Conducting",
                 "conducting",
-                "Monitor and steer work from the CLI, tmux, or Mac app",
+                "See what got done, what needs you, and how to step in",
             ),
         ),
     ),
     DocArea(
         "Build and extend",
         "extend",
-        "Turn your own operating knowledge into reusable Skills and agent workflows.",
+        "Change how Loopflow works: every step is a text file.",
         (
-            DocPage("Authoring", "authoring", "Write Skills, Flows, and goals"),
+            DocPage("Authoring", "authoring", "Write your own steps, flows, and goals"),
             DocPage(
                 "The Agent API",
                 "agent-api",
@@ -238,8 +247,9 @@ DOCS_AREAS = (
     DocArea(
         "Reference",
         "reference",
-        "Look up exact commands, settings, identities, boundaries, and repairs.",
+        "Look up exact words, commands, settings, and fixes.",
         (
+            DocPage("Glossary", "glossary", "Every term, in one plain sentence"),
             DocPage("lf command reference", "lf", "Commands, flags, and builtins"),
             DocPage("Configuration", "config", "Context, models, profiles, and launch behavior"),
             DocPage(
@@ -332,7 +342,7 @@ def generate_llms_txt() -> str:
         if doc_path(slug)
     )
     return f"""# Loopflow
-> Durable Work, replaceable agents, no central server. lf is the CLI for daily work and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Home-local evidence.
+> A software instrument that runs on your machine: durable Work, replaceable agents. lf is the CLI for daily work and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Home-local evidence.
 
 Loopflow runs one Skill through a provider and records that launch in an
 immutable Home-local Run record. Stable Wave, Project, and Task Work preserves
@@ -866,6 +876,16 @@ def _capture_figure(item):
     )
 
 
+def _flow_diagram(name: str, description: str):
+    """Inline a static flow diagram so it takes the page's fonts and colors."""
+    svg = (STATIC_DIR / name).read_text()
+    return Figure(
+        NotStr(svg),
+        Figcaption(description, cls="visually-hidden"),
+        cls="flow-figure",
+    )
+
+
 def _screenshot_section():
     """One product shot under the hero; a missing capture never renders."""
     for item in SHOWCASE_CONTENT["items"]:
@@ -883,7 +903,7 @@ def build_homepage():
     building_blocks = BUILDING_BLOCKS_CONTENT["items"]
 
     return (
-        Title("Loopflow — Living software, conducted by you"),
+        Title("Loopflow, a software instrument"),
         SkipLink(),
         Navbar(),
         Main(
@@ -903,12 +923,11 @@ def build_homepage():
                 ),
                 cls="hero",
             ),
-            # Demo — one product capture, when present
-            _screenshot_section(),
-            # Pillars
+            # One task at a time — the people-only diagram and its three steps
             Section(
                 Div(
                     H2(PILLARS_CONTENT["heading"]),
+                    _flow_diagram("loopflow-steps.svg", PILLARS_CONTENT["diagram_alt"]),
                     Div(
                         *[
                             CapabilityItem(item["title"], item["description"])
@@ -919,7 +938,58 @@ def build_homepage():
                 ),
                 cls="capabilities-section",
             ),
-            # Building blocks — wave → project → task → skill
+            # What it helps with — each problem beside what Loopflow does about it
+            Section(
+                Div(
+                    H2(PROBLEMS_CONTENT["heading"]),
+                    Div(
+                        *[
+                            Div(
+                                H3(item["title"]),
+                                P(item["problem"], cls="problem"),
+                                P(item["solve"], cls="solve"),
+                                cls="problem-item",
+                            )
+                            for item in PROBLEMS_CONTENT["items"]
+                        ],
+                        cls="problems-grid",
+                    ),
+                ),
+                cls="problems-section",
+            ),
+            # Install — the app first; the command line tool rides along
+            Section(
+                Div(
+                    H2(INSTALL_CONTENT["heading"], cls="quick-install-heading"),
+                    Div(
+                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
+                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
+                        cls="hero-actions",
+                    ),
+                    P(INSTALL_CONTENT["facts"], cls="install-facts"),
+                    P(INSTALL_CONTENT["note"], cls="install-note"),
+                    P(INSTALL_CONTENT["cli_label"], cls="install-note"),
+                    Div(
+                        Pre(Code(install_display), cls="install-code", tabindex="0"),
+                        CopyButton(install_copy),
+                        cls="install-code-wrapper",
+                    ),
+                    cls="container",
+                ),
+                cls="quick-install",
+            ),
+            # The technical definition, beside the full flow
+            Section(
+                Div(
+                    H2(DEFINITION_CONTENT["heading"]),
+                    _flow_diagram("loopflow-full.svg", DEFINITION_CONTENT["diagram_alt"]),
+                    *[P(paragraph) for paragraph in DEFINITION_CONTENT["paragraphs"]],
+                    H2(SCALE_CONTENT["heading"], cls="scale-heading"),
+                    P(SCALE_CONTENT["text"]),
+                ),
+                cls="definition-section",
+            ),
+            # Building blocks — skill → flow → task → wave
             Section(
                 Div(
                     H2(BUILDING_BLOCKS_CONTENT["heading"]),
@@ -937,26 +1007,8 @@ def build_homepage():
                 ),
                 cls="building-blocks-section",
             ),
-            # Bottom CTA — the app first; the CLI rides along
-            Section(
-                Div(
-                    H2(INSTALL_CONTENT["heading"], cls="quick-install-heading"),
-                    Div(
-                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
-                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                        cls="hero-actions",
-                    ),
-                    P(INSTALL_CONTENT["note"], cls="install-note"),
-                    P(INSTALL_CONTENT["cli_label"], cls="install-note"),
-                    Div(
-                        Pre(Code(install_display), cls="install-code", tabindex="0"),
-                        CopyButton(install_copy),
-                        cls="install-code-wrapper",
-                    ),
-                    cls="container",
-                ),
-                cls="quick-install",
-            ),
+            # Demo — one product capture, when present
+            _screenshot_section(),
             id="main-content",
         ),
         SiteFooter(),
@@ -1170,11 +1222,26 @@ def get():
                 Div(
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
                     H1("Install"),
-                    P("Local-first. No central server. Nothing to register.", cls="tagline"),
+                    P("Runs on your computer. Nothing to register.", cls="tagline"),
                     Div(
-                        H2("CLI"),
+                        Div(
+                            H2("Mac app"),
+                            P(
+                                "Start here. The app shows your goals, your tasks, and what needs you, "
+                                "and it includes the command line tool.",
+                                cls="install-desc",
+                            ),
+                            A(
+                                "Download for Mac",
+                                href=HERO_CONTENT["loopflow_download_url"],
+                                cls="btn btn-primary",
+                            ),
+                            cls="mac-app-option",
+                        ),
+                        H2("Command line"),
                         P(
-                            "The CLI for daily work and the API agents call. Best for: daily work, waves, and everything headless.",
+                            "The same tool without the app, for macOS or Linux. "
+                            "Everything the app does, it does by running these commands.",
                             cls="install-desc",
                         ),
                         Div(
@@ -1186,28 +1253,19 @@ def get():
                             CopyButton("curl -fsSL https://loopflow.studio/install.sh | sh"),
                             cls="install-code-wrapper",
                         ),
-                        P("macOS or Linux · Claude Code, Codex, or OpenCode", cls="system-req"),
                         Div(
-                            P("Then:", cls="next-skill-label"),
+                            P("Then, inside a project:", cls="next-skill-label"),
                             Pre(
-                                Code("cd your-project\nlf init\nlf debug -c"),
+                                Code("cd your-project\nlf init"),
                                 cls="install-code next-skills",
                                 tabindex="0",
                             ),
                             cls="next-skills-wrapper",
                         ),
-                        Div(
-                            H2("Mac app"),
-                            P(
-                                "The podium: wave chat, the machine-wide roadmap, and every task's worktree — a pure client over the same local state.",
-                                cls="install-desc",
-                            ),
-                            A(
-                                "Download for Mac",
-                                href=HERO_CONTENT["loopflow_download_url"],
-                                cls="btn btn-secondary",
-                            ),
-                            cls="mac-app-option",
+                        P(
+                            "Before you start: an AI coding tool (Claude Code or Codex), signed in, "
+                            "and a project that uses Git.",
+                            cls="system-req",
                         ),
                         cls="install-option",
                         style="max-width: 420px; margin: 0 auto;",

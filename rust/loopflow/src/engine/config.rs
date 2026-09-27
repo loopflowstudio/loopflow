@@ -6,9 +6,12 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(test))]
+use crate::engine::agent::check_cli_available;
 use crate::engine::error::LoadError;
 
 /// Request participant carried across foreground launches, including SSH.
@@ -20,18 +23,29 @@ struct UserConfig {
     name: Option<String>,
 }
 
-/// Read the explicitly chosen name from personal configuration only.
+/// Resolve a display name from personal Loopflow configuration or Git's user.name.
 pub fn load_user_name() -> Result<Option<String>, LoadError> {
-    let Some(config) = load_yaml_file(&global_config_path())? else {
+    if let Some(config) = load_yaml_file(&global_config_path())? {
+        if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
+            let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
+                LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
+            })?;
+            if let Some(name) = user.name.as_deref().and_then(normalize_user_name) {
+                return Ok(Some(name));
+            }
+        }
+    }
+    let Some(output) = Command::new("git")
+        .args(["config", "--get", "user.name"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+    else {
         return Ok(None);
     };
-    let Some(user) = config.get("user").filter(|value| !value.is_null()) else {
-        return Ok(None);
-    };
-    let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
-        LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
-    })?;
-    Ok(user.name.as_deref().and_then(normalize_user_name))
+    Ok(std::str::from_utf8(&output.stdout)
+        .ok()
+        .and_then(normalize_user_name))
 }
 
 /// Resolve a direct invocation's participant before execution moves Homes.
@@ -50,9 +64,21 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Agent used when neither the caller, config, nor skill chooses one.
+/// Agents Loopflow can drive, in the order it prefers them.
+const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
+
+/// Agent used when neither the caller, config, nor skill chooses one: the
+/// first known agent installed on this machine.
 pub fn default_agent() -> &'static str {
-    "codex"
+    #[cfg(test)]
+    let is_installed = |agent: &str| agent == KNOWN_AGENTS[0];
+    #[cfg(not(test))]
+    let is_installed = check_cli_available;
+    installed_agent(is_installed).unwrap_or(KNOWN_AGENTS[0])
+}
+
+fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
+    KNOWN_AGENTS.into_iter().find(|agent| is_installed(agent))
 }
 
 /// Keys that combine lists from global + repo config.
@@ -464,6 +490,13 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_agent_is_the_one_installed() {
+        assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
+        assert_eq!(installed_agent(|_| true), Some("codex"));
+        assert_eq!(installed_agent(|_| false), None);
+    }
 
     // ==========================================================================
     // parse_agent tests

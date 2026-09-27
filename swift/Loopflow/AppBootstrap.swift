@@ -72,6 +72,8 @@ extension Bundle {
     }
 }
 
+/// The bundled weights are the only ones `Typography` may request; anything
+/// else is synthesized by CoreText and renders heavier than the design.
 enum AppFontRegistration {
     private static let fontFiles = [
         "CormorantGaramond-Regular.otf",

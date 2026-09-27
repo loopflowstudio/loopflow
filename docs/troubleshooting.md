@@ -51,9 +51,7 @@ Steer, or resume a stopped process through the same Task Work:
 
 ```bash
 lf session open <session-id>
-lf session complete <interactive-or-ask-id>
-lf session approve <flowstep-id> "Verified summary"
-lf session iterate <flowstep-id> "Narrow the design"
+lf session complete <session-id>    # return saved review or Ask feedback
 lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123
@@ -163,15 +161,18 @@ See [Configuration](config.md) for context options.
 
 ## Claude Code not found
 
-**Symptom:** `lf` fails with "claude not found" or similar.
+**Symptom:** `lf` fails with "'claude' is not installed" or similar.
 
-Run the setup wizard:
+Loopflow drives an AI coding tool and needs one installed. The error names
+the install command. For Claude Code:
 
 ```bash
-lf init
+npm install -g @anthropic-ai/claude-code
+lf auth claude
 ```
 
-If an agent CLI is missing, install that vendor's CLI and rerun `lf init`.
+With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and
+OpenCode it finds, so installing any one of them is enough.
 
 ## See Also
 

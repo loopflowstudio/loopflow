@@ -276,11 +276,11 @@ Test skill body.
                 )
                 .unwrap();
                 assert_eq!(prepared.components.user_name.as_deref(), Some("Jack"));
-                assert!(prepared.prompt.contains("preferred name is \"Jack\""));
+                assert!(prepared.prompt.contains("display name is \"Jack\""));
                 assert!(prepared
                     .config
                     .task_prompt
-                    .contains("preferred name is \"Jack\""));
+                    .contains("display name is \"Jack\""));
                 assert!(!prepared.config.system_prompt.contains("<lf:user>"));
                 assert_eq!(
                     prepared.config.env[crate::engine::config::USER_NAME_ENV],

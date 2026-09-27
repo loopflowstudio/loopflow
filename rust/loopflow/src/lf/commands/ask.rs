@@ -12,7 +12,7 @@ pub fn run(args: &AskArgs) -> anyhow::Result<()> {
 async fn run_async(args: &AskArgs) -> anyhow::Result<()> {
     let question = args.question.join(" ").trim().to_string();
     let store = open_shared_store().await?;
-    let summary = crate::ops::human_session::ask(&store, &question).await?;
+    let summary = crate::ops::human_session::ask(&store, &question, args.skill.as_deref()).await?;
     println!("Session complete: {summary}");
     Ok(())
 }

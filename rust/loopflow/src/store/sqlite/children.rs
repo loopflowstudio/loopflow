@@ -147,16 +147,18 @@ impl SqliteStore {
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
         update_task_timestamp_in(&transaction, task)?;
+        let position = super::durable::flow_position_in(&transaction, &task.id)?
+            .ok_or(StoreError::NotFound)?;
         super::durable::finish_task_flow_in(&transaction, &task.id, expected)?;
-        if let Some(summary) = progress.filter(|summary| !summary.is_empty()) {
-            insert_task_event_in(
-                &transaction,
-                task,
-                &TaskEventKind::Progress {
-                    summary: summary.to_string(),
-                },
-            )?;
-        }
+        insert_task_event_in(
+            &transaction,
+            task,
+            &TaskEventKind::FlowFinished {
+                invocation_id: position.invocation.id,
+                flow: position.invocation.flow,
+                summary: progress.unwrap_or_default().to_string(),
+            },
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -198,14 +200,49 @@ impl SqliteStore {
         Ok(position)
     }
 
-    pub fn approve_human_task_boundary(
+    pub fn complete_human_task_boundary(
         &self,
         task: &Task,
         expected: &FlowPosition,
         next: &FlowPosition,
         summary: &str,
     ) -> StoreResult<FlowPosition> {
-        self.settle_human_task_boundary(task, expected, next, Some(summary))
+        validate_task(task)?;
+        if expected.task_id != task.id
+            || !expected.is_human()
+            || expected.claim.is_some()
+            || expected.failure.is_some()
+        {
+            return Err(StoreError::InvalidAuthority(
+                "human Task settlement requires its exact unclaimed position".to_string(),
+            ));
+        }
+        if next.version != expected.version {
+            return Err(StoreError::InvalidAuthority(
+                "human Task settlement has a stale position version".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = super::durable::flow_position_in(&transaction, &task.id)?
+            .ok_or(StoreError::NotFound)?;
+        if current != *expected {
+            return Err(StoreError::InvalidAuthority(
+                "human Task position changed before settlement".to_string(),
+            ));
+        }
+        validate_task_project(&transaction, task)?;
+        update_task_timestamp_in(&transaction, task)?;
+        let position = super::durable::set_flow_position_in(&transaction, &task.id, next)?;
+        insert_task_event_in(
+            &transaction,
+            task,
+            &TaskEventKind::Progress {
+                summary: summary.to_string(),
+            },
+        )?;
+        transaction.commit()?;
+        Ok(position)
     }
 
     pub fn finish_human_task_boundary(
@@ -250,21 +287,14 @@ impl SqliteStore {
         insert_task_event_in(
             &transaction,
             task,
-            &TaskEventKind::Progress {
+            &TaskEventKind::FlowFinished {
+                invocation_id: expected.invocation.id.clone(),
+                flow: expected.invocation.flow.clone(),
                 summary: summary.to_string(),
             },
         )?;
         transaction.commit()?;
         Ok(())
-    }
-
-    pub fn iterate_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        next: &FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        self.settle_human_task_boundary(task, expected, next, None)
     }
 
     pub fn retry_task_flow(
@@ -288,6 +318,8 @@ impl SqliteStore {
         }
         let mut next = expected.clone();
         next.failure = None;
+        next.cursor.leaf_mut().progress.verdict = None;
+        next.cursor.leaf_mut().route = None;
         next.updated_at = OffsetDateTime::now_utc();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -299,53 +331,6 @@ impl SqliteStore {
             ));
         }
         let position = super::durable::set_flow_position_in(&transaction, task_id, &next)?;
-        transaction.commit()?;
-        Ok(position)
-    }
-
-    fn settle_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        next: &FlowPosition,
-        progress: Option<&str>,
-    ) -> StoreResult<FlowPosition> {
-        validate_task(task)?;
-        if expected.task_id != task.id
-            || !expected.is_human()
-            || expected.claim.is_some()
-            || expected.failure.is_some()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task review decision requires its exact unclaimed position".to_string(),
-            ));
-        }
-        if next.version != expected.version {
-            return Err(StoreError::InvalidAuthority(
-                "Task review decision has a stale position version".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::durable::flow_position_in(&transaction, &task.id)?
-            .ok_or(StoreError::NotFound)?;
-        if current != *expected {
-            return Err(StoreError::InvalidAuthority(
-                "Task review position changed before settlement".to_string(),
-            ));
-        }
-        validate_task_project(&transaction, task)?;
-        update_task_timestamp_in(&transaction, task)?;
-        let position = super::durable::set_flow_position_in(&transaction, &task.id, next)?;
-        if let Some(summary) = progress {
-            insert_task_event_in(
-                &transaction,
-                task,
-                &TaskEventKind::Progress {
-                    summary: summary.to_string(),
-                },
-            )?;
-        }
         transaction.commit()?;
         Ok(position)
     }

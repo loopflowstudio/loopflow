@@ -1,11 +1,8 @@
-// RegistryQuery — discovery and history as `lf` queries over the machine
-// registry store, not a streaming center.
+// RegistryQuery — typed `lf` reads over the machine registry.
 //
-// The wave model has no telemetry hub (see `scratch/eventing.md`): durable
-// facts — which waves exist (running and stopped) and their work
-// — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
-// CLI. The Podium re-queries the bounded process snapshot for live output;
-// Wave conversation motion remains a per-wave SSE stream (`WaveChatConnection`).
+// Planning and history are one-shot queries. Active Runs use one foreground
+// observation per window so native receipt discovery survives between samples.
+// Wave conversations retain their per-wave SSE stream (`WaveChatConnection`).
 //
 // This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
@@ -30,15 +27,22 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
+    private let observe: @Sendable () async throws -> ActiveRunsObservation
 
-    public init(run: @escaping RegistryRunner) {
+    public init(
+        watchActiveRuns: @escaping @Sendable () async throws -> ActiveRunsObservation = {
+            throw RegistryQueryError("Active Run observation is unavailable on this transport")
+        },
+        run: @escaping RegistryRunner
+    ) {
         self.run = run
+        self.observe = watchActiveRuns
     }
 
-    /// Every wave the registry knows across the machine. Callers that need
-    /// several repo slices should call this once and filter locally.
+    /// Current Waves across the machine, including stopped Waves. The shared
+    /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await run(["ls", "--all", "--json"], nil)
+        let stdout = try await run(["ls", "--all", "--current", "--json"], nil)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }
@@ -126,8 +130,12 @@ public struct RegistryQuery: Sendable {
     }
 
     public func userName() async throws -> String? {
-        let stdout = try await run(["name", "--json"], nil)
+        let stdout = try await run(["user", "name", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
+    }
+
+    public func watchActiveRuns() async throws -> ActiveRunsObservation {
+        try await observe()
     }
 
     /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
@@ -174,6 +182,49 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
+    /// Every selectable Flow with the topology it would pin, via the shared loader.
+    public func flowCatalog(cwd: String?) async throws -> [FlowCatalogEntry] {
+        let stdout = try await run(["flow", "list", "--json"], cwd)
+        return try Self.decode([FlowCatalogEntry].self, from: stdout)
+    }
+
+    /// Start (preparing when needed) the Task's managed Flow.
+    public func runTaskFlow(issue: String, flow: String, cwd: String?) async throws {
+        _ = try await run(["task", "run", issue, "--flow", flow], cwd)
+    }
+
+    /// Checkpoint, stop, and replace the pinned Flow. Rust validates `flow`
+    /// before any side effect.
+    public func restartTaskFlow(issue: String, flow: String, cwd: String?) async throws {
+        _ = try await run(["task", "restart", issue, "--flow", flow], cwd)
+    }
+
+    /// Continue the pinned Flow from its saved boundary.
+    public func resumeTaskFlow(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "resume", issue], cwd)
+    }
+
+    /// One planning Task's complete comment thread. Read-only; works before
+    /// the Task is prepared or started.
+    public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
+        let stdout = try await run(["pm", "task", "comments", "--id", id, "--wave", wave, "--json"], cwd)
+        return try Self.decode(TaskComments.self, from: stdout)
+    }
+
+    /// Recent Runs attributed to one Task through the shared `lf runs` reader:
+    /// the last seven days, newest first, capped. Read-only; an unstarted Task
+    /// is neither prepared nor started by asking.
+    public func taskRuns(task: String, cwd: String?) async throws -> [RunSnapshot] {
+        let stdout = try await run(["runs", "--task", task, "--json"], cwd)
+        return try Self.decode([RunSnapshot].self, from: stdout)
+    }
+
+    public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
+        _ = try await run([
+            "pm", "task", "update", "--id", id, "--wave", wave, "--notes=\(text)",
+        ], cwd)
+    }
+
     /// One Task's complete patch, or the patch for a selected changed file.
     public func taskDiff(
         issue: String,
@@ -215,18 +266,18 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Decide one Task FlowStep and release its controller.
-    public func resolveFlowSession(
+    /// Give one Session a human-assigned name and return the authoritative
+    /// record. A Run ID reaches the Ask or Flow boundary that owns it.
+    public func renameSession(
         id: String,
-        approving: Bool,
-        text: String,
+        name: String,
         cwd: String? = nil
-    ) async throws {
-        let verb = approving ? "approve" : "iterate"
-        _ = try await run(["session", verb, id, text], cwd)
+    ) async throws -> SessionRecord {
+        let stdout = try await run(["session", "rename", "--json", "--", id, name], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Complete one interactive or ad-hoc Ask session.
+    /// Complete an interactive conversation, Flow review, or blocked Ask.
     public func completeSession(
         id: String,
         cwd: String? = nil
@@ -516,7 +567,7 @@ public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-public struct RunSubjectAttribution: Decodable, Sendable, Hashable {
+public struct RunSubjectAttribution: Codable, Sendable, Hashable {
     public let selector: String
     public let source: String
 }

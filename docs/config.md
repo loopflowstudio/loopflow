@@ -1,16 +1,24 @@
 # Configuration
 
-Remember a preferred name in personal configuration (`$LF_HOME/config.yaml`,
-or `~/.lf/config.yaml` when `LF_HOME` is unset):
+```bash
+lf user name          # show the resolved display name
+lf user name --json   # name as a JSON string, or null when unavailable
+```
+
+Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
+including repository overrides. Agents can use a familiar name such as `Jack`
+in prose. No first name or username is derived from this value. Override it
+in personal Loopflow configuration (`$LF_HOME/config.yaml`, or
+`~/.lf/config.yaml` when `LF_HOME` is unset):
 
 ```yaml
 user:
   name: Jack
 ```
 
-Edit `user.name` to correct it; remove it or leave it blank to clear it. Keep
-other settings in the file. Repo configuration cannot supply or override this
-name. Direct interactive and batch launches use the preference, and `lf ssh`
+Edit `user.name` to correct it; remove it or leave it blank to use Git again.
+Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
+preference. Direct interactive and batch launches use the resolved name, and `lf ssh`
 carries the caller's name rather than reading the destination owner's name.
 Names describe people; they do not grant authority or establish who wrote an
 older request. Unattributed background Task and Wave work remains unattributed.
@@ -18,13 +26,12 @@ older request. Unattributed background Task and Wave work remains unattributed.
 Persisted artifacts use the person's name; session replies use “you.” Stored
 transcripts retain their conversational wording.
 
-Opening or resuming a native session supplies a participant update from the
-current caller's preference, including an explicit unknown name when absent.
-This replaces earlier current-participant context without changing historical
-authorship. The update instructs the agent to wait for the next request;
-opening a session does not approve a review.
+Opening, moving, or resuming a native session preserves the conversation without
+submitting a prompt or resetting its participant. Agents can use a name they
+already know or the configured name; no reconciliation is required. Opening a
+session does not approve a review.
 
-`lf name --json` reads the saved preference without provider or PM access.
+`lf user name --json` resolves the name without provider or PM access.
 The Mac chat composer uses this local query when sending a message; CLI chat
 captures the caller's name before posting to a listener. The name travels with
 the message and survives replay. Old messages without names stay anonymous.
@@ -288,7 +295,7 @@ Set the default harness, with an optional model.
 |---|---|
 | **CLI** | `lf gate -m codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then `codex`) |
+| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode` installed on this machine) |
 
 ```yaml
 agent: codex          # harness default
@@ -299,8 +306,8 @@ Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific model
 
 Four built-in skills intentionally default to Claude: `kickoff`,
 `review-design`, `review-slice`, and `prompt`. Every other unconfigured
-built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
-an explicit override.
+built-in skill uses Codex when it is installed, then Claude, then OpenCode. A
+CLI `-m` or authored `agent:` config remains an explicit override.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex

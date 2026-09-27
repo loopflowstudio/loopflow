@@ -308,7 +308,7 @@ mod tests {
         }
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
-            "User explicitly confirms",
+            "human feedback, revised artifact references, and remaining",
             "headless surface",
             "run `lf ask \"<exact request>\"`",
             "closing, detaching, provider exit, or lack of response",
@@ -375,14 +375,10 @@ mod tests {
         assert!(!task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
 
-        let flow = get_builtin_flow("wave").expect("Wave flow");
-        assert!(flow.contains("- wave/operate"));
-        assert!(!flow.contains("loop:"));
-
         assert!(get_builtin_flow("task").is_none());
         assert!(get_builtin_flow("task-design")
             .expect("Task first flow")
-            .contains("- kickoff"));
+            .contains("name: kickoff"));
         let first = get_builtin_flow("task-design").expect("Task first flow");
         assert_eq!(first.matches("human: true").count(), 1);
         assert!(first.contains("id: review_kickoff"));
@@ -396,9 +392,9 @@ mod tests {
             .expect("Task final flow")
             .contains("- op: pr land -c"));
 
-        let design = get_builtin_flow("design").expect("reviewed design flow");
-        assert!(design.contains("id: review_design"));
-        assert_eq!(design.matches("human: true").count(), 1);
+        for wrapper in ["design", "ship-5whys", "wave"] {
+            assert!(get_builtin_flow(wrapper).is_none());
+        }
 
         let launch = get_builtin_flow("launch-plan").expect("launch flow");
         for step in [

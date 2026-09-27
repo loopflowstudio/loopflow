@@ -79,8 +79,7 @@ impl CiCheck {
     ///
     /// This is the one class of required check a Task body cannot act on.
     /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
-    /// which is true of every PR carrying its own design doc — i.e. every Task PR
-    /// during first and loop, by construction — and
+    /// which is true of a PR carrying its own design doc before delivery, and
     /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
     /// body woken to "repair" it could only delete the Task's design artifact,
     /// to green a check land greens anyway.
@@ -661,6 +660,11 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    FlowFinished {
+        invocation_id: String,
+        flow: String,
+        summary: String,
+    },
     /// A durable steer: direction handed to the Task. Folded into the run's
     /// seed and injected into a live turn; not a report out, so it never
     /// crosses to the parent Project.
@@ -708,6 +712,7 @@ impl TaskEventKind {
             Self::WorktreeInitializing { .. }
                 | Self::Started
                 | Self::Progress { .. }
+                | Self::FlowFinished { .. }
                 | Self::Steer { .. }
                 | Self::Interrupt
         )

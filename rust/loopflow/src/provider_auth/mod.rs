@@ -3606,9 +3606,10 @@ pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
         ("claude", CredentialType::ApiKey) => {
             Some(("ANTHROPIC_API_KEY".to_string(), token.access_token.clone()))
         }
-        ("codex", CredentialType::OAuth) => {
-            Some(("CODEX_ACCESS_TOKEN".to_string(), token.access_token.clone()))
-        }
+        // Codex's native login owns ChatGPT OAuth. CODEX_ACCESS_TOKEN is an
+        // agent-identity credential, not a ChatGPT access token; injecting the
+        // latter overrides a working native login with invalid authentication.
+        ("codex", CredentialType::OAuth) => None,
         ("codex", CredentialType::ApiKey) => {
             Some(("OPENAI_API_KEY".to_string(), token.access_token.clone()))
         }
@@ -5230,10 +5231,9 @@ printf '{"id":2,"result":{"account":null}}\n'
     }
 
     #[test]
-    fn env_var_for_token_codex_oauth_returns_access_token() {
+    fn codex_oauth_does_not_override_native_login_with_agent_identity() {
         let token = make_token("codex", CredentialType::OAuth);
-        let (name, _) = env_var_for_token(&token).expect("should produce env var");
-        assert_eq!(name, "CODEX_ACCESS_TOKEN");
+        assert!(env_var_for_token(&token).is_none());
     }
 
     #[test]
@@ -5282,7 +5282,7 @@ printf '{"id":2,"result":{"account":null}}\n'
             .await
             .expect("upsert github oauth");
 
-        // Codex with OAuth uses the supported process-lifetime access token.
+        // Codex OAuth stays in its native login, never an agent-identity env var.
         store
             .upsert_provider_token(&make_token("codex", CredentialType::OAuth))
             .await
@@ -5293,7 +5293,7 @@ printf '{"id":2,"result":{"account":null}}\n'
         assert!(vars.iter().any(|(n, _)| n == "ANTHROPIC_API_KEY"));
         assert!(vars.iter().any(|(n, _)| n == "GH_TOKEN"));
         assert!(!vars.iter().any(|(n, _)| n == "CLAUDE_CODE_OAUTH_TOKEN"));
-        assert!(vars.iter().any(|(n, _)| n == "CODEX_ACCESS_TOKEN"));
+        assert!(!vars.iter().any(|(n, _)| n == "CODEX_ACCESS_TOKEN"));
         assert!(!vars.iter().any(|(n, _)| n == "OPENAI_API_KEY"));
     }
 }

@@ -9,7 +9,17 @@ lf init
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
-Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode).
+### Before you install
+
+| You need | For |
+|---|---|
+| macOS or Linux | Everything |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode), signed in | Every run. Loopflow uses the one you have; these have their own cost |
+| `git`, and a project in a git repository | Every run |
+| [GitHub CLI](https://cli.github.com) (`gh`), signed in | Pull requests |
+| A [Linear](https://linear.app) workspace | Tasks and Waves |
+
+A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 
 ### Setup Paths
 
@@ -114,15 +124,15 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf design                                # review one exact design artifact
-lf launch-plan                           # keep the core here; launch independent Tasks
+lf --task DES-123 design                  # design skill with Task context
+lf flow launch-plan                      # plan the core → implement → gate → demo → land
 lf build                                 # one code → reviewable Task slice
 lf ship                                  # final Task gate → learnings → land
 ```
 
-Flows automate skills within one bounded pass. Their YAML owns ordering and
-review gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
-belongs to Wave and Task execution.
+Flow YAML owns step order, interactive reviews (`human: true`), and explicit
+backward edges. A Flow with backward edges is a loopflow; it runs with or without
+a Task. `ship` and `deploy` supply explicitly selected delivery steps.
 
 ### Custom skills
 
@@ -184,12 +194,12 @@ worktree. `lf pr land` keeps the PR under one durable watcher through CI repair
 and merge; review feedback returns to the same Task and linked events land in
 the Wave thread.
 
-Detached processes use named tmux sessions for process lifetime and read-only
-inspection:
+Inspect running work through Loopflow:
 
 ```bash
-tmux ls               # live agent sessions
-tmux attach -r -t <name> # inspect one; never mutate the session directly
+lf ps --json          # live processes and their ownership evidence
+lf status shipper     # Wave work, Runs, and Task conditions
+lf session list       # conversations waiting for a person
 ```
 
 Use `lf session list`, then `lf session open <session-id>`, for every unresolved
@@ -240,41 +250,6 @@ lf auth claude    # connect Claude
 lf auth linear    # connect Linear with OAuth
 lf auth status    # check connections
 ```
-
----
-
-## tmux Plugin
-
-Status bar, keybindings, layouts — all from the terminal.
-
-```bash
-# Add to .tmux.conf
-set -g @plugin 'loopflowstudio/loopflow.tmux'
-run '~/.tmux/plugins/tpm/tpm'
-```
-
-Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Customize with `@loopflow_status_format` (variables: `#{status}`, `#{branch}`, `#{skill}`, `#{waves}`, `#{wave}`):
-
-```bash
-# .tmux.conf
-set -g @loopflow_status_format '[lf: #{status}]'    # default
-```
-
-| Key | Action |
-|-----|--------|
-| `prefix+l r` | Run skill/wave |
-| `prefix+l s` | Stop |
-| `prefix+l o` | Open logs |
-| `prefix+l p` | Open PR |
-| `prefix+l n` | New worktree |
-| `prefix+l d` | Land PR |
-| `prefix+l w` | Pick wave/worktree |
-| `prefix+l L` | Pick layout |
-| `prefix+l ?` | Help |
-
-Works without `lf` installed — status shows a placeholder and keybindings explain themselves.
-
-Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
 
 ---
 

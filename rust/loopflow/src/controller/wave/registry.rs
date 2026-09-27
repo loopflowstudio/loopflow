@@ -533,6 +533,7 @@ mod tests {
 
         let id = format!("promotion:{}", parent.id());
         runtime.apply_resident_delta(crate::controller::wave::wire::ResidentDelta::TurnOpened {
+            body: None,
             answers: vec![id],
         });
         runtime.apply_resident_delta(crate::controller::wave::wire::ResidentDelta::TurnFinished {

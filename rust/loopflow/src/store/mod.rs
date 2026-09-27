@@ -571,6 +571,14 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
+    pub async fn forget_wave(&self, wave_id: &WaveId, dry_run: bool) -> StoreResult<()> {
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.forget_wave(&wave_id, dry_run)
+        })
+        .await
+    }
+
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
         let provider = provider.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -1404,12 +1412,16 @@ mod tests {
                     ),
                     session_run_id: None,
                     ready_summary: None,
-                    step_index: 2,
-                    iteration: 4,
+                    cursor: crate::engine::ExecutionCursor {
+                        index: 2,
+                        iteration: 4,
+                        ..Default::default()
+                    },
                     version: 0,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
+
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
@@ -1424,6 +1436,7 @@ mod tests {
         store
             .claim_task_worker(
                 &task.id,
+                &position.invocation.id,
                 position.version,
                 &owner,
                 OffsetDateTime::now_utc(),
@@ -1503,12 +1516,16 @@ mod tests {
                     ),
                     session_run_id: None,
                     ready_summary: None,
-                    step_index: 0,
-                    iteration: 1,
+                    cursor: crate::engine::ExecutionCursor {
+                        index: 0,
+                        iteration: 1,
+                        ..Default::default()
+                    },
                     version: 0,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
+
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
@@ -1525,6 +1542,7 @@ mod tests {
         assert!(store
             .claim_task_worker(
                 &task.id,
+                &position.invocation.id,
                 position.version,
                 &owner,
                 OffsetDateTime::now_utc()
@@ -2078,12 +2096,16 @@ mod tests {
                     ),
                     session_run_id: None,
                     ready_summary: None,
-                    step_index: 2,
-                    iteration: 4,
+                    cursor: crate::engine::ExecutionCursor {
+                        index: 2,
+                        iteration: 4,
+                        ..Default::default()
+                    },
                     version: 0,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
+
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
@@ -2096,7 +2118,13 @@ mod tests {
             started_at: 1_700_000_000,
         };
         let claim = match store
-            .claim_task_worker(&task.id, initial.version, &owner, OffsetDateTime::now_utc())
+            .claim_task_worker(
+                &task.id,
+                &initial.invocation.id,
+                initial.version,
+                &owner,
+                OffsetDateTime::now_utc(),
+            )
             .await
             .unwrap()
         {
@@ -2108,8 +2136,8 @@ mod tests {
             .await
             .unwrap();
         let mut next = initial.clone();
-        next.step_index = 3;
-        next.iteration = 5;
+        next.cursor.index = 3;
+        next.cursor.iteration = 5;
         next.version = claim.position_version;
         let mut refreshed = task.clone();
         refreshed.plan.title = "Updated while the worker ran".to_string();
@@ -2135,7 +2163,7 @@ mod tests {
             .await
             .unwrap();
         let settled = store.flow_position(&task.id).await.unwrap().unwrap();
-        assert_eq!(settled.step_index, 3);
+        assert_eq!(settled.cursor.index, 3);
         assert_eq!(settled.invocation, initial.invocation);
         let updated_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(updated_task.updated_at, task.updated_at);
@@ -2173,12 +2201,16 @@ mod tests {
                     ),
                     session_run_id: None,
                     ready_summary: None,
-                    step_index: 0,
-                    iteration: 0,
+                    cursor: crate::engine::ExecutionCursor {
+                        index: 0,
+                        iteration: 0,
+                        ..Default::default()
+                    },
                     version: 0,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
+
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
@@ -2193,6 +2225,7 @@ mod tests {
         let old_claim = match store
             .claim_task_worker(
                 &task.id,
+                &first.invocation.id,
                 first.version,
                 &old_owner,
                 OffsetDateTime::now_utc(),
@@ -2219,12 +2252,16 @@ mod tests {
                     ),
                     session_run_id: None,
                     ready_summary: None,
-                    step_index: 0,
-                    iteration: 0,
+                    cursor: crate::engine::ExecutionCursor {
+                        index: 0,
+                        iteration: 0,
+                        ..Default::default()
+                    },
                     version: 0,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
+
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
@@ -2236,9 +2273,28 @@ mod tests {
             pid: 602,
             started_at: 1_700_000_001,
         };
+        assert_eq!(first.version, replacement.version);
+        assert!(matches!(
+            store
+                .claim_task_worker(
+                    &task.id,
+                    &first.invocation.id,
+                    first.version,
+                    &old_owner,
+                    OffsetDateTime::now_utc(),
+                )
+                .await
+                .unwrap(),
+            TaskWorkerClaimOutcome::Stale { .. }
+        ));
+        assert_eq!(
+            store.flow_position(&task.id).await.unwrap(),
+            Some(replacement.clone())
+        );
         let new_claim = match store
             .claim_task_worker(
                 &task.id,
+                &replacement.invocation.id,
                 replacement.version,
                 &new_owner,
                 OffsetDateTime::now_utc(),

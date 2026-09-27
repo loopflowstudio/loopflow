@@ -35,9 +35,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::chat::turns::BodyProvenance;
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::controller::wave::journal::{DiscordMessageSource, MessageOp};
-use crate::controller::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 use crate::work::project::ProjectObservation;
 use crate::work::task::TaskObservation;
 
@@ -63,13 +63,14 @@ pub enum ResidentDelta {
     /// its queue). The listener validates each id against its pending fold —
     /// unknown or already-consumed ids are dropped with a warning — and
     /// journals the valid set in `TurnStarted.answers`.
-    TurnOpened { answers: Vec<String> },
+    TurnOpened {
+        answers: Vec<String>,
+        body: Option<BodyProvenance>,
+    },
     /// A prose fragment of the open turn.
     TurnText { text: String },
-    /// Relate this open assistant turn to the channel message it answers.
-    /// This is a Discord-shaped reply edge, not a consumption claim: the
-    /// message remains readable and the relation survives restart.
-    TurnReplyTo { message_id: String },
+    /// Publish a completed chat reply without changing the governance turn.
+    ChatReply { message_id: String, text: String },
     /// A non-prose item (tool / command / file / thought) of the open turn.
     TurnItem { item: ConversationItem },
     /// The open turn finalized. The listener already holds the turn's content
@@ -78,17 +79,8 @@ pub enum ResidentDelta {
         status: Lifecycle,
         reason: Option<String>,
     },
-    /// A fresh body took the current logical playhead step.
-    BodyStarted { body: BodyProvenance },
-    /// The harness announced its provider session after the body opened.
+    /// Bind the open attempt to its provider session after launch.
     BodySessionUpdated { body_id: String, session_id: String },
-    /// A body ended. Only completed/skipped outcomes advance the playhead;
-    /// failure/interruption leave the logical step selected for retry.
-    BodyFinished {
-        body_id: String,
-        outcome: StepOutcome,
-        reason: String,
-    },
     /// The resident's reported loop state ([`ResidentStateTo`]). `Turning`
     /// and the boundary `Idle` are DERIVED by the listener from
     /// `TurnOpened`/`TurnFinished`; only the transitions the turn deltas
@@ -147,7 +139,6 @@ pub struct AttachResponse {
 /// into its prompts. Serving it freshens the listener's child observations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextResponse {
-    pub playhead: PlayheadView,
     pub provider_session: Option<ProviderSessionRef>,
 }
 
@@ -159,8 +150,8 @@ pub struct ProviderSessionRef {
 }
 
 /// One `inbox` SSE frame on `/events?inbox=true` — a resident-directed op.
-/// A `Message` carries its journaled id (`"msg-<seq>"`). `Interrupt` and `Skip`
-/// carry none: nothing is journaled, because the op is control, not content.
+/// A `Message` carries its journaled id (`"msg-<seq>"`). `Interrupt` carries
+/// none: nothing is journaled, because the op is control, not content.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InboxFrame {
@@ -181,7 +172,6 @@ pub enum InboxFrame {
         parent: String,
     },
     Interrupt,
-    Skip,
 }
 
 #[cfg(test)]
@@ -192,13 +182,15 @@ mod tests {
     fn resident_delta_round_trips_every_variant() {
         let deltas = vec![
             ResidentDelta::TurnOpened {
+                body: None,
                 answers: vec!["msg-1".into(), "msg-2".into()],
             },
             ResidentDelta::TurnText {
                 text: "thinking".into(),
             },
-            ResidentDelta::TurnReplyTo {
+            ResidentDelta::ChatReply {
                 message_id: "msg-2".into(),
+                text: "answer".into(),
             },
             ResidentDelta::TurnItem {
                 item: ConversationItem::Tool {
@@ -238,6 +230,27 @@ mod tests {
         assert_eq!(serde_json::to_value(request).unwrap(), value);
     }
 
+    #[test]
+    fn resident_door_fixture_contains_only_the_current_contract() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/resident_door.json"
+        )))
+        .unwrap();
+        let request: AttachRequest =
+            serde_json::from_value(fixture["attach_request"].clone()).unwrap();
+        let response: AttachResponse =
+            serde_json::from_value(fixture["attach_response"].clone()).unwrap();
+        let context: ContextResponse =
+            serde_json::from_value(fixture["context_response"].clone()).unwrap();
+        assert_eq!(
+            serde_json::json!({
+                "attach_request": request, "attach_response": response, "context_response": context,
+            }),
+            fixture
+        );
+    }
+
     /// No serde defaults: an absent REQUIRED field is a parse error, never a
     /// silent fill-in. Absent `Option` fields decode as `None` — explicitly
     /// Optional is the one sanctioned absence.
@@ -247,7 +260,7 @@ mod tests {
             serde_json::json!({ "kind": "turn_opened" }),
             serde_json::json!({ "kind": "turn_finished" }),
             serde_json::json!({ "kind": "turn_text" }),
-            serde_json::json!({ "kind": "turn_reply_to" }),
+            serde_json::json!({ "kind": "chat_reply" }),
             serde_json::json!({ "kind": "loop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),
         ] {

@@ -5,6 +5,38 @@ Trace & Context in one measured bet: explicitly selected work is explainable fro
 durable local evidence. No standalone Memory, Evals, or Runtime Monitoring
 Project is implied by the historical research.
 
+## Attribution and feedback evidence (curated 2026-09-25)
+
+- A first-page GraphQL query captured author names while pagination fetched
+  only IDs. Static fixtures containing names hid the loss. The repaired
+  `observe_issue_reads_every_comment_page_in_revision_order` models field
+  selection and observes both authors. Extend continuation queries and verify
+  their actual selected data when adding provider-record fields.
+- Native resume bypasses fresh prompt assembly. Tests of launch prompts or
+  resume subprocess arguments cannot establish that the resumed model received
+  and obeyed participant corrections. Keep that live proof separate.
+- Human feedback lives in self-contained topic-named scratch notes. Ready
+  summaries name paths and takeaways; deciding agents reconcile those notes
+  and the current design. A path alone does not deliver context. Inspect actual
+  prepared decision and implementation prompts, including nested/untracked
+  Markdown, and reread files changed after the launch-time snapshot. No filename
+  confers navigation authority.
+- One fallible production chat delivery path replaced an anonymous test shortcut
+  and unchecked writer. Preserve destination ownership and journal append before
+  projection/broadcast; failed writes remain retryable. Provider ingestion owns
+  its separate IDs and deduplication. Producer-generated SSE frames exposed a
+  Swift/Rust shape mismatch that an old-shaped green decoder fixture concealed.
+- The earlier live continuation demo used manual binding/Home corrections and
+  predates the outer demo-feedback loop. Later local Complete/recovery and
+  prepared-prompt proofs use simulated providers. Neither establishes installed
+  Task parity or live acceptance of the revised loop. Measure production deletion
+  separately from moved types, tests, historical readers and scratch cleanup.
+
+The retired [attribution record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/name-attribution.md)
+and [continuation record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/directions/task-continuation.md)
+retain exact historical proof counts, commit-addressed artifacts and unresolved
+acceptance. This curation does not rerun those checks or verify remote links.
+
 ## Instruction ownership and design delivery (2026-09-25)
 
 - Customer operating guidance carries universal execution rules. Detailed Task,

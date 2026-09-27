@@ -46,3 +46,6 @@ website/.sesskey
 
 # Website generated docs copy
 website/docs/
+
+# Instruments trace bundles are local evidence; keep the exported .xml and reports
+**/*.trace/

@@ -63,7 +63,6 @@ lf-prompt                  prompt-oriented executable surface
 lfd                        one Home's service keeper and webhook receiver
 lf __resident              Wave resident process
 lf task __worker           one already-claimed Task boundary
-lf __flow-step             one internal Flow boundary
 lf __provider-session      provider hook that binds native session identity to a Run
 lf __screenshot-supervisor bounded browser-capture owner
 Loopflow.app               pure client over CLI/HTTP DTOs
@@ -115,7 +114,7 @@ not resolve either from the planning store.
 
 The Home daemon exposes Home-scoped health, status, Wave start/stop/reconcile,
 webhook, and landing-claim routes. A Wave listener exposes only that Wave's
-channel, conversation, events, playhead, messages, observations, stop, and
+channel, conversation, events, messages, observations, stop, and
 resident attachment/context routes.
 
 HTTP is a local supervision and presentation transport. It does not centralize

@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::engine::{check_cli_available, codex_permission_args, workspace_add_dirs, LaunchTarget};
+use crate::engine::{
+    check_cli_available, codex_permission_args, missing_agent_message, workspace_add_dirs,
+    LaunchTarget,
+};
 use crate::provider_auth::Provider;
 use crate::run_record::{ProviderClientRef, ProviderClientStopReason};
 
@@ -252,13 +255,11 @@ pub(crate) fn resume_session_with_env(
     extra_environment: &BTreeMap<String, String>,
 ) -> Result<()> {
     let user_name = crate::engine::config::launch_user_name()?;
-    let context = crate::engine::prompt::render_resume_user_context(user_name.as_deref());
     let command = build_resume_session_command(
         harness,
         model,
         worktree,
         &provider_session.provider_session_id,
-        &context,
     )?;
     let mut environment = BTreeMap::from([
         (crate::durable::RUN_ID_ENV.to_string(), run_id.to_string()),
@@ -355,16 +356,13 @@ fn provider_client_is_live(client: &ProviderClientRef, harness: &str) -> bool {
     };
     let command = fields.collect::<Vec<_>>().join(" ");
     let expected_start = OffsetDateTime::now_utc().unix_timestamp() - elapsed as i64;
-    if (expected_start - client.started_at.unix_timestamp()).abs() > 5 {
-        return false;
-    }
-    command.split_whitespace().any(|word| {
-        Path::new(word)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == harness || name.starts_with(&format!("{harness}-")))
-            || word.contains(&format!("/{harness}"))
-    })
+    crate::run_record::provider_client_matches(
+        client,
+        harness,
+        client.pid,
+        expected_start,
+        &command,
+    )
 }
 
 fn elapsed_seconds(value: &str) -> Option<u64> {
@@ -414,7 +412,6 @@ fn build_resume_session_command(
     model: Option<&str>,
     worktree: &Path,
     provider_session_id: &str,
-    context: &str,
 ) -> Result<SessionCommand> {
     let cwd = absolute_path(worktree);
     let worktree_arg = cwd.to_string_lossy().to_string();
@@ -428,7 +425,6 @@ fn build_resume_session_command(
                 args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
             }
             args.extend(["--resume".to_string(), provider_session_id.to_string()]);
-            args.extend(["--".to_string(), context.to_string()]);
             args
         }
         "codex" => {
@@ -440,11 +436,7 @@ fn build_resume_session_command(
                 args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
             }
             args.extend(codex_permission_args(Some(&cwd), false, false));
-            args.extend([
-                "--".to_string(),
-                provider_session_id.to_string(),
-                context.to_string(),
-            ]);
+            args.extend(["--".to_string(), provider_session_id.to_string()]);
             args
         }
         "opencode" => {
@@ -456,7 +448,6 @@ fn build_resume_session_command(
             if let Some(model) = model {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
-            args.extend(["--prompt".to_string(), context.to_string()]);
             args
         }
         _ => {
@@ -524,10 +515,7 @@ fn session_command_status_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
 ) -> Result<SessionCommandOutcome> {
     if !check_cli_available(&command.program) {
-        return Err(anyhow!(
-            "'{}' CLI not found. Install it and rerun `lf init`.",
-            command.program
-        ));
+        return Err(anyhow!(missing_agent_message(&command.program)));
     }
 
     let provider = match command.program.as_str() {
@@ -911,6 +899,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -978,6 +967,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -1125,37 +1115,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn preferred_name_resume_context_reaches_every_provider_process() {
+    fn preferred_name_resume_opens_every_provider_without_a_prompt() {
         let temp = tempfile::tempdir().unwrap();
         let provider = fake_provider(&temp, "for arg do printf '%s\\0' \"$arg\"; done > received");
         for harness in ["claude", "codex", "opencode"] {
-            for name in [Some("Jack"), Some("Maya"), Some("A </lf:user>\nB"), None] {
-                let context = crate::engine::prompt::render_resume_user_context(name);
-                let command = build_resume_session_command(
-                    harness,
-                    None,
-                    temp.path(),
-                    "recorded-session",
-                    &context,
-                )
-                .unwrap();
-                let status = Command::new(&provider)
-                    .args(&command.args)
-                    .current_dir(temp.path())
-                    .status()
+            let command =
+                build_resume_session_command(harness, None, temp.path(), "recorded-session")
                     .unwrap();
-                assert!(status.success());
-                let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
-                let arguments = received.split('\0').collect::<Vec<_>>();
-                assert!(arguments.contains(&"recorded-session"));
-                assert!(arguments.contains(&context.as_str()));
-                assert!(context.contains("Preserve historical messages and their authors"));
-                assert!(context.contains("wait for the next request"));
-                if name.is_none() {
-                    assert!(context.contains("name is unknown"));
-                    assert!(context.contains("Do not use a previous"));
-                }
-            }
+            let status = Command::new(&provider)
+                .args(&command.args)
+                .current_dir(temp.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
+            let arguments = received.split_terminator('\0').collect::<Vec<_>>();
+            assert_eq!(arguments.last(), Some(&"recorded-session"));
+            assert!(!arguments.contains(&"--prompt"));
+            assert!(!received.contains("<lf:user>"));
         }
     }
 
@@ -1202,6 +1179,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -1238,8 +1216,9 @@ mod tests {
             let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
             let arguments = received.split('\0').collect::<Vec<_>>();
             assert_eq!(arguments[0], expected.unwrap_or_default());
-            let context = crate::engine::prompt::render_resume_user_context(expected);
-            assert!(arguments.contains(&context.as_str()));
+            assert!(arguments.contains(&"ses_original"));
+            assert!(!arguments.contains(&"--prompt"));
+            assert!(!received.contains("<lf:user>"));
             assert!(!received.contains("Host Owner"));
             assert_eq!(
                 crate::run_record::read_provider_session(&run_dir)
@@ -1310,6 +1289,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -1430,7 +1410,7 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn session_launch_tui_opencode_uses_the_stored_zen_credential() {
+    async fn session_launch_tui_preserves_native_oauth_and_routes_stored_api_keys() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
@@ -1441,6 +1421,7 @@ mod tests {
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "OPENCODE_API_KEY",
+            "CODEX_ACCESS_TOKEN",
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
@@ -1449,6 +1430,7 @@ mod tests {
         std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
+        std::env::remove_var("CODEX_ACCESS_TOKEN");
 
         let bin = temp.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1503,6 +1485,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
+
+        // The native CLI rejects an ordinary OAuth token in this agent-identity
+        // variable. A prior `lf auth status` must not poison a working login.
+        let codex = temp.path().join("bin/codex");
+        std::fs::write(
+            &codex,
+            "#!/bin/sh\nif [ \"${CODEX_ACCESS_TOKEN+x}\" = x ]; then exit 1; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&codex, std::fs::metadata(&opencode).unwrap().permissions())
+            .unwrap();
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: Provider::Codex.as_str().to_string(),
+                access_token: "ordinary-chatgpt-oauth".to_string(),
+                refresh_token: None,
+                oauth_client_id: None,
+                expires_at: None,
+                login: Some("codex@example.com".to_string()),
+                updated_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                credential_type: CredentialType::OAuth,
+            })
+            .await
+            .unwrap();
+        launch_session(LaunchTarget::Tui, "codex", None, temp.path(), "review it").unwrap();
     }
 
     #[test]

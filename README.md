@@ -1,24 +1,19 @@
 # Loopflow
 
-Run one useful prompt first:
+A software instrument. It doesn't make the software for you. You make the
+software through it.
 
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 lf init
-lf debug -c        # copy an error to the clipboard, watch it fix
 ```
 
-That command assembles the skill, repository guidance, scratch notes, and
-clipboard into one prompt. It launches the configured provider and writes one
-Home-local Run record. The Run records what happened; it does not reserve the
-repository, control a Wave, or become planning state.
+AI can build a lot of software fast. It can also spend all day going in
+circles, and it's hard to tell which is happening. Loopflow keeps track, so
+you can see what got done and what still needs you.
 
-The same building block runs **Waves**: persistent agents that coordinate
-chapter plans and Tasks, remember what they learn, and stay steerable.
-There is no Loopflow server at the center. Repo files hold authored behavior;
-Linear and GitHub hold shared coordination and delivery facts; each Home keeps
-its local execution records. `lf ssh` runs the same local commands on another
-Home.
+Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+or [Codex](https://github.com/openai/codex), which have their own cost.
 
 ## More install options
 
@@ -109,6 +104,7 @@ Watch this repository and the current Home:
 
 ```bash
 lf ls                  # every durable Wave and its Home/runtime evidence
+lf user name           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf status designer     # one Wave's current chapter and Tasks
@@ -132,6 +128,7 @@ Finish every kind of Session explicitly:
 ```bash
 lf session list
 lf session open run_ab12
+lf session rename run_ab12 "Release notes"            # human name; agents add --suggest
 lf session complete run_ab12                         # interactive Run
 
 lf session ready "Ready for review"                 # inside an Ask
@@ -177,11 +174,11 @@ each `.md` URL, use the curated
 | [Get Started](docs/getting-started.md) | Install, first commands, building features, going remote |
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
-| [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
+| [Conducting](docs/conducting.md) | Seeing what got done, what needs you, and how to step in |
 | [Authoring](docs/authoring.md) | Writing skills, flows, and goals |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
-| [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |
+| [Glossary](docs/glossary.md) · [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |
 
 ## Developing loopflow
 
@@ -201,4 +198,4 @@ suite runner documented in [TESTING.md](TESTING.md#bounded-and-honest).
 
 ## License
 
-MIT
+[MIT](LICENSE)

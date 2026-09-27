@@ -14,9 +14,18 @@ private enum SessionFixtureKind: String {
         let work = self == .flow
             ? #"{"kind":"task","id":"task_00000000000000000000000000000001"}"#
             : "null"
+        let membership = self == .flow
+            ? #"{"kind":"step","flow":"task-design","invocation_id":"fixture","step":"review-design","node":"1","iteration":0,"occurrence":"current"}"#
+            : #"{"kind":"independent"}"#
+        let actions: String
+        switch self {
+        case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Stop the other client and resume here; unsent text there is lost","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Stop the provider and remove this Session; native history remains resumable","unavailable_reason":null}]"#
+        case .ask: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Complete the conversation and resume its blocked caller","unavailable_reason":null}]"#
+        case .flow: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Complete the conversation and resume its blocked caller","unavailable_reason":null}]"#
+        }
         return """
         {
-          "id": "\(id)",
+          "id": "\(id)", "run_id": "\(id)",
           "kind": "\(rawValue)",
           "work": \(work),
           "title": "\(rawValue.capitalized) fixture",
@@ -24,6 +33,9 @@ private enum SessionFixtureKind: String {
           "cwd": "/tmp",
           "state": "\(state)",
           "ready_summary": \(summary),
+          "work_path": null,
+          "actions": \(actions),
+          "title_source": "generated", "flow_membership": \(membership), "terminal_ids": [],
           "open_argv": ["/usr/bin/tail", "-f", "/dev/null"]
         }
         """
@@ -47,21 +59,8 @@ private actor SessionFixtureStore {
             return kind.record
         }
         if args == ["session", "complete", kind.id] {
-            guard kind != .flow else {
-                throw RegistryQueryError("Task FlowStep Sessions cannot complete")
-            }
             unresolved = false
             return "Session completed"
-        }
-        if args.count >= 4,
-           args[0] == "session",
-           ["approve", "iterate"].contains(args[1]),
-           args[2] == kind.id {
-            guard kind == .flow else {
-                throw RegistryQueryError("Only Task FlowStep Sessions accept decisions")
-            }
-            unresolved = false
-            return "Task FlowStep resolved"
         }
         if args == ["roadmap", "--all", "--json"] {
             return #"{"generated_at":"2026-08-30T00:00:00Z","waves":[]}"#

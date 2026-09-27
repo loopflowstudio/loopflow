@@ -7,6 +7,7 @@ pub mod error;
 pub mod event;
 pub mod execution;
 pub mod flow;
+pub mod flow_graph;
 pub mod git;
 pub mod identity;
 pub mod launch;
@@ -17,6 +18,7 @@ pub mod prompt;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;
+pub mod transitions;
 pub mod wave_home;
 pub mod worktree;
 pub mod worktrees;
@@ -25,8 +27,9 @@ pub use crate::repo::find_repo_root;
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_model_command,
     build_opencode_command, check_cli_available, codex_permission_args, launch_agent,
-    workspace_add_dirs, AgentCapabilities, AgentCapture, AgentConfig, AgentExecutionBoundary,
-    AgentFailure, AgentWriteScope, ClaudeArgs, DefaultRunner, LaunchResult, ProcessConfig, Runner,
+    missing_agent_message, workspace_add_dirs, AgentCapabilities, AgentCapture, AgentConfig,
+    AgentExecutionBoundary, AgentFailure, AgentWriteScope, ClaudeArgs, DefaultRunner, LaunchResult,
+    ProcessConfig, Runner,
 };
 pub use command::{run_command, CommandError};
 pub use config::{
@@ -35,14 +38,13 @@ pub use config::{
 };
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use execution::{
-    advance_cursor_after_wait, current_flow_parents, current_skill, xor_verdict_path,
-    ExecutionContext, ExecutionCursor, ExecutionSkill, FlowEngine, FlowOutcome, FlowProgress,
-    NestedCursor, SkillExecutor, SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
+    current_skill, ExecutionContext, ExecutionCursor, FlowEngine, FlowOutcome, NestedCursor,
+    SkillExecutor, SkillOutcome, StepProgress,
 };
 pub use flow::{
     available_flow_names, expand_flow, find_skill_source_path, human_occurrence_ids, load_flow,
-    load_goal, load_skill, render_goal, ConcreteOp, ConcreteSkill, ConcreteStep, ConcreteXor, Flow,
-    Goal, GoalRenderContext, OccurrencePolicy, Op, Skill, Step, XorDef, XorPath,
+    load_goal, load_skill, render_goal, ConcreteOp, ConcretePath, ConcreteSkill, ConcreteStep,
+    ConcreteXor, Flow, Goal, GoalRenderContext, OccurrencePolicy, Op, Skill, Step, XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,
@@ -61,3 +63,5 @@ pub use structured_reply::{
     render_structured_reply_guidance, structured_replies_for_context, ClientContext,
     StructuredReply,
 };
+
+pub mod invocation;

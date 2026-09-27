@@ -1,8 +1,8 @@
 use crate::engine::{
-    check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
-    write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
-    LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
-    StreamFormat, Surface,
+    check_cli_available, launch_agent, load_config_or_default, missing_agent_message, parse_agent,
+    prepare_launch_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
+    ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents,
+    Skill, SkillSyncOptions, StreamFormat, Surface,
 };
 use crate::lf::commands::util::launch_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -23,9 +23,41 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+    if let Some(binding) = checkout_binding(cli)? {
+        let mut bound = cli.launch_options();
+        bound.wave = Some(binding.wave_name.clone());
+        if bound.model.is_none() {
+            bound.model = binding.agent.clone();
+        }
+        return run_bound(skill, message, &bound, &binding);
+    }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
 
+    print_context_header(&built, cli);
+    launch_prompt(&built, cli)
+}
+
+pub(crate) fn run_saved(
+    skill: &Skill,
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+) -> Result<()> {
+    let mut built = build_prompt_at(
+        Some(&skill.name),
+        message,
+        cli,
+        repo.to_path_buf(),
+        false,
+        None,
+        PromptLaunchContext {
+            skill: Some(skill.clone()),
+            user_name: crate::engine::config::launch_user_name()?,
+            ..Default::default()
+        },
+    )?;
+    built.subjects = cli.work_subject_selector().into_iter().collect();
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
 }
@@ -37,21 +69,7 @@ pub fn run_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<()> {
-    let message = match message.filter(|message| !message.trim().is_empty()) {
-        Some(message) => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>\n\n{}",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-            message,
-        ),
-        None => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-        ),
-    };
+    let message = bound_message(binding, message);
     let resolved_skill = skill
         .map(crate::ops::human_session::active_flow_skill)
         .transpose()?
@@ -66,6 +84,46 @@ pub fn run_bound(
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
+}
+
+/// An `lf` launch inside a registered Task's checkout binds to that Task unless
+/// the caller selected Work explicitly (Jack, 2026-09-26). No registry, an
+/// unreadable one, a checkout outside git or an unregistered branch all leave
+/// the launch unbound; nothing here refuses a launch that worked before.
+fn checkout_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
+    if cli.work_subject_selector().is_some() {
+        return Ok(None);
+    }
+    let Some(repo) = crate::repo::discover_repo_root(&std::env::current_dir()?)? else {
+        return Ok(None);
+    };
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let Some(store) = crate::store::open_existing_store().await else {
+            return Ok(None);
+        };
+        crate::ops::resolve_checkout_binding(&std::sync::Arc::new(store), &repo)
+            .await
+            .map_err(anyhow::Error::from)
+    })
+}
+
+pub(crate) fn bound_message(binding: &crate::ops::WorkBinding, message: Option<&str>) -> String {
+    match message.filter(|message| !message.trim().is_empty()) {
+        Some(message) => format!(
+            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>\n\n{}",
+            binding.work.kind(),
+            binding.work.id(),
+            binding.context,
+            message,
+        ),
+        None => format!(
+            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
+            binding.work.kind(),
+            binding.work.id(),
+            binding.context,
+        ),
+    }
 }
 
 struct PromptBuild {
@@ -192,14 +250,20 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let start = Instant::now();
     let repo_root = crate::repo::working_directory()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
+    let saved = skill
+        .map(crate::ops::human_session::active_flow_skill)
+        .transpose()?
+        .flatten();
+    let native = saved.is_none();
     build_prompt_at(
         skill,
         message,
         cli,
         repo_root,
-        true,
+        native,
         None,
         PromptLaunchContext {
+            skill: saved,
             user_name: crate::engine::config::launch_user_name()?,
             ..Default::default()
         },
@@ -537,6 +601,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
             "tui"
         };
         let capture = begin_run_capture(built, surface, &built.agent_config)?;
+        record_task_start(&built.subjects)?;
         let provider_session_id = if target == LaunchTarget::Tui && built.harness == "claude" {
             let run_id = capture.run_id();
             let raw_id = run_id
@@ -582,10 +647,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
-        return Err(anyhow!(
-            "'{}' CLI not found. Install it and rerun `lf init`.",
-            built.harness
-        ));
+        return Err(anyhow!(missing_agent_message(&built.harness)));
     }
     debug!(
         elapsed_ms = cli_check_start.elapsed().as_millis(),
@@ -598,6 +660,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let capture = begin_run_capture(built, "headless", &agent_config)?;
+    record_task_start(&built.subjects)?;
 
     let result = launch_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
@@ -718,8 +781,16 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
+        flow: crate::ops::flow_run::capture_membership()?,
     };
-    let capture = if surface == "headless" {
+    let capture = if let Some(id) = crate::ops::human_session::prepared_run_id()? {
+        crate::run_record::CaptureHandle::start_prepared(
+            &crate::store::lf_home_dir(),
+            &id,
+            spec,
+            &built.context,
+        )
+    } else if surface == "headless" {
         let launch = crate::run_record::RunLaunchRequest::from_prepared(
             prepared_config,
             &built.capabilities,
@@ -734,8 +805,33 @@ fn begin_run_capture(
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
-    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
+    crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)
+}
+
+/// A Task-bound launch starts work, whether the Task was selected explicitly or
+/// resolved from the checkout; generic capture records attribution only and does
+/// not require a planning registry. Reads and preparation do not start work.
+fn record_task_start(subjects: &[String]) -> Result<()> {
+    let Some(selector) = subjects
+        .iter()
+        .find_map(|subject| subject.strip_prefix("task:"))
+    else {
+        return Ok(());
+    };
+    let path = crate::store::database_path_from_env()?;
+    if !path.try_exists()? {
+        return Ok(());
+    }
+    let store = crate::store::sqlite::SqliteStore::new(&path)?;
+    let task = match crate::durable::TaskId::parse(selector) {
+        Ok(id) => store.task(&id)?,
+        Err(_) => store.task_by_issue(selector)?,
+    };
+    if let Some(task) = task {
+        store.begin_chapter_task(&task.id)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn attributed_context(
@@ -1075,10 +1171,19 @@ mod tests {
     #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["LF_HOME", "LF_USER_NAME"]);
+        let _restore = EnvironmentRestore::capture(&[
+            "LF_HOME",
+            "LF_USER_NAME",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+        ]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         std::env::remove_var("LF_USER_NAME");
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "user.name");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "Git User");
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
@@ -1105,7 +1210,7 @@ mod tests {
                 assert_eq!(
                     built.components.user_name.as_deref(),
                     if name.trim().is_empty() {
-                        None
+                        Some("Git User")
                     } else {
                         Some(name)
                     }
@@ -1120,12 +1225,12 @@ mod tests {
                 assert!(built.agent_config.task_prompt.contains(&context));
                 assert!(!built
                     .prompt
-                    .contains("preferred name is \"Repository Owner\""));
+                    .contains("display name is \"Repository Owner\""));
             }
         }
         std::fs::remove_file(home.path().join("config.yaml")).unwrap();
         let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
-        assert!(built.components.user_name.is_none());
+        assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
     }
 
     #[test]
@@ -1191,8 +1296,8 @@ mod tests {
                 None,
                 Some("Jack"),
             );
-            assert!(seed.contains("preferred name is \"Jack\""));
-            assert!(seed.contains("address them as \"you\""));
+            assert!(seed.contains("display name is \"Jack\""));
+            assert!(seed.contains("Address them as \"you\""));
             assert_eq!(seed.matches("<lf:user>").count(), 1);
         }
     }

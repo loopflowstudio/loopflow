@@ -1943,18 +1943,9 @@ mod tests {
             .id
             .0;
 
-        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
-            answers: Vec::new(),
-        });
-        runtime.apply_resident_delta(ResidentDelta::TurnReplyTo {
+        runtime.apply_resident_delta(ResidentDelta::ChatReply {
             message_id: reply_to,
-        });
-        runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "x".repeat(2_001),
-        });
-        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
-            status: Lifecycle::Completed,
-            reason: None,
         });
         assert_eq!(
             runtime.discord_snapshot().deliveries[0]
@@ -2023,9 +2014,7 @@ mod tests {
                 },
             )
             .expect("deliver");
-        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
-            answers: Vec::new(),
-        });
+
         let reply_to = runtime
             .unanswered_chat_tail()
             .into_iter()
@@ -2033,15 +2022,9 @@ mod tests {
             .expect("chat trigger")
             .id
             .0;
-        runtime.apply_resident_delta(ResidentDelta::TurnReplyTo {
+        runtime.apply_resident_delta(ResidentDelta::ChatReply {
             message_id: reply_to,
-        });
-        runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "x".repeat(4_000),
-        });
-        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
-            status: Lifecycle::Completed,
-            reason: None,
         });
         let delivery = runtime.discord_snapshot().deliveries[0].clone();
         assert_eq!(delivery.parts.len(), 2);
@@ -2182,6 +2165,7 @@ mod tests {
             .all(|message| matches!(message.source, ChatMessageSource::Discord { .. })));
 
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         runtime.apply_resident_delta(ResidentDelta::TurnText {
@@ -2414,9 +2398,7 @@ mod tests {
                 },
             )
             .expect("deliver chat message");
-        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
-            answers: Vec::new(),
-        });
+
         let reply_to = runtime
             .unanswered_chat_tail()
             .into_iter()
@@ -2424,15 +2406,9 @@ mod tests {
             .expect("chat trigger")
             .id
             .0;
-        runtime.apply_resident_delta(ResidentDelta::TurnReplyTo {
+        runtime.apply_resident_delta(ResidentDelta::ChatReply {
             message_id: reply_to,
-        });
-        runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "here you go".into(),
-        });
-        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
-            status: Lifecycle::Completed,
-            reason: None,
         });
         adapter
             .deliver_pending(&runtime)
@@ -2572,6 +2548,7 @@ mod tests {
         )
         .expect("runtime");
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         runtime.apply_resident_delta(ResidentDelta::TurnText {

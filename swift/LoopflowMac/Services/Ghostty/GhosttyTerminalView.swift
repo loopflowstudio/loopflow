@@ -3,6 +3,7 @@
 
 import SwiftUI
 import AppKit
+import OSLog
 import QuartzCore
 import Loopflow
 
@@ -59,11 +60,15 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        buildGhosttyShellCommand(argv: argv, env: env)
+        if case .shell(let id) = terminal {
+            return buildWorkspaceShellCommand(id: id, argv: argv, env: env)
+        }
+        return buildGhosttyShellCommand(argv: argv, env: env)
     }
 }
 
 struct GhosttyTerminalRepresentable: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
     let workingDirectory: String
     let command: String?
     let terminal: TerminalIdentity
@@ -101,9 +106,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
            size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
         }
-        if isFocused, nsView.window?.firstResponder !== nsView {
-            nsView.window?.makeFirstResponder(nsView)
-        }
+        nsView.updateFocus(isFocused: isFocused, isEnabled: isEnabled)
     }
 }
 
@@ -121,6 +124,10 @@ final class GhosttySurfacePool {
         view.pool = self
         views[id] = view
         return view
+    }
+
+    func title(for id: TerminalIdentity) -> String? {
+        views[id]?.terminalTitle
     }
 
     /// True only while the surface's child is still running. A provider killed
@@ -145,6 +152,11 @@ final class GhosttySurfacePool {
 
     func release(_ id: TerminalIdentity) {
         views.removeValue(forKey: id)?.destroySurface()
+    }
+
+    func focus(_ id: TerminalIdentity) {
+        guard let view = views[id] else { return }
+        view.window?.makeFirstResponder(view)
     }
 }
 
@@ -210,6 +222,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     /// Set when the surface's child ended; blocks implicit relaunch — reopening
     /// a Session or shell is an explicit action that mints a fresh view.
     private(set) var childExited = false
+    var terminalTitle: String?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -226,6 +239,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var selectedCommandBlock: (id: UInt64, text: String)?
     private var commandBlockMouseDown = false
     private var lastCommandBlockRefresh: CFTimeInterval = 0
+    private var focusRequested = false
+    /// Open from a key press until the next display-link draw.
+    private var keyToDraw: OSSignpostIntervalState?
 
     init(terminal: TerminalIdentity, frame frameRect: NSRect = .zero) {
         self.terminal = terminal
@@ -240,7 +256,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.loopflowDarkBackground.cgColor
+        layer?.backgroundColor = TerminalPalette.nsBackground.cgColor
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         autoresizingMask = [.width, .height]
         registerForDraggedTypes(ghosttyDropTypes)
@@ -280,6 +296,20 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             setupDisplayLink()
             updateContentScale()
             updateSurfaceSize()
+        }
+        if focusRequested { window?.makeFirstResponder(self) }
+    }
+
+    func updateFocus(isFocused: Bool, isEnabled: Bool) {
+        let requested = isEnabled && isFocused
+        let changed = focusRequested != requested
+        focusRequested = requested
+        if requested && changed {
+            // Attachment handles a request made before the view has a window.
+            // Later polls and resizes must leave the search field's focus alone.
+            window?.makeFirstResponder(self)
+        } else if !isEnabled || changed, window?.firstResponder === self {
+            window?.makeFirstResponder(nil)
         }
     }
 
@@ -323,6 +353,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               window?.occlusionState.contains(.visible) != false
         else { return }
         ghostty_surface_draw(surface)
+        if let keyToDraw {
+            self.keyToDraw = nil
+            Perf.signposter.endInterval(Perf.terminalKeyToDraw, keyToDraw)
+        }
         let now = CACurrentMediaTime()
         if isShellPane, now - lastCommandBlockRefresh >= 0.1 {
             lastCommandBlockRefresh = now
@@ -478,6 +512,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         let accepted = super.becomeFirstResponder()
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)
+            // The Session pane is visible and accepting input.
+            if case .session(let id) = terminal { Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id) }
         }
         return accepted
     }
@@ -537,7 +573,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             }
         }
 
-        // Let other command shortcuts through to the terminal (e.g., tmux prefix)
+        // Let other command shortcuts through to the terminal
         let key = translateKey(event)
         return ghostty_surface_key(surface, key)
     }
@@ -546,6 +582,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard let surface else {
             super.keyDown(with: event)
             return
+        }
+        if keyToDraw == nil {
+            keyToDraw = Perf.signposter.beginInterval(Perf.terminalKeyToDraw, id: Perf.signposter.makeSignpostID())
         }
 
         if ghosttyShouldHandleKeyDownDirectly(
@@ -1076,7 +1115,9 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 @MainActor
 final class GhosttySurfacePool {
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
+    func title(for id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
+    func focus(_ id: TerminalIdentity) {}
 }
 
 struct GhosttyTerminalView: View {
@@ -1124,7 +1165,7 @@ struct GhosttyTerminalView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(LoopflowPalette.dark.background.opacity(0.9))
+        .background(TerminalPalette.background)
     }
 }
 
@@ -1153,6 +1194,38 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     }
 
     return ["env", envPrefix, command].joined(separator: " ")
+}
+
+/// Keep a real shell after the initial conversation exits or hands off to an
+/// app. The PTY marker lets successive manual lf launches find this terminal.
+func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String]) -> String {
+    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+    let initial = buildGhosttyShellCommand(argv: argv, env: env).map { $0 + "\n" } ?? ""
+    let script = """
+    export LF_TERMINAL_ID=\(shellEscape(id))
+    export LF_TERMINAL_TTY="$(tty)"
+    \(initial)
+    if [ -n "$GHOSTTY_RESOURCES_DIR" ]; then
+        export GHOSTTY_SHELL_FEATURES="${GHOSTTY_SHELL_FEATURES-}"
+        case \(shellEscape(URL(fileURLWithPath: shell).lastPathComponent)) in
+            zsh)
+                if [ "${ZDOTDIR+x}" = x ]; then export GHOSTTY_ZSH_ZDOTDIR="$ZDOTDIR"; fi
+                export ZDOTDIR="$GHOSTTY_RESOURCES_DIR/shell-integration/zsh"
+                ;;
+            bash)
+                export GHOSTTY_BASH_ENV="${ENV-}"
+                export GHOSTTY_BASH_INJECT=1
+                export ENV="$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+                exec \(shellEscape(shell)) --posix -l
+                ;;
+            fish)
+                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/ghostty-shell-integration.fish"'
+                ;;
+        esac
+    fi
+    exec \(shellEscape(shell)) -l
+    """
+    return ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
 }
 
 func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {

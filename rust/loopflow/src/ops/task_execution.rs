@@ -2,9 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::controller::wave::playhead::StepRef;
 use crate::durable::{FlowPosition, RunId, TaskId};
+use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
+use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
 use crate::store::{SharedStore, StoreResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,12 +31,38 @@ pub(crate) async fn task_execution(
     store: &SharedStore,
     task_id: &TaskId,
 ) -> StoreResult<TaskExecutionSnapshot> {
+    Ok(task_execution_and_flow(store, task_id).await?.0)
+}
+
+/// Execution and the Flow record read from the same saved position.
+pub(crate) async fn task_execution_and_flow(
+    store: &SharedStore,
+    task_id: &TaskId,
+) -> StoreResult<(TaskExecutionSnapshot, TaskFlowRecord)> {
     let position = store.flow_position(task_id).await?;
     let evidence = position
         .as_ref()
         .and_then(|position| position.claim.as_ref())
         .map(|claim| task_worker_owner_evidence(&claim.owner));
-    Ok(project_execution(position.as_ref(), evidence))
+    let mut snapshot = project_execution(position.as_ref(), evidence);
+    let record = match position.as_ref() {
+        Some(position) => TaskFlowRecord::Pinned(PinnedTaskFlow::new(position, &snapshot)),
+        None => match store
+            .task_events_after(task_id, 0)
+            .await?
+            .into_iter()
+            .rev()
+            .map(|event| event.kind)
+            .find(|kind| matches!(kind, crate::work::task::TaskEventKind::FlowFinished { .. }))
+        {
+            Some(crate::work::task::TaskEventKind::FlowFinished { flow, .. }) => {
+                snapshot.reason = format!("Flow {flow} finished; no further steps are scheduled");
+                TaskFlowRecord::Finished { flow }
+            }
+            _ => TaskFlowRecord::None,
+        },
+    };
+    Ok((snapshot, record))
 }
 
 fn project_execution(
@@ -121,12 +148,16 @@ mod tests {
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
             session_run_id: None,
             ready_summary: None,
-            step_index: 0,
-            iteration: 0,
+            cursor: crate::engine::ExecutionCursor {
+                index: 0,
+                iteration: 0,
+                ..Default::default()
+            },
             version: 1,
             worker_generation: 0,
             claim: None,
             failure: None,
+
             updated_at: OffsetDateTime::now_utc(),
         };
         assert_eq!(

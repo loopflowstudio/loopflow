@@ -10,6 +10,35 @@ use crate::durable::{
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub async fn record_flow_route(
+        &self,
+        task_id: &TaskId,
+        run_id: &RunId,
+        path: &str,
+    ) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let run_id = run_id.clone();
+        let path = path.to_owned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_flow_route(&task_id, &run_id, &path)
+        })
+        .await
+    }
+
+    pub async fn record_flow_verdict(
+        &self,
+        task_id: &TaskId,
+        run_id: &crate::durable::RunId,
+        verdict: &crate::engine::transitions::FlowVerdict,
+    ) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let run_id = run_id.clone();
+        let verdict = verdict.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_flow_verdict(&task_id, &run_id, &verdict)
+        })
+        .await
+    }
     pub(crate) async fn task_issue_identifier(
         &self,
         external_issue_id: &str,
@@ -82,14 +111,22 @@ impl Store {
     pub async fn claim_task_worker(
         &self,
         task_id: &TaskId,
+        expected_invocation: &str,
         expected_version: u64,
         owner: &TaskWorkerOwner,
         claimed_at: OffsetDateTime,
     ) -> StoreResult<TaskWorkerClaimOutcome> {
         let task_id = task_id.clone();
+        let expected_invocation = expected_invocation.to_string();
         let owner = owner.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_task_worker(&task_id, expected_version, &owner, claimed_at)
+            store.claim_task_worker(
+                &task_id,
+                &expected_invocation,
+                expected_version,
+                &owner,
+                claimed_at,
+            )
         })
         .await
     }

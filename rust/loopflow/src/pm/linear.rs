@@ -348,6 +348,7 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
       nodes {
         id
         body
+        createdAt
         updatedAt
         user {
           id
@@ -366,6 +367,7 @@ const ISSUE_COMMENTS_QUERY: &str = r#"query IssueComments($id: String!, $comment
       nodes {
         id
         body
+        createdAt
         updatedAt
         user {
           id
@@ -1232,6 +1234,7 @@ impl LinearClient {
         loop {
             comments.extend(page.nodes.into_iter().map(|node| IssueComment {
                 id: node.id,
+                created_at: node.created_at,
                 revision: node.updated_at,
                 body: node.body,
                 author_name: node.user.as_ref().and_then(|user| {
@@ -1465,6 +1468,8 @@ struct PagedCommentConnection {
 #[derive(Deserialize)]
 struct CommentNode {
     id: String,
+    #[serde(rename = "createdAt", default)]
+    created_at: Option<String>,
     #[serde(rename = "updatedAt")]
     updated_at: Option<String>,
     #[serde(default)]
@@ -2032,6 +2037,7 @@ mod tests {
                 IssueComment {
                     author_name: Some("Jack".to_string()),
                     id: "c-1".to_string(),
+                    created_at: None,
                     revision: None,
                     body: "please prioritize".to_string(),
                     author_id: Some("user-human".to_string()),
@@ -2039,6 +2045,7 @@ mod tests {
                 IssueComment {
                     author_name: None,
                     id: "c-2".to_string(),
+                    created_at: None,
                     revision: None,
                     body: "PR: https://x".to_string(),
                     author_id: Some("user-loopflow".to_string()),
@@ -2046,6 +2053,7 @@ mod tests {
                 IssueComment {
                     author_name: None,
                     id: "c-3".to_string(),
+                    created_at: None,
                     revision: None,
                     body: "integration note".to_string(),
                     author_id: None,

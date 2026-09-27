@@ -272,6 +272,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
             worktree: Some(landing.worktree.clone()),
             skill: Some("ci-fix".to_string()),
             subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Independent,
         },
         crate::run_record::RunLaunchRequest::from_prepared(&launch, &capabilities),
     )
@@ -1272,6 +1273,7 @@ mod tests {
                     worktree: Some(worktree),
                     skill: Some(skill.into()),
                     subjects: Vec::new(),
+                    flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
             .unwrap();

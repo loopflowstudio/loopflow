@@ -4,6 +4,8 @@
 mkdir -p release/unreleased
 $EDITOR release/unreleased/DECISIONS.md
 lf release run patch
+lf release notes 0.13.0 --preview  # inspect the cycle since v0.12.0
+lf release run minor             # close the patch cycle, then publish its minor
 find release -maxdepth 2 -type f | sort
 ```
 
@@ -111,6 +113,22 @@ build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
+
+Minor releases summarize a completed patch cycle. When changes remain,
+`lf release run minor` publishes the next patch first. When the latest completed
+patch already contains everything, it reuses that patch. The minor uses the
+same product snapshot; version metadata and release notes change. Patch notes
+compare against the preceding release, while minor notes compare against the
+preceding `.0` tag. A missing cycle baseline is reported explicitly.
+An explicit minor version such as `lf release run 0.13.0` follows the same policy.
+
+The selected pair and snapshot survive interruption in
+`.lf/releases/minor-<target>.json`. Retrying finishes the same pair without
+creating another patch. A minor candidate whose merged tree differs from its
+prepared snapshot is stopped before tagging. Notes previews print Markdown to
+stdout and progress to stderr, without changing manifests or release archives.
+For an existing version, previews end at its tag and read historical release
+context. Unreleased versions end at HEAD.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 

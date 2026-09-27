@@ -1,0 +1,266 @@
+[
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 2,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "failed-attempt",
+        "ended_at": null,
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": null,
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": null,
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-2",
+      "items": [],
+      "role": "assistant",
+      "status": "running",
+      "text": ""
+    }
+  },
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 2,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "failed-attempt",
+        "ended_at": "2026-09-25T12:00:01Z",
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": null,
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": "failed to prepare wave/operate: model unavailable",
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-2",
+      "items": [],
+      "role": "assistant",
+      "status": "failed",
+      "text": ""
+    }
+  },
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 6,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "later-attempt",
+        "ended_at": null,
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": null,
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": null,
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-6",
+      "items": [],
+      "role": "assistant",
+      "status": "running",
+      "text": ""
+    }
+  },
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 6,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "later-attempt",
+        "ended_at": null,
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": "session-later-attempt",
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": null,
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-6",
+      "items": [],
+      "role": "assistant",
+      "status": "running",
+      "text": ""
+    }
+  },
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 6,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "later-attempt",
+        "ended_at": "2026-09-25T12:00:01Z",
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": "session-later-attempt",
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": null,
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-6",
+      "items": [],
+      "role": "assistant",
+      "status": "completed",
+      "text": "Scheduled work completed."
+    }
+  },
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 12,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "interrupted-attempt",
+        "ended_at": null,
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": null,
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": null,
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-12",
+      "items": [],
+      "role": "assistant",
+      "status": "running",
+      "text": ""
+    }
+  },
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 12,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "interrupted-attempt",
+        "ended_at": null,
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": "session-interrupted-attempt",
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": null,
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-12",
+      "items": [],
+      "role": "assistant",
+      "status": "running",
+      "text": ""
+    }
+  },
+  {
+    "epoch_id": "chat-epoch-1",
+    "source": {
+      "journal_seq": 12,
+      "kind": "local"
+    },
+    "turn": {
+      "activity": null,
+      "author_name": null,
+      "body": {
+        "body_id": "interrupted-attempt",
+        "ended_at": "2026-09-25T12:00:01Z",
+        "flow": null,
+        "harness": "codex",
+        "host": "fixture-host",
+        "invocation_id": null,
+        "iteration": null,
+        "model": "fixture-model",
+        "session_id": "session-interrupted-attempt",
+        "started_at": "2026-09-25T12:00:00Z",
+        "step": "wave/operate",
+        "step_index": null,
+        "termination_reason": "interrupted by user",
+        "worktree": "/fixture"
+      },
+      "created_at": "2026-09-25T12:00:00Z",
+      "id": "turn-12",
+      "items": [],
+      "role": "assistant",
+      "status": "interrupted",
+      "text": "Work in progress."
+    }
+  }
+]

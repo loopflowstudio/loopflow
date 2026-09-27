@@ -181,7 +181,7 @@ struct MessageRow: View {
                     .textSelection(.enabled)
 
                 HStack(spacing: Spacing.xs) {
-                    Text("\(attemptFailure.flow) / \(attemptFailure.step)")
+                    Text([attemptFailure.flow, attemptFailure.step].compactMap { $0 }.joined(separator: " / "))
                     if attemptFailure.count > 1, let timestampLabel {
                         Text("· latest \(timestampLabel)")
                     }

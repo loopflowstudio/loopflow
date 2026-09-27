@@ -7,9 +7,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use loopflow::ops::{
-    bump_version, generate_release, release_bump, release_check, release_notes, release_run,
-    release_status, release_tag, NullProgress, ReleaseNotesDegradation, ReleaseNotesStatus,
-    ReleaseRunOutcome,
+    bump_version, generate_release, preview_release_notes, release_bump, release_check,
+    release_notes, release_run, release_status, release_tag, NullProgress, ReleaseNotesDegradation,
+    ReleaseNotesStatus, ReleaseRunOutcome,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -789,6 +789,115 @@ fn release_check_returns_empty_without_tag() {
 }
 
 #[test]
+fn minor_notes_cover_the_cycle_and_preview_preserves_release_files() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = r#"#!/bin/sh
+cp "$LF_RELEASE_NOTES_CONTEXT" observed-context.json
+printf '# v0.10.0\n\nCycle highlights.\n' > "$LF_RELEASE_NOTES_OUTPUT"
+"#;
+    let _env = EnvGuard::new(&[("gh", &gh_script), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    repo.create_file("early.txt", "already shipped in a patch");
+    repo.stage_all();
+    repo.commit("Early improvement");
+    git(&repo, &["tag", "v0.9.1"]);
+    repo.create_file("late.txt", "closing patch improvement");
+    repo.stage_all();
+    repo.commit("Late improvement");
+    let original = "# v0.9.1\n\nExisting release notes.\n";
+    repo.create_file("RELEASE_NOTES.md", original);
+    repo.create_file(
+        "release/unreleased/DECISIONS.md",
+        "Preserve cycle intent.\n",
+    );
+
+    let notes = preview_release_notes(repo.path(), "0.10.0", None, None, &NullProgress).unwrap();
+    let context: serde_json::Value =
+        serde_json::from_slice(&fs::read(repo.path().join("observed-context.json")).unwrap())
+            .unwrap();
+    assert_eq!(context["prev_tag"], "v0.9.0");
+    let titles: Vec<_> = context["commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|commit| commit["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, ["Early improvement", "Late improvement"]);
+    assert!(notes.contains("Cycle highlights."));
+    assert_eq!(
+        fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).unwrap(),
+        original
+    );
+    assert!(repo.path().join("release/unreleased/DECISIONS.md").exists());
+    assert!(!repo.path().join("release/v0.10.0").exists());
+    assert_eq!(git_output(&repo, &["tag", "--list"]), "v0.9.0\nv0.9.1");
+}
+
+#[test]
+fn historical_minor_preview_excludes_later_changes_and_context() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = r#"#!/bin/sh
+cp "$LF_RELEASE_NOTES_CONTEXT" observed-context.json
+printf '# v0.10.0\n\nHistorical cycle.\n' > "$LF_RELEASE_NOTES_OUTPUT"
+"#;
+    let _env = EnvGuard::new(&[("gh", &gh_script), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    repo.create_file("RELEASE_NOTES.md", "Previous notes");
+    repo.stage_all();
+    repo.commit("Previous release");
+    git(&repo, &["tag", "v0.9.0"]);
+    repo.create_file("release/v0.10.0/DECISIONS.md", "Historical intent");
+    repo.create_file("RELEASE_NOTES.md", "Archived notes");
+    repo.stage_all();
+    repo.commit("Historical improvement");
+    git(&repo, &["tag", "v0.10.0"]);
+    repo.create_file("later.txt", "Must not appear");
+    repo.create_file("RELEASE_NOTES.md", "Future notes");
+    repo.create_file("release/unreleased/DECISIONS.md", "Future intent");
+    repo.stage_all();
+    repo.commit("Future improvement");
+
+    preview_release_notes(repo.path(), "0.10.0", None, None, &NullProgress).unwrap();
+    let context: serde_json::Value =
+        serde_json::from_slice(&fs::read(repo.path().join("observed-context.json")).unwrap())
+            .unwrap();
+    assert_eq!(context["commits"].as_array().unwrap().len(), 1);
+    assert_eq!(context["commits"][0]["title"], "Historical improvement");
+    assert_eq!(context["decisions"], "Historical intent");
+    assert_eq!(context["previous_release_notes"], "Previous notes");
+    assert_eq!(
+        fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).unwrap(),
+        "Future notes"
+    );
+}
+
+#[test]
+fn minor_notes_require_the_cycle_baseline_and_support_named_targets() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = r#"#!/bin/sh
+cp "$LF_RELEASE_NOTES_CONTEXT" observed-context.json
+printf '# v1.3.0\n\nCLI cycle highlights.\n' > "$LF_RELEASE_NOTES_OUTPUT"
+"#;
+    let _env = EnvGuard::new(&[("gh", &gh_script), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    repo.create_file(
+        ".lf/config.yaml",
+        "release:\n  targets:\n    cli:\n      tag_prefix: cli/\n",
+    );
+    git(&repo, &["tag", "cli/v1.2.7"]);
+    let error =
+        preview_release_notes(repo.path(), "1.3.0", None, Some("cli"), &NullProgress).unwrap_err();
+    assert!(error.to_string().contains("cli/v1.2.0"));
+    git(&repo, &["tag", "cli/v1.2.0"]);
+    preview_release_notes(repo.path(), "1.3.0", None, Some("cli"), &NullProgress).unwrap();
+    let context: serde_json::Value =
+        serde_json::from_slice(&fs::read(repo.path().join("observed-context.json")).unwrap())
+            .unwrap();
+    assert_eq!(context["prev_tag"], "cli/v1.2.0");
+}
+
+#[test]
 fn release_run_is_a_green_noop_without_merged_changes() {
     let gh_script = write_gh_script("[]");
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
@@ -806,6 +915,223 @@ fn release_run_is_a_green_noop_without_merged_changes() {
             latest_tag: Some("v0.9.1".to_string()),
         }
     );
+}
+
+fn minor_release_scripts(state: &std::path::Path) -> (String, String) {
+    let gh = format!(
+        r#"#!/bin/sh
+set -eu
+state='{state}'
+[ "$1" != --version ] || exit 0
+branch=''
+case "$1 $2" in
+  'pr list')
+    previous=''
+    for arg in "$@"; do
+      [ "$previous" != --head ] || branch="$arg"
+      previous="$arg"
+    done
+    [ -n "$branch" ] || {{ echo '[]'; exit 0; }} ;;
+  'pr view'|'pr merge')
+    case "${{3:-}}" in
+      92) branch=jack/release-default-v0-9-2 ;;
+      100) branch=jack/release-default-v0-10-0 ;;
+      *) branch=$(git branch --show-current) ;;
+    esac ;;
+  'pr create'|'pr edit'|'pr ready') exit 0 ;;
+  'api graphql') echo false; exit 0 ;;
+  'release view') echo '{{"isDraft":false}}'; exit 0 ;;
+  *) echo "unexpected gh invocation: $*" >&2; exit 1 ;;
+esac
+case "$branch" in
+  jack/release-default-v0-9-2) number=92; version=0.9.2 ;;
+  jack/release-default-v0-10-0) number=100; version=0.10.0 ;;
+  *) exit 1 ;;
+esac
+head=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
+if [ -z "$head" ] || ! git cat-file -e "$head:release/v$version/NOTES.md" 2>/dev/null; then
+  [ "$2" != list ] || {{ echo '[]'; exit 0; }}
+  exit 1
+fi
+if [ "$2" = merge ]; then
+  if [ "$number" = 100 ] && [ -f "$state/advance-main" ]; then
+    GIT_INDEX_FILE="$state/index" git read-tree "$head"
+    blob=$(printf 'late feature\n' | git hash-object -w --stdin)
+    GIT_INDEX_FILE="$state/index" git update-index --add --cacheinfo "100644,$blob,late.txt"
+    tree=$(GIT_INDEX_FILE="$state/index" git write-tree)
+    head=$(printf 'Merge with concurrent feature\n' | git commit-tree "$tree" -p "$head")
+  fi
+  git push origin "$head:refs/heads/main" >&2
+  printf '%s' "$head" > "$state/merged-$number"
+  exit 0
+fi
+status=OPEN
+merge=null
+if [ -f "$state/merged-$number" ]; then
+  status=MERGED
+  merge="{{\"oid\":\"$(cat "$state/merged-$number")\"}}"
+fi
+result=$(printf '{{"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
+if [ "$2" = list ]; then printf '[%s]\n' "$result"; else printf '%s\n' "$result"; fi
+"#,
+        state = state.display()
+    );
+    let lf = format!(
+        r#"#!/bin/sh
+set -eu
+version=$(sed 's/^{{"version":"\([^"]*\)".*/\1/' "$LF_RELEASE_NOTES_CONTEXT")
+cp "$LF_RELEASE_NOTES_CONTEXT" '{state}'/context-$version.json
+if [ "$version" = 0.10.0 ] && [ -f '{state}/interrupt' ]; then
+  echo 'operator interrupted minor notes' >&2
+  exit 1
+fi
+printf '# v%s\n\nRelease highlights.\n' "$version" > "$LF_RELEASE_NOTES_OUTPUT"
+"#,
+        state = state.display()
+    );
+    (gh, lf)
+}
+
+fn prepare_minor_cycle(repo: &TestRepo, outstanding: bool) {
+    repo.create_file(".gitignore", ".lf/releases/\n");
+    repo.create_file(
+        "Cargo.toml",
+        "[package]\nname = \"demo\"\nversion = \"0.9.0\"\n",
+    );
+    repo.stage_all();
+    repo.commit("Start cycle");
+    git(repo, &["tag", "v0.9.0"]);
+    repo.create_file("feature.txt", "same product in patch and minor\n");
+    repo.create_file(
+        "Cargo.toml",
+        "[package]\nname = \"demo\"\nversion = \"0.9.1\"\n",
+    );
+    repo.stage_all();
+    repo.commit("Ship cycle improvement");
+    git(repo, &["tag", "v0.9.1"]);
+    if outstanding {
+        repo.create_file("fix.txt", "closing patch fix\n");
+        repo.stage_all();
+        repo.commit("Closing fix");
+    }
+    git(repo, &["push", "origin", "main", "--tags"]);
+}
+
+#[test]
+fn minor_release_closes_outstanding_changes_with_a_patch() {
+    let repo = TestRepo::new();
+    prepare_minor_cycle(&repo, true);
+    let state = tempfile::tempdir().unwrap();
+    let (gh, lf) = minor_release_scripts(state.path());
+    let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
+    let result = release_run(repo.path(), "0.10.0", None, &NullProgress).unwrap();
+    let ReleaseRunOutcome::Released(receipt) = result else {
+        panic!("expected minor release")
+    };
+    assert_eq!(receipt.tag, "v0.10.0");
+    assert_eq!(
+        git_output(&repo, &["tag", "--list"]),
+        "v0.10.0\nv0.9.0\nv0.9.1\nv0.9.2"
+    );
+    assert_eq!(
+        git_output(
+            &repo,
+            &["diff", "v0.9.2", "v0.10.0", "--", "feature.txt", "fix.txt"]
+        ),
+        ""
+    );
+    assert!(git_output(&repo, &["show", "v0.10.0:Cargo.toml"]).contains("0.10.0"));
+    let patch: serde_json::Value =
+        serde_json::from_slice(&fs::read(state.path().join("context-0.9.2.json")).unwrap())
+            .unwrap();
+    let minor: serde_json::Value =
+        serde_json::from_slice(&fs::read(state.path().join("context-0.10.0.json")).unwrap())
+            .unwrap();
+    assert_eq!(patch["prev_tag"], "v0.9.1");
+    assert_eq!(minor["prev_tag"], "v0.9.0");
+    assert!(minor["commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|commit| commit["title"] == "Ship cycle improvement"));
+}
+
+#[test]
+fn minor_release_reuses_the_latest_patch_without_an_empty_patch() {
+    let repo = TestRepo::new();
+    prepare_minor_cycle(&repo, false);
+    let state = tempfile::tempdir().unwrap();
+    let (gh, lf) = minor_release_scripts(state.path());
+    let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
+    let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
+    let ReleaseRunOutcome::Released(receipt) = result else {
+        panic!("expected minor release")
+    };
+    assert_eq!(receipt.tag, "v0.10.0");
+    assert_eq!(
+        git_output(&repo, &["tag", "--list"]),
+        "v0.10.0\nv0.9.0\nv0.9.1"
+    );
+    assert_eq!(
+        git_output(&repo, &["diff", "v0.9.1", "v0.10.0", "--", "feature.txt"]),
+        ""
+    );
+    assert!(matches!(
+        release_run(repo.path(), "minor", None, &NullProgress).unwrap(),
+        ReleaseRunOutcome::NoChanges { .. }
+    ));
+}
+
+#[test]
+fn interrupted_minor_reuses_its_published_patch() {
+    let repo = TestRepo::new();
+    prepare_minor_cycle(&repo, true);
+    let state = tempfile::tempdir().unwrap();
+    fs::write(state.path().join("interrupt"), "").unwrap();
+    let (gh, lf) = minor_release_scripts(state.path());
+    let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
+    let error = release_run(repo.path(), "minor", None, &NullProgress).unwrap_err();
+    assert!(
+        error.to_string().contains("interrupted minor notes"),
+        "{error}"
+    );
+    let patch = git_output(&repo, &["rev-parse", "v0.9.2"]);
+    assert_eq!(git_output(&repo, &["tag", "--list", "v0.10.0"]), "");
+    fs::remove_file(state.path().join("interrupt")).unwrap();
+    let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
+    let ReleaseRunOutcome::Released(receipt) = result else {
+        panic!("expected resumed pair to finish")
+    };
+    assert_eq!(receipt.tag, "v0.10.0");
+    assert_eq!(git_output(&repo, &["rev-parse", "v0.9.2"]), patch);
+    assert_eq!(git_output(&repo, &["tag", "--list", "v0.9.3"]), "");
+
+    // Publication succeeded but the controller died before recording completion.
+    let receipt_path = repo.path().join(".lf/releases/minor-default.json");
+    let mut receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(&receipt_path).unwrap()).unwrap();
+    receipt["completed"] = false.into();
+    fs::write(receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+    let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
+    let ReleaseRunOutcome::Resumed(receipt) = result else {
+        panic!("expected the already-published minor to resume")
+    };
+    assert_eq!(receipt.tag, "v0.10.0");
+    assert_eq!(git_output(&repo, &["tag", "--list", "v0.11.0"]), "");
+}
+
+#[test]
+fn minor_release_does_not_tag_a_merge_that_changed_its_patch_snapshot() {
+    let repo = TestRepo::new();
+    prepare_minor_cycle(&repo, false);
+    let state = tempfile::tempdir().unwrap();
+    fs::write(state.path().join("advance-main"), "").unwrap();
+    let (gh, lf) = minor_release_scripts(state.path());
+    let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
+    let error = release_run(repo.path(), "minor", None, &NullProgress).unwrap_err();
+    assert!(error.to_string().contains("late.txt"), "{error}");
+    assert_eq!(git_output(&repo, &["tag", "--list", "v0.10.0"]), "");
+    assert_eq!(git_output_bare(&repo, &["tag", "--list", "v0.10.0"]), "");
 }
 
 #[test]

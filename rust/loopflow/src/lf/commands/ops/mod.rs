@@ -21,11 +21,11 @@ use crate::ops::{
     abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
     commit_workflow, continue_rebase_after_authorization, continue_rebase_for_resolution,
     create_or_update_pr, current_pr, finish_arm_after_rebase, finish_submit_after_rebase,
-    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
-    release_bump, release_check, release_notes, release_publish, release_run, release_status,
-    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronHost,
-    CronOutcome, CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress,
-    RebaseOptions, SystemLaunchctl,
+    plan_rebase, preview_release_notes, rebase_class_name, rebase_strategy_name,
+    rebase_with_recovery, recover_rebase, release_bump, release_check, release_notes,
+    release_publish, release_run, release_status, release_tag, start_rebase_for_resolution, submit,
+    AbandonOptions, CommitOptions, CronHost, CronOutcome, CronSource, CronSpec, CronTargetKind,
+    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -153,8 +153,15 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
         ReleaseCommand::Notes {
             version,
             prev_tag,
+            preview,
             target,
-        } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
+        } => release_notes_cmd(
+            version,
+            prev_tag.as_deref(),
+            target.as_deref(),
+            *preview,
+            &progress,
+        ),
         ReleaseCommand::Bump { version, target } => {
             release_bump_cmd(version, target.as_deref(), &progress)
         }
@@ -826,6 +833,29 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 )?;
                 println!("{}: updated task {}", result.wave, result.id);
             }
+            PmTaskCommand::Comments { id, wave, json } => {
+                let result = crate::ops::pm::pm_task_comments(
+                    &repo_root,
+                    ambient_wave(wave.as_deref())?.as_deref(),
+                    id,
+                )?;
+                if *json {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else if result.comments.is_empty() {
+                    println!("{}: no comments", result.identifier);
+                } else {
+                    for comment in &result.comments {
+                        let author = match &comment.author {
+                            crate::ops::pm::TaskCommentAuthor::Person { name } => {
+                                name.as_deref().unwrap_or("unnamed person")
+                            }
+                            crate::ops::pm::TaskCommentAuthor::Integration => "integration",
+                        };
+                        let date = comment.created_at.as_deref().unwrap_or("date unavailable");
+                        println!("── {author} · {date}\n{}\n", comment.body.trim_end());
+                    }
+                }
+            }
             PmTaskCommand::Done { id, wave, pr } => {
                 let result = crate::ops::pm::pm_update(
                     &repo_root,
@@ -1449,15 +1479,46 @@ fn release_notes_cmd(
     version: &str,
     prev_tag: Option<&str>,
     target_name: Option<&str>,
+    preview: bool,
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
+    if preview {
+        print!(
+            "{}",
+            preview_release_notes(
+                &repo_root,
+                version,
+                prev_tag,
+                target_name,
+                &NotesPreviewProgress
+            )?
+        );
+        return Ok(());
+    }
     release_notes(&repo_root, version, prev_tag, target_name, progress)?;
     println!(
         "RELEASE_NOTES.md updated for v{}",
         version.trim_start_matches('v')
     );
     Ok(())
+}
+
+struct NotesPreviewProgress;
+
+impl Progress for NotesPreviewProgress {
+    fn status(&self, message: &str) {
+        eprintln!("{message}");
+    }
+    fn warning(&self, message: &str) {
+        eprintln!("{message}");
+    }
+    fn error(&self, message: &str) {
+        eprintln!("{message}");
+    }
+    fn confirm(&self, _message: &str) -> bool {
+        false
+    }
 }
 
 fn release_bump_cmd(
@@ -2216,6 +2277,7 @@ fn launch_skill_agent(
             worktree: Some(repo_root.to_path_buf()),
             skill: Some(skill_name.to_string()),
             subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Independent,
         },
         &context,
     )?;
@@ -2371,7 +2433,7 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         required: false,
         macos_only: false,
         brew: None,
-        fallback: "lf init",
+        fallback: "npm install -g @anthropic-ai/claude-code",
     },
     SystemDep {
         name: "codex",

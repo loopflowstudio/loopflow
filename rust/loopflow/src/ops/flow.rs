@@ -307,15 +307,24 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
         ReleaseCommand::Notes {
             version,
             prev_tag,
+            preview,
             target,
         } => {
-            release_notes(
+            let generate = if preview {
+                crate::ops::preview_release_notes
+            } else {
+                release_notes
+            };
+            let notes = generate(
                 repo,
                 &version,
                 prev_tag.as_deref(),
                 target.as_deref(),
                 progress,
             )?;
+            if preview {
+                println!("{notes}");
+            }
             Ok(())
         }
         ReleaseCommand::Bump { version, target } => {

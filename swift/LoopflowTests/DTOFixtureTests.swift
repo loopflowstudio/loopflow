@@ -7,6 +7,42 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Active Runs preserve exact attribution, waiting clients, and evidence gaps")
+    func activeRunsFixture() async throws {
+        let data = try loadFixtureData("active_runs.json")
+        let snapshot = try JSONDecoder().decode(ActiveRunsSnapshot.self, from: data)
+        #expect(snapshot.discovery == .ready)
+        #expect(snapshot.runs[0].work == snapshot.task)
+        #expect(snapshot.runs[0].processes[0].state == .waiting)
+        #expect(snapshot.gaps.count == 1)
+        #expect(try JSONDecoder().decode(ActiveRunsSnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
+        var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missing.removeValue(forKey: "discovery")
+        let incomplete = try JSONSerialization.data(withJSONObject: missing)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ActiveRunsSnapshot.self, from: incomplete)
+        }
+    }
+
+    @Test("Task comments keep the complete thread and require every field")
+    func taskCommentsFixture() throws {
+        let data = try loadFixtureData("task_comments.json")
+        let thread = try JSONDecoder().decode(TaskComments.self, from: data)
+        #expect(thread.identifier == "LOO-291")
+        #expect(thread.comments.map(\.id) == ["c-bot", "c-1", "c-2"])
+        #expect(thread.comments.map(\.author) == [.integration, .person(name: "Maya"), .person(name: nil)])
+        #expect(thread.comments[0].createdAt == nil)
+        #expect(thread.comments[1].body == "- first\n  - nested\n\n[spec](https://example.com)")
+        var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var comments = try #require(root["comments"] as? [[String: Any]])
+        comments[0].removeValue(forKey: "created_at")
+        root["comments"] = comments
+        let incomplete = try JSONSerialization.data(withJSONObject: root)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskComments.self, from: incomplete)
+        }
+    }
+
     @Test("Wave plan uses the same chapter as status")
     func planUsesChapterSnapshot() async throws {
         let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
@@ -40,6 +76,8 @@ struct DTOFixtureTests {
             == [.working, .stalled])
         #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.wave)
             == ["product", "product"])
+        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.worktree)
+            == ["/src/loopflow.task", "/src/loopflow.task"])
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
 
         let encoded = try JSONEncoder().encode(snapshot)
@@ -166,6 +204,8 @@ struct DTOFixtureTests {
         #expect(tasks[2].reference.workspace == nil)
         #expect(tasks[2].reference.issueUrl == nil)
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
+        // Start evidence is required: a prepared checkout is not started work.
+        #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
         #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf pm sync") == true)
         #expect(!roadmap.waves[1].wave.enabled)
     }
@@ -233,12 +273,79 @@ struct DTOFixtureTests {
             id: "task_00000000000000000000000000000001"
         ))
         #expect(session.title == "Simplify cross-Work questions")
+        #expect(session.titleSource == .human)
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
+        #expect(session.workPath == "product / LOO-291")
+        #expect(session.action(.complete)?.unavailableReason == "The session agent has not marked this ready")
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
         #expect(decoded == sessions)
+    }
+
+    @Test("Session Flow membership mirrors every Rust projection and is required")
+    func sessionFlowMembershipFixture() throws {
+        let data = try loadFixtureData("session_memberships.json")
+        let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
+        #expect(sessions.map(\.flowMembership) == [
+            .step(flow: "task-design", invocationId: "00000000-0000-0000-0000-00000000f10w",
+                  step: "review-design", node: "1", iterations: [[]], occurrence: .current),
+            .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
+                  step: "implement", node: "4/fix/1", iterations: [[2, 1], [1]], occurrence: .earlier),
+            .independent,
+            .unknown(reason: "Run run_00000000000000000000000000000004 predates recorded Flow membership"),
+            .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f1",
+                  step: "implement", node: "2", iterations: [[2, 1]], occurrence: .past),
+            .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f0",
+                  step: "implement", node: nil, iterations: nil, occurrence: .past),
+            .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
+                  step: "demo", node: "7", iterations: [[0, 0]], occurrence: .current),
+        ])
+        #expect(sessions.last?.titleSource == .unavailable)
+        #expect(sessions.map(\.provider) == ["codex", "claude", "claude", "claude", "claude", "claude", nil])
+        #expect(sessions[1].flowMembership.label == "feature / implement · iteration (2, 1) / (1) · earlier")
+        #expect(sessions[4].flowMembership.label == "feature / implement · iteration (2, 1) · past run")
+        #expect(sessions[5].flowMembership.label == "feature / implement · iteration unavailable · past run")
+        let legacy: SessionFlowMembership = .step(flow: "feature", invocationId: "old", step: "demo",
+                                                 node: nil, iterations: nil, occurrence: .past)
+        #expect(legacy.label == "feature / demo · iteration unavailable · past run")
+        #expect(try JSONDecoder().decode(SessionFlowMembership.self,
+                                       from: JSONEncoder().encode(legacy)) == legacy)
+        let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        for var value in objects {
+            value.removeValue(forKey: "flow_membership")
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+        }
+        let decoded = try JSONDecoder().decode([SessionRecord].self, from: JSONEncoder().encode(sessions))
+        #expect(decoded == sessions)
+    }
+
+    @Test("Every Session kind has a required Run reference independent of its boundary ID")
+    func sessionRequiresRun() throws {
+        let data = try loadFixtureData("session.json")
+        for kind in ["interactive", "ask", "flow"] {
+            var value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            value["kind"] = kind
+            let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            #expect(session.runId == "run_00000000000000000000000000000001")
+            #expect(session.runId != session.id)
+            var untitled = value
+            untitled.removeValue(forKey: "title_source")
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: untitled))
+            }
+            value.removeValue(forKey: "run_id")
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+            value["run_id"] = NSNull()
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+        }
     }
 
     @Test("Flow Session fixture preserves readiness and its open command")
@@ -249,6 +356,9 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .ready)
+        #expect(session.titleSource == .generated)
+        #expect(session.actions.map(\.kind) == [.open, .complete])
+        #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
@@ -278,6 +388,28 @@ struct DTOFixtureTests {
         let data = try loadFixtureData(name, sourceFile: sourceFile)
         let json = try JSONSerialization.jsonObject(with: data)
         return try #require(json as? [String: Any])
+    }
+
+    @Test("Governance bodies decode without historical Flow coordinates")
+    func governanceBody() throws {
+        let data = try loadFixtureData("resident_deltas.json")
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let deltas = try #require(json["deltas"] as? [[String: Any]])
+        var value = try #require(deltas.first?["body"] as? [String: Any])
+        let body = try JSONDecoder().decode(BodyProvenance.self, from: JSONSerialization.data(withJSONObject: value))
+        #expect(body.invocationId == nil)
+        #expect(body.stepIndex == nil)
+        #expect(body.flow == nil)
+        #expect(body.iteration == nil)
+        #expect(body.step == "wave/operate")
+        let failed = try ChatTurn(id: "failed", role: .assistant, authorName: nil, text: "", status: .failed,
+                              items: [], createdAt: body.startedAt, body: body, activity: nil)
+        value["body_id"] = "different-attempt"
+        let laterBody = try JSONDecoder().decode(BodyProvenance.self, from: JSONSerialization.data(withJSONObject: value))
+        let later = try ChatTurn(id: "later", role: .assistant, authorName: nil, text: "", status: .completed,
+                             items: [], createdAt: body.startedAt, body: laterBody, activity: nil)
+        let failures = attemptFailurePresentations(turns: [failed, later])
+        #expect(failures[failed.id]?.state == .failed)
     }
 
     private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {

@@ -161,7 +161,8 @@
           "workspace": {
             "slug": "infrastructure-task",
             "branch": "jack/infrastructure.task.20260713_1200",
-            "worktree": "/src/loopflow.infrastructure.task"
+            "worktree": "/src/loopflow.infrastructure.task",
+            "local_exists": true
           }
         },
         "runtime": {
@@ -169,7 +170,8 @@
           "status": "ready",
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
-          "provider": "codex"
+          "provider": "codex",
+          "started": true
         },
         "directive": {
           "version": 2,
@@ -220,6 +222,182 @@
           "recommended": "open_pr",
           "reason": "merge head 333333333333 on GitHub"
         },
+        "flow": {
+          "recommended": "feature",
+          "record": {
+            "kind": "pinned",
+            "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+            "graph": {
+              "name": "feature",
+              "steps": [
+                {
+                  "key": "0",
+                  "id": "design",
+                  "label": "task-design",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": null,
+                  "parents": [
+                    "feature"
+                  ],
+                  "paths": []
+                },
+                {
+                  "key": "1",
+                  "id": "implement",
+                  "label": "implement",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": null,
+                  "parents": [
+                    "feature",
+                    "pursue"
+                  ],
+                  "paths": []
+                },
+                {
+                  "key": "2",
+                  "id": null,
+                  "label": "review-slice",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": null,
+                  "parents": [
+                    "feature",
+                    "pursue"
+                  ],
+                  "paths": []
+                },
+                {
+                  "key": "3",
+                  "id": "decide",
+                  "label": "loop-decide",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": "1",
+                  "parents": [
+                    "feature",
+                    "pursue"
+                  ],
+                  "paths": []
+                },
+                {
+                  "key": "4",
+                  "id": "demo",
+                  "label": "demo",
+                  "kind": "skill",
+                  "human": true,
+                  "returns_to": null,
+                  "parents": [
+                    "feature",
+                    "pursue"
+                  ],
+                  "paths": []
+                },
+                {
+                  "key": "5",
+                  "id": "decide_delivery",
+                  "label": "loop-decide",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": "1",
+                  "parents": [
+                    "feature",
+                    "pursue"
+                  ],
+                  "paths": []
+                },
+                {
+                  "key": "6",
+                  "id": null,
+                  "label": "xor-route",
+                  "kind": "xor",
+                  "human": false,
+                  "returns_to": null,
+                  "parents": [
+                    "feature"
+                  ],
+                  "paths": [
+                    {
+                      "name": "fix",
+                      "description": "Repair the failing check",
+                      "steps": [
+                        {
+                          "key": "6/fix/0",
+                          "id": "patch",
+                          "label": "patch",
+                          "kind": "skill",
+                          "human": false,
+                          "returns_to": null,
+                          "parents": [],
+                          "paths": []
+                        }
+                      ]
+                    },
+                    {
+                      "name": "skip",
+                      "description": "Nothing to repair",
+                      "steps": []
+                    }
+                  ]
+                },
+                {
+                  "key": "7",
+                  "id": null,
+                  "label": "pr land -c",
+                  "kind": "op",
+                  "human": false,
+                  "returns_to": null,
+                  "parents": [
+                    "feature",
+                    "queue"
+                  ],
+                  "paths": []
+                }
+              ]
+            },
+            "current": "4",
+            "completed": [
+              "0",
+              "1",
+              "2",
+              "3"
+            ],
+            "returns": [
+              {
+                "decider": "3",
+                "traversals": 1
+              },
+              {
+                "decider": "5",
+                "traversals": 1
+              }
+            ],
+            "execution": "human",
+            "reason": "Waiting for your review at demo",
+            "restart_required": false,
+            "iterations": [
+              [
+                1,
+                1
+              ]
+            ]
+          },
+          "controls": [
+            {
+              "kind": "start",
+              "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
+            },
+            {
+              "kind": "resume",
+              "unavailable": "Waiting for your review at demo; continue it through its Session"
+            },
+            {
+              "kind": "restart",
+              "unavailable": null
+            }
+          ]
+        },
         "condition": {
           "state": "waiting",
           "reason": "merge pull request head 333333333333 on GitHub",
@@ -260,6 +438,26 @@
         "actions": {
           "recommended": null,
           "reason": "Task is ready to start"
+        },
+        "flow": {
+          "recommended": "feature",
+          "record": {
+            "kind": "none"
+          },
+          "controls": [
+            {
+              "kind": "start",
+              "unavailable": null
+            },
+            {
+              "kind": "resume",
+              "unavailable": "No pinned Flow to resume; start one"
+            },
+            {
+              "kind": "restart",
+              "unavailable": "Task has no Work yet; start a Flow instead"
+            }
+          ]
         },
         "condition": {
           "state": "clear",

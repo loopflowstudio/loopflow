@@ -104,7 +104,7 @@ impl Store {
         .await
     }
 
-    pub async fn approve_human_task_boundary(
+    pub async fn complete_human_task_boundary(
         &self,
         task: &Task,
         expected: &FlowPosition,
@@ -116,7 +116,7 @@ impl Store {
         let next = next.clone();
         let summary = summary.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.approve_human_task_boundary(&task, &expected, &next, &summary)
+            store.complete_human_task_boundary(&task, &expected, &next, &summary)
         })
         .await
     }
@@ -132,21 +132,6 @@ impl Store {
         let summary = summary.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.finish_human_task_boundary(&task, &expected, &summary)
-        })
-        .await
-    }
-
-    pub async fn iterate_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        next: &FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let next = next.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.iterate_human_task_boundary(&task, &expected, &next)
         })
         .await
     }

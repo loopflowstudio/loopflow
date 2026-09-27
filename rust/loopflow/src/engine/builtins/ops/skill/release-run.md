@@ -15,6 +15,11 @@ first token as:
 
 If no input is provided, default to `patch`.
 
+`minor` completes a closing patch when unreleased changes exist, or reuses the
+latest completed patch when it already contains the release snapshot. The minor
+publishes that same product state with new version metadata and cycle notes
+against the preceding `.0` tag. Patch notes retain their incremental baseline.
+
 ## Workflow
 
 Run exactly one command:
@@ -44,6 +49,10 @@ publication, deployment, and secret handling in the publisher.
 
 `lf release run` resumes an existing release PR or incomplete latest tag after
 interruptions.
+
+A minor run records its selected patch, minor version, and source snapshot in
+`.lf/releases/minor-<target>.json`. Retry `lf release run minor` to complete that
+pair; a published patch is reused even when no unreleased commits remain.
 
 Process death does not make generated release state temporary. Re-entry owns:
 

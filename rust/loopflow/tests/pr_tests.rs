@@ -4,8 +4,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::controller::wave::playhead::QueuedInvocation;
 use loopflow::durable::{FlowPosition, WorkStatus};
+use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
 use loopflow::ops::{
     arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
@@ -1009,12 +1009,16 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
         session_run_id: None,
         ready_summary: None,
-        step_index: 1,
-        iteration: 0,
+        cursor: loopflow::engine::ExecutionCursor {
+            index: 1,
+            iteration: 0,
+            ..Default::default()
+        },
         version: 0,
         worker_generation: 0,
         claim: None,
         failure: None,
+
         updated_at: now,
     };
     assert!(position.is_human());
@@ -1026,13 +1030,14 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         .expect("store auto merge request");
 
     task_resume("INF-123", None).expect("resume Task authored work");
-    assert_eq!(
-        runtime
-            .block_on(task.store.flow_position(&task.task.id))
-            .unwrap(),
-        Some(position),
-        "resume preserves the exact review boundary"
-    );
+    let resumed = runtime
+        .block_on(task.store.flow_position(&task.task.id))
+        .unwrap()
+        .expect("review boundary remains available");
+    assert_eq!(resumed.invocation, position.invocation);
+    assert_eq!(resumed.cursor, position.cursor);
+    assert!(resumed.is_human());
+    assert!(resumed.session_run_id.is_some());
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))

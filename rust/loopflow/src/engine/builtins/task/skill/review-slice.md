@@ -1,11 +1,11 @@
 ---
 requires: Task design, implementation diff, and runnable behavior
-produces: repaired reviewable change | precise direction for the next slice
+produces: scratch review evidence, repaired bounded gaps, and recommended next work
 default_agent: claude
 action_style: procedural
 ---
 Review the implemented slice through behavior, intent, and source. Operate
-independently; this is an autonomous loop step, not a Feedback boundary.
+independently and return evidence, whether invoked on its own or within a Flow.
 
 ## Evidence first
 
@@ -43,6 +43,14 @@ locally, or creates a dead end for the next slice.
 Fix clear, bounded gaps in this Task worktree and rerun their focused proof. If a
 material change invalidates prior review, return precise direction for the next
 slice rather than approving stale evidence.
+
+Save the evidence matrix, remaining findings, and recommended next action/proof
+in the relevant topic note under `scratch/`. Include the reviewed scope and date,
+link the design and proof, and distinguish current findings from superseded
+ones. Make the note readable without this Run or knowledge of the next skill.
+Return its exact path and a short takeaway. A following loop-decide reconciles
+these findings with the other reviews and human feedback; this review does not
+choose the Flow's navigation.
 
 When all applicable `Done when` claims hold and the slice is coherent, publish or
 refresh the Task PR with `lf pr publish`. This review never lands or completes the

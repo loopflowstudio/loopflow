@@ -47,6 +47,14 @@ Skills chain through `scratch/`: a step writes `scratch/<branch>.md`, the
 next step reads it. That contract is what makes flows work — if your skill
 produces something a later step needs, write it to `scratch/`, not to chat.
 
+Use `concept-review` to reconsider the product mid-task with a human, or after
+`review-slice` for an autonomous assessment. Draft the affected usage docs and
+skill guidance first, then follow the simpler interaction through types, APIs,
+and infrastructure. Product clarity is valuable even without deleting code.
+Keep proposed alternatives distinct from accepted requirements and verified
+behavior. The review supplies evidence; `loop-decide` owns navigation when the
+Flow declares a decision step.
+
 ## Flows
 
 A flow is a YAML list of steps — each step names a skill, an op, or another
@@ -64,20 +72,23 @@ Skills that need another Work's perspective launch it directly with
 `lf ask "<request>"`; the Run blocks while a durable session works in the
 same checkout, then resumes when the user completes that conversation.
 
-Put a mandatory review gate on the exact authored occurrence. `id` is
-stable within the expanded flow and required with `human: true`:
+Run a step interactively with `human: true`. Give it an `id` stable within
+its expanded Flow so the conversation can be reopened:
 
 ```yaml
+- kickoff
 - step:
-    id: review_kickoff
+    id: review_design
     name: review-design
     human: true
 ```
 
-A headless Task parks at that node; an attached TUI uses its present User.
-Iterate returns to the nearest preceding autonomous occurrence. Flow policy
-does not create a separate review ledger; workflows that are already designed
-can select an existing gate-free Flow when they launch a Task worker.
+The human and agent clarify the design in that conversation. The agent saves
+feedback with `lf session ready "feedback and remaining work"`; the human ends
+the review with `lf session complete <session-id>`. The Flow carries that
+feedback to its next step. Provider exit or readiness alone leaves it waiting.
+Human steps have no navigation verdict or backward edge. Put a deciding step
+after the review when its feedback should choose between continuing and more work.
 
 Mechanical git/PR operations ride along as `op:` steps:
 
@@ -86,6 +97,33 @@ Mechanical git/PR operations ride along as `op:` steps:
 - gate
 - op: pr land
 ```
+
+### Working notes and feedback
+
+```text
+scratch/search-design.md
+scratch/search-feedback.md
+scratch/search-recovery-proof.md
+```
+
+Use topic-named Markdown notes for designs, research, demos and review findings.
+Write for someone who did not attend the conversation: context and date,
+observations, human feedback, agreed changes, unresolved questions, and the next
+useful action with its proof. Link related notes. Update the relevant account
+and mark superseded conclusions while preserving useful evidence. Notes remain
+available across steps, regardless of which skill wrote them or runs next.
+
+A review's ready summary points to that material:
+
+```sh
+lf session ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
+```
+
+Loop-decide starts at those paths, then reconciles the current design and other
+relevant scratch evidence. A note recommends work; the deciding occurrence
+records navigation through the Flow protocol. There is no required handoff
+filename or control file. Recursive scratch Markdown is assembled into fresh
+Run context; a running agent can reread files updated since its launch.
 
 ### Branching (xor)
 
@@ -106,14 +144,88 @@ one path runs:
         description: "Everything is healthy"
 ```
 
-The `router:` skill reads `scratch/` and chooses a path; routing
-instructions are appended to its prompt automatically, so the skill author
-focuses on *what to think about*, not how to express the choice. A path
-with no `flow:` or `skill:` (like `silence`) is a clean no-op exit. With no
-`router:`, a generic routing agent picks from `scratch/` contents.
+The `router:` skill reads the available evidence and records one choice with
+`lf flow route PATH`. Routing instructions and path descriptions are appended
+to its captured prompt. The choice belongs to the active Run and takes effect
+when it succeeds; failed Runs discard their candidates. A path
+with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
+exit. With no `router:`, a generic routing agent picks from `scratch/` contents.
 
-Keep flows bounded. A flow is one pass — repetition belongs to Wave,
-Project, and Task runtimes, not to loops inside a flow.
+### Loopflows
+
+A **loopflow** is a Flow with one or more backward edges. Use the same Flow
+commands; Task binding adds context and Task authority. Task and ordinary Flow
+execution interpret backward edges through the same transition rules.
+
+```bash
+lf feature
+lf task run DES-123 --flow feature
+```
+
+A loop is a backward edge in that Flow. It returns from a deciding step to an
+earlier step; the intervening steps form its body. Give the destination and
+deciding step stable ids:
+
+```yaml
+- step:
+    id: implement
+    name: implement
+- compress
+- review-slice
+- step:
+    id: review_concepts
+    name: concept-review
+- step:
+    id: decide
+    name: loop-decide
+    repeat:
+      from: implement
+- step:
+    id: review_delivery
+    name: demo
+    human: true
+- step:
+    id: decide_delivery
+    name: loop-decide
+    repeat:
+      from: implement
+```
+
+One pass runs implement, compress, review-slice, concept-review, and loop-decide.
+The reviews supply evidence; loop-decide chooses Advance or Iterate through the
+[decision protocol](lf.md#flow-decisions-and-recovery). Iterate returns to `from`
+with direction; Advance reaches the human demo. Complete returns the demo's
+feedback and revised design to the second loop-decide. Its own explicit edge
+also targets implement: the outer loop repeats implementation, both reviews,
+the inner decision loop, and demo. Review completion itself chooses no edge.
+
+At the deciding occurrence, use `lf flow decide advance "evidence"` or
+`lf flow decide iterate "next action and proof"`. The current decision Run owns
+that choice; its candidate takes effect only after the Run succeeds. A review's
+final prose or a successful process exit cannot substitute for the decision.
+
+Backward edges have no pass limit. Iterate follows the edge as long as the
+decision calls for more work; human revision needs no budget reset. Pass counts
+describe history. Missing decisions stop execution. Blocked is a stopped
+execution outcome: report it with
+`lf flow blocked "reason, attempted direction, evidence, and question"`.
+The runtime keys one Ask to the exact invocation, occurrence, and pass. Retries
+join that Ask or recover its saved completion. Its Session runs `unblock`, using
+concept-review with the human by default. Completion returns evidence to
+loop-decide for reassessment without choosing a navigation decision. If the blocker
+remains unresolved, report it; do not open identical Asks automatically.
+
+Resume the saved invocation to preserve its captured definition, position,
+direction, and accepted decisions. Edits to the source apply to new invocations.
+Finishing a Flow grants no implicit merge or Task-completion authority and
+does not choose another Flow; author delivery explicitly.
+
+`feature` combines design review with this loop; `pursue` starts at
+implementation. Ordinary and Task invocations capture every XOR router and path
+before execution and use the same cursor for nested paths and backward edges.
+Recovery reads that captured definition, including paths not yet selected.
+The implementation and recovery fixtures do not establish live provider/Session
+handoff parity; that still requires a configured end-to-end demonstration.
 
 ## Goals
 

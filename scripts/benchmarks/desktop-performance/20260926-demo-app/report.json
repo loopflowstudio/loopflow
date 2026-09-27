@@ -1,0 +1,77 @@
+{
+  "run": {
+    "process": "Loopflow",
+    "pid": 25062,
+    "seconds": 90,
+    "started_at": "2026-09-26T12:53:04.668569",
+    "ended_at": "2026-09-26T13:00:16.064815",
+    "xctrace": "recorded",
+    "template": "Animation Hitches",
+    "host": {
+      "macos": "26.0.1",
+      "cpu": "Apple M4 Max"
+    }
+  },
+  "intervals": [
+    {
+      "name": "lf",
+      "scenario": "activity --since",
+      "n": 10,
+      "p50_ms": 695.49,
+      "p95_ms": 734.5,
+      "max_ms": 734.5,
+      "superseded": 0
+    },
+    {
+      "name": "lf",
+      "scenario": "ls --all",
+      "n": 9,
+      "p50_ms": 2004.25,
+      "p95_ms": 2204.19,
+      "max_ms": 2204.19,
+      "superseded": 0
+    },
+    {
+      "name": "lf",
+      "scenario": "ps --json",
+      "n": 61,
+      "p50_ms": 273.83,
+      "p95_ms": 293.18,
+      "max_ms": 314.27,
+      "superseded": 0
+    },
+    {
+      "name": "lf",
+      "scenario": "roadmap --all",
+      "n": 9,
+      "p50_ms": 3486.28,
+      "p95_ms": 4020.7,
+      "max_ms": 4020.7,
+      "superseded": 0
+    },
+    {
+      "name": "lf",
+      "scenario": "session list",
+      "n": 72,
+      "p50_ms": 809.25,
+      "p95_ms": 1450.33,
+      "max_ms": 1489.32,
+      "superseded": 0
+    }
+  ],
+  "memory": {
+    "samples": 90,
+    "start_mib": 109.6,
+    "end_mib": 109.8,
+    "max_mib": 109.9,
+    "growth_mib": 0.1
+  },
+  "hitches": {
+    "recorded": true,
+    "count": 0,
+    "hitch_ms_per_second": 0.0,
+    "worst_ms": 0.0,
+    "hangs": 1,
+    "worst_hang_ms": 1854.57
+  }
+}

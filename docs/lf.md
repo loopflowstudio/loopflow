@@ -40,6 +40,8 @@ lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
 lf task prepare DES-123           # tracked Work + worktree, no execution
+lf --task DES-123 design "Revise the discovery design"
+lf --task DES-123 code "Implement the accepted slice"
 lf --task DES-123 research \
   "Map runtime behavior; write scratch/research-runtime.md"
 lf --wave context wave/operate \
@@ -49,17 +51,25 @@ lf task run DES-123 --directive "fix the flaky test" # keep one Task through mer
 lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
 
-`--task` and `--wave` run one named skill about existing Work
-without advancing its Flow position. The most specific selector is the
-Run subject: a Task implies its Wave. Broader
+`--task` and `--wave` run a named skill, Flow or inline prompt about existing Work
+without advancing its managed Flow position. A direct bound Flow has its own
+invocation; attribution does not claim the Task worker's cursor. The most
+specific selector is the Run subject: a Task implies its Wave. Broader
 selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
 Markdown snapshot. Wave binding uses its repository. Several Runs may concern the same Work
 concurrently; each keeps a distinct Run id and none reserves the Work. Bound
-direct skills leave edits uncommitted; give parallel contributions distinct
+direct skills and flows leave edits uncommitted; give parallel contributions distinct
 paths, reconcile the shared tree, then checkpoint one coherent result with `lf
 commit` or aggregate it deliberately with `lf task restart`. Parent Runs use
 this same path without becoming the Task worker or taking its claim.
+A direct flow creates a fresh Run for each skill, with the same Work subject and
+an updated scratch snapshot. Explicit flow operations still execute as authored.
+Use `lf task run DES-123 --flow code` to bind and pursue the managed Task workflow.
+
+Bare names prefer skills when a skill and flow share a name. Select explicitly
+with `lf skill launch-plan` or `lf flow launch-plan`. `design` and `ship-5whys`
+are skills; they need no single-step flow wrapper.
 
 ## Browser Captures
 
@@ -122,6 +132,9 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
 | `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
+| [`concept-review`](concept-review.md) | Rewrite the intended usage, then simplify product concepts, core types, and APIs together or after review-slice |
+| `loop-decide` | Assess a pass's progress and evidence to choose Advance, Iterate, or human help |
+| `unblock` | Resolve stalled work with the human inside an Ask Session, using concept-review by default |
 | `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
@@ -244,7 +257,9 @@ Run a named flow (chains of skills):
 
 ```bash
 lf <flow>
-lf ship -w feature-branch
+lf flow feature
+lf --wave designer flow feature  # ordinary invocation about this Wave
+lf task run DES-123 --flow feature
 ```
 
 | Flag | Description |
@@ -256,23 +271,31 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
+A **loopflow** is a Flow with one or more backward edges. Use the same commands:
+`lf feature` or `lf task run ISSUE --flow feature`. Managed Task execution adds
+its work context and Task authority. Running a Flow about a Wave needs no
+Wave-owned Flow lifecycle. See [Flow decisions and recovery](#flow-decisions-and-recovery)
+for the protocol and current verification limits, and [authoring](authoring.md)
+for composition limitations.
+
 ### Builtin Flows
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → code → review-slice → demo |
+| `build` | kickoff → code → review-slice → concept-review → demo |
 | `code` | implement → compress |
 | `pair` | design → code |
 | `design` | author one exact design at a User gate |
 | `launch-plan` | keep one coherent core here and launch independent follow-up Tasks |
-| `task-design` | kickoff → review-design |
-| `slice` | code → review-slice → publish/refresh Task PR |
+| `feature` | task-design → pursue (default Task Flow) |
+| `task-design` | kickoff → human review-design |
+| `pursue` | repeat implement → compress → review-slice → concept-review → loop-decide, then human demo |
+| `slice` | code → review-slice (publishes PR) → concept-review |
 | `ship` | task-gate → record-learnings → op: pr land -c |
 | `ship-demo` | task-gate → demo review → record-learnings → op: pr land -c |
 | `deploy` | gate → op: pr land |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `incident` | restore → 5whys |
-| `ship-5whys` | implement the next open prevention from the 5 Whys |
 | `queue` | compress → update-wave → gate |
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `govern-coordination` | s2-scan → s2-assess → mutate |
@@ -306,19 +329,21 @@ lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --flow incident
 lf task status DES-123
+lf task advance DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
-lf ask "Review this proof with me"                    # block on a session
-lf session list --json                                # unresolved Sessions
-lf session open task_...:flow:node:0 --json           # exact native provider resume
-lf session complete <ask-id>                          # finish an ad-hoc Ask
-lf session approve <flowstep-id> "Verified"           # approve a Task FlowStep
-lf session iterate <flowstep-id> "Narrow the design"
+lf ask "Review this proof with me"                    # block on a human session
+lf session list --json                                # unresolved human Sessions
+lf session open <session-id> --json                  # reopen the exact boundary
+lf session complete <session-id>                     # return review or Ask feedback
+lf session rename <session-id> "Release notes"        # suggestions preserve human names
 lf task steer DES-123 "rename the flag"
 lf task steer DES-123 "take the smaller approach"
 lf task interrupt DES-123                             # end the active turn
 lf task wait DES-123
 lf task resume DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
+lf task restart DES-123 --flow build                 # replace the pinned Flow; rejected before any checkpoint if unusable
+lf flow list --json                                  # every Flow with the topology it would pin
 lf work status task task_... --json                  # stable Work projection
 lf work interrupt task task_...                      # refuses without exact process ownership
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
@@ -342,8 +367,10 @@ Task Work has stable identities and small state:
 PR state, Flow position, and Run evidence stay separate. `task prepare` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
 identity without starting execution. `task run` uses that same substrate,
-selects a Flow when none is active, and ensures the exact next boundary has one
-Task worker. Each autonomous boundary starts a fresh provider Run from durable
+selects a Flow when none is active, and starts its mechanical driver.
+`task advance` drives an existing Flow until human input, a blocker, interruption,
+or completion; repeated calls report the active driver. A human review waits
+for its exact Session to be completed. Each autonomous boundary starts a fresh provider Run from durable
 Task facts; no provider transcript or resident Task process is required.
 `resume` preserves the Work, selected Flow, Steers, worktree, branch, and PR
 while starting a fresh worker.
@@ -365,8 +392,95 @@ overrides that recommendation when it selects the next worker's Flow. The
 selected Flow definition is persisted immutably for that invocation, so edits
 to repository Flow YAML cannot change a Task already in progress. When the
 Flow completes, Loopflow deletes its position and leaves the Task ready. The
-next worker chooses afresh; PR delivery and Task completion remain explicit
-commands rather than an implied next lifecycle phase.
+next explicit `task run` chooses afresh. With no recommendation, `feature` runs
+design review, then implement → compress → review-slice → concept-review → loop-decide.
+Iterate returns to implement; Advance reaches `demo human:true`. Completing demo
+passes its feedback to a second loop-decide whose explicit edge also targets
+implement. This outer loop can apply a revised design and demonstrate it again.
+`pursue` starts at implementation. `task-design` finishes when its interactive
+design review is completed. Existing pinned invocations retain their definition;
+obsolete human navigation policies require starting a new invocation.
+PR delivery and Task completion
+remain explicit commands rather than an implied lifecycle phase.
+
+### Flow decisions and recovery
+
+```sh
+lf feature                         # start an ordinary invocation
+lf flow resume <invocation>         # continue its saved position
+lf flow resume <invocation> --retry  # retry a recorded failure at the same step
+lf task run DES-123 --flow feature  # start the Task's managed invocation
+lf task advance DES-123             # continue that Task's saved Flow
+```
+
+A **loopflow** is a Flow with one or more backward edges. Each edge names an
+earlier occurrence. There is no pass limit. Steps outside a backward edge's body
+do not repeat when that edge is taken. Advance enters the remaining steps;
+Iterate traverses the declared section again. A slice is a unit of work within
+a pass. Task binding adds context and Task authority.
+
+The dedicated `loop-decide` step compares the previous direction with the pass's
+evidence after both reviews. Its exact Run records one navigation decision:
+
+```sh
+lf flow decide advance "Evidence that this boundary's obligations are satisfied"
+lf flow decide iterate "Remaining work, next action, and the proof to collect"
+lf flow blocked "What stalled, what was tried, and what needs human judgment"
+```
+
+The reviews supply evidence; concept-review does not own navigation. Blocked is
+a stopped execution outcome, separate from Advance/Iterate. Meaningful learning
+counts as progress; repeating a failure without new evidence calls for help.
+
+`lf flow blocked` keys one Ask to the exact invocation, occurrence, and pass;
+duplicate calls join it and retries recover its saved completion. Its Session
+runs `unblock`, using concept-review with the human by default or addressing a
+specific missing input. Human Complete returns the summary and shared artifact
+changes to loop-decide for reassessment. It supplies evidence, not a navigation decision.
+If the blocker remains unresolved, report it instead of opening identical Asks.
+Invalid or missing decisions remain visible blockers.
+A candidate decision takes effect only after its Run succeeds. Inspect any
+operation's effects before choosing `--retry`, since an interrupted operation
+may already have changed external state.
+
+Ordinary invocations print an ID and save their captured definition and position
+on the current Home. Resume that ID to retain direction, accepted decisions,
+and the exact boundary; invoking the Flow name again starts a new invocation.
+Task continuation uses its saved definition too. Source edits apply to newly
+selected invocations. Completion runs only the declared suffix; it grants no
+implicit merge or Task-completion authority.
+
+For source development, `scripts/dev-lf flow resume <invocation-id>` continues
+through the development binary and its Home. Its Session reopen commands use
+that same binary; the installed `lf` on PATH may have different saved state.
+
+An unreadable ordinary position reports its saved file without hiding other
+Sessions. Keep that file for recovery; `lf flow <name>` starts a fresh invocation.
+Inspect historical Wave continuations with `lf wave recover <name>`. Custom or
+uncaptured work stays unresolved until explicitly cancelled with
+`--cancel <source-seq> --reason <text>`; recovery preserves its original journal
+and never recompiles it from today's Flow catalog. Attempts without recorded
+termination remain unresolved.
+
+A `human:true` step appears as a Flow Session. The reviewer saves feedback and
+revised artifacts, then calls `lf session ready "feedback and remaining work"`.
+The human ends the conversation with `lf session complete <session-id>`.
+Completion returns feedback to the next step. A following loop-decide interprets
+it and records Advance or Iterate against its own authored edge. Human reviews
+have no implicit revision target. Closing the provider, marking ready, or
+reopening a Session does not complete it.
+Already finished invocations report completion rather than starting again.
+
+Ordinary and Task Flows capture all XOR routers and branch definitions at
+invocation creation. A router records its exact choice with `lf flow route PATH`;
+failed Runs discard that candidate. Nested paths and review completion use the
+same cursor transition. Recovery fixtures prove these paths locally; live
+provider/desktop review completion → decision → implementation → Ask → reassessment remains a
+separate demonstration.
+
+The `advance` skill also resolves these actions from an ordinary coding
+conversation: complete an exact review, resume a Task, or prepare work from an
+approved design. It reports the actual Task state after the handoff.
 
 Every Task-owned PR keeps its authored title, naming the benefit of that PR.
 Loopflow places the canonical Task name and Linear link after the opening
@@ -409,30 +523,52 @@ complete, hide, or release anything. The user runs `lf session complete
 provider client, removes the Session from the Sessions list, and resumes the caller
 with the ready summary and any filesystem changes.
 
-A Task review FlowStep uses the same surface. It persists its exact playhead and
-starts one ordinary provider Run for its authored Skill:
+Choose the skill for the human Session when the request needs a particular
+kind of conversation:
+
+```bash
+lf ask --skill unblock "Two passes repeated the same failure; reconsider the direction"
+```
+
+Ask owns the Session and wait; `unblock` guides the conversation inside it,
+using concept-review by default. The selected skill name is saved with the Ask
+so reopening keeps that choice. Completing this conversation returns
+direction to the blocked caller for reassessment. The
+`lf flow blocked` command uses this path and retains the Ask result
+across retries of the same decision boundary.
+
+A human FlowStep in an ordinary or Task-managed Flow uses the same Session
+surface. Its saved invocation owns the exact boundary and captured Skill:
 
 ```bash
 lf session list --json                              # unresolved Sessions
 lf session open <session-id> --json                 # prepare/recover attachment
-lf session ready "Ready for review"                 # agent state; stays visible
-lf session approve <session-id> "Verified summary"  # approve the FlowStep
-lf session iterate <session-id> "Narrow the design"
+lf session ready "Feedback and remaining work"      # agent state; stays visible
+lf session complete <session-id>                    # human ends the review
 ```
 
-The FlowStep session runs `lf --tui --as task:<id> <skill>`. Closing, provider
-exit, or agent readiness never means approval; the persisted Task playhead
-remains waiting. Loopflow.app lists the same sessions and exposes the FlowStep
-decision controls. Selecting a Session already open in the app returns to its
+Task FlowStep Sessions retain Task attribution; ordinary Flow Sessions retain
+their invocation's context. Closing, provider exit, or agent readiness never
+completes a review; the saved boundary remains waiting. Loopflow.app lists Sessions
+and exposes Complete for ready reviews. Selecting a Session already open in the app returns to its
 live terminal. If its client is active elsewhere, **Move here** explicitly
 stops that client and resumes provider-native history in the selected pane.
-Closing a pane keeps the live terminal available in the Sessions list; Complete
-ends the Session.
+Closing a pane keeps the live terminal available in the Sessions list. Complete
+finishes the conversation. Flow reviews return feedback to the next step;
+Asks return feedback to their blocked caller.
 
 Sessions may use a detached PTY cradle to let the first provider client
 start before the desktop is present. That cradle is not Session identity,
 readiness storage, liveness authority, or the attachment surface. The boundary
 record owns resolution; the ordinary Run owns provider identity and history.
+
+Every Session JSON record includes a required `run_id`. Use it for Run lookup;
+do not parse the Session ID. Ask and FlowStep boundaries prepare their Run before
+publication, so an unopened Session already has an identity without a provider
+process. Launch fills in that Run's context; native resume retains its identity.
+For an older boundary without a Run, `lf session open <id> --json` prepares it
+without starting a provider. Listing fails with that recovery command until the
+boundary is prepared; it never allocates a Run itself.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
@@ -519,11 +655,15 @@ Waves sharing `main`.
 
 ```bash
 lf ls --json                    # every durable Wave and its Home/runtime evidence
+lf ls --current --json          # current Waves, including stopped ones
 lf status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
 lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # recent Home-local Run records
+lf runs --active --json          # current provider-backed Runs and observation gaps
+lf runs --active --watch --json  # retain discovery and stream snapshots (macOS)
+lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
 lf runs --project parser        # one Project's Runs, filtered before the result cap
 lf runs --parent run_ab12 --json # every direct child Run, uncapped
 lf runs run_ab12                 # inspect one Run by unambiguous prefix
@@ -531,7 +671,7 @@ lf runs run_ab12 --final         # print the last durable provider conclusion
 lf runs run_ab12 --events        # print its event stream verbatim
 lf usage --project parser        # direct Run usage for one Project
 lf usage --task INF-123 --json   # direct Run evidence for one Task
-lf session list                  # interactive, Ask, and FlowStep sessions
+lf session list                  # Sessions, Work paths, actions and unavailable reasons
 lf session open run_ab12         # continue a closed native provider session
 lf session open run_ab12 --try   # let the provider arbitrate an active session
 lf session open run_ab12 --replace # stop Loopflow's client, then continue here
@@ -552,12 +692,49 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
-`lf ls` reads the local Wave registry. `lf status` focuses one Wave's local
+`lf ls` reads the local Wave registry. `--current` excludes abandoned and retired
+registrations. `lf roadmap --all` spans repositories without inheriting the
+launching process's Wave; an explicit `--wave` still scopes the query.
+
+```bash
+lf work forget wave <wave-id> --dry-run --json
+lf work forget wave <wave-id> --json
+```
+
+Forget an abandoned, disabled, empty registration after removing its authored
+`GOAL.md`. The command leaves repository files alone and refuses registrations
+with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
+Use the installed Home's `lf`; development binaries operate on their own Home.
+
+`lf status` focuses one Wave's local
 planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, Run, Task PR, and Steer facts; it reuses
 `WorkRef` identity and does not read reconstructable Task or Project wake
-events. `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
+events. Historical `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
+
+`lf runs --active` discovers existing receipts once and checks current processes.
+Waiting native clients count while their owned process remains live; unfinished
+Run metadata alone does not. Exact native receipts and current Exec capture
+bindings supply ownership. No history window, result cap or new launcher marker
+is required. The one-shot cold scan still grows with retained history.
+
+On macOS, `--watch --json` keeps that reader alive, follows filesystem publication,
+and emits newline-delimited snapshots every two seconds. Unchanged warm reads
+recheck live candidates without enumerating historical Runs. Send
+`{"action":"refresh"}` on stdin for an immediate read or `{"action":"rescan"}`
+after sleep/wake or to retry discovery. Closing stdin or stdout exits only this
+reader. Notification loss requests a full cold rescan; errors remain explicit.
+Linux supports one-shot reads and reports continuous discovery as unsupported.
+
+JSON includes required `discovery` (`scanning`, `ready`, `unavailable`), `home`,
+`observed_at`, optional `task`, `runs`, and `gaps`. Empty `runs` confirms no active
+Runs only when discovery is ready and gaps are empty. Missing or ambiguous
+ownership stays incomplete. A replaced Home requires a fresh reader; repeated
+read failures wait for a request instead of repeatedly scanning history.
+Use one unfiltered Home observation for several Task views, matching each row's
+typed `work`, never its checkout. Wave/Project filters remain history reads.
+
 The `--parent` drill resolves one exact Run and returns all direct children
 without the seven-day presentation cap. The one-Run `--final` read projects the
 last durable provider conclusion from normalized conversation events. Records
@@ -727,6 +904,10 @@ lf : "fix the bug" --ide -m codex   # force the Codex app instead
 or Codex in its app. Both override the repo default. Set `session.launch: ide`
 in `.lf/config.yaml` to make the app the default for direct interactive
 skills. Automated flow nodes and `--batch` remain headless.
+
+Inside a Task's worktree, a launch without `--task`/`--wave`/`--as` belongs to
+that Task: its Session lists the Task as Work and `lf runs --task` finds it.
+An explicit selection still wins, and a branch no Task tracks stays unbound.
 
 ### External skills
 
@@ -954,6 +1135,24 @@ complete release skips asset downloads; missing or stale artifacts are repaired.
 Use `lf rebase` for checkout updates and your project's own tools for dependency
 setup.
 
+To restore a retained development Home while promoting a local build:
+
+```bash
+local-bin/lf install promote --from-build local-bin/lf --reuse-home local-<id> \
+  --cli-target ~/.local/bin/lf --daemon-source local-bin/lfd --daemon-target ~/.local/bin/lfd \
+  --app-source local-bin/Loopflow.app --app-target /Applications/Loopflow.app --preview
+```
+
+Remove `--preview` to apply. `--reuse-home` reads the prior installation receipt
+and preserves that Home's chapter bindings, Tasks and Runs. `--fresh` instead
+forks published data into a new development Home; it does not carry history from
+another development installation.
+
+When a release contains the exact draft SQL already applied in a retained Home,
+local promotion preserves that Home's data and adopts the release receipt without
+rerunning the SQL. Its preview checks the draft order, checksums and resulting
+schema. Changed or unmatched drafts still require explicit recovery.
+
 For an older `lf` whose install command requires a source checkout, upgrade once
 with the external installer, then use `lf install` for subsequent updates:
 
@@ -1069,6 +1268,7 @@ lf wave history --wave designer --json
 lf status designer --chapter 2026-08 --json
 lf pm task create --wave designer --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"
+lf pm task comments --id 1207... --json       # read the complete comment thread
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 lf pm rename --wave designer --title "Designer"   # rename the Initiative
 lf pm reteam                            # dry-run the repository-wide Team migration
@@ -1126,8 +1326,11 @@ Mechanical release subcommands; `lf release run` is the full workflow.
 
 ```bash
 lf release run patch          # full release workflow
+lf release run minor          # close/reuse a patch, then publish the cycle milestone
 lf release check              # exact commits in the target range
 lf release notes 1.2.3        # narrative notes from decisions + commits + PRs
+lf release notes 0.13.0 --preview  # print cycle notes since v0.12.0; no release writes
+lf release notes 0.12.0 --preview  # existing version: end at v0.12.0, not today's HEAD
 lf release bump 1.2.3         # bump manifests
 lf release tag 1.2.3          # create + push git tag
 lf release publish v1.2.3 --notes RELEASE_NOTES.md --asset dist/lf.tar.gz
@@ -1142,8 +1345,11 @@ with `publish --tag ... --artifacts ...` after tagging. The candidate phase
 builds the merged commit under a disposable ref, validates the installer and
 migration authority, notarizes the DMG, and records the exact artifact hashes.
 Only that prepared candidate receives the immutable version tag. Publication
-consumes the prepared bytes from an exact-tag worktree. No merged changes is a
-successful no-op. An incomplete latest tag resumes; it never cuts a newer tag
+consumes the prepared bytes from an exact-tag worktree. For patch releases,
+no merged changes is a successful no-op. A minor completes a closing patch only
+when changes remain, otherwise reuses the latest patch. Its notes span the
+preceding `.0` tag; both releases share a product snapshot. Retrying an interrupted
+minor finishes its recorded pair. An incomplete latest tag resumes; it never cuts a newer tag
 around a failed publication. Use `{repo}` in a publisher argument to name the
 current synchronized repository; `LF_RELEASE_SOURCE_REPO` names the leased
 candidate or exact-tag worktree.

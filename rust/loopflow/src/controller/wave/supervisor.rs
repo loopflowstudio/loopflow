@@ -251,10 +251,29 @@ impl Supervisor {
                         wave = self.runtime.name(),
                         "interrupt deadline expired with the resident silent; force-finalizing"
                     );
+                    // Teardown precedes terminal evidence; a timeout alone does
+                    // not prove that the process stopped executing its input.
+                    let pid = self.child.as_ref().and_then(Child::id).or_else(|| self.door.seat_pid());
+                    if let Some(pid) = pid {
+                        terminate_resident(pid).await;
+                        if let Some(mut child) = self.child.take() {
+                            if let Err(error) = child.wait().await {
+                                tracing::error!(%error, "resident termination is unproven");
+                                continue;
+                            }
+                        } else if process_alive(pid).await {
+                            tracing::error!(pid, "resident termination is unproven");
+                            continue;
+                        }
+                        self.door.clear_seat();
+                    }
                     self.runtime.force_finalize_open_turn(
                         Lifecycle::Interrupted,
-                        "interrupt deadline: resident silent; listener force-finalized",
+                        "interrupt deadline: resident terminated",
                     );
+                    if pid.is_some() && self.spawner.is_some() {
+                        self.respawn_at = Some(Instant::now());
+                    }
                 }
                 _ = sleep_until_opt(self.respawn_at), if self.respawn_at.is_some() => {
                     self.respawn_at = None;
@@ -345,7 +364,7 @@ impl Supervisor {
 
     async fn on_inbox(&mut self, item: InboxItem) {
         let is_interrupt = match &item {
-            InboxItem::Interrupt | InboxItem::Skip => true,
+            InboxItem::Interrupt => true,
             InboxItem::Message(_) => {
                 // A chat message revives a dead resident immediately —
                 // regardless of the restart backoff.
@@ -595,6 +614,7 @@ mod tests {
 
         // The resident opens a turn, then its process dies.
         rt.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         rt.apply_resident_delta(ResidentDelta::TurnText {
@@ -653,6 +673,42 @@ mod tests {
         task.abort();
     }
 
+    #[tokio::test]
+    async fn interrupt_deadline_terminates_owned_resident_before_closing_attempt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rt = open_runtime(tmp.path());
+        let mut supervisor = Supervisor::new(
+            rt.clone(),
+            ResidentDoor::new("tok"),
+            None,
+            config(Vec::new()),
+        );
+        let child = tokio::process::Command::new("sleep")
+            .arg("60")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        supervisor.child = Some(child);
+        rt.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: Some(crate::chat::turns::BodyProvenance::for_wave(tmp.path())),
+            answers: Vec::new(),
+        });
+        let task = tokio::spawn(supervisor.run());
+        rt.deliver_interrupt();
+        wait_for("terminated attempt", || {
+            rt.thread_snapshot()
+                .last()
+                .is_some_and(|turn| turn.status == Lifecycle::Interrupted)
+        })
+        .await;
+        assert!(!process_alive(pid).await);
+        let turn = rt.thread_snapshot().pop().unwrap();
+        assert!(turn.body.unwrap().ended_at.is_some());
+        task.abort();
+        let _ = task.await;
+    }
+
     /// The listener-side janitor: an interrupt delivered while a turn is
     /// live, with the resident fully silent, force-finalizes at the deadline.
     #[tokio::test]
@@ -663,6 +719,7 @@ mod tests {
         let task = tokio::spawn(Supervisor::new(rt.clone(), door, None, config(Vec::new())).run());
 
         rt.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         rt.apply_resident_delta(ResidentDelta::TurnText {
@@ -822,6 +879,7 @@ mod tests {
         // While resident 2 lives, a turn completes: the ladder resets.
         wait_for("second spawn", || count.load(Ordering::SeqCst) >= 2).await;
         rt.apply_resident_delta(ResidentDelta::TurnOpened {
+            body: None,
             answers: Vec::new(),
         });
         rt.apply_resident_delta(ResidentDelta::TurnFinished {

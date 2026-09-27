@@ -19,6 +19,8 @@ different evidence for different questions.
 ```text
 repository files + Git        authored goals, memory, Skills, Flows, code
 planning SQLite               local durable planning and delivery facts
+Flow position files           ordinary invocation definitions and continuation
+human Ask files               waiting conversations and completion summaries
 Wave journal JSONL            conversation and resident event history
 Run record files              one Home's provider-launch evidence
 provider-native homes         model credentials and resumable sessions
@@ -31,7 +33,9 @@ kernel locks                  live local exclusion authority
 | --- | --- |
 | What is this Wave trying to do? | `wave/<name>/GOAL.md` and `MEMORY.md` |
 | What Projects and Tasks exist? | Linear, through the bounded PM projection |
-| What boundary should resume? | Work domain state joined to its exact `task_flow_positions` row |
+| What Task boundary should resume? | Work domain state joined to its exact `task_flow_positions` row |
+| What ordinary Flow boundary should resume? | the invocation's Home-local `flows/<id>/position.json` |
+| What human input is pending? | Session projections of Task/ordinary Flow boundaries and human Ask records |
 | What did one provider launch emit? | the Run record on the Home that launched it |
 | Is a local process moving now? | the OS process table joined to local command receipts |
 | Did a PR merge? | GitHub |
@@ -52,10 +56,10 @@ The current application tables group by owner:
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
-| Project and Task progression | `projects`, `tasks`, `task_flow_positions` | Project operation evidence; Task-only selected Flow, exact boundary, claim, and unsafe blocker |
+| Project and Task progression | `projects`, `tasks`, `task_flow_positions` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
-| Ask | `ask_exchanges`, `ask_linear_comment_outbox` | blocking requests, answering fence, results, publication |
+| Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current human Ask Sessions use files |
 | PM projection | `pm_snapshots`, `observation_outbox` | bounded Linear reads and deferred publication |
 | Metrics | `metric_instruments`, `metric_observations` | registered producers and accepted evidence |
 | PR landing | `pr_landings`, `ci_incidents` | exact-head supervision and bounded repair |
@@ -77,6 +81,13 @@ Claimed Task settlement, completion, and blocking commit the Flow change and
 its Task evidence in one transaction. Ordinary Task updates write facts, while
 Flow settlement only touches the Task timestamp.
 
+The Task position stores the shared `ExecutionCursor` tree in `review_json`;
+SQL `step_index` and `iteration` are projections. Historical flat progress is
+decoded without replacing its captured definition. Ordinary Flow invocations
+use the same cursor and navigation rules, with file ownership instead of a
+Task claim or transaction. A direct Flow attributed to a Task owns its own
+invocation and cannot advance that Task's managed position.
+
 Store open uses a short OS migration lock around backup plus schema
 application. A current schema does not take the database write lock merely to
 validate. Promotion tests a candidate against an isolated copy before it
@@ -90,6 +101,8 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | authored Wave intent and evidence contracts | ordinary reviewed file edits |
 | `.lf/journal/waves/<name>/journal.jsonl` | conversation and resident events | append-only with crash-tail repair |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | provider-launch manifest, streams, terminal | publish once, append, settle once |
+| current Home `flows/<invocation-id>/position.json` | ordinary Flow's captured definition, cursor, active boundary, failure and completion | position lock plus atomic replacement; driver lock serializes continuation |
+| current Home `human-sessions/<ask-id>.json` | Ask question, selected skill, caller/Session Run, readiness and completion summary | Session launch lock serializes startup and human updates; atomic replacement |
 | provider account homes | provider-native login and resume state | provider adapter owns format |
 | absolute Git directory `loopflow/` | writer and rebase receipts | kernel-held lock plus readable JSON |
 | machine-install root | versioned artifacts and switch receipts | stage immutably, select atomically |
@@ -97,6 +110,31 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 Run records are deliberately decentralized. A scan can rebuild the complete
 local read model. A future index may accelerate queries, but index failure must
 not gate launch and the Run record remains evidence truth.
+
+Flow positions capture skills, XOR routers and every path before execution.
+The captured occurrence owns its name and human/decision policy. An ordinary
+Flow's active boundary stores only attempt identity, provider binding, completion
+and readiness; Session projections and recovery read policy through the cursor.
+`ExecutionCursor::finish` owns traversal for ordinary and Task Flows; their
+storage owners fence settlement. Advance moves forward, Iterate takes the
+authored backward edge, and pass counts describe history without a limit.
+Autonomous decisions and routes are candidates until their owning Run succeeds.
+Human Flow Sessions project the exact saved boundary. Complete records the
+review's feedback before continuation; readiness and provider exit do not
+complete it. The next step receives feedback through cursor direction, and a
+following loop-decide owns any navigation verdict.
+
+Blocked opens a keyed Ask running `unblock`. Calls at the same invocation,
+occurrence and pass join the same Ask or recover its saved completion summary.
+Keyed completion remains on disk but leaves the unresolved Session list;
+ordinary prompt-only Ask records are removed after the caller receives the
+answer. Ask completion supplies evidence for reassessment, never a navigation verdict.
+The Session projection and provider Run do not become additional cursor owners.
+
+Older unresolved XOR definitions lack captured router or branch content.
+Loading today's sources cannot recover those missing historical bytes. Preserve
+the original evidence and require explicit recovery or a new invocation;
+a fresh-record test cannot establish safe recovery of that historical state.
 
 ## External systems
 

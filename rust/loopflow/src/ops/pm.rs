@@ -105,6 +105,32 @@ pub struct PmUpdateResult {
     pub linked_pr: Option<String>,
 }
 
+/// One planning Task's Linear comment thread, read on demand for display.
+/// `comments` is the complete thread in creation order; an incomplete read is
+/// an error, never a shorter list.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TaskComments {
+    pub identifier: String,
+    pub comments: Vec<TaskComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TaskComment {
+    pub id: String,
+    pub body: String,
+    pub author: TaskCommentAuthor,
+    pub created_at: Option<String>,
+}
+
+/// Who wrote a comment. A person has a provider user; an integration has none
+/// and is never participant direction, whatever the display says.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TaskCommentAuthor {
+    Person { name: Option<String> },
+    Integration,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PmStatusOptions {
     pub wave: Option<String>,
@@ -650,6 +676,9 @@ tokio::task_local! {
 #[cfg(test)]
 mod oauth_tests;
 
+#[cfg(test)]
+mod task_comments_tests;
+
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
@@ -1095,6 +1124,63 @@ pub fn pm_update(
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
     block_on_pm(pm_update_async(repo, options, progress))
+}
+
+/// Read a planning Task's comments. Read-only: no Task preparation, Work
+/// state or PM snapshot changes.
+pub fn pm_task_comments(repo: &Path, wave: Option<&str>, issue: &str) -> OpsResult<TaskComments> {
+    block_on_pm(pm_task_comments_async(repo, wave, issue))
+}
+
+pub(crate) async fn pm_task_comments_async(
+    repo: &Path,
+    wave: Option<&str>,
+    issue: &str,
+) -> OpsResult<TaskComments> {
+    let wave = resolve_wave(wave)?;
+    let repository = resolve_repository_context(repo).await?;
+    let (owning_wave, _, item, _) = resolve_owned_issue(repo, &repository, issue).await?;
+    if owning_wave != wave {
+        return Err(OpsError::Message(format!(
+            "Linear task {issue} belongs to wave/{owning_wave}, not wave/{wave}"
+        )));
+    }
+    let observation = repository
+        .client
+        .observe_issue(&item.id)
+        .await
+        .map_err(pm_to_ops)?;
+    let mut comments = observation
+        .comments
+        .into_iter()
+        .map(|comment| TaskComment {
+            // Explicit steering speaks for its requester even through an integration.
+            author: if comment.author_id.is_some() || super::linear_observe::is_steer(&comment.body)
+            {
+                TaskCommentAuthor::Person {
+                    name: super::linear_observe::comment_requester(
+                        &comment.body,
+                        comment.author_name.as_deref(),
+                    ),
+                }
+            } else {
+                TaskCommentAuthor::Integration
+            },
+            id: comment.id,
+            body: comment.body,
+            created_at: comment.created_at,
+        })
+        .collect::<Vec<_>>();
+    // Direction orders by revision; people read a thread in the order it was written.
+    comments.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(TaskComments {
+        identifier: item.identifier,
+        comments,
+    })
 }
 
 pub fn pm_create_task_idempotent(

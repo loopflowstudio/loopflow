@@ -272,7 +272,6 @@ impl WaveHost {
                 false,
                 true,
                 discord_token,
-                false,
                 wave::ListenerSignals::new(Some(published), pending()),
             );
             tokio::pin!(listener);

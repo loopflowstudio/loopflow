@@ -79,9 +79,11 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let updatedAt: String
     public let provider: String
+    /// Durable evidence that work began; `false` means none is recorded.
+    public let started: Bool
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, provider
+        case status, reason, provider, started
         case workId = "work_id"
         case updatedAt = "updated_at"
     }
@@ -104,6 +106,12 @@ public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
     public let slug: String
     public let branch: String?
     public let worktree: String
+    public let localExists: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case slug, branch, worktree
+        case localExists = "local_exists"
+    }
 }
 
 public enum RoadmapSection: String, Decodable, Sendable, Hashable {
@@ -122,11 +130,12 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
+    public let flow: TaskFlowSnapshot
     public let activePr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, section
+        case task, reference, runtime, condition, actions, flow, section
         case nextMove = "next_move"
         case activePr = "active_pr"
     }

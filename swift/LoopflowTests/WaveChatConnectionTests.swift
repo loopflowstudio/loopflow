@@ -384,41 +384,39 @@ struct WaveChatConnectionTests {
         #expect(conn.turns.isEmpty)
     }
 
-    @Test("playhead events expose location queue and return target")
-    func playheadEventsExposeNavigation() {
+    @Test("Rust listener attempts retain failures and interruptions across replay")
+    func governanceAttemptFrames() throws {
+        let repo = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: repo.appendingPathComponent("tests/fixtures/dto/wave_attempt_messages.json"))
+        let messages = try JSONDecoder().decode([WaveChatMessage].self, from: data)
         let conn = connection()
-        let json = """
-        {
-          "stack": [{
-            "id": "inv-wave", "flow": "wave",
-            "steps": [{"name":"pursue","kind":"skill"}],
-            "cursor": 0, "iteration": 3,
-            "queue": [{
-              "id":"inv-review", "flow":"review-design",
-              "steps":[{"name":"clarify","kind":"skill"}]
-            }]
-          }],
-          "active": null,
-          "now": {
-            "invocation_id":"inv-wave", "flow":"wave",
-            "step":"pursue", "kind":"skill", "index":0, "total":1,
-            "iteration":3
-          },
-          "next": {
-            "invocation_id":"inv-review", "flow":"review-design",
-            "step":"clarify", "kind":"skill", "index":0, "total":1,
-            "iteration":0
-          },
-          "return_to": null
+        let replay = connection()
+        var parser = SSEFrameParser()
+        for message in messages {
+            let encoded = try JSONEncoder().encode(message)
+            let text = try #require(String(data: encoded, encoding: .utf8))
+            for byte in "event: message\ndata: \(text)\n\n".utf8 {
+                if let frame = parser.consume(byte) {
+                    conn.handle(event: frame.event, data: frame.data)
+                }
+            }
+            if message.turn.status != .running {
+                replay.handle(event: "message", data: text)
+            }
         }
-        """
-
-        conn.handle(event: "playhead", data: json)
-
-        #expect(conn.playhead?.now?.step == "pursue")
-        #expect(conn.playhead?.next?.flow == "review-design")
-        #expect(conn.playhead?.stack.last?.queue.map(\.flow) == ["review-design"])
-        #expect(conn.turns.isEmpty)
+        #expect(conn.turns == replay.turns)
+        #expect(conn.turns.map(\.status) == [.failed, .completed, .interrupted])
+        let failed = try #require(conn.turns.first)
+        let failures = attemptFailurePresentations(turns: conn.turns)
+        #expect(failures[failed.id]?.state == .failed)
+        #expect(failures[failed.id]?.reason == "failed to prepare wave/operate: model unavailable")
+        #expect(visibleConversationTurns(conn.turns, failures: failures).count == 3)
+        let interrupted = try #require(conn.turns.last?.body)
+        #expect(interrupted.sessionId == "session-interrupted-attempt")
+        #expect(interrupted.terminationReason == "interrupted by user")
+        #expect(interrupted.endedAt != nil)
+        #expect(interrupted.invocationId == nil)
     }
 
     @Test("message ops encode to the wire values the server expects")

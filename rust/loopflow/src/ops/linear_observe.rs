@@ -25,8 +25,13 @@ pub(crate) fn is_human_comment(comment: &IssueComment, _viewer_id: &str) -> bool
     is_direction_comment(&comment.body, comment.author_id.as_deref())
 }
 
+/// Explicit steering carries its marker, whichever account published it.
+pub(crate) fn is_steer(body: &str) -> bool {
+    body.contains("<!-- loopflow-steer:")
+}
+
 pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
-    if body.contains("<!-- loopflow-steer:") {
+    if is_steer(body) {
         return true;
     }
     author.is_some()
@@ -106,24 +111,29 @@ pub(crate) fn comment_revision_id(id: &str, revision: Option<&str>) -> String {
     }
 }
 
-pub(crate) fn render_comment(
-    id: &str,
-    body: &str,
-    author_id: Option<&str>,
-    author_name: Option<&str>,
-) -> String {
-    // Explicit steering can be published through an integration account. Its
-    // recorded requester wins; an older anonymous steer stays anonymous.
-    let requester = if body.contains("<!-- loopflow-steer:") {
+/// The person a comment speaks for. Explicit steering can be published through
+/// an integration account: its recorded requester wins, and an older anonymous
+/// steer stays anonymous.
+pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option<String> {
+    let requester = if is_steer(body) {
         body.split_once("<!-- loopflow-requester:")
             .and_then(|(_, rest)| rest.split_once(" -->"))
             .and_then(|(name, _)| serde_json::from_str::<String>(name).ok())
     } else {
         author_name.map(str::to_string)
     };
-    let attribution = requester
+    requester
         .as_deref()
         .and_then(crate::engine::config::normalize_user_name)
+}
+
+pub(crate) fn render_comment(
+    id: &str,
+    body: &str,
+    author_id: Option<&str>,
+    author_name: Option<&str>,
+) -> String {
+    let attribution = comment_requester(body, author_name)
         .map(|name| {
             format!(
                 " by {}",
@@ -296,6 +306,7 @@ pub(crate) mod tests {
         .into_iter()
         .map(|(id, name)| IssueComment {
             id: id.into(),
+            created_at: None,
             revision: None,
             body: "prototype".into(),
             author_id: Some(format!("person-{id}")),
@@ -335,6 +346,7 @@ pub(crate) mod tests {
         IssueComment {
             author_name: None,
             id: id.to_string(),
+            created_at: None,
             revision: None,
             body: body.to_string(),
             author_id: author.map(str::to_string),

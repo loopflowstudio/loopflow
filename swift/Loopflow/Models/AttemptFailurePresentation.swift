@@ -2,7 +2,6 @@ import Foundation
 
 public enum AttemptFailureState: Equatable, Sendable {
     case failed
-    case retryPending
     case retrying
     case recoveredOnRetry
 }
@@ -19,7 +18,7 @@ public struct AttemptFailureDetail: Equatable, Sendable, Identifiable {
 public struct AttemptFailurePresentation: Equatable, Sendable {
     public let state: AttemptFailureState
     public let reason: String
-    public let flow: String
+    public let flow: String?
     public let step: String
     public let attempts: [AttemptFailureDetail]
 
@@ -29,41 +28,36 @@ public struct AttemptFailurePresentation: Equatable, Sendable {
         let failure = count == 1 ? "Attempt failed" : "\(count) attempts failed"
         switch state {
         case .failed: return failure
-        case .retryPending: return "\(failure) · retry pending"
         case .retrying: return "\(failure) · retrying"
         case .recoveredOnRetry: return "\(failure) · recovered on retry"
         }
     }
 }
 
+/// Only historical bodies carry a saved logical step that identifies retries.
 private struct StepKey: Hashable {
     let invocationID: String
     let stepIndex: Int
     let iteration: Int
 
-    init(_ body: BodyProvenance) {
-        invocationID = body.invocationId
-        stepIndex = body.stepIndex
-        iteration = body.iteration
-    }
-
-    init(_ step: PlayheadStepRef) {
-        invocationID = step.invocationId
-        stepIndex = step.index
-        iteration = step.iteration
+    init?(_ body: BodyProvenance) {
+        guard let invocationId = body.invocationId,
+              let index = body.stepIndex,
+              let iteration = body.iteration else { return nil }
+        invocationID = invocationId
+        stepIndex = index
+        self.iteration = iteration
     }
 }
 
 private struct EquivalentFailureKey: Hashable {
-    let flow: String
+    let flow: String?
     let step: String
     let reason: String
 }
 
 public func attemptFailurePresentations(
-    turns: [ChatTurn],
-    playhead: PlayheadView?,
-    loopState: WaveLoopState
+    turns: [ChatTurn]
 ) -> [String: AttemptFailurePresentation] {
     var presentations: [String: AttemptFailurePresentation] = [:]
     var equivalentFailures: [EquivalentFailureKey: [String]] = [:]
@@ -75,19 +69,14 @@ public func attemptFailurePresentations(
         let key = StepKey(body)
         let laterAttempts = turns.dropFirst(index + 1).filter { later in
             guard later.role == .assistant, let laterBody = later.body else { return false }
-            return laterBody.bodyId != body.bodyId && StepKey(laterBody) == key
+            return key != nil && laterBody.bodyId != body.bodyId && StepKey(laterBody) == key
         }
 
         let state: AttemptFailureState
         if laterAttempts.contains(where: { $0.status == .completed }) {
             state = .recoveredOnRetry
-        } else if laterAttempts.contains(where: { $0.status == .running })
-            || playhead?.active.map({ $0.bodyId != body.bodyId && StepKey($0) == key }) == true {
+        } else if laterAttempts.contains(where: { $0.status == .running }) {
             state = .retrying
-        } else if playhead?.active == nil,
-                  playhead?.now.map(StepKey.init) == key,
-                  loopState != .failed {
-            state = .retryPending
         } else {
             state = .failed
         }

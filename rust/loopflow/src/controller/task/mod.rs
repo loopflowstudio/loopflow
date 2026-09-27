@@ -2351,6 +2351,11 @@ mod planning_tests {
             step.policy.id.as_deref(),
             true,
         );
+        store
+            .restart_task_flow(&task, "fixture-checkpoint")
+            .await
+            .unwrap();
+        replacement.version = 0;
         let replacement = store
             .set_flow_position(&task.id, replacement)
             .await

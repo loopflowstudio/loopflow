@@ -272,11 +272,13 @@ impl SqliteStore {
         }
         validate_task_project(&transaction, task)?;
         if transaction.execute(
-            "DELETE FROM task_flow_positions WHERE task_id=?1 AND position_version=?2",
+            "UPDATE flow_invocations SET state='completed', ended_at=?3
+             WHERE state='current' AND task_id=?1 AND position_version=?2",
             params![
                 task.id.as_str(),
                 i64::try_from(expected.version)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                now_unix()
             ],
         )? != 1
         {
@@ -350,8 +352,8 @@ impl SqliteStore {
             .optional()?
             .ok_or(StoreError::NotFound)?;
         transaction.execute(
-            "DELETE FROM task_flow_positions WHERE task_id=?1",
-            [task.id.as_str()],
+            "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE state='current' AND task_id=?1",
+            params![task.id.as_str(), now_unix()],
         )?;
         let parameters = task_params(task);
         transaction.execute(

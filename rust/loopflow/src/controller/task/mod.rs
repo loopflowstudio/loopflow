@@ -679,8 +679,6 @@ async fn settle_claimed_task_position(
     next.session_run_id = None;
     next.ready_summary = None;
     next.updated_at = time::OffsetDateTime::now_utc();
-    task.agent = load_task(store, &task.id).await?.agent;
-    crate::ops::human_session::prepare_flow_run(task, &mut next)?;
     let summary = progress_summary(text);
     let next = store
         .settle_task_worker(
@@ -792,6 +790,7 @@ pub(crate) async fn complete_human_flow_step(
         .flow_position(&token.task_id)
         .await?
         .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
+    crate::ops::human_session::require_current_review_actor(store, &expected).await?;
     let text = expected
         .ready_summary
         .as_deref()
@@ -826,7 +825,6 @@ pub(crate) async fn complete_human_flow_step(
     position.session_run_id = None;
     position.ready_summary = None;
     position.updated_at = time::OffsetDateTime::now_utc();
-    crate::ops::human_session::prepare_flow_run(&task, &mut position)?;
     store
         .complete_human_task_boundary(&task, &expected, &position, text)
         .await?;
@@ -839,19 +837,7 @@ pub(crate) async fn ensure_flow_position(
     selected_flow: Option<&str>,
 ) -> Result<FlowPosition> {
     let task = load_task(store, task_id).await?;
-    if let Some(mut current) = store.flow_position(&task.id).await? {
-        if current
-            .failure
-            .as_ref()
-            .is_some_and(|failure| failure.run_id.is_some())
-            && current.is_decision()
-        {
-            crate::ops::human_session::task_unblock(store, &task, &current).await?;
-        }
-        if current.is_human() && current.session_run_id.is_none() {
-            crate::ops::human_session::prepare_flow_run(&task, &mut current)?;
-            return Ok(store.set_flow_position(&task.id, current).await?);
-        }
+    if let Some(current) = store.flow_position(&task.id).await? {
         return Ok(current);
     }
     let selected_flow = selected_flow.ok_or_else(|| {
@@ -861,8 +847,7 @@ pub(crate) async fn ensure_flow_position(
             task.plan.identifier
         )
     })?;
-    let mut candidate = start_task_flow(&task, selected_flow)?;
-    crate::ops::human_session::prepare_flow_run(&task, &mut candidate)?;
+    let candidate = start_task_flow(&task, selected_flow)?;
     let candidate = store.set_flow_position(&task.id, candidate).await?;
     if candidate.is_human() {
         let node_id = candidate
@@ -3225,7 +3210,7 @@ mod planning_tests {
         let recovered = park_human_task(&store, &task, &restarted_flow).await;
 
         assert_eq!(recovered, original);
-        assert_eq!(store.human_task_flow_positions().await.unwrap().len(), 1);
+        assert_eq!(store.open_review_sessions().await.unwrap().len(), 1);
         let recovered = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(recovered.session_run_id, Some(run_id));
         assert_eq!(recovered.ready_summary.as_deref(), Some("ready"));
@@ -3315,157 +3300,7 @@ mod planning_tests {
         assert!(settled.is_human());
         assert!(settled.claim.is_none());
         assert_eq!(settled.version, initial.version + 1);
-        assert_eq!(store.human_task_flow_positions().await.unwrap().len(), 1);
-        let run_id = settled.session_run_id.as_ref().unwrap();
-        let (dir, manifest) = crate::run_record::resolve_manifest(
-            &crate::store::observability_home_dir(),
-            run_id.as_str(),
-        )
-        .unwrap();
-        assert_eq!(&manifest.run_id, run_id);
-        assert!(dir.join("prepared").is_file());
-        assert!(!dir.join("provider-clients").exists());
-        let restarted = super::ensure_flow_position(&store, &task.id, None)
-            .await
-            .unwrap();
-        assert_eq!(restarted.session_run_id.as_ref(), Some(run_id));
-        assert_eq!(restarted.version, settled.version);
-    }
-
-    #[tokio::test]
-    async fn flow_sessions_are_named_through_their_run_and_keep_exact_membership() {
-        use crate::ops::human_session::{self, SessionFlowMembership, SessionKind};
-        use crate::run_record::{RunFlowMembership, RunFlowStep, SessionTitleSource};
-        let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, task, mut flow) = human_task_fixture().await;
-        human_session::prepare_flow_run(&task, &mut flow).unwrap();
-        let flow = store.set_flow_position(&task.id, flow).await.unwrap();
-        let run_id = flow.session_run_id.clone().unwrap();
-        let step = flow.current().step;
-        let (_, manifest) = crate::run_record::resolve_manifest(
-            &crate::store::observability_home_dir(),
-            run_id.as_str(),
-        )
-        .unwrap();
-        assert_eq!(
-            manifest.flow,
-            Some(RunFlowMembership::Step(RunFlowStep::of(&flow)))
-        );
-
-        let listed = |sessions: Vec<human_session::SessionRecord>| {
-            sessions
-                .into_iter()
-                .find(|session| session.run_id == run_id)
-                .expect("the Flow Run is listed")
-        };
-        let session = listed(human_session::list(&store).await.unwrap());
-        assert_eq!(session.kind, SessionKind::Flow);
-        assert_eq!(
-            (session.title.as_str(), session.title_source),
-            (step.as_str(), SessionTitleSource::Generated)
-        );
-        assert_eq!(
-            session.flow_membership,
-            SessionFlowMembership::Step {
-                flow: flow.invocation.flow.clone(),
-                invocation_id: flow.invocation.id.clone(),
-                step: step.clone(),
-                node: Some(flow.cursor.node_key()),
-                iterations: Some(crate::engine::flow_graph::flow_iterations(
-                    &flow.invocation.steps,
-                    &flow.cursor,
-                )),
-                occurrence: human_session::SessionFlowOccurrence::Current,
-            }
-        );
-
-        // The agent's `$LF_RUN_ID` reaches the Flow boundary before any
-        // provider history exists.
-        let suggested = human_session::rename(
-            &store,
-            run_id.as_str(),
-            "Kickoff review",
-            SessionTitleSource::Generated,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            (suggested.id.as_str(), suggested.title.as_str()),
-            (session.id.as_str(), "Kickoff review")
-        );
-        human_session::rename(
-            &store,
-            &session.id,
-            "Launch design",
-            SessionTitleSource::Human,
-        )
-        .await
-        .unwrap();
-        let kept = human_session::rename(
-            &store,
-            run_id.as_str(),
-            "Better guess",
-            SessionTitleSource::Generated,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            (kept.title.as_str(), kept.title_source),
-            ("Launch design", SessionTitleSource::Human)
-        );
-        assert!(
-            human_session::rename(&store, &session.id, " ", SessionTitleSource::Human)
-                .await
-                .is_err()
-        );
-
-        // Once the Flow moves on, the same Run keeps its human name and is
-        // truthfully historical, never relabeled Independent.
-        let (dir, _) = crate::run_record::resolve_manifest(
-            &crate::store::observability_home_dir(),
-            run_id.as_str(),
-        )
-        .unwrap();
-        std::fs::write(
-            dir.join("provider-session.json"),
-            r#"{"schema_version":1,"provider_session_id":"ses_flow-proof","account_id":null}"#,
-        )
-        .unwrap();
-        // A later position in the same invocation is "earlier", not a past run.
-        let mut moved = store.flow_position(&task.id).await.unwrap().unwrap();
-        moved.cursor.index = 0;
-        moved.session_run_id = None;
-        store.set_flow_position(&task.id, moved).await.unwrap();
-        let earlier = listed(human_session::list(&store).await.unwrap());
-        assert_eq!(earlier.kind, SessionKind::Interactive);
-        assert_eq!(earlier.title, "Launch design");
-        assert!(matches!(
-            earlier.flow_membership,
-            SessionFlowMembership::Step {
-                occurrence: human_session::SessionFlowOccurrence::Earlier,
-                ref invocation_id,
-                step: ref recorded,
-                ..
-            } if *recorded == step && *invocation_id == flow.invocation.id
-        ));
-
-        // Restarting replaces the invocation: the same Run is a past run.
-        let current = store.flow_position(&task.id).await.unwrap().unwrap();
-        let mut next = super::start_task_flow(&task, "task-design").unwrap();
-        assert_ne!(next.invocation.id, flow.invocation.id);
-        next.cursor.index = 0;
-        next.version = current.version;
-        store.set_flow_position(&task.id, next).await.unwrap();
-        let past = listed(human_session::list(&store).await.unwrap());
-        assert_eq!(past.title, "Launch design");
-        assert!(matches!(
-            past.flow_membership,
-            SessionFlowMembership::Step {
-                occurrence: human_session::SessionFlowOccurrence::Past,
-                step: ref recorded,
-                ..
-            } if *recorded == step
-        ));
+        assert_eq!(store.open_review_sessions().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -3526,9 +3361,14 @@ mod planning_tests {
     }
 
     async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {
-        let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
-        position.ready_summary = Some(feedback.into());
-        store.set_flow_position(&task.id, position).await.unwrap();
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        let id = crate::ops::human_session::flow_id(&position).unwrap();
+        let (position, run) = store.reserve_review_run(&position).await.unwrap();
+        store
+            .sqlite
+            .publish_review_run(&id, &run.id, position.version)
+            .unwrap();
+        store.ready_session(&id, &run.id, feedback).await.unwrap();
     }
 
     #[tokio::test]

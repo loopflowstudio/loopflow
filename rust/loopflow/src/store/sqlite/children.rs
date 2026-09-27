@@ -242,6 +242,7 @@ impl SqliteStore {
                 "human Task position changed before settlement".to_string(),
             ));
         }
+        super::sessions::complete_review_in(&transaction, expected)?;
         validate_task_project(&transaction, task)?;
         update_task_timestamp_in(&transaction, task)?;
         let position = super::durable::set_flow_position_in(&transaction, &task.id, next)?;
@@ -281,6 +282,7 @@ impl SqliteStore {
                 "Task review position changed before completion".to_string(),
             ));
         }
+        super::sessions::complete_review_in(&transaction, expected)?;
         validate_task_project(&transaction, task)?;
         if transaction.execute(
             "UPDATE flow_invocations SET state='completed', ended_at=?3

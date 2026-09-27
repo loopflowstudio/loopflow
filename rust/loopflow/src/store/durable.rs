@@ -156,10 +156,6 @@ impl Store {
         .await
     }
 
-    pub async fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
-        run_sqlite(&self.sqlite, |store| store.human_task_flow_positions()).await
-    }
-
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
         let work = work.clone();
         let reason = reason.to_string();

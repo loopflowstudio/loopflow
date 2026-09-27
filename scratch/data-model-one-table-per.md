@@ -479,47 +479,87 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-Preserve the selected Task review attempt across Complete, Open and rename.
-Complete now carries the lookup's full expected position into controller
-settlement; the transaction compares that original Run, version and feedback.
-The existing launch lock spans settlement and teardown of that same Run.
-Continuation still launches before teardown, so stopping the review provider
-cannot prevent the next worker from being requested.
+Move Run ancestry construction into one transactional writer, used immediately
+by Task review reservation and replacement. The writer accepts nullable
+Invocation, Task and Wave, fills omitted ancestors, and rejects explicit
+mismatches, including a Task supplied for a taskless Invocation. It requires a
+SQLite transaction; the existing callers hold immediate write transactions.
+Database constraints continue to protect direct imports and parent-changing
+writes. Task-owned and taskless execution drivers are not unified by this cut.
 
-Open retains the original exact/prefix selector while acquiring the Session
-launch lock, rejects a changed snapshot, and holds exclusion through native
-client transfer and receipt publication. The launcher releases it before waiting
-for provider exit, allowing Ready and Complete during the conversation.
-Replacement reserves against the opening snapshot and returns the Run it actually
-launched, rather than reading a possibly newer current pointer after the provider
-exits. Ask and taskless native-resume callers pass their existing launch lock
-through the same handoff; their separate owners remain unfinished cutover scope.
+Add `Run.work_source` with the four specified values. New review attempts record
+Inherited. A forward draft leaves existing rows null: their provenance remains
+unknown until the offline importer establishes it from retained evidence. The
+draft changes no old capture, title, feedback, ancestry or publication value.
+Current Session and history queries now use one Run decoder, replacing the two
+copies that parsed ancestry independently.
 
-Rename preserves the original selector across its lock wait. An explicit Run or
-prefix also supplies its selected Run to the SQL transaction, so replacement
-between validation and UPDATE rejects without changing the title. A stable
-Session-ID rename remains a conversation operation and may name its newer attempt.
-No token fields, schema columns or second current-attempt owner were added.
+Replacement inherits the current Run's ancestry and records a fresh creation
+time. Its launch cwd comes from the Task's current worktree; previous attempts
+remain unchanged. Session title, feedback and the current-pointer/version fence
+stay in their existing transaction. The Run constructor is used code, not a
+second writer, and does not introduce another launch path or public DTO.
 
-The deterministic regression pauses each public action after lookup (rename has
-already requested its held launch lock), publishes B with A's retained feedback,
-then resumes. It covers exact IDs, prefixes and Session IDs using real lookup and
-SQLite writes, with native client effects simulated. Rejected requests leave
-B/cursor/feedback/clients intact; a subsequent Open and Complete of B preserve
-A's simulated client, stop B, and record the answer once. A separate existing
-native-launcher test now uses the startup lock itself to observe receipt publication
-and stop its owned stand-in, without sleep-based race synchronization.
-These tests remain unexecuted under the resource rule; compilation is not a
-behavioral result.
+Focused proof covers independent, Wave-only, Task-only and Invocation-only
+inputs; taskless Invocations with and without Wave; mismatch/missing-parent
+rollback including a reserved Session; and a competing Project Wave update.
+The existing repeated-replacement proof now checks ancestry/provenance and
+unchanged prior attempts. The populated migration fixture also checks that
+adding provenance retains unknown values and exact capture/feedback bytes.
+These fixtures are authored; execution remains blocked by TESTING.md's resource
+rule. Compilation is not a behavioral result.
 
-The complete shared taskless driver, general Run facts, all Session kinds,
-bind/read/launch cutover, DTO/Swift identity and caches, repository Chapter
-operation, populated offline import, real-Home maintenance, measurements and
-deletion research followed by deletion remain required. Current-Run-only bind
-remains the recorded assumption. All eight Done When obligations and the supplied
-publication-record/stacking reports remain; no intermediate publication is selected.
+The next cut must use this constructor for general launches while completing
+the common invocation owner/driver, captured runtime nesting and all Session
+kinds. Node/tuple validation, remaining Run lifecycle/process facts, Ask and
+interactive conversion, common readers/bind, DTO/Swift identity/caches,
+repository Chapter operation, populated offline import, real-Home maintenance,
+configured acceptance, comparable measurements and deletion research remain.
+Current-Run-only bind remains an assumption. All eight Done When obligations
+and the supplied publication/stacking reports still govern; no intermediate
+publication is selected.
 
 ## Slice ledger
+
+- 2026-09-26 Run-construction static verification: `cargo fmt --all --check`,
+  isolated `cargo clippy --all-targets -- -D warnings` (**18.14 s**) and
+  working-diff whitespace pass. Migration validation passes with four ordered
+  drafts and 52 unchanged shipped files. Architecture still reports **32/33**
+  SQLite owners, missing `wave_chapters`; its seven other inventories pass.
+  Clippy compiled the new matrix, concurrent-writer and preservation fixtures;
+  no behavioral result or full-design acceptance is claimed. Historical branch
+  whitespace and all earlier execution obligations remain.
+
+- 2026-09-26 Run-construction cut: checkpointed the supplied concept review
+  through `lf commit` before edits. Replaced the Task-specific Run INSERT with
+  one ancestor-resolving writer requiring a transaction; both initial review
+  reservation and replacement use it. Joined Session and history reads share
+  the Run decoder. Added one forward provenance draft after
+  `own_sessions_and_runs`; old provenance remains unknown.
+- 2026-09-26 source review: kept nullable Invocation/Task equality, existing
+  parent-update triggers, exact review/current-Run fences and immutable history.
+  Replacement inherits ancestry but reads the current Task worktree for its
+  launch cwd; copying old cwd would disagree with the actual launcher after
+  relocation. Required a transaction in the constructor and its invoking store
+  functions so ancestor lookup cannot become an unfenced read followed by insert.
+- 2026-09-26 preflight and safe recovery fail at active `main-view-task`
+  **15.3 GiB / 12 GiB**, **97.2 GiB** free. Recovery preserved the foreign
+  active build. No behavioral test, materialized rehearsal, Home migration or
+  configured provider/app acceptance ran. No PR or Task disposition changed.
+- Focused proof owed for this cut, retaining every earlier command:
+
+  ```sh
+  cargo test -p loopflow --lib run_constructor_infers_ancestors_and_rejects_conflicts_atomically
+  cargo test -p loopflow --lib run_reservation_serializes_with_project_ancestry_changes
+  cargo test -p loopflow --lib review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors
+  cargo test -p loopflow --lib session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints
+  ```
+
+  Repeat the populated migration proof after canonical materialization in a
+  disposable exact source copy. The constructor matrix exercises real SQLite
+  transactions; the competing-writer proof uses two database connections and
+  a barrier, with no provider. Neither establishes taskless CLI or native recovery.
+
 
 - 2026-09-26 final selected-attempt static verification: `cargo fmt --all --check`,
   isolated `cargo clippy --all-targets -- -D warnings` (**1m 43s**), and

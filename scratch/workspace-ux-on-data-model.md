@@ -686,6 +686,52 @@ receipts retain only their recorded scope. The inherited `wave_chapters` owner-m
 gap, parent checklist, installed cold/warm links, configured provider/bind proof,
 captures and Jack's verdict remain open. No publication or Flow navigation decision.
 
+## Return-detail and keyboard compression (2026-09-27)
+
+Reviewed clean HEAD `792a3ce40`, the latest repair against `587d8fe2f`, and the
+branch's model path from `c832aaede`. No further executable reduction selected.
+Jack's light-only/no-teardown scope and the complete parent integration checklist
+remain governing. The model before and after this pass is unchanged:
+
+| Fact | Owner | Why the representation stays |
+| --- | --- | --- |
+| Resolved composition and execution semantics | Rust `resolve_flow` and `flatten_resolved` | One resolution traverses sources; the template tree adds distinct and empty composition uses without replacing captured execution. |
+| Node names, return targets and policy | Original `FlowGraph`, queried through recursive `node` | Detail needs nodes hidden by disclosure. The folded graph cannot supply those facts. No separate target-label cache is needed. |
+| Visible nodes and arrow endpoints | Ephemeral `FlowTemplateProjection` and mapped loop spans | These describe layout, not another execution graph. Original return keys and captured counts retain their meaning. |
+| Composition disclosure | Repository navigation's revision-keyed group set | Diagram activation and the shared disclosure style use this same state. XOR path disclosure remains local SwiftUI presentation; it does not create execution parentage. |
+| Keyboard eligibility and requested focus | Existing SwiftUI enabled input carried into `GhosttyMetalView`; separate `focusRequested` | An enabled, unfocused pane must remain clickable; a hidden retained pane must reject focus. One Boolean cannot represent both facts. Neither flag owns the surface lifetime. |
+| Historical navigation | Bounded destination descriptors and selected Task evidence | Recents enable readback after leaving a page; selected evidence renders that page. Combining them would introduce a historical snapshot cache. |
+
+Traced the catalog DTOs and fixtures through Task, Wave and palette consumers;
+the exact roadmap reader through destination generation and window delivery;
+and disclosure/detail through captured rendering and AppKit focus. The optional
+`detailGraph` is a presentation input for folded layouts: captured rendering
+already has a complete graph. Replacing that input with copied labels, another
+resolver or a new rendering-mode hierarchy would add machinery. The two style
+applications cover composition and XOR controls at each recursive level; the
+recorded keyboard counterexample explains why relying on inherited style alone
+is insufficient. Pointer and keyboard share one disclosure button and expansion
+binding. No redundant keyboard state remains to remove.
+
+The shared Session list still joins four sources. Work/path DTOs, unmatched-roadmap
+classification, reverse Session lookup, the hidden checkout host and Task-based
+running provider/time still have live consumers. Source still lacks Bind and
+authoritative node/iteration/current-attempt fields on `Run`. Their removal must
+follow the approved owner conversion and working room/attempt replacements;
+this compression pass does not substitute table presence for those contracts.
+No public interface, persisted field, migration, fallback or capability test was
+removed. `swift/README.md` describes the repaired keyboard and target-name behavior.
+
+Inspected the retained final Swift and Xcode logs: nine tests in five suites pass
+in `return-final-swift.log`; `return-xcode.log` records successful app/test-runner
+compilation. Reuse these only as the [focused receipt](workspace-return-proof.md)
+states: fixture transport, owned PTYs and local AppKit interactions, not installed
+provider acceptance. Executable bytes are unchanged; no product tests, resource
+recovery or rendering were repeated. This note alone changes, and its whitespace
+check passes. Parent integration, installed links, configured drafts/attempts/bind,
+live captures, Jack's verdict, final deletion and the inherited `wave_chapters`
+owner-map gap remain open. No publication or Flow navigation decision occurred.
+
 ## Measure
 
 Reuse existing `hierarchy_interaction_ms` and `task_workspace_ready_ms`; keep them

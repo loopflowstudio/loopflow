@@ -1,142 +1,113 @@
-# Chapters — the repository's planning clock
+# Chapters — the In Progress Projects
 
-2026-09-27 · LOO-298 · Design for Cut H7. Not built. Consolidates the target
-already stated in [docs/waves.md](../docs/waves.md#the-planning-model), the
-complete design's "Repository Chapter rotation" and the planning-ancestry
-validator in [docs/architecture-reference.md](../docs/architecture-reference.md#core-models-and-apis).
-Jack's model, from the Task: "Repository has Chapters: a repo-wide clock, one
-current, incremented for every Wave at once. Project = (Wave, Chapter), unique;
-owns that Wave's Tasks, KRs, metric targets and the Flow its Tasks run by
-default. No 'recommended Flow'."
+2026-09-27 · LOO-298 · Design for Cut H7, rewritten after review with Jack.
+Supersedes the same-day draft that added a `chapters` table, a `chapter.json`
+plan file and a config line. Jack's direction: the current Chapter code was
+expedient prototyping, not a blessed model; deleting more is better; one
+deployment (his) is primary, but the shape must not be a dead end for several
+Homes; chapter history and current ids need not be preserved; existing Linear
+Projects must not be thrown away; a developer who has not pulled must still see
+both chapters in Linear and be able to detect and adopt the new one; "newest
+wins" by name should not decide anything.
 
-## What exists today (observed)
+## The model
 
-- `wave_chapters(wave_id, chapter_id, project_id, current, receipt)`: one clock
-  per Wave. `Chapter` (`work/chapter.rs:59`) carries `wave_id`, `project_id`,
-  `predecessors`, `tasks`, `phase`. `store/sqlite/chapters.rs::save_chapter`
-  clears `current` for one Wave only.
-- `ops/chapter.rs::rotate` runs for one Wave: preview, refresh boundary,
-  `ensure_successor` (a Linear Project per Wave), activate, per-Task
-  move/abandon/historical with retry, archive predecessors, refresh the PM
-  snapshot. Classification and frozen metric evidence are sound and stay.
-- A Project's Flow is a *recommendation*: `ProjectFlowPlan.recommended`
-  (`pm/mod.rs:67`), parsed from a `recommended:` line in Linear Project content
-  and read by `task run` as a default when present. Swift mirrors it as optional.
-- `projects` has `wave_id`, no Chapter, no Flow column. `check_architecture.py`
-  reports `wave_chapters` as the one missing owner.
-- `lf wave new-chapter` exists with `--dry-run`; `lf wave history` and
-  `lf status --chapter` read per-Wave receipts, including `legacy-<project>` ids.
-
-## Usage (proposed; docs/waves.md already reads this way)
-
-```sh
-lf wave new-chapter --chapter 2026-10 --plan chapter.json --dry-run --json
-lf wave new-chapter --chapter 2026-10 --plan chapter.json --json
-lf wave history --wave infrastructure --json      # this Wave's Project per Chapter
-lf status infrastructure --chapter 2026-09 --json # a past plan, frozen evidence
-lf task run INF-123                               # the Project's Flow
-lf task run INF-123 --flow incident               # explicit override (H1/H3)
-```
-
-`chapter.json` has one plan per Wave, keyed by stable Wave id:
-`{"plans": {"<wave-id>": {"flow": "feature", "metric_targets": [], "krs": []}}}`.
-A Wave missing from the plan is an error, never a silent retirement; an empty
-plan is explicit. The preview lists every Wave and every Task disposition.
-Retry with the same `--chapter` id resumes from the recorded boundary.
-
-Recovery: activation is one SQLite transaction, so a crash leaves either the
-old Chapter current with every successor prepared, or the new one current.
-External moves, cancellations and archival stay retryable per Task afterwards,
-as today. Started unfinished Tasks keep identity, worktree, PR and invocation.
-
-## Model
+A Chapter is not a stored object. It is the set of Projects that are In
+Progress in Linear, one per Wave. Their shared name (`2026-10`) is the title
+Loopflow gives Projects it creates together, so a person can see they belong
+together. History is the Completed Projects. Nothing else exists.
 
 ```text
-chapters      id (Jack-chosen, e.g. 2026-10), repository, state
-              (preparing | current | completed), created_at, activated_at,
-              completed_at, receipt_json (dispositions, frozen evidence per Wave)
-              UNIQUE(repository) WHERE state='current'
+Linear Project (per Wave)     status: Planned | In Progress | Completed | Canceled
+  content lines               flow: feature            the Flow its Tasks run
+                              KR / target lines        unchanged
+  Tasks (issues)              unchanged
 
-projects      + chapter_id  NOT NULL REFERENCES chapters(id)
-              + flow        NOT NULL   -- the template Tasks run by default
-              UNIQUE(wave_id, chapter_id)
-
-tasks         project_id (unchanged)  ⇒  Project ⇒ Wave; Chapter through Project
+local projects row            + status  (synced; no other new column)
 ```
 
-- A Wave's current Project is `projects WHERE wave_id=? AND chapter_id=(current)`.
-  A Wave with no work has an empty Project row, created at activation.
-- `Chapter` (Rust) loses `wave_id`, `project_id`, `predecessors`; it gains
-  `plans: BTreeMap<WaveId, ChapterPlan>` (successor Project id, predecessor
-  Project id, frozen metrics, task dispositions). One receipt, one row.
-- `ProjectFlowPlan.recommended: Option<String>` becomes `Project.flow: String`.
-  Linear Project content carries `flow: <name>`; the PM sync reads it into
-  `projects.flow`; an absent line is an error at preview, not a default.
-- `ensure_flow_position(task, None)` reads `projects.flow` through the Task's
-  Project. `--flow` overrides for that invocation only.
-- Validators: Project's Wave and Chapter name the same repository; one current
-  Chapter per repository; a Task's Project must be in the current Chapter to
-  receive a new invocation (transfer moves it there first).
+- A Wave's current Project is its one In Progress Project. Its Tasks start
+  there; `lf task run` runs the Project's Flow unless `--flow` overrides.
+- A Planned Project with a future name is a Wave's plan for the next chapter.
+  Anyone creates it in Linear whenever they like. That is the bottom-up part.
+- Completed Projects stay visible in Linear and keep their Tasks until they
+  drain; `lf runs --project` and the Task pages still read them.
+- The repository has one chapter when every Wave's In Progress Project shares a
+  name. When they do not, `lf status` names each Wave's current Project and
+  `new-chapter` refuses until a person resolves it. Nothing wins silently.
 
-Deleted with this: `wave_chapters`, per-Wave `save_chapter(activate)`,
-`Chapter.wave_id/project_id/predecessors`, `ProjectFlowPlan` and its
-`recommended` parsing and Swift mirror, the `legacy-<project>` synthetic
-Chapter ids in `read_chapter`, `move_chapter_task`'s same-Wave check as a
-separate query (the Project row carries it).
+## Usage
 
-## Rotation, one operation
+```sh
+lf wave new-chapter 2026-10 --dry-run   # every Wave: successor, Task dispositions
+lf wave new-chapter 2026-10             # create, transfer, flip statuses
+lf pm show --wave infrastructure        # the Wave's In Progress Project and Tasks
+lf task run INF-123                     # the Project's Flow
+```
 
-1. **Preview** (`--dry-run`): resolve every Wave in the repository, snapshot
-   membership, classify each open Task with the existing `disposition`
-   (Move / Abandon / Historical / Unresolved). Any Unresolved blocks.
-2. **Prepare**: one Linear Project per Wave for the new Chapter, including
-   empty plans, through the existing `ensure_successor` per Wave. Write
-   `chapters(state='preparing')` with the full receipt. If Wave membership
-   changed since preview, refresh and re-preview.
-3. **Activate**: one transaction: insert successor `projects` rows with
-   `chapter_id` and `flow`, set the new Chapter `current`, set the old
-   `completed`, move local Tasks with `TaskDisposition::Move` to their
-   successor Project, record frozen predecessor metrics per Wave.
-4. **Transfer** (retryable, phase `Transferring`): per Task, Linear move or
-   cancel; archive predecessor Projects; refresh PM snapshots. New Tasks filed
-   during rotation stop the pass for reconciliation, as today.
-5. **Complete**: `completed_at`, phase `Complete`.
+`new-chapter` takes no plan file. For each Wave in the repository: use the
+Wave's Planned Project named `2026-10` if one exists, else create an empty one
+(title from the Wave's existing naming, `flow:` copied from the current Project);
+classify the current Project's Tasks with the existing disposition code, move
+started unfinished Tasks to the successor and cancel untouched backlog; set the
+successor In Progress and the predecessor Completed. Each step is retryable by
+running the command again with the same name. No SQLite transaction spans it
+and none is claimed: Linear is the owner and the command converges on it.
 
-Retirement keeps its evidence checks: authored work, PRs, worker claims,
-`tasks.started_at`. Missing Runs alone never prove untouched backlog.
+Another Home detects the change on its next `lf pm sync`, which every planning
+read already triggers: its `projects` rows now carry the new statuses, its
+Wave's current Project has changed, and `lf status` says so. Its local Tasks
+already point at the right Project because Linear moved the issues. There is
+no switch command because there is nothing local to switch.
 
-## Migration of existing Homes
+## What changes in code
 
-`wave_chapters` holds per-Wave clocks whose ids may not agree. The draft:
-imports every distinct `chapter_id` as a completed `chapters` row keyed by
-`(repository, chapter_id)`; points each `projects` row at its chapter through
-`wave_chapters.project_id`; Projects with no receipt get a `chapters` row named
-`legacy-<project-slug>` marked completed; `projects.flow` is filled from the PM
-snapshot's `recommended`, else the Wave's configured default, else `feature`,
-and the import report lists every inference. **The one current Chapter for the
-repository cannot be inferred**: if the Waves' current ids agree, that id
-becomes current; if they disagree, the migration stops and the report asks for
-the mapping. Nothing mints a fictional all-Wave rotation.
+Add: Project `status { type }` to the Linear projects query and `PmProject`;
+`projects.status` on sync; `ops/chapter.rs::rotate` over every Wave using
+status instead of the receipt phases; `flow:` replaces `recommended:` as the
+content key, `ProjectFlowPlan { recommended: Option }` becomes `Project.flow:
+String` (required at creation; the Swift mirror follows).
+
+Delete: `wave_chapters` and `store/sqlite/chapters.rs` as a chapter store;
+`work/chapter.rs` (`Chapter`, `ChapterId`, `ChapterPhase`, `ChapterMetricEvidence`;
+`TaskDisposition` and `ChapterTask` move next to the classifier that uses them);
+`read_chapter`, `frozen_chapter`, `chapter_history`, the `legacy-<project>` ids,
+`ensure_successor`'s receipt bookkeeping; `lf wave history` and
+`lf status --chapter`; the Swift `ChapterSummary`, `chapterUnavailable` and
+their fixtures; the `.lf/chapters/` packet directory and the code that reads or
+writes it; `check_architecture.py`'s `wave_chapters` owner. Retirement keeps its
+evidence checks (authored work, PRs, claims, `tasks.started_at`).
+
+Migration: none of history. A draft drops `wave_chapters`. Existing Projects
+stay as they are; the first `new-chapter` after this lands Completes them and
+creates the successors. Until then each Wave's non-archived Project is treated
+as In Progress.
+
+## Not a dead end for several Homes
+
+Linear is already shared. Two Homes read the same statuses; the only race is two
+people running `new-chapter` with different names, which leaves two In Progress
+Projects per Wave, visible, named by `lf status`, and fixed by completing one.
+If a chapter ever needs to be a first-class object again, the Projects it groups
+are all still there.
 
 ## Done when
 
-The complete design's Done when 4: two Waves including an empty plan,
-concurrent Task start versus retirement, loss of a provider response, missing
-Task/Project reads, external reassignment, retry after activation; one current
-repository Chapter; preserved active identity; frozen predecessor evidence. Plus:
-`lf task run` with no `--flow` runs the Project's Flow; `check_architecture.py`
-reports no missing owner; `lf wave history` shows one Wave's Project per
-Chapter; a Home whose Waves disagree on their current Chapter is refused with
-the two ids named.
+`lf wave new-chapter --dry-run` lists every Wave with its successor and Task
+dispositions; the real run leaves each Wave with one In Progress Project named
+`2026-10` and its predecessor Completed with only finished or canceled Tasks;
+started Tasks kept identity, worktree, PR and invocation; a second Home (private
+`LF_HOME`) shows the new chapter after `lf pm sync` with no other action;
+`lf task run` with no `--flow` runs the Project's `flow:`; `rg
+"wave_chapters|ChapterId|\.lf/chapters" rust swift scripts docs` returns only
+released migrations; `check_architecture.py` reports no missing owner.
 
-## Decisions for Jack
+## Open
 
-1. **Initial repository Chapter on existing Homes** when Waves disagree: name
-   it in the migration input (`--chapter <id>` on first `new-chapter`), or map
-   by hand in the import report. Recommended: the first `new-chapter` after
-   upgrade names it, and until then reads stay per-Wave-historical.
-2. **`projects.flow` source of truth**: the Linear Project content line
-   (`flow: feature`) synced into SQLite, or SQLite only with Linear as display.
-   Recommended: Linear carries it, as KRs and targets already do.
-3. **Chapter id shape**: free text as today (`2026-10`), or generated. Recommended:
-   as today; the id is a name people say.
+- Whether a Wave with no In Progress Project (all Completed, none Planned) may
+  start Tasks. Proposed: `lf task start` creates the Project for the current
+  chapter name on the spot, so a Wave is never blocked on planning ceremony.
+- Alternative to status considered: archived-vs-live, the convention the
+  prototype already uses. It needs no query change but hides past Projects by
+  default in Linear and cannot express Planned. Status was chosen for the
+  visibility Jack asked for.

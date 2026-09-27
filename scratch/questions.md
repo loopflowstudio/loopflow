@@ -1,5 +1,40 @@
 # LOO-298 review agenda
 
+LOO-303's current design is [Workspace UX after the data model](workspace-ux-on-data-model.md).
+This inherited LOO-298 agenda remains evidence, not this Task's implementation plan.
+Its later `data-model-slice-review.md` reference was not copied into this checkout;
+those review claims retain their original limits and have not been revalidated here.
+
+## LOO-303 kickoff assumptions (2026-09-26)
+
+Jack's evening comment `41ea97a6-1532-4453-87b2-86fc7634aad2` governs:
+light only, no teardown of LOO-291, palette/Task links/template first, then the
+table-dependent room and bind. Session owns Runs; step positions have Run
+attempts and one current attempt. No further decision is required for kickoff.
+
+- An independent Task Run (including one bound from the room) sets Started but
+  does not manufacture a Flow invocation. Keep the template with “Flow not
+  started” until captured execution exists. This resolves an edge in the older
+  “until a Run exists” wording and is an implementation assumption.
+- Task URLs and palette Task entries open details; the sidebar's existing
+  single-Session drill-down remains unchanged. Unqualified issue collisions use
+  a repository chooser rather than selecting the first candidate.
+- The shared model must supply position-level attempt order/current identity.
+  Provider retry streams within one Run are separate. The inspected parent
+  source does not yet expose this projection; no ordinal is inferred in Swift.
+- Bind remains current-Run-only under the inherited assumption. Taskless
+  invocation Runs obey nullable Task equality and may remain non-bindable
+  orphans with a shared explanation; the room must keep them accessible.
+- Multiple Session records can point at one shell terminal. Keep every orphan
+  tile, mount that terminal once, and offer “Show here” on the other tiles.
+  Never clone the provider client to satisfy the layout.
+- Parent schema presence alone does not release table-dependent implementation.
+  Complete independent slices while final shared APIs are being built. No
+  duplicate store, live migration or PR-record repair belongs in this Task.
+
+The remainder is preserved parent evidence. The full new design owns scope,
+ordering, review questions and proof for LOO-303.
+
 2026-09-26. Interactive review amends Jack's earlier model. The current
 participant's name is unresolved. Approval covers the changes recorded below;
 implementation assumptions are distinguished from explicit confirmation.

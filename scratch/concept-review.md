@@ -1,180 +1,191 @@
 # Newcomer setup concept review — 2026-09-26
 
-Reviewed LOO-312, Jack's accepted direction in the [design](a-newcomer-gets-from-download.md),
-the [slice review](installer-slice-review.md), growth memory, and the complete
-branch diff from `102522bc2` through `f8260ba70`. The worktree started clean.
+Reviewed LOO-312, Jack's accepted [design](a-newcomer-gets-from-download.md),
+growth memory, the full production diff from `102522bc2` through `c64bfbc62`,
+and the [completion review](installer-completion-review.md). Preserved that
+review's pending notes in checkpoint `1650f2d97` before editing. This document
+supersedes the earlier concept review's outstanding receipt-ordering finding.
 
-Judgment: keep the accepted interaction and existing owners. The useful
-simplification is one recoverable installation operation behind opening the
-app, followed by setup derived from current tool/account observations. No new
-product decision is needed. The installer still loses its active reopen
-obligation before reopening succeeds; the retained-helper handoff still lacks
-boundary proof. Neither the copied-app slice nor LOO-312 is complete.
+Judgment: keep the accepted interaction and current installation model. The
+completion repair now preserves the distinction between selecting an installation
+and finishing its recovery. The shared selection constructor removes duplicate
+retention decisions. No further product concept or speculative lifecycle is
+needed. Copied-app activation and the newcomer journey remain incomplete.
 
 ## Proposed usage first
 
-This is a proposed experience sketch within Jack's accepted scope, not a
-walkthrough of an observed app. Do not publish it as instructions until the
-running-app baseline and clean-account trials exist.
+This sketch expresses Jack's accepted scope, not an observed walkthrough. It
+must not become public instructions before the running-app and clean-account
+proofs exist.
 
 > Download Loopflow, drag it into Applications, and open it. Loopflow prepares
 > the installed app and may reopen it to finish. If preparation fails, the app
-> explains the failure and offers Retry.
+> explains what happened and offers Retry.
 >
-> Choose a coding tool. Install it and sign in from Loopflow, then connect
+> Choose a coding tool, install it, and sign in from Loopflow. Then connect
 > GitHub. Existing verified sign-ins skip those steps. Loopflow is free; the
 > coding tool has its own cost.
 >
-> Choose **Open project…**. A project is a folder of files; for now it must
-> already use Git. Canceling the chooser leaves that action available. Choosing
-> another folder stays in the same window.
+> Choose **Open project…** and select an existing Git project. A project is a
+> folder of files. Canceling leaves the action available; choosing a folder
+> opens it in the same window. An invalid folder explains the problem and lets
+> another folder be chosen.
 
 Concrete recovery: Kim opens the copied app; preparation closes it, then the
-coordinator exits before reopening. On the next open, the same installation
-owner must recover the unfinished work and reach setup, without another
-download or an external Terminal command. Successful reopen must discharge
-that obligation so later opens do not repeat activation. This is required
-behavior, not a claim that recovery currently does it.
+coordinator exits before reopening. On the next open, the installer completes
+that pending operation and the app reaches setup. If the app already reopened
+before interruption, retry observes it without requesting another open. The
+receipt now supports this behavior; the actual app entry and helper lifetime
+still need implementation and proof. Kim should not have to distinguish
+selection commit, store advancement, and receipt archival.
 
-Canceling provider sign-in is different: returning to setup rechecks actual
-status and offers Sign in again. A timeout offers retry; it must not appear as
-signed out or connected. Installing a tool and authenticating it remain
-separate actions. No repository, Session, Wave, Task, or Linear account owns
-either operation.
+Canceling sign-in has a different recovery: recheck native account state and
+show Sign in again if needed. A timeout stays unknown with Retry. Neither
+installing a tool nor finding a saved token establishes a usable account.
 
-Affected documentation: eventually replace the Mac opening of
-`docs/getting-started.md`, retain the DMG link in `website/content.yaml`, and
-describe only proven completion/recovery in `release/README.md`. Keep the
-separate CLI route and its current-shell PATH instruction. Keep init's skill
-unchanged: its repository setup is a separate use, and this Task does not
-redesign it. No customer docs or skills are rewritten in this review.
+Affected docs remain `docs/getting-started.md`, the Mac download instructions in
+`website/content.yaml`, and installer behavior in `release/README.md`. The first
+two wait for working behavior; the release README matches the implemented
+ordering. Keep the separate CLI route and immediate-shell PATH guidance. The
+init skill remains separate repository setup; no skill rewrite is warranted.
 
 ## Core model in one screen
 
-| Action or fact | Existing owner and types | Change under the accepted design |
+| Action or fact | Owner and representation | Transition or API |
 | --- | --- | --- |
-| Open the copied app | `ArtifactSet` owns retained bytes; `InstallSelection` pairs an installation with its store; `ActivationTargets` names installed destinations | Add the repo-independent signed-bundle entry to the installer; Swift presents its progress |
-| Recover interrupted preparation | `SwitchReceipt` owns switch identity, prior/target selections, advancement, and `app_was_running`; `ActiveInstall` records the selected installation | Preserve the reopen obligation through completion; do not create a Swift installation record |
-| Install and connect a coding tool | Installer owns acquisition; `provider_auth` owns native login; `ProviderAuthSnapshot` currently describes account status | Add bounded native availability/auth observations; persist an explicit verified choice in the existing Home `agent` setting |
-| Connect GitHub | Existing auth owner and `gh` | Acquire `gh` without a package manager; verify sign-in before offering Open project |
-| Open a project | `PortfolioService.addRepo`, `RepoScanner`, `PodiumModel.setRepoPath` | Use the same current-window selection path for setup and Go → Open |
+| Prepare the copied app | Installer; `ArtifactSet` retains bytes, `ActivationTargets` names destinations | Signed repo-independent entry still needed; reuse `promote` and existing staging/preflight |
+| Select installation and store | `SwitchReceipt.target`, `active_selection_committed` | `commit_switch_selection`; ordinary startup then resolves the target |
+| Finish or recover preparation | Pending `SwitchReceipt`; `app_was_running` retains window intent | `recover_switch`, `finish_switch`; resume before archival/removal |
+| Retain completed selection/history | `ActiveInstall` | `active_install_from_switch` shared by both promotion paths and recovery |
+| Install/connect a coding tool and GitHub | Installer acquisition, native CLI/auth owner, existing Home default | Guided install and native-status projection remain to implement; verified choice writes existing config |
+| Open a project | `PortfolioService`, `RepoScanner`, current `PodiumModel` | Register/resolve with existing owners, then `setRepoPath` in the current window |
 
-Setup is the overall interaction, not a new durable entity. The installation
-switch is one recoverable operation; account connection is an explicit action;
-the displayed next step is derived from observations. These lifetimes differ
-for useful reasons. Do not combine them into one persisted setup stage.
+Setup is a derived interaction, not a durable entity. Installation, account
+connection, and repository selection have different lifetimes. Combining them
+into one stored setup stage would require repairing that stage whenever a tool
+is removed, credentials expire, or a project moves.
 
 ## Findings and challenged simplifications
 
-### 1. “Settled” does not yet mean the opening operation finished
+### 1. Keep commit and completion separate; the earlier defect is repaired
 
-Observed source: published promotion settles before `resume_switch_app`
-(`install.rs:3468–3483`). Machine settlement writes the active installation,
-archives the receipt, and removes the active switch (`machine_install.rs:979–1027`).
-Recovery returns for an already settled machine, finishes a partially settled
-receipt without reopening, and clears an unadvanced switch before reopening
-(`install.rs:3155–3210`). Exact published recovery also settles first
-(`install.rs:3259–3264`). This preserves the slice review's P1 finding. The
-failure after interruption is inferred from this ordering, not reproduced live.
+Observed source: `install.rs:3144` commits `Settled` plus
+`active_selection_committed` to the pending receipt. `finish_switch` at `:3157`
+reopens before machine settlement. `machine_install.rs:896` gives the pending
+receipt precedence over the last active record; startup selection at `:926`
+uses the committed target. Machine settlement at `:990` writes the active
+record and immutable archive before removing the pending receipt.
 
-Current → proposed experience: an installation can finish with the window
-missing → opening/retrying Loopflow completes that same operation. Proposed
-engineering direction: keep the outstanding reopen work in the existing
-installation authority until it is fulfilled. Preserve selected bytes, store
-advancement boundaries, and the original window intent. Helpers alone still
-must not request a window. Do not infer pending work from historical
-`app_was_running` alone: it remains true after a successful reopen, too.
+Normal published promotion (`install.rs:3474`) derives one active selection,
+commits it, resumes Home, and finishes. Committed recovery (`:3212`) resumes
+and verifies Home before the same finish helper; it does not quiesce again.
+Failed reopen leaves the receipt pending. Unadvanced recovery (`:3223`)
+restores the prior Home and reopens before cancellation clears its receipt.
 
-The smallest source check already rejects a mechanical “move open earlier”
-fix. Local promotion does reopen before settlement (`install.rs:2714–2716`),
-but entry routing and authorization during a switch use
-`startup_selection_during_switch` / `startup_active_during_switch`
-(`machine_install.rs:762–800, 891–930, 1038–1080`). Before selection is committed,
-ordinary startup selects the prior installation, or refuses first-install startup
-because no prior selection exists. A switch-authorized process can instead use
-the target. A completion fix must prove
-the reopened app and its helpers use the appropriate installation/store;
-copying one branch's ordering is not enough.
+Earlier behavior → current behavior: a failed reopen lost its actionable
+obligation → the same receipt remains recoverable. Keep this repair. Moving
+open before selection commit would restore the first-install/prior-store
+startup hazard. Clearing the receipt at commit would restore lost recovery.
 
-No new queue, coordinator service, or UI receipt is justified. The exact
-receipt transition needed remains implementation work, not an approved schema
-change. Keeping retained and destination paths distinct remains necessary for
-replacement and recovery; combining them would discard required information.
+Vocabulary caution, not a new defect: `SwitchPhase::Settled` means selection is
+committed inside a still-pending switch; `MachineInstallState::Settled` means
+there is no pending receipt. Do not expose either internal label as setup
+success. No persisted rename or extra completion flag is justified in this
+review. The pending record already answers whether completion work remains.
 
-### 2. One setup screen should expose observations, not remembered success
+### 2. Retained history has one constructor without flattening useful distinctions
 
-Observed source: `ProviderAuthService::resolve_snapshot` can report active
-from a stored token before checking a native broker
-(`provider_auth/mod.rs:949–986`). `ProviderAuthSnapshot` has no executable
-availability field (`:255–261`). It cannot alone answer whether Loopflow can
-launch the selected coding tool.
+Observed source: `active_install_from_switch` (`install.rs:3104`) preserves the
+recorded active selection when it already matches the target; otherwise it
+carries recorded retained releases and the receipt's fallbacks forward. Both
+promotion paths and recovery call it. `active_install` has only the state-reader
+and this constructor as production consumers.
 
-Current → proposed experience: separately acquired tools and account state →
-the next useful action in the primary window. Keep the design's typed native
-status projection inside the auth owner, with unavailable/unknown distinct
-from signed out. Keep availability distinct from authentication. A selected
-provider is UI intent until verified; only then update the existing Home
-default. Repository overrides retain precedence. Connected does not promise
-quota: the actual conversation remains the integration proof.
+Earlier model → current model: three retention decisions → one constructor.
+Keep retained bytes separate from replaceable destination paths, and keep
+startup's temporary projection separate from completed retained history.
+Bootstrap adoption precedes a switch and remains a distinct operation.
+Deleting these distinctions would lose either safe replacement, recovery, or
+first-install handling. No additional interface reduction is required.
 
-This avoids an onboarding-complete flag, a second credential store, a Swift
-provider default, and a synthetic Session. These are avoided additions, not
-claimed code deletions. The auth projection and default-selection behavior
-are still unimplemented in this branch.
+### 3. The remaining installer gap is the executable boundary
 
-### 3. Open project should have one meaning in the primary window
+P2 from the slice review remains open. `promote` (`install.rs:3529`) delegates
+an existing receipt to recovery; for a new published promotion, `:3538` stages
+and execs a helper outside the selected bundle. Recovery delegation (`:2920`)
+runs the receipt-pinned owner. The seven fixtures do not execute these entry
+paths, Launch Services, or the Home keeper. Their sleep processes cannot prove
+a usable window or inherited-descriptor/GUI-parent-exit behavior.
 
-Observed source: no selected repository renders `WorkspaceNavigator`
-(`swift/LoopflowMac/Views/PodiumView.swift:41–49`). The app-level chooser
-registers a folder and opens the `repo` scene
-(`swift/LoopflowMac/LoopflowApp.swift:179–195`); selection inside the navigator
-sets the current model's repository (`Views/WorkspaceNavigator.swift:410–413`).
+First-install cancellation remains a required counterexample: no prior
+installation exists to authorize ordinary startup. `bin/lf.rs:1151` bypasses
+that authorization for install commands, while entry-gate dispatch happens
+earlier at `:1127`. The copied app must invoke its bundled installation helper
+directly and prove recovery through this ordering. Do not weaken ordinary
+startup authorization to make cancellation appear successful.
 
-The accepted same-window action removes a navigation distinction newcomers
-should not need to learn. Reuse registration and selection rather than adding
-a setup repository list. Preserve failed/loading discovery, returning sessions,
-cancel, invalid-folder feedback, and the other windows' existing uses. No UI
-claim here is live evidence, and no UI edit precedes the required baseline.
+`InstallCommand` (`lf/mod.rs:1115`) still has no copied-bundle activation entry.
+Signature validation remains in `release/install.sh:185`; Rust tree/helper
+identity checks alone do not establish signed activation. `install/published.rs:26`
+and `release/install.sh:164` still default to `/Applications`. Shared PATH
+persistence and update destination retention remain unimplemented. These are
+missing accepted capabilities, not reasons to introduce a Swift install record
+or a second updater.
 
-### 4. Acquisition paths can share ownership without becoming one action
+### 4. Keep the setup projection and same-window action already designed
 
-Keep both DMG and CLI acquisition. Jack selected DMG for newcomers; the CLI
-remains supported. Both should use the same validation, PATH writer, recorded
-destination, and recovery owner. `install/published.rs:26–28` and
-`release/install.sh:164` still choose `/Applications` absent an override. A
-second copy after an update would break the apparent simplicity of drag/open.
-The design's destination retention and explicit `LF_APPLICATIONS_DIR`
-precedence remain required. No new updater configuration is proposed.
+Source confirms the earlier mismatches remain: `provider_auth/mod.rs:949`
+can report active from a stored token without checking native executable
+availability. `PodiumView.swift:41` renders `WorkspaceNavigator` with no selected
+repository. `LoopflowApp.swift:179` registers a chosen repository but opens the
+older repo scene; the navigator selects the current model at
+`WorkspaceNavigator.swift:412`.
+
+Current → proposed experience: separate installation/account prerequisites and
+two project-opening paths → one observed next action and one current-window
+selection path. Preserve loading/error distinction, returning sessions, canceled
+choosers, invalid-folder feedback, existing OpenCode use, repository config
+precedence, and native authentication failures. The typed native-status view
+must stay with the auth owner; explicit verified provider choice uses the
+existing Home default. Installation alone never changes that default.
+
+No account store, setup-complete boolean, synthetic Session, alternate repository
+list, or provider preference in Swift earns a place. GitHub stays before
+**Open project…**; acquiring `gh` without a package manager remains engineering
+work. This review does not change Jack's optional-Linear direction or claim
+local Tasks already support it.
 
 ## Evidence, decisions, and next proof
 
-Reused the slice review's four passing process/selection fixtures and the
-design's four artifact fixtures. Source comparison against `fb6ce42dc` confirms
-the reviewed installer and machine owner are unchanged. No behavioral tests
-were rerun for this documentation-only review. Those passes establish neither
-GUI reopen nor the retained-helper `exec` boundary; P2 remains open. This
-review's source checks do not upgrade either claim to acceptance.
+Reused the completion review's **7 passing lifecycle tests** (1.65 seconds after
+compilation) on unchanged production source. Inspected their bodies and all
+completion/clear/selection callers. The fixtures cover selected processes,
+startup authorization, failed reopen, retry, retained history after partial
+archival, helper-only completion, and unadvanced update cancellation. They do
+not invoke real promotion/recovery. No behavioral tests were rerun for this
+documentation-only review; `git diff --check` validates the edited Markdown.
 
-The smallest next implementation/proof is the completion boundary: interrupt
-before settlement, after selection is committed but before reopening, and
-after reopening but before completion is recorded. Retry through the real
-installer entry and verify the correct app/helpers/store, eventual completion,
-and no repeated restart on a later open. Include unadvanced rollback and
-helper-only installation. Use owner-level isolated fixtures first; execute the
-real retained helper and terminate its GUI parent in a disposable macOS account
-for the boundary proof. A HOME override does not isolate machine state.
+No new bounded production defect or product decision was identified. The old
+P1 finding is superseded; P2 and the completion review's acceptance gaps carry
+forward. This review changes no implementation and invalidates no prior proof.
 
-Any changed completion ordering requires renewed behavioral review of reopen,
-startup authorization, and retry. Prior path-selection tests remain useful but
-cannot stand in for that proof. Signed-bundle activation, PATH persistence,
-update destination retention, provider/GitHub setup, live primary-window
-baseline, clean-account trials, and public-channel verification remain in the
-full design; this bounded recommendation does not remove them.
+The next implementation is the signed, repo-independent copied-bundle entry
+through the existing installer. Alongside it, isolate every shell-test HOME
+and ZDOTDIR before adding shared PATH persistence, and retain the copied app's
+actual destination for updates. No live baseline is needed for those Rust and
+shell changes; the baseline remains required before Swift UI edits.
 
-No human choice blocks this installer work. How to acquire `gh` is an
-engineering choice under the accepted no-package-manager requirement. The
-broader local planning/Linear boundary still needs coordination with LOO-316;
-this review neither resolves its ownership nor claims local Tasks work.
+The smallest missing lifecycle proof executes the retained helper and actual
+recovery entry in a disposable Mac account, terminating the GUI parent and
+interrupting before commit, after commit before reopen, and after reopen before
+archival. Include first-install cancellation, failed open, updates, and
+helper-only installation. Observe correct CLI/daemon/store selection, eventual
+receipt removal, and no repeated restart. A temporary HOME does not isolate
+this machine boundary. Rendering and a fresh account are unavailable here;
+no host installation or login was attempted to substitute for that proof.
 
-Review only: no implementation, account, installation, planning, publication,
-merge, Task completion, or Flow navigation changes.
+Provider/GitHub setup, same-window opening, the real provider response, both
+clean-provider trials, narrow docs, affected-suite gate, and public-channel
+verification remain required by the complete design. Broader local planning
+ownership remains coordination with LOO-316. This review chooses no Flow
+navigation and does not publish, merge, or complete the Task.

@@ -458,6 +458,11 @@ channel verification above remain the target.
 
 ## Slice ledger
 
+Concept review on 2026-09-26: [concept-review.md](concept-review.md) now reflects
+the repaired completion model and shared selection constructor. No additional
+product concept or production defect was identified. It reuses the completion
+review's proof and preserves all live-boundary and full-design acceptance gaps.
+
 Completion review on 2026-09-26: [installer-completion-review.md](installer-completion-review.md)
 supersedes the earlier receipt-ordering finding after reviewing the full branch
 through `c64bfbc62`. Seven lifecycle tests passed in 1.65 seconds after compilation;

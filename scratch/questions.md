@@ -1,12 +1,13 @@
 # LOO-312 assumptions and outstanding evidence
 
-- The selected step is review-slice. The completion repair and retention
-  compression pass seven isolated lifecycle tests; the previous receipt-ordering
-  finding is superseded. Real promotion/recovery entry, Home restart, retained
-  helper survival and GUI reopen remain unproven. See
-  `installer-completion-review.md`. No new product decision is needed.
+- The selected step is concept-review. Keep the repaired completion model and
+  shared selection constructor; no new product decision or lifecycle is needed.
+  The previous receipt-ordering finding is superseded. Seven isolated lifecycle
+  passes remain evidence, not proof of real promotion/recovery, Home restart,
+  retained-helper survival or GUI reopen. See `concept-review.md` and
+  `installer-completion-review.md`.
 - The preceding implementation pass repaired the completion ordering
-  identified in `installer-slice-review.md` and `concept-review.md`: commit
+  identified in `installer-slice-review.md` and the earlier concept review: commit
   selection before reopening, retain the active receipt until Home recovery
   and reopening succeed, and observe an already reopened app on retry. The
   existing receipt and startup-routing rules remain authoritative. No new

@@ -62,3 +62,25 @@ this worker does not delete another contribution's active build output. Static
 checks continue. Behavioral tests remain required once that resource condition
 clears; no real Home import or installed binary promotion is authorized by this
 local proof.
+
+
+## Invocation lifetime cut (2026-09-26)
+
+Executive sequencing choice: retain Task invocations before replacing the other
+owners. The existing completion/restart paths deleted their captured execution,
+which cannot supply the approved historical Run/Session ancestry. The new table
+is the sole Task execution owner; the remaining ordinary file path is existing
+unfinished cutover scope, not a newly selected dual-store design. No intermediate
+publication is authorized by this slice.
+
+The forward migration adds a Task FK and requires each captured invocation ID
+to be unique and nonempty. Old singleton storage did not enforce either rule.
+A conflicting historical Home must stop and preserve its transaction input for
+explicit mapping; the migration does not rewrite IDs, drop captures or null Task
+ancestry. This pass inspected no real Home, so conflict frequency is unknown.
+
+Preflight and safe recovery now observe `main-view-task` at 15.3 GiB / 12 GiB
+(98.9 GiB free). Product tests remain blocked by TESTING.md. The outstanding
+commands also include `retaining_invocations_preserves_populated_execution_and_review_bytes`
+and `stale_human_decisions_cannot_target_a_replacement_invocation`; run the
+migration proofs again after materialization in a disposable source copy.

@@ -4534,7 +4534,7 @@ mod tests {
     }
 
     #[test]
-    fn native_human_session_schema_uses_task_flow_positions() {
+    fn native_human_session_schema_uses_flow_invocations() {
         let conn = open();
         apply_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
             .unwrap();
@@ -4553,8 +4553,11 @@ mod tests {
         for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
-        let position_columns = columns(&conn, "task_flow_positions");
+        let position_columns = columns(&conn, "flow_invocations");
         for present in [
+            "id",
+            "state",
+            "ended_at",
             "task_id",
             "invocation_json",
             "review_json",
@@ -4577,7 +4580,11 @@ mod tests {
             assert!(!position_columns.contains(&deleted.to_string()));
         }
 
-        for table in ["ask_exchanges", "ask_linear_comment_outbox"] {
+        for table in [
+            "ask_exchanges",
+            "ask_linear_comment_outbox",
+            "task_flow_positions",
+        ] {
             assert!(!conn
                 .query_row(
                     "SELECT EXISTS(
@@ -4683,6 +4690,129 @@ mod tests {
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='task_chapter_started')",
             [], |row| row.get::<_, bool>(0)
         ).unwrap());
+    }
+
+    #[test]
+    fn retaining_invocations_preserves_populated_execution_and_review_bytes() {
+        let conn = open();
+        let name = "retain_flow_invocations";
+        apply_before_current_draft(&conn, name);
+        if !_draft_is_canonical(name) && !_draft_is_canonical("drop_task_flow_step_projection") {
+            conn.execute_batch(&current_draft_sql("drop_task_flow_step_projection"))
+                .unwrap();
+        }
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             INSERT INTO waves(id,name,repo,created_at) VALUES('wave','wave','/repo',1);
+             INSERT INTO projects(id,wave_id,external_project_id,created_at)
+                 VALUES('project','wave','external-project',1);",
+        )
+        .unwrap();
+        for human in [true, false] {
+            let task = crate::durable::TaskId::new();
+            conn.execute(
+                "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
+                 VALUES(?1,'project',?1,?1,1)",
+                [task.as_str()],
+            )
+            .unwrap();
+            let invocation = crate::durable::test_flow_invocation(
+                "captured",
+                0,
+                "review",
+                Some("review"),
+                human,
+            );
+            let run = crate::durable::RunId::new();
+            let claim = (!human).then(|| crate::durable::TaskWorkerClaim {
+                invocation_id: invocation.id.clone(),
+                generation: 4,
+                position_version: 9,
+                owner: crate::durable::TaskWorkerOwner {
+                    trace_id: crate::id::TraceId::new(),
+                    exec_id: crate::id::ExecId::new(),
+                    pid: 123,
+                    started_at: 100,
+                },
+                worker_run_id: Some(run.clone()),
+                claimed_at: time::OffsetDateTime::from_unix_timestamp(100).unwrap(),
+            });
+            let cursor = crate::engine::ExecutionCursor {
+                iteration: 7,
+                ..Default::default()
+            };
+            conn.execute(
+                "INSERT INTO task_flow_positions (
+                    task_id, invocation_json, session_run_id, ready_summary,
+                    step_index, iteration, position_version, worker_generation,
+                    claim_json, failure_json, updated_at, review_json
+                 ) VALUES (?1,?2,?3,'saved answer',0,7,9,4,?4,NULL,100,?5)",
+                rusqlite::params![
+                    task.as_str(),
+                    serde_json::to_string(&invocation).unwrap(),
+                    run.as_str(),
+                    claim
+                        .as_ref()
+                        .map(|claim| serde_json::to_string(claim).unwrap()),
+                    serde_json::to_string(&cursor).unwrap(),
+                ],
+            )
+            .unwrap();
+        }
+        let evidence = |table| {
+            conn.prepare(&format!(
+                "SELECT json_array(task_id, invocation_json, session_run_id, ready_summary,
+                    step_index, iteration, position_version, worker_generation,
+                    claim_json, failure_json, updated_at, review_json)
+                 FROM {table} ORDER BY task_id"
+            ))
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        };
+        let before = evidence("task_flow_positions");
+        let migration = current_draft_sql(name);
+        // The migration transaction must preserve its input on ambiguous IDs
+        // or dangling ancestry, rather than inventing a replacement identity.
+        for corruption in [
+            "UPDATE task_flow_positions SET invocation_json=(SELECT invocation_json FROM task_flow_positions LIMIT 1)",
+            "UPDATE task_flow_positions SET task_id='missing' WHERE task_id=(SELECT task_id FROM task_flow_positions LIMIT 1)",
+        ] {
+            conn.execute_batch("SAVEPOINT import").unwrap();
+            conn.execute_batch(corruption).unwrap();
+            assert!(conn.execute_batch(&migration).is_err());
+            conn.execute_batch("ROLLBACK TO import; RELEASE import").unwrap();
+            assert_eq!(evidence("task_flow_positions"), before);
+        }
+        conn.execute_batch(&migration).unwrap();
+        assert_eq!(evidence("flow_invocations"), before);
+        validate_foreign_keys(&conn).unwrap();
+        assert!(columns(&conn, "task_flow_positions").is_empty());
+        assert_eq!(conn.query_row(
+            "SELECT count(*) FROM flow_invocations
+             WHERE state='current' AND ended_at IS NULL AND id=json_extract(invocation_json,'$.id')",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 2);
+        // The denormalized identity cannot be changed through a capture rewrite.
+        assert!(conn.execute(
+            "UPDATE flow_invocations SET invocation_json=json_set(invocation_json,'$.id','other')",
+            [],
+        ).is_err());
+        assert_eq!(evidence("flow_invocations"), before);
+        // First execution still protects a Task from later chapter retirement.
+        conn.execute("UPDATE flow_invocations SET worker_generation=5", [])
+            .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='started'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            2
+        );
     }
 
     #[test]

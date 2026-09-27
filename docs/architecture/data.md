@@ -33,7 +33,7 @@ kernel locks                  live local exclusion authority
 | --- | --- |
 | What is this Wave trying to do? | `wave/<name>/GOAL.md` and `MEMORY.md` |
 | What Projects and Tasks exist? | Linear, through the bounded PM projection |
-| What Task boundary should resume? | Work domain state joined to its exact `task_flow_positions` row |
+| What Task boundary should resume? | Work domain state joined to its exact `flow_invocations` row |
 | What ordinary Flow boundary should resume? | the invocation's Home-local `flows/<id>/position.json` |
 | What human input is pending? | Session projections of Task/ordinary Flow boundaries and human Ask records |
 | What did one provider launch emit? | the Run record on the Home that launched it |
@@ -48,15 +48,17 @@ authority between them.
 ## Planning SQLite
 
 The durable store keeps facts needed to resume planning, delivery, placement,
-credentials, and provider observations. It no longer stores a parallel Run,
-Invocation, Turn, liveness, context, or usage lifecycle.
+credentials, and provider observations. Task invocations retain their captured
+execution and settlement history. Run,
+Session and ordinary Flow ownership are covered by the model cutover in the
+architecture reference; the current file paths below remain implementation facts.
 
 The current application tables group by owner:
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
-| Project and Task progression | `projects`, `tasks`, `task_flow_positions` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
+| Project and Task progression | `projects`, `tasks`, `flow_invocations` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
 | Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current human Ask Sessions use files |
@@ -73,7 +75,7 @@ ordered development frontier and become released only through the release
 workflow.
 
 Project and Task progression lives on the Work records and exact
-`task_flow_positions`; there is no controller table, provider continuation,
+`flow_invocations`; there is no controller table, provider continuation,
 phase epoch, active controller slot, Task writer token, or generic Work lease.
 The short advancement claim fences one Flow-position version and uses the
 existing process ledger for liveness evidence.
@@ -81,9 +83,14 @@ Claimed Task settlement, completion, and blocking commit the Flow change and
 its Task evidence in one transaction. Ordinary Task updates write facts, while
 Flow settlement only touches the Task timestamp.
 
-The Task position stores the shared `ExecutionCursor` tree in `review_json`;
+The current Task invocation stores the shared `ExecutionCursor` tree in `review_json`;
 the current Flow name, step, node and human policy come from its captured graph.
-Review discovery and exact Task reads share that decoder. SQL `step_index` and
+Review discovery and exact Task reads share that decoder. Completion and
+restart close the invocation without deleting its capture, cursor, exact claim
+or saved feedback. A partial unique index selects one current invocation per
+Task. Session writes compare invocation identity as well as version; chapter
+retirement retains evidence from earlier invocations, while only the current
+invocation can hold an active worker claim. SQL `step_index` and
 `iteration` remain root projections while historical flat progress is
 decoded without replacing its captured definition. Ordinary Flow invocations
 use the same cursor and navigation rules, with file ownership instead of a

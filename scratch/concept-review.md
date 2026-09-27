@@ -1,195 +1,202 @@
-# Workspace navigation concept review
+# Workspace navigation and template concept review
 
-2026-09-26 · LOO-303 · reviewed HEAD `f20f06234`
+2026-09-27 · LOO-303 · reviewed HEAD `587d8fe2f`
 
-The navigation model is clear: open a Task's details, open a Session's conversation,
-or inspect a Flow template. Keep those destinations distinct and keep the existing
-sidebar's single-Session shortcut. No redesign or new persistent owner is needed.
-Two source-level gaps remain in repeat navigation: a disappearing highlighted row
-can leave Return targeting an absent destination, and a visited historical Task
-disappears from recents when its page is left. Return these for focused behavior
-proof and repair; neither was exercised by this review.
+Keep the current model: inspect a Task, open a Session, or inspect a Flow
+template; captured execution remains a separate reading. The prior navigation
+findings are repaired with local proof. One narrow template mismatch remains:
+folding can make a return target's detail display an internal node key instead
+of its name. Return that case for focused reproduction and repair. It requires
+no new product object, resolver, persistence or workspace redesign.
 
-The [slice review](workspace-navigation-review.md) remains authoritative for its
-executed checks and outstanding acceptance. This review supplies concept evidence,
-not a navigation decision or permission to publish or complete LOO-303.
+The [template slice review](workspace-template-review.md) owns executed checks
+and remaining acceptance. This concept review supplies source evidence and a
+bounded proposal, not a Flow navigation decision or permission to publish or
+complete LOO-303.
 
 ## Intent and usage first
 
-Jack requested keyboard access and exact Task links while preserving the installed
-LOO-291 composition. Light mode only; no teardown. The approved design distinguishes
-Project-owned Flow templates on Wave pages, Task-owned captured invocations, and
-non-Task execution in monitoring. Session identity, terminal drafts, exact Run
-attempts and permanent bind targets must survive the later integration.
+Jack requested keyboard access, exact Task links, understandable templates and
+later exact attempts and permanent Session binding. Preserve LOO-291's composition,
+light mode, retained terminals/drafts, and the existing sidebar's single-Session
+shortcut. The approved model places the Project's default template on its Wave
+page and captured invocations on Task pages; non-Task execution stays in overall
+monitoring. Current-Run-only bind remains an explicit inherited assumption.
 
-The navigation usage in `swift/README.md:102` and the exact lookup example in
-`docs/lf.md:703` already explain the normal path clearly. Keep them. No affected
-skill needs rewriting: this change adds navigation, not a new agent workflow.
-The following recovery wording is a proposal within the approved scope, not a
-claim of implemented or installed behavior:
+Keep the navigation and template guidance in `swift/README.md:102` and the exact
+lookup example in `docs/lf.md:706`. The README now correctly bounds historical
+recents: visited Tasks can be revisited after leaving their pages; this is not
+all-history search. No affected skill needs a new workflow or instruction.
 
-> Press ⌘K, search an issue identifier and press Return to open its Task page.
-> Escape returns focus to the retained terminal. Recently visited Tasks remain
-> available after leaving their pages, including Tasks from an earlier chapter.
-> If a destination disappears during search, the palette shows a valid current
-> selection; it never opens the removed item. A failed read keeps the last
-> available results visibly stale. An unresolved Task link keeps the current
-> workspace and offers Retry or repository-qualified choices.
+Concrete journey: Jack opens `loopflow://task/LOO-303`, reads Task details rather
+than entering its sole Session, visits a Wave, and returns through ⌘K. A recent
+historical Task is read back by exact identity; failure preserves the workspace
+and offers Retry. A removed highlighted row gives Return the first remaining
+visible result, or no action when empty. Those repairs have local evidence in
+the slice review; installed link delivery still needs proof.
 
-Concrete journey: Jack opens `loopflow://task/LOO-303`, reads details rather than
-entering its sole Session, visits a Wave, then returns through ⌘K. Inspection
-never starts work. If exact lookup fails, Jack can cancel or retry without losing
-the terminal. If a Session closes elsewhere while highlighted in the palette,
-Return must have a visible, valid meaning rather than silently doing nothing.
+For templates, retain the documented interaction: expand a composed Flow from
+its group or disclosure control; collapse without changing execution; inspect
+both return edges. Add this proposed detail expectation to the next focused
+implementation, not as a claim already met:
 
-The README's phrase “Task links and palette Task entries ... including Tasks
-outside the current chapter” needs this boundary made explicit when the repair
-lands: exact links resolve retained history; the palette currently adds only the
-selected historical Task to its current inventory. General historical search is
-not implemented and is not proposed here. Reconcile usage with the final bounded
-recents behavior before shipping.
+> Inspect a return step to see the named step it returns to, even while that
+> step's containing Flow is folded. Expanding the group reveals the same target.
+
+This stays inside the approved template semantics. No new user choice is needed.
+Keyboard access through nested disclosure remains unverified; naming it here
+does not close that existing acceptance gap.
 
 ## Model in one screen
 
-| Action / concept | Identity and owner | API / transition |
+| User action / concept | Identity and owner | API or transition |
 | --- | --- | --- |
-| Open Task details | Planning Task ID plus owning repository/Wave; shared roadmap projection | `TaskLink` → `RegistryQuery.taskDestination` → `roadmap --task` → `openTaskDestination` |
-| Open a named conversation | Session ID; existing Session reader and window terminal pool | Palette `.session` → existing `openSession`; explicit takeover remains separate |
-| Inspect a template | Flow name in repository catalog; future resolved revision/group IDs | `.flow` → `WorkspaceNavigation.Palette.flow`; inspection does not start it |
-| Choose execution | Exact Task and existing Flow draft/control | `.chooseFlow` → existing preview/restart picker; confirmation/legality stay there |
-| Return to a destination | At most 20 disposable entries in per-repository `WorkspaceNavigation` | `remember`; no planning, Session or launch record is created |
-| Resolve a link | One pending URL/window router plus generation-fenced model reading | One Podium receives it; a later selection invalidates the result |
-| Retain a historical page | `selectedTaskEvidence`, separate from current plan membership | Current-plan refresh cannot eject the selected page |
+| Open Task details | Stable planning Task ID and repository; shared roadmap projection | `TaskLink` / palette → exact `roadmap --task` → `openTaskDestination` |
+| Revisit a destination | At most 20 display/lookup descriptors per window/repository | `remember`, `openPaletteTask`; exact readback for history absent from current readings |
+| Retain the selected historical page | `selectedTaskEvidence`, outside current-plan membership | Selection and successful planning refresh; no second snapshot cache |
+| Open a conversation | Session ID; existing reader and window terminal pool | Existing `openSession`; explicit client takeover remains separate |
+| Inspect a Flow template | Resolved composition plus graph, with content revision and local group IDs | Rust `resolve_flow` → catalog → Swift `FlowTemplateView` |
+| Expand a group | Repository navigation's revision-keyed set of group IDs | Disclosure and diagram click update the same set |
+| Inspect execution | Captured invocation/node/iteration; later exact Run attempt | Existing captured graph; parent contracts supply missing attempt authority |
+| Choose another Flow | Task's existing draft and legal controls | Preview or confirmed restart; inspection itself never starts work |
 
-Normal path inspection followed `LoopflowApp.swift:165`,
-`WorkspaceDestination.swift:43`, `PodiumModel.swift:78`,
-`RegistryQuery.swift:126` and `commands/waves.rs:610`. Exact lookup reads cached
-planning and retained Tasks through the existing projector, without launch
-resolution or an active-PR requirement. The failure path retains the selection,
-records an unavailable reading and offers Retry in `WorkspacePalette.swift:146`.
-`dismissTaskLink` and ordinary selection invalidate pending results.
+Normal template path: `engine/flow.rs:403` flattens the resolved tree for execution;
+`engine/flow_graph.rs:141` uses the same resolution for catalog graph and disclosure
+structure. Every composition use gets a distinct ID, including empty uses and
+groups inside XOR alternatives. Revision identifies resolved content, not an
+invocation or loop pass. Swift uses one shared view on Task, Wave and catalog
+surfaces; pinned execution takes precedence at `TaskFlowView.swift:360`.
 
-## Findings and bounded simplifications
+Failure path: catalog resolution errors yield a named unavailable entry with no
+graph/template (`flow_graph.rs:167`); Task preview displays that reason
+(`TaskFlowView.swift:365`). It does not manufacture an executable partial graph.
+Historical execution cannot be reconstructed from this current catalog. Retained
+history and exact attempts still depend on the parent integration below.
 
-### 1. Current inventory is not the set of reachable recent destinations
+## Findings and simplifications
 
-Observed in source: `WorkspacePalette.swift:20` builds current Task rows and
-`:27` adds only `selectedTaskEvidence`. `PodiumModel.swift:843` clears that evidence
-when selecting a Wave. `searchDestinations` sorts existing rows by recent IDs; it
-does not materialize a recent row absent from the inventory. At palette opening,
-`WorkspacePalette.swift:130` removes recent IDs absent from those rows after a
-successful reading. Therefore a linked historical Task can remain resolvable by
-the shared exact reader but cease to be offered as a recent destination.
+### 1. Folding should not change the name of a return target
 
-Current → proposed: after leaving an older Task, Jack must reuse its link → Jack
-can return through recents, with exact readback when needed. A successful current
-plan read establishes current membership, not deletion of historical Work.
+**Observed in source, not executed in this review:**
 
-Keep the selected-page evidence as the sole detail owner. Extend the bounded
-recent entry only with the display and exact lookup information needed to revisit
-it; use the existing reader and compare the returned stable identity before
-navigation. Do not retain a second full Task snapshot cache, insert historical
-Tasks into the current plan, or add a durable visit table. Unknown availability
-must remain distinct from confirmed disappearance. This is a proposed repair,
-not an approved new all-history search feature.
+- `TaskFlow.swift:224` replaces a collapsed group's children with one visible
+  group node. Other nodes retain their original `returnsTo` (`:232`).
+- `TaskFlowView.swift:469` correctly remaps the diagram's return endpoints through
+  `visibleKeys`. The return arrow can therefore terminate at the folded group.
+- `TemplateDiagram` passes the projected graph to `FlowDiagram` (`:533`), which
+  passes that same graph to `FlowNodeDetail` (`:614`).
+- Detail resolves the target only among that graph's visible steps, falling back
+  to the raw target key when absent (`:967`).
 
-Smallest counterexample/proof: open historical Task A from an exact result absent
-from the current roadmap; visit Wave B; refresh successfully; reopen the palette
-and select A from recents. Require A's exact identity and details, unchanged
-Run/event counts, and isolation from another repository's recents. Repeat with
-failed readback and preserve the current workspace. The existing historical test
-keeps A selected throughout; it does not prove this return journey.
+Smallest source counterexample: a composition contains `implement` at key `0`;
+an outer `loop-decide` at key `1` returns to `0`. Fold the composition. The
+diagram maps `0` to `group-0`, but the detail lookup finds no visible step keyed
+`0`, so its expression produces **Iterate returns to 0**. Expanding restores the
+name. The target still exists in the catalog; disclosure alone lost its label.
+This is a presentation defect, not evidence of a changed execution target.
 
-### 2. A highlighted ID can outlive its row
+Current → proposed: Jack must interpret a numeric key when a target is hidden →
+the detail always names the semantic target while the arrow attaches to its
+visible containing group. Resolve descriptive facts from the original graph;
+keep the projected graph for layout. If helpful, identify the containing group
+alongside the step name, but do not substitute the group for the execution target.
+Reuse the original graph already passed into `TemplateDiagram`; no copied label
+store, wire field, YAML lookup or rewritten execution edge is needed.
 
-Observed in source: `WorkspacePalette.swift:97` submits `highlighted` whenever
-non-null. The visible highlight uses the same expression at `:115`; only search
-text changes reset it (`:126`). A readings refresh can remove that row without
-changing the search. `SessionsView.swift:471` correctly rejects the absent
-destination, but no visible row then owns Return and no recovery is shown.
+Smallest next proof: mount a template with the target inside a folded composition
+and two return steps outside it. Inspect each return and require the original
+target name and distinct edge labels; expand/collapse and require unchanged
+meaning. Repeat the shape inside an XOR alternative. Assert inspection issues no
+Flow control and keeps terminal input isolated. The current fixture puts both
+returns and their target in the same `pursue` group, so its full-expansion and
+folded-loop checks do not exercise this crossing (`TaskFlowProofTests.swift:53`).
 
-Current → proposed: Return silently targets an absent row → display and submit
-one effective selection drawn from the current results. Preserve the selected
-identity while present; otherwise show the first remaining result or the existing
-empty state. Keep activation's fresh legality check. Do not add a tombstone store,
-pending-action queue or permission to activate stale actions.
+The existing topology and resolver passes remain valid within their scope. A
+repair to shared detail rendering needs focused template and captured-detail
+proof before it is treated as complete; no new passing behavior is claimed here.
 
-Smallest proof: in the mounted palette, highlight Session A, publish a successful
-inventory without A but with B, then dispatch Return. Verify the visibly selected
-destination opens, A is never opened, search reaches neither PTY, and Escape
-still restores valid prior focus. Cover zero remaining rows and failure retaining
-last-good rows. This instantiates the slice review's unresolved stale-row case;
-the source finding is not a new executed AppKit failure receipt.
+### 2. The previous navigation repairs keep the right owners
 
-### 3. Keep the existing conceptual separations
+`WorkspacePalette.swift:100` now derives both visible highlighting and Return from
+current results. `SessionsView.swift:469` retains activation's fresh inventory
+check. There is no tombstone, pending-action queue or permission to activate an
+absent row. The slice review also executed Return during a failed reading with
+last-good inventory, preserving the exact retained terminal.
 
-`WorkspaceDestination` also carries UI actions, but one enum and switch are enough
-for this small surface. Splitting it into a generic action registry adds no user
-benefit. Search and Flow inspection already share one modal lifetime; the prior
-compression removed the competing presentation flags. The slice review tested
-natural focus restoration from Flow inspection, so no new responder machinery is
-justified by this review.
+Recent Task descriptors are materialized independently of current membership
+(`WorkspacePalette.swift:33`). `PodiumModel.swift:123` bounds them at 20;
+`:130` resolves absent historical Tasks through the existing exact reader.
+Expected identity and repository are checked before selection (`:93`); Retry
+retains the expected ID (`:146`). Confirmed absence removes the recent entry;
+transport failure does not. The historical Task → Wave → refresh → recent Task
+journey and repository isolation are now covered at
+`WorkspaceDestinationTests.swift:61`, with failure/mismatch cases at `:91`.
 
-Retain generation, selected Task evidence, terminal pool and pending cold URL:
-they protect different lifetimes. A historical page surviving refresh is not
-permission to keep it in the current plan. A Session surface remaining alive is
-not authority to launch, transfer, complete or bind it.
+Keep descriptors and selected evidence separate: one permits returning to a
+destination, the other owns its current detail. Combining them into a historical
+Task cache would add another truth source. The old concept-review findings are
+resolved locally, not reasons to repeat their implementation.
 
-The next template cut should preserve composition during the shared resolution
-pass, as already approved. `engine/flow.rs:1053` flattens nested references through
-`items.extend`; `flow_graph.rs:67` and Swift `TaskFlow.swift:149` expose only the
-flat graph. Adjacent uses of the same sub-Flow cannot be recovered from equal
-parent names. Separate local disclosure IDs and source revision from invocation,
-node and iteration identity. Repeated composition, loop returns and Run retries
-must not become three names for the same thing.
+### 3. Preserve the template / invocation / attempt distinctions
 
-## Preserved obligations and next proof
+Composition is an authored group; a return is an edge; one pass has an iteration
+value; a Run is an attempt. Local disclosure IDs and template revisions cannot
+identify execution. The shared resolution/flattening split preserves that model
+without a second loader. Keep graph-referencing template items rather than
+duplicating node policy into the tree.
 
-No new product decision blocks these repairs or the independent template slice.
-The current-Run-only bind assumption and independent-Run-without-invocation
-presentation remain explicit in the [approved design](workspace-ux-on-data-model.md).
-The later room must retain non-bindable taskless review Sessions with Rust's
-explanation; it cannot relax nullable invocation/Task equality in Swift.
+The slice review's **No Flow recorded** repair correctly avoids calling Started
+proof of independent membership (`TaskFlowView.swift:407`). Keep it until exact
+Run evidence can support a stronger statement. The running line's current Task
+timestamp/provider selection remains later attempt work, not a new reliable
+Run projection (`TaskFlowView.swift:144`, `:156`).
 
-Carry forward the slice review's remaining work:
+The disclosure tree and diagram offer two controls for the same expansion set.
+That is not a second lifecycle. Whether the extra disclosure rows feel redundant
+is a visual question, not a source-confirmed usability defect. Do not remove them
+before proving recursive keyboard access and empty-group reachability. No broader
+template redesign or generic action registry is selected by this review.
 
-- Repeated Session activation, stale inventory, two mounted production windows,
-  and two links racing a click; then installed cold/warm Launch Services `open`.
-- Folded templates on Task and current-Project Wave pages: repeated/empty
-  compositions, Xor alternatives, both returns, shared expansion equivalence,
-  unavailable sources and matching Rust/Swift fixtures.
-- Parent contract checklist before room/bind or attempts. `SessionCommand`
-  still has no Bind (`lf/mod.rs:736`); `session.rs:27` lacks position/ordinal/current
-  attempt projection. Table existence alone supplies none of those contracts.
-- One mounted terminal per identity, shell attachment/shared-shell cases,
-  unlimited orphan tiles, exact permanent-target confirmation and all bind races.
-  Existing unmatched-roadmap grouping and hidden mounted checkout host remain
-  live consumers; deleting them now would remove capability.
-- Exact current Run in the status line and membership chip, retained invocation
-  history, configured provider/draft proof, captures at both required widths and
-  Jack's installed-app verdict. `TaskFlowView.swift:144` still uses Task update
-  time and `:156` selects provider by Task; that remains later attempt work.
-- Final deletion and documentation reconciliation; the inherited `wave_chapters`
-  architecture-map gap remains as recorded in the slice review.
+## Remaining work and decision boundary
 
-The smallest next navigation work is the disappearing-selection regression and
-bounded historical-recents return proof above, followed by their implementation
-review. The next independent feature remains shared template disclosure. These
-are evidence recommendations; the following deciding step owns Flow navigation.
+The smallest independent action is the crossing-boundary return-detail proof and
+repair above, followed by the already owed dispatched recursive keyboard proof.
+Preserve all outstanding slice-review and full-design obligations:
+
+- Installed cold/warm Launch Services Task links, configured providers/drafts,
+  live captures at 1440×900 and 1100×800, and Jack's installed-app verdict.
+- The explicit LOO-298 integration checklist: all-kind stable Session/current Run,
+  typed ancestry/repository, historical Task lookup, confirmed selected-Run bind,
+  shared Started, ordered/current attempts, retained invocations and taskless
+  legality. This source still has no Bind in `SessionCommand` (`lf/mod.rs:736`)
+  and no node/iteration/attempt projection on `Run` (`session.rs:27`).
+- Exact attempts in node detail, status and Session chip; retained historical and
+  child invocations; source-independent capture; independent-Run counterexample.
+- Every orphan tiled, including Wave-only and non-bindable taskless reviews;
+  shell-attached/shared terminals mounted once; one permanent-target confirmation
+  across three entry points; bind/replacement/poll/repository/Undo races.
+- Final deletion and documentation reconciliation. Unmatched-roadmap grouping
+  (`WorkspaceProjection.swift:75`) and the hidden mounted checkout host
+  (`SessionsView.swift:371`) remain live dependencies until their replacements
+  work. The inherited `wave_chapters` architecture-map gap remains open.
+
+No new product decision is needed for the focused repair. Current-Run-only bind
+and the approved handling of independent Runs remain explicit assumptions in the
+[design](workspace-ux-on-data-model.md). Parent integration cannot be inferred
+from this review or from table existence. The following deciding step owns Flow
+navigation; this note makes no navigation or disposition choice.
 
 ## Evidence limits
 
-Inspected the active diff from `c832aaede` through `f20f06234`, the governing
-design/review, Product memory, source callers and focused test bodies. Reused the
-slice review's recorded 14 Rust and 8 Swift passes and Xcode compile only within
-their stated scope; no product tests, builds, resource recovery or native capture
-were repeated. Neither newly identified journey is claimed to have executed.
+Reviewed the active diff from `c832aaede` through `587d8fe2f`, the latest review
+changes, governing design/feedback, Product memory, source consumers and focused
+test bodies. Inspected the retained passing logs for the five affected Flow
+checks, failed-inventory activation and Xcode compilation. Reuse the slice
+review's other CLI/Rust/Swift receipts only within their named byte and behavior
+scope; nothing was rerun or relabeled as installed acceptance.
 
-Only this review note changes. No prior executable proof is invalidated by that
-edit. Repairs will require focused new behavior evidence; existing tests cannot
-be relabeled as coverage of the new cases. No implementation, parent conversion,
-live Home mutation, external message, publication, Task disposition or Flow
-navigation was performed.
-
-Review-note local links and whitespace checks pass. No product behavior is
-established by those documentation checks.
+Only this review note changes. No product test, resource recovery, native render,
+installed activation, parent conversion, live Home mutation, external message,
+publication or Task completion occurred. The new return-label case is a source
+counterexample awaiting behavior proof. Local link and whitespace checks validate
+the note only; they establish no product behavior.

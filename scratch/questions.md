@@ -551,3 +551,35 @@ review chose: the CLI prints the exact target and writes; the app owns a confirm
 step; binding to the Task a Session already has is a no-op success. This
 replaces Cut E's same-Task refusal and satisfies the earlier "confirm once"
 decision at the surface where a mis-click is possible.
+
+## Cut H1: Task points at its invocation (2026-09-27)
+
+Executive choices, recorded in [the Cut H ledger](cutover/cut-h-one-flow-driver.md#2026-09-27--h1--task-points-at-its-invocation-strict-equality).
+Jack has not reviewed them.
+
+**`flow_invocations` gains no `wave_id` in H1.** The H1 draft adds the Task
+pointer only; a saved Flow's invocation names its Task, and its Runs carry the
+Wave. H2's `own_flow_launch` owns the launch facts (`cwd`, `message`, `model`,
+and the Wave if it is one).
+
+**A review Run naming the Task starts it.** `lf --task X flow <review-first>`
+now reserves a review Run that names X, and the store's rule since Cut E is that
+the first Run naming a Task sets `started_at`. `flow_tests::observing_and_
+preparing_a_task_are_not_execution` asserted the opposite for a saved Flow's
+review because Cut 3 gave that Run the Wave only; it now asserts the start.
+
+**The bind line prints on stderr, on the no-op too.** `Binding <session> to
+<ISSUE> (<title>). Permanent.` keeps `--json` stdout parseable.
+
+**A stale review is "no longer waiting".** `owned_target` treats a review as the
+Task's own when its Run's invocation is the Task's pointer; otherwise it must be
+a waiting saved Flow, or the lookup is refused.
+
+**Binding a taskless Flow's review stays impossible.** The bind-specific refusal
+went, and the strict Run ↔ invocation trigger now refuses it with `Run and
+Invocation nullable Tasks disagree`: neither the Run nor the invocation can take
+a Task the other does not name, in either order. Open for Jack: should bind
+assign a whole taskless invocation and every Run in it?
+
+**`Task` in Rust does not carry the pointer.** Only the store reads
+`tasks.current_invocation_id`; the struct grows when a reader needs it.

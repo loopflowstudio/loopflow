@@ -959,6 +959,52 @@ cutover, repository Chapter operation, offline import, configured acceptance,
 measurements and final deletion research remain required before publication;
 the architecture and historical branch-whitespace gaps remain unresolved.
 
+### Selected-attempt compression review (2026-09-26)
+
+Reviewed `830e9af7b` from a clean working tree, including the branch model against
+`4cd64be3d`. No further executable reduction selected. The amended approval
+still governs: taskless Invocations and Session owning Runs plus a current Run.
+The model before and after this pass is unchanged:
+
+| Fact | Owner / representation | Retention decision |
+| --- | --- | --- |
+| Conversation title, feedback, completion, current Run | `sessions`; member history through `runs.session_id` | Keep one conversation writer per operation; cursor checkpoints cannot overwrite these facts. |
+| Selected attempt | `SessionTarget::Flow.run_id` and expected `FlowPosition` | Not interchangeable: `FLOW_POSITION_SELECT` omits unpublished Run IDs. Rename needs the selected reserved identity too. Neither value is another persistent owner. |
+| Boundary identity across processes | Serialized `FlowSessionToken` | Still consumed by launch, Ready and captured Skill preparation. It cannot replace the full settlement snapshot; deleting it is not enabled by adding that snapshot. |
+| Exact settlement | Original position/version/feedback compared in the SQLite transaction | Keep the comparison through completion; a fresh token check cannot replace the caller's expectation. |
+| Native resume and stop exclusion | Session launch lock, handed to client publication | Keep through native effects, release before waiting for provider exit. It protects effects outside SQLite; current-Run validation alone cannot do that. |
+| Rename scope | Optional expected Run in the existing write transaction | `None` means a conversation rename; `Some` preserves an explicit attempt selector. One optional expectation expresses the distinction without another command or owner. |
+
+Followed lookup, Complete, Open, rename, controller settlement, reservation,
+publication and native client handoff through their direct consumers and the
+deterministic action fixture. Also checked Ask/taskless callers, migration parent
+constraints, Run readers, Rust/Swift Session fields, desktop reverse lookup,
+Chapter activation and canonical docs. The native-launcher fixture observes the
+publication lock separately from the simulated client matrix; both proofs remain
+necessary. The token and snapshot checks were retained rather than collapsed
+into a new generic action abstraction.
+
+The four-source list, Ask/name-copy path, taskless file driver, manifest Run
+queries, Started writes and existing desktop projection remain live dependencies.
+Their deletion still requires the complete owner/caller conversion and populated
+import. No compatibility wrapper, schema change or public interface was added.
+The prepared-Run paragraph in `docs/lf.md` still needs reconciliation with the
+final all-kind publication contract; this review does not broaden Task-only
+behavior into a documented all-kind claim.
+
+Fresh preflight and safe recovery both fail: active `main-view-task` **15.3 GiB /
+12 GiB**, **97.2 GiB** free; this checkout **332.9 MiB**. Recovery preserved the
+active foreign build. TESTING.md therefore blocks behavioral execution and
+materialized rehearsal. No tests ran. The implementation's formatting and
+all-target Clippy receipts retain their recorded scope on unchanged executable
+bytes; the selected-attempt matrix and every earlier owed proof remain unexecuted.
+
+Only this note changed; its working-diff whitespace check passes. No Home,
+provider, PR, Task disposition or Flow navigation changed. All eight Done When
+obligations, the Chapter inventory gap, historical whitespace findings and the
+unreproduced publication/stacking reports remain. No intermediate publication is
+selected.
+
 ## Measure
 
 The [2026-09-26 slice review](data-model-slice-review.md) records the current

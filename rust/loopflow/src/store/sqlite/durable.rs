@@ -42,6 +42,7 @@ impl SqliteStore {
                 "only the current claimed loop reviewer may record a verdict".to_string(),
             ));
         }
+        super::runs::require_attempt_in(&tx, &position.invocation.id, run_id)?;
         let progress = &mut position.cursor.leaf_mut().progress;
         if progress
             .verdict
@@ -81,6 +82,7 @@ impl SqliteStore {
                 "only the current claimed router may select a path".into(),
             ));
         }
+        super::runs::require_attempt_in(&tx, &position.invocation.id, run_id)?;
         let crate::engine::ConcreteStep::Xor(branch) = position.current_plan() else {
             return Err(StoreError::InvalidAuthority(
                 "current Flow step is not a router".into(),
@@ -361,6 +363,41 @@ impl SqliteStore {
         {
             return Err(stale_task_worker(task_id));
         }
+        if expected.worker_run_id.is_some() {
+            return Err(StoreError::InvalidAuthority(
+                "Task claim already has a Run".into(),
+            ));
+        }
+        let position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        let cwd: String = tx.query_row(
+            "SELECT worktree FROM tasks WHERE id=?1",
+            [task_id.as_str()],
+            |row| row.get(0),
+        )?;
+        super::runs::insert_run_in(
+            &tx,
+            crate::session::Run {
+                id: worker_run_id.clone(),
+                session_id: None,
+                invocation_id: Some(position.invocation.id.clone()),
+                node: None,
+                iterations: None,
+                attempt: None,
+                task_id: Some(task_id.clone()),
+                wave_id: None,
+                work_source: Some(crate::session::WorkSource::Inherited),
+                created_at: now_unix(),
+                published: true,
+                cwd: cwd.into(),
+                skill: Some(position.current().step),
+            },
+        )?;
+        super::runs::select_attempt_in(
+            &tx,
+            &position.invocation.id,
+            position.version,
+            worker_run_id,
+        )?;
         tx.commit()?;
         Ok(bound)
     }
@@ -971,6 +1008,9 @@ pub(super) fn block_task_flow_in(
     failure: &TaskFlowBlocker,
 ) -> StoreResult<FlowPosition> {
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    if let Some(run) = &expected.worker_run_id {
+        super::runs::require_attempt_in(conn, &expected.invocation_id, run)?;
+    }
     let expected_json = serde_json::to_string(expected)?;
     let mut failure = failure.clone();
     failure.run_id = expected.worker_run_id.clone();
@@ -1004,6 +1044,9 @@ pub(super) fn release_task_worker_in(
     expected: &TaskWorkerClaim,
 ) -> StoreResult<FlowPosition> {
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    if let Some(run) = &expected.worker_run_id {
+        super::runs::require_attempt_in(conn, &expected.invocation_id, run)?;
+    }
     let expected_json = serde_json::to_string(expected)?;
     let mut position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
     let leaf = position.cursor.leaf_mut();
@@ -1044,6 +1087,9 @@ pub(super) fn settle_task_worker_in(
         return Err(stale_task_worker(task_id));
     }
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    if let Some(run) = &expected.worker_run_id {
+        super::runs::require_attempt_in(conn, &expected.invocation_id, run)?;
+    }
     let expected_json = serde_json::to_string(expected)?;
     if conn.execute(
         "UPDATE flow_invocations
@@ -1081,6 +1127,9 @@ pub(super) fn finish_task_flow_in(
         ));
     }
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    if let Some(run) = &expected.worker_run_id {
+        super::runs::require_attempt_in(conn, &expected.invocation_id, run)?;
+    }
     let expected_json = serde_json::to_string(expected)?;
     if conn.execute(
         "UPDATE flow_invocations SET state='completed', ended_at=?4
@@ -1575,6 +1624,9 @@ mod durable_store_tests {
             id: RunId::new(),
             session_id: None,
             invocation_id,
+            node: None,
+            iterations: None,
+            attempt: None,
             task_id,
             wave_id,
             work_source: Some(WorkSource::Declared),
@@ -1632,7 +1684,7 @@ mod durable_store_tests {
             let read = conn
                 .query_row(
                     "SELECT id,session_id,invocation_id,task_id,wave_id,work_source,
-                created_at,published,cwd,skill FROM runs WHERE id=?1",
+                created_at,published,cwd,skill,node,iterations,attempt FROM runs WHERE id=?1",
                     [saved.id.as_str()],
                     |row| read_run(row, 0),
                 )
@@ -1643,6 +1695,23 @@ mod durable_store_tests {
         let run_count: i64 = conn
             .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
             .unwrap();
+        // Callers cannot publish a Run under a different node or loop pass.
+        for (node, iterations) in [(Some(u32::MAX), None), (None, Some(vec![vec![99]]))] {
+            let mut requested = new_run(Some(position.invocation.id.clone()), None, None);
+            requested.node = node;
+            requested.iterations = iterations;
+            {
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .unwrap();
+                assert!(insert_run_in(&tx, requested).is_err());
+            }
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                run_count
+            );
+        }
         for (invocation, task_input, wave_input) in [
             (None, Some(task_id.clone()), Some(other_wave.clone())),
             (Some(position.invocation.id.clone()), Some(other_task), None),
@@ -1728,6 +1797,9 @@ mod durable_store_tests {
                 id: RunId::new(),
                 session_id: None,
                 invocation_id: None,
+                node: None,
+                iterations: None,
+                attempt: None,
                 task_id: Some(task_id),
                 wave_id: None,
                 work_source: Some(WorkSource::Checkout),
@@ -1783,6 +1855,9 @@ mod durable_store_tests {
             id: RunId::new(),
             session_id: None,
             invocation_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
             task_id,
             wave_id,
             work_source: Some(WorkSource::Declared),
@@ -2110,6 +2185,24 @@ mod durable_store_tests {
         assert_eq!(session.title, "Parser review");
         assert_eq!(current.id, *runs.last().unwrap());
         let history = store.session_runs(&session_id).unwrap();
+        let attempts = store
+            .position_runs(
+                &position.invocation.id,
+                current.node.unwrap(),
+                current.iterations.as_ref().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            attempts
+                .iter()
+                .map(|run| run.id.clone())
+                .collect::<Vec<_>>(),
+            runs
+        );
+        assert_eq!(
+            attempts.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            [Some(1), Some(2), Some(3)]
+        );
         assert_eq!(history.len(), 3);
         for run in &runs {
             assert!(history.iter().any(|saved| &saved.id == run));
@@ -2681,6 +2774,97 @@ mod durable_store_tests {
         let stored = store.flow_position(&work).unwrap().unwrap();
         assert_eq!(stored.session_run_id, Some(run_id));
         assert_eq!(stored.ready_summary.as_deref(), Some("Ready for review"));
+    }
+
+    #[test]
+    fn headless_position_retains_attempts_and_rejects_the_replaced_run() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut initial = autonomous_position(&task_id);
+        let mut decision = initial.invocation.steps[0].clone();
+        let ConcreteStep::Skill(skill) = &mut decision else {
+            unreachable!()
+        };
+        skill.skill = Skill::named("loop-decide");
+        skill.policy.id = Some("decide".into());
+        skill.policy.repeat = Some(crate::engine::flow::RepeatPolicy {
+            from: "implement".into(),
+        });
+        initial.invocation.steps.push(decision);
+        initial.cursor.index = 1;
+        let position = store.set_flow_position(&task_id, &initial).unwrap();
+        let node = position.invocation.node_id(&position.cursor).unwrap();
+        let tuple = crate::engine::flow_graph::flow_iterations(
+            &position.invocation.steps,
+            &position.cursor,
+        );
+        let claim = |position: &FlowPosition, pid| {
+            let TaskWorkerClaimOutcome::Claimed(claim) = store
+                .claim_task_worker(
+                    &task_id,
+                    &position.invocation.id,
+                    position.version,
+                    &owner(pid),
+                    time::OffsetDateTime::now_utc(),
+                )
+                .unwrap()
+            else {
+                panic!("expected a claim")
+            };
+            claim
+        };
+        let first = RunId::new();
+        let bound = store
+            .bind_task_worker_run(&task_id, &claim(&position, 501), &first, &owner(501))
+            .unwrap();
+        let verdict = FlowVerdict {
+            decision: FlowDecision::Advance,
+            summary: "candidate before failure".into(),
+        };
+        store
+            .record_flow_verdict(&task_id, &first, &verdict)
+            .unwrap();
+        store.release_task_worker(&task_id, &bound).unwrap();
+        let failed = store.flow_position(&task_id).unwrap().unwrap();
+        assert_eq!(failed.cursor.index, position.cursor.index);
+        assert_eq!(failed.cursor.iteration, position.cursor.iteration);
+        assert!(!failed.has_pending_decision());
+        let second = RunId::new();
+        let replacement = store
+            .bind_task_worker_run(&task_id, &claim(&failed, 502), &second, &owner(502))
+            .unwrap();
+        let before = store.flow_position(&task_id).unwrap().unwrap();
+        assert!(store
+            .record_flow_verdict(&task_id, &first, &verdict)
+            .is_err());
+        assert!(store.finish_task_flow(&task, &bound, None).is_err());
+        assert_eq!(store.flow_position(&task_id).unwrap().unwrap(), before);
+        let attempts = store
+            .position_runs(&position.invocation.id, node, &tuple)
+            .unwrap();
+        assert_eq!(
+            attempts.iter().map(|run| &run.id).collect::<Vec<_>>(),
+            [&first, &second]
+        );
+        assert_eq!(
+            attempts.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            [Some(1), Some(2)]
+        );
+        assert!(attempts.iter().all(|run| run.session_id.is_none()));
+        store
+            .record_flow_verdict(&task_id, &second, &verdict)
+            .unwrap();
+        store
+            .finish_task_flow(&task, &replacement, Some("successful attempt"))
+            .unwrap();
+        assert!(store.flow_position(&task_id).unwrap().is_none());
+        assert_eq!(
+            store
+                .position_runs(&position.invocation.id, node, &tuple)
+                .unwrap(),
+            attempts
+        );
+        assert!(store.finish_task_flow(&task, &replacement, None).is_err());
     }
 
     #[test]

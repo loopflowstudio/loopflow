@@ -175,6 +175,22 @@ Run. Closed Sessions retain the pointer and their complete Run history.
 Session identity, title and feedback survive replacement. Run outcomes, usage,
 native identities and process receipts stay attached to their original Runs.
 
+A step position is `(invocation, node, iteration tuple)`. It has zero or more
+Runs, ordered as attempts, and one current attempt once execution is reserved.
+That position key is an index, never a unique Run identity. Headless steps and
+human reviews share the current-attempt selection and version fence. A Session
+is the conversational instance of this rule: its current Run agrees with the
+invocation's current attempt while that review is pending.
+
+Failure, interruption or abandonment retains the attempt without advancing the
+cursor. One successful current attempt completes the step; a superseded Run
+cannot submit a decision or settle it. Retries stay at the same node and loop
+tuple. Returning through a loop creates a different position, not a retry.
+Position readers and DTOs expose the attempt list and selected Run. Node details
+and Session membership show all attempts. Usage and execution duration sum over
+attempts; a running status line measures only its current attempt. Offline import
+preserves repeated attempts rather than deduplicating by position.
+
 ### Three validator groups
 
 | Validator | Enforced contract | Mutation boundary |

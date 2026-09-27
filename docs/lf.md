@@ -531,6 +531,13 @@ iteration tuple follows that chain. A Run records its exact invocation, node
 and tuple when the driver launches it; a Session projects that membership.
 An independent conversation about the same Task does not become a Flow step.
 
+Each `(invocation, node, iteration tuple)` can have several Run attempts. A failed
+or interrupted attempt stays in history; retry selects a new current attempt at
+the same position. Only a successful current attempt advances the step. This
+applies to headless steps and review Sessions alike. Node details list attempts;
+usage and duration include them all, while running elapsed time describes the
+current attempt.
+
 Recovery reports unreadable invocation data without replacing it with today's
 catalog. Inspect historical Wave continuations with `lf wave recover <name>`.
 Custom or uncaptured work stays unresolved until explicitly cancelled with

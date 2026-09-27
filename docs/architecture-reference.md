@@ -153,7 +153,7 @@ CLI names and issue identifiers resolve once at the boundary.
 | `chapters` | Repository identity, Chapter ID, current status, dated boundary and transition state; rotate the repository, inspect history |
 | `waves` | Stable identity and repository locator; authored goal/memory/instrument definitions stay in repository files |
 | `projects` | `wave_id`, `chapter_id`, Flow template selection, provider Project identity; read/update the Linear-backed plan |
-| `tasks` | `project_id`, provider Issue identity, Work state, worktree and delivery facts; derive Wave through Project |
+| `tasks` | `project_id`, provider Issue identity, Work state, worktree, delivery facts and validated set-once `started_at`; derive Wave through Project |
 | `flow_invocations` | Nullable Task, nullable runtime parent, captured Flow name/source and complete graph, local node cursor, loop return counts, status, claim/version/generation, pending boundary; create, claim, settle, interrupt, restart |
 | `runs` | ID, nullable `session_id` FK, causal parent Run, Home/repository/cwd, provider/model/skill, timestamps/outcome, nullable `invocation_id`, `task_id`, `wave_id`, `work_source`, node, iteration tuple and `membership_known`; create, settle, bind, query |
 | `sessions` | Stable `id`, `current_run_id` FK; `kind` = `interactive | flow_review | ask`; `title`, `title_source` = `generated | human`; `state` = `waiting | active | ready | closed`; `ready_summary`; query Runs, open, ready, complete, rename |
@@ -181,7 +181,7 @@ native identities and process receipts stay attached to their original Runs.
 | --- | --- | --- |
 | Planning ancestry | Project's Wave and Chapter name the same repository; `(wave_id, chapter_id)` is unique; a repository has one current Chapter; Task's Wave is derived from its Project | Plan writes and atomic chapter activation |
 | Invocation structure | Invocation has an optional Task; parent has the same nullable Task; parent chain is acyclic and describes runtime entry; node exists in the captured expanded graph; one current root per Task when Task-owned | Invocation creation, child entry, cursor settlement, restart |
-| Run ancestry | Invocation supplies its nullable Task; a present Task fills Wave; supplied parents must match. An invocation-owned Run has a valid node/iteration tuple even when taskless; an independent Run has neither. Membership never changes through bind | All Run creation, binding, import and ancestry-changing writes |
+| Run ancestry | Invocation supplies its nullable Task; a present Task fills Wave; supplied parents must match. An invocation-owned Run has a valid node/iteration tuple even when taskless; an independent Run has neither. Membership never changes through bind; Task assignment is write-once and existing Wave is retained; Started timestamp presence equals Task Run existence | All Run creation, binding, import and ancestry-changing writes |
 
 SQLite foreign keys, uniqueness and nullability constraints back these APIs.
 Cross-row checks run in the same write transaction as the change. Task moves
@@ -202,17 +202,35 @@ An Ask copies its caller's Task/Wave with `inherited`; it does not inherit the
 caller's invocation just because it shares a checkout. Only a Flow driver sets
 execution membership on Runs it launches.
 
-Bind sets Task and its Wave, only Wave, or neither, with `bound` provenance for
-a selected parent. Binding to a done or landed Task is allowed and does not
-reopen it. An invocation-owned Run cannot be rebound to a different Task or
-have its Task cleared: the operation reports the invariant and changes nothing.
-Binding never rewrites the invocation, node, iteration tuple, launch artifact,
-provider history, Session identity or name.
+Bind fills missing ancestry with `bound` provenance. A Run with no parent may
+receive a Wave or a Task; a Wave-only Run may receive a Task in that same Wave.
+Once set, its Task cannot change or be cleared. Bind never changes an existing
+Wave. Binding to a done or landed Task is allowed and does not reopen it. The
+operation and every UI calling it state the exact target and require one
+confirmation before the permanent assignment. There is no unbind operation.
+The transaction validates the selected current Run and ancestry together;
+concurrent binding cannot redirect the confirmed target.
 
-A Task's displayed `started` fact is an indexed existence query over its Runs.
-Chapter retirement also examines authored work, PRs and active invocation
-claims: absence of a Run alone never proves untouched backlog. Binding away the
-last Run can change the displayed fact without erasing delivery history.
+Invocation membership still constrains nullable Task equality: a taskless
+invocation's Run cannot independently acquire a Task. Binding never rewrites
+the invocation, node, iteration tuple, launch artifact, provider history,
+Session identity or name. Authorized cross-Wave Task moves retain their separate
+operation and update dependent Run Wave values atomically.
+
+A Task is started when any Run has that Task. `tasks.started_at` records when
+it first receives a Run: the shared Run writer sets it only if null, in the
+same transaction as launch or bind. A first bind uses the bind time, not the
+Run's creation time. Later launches and binds leave the timestamp unchanged,
+even for older Runs. It never moves earlier, later, or back to null.
+
+The write validator checks `started_at IS NOT NULL` exactly when a Run with
+that Task exists; it does not compare timestamps with `MIN(created_at)`. Offline
+import sets it for every Task with imported Runs and leaves other Tasks null.
+The sidebar and roadmap read this column through one Started reader. This
+replaces the Started event writer once all readers use the validated column.
+Write-once binding keeps the evidence monotonic; usage and history never move
+between Tasks. Chapter retirement also examines authored work, PRs and active
+invocation claims: absence of a Run alone never proves untouched backlog.
 
 The shared readers select Session rows joined to their current Runs, and Runs by their typed
 parents. `runs --task`, `session list --task`, usage, activity and the desktop

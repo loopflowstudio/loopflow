@@ -470,7 +470,9 @@ preserving the Task's worktree directory.
 Runs carry nullable Task/Wave fields; Sessions read those fields through their
 Runs. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
-a done or landed Task without reopening Work. See [Sessions](lf.md#sessions)
+a done or landed Task without reopening Work. Assignment is permanent and
+requires confirmation of the exact target; an existing Task cannot change.
+See [Sessions](lf.md#sessions)
 for rename, bind, and the distinction between ancestry and Flow membership.
 
 Each Task PR keeps its own benefit-focused title. After the opening summary,

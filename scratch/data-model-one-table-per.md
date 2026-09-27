@@ -496,49 +496,103 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-Move Run ancestry construction into one transactional writer, used immediately
-by Task review reservation and replacement. The writer accepts nullable
-Invocation, Task and Wave, fills omitted ancestors, and rejects explicit
-mismatches, including a Task supplied for a taskless Invocation. It requires a
-SQLite transaction; the existing callers hold immediate write transactions.
-Database constraints continue to protect direct imports and parent-changing
-writes. Task-owned and taskless execution drivers are not unified by this cut.
+Make first Run assignment a database invariant before extending the common
+writer to the remaining launch paths. This is an internal storage cut within
+the full owner conversion, not completion of the requested shared invocation
+driver or an independently publishable change.
 
-Add `Run.work_source` with the four specified values. New review attempts record
-Inherited. A forward draft leaves existing rows null: their provenance remains
-unknown until the offline importer establishes it from retained evidence. The
-draft changes no old capture, title, feedback, ancestry or publication value.
-Current Session and history queries now use one Run decoder, replacing the two
-copies that parsed ancestry independently.
+A forward `record_task_first_run` draft adds `tasks.started_at`. The Run table's
+INSERT and null-to-Task UPDATE triggers form one assignment boundary: set a
+null timestamp to the operation's time, in the same transaction, and never
+change a present timestamp. Both existing review reservation and replacement
+use this boundary through the shared Run constructor. An unpublished reserved
+Run counts immediately. No provider success or liveness is inferred from it.
+The database rejects Task reassignment/clearing, a Wave-only Run moving or
+clearing its Wave, direct timestamp changes, a timestamp without a Run, and
+deletion of the last Run supporting a started Task. Existing nullable
+Invocation/Task and Task/Wave constraints still apply.
 
-Replacement inherits the current Run's ancestry and records a fresh creation
-time. Its launch cwd comes from the Task's current worktree; previous attempts
-remain unchanged. Session title, feedback and the current-pointer/version fence
-stay in their existing transaction. The Run constructor is used code, not a
-second writer, and does not introduce another launch path or public DTO.
+The populated SQL conversion uses conversion time for Tasks with existing Run
+rows, leaving other Tasks null. That is an inferred historical timestamp, not
+an observed launch or bind time; the later offline Home import report must
+retain this provenance. Captures, Session names/feedback, Run IDs, creation
+times and attribution remain unchanged. Old Started events without mapped
+Runs remain evidence, not fabricated Runs.
 
-Focused proof covers independent, Wave-only, Task-only and Invocation-only
-inputs; taskless Invocations with and without Wave; mismatch/missing-parent
-rollback including a reserved Session; and a competing Project Wave update.
-The existing repeated-replacement proof now checks ancestry/provenance and
-unchanged prior attempts. The populated migration fixture also checks that
-adding provenance retains unknown values and exact capture/feedback bytes.
-These fixtures now pass, including the populated migration after canonical
-materialization. The [current review](data-model-slice-review.md) records actual
-results and the corrected corrupt-neighbor fixture. They do not establish the
-complete target contract or the newly selected bind/Started semantics.
+Current Started and retirement readers now recognize the column, including
+reservations. Historical event/worker evidence and `record_task_start` remain
+until all general launch writers and the filesystem importer are converted.
+Removing those now would hide real work that has no SQL Run yet. Thus the
+column's presence invariant is implemented for table-owned Runs, while the
+final column-only product reader remains dependent on that conversion.
 
-The next cut must use this constructor for general launches while completing
-the common invocation owner/driver, captured runtime nesting and all Session
-kinds. Node/tuple validation, remaining Run lifecycle/process facts, Ask and
-interactive conversion, common readers/bind, DTO/Swift identity/caches,
-repository Chapter operation, populated offline import, real-Home maintenance,
-configured acceptance, comparable measurements and deletion research remain.
-Current-Run-only bind remains an assumption. All eight Done When obligations
-and the supplied publication/stacking reports still govern; no intermediate
-publication is selected.
+Focused proof exercises constructor reservation, first bind of an old Run at
+bind time, same-Wave binding, a done Task, subsequent older/newer insertions
+and binds, rejected conflicting assignments, rollback, concurrent competing
+targets and timestamp presence against Run existence. The existing review
+lifecycle proof changes its obsolete reservation-is-false assertion and
+proves retirement cannot abandon a reserved Task. The populated Session
+migration proof checks the new column, historical inference and nullable
+Invocation mismatch, including after canonical materialization.
+
+This cut does not expose a bind command or claim that SQL UPDATE tests prove
+confirmation, Session selection races, configured providers or desktop
+retention. Those belong to the all-caller conversion. Common Task/taskless
+invocation storage and driver, runtime nesting, general Run lifecycle/process
+facts, Ask/interactive Sessions, bind confirmation and all consumers, Chapter
+scope, offline Home import, configured acceptance and deletion research remain
+required. All eight Done When obligations still govern publication.
 
 ## Slice ledger
+
+- 2026-09-26 first-assignment implementation: preserved the supplied concept
+  review unchanged through `lf commit`, then added the forward
+  `record_task_first_run` draft. Run insertion/binding set `tasks.started_at`
+  once; constraints reject attribution movement and loss of the last supporting
+  Run. Started/retirement readers count reservations through that column while
+  retaining historical evidence until general launch/import conversion.
+- Source review: the timestamp writer lives at the Run table's assignment
+  boundary so direct import and constructor writes share the same transaction.
+  No extra bind API, runtime fallback or unused launch mode was added. Retained
+  parent validators and historical event writers because their current callers
+  still exist. Removing events now would hide execution absent from SQL.
+- Focused source execution: **6 distinct library tests pass** across filters
+  `run_assignment` (2),
+  `task_started_tracks_reserved_review_and_retained_history`,
+  `session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints`,
+  `run_constructor_infers_ancestors_and_rejects_conflicts_atomically`, and
+  `review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors`.
+  The first filter compiled/executed in 36.8 s; remaining commands took 1.0–1.7 s.
+  No product assertion failed. All use isolated LF authority, four low-priority
+  workers, serial tests and a 900-second process-group timeout; no timeout fired.
+- Canonical rehearsal: verified 2,038 source files/symlinks in a disposable
+  source copy, materialized five drafts as `0.12.23.001_release`, and passed
+  migration validation with 52 shipped migrations unchanged. The first copy
+  attempt treated the `vendor/ghostty` gitlink directory as a file and failed;
+  the repaired copier omits gitlinks, preserves symlinks and verifies copied
+  file hashes. No product test ran on the failed copy. Only the copy's Cargo
+  and Python versions changed. Original Git metadata was used solely for the
+  checker's read-only historical queries, never in test processes.
+- On canonical bytes, the populated Session import, assignment matrix/race and
+  reservation/retirement tests pass (4 library tests repeated). Both actual CLI
+  status/roadmap `merge_request` integration tests pass (33.0 s command).
+  Fresh isolated Home `runs --json`, `usage --json` and `doctor --json` exit 0;
+  doctor reports matching canonical schema with the expected unknown-revision
+  warning for a source copy without Git metadata. This is fixture/local CLI
+  proof, not installed promotion or configured provider/app acceptance.
+- Static checks: formatting, all-target Clippy (18.6 s), migration validation
+  and working-diff whitespace pass. Architecture retains the known **32/33**
+  owner gap for `wave_chapters`; seven other inventories pass. Evidence logs,
+  source hashes and disposable-copy location are retained under
+  `.lf/tmp/loo298-first-assignment/`. No broad gate was run. The stale Measure
+  paragraph is corrected to acknowledge the earlier executed proofs.
+- Full-design boundary: SQL binds prove storage invariants only. Exact-target
+  confirmation/current-Run races, taskless CLI recovery, common invocation
+  driver, all-kind Sessions, filesystem import, real-Home maintenance and
+  desktop acceptance remain unimplemented. All eight Done When obligations,
+  comparable measurements, historical whitespace and the three supplied lf
+  incident reports remain open. No intermediate publication or disposition.
+
 
 - 2026-09-26 executed review: **58 distinct library tests pass**, including
   every previously owed filter, the 29-test Task-controller suite and 16-test
@@ -1128,10 +1182,12 @@ publication/stacking reports remain unresolved. No intermediate publication.
 ## Measure
 
 The [2026-09-26 slice review](data-model-slice-review.md) records the current
-evidence matrix and publication gaps. Behavioral proof remains blocked by the
-resource envelope. It traces malformed autonomous captures through Session
-listing and exact review lookup, and records the branch-range whitespace
-failure separately from earlier working-tree checks.
+evidence matrix and publication gaps. The previous resource blocker cleared;
+the review records 58 distinct executed library proofs and canonical/CLI
+checks, including their initial failures and repairs. Those receipts apply to
+the named prior bytes. New storage changes receive their own focused proof
+below; the whole-design acceptance gaps and branch-range whitespace findings
+remain open.
 
 Before implementation, capture 20 comparable `session list --json` and
 `runs --task <id> --json` samples on a copied representative Home, recording

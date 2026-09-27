@@ -150,20 +150,19 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
 }
 
 fn location_in(conn: &Connection, invocation: &str) -> StoreResult<(u32, Vec<Vec<u32>>)> {
-    let (capture, cursor, index, iteration): (String, Option<String>, i64, u32) = conn.query_row(
-        "SELECT invocation_json,review_json,step_index,iteration FROM flow_invocations WHERE id=?1",
+    let (capture, cursor, index, iteration, updated_at): (String, Option<String>, i64, i64, i64) = conn.query_row(
+        "SELECT invocation_json,review_json,step_index,iteration,updated_at FROM flow_invocations WHERE id=?1",
         [invocation],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     )?;
     let capture: crate::engine::invocation::QueuedInvocation = serde_json::from_str(&capture)?;
-    let cursor: crate::engine::ExecutionCursor = match cursor {
-        Some(cursor) => serde_json::from_str(&cursor)?,
-        None => crate::engine::ExecutionCursor {
-            index: usize::try_from(index).map_err(invalid)?,
-            iteration,
-            ..Default::default()
-        },
-    };
+    let cursor = super::durable::decode_flow_cursor(
+        cursor.as_deref(),
+        index,
+        iteration,
+        &mut None,
+        time::OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?,
+    )?;
     Ok((
         capture.node_id(&cursor).map_err(invalid)?,
         crate::engine::flow_graph::flow_iterations(&capture.steps, &cursor),

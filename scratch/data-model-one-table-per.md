@@ -1277,6 +1277,55 @@ When obligations remain, including common execution ownership, repository Chapte
 scope, import, all consumers and the final deletion research. No intermediate
 publication or Flow navigation is selected.
 
+### Attempt-history compression review (2026-09-26)
+
+Reviewed `762e546673` from a clean tree, following the full branch model against
+`4cd64be3d`. No meaningful executable reduction selected. The amended Session
+ownership and taskless Invocation approval govern; the original Task title does
+not. Model before and after this pass:
+
+| Fact | Owner | Why it remains |
+| --- | --- | --- |
+| Position and ordered attempts | Captured graph/cursor; `runs` location and ordinal, nonunique position index | The tuple identifies a position, not a Run. Historical null locations preserve missing evidence; current cursor values cannot reconstruct them. |
+| Selected execution attempt | `flow_invocations.current_run_id`; shared selection and settlement checks | Human and headless writers now share this fence. Selection alone proves neither successful completion nor process authority. |
+| Conversation and its current Run | `sessions`; history via `runs.session_id` | Conversation identity, title and feedback outlive an attempt and the invocation's pending boundary. Removing its pointer would lose closed conversation identity. |
+| Worker authority and successful decision | Exact claim/generation/version plus original Run terminal receipt | A selected Run does not identify the process owner or prove success. Recovery must inspect the original candidate before replacement changes its binding. |
+| First Task assignment | `tasks.started_at`, maintained at Run assignment | Set-once assignment time is not derivable from attempt timestamps. Existing historical Started evidence still covers launches absent from SQL. |
+
+Traced Run construction/decoding, preorder node numbering, Session reservation,
+attempt selection, verdict/router writes and Task settlement/recovery. Followed
+their consumers through ordinary Flow preparation, the four-source Session list,
+Run/usage filtering, Rust/Swift Session DTOs and fixtures, `WorkspaceProjection`,
+Started readers and Chapter retirement. The new position query is not yet wired
+into public attempt DTOs or usage aggregation; removing manifest readers now
+would hide Runs and usage rather than simplify their ownership.
+
+Retained the historical cursor decoder and root columns: populated legacy
+progress still consumes them. The new location reader is narrower and cannot
+replace that decoder's progress/blocker preservation; routing it through the
+Task-specific `FlowPosition` would also obstruct nullable Task ownership.
+Retained both SQL INSERT/UPDATE membership constraints, which protect different
+writes, and Session/worker fences, which protect different lifetimes. No wrapper,
+fallback, public interface, migration or test was added or removed for cosmetic
+gain. Ask/name-copy and taskless file persistence remain live conversion scope.
+
+Evidence review: all **436 Rust/Cargo inputs** match
+`.lf/tmp/loo298-attempts/final-source-hashes.json`. The earlier test snapshot
+differs only in `store/migrations.rs`; the ledger and Clippy failure record its
+subsequent fixture type-annotation cleanup. Retain the recorded 24 distinct
+source tests and five canonical preservation/retry passes with their original
+limits, rather than rerunning unchanged behavior. No product test ran in this
+note-only pass. The concurrent fresh-Home usage failure remains unresolved;
+sequential passes are not a repair.
+
+Only this note changed; working-diff whitespace passes. The common Task/taskless
+driver, runtime loop children, all-kind owners/readers, attempt DTOs/aggregation,
+Chapter operation, offline import and configured acceptance remain required.
+Specialist docs still describe file-backed behavior and need reconciliation at
+cutover. All eight Done When obligations, measurements, architecture gap,
+historical whitespace and supplied delivery reports remain open. No intermediate
+publication or Flow navigation is selected.
+
 ## Measure
 
 The [2026-09-26 slice review](data-model-slice-review.md) records the current

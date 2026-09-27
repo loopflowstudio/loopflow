@@ -1,6 +1,7 @@
 # Chapters — the In Progress Projects
 
-2026-09-27 · LOO-298 · Design for Cut H7, rewritten after review with Jack.
+2026-09-27 · LOO-298 · Design for Cut H7, rewritten after review with Jack and
+accepted by him "for now" the same day.
 Supersedes the same-day draft that added a `chapters` table, a `chapter.json`
 plan file and a config line. Jack's direction: the current Chapter code was
 expedient prototyping, not a blessed model; deleting more is better; one
@@ -39,13 +40,16 @@ local projects row            + status  (synced; no other new column)
 ## Usage
 
 ```sh
-lf wave new-chapter 2026-10 --dry-run   # every Wave: successor, Task dispositions
-lf wave new-chapter 2026-10             # create, transfer, flip statuses
+lf repo new-chapter 2026-10 --dry-run   # every Wave: successor, Task dispositions
+lf repo new-chapter 2026-10             # create, transfer, flip statuses
 lf pm show --wave infrastructure        # the Wave's In Progress Project and Tasks
 lf task run INF-123                     # the Project's Flow
 ```
 
-`new-chapter` takes no plan file. For each Wave in the repository: use the
+`lf repo` is a new command family: rotation addresses every Wave in the
+repository, and `lf wave` addresses one. It starts with this one command;
+`lf pm init --all` and `lf roadmap` are its natural later neighbors, not moved
+here. `new-chapter` takes no plan file. For each Wave in the repository: use the
 Wave's Planned Project named `2026-10` if one exists, else create an empty one
 (title from the Wave's existing naming, `flow:` copied from the current Project);
 classify the current Project's Tasks with the existing disposition code, move
@@ -93,7 +97,7 @@ are all still there.
 
 ## Done when
 
-`lf wave new-chapter --dry-run` lists every Wave with its successor and Task
+`lf repo new-chapter --dry-run` lists every Wave with its successor and Task
 dispositions; the real run leaves each Wave with one In Progress Project named
 `2026-10` and its predecessor Completed with only finished or canceled Tasks;
 started Tasks kept identity, worktree, PR and invocation; a second Home (private

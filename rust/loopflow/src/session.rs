@@ -30,8 +30,19 @@ pub struct Run {
     pub invocation_id: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
+    pub work_source: Option<WorkSource>,
     pub created_at: i64,
     pub published: bool,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
+}
+
+/// How this attempt received its work attribution; absent for unrecorded history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkSource {
+    Declared,
+    Checkout,
+    Inherited,
+    Bound,
 }

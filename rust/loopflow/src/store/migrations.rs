@@ -5477,6 +5477,29 @@ mod tests {
                 .unwrap();
             assert_eq!(membership, (session, task.to_string(), wave.to_string()));
         }
+        conn.execute_batch(&current_draft_sql("record_run_work_source"))
+            .unwrap();
+        for (_, invocation, run, capture, cursor) in &imported {
+            let saved: (String, String, Option<String>, String) = conn
+                .query_row(
+                    "SELECT f.invocation_json,f.review_json,r.work_source,s.ready_summary
+                 FROM runs r JOIN flow_invocations f ON f.id=r.invocation_id
+                 JOIN sessions s ON s.id=r.session_id WHERE r.id=?1 AND f.id=?2",
+                    rusqlite::params![run.as_str(), invocation],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                saved,
+                (capture.clone(), cursor.clone(), None, "saved answer".into())
+            );
+            assert!(conn
+                .execute(
+                    "UPDATE runs SET work_source='guessed' WHERE id=?1",
+                    [run.as_str()]
+                )
+                .is_err());
+        }
         // The current Run must belong to this conversation, including at COMMIT.
         conn.execute_batch("BEGIN IMMEDIATE").unwrap();
         conn.execute(

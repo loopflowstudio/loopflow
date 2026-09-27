@@ -1,17 +1,17 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::{FlowPosition, RunId, TaskId};
-use crate::id::WaveId;
-use crate::session::{Run, Session, TitleSource};
+use crate::durable::{FlowPosition, RunId};
+use crate::session::{Run, Session, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
 const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_source,
     s.ready_summary, s.completed_at, s.created_at,
-    r.invocation_id, r.task_id, r.wave_id, r.created_at, r.published, r.cwd, r.skill
+    r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
+    r.created_at, r.published, r.cwd, r.skill
     FROM sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Session, Run)>> {
@@ -22,13 +22,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
     let ready_summary = row.get(4)?;
     let completed_at = row.get(5)?;
     let created_at = row.get(6)?;
-    let invocation_id = row.get(7)?;
-    let task_id: Option<String> = row.get(8)?;
-    let wave_id: Option<String> = row.get(9)?;
-    let run_created_at = row.get(10)?;
-    let published = row.get(11)?;
-    let cwd: String = row.get(12)?;
-    let skill = row.get(13)?;
+    let run = super::runs::read_run(row, 7)?;
     Ok((|| {
         let run_id = RunId::parse(&run_id).map_err(invalid)?;
         Ok((
@@ -45,23 +39,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
                 completed_at,
                 created_at,
             },
-            Run {
-                id: run_id,
-                session_id: Some(id),
-                invocation_id,
-                task_id: task_id
-                    .map(|id| TaskId::parse(&id))
-                    .transpose()
-                    .map_err(invalid)?,
-                wave_id: wave_id
-                    .map(|id| WaveId::parse(&id))
-                    .transpose()
-                    .map_err(invalid)?,
-                created_at: run_created_at,
-                published,
-                cwd: cwd.into(),
-                skill,
-            },
+            run?,
         ))
     })())
 }
@@ -98,7 +76,22 @@ impl SqliteStore {
         }
         if run.published {
             let replacement = RunId::new();
-            insert_run_in(&tx, &replacement, &id, expected, false)?;
+            let cwd: String = tx.query_row(
+                "SELECT worktree FROM tasks WHERE id=?1",
+                [expected.task_id.as_str()],
+                |row| row.get(0),
+            )?;
+            super::runs::insert_run_in(
+                &tx,
+                Run {
+                    id: replacement.clone(),
+                    cwd: cwd.into(),
+                    published: false,
+                    created_at: crate::store::rows::now_unix(),
+                    work_source: Some(WorkSource::Inherited),
+                    ..run
+                },
+            )?;
             tx.execute(
                 "UPDATE sessions SET current_run_id=?2 WHERE id=?1",
                 params![id, replacement.as_str()],
@@ -173,42 +166,12 @@ impl SqliteStore {
     pub fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT id, invocation_id, task_id, wave_id, created_at, published, cwd, skill
+            "SELECT id, session_id, invocation_id, task_id, wave_id, work_source,
+             created_at, published, cwd, skill
              FROM runs WHERE session_id=?1 ORDER BY created_at, id",
         )?;
-        let rows = query.query_map([id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, bool>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, Option<String>>(7)?,
-            ))
-        })?;
-        rows.map(|row| {
-            let (run_id, invocation_id, task_id, wave_id, created_at, published, cwd, skill) = row?;
-            Ok(Run {
-                id: RunId::parse(&run_id).map_err(invalid)?,
-                session_id: Some(id.to_string()),
-                invocation_id,
-                task_id: task_id
-                    .map(|id| TaskId::parse(&id))
-                    .transpose()
-                    .map_err(invalid)?,
-                wave_id: wave_id
-                    .map(|id| WaveId::parse(&id))
-                    .transpose()
-                    .map_err(invalid)?,
-                created_at,
-                published,
-                cwd: cwd.into(),
-                skill,
-            })
-        })
-        .collect()
+        let rows = query.query_map([id], |row| super::runs::read_run(row, 0))?;
+        rows.map(|row| row?).collect()
     }
 
     pub fn rename_session(
@@ -287,7 +250,7 @@ pub(super) fn review_id(position: &FlowPosition) -> StoreResult<String> {
 }
 
 /// Called only inside the already fenced invocation mutation transaction.
-pub(super) fn save_review_in(conn: &Connection, position: &FlowPosition) -> StoreResult<()> {
+pub(super) fn save_review_in(conn: &Transaction<'_>, position: &FlowPosition) -> StoreResult<()> {
     if !position.is_human() {
         conn.execute(
             "UPDATE flow_invocations SET pending_session_id=NULL WHERE id=?1",
@@ -320,7 +283,7 @@ pub(super) fn save_review_in(conn: &Connection, position: &FlowPosition) -> Stor
                 position.updated_at.unix_timestamp()
             ],
         )?;
-        insert_run_in(
+        insert_review_run_in(
             conn,
             &run_id,
             &id,
@@ -335,26 +298,32 @@ pub(super) fn save_review_in(conn: &Connection, position: &FlowPosition) -> Stor
     Ok(())
 }
 
-fn insert_run_in(
-    conn: &Connection,
+fn insert_review_run_in(
+    conn: &Transaction<'_>,
     id: &RunId,
     session_id: &str,
     position: &FlowPosition,
     published: bool,
 ) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO runs(id,session_id,invocation_id,task_id,wave_id,created_at,published,cwd,skill)
-        SELECT ?1,?2,?3,t.id,p.wave_id,?5,?6,t.worktree,?7 FROM tasks t JOIN projects p ON p.id=t.project_id
-        WHERE t.id=?4",
-        params![
-            id.as_str(),
-            session_id,
-            position.invocation.id,
-            position.task_id.as_str(),
-            position.updated_at.unix_timestamp(),
+    let cwd: String = conn.query_row(
+        "SELECT worktree FROM tasks WHERE id=?1",
+        [position.task_id.as_str()],
+        |row| row.get(0),
+    )?;
+    super::runs::insert_run_in(
+        conn,
+        Run {
+            id: id.clone(),
+            session_id: Some(session_id.to_owned()),
+            invocation_id: Some(position.invocation.id.clone()),
+            task_id: Some(position.task_id.clone()),
+            wave_id: None,
+            work_source: Some(WorkSource::Inherited),
+            created_at: position.updated_at.unix_timestamp(),
             published,
-            position.current().step
-        ],
+            cwd: cwd.into(),
+            skill: Some(position.current().step),
+        },
     )?;
     Ok(())
 }

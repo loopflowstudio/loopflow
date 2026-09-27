@@ -477,6 +477,16 @@ justified for this scratch-only design.
 
 ## This slice
 
+**Next boundary amended 2026-09-27:** Claude's
+[delegated unblock decision](workspace-demo-unblock.md), given under Jack's
+reported authorization and overturnable by Jack, directs Advance to demo of
+the command palette, Task links and folded templates now. Their local proofs
+do not establish installed/live acceptance. Invocation/attempt display, orphan
+room and universal bind remain the next iteration after LOO-298 delivers the
+named owner/consumer contracts. The assessment below is complete; do not repeat
+it on unchanged source. This changes demo sequencing, not full-design scope,
+parent integration requirements or Task completion.
+
 Assess the actual available LOO-298 source and fixtures against the parent
 contract checklist before integrating dependent UI. The completed folded-return
 and recursive keyboard repair remains covered by its existing proof; do not

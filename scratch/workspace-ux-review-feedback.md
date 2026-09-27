@@ -1,5 +1,20 @@
 # Workspace UX design review
 
+## Delegated demo boundary — 2026-09-27
+
+Claude, acting under Jack's reported explicit delegation to answer Asks while
+Jack sleeps, directs Advance to demo for the implemented command palette, Task
+links and folded templates. This is a delegated decision Jack can overturn,
+not Jack's own statement or acceptance. The
+[unblock note](workspace-demo-unblock.md) records attribution, proof limits,
+each deferred slice's exact LOO-298 dependency and the next action. It supersedes
+waiting idle for the parent as the next step; the complete design stays open.
+Invocation/attempt display, room and universal bind follow in the next iteration
+after the parent consumer contracts arrive. No installed/live proof is established
+for these three slices by this decision; the demo must distinguish local receipts
+from newly observed configured results. Loop-decide is directed to choose Advance
+to demo; this review Session does not execute that edge.
+
 2026-09-26 · LOO-303 · Approved interactive design review
 
 ## Design and evidence

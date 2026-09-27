@@ -70,6 +70,7 @@ public enum TaskFlowExecution: String, Decodable, Sendable, Hashable {
     case idle
     case starting
     case running
+    case stalled
     case human
     case blocked
     case unknown

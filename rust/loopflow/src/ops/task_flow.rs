@@ -87,11 +87,9 @@ pub struct TaskFlowControl {
 /// Facts beyond the Flow record that decide control legality.
 #[derive(Debug)]
 pub(crate) struct TaskFlowGate<'a> {
-    pub identifier: &'a str,
     /// `None` when no durable Task Work exists yet.
     pub status: Option<&'a WorkStatus>,
     pub plan_completed: bool,
-    pub execution: Option<&'a TaskExecutionSnapshot>,
     pub worktree_blocker: Option<&'a str>,
     pub launch_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
@@ -125,19 +123,12 @@ pub(crate) fn task_flow_controls(
             TaskExecutionState::Running | TaskExecutionState::Starting => {
                 Some("The Task worker is already advancing this Flow".to_string())
             }
-            TaskExecutionState::Human => Some(format!(
-                "{}; continue it through its Session",
-                flow.reason
-            )),
-            TaskExecutionState::Unknown => Some(flow.reason.clone()),
-            TaskExecutionState::Blocked if flow.restart_required => Some(format!(
-                "{}. Only Stop & restart can clear this blocker",
-                flow.reason
-            )),
-            TaskExecutionState::Blocked => Some(format!(
-                "{}. After correcting it, resume with a stated reason: `lf task resume {} --reason \"<what changed>\"`",
-                flow.reason, gate.identifier
-            )),
+            TaskExecutionState::Human => {
+                Some(format!("{}; continue it through its Session", flow.reason))
+            }
+            TaskExecutionState::Unknown
+            | TaskExecutionState::Blocked
+            | TaskExecutionState::Stalled => Some(flow.reason.clone()),
             TaskExecutionState::Idle => gate.resume_refusal.map(str::to_string),
         },
         TaskFlowRecord::None | TaskFlowRecord::Finished { .. } => {
@@ -147,13 +138,13 @@ pub(crate) fn task_flow_controls(
 
     let restart = if gate.status.is_none() {
         Some("Task has no Work yet; start a Flow instead".to_string())
-    } else if gate
-        .execution
-        .is_some_and(|execution| execution.state == TaskExecutionState::Unknown)
-    {
-        gate.execution.map(|execution| execution.reason.clone())
     } else {
-        gate.worktree_blocker.map(str::to_string)
+        match record {
+            TaskFlowRecord::Pinned(flow) if flow.execution == TaskExecutionState::Unknown => {
+                Some(flow.reason.clone())
+            }
+            _ => gate.worktree_blocker.map(str::to_string),
+        }
     };
 
     vec![
@@ -191,10 +182,8 @@ mod tests {
         task_flow_controls(
             record,
             &TaskFlowGate {
-                identifier: "LOO-1",
                 status,
                 plan_completed: false,
-                execution: None,
                 worktree_blocker: None,
                 launch_refusal: None,
                 resume_refusal: None,
@@ -230,6 +219,7 @@ mod tests {
         }
         let done = WorkStatus::Done;
         assert!(available(&pinned(TaskExecutionState::Idle, false), Some(&done)).is_empty());
+        assert!(available(&pinned(TaskExecutionState::Unknown, false), Some(&ready)).is_empty());
     }
 
     #[test]
@@ -258,6 +248,16 @@ mod tests {
         let mut missing = value[1].clone();
         missing["record"].as_object_mut().unwrap().remove("returns");
         assert!(serde_json::from_value::<TaskFlowSnapshot>(missing).is_err());
+
+        let stalled: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_flow_stalled.json"
+        ))
+        .unwrap();
+        let snapshot: TaskFlowSnapshot = serde_json::from_value(stalled.clone()).unwrap();
+        assert!(
+            matches!(&snapshot.record, TaskFlowRecord::Pinned(flow) if flow.execution == TaskExecutionState::Stalled)
+        );
+        assert_eq!(serde_json::to_value(snapshot).unwrap(), stalled);
 
         let catalog: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/flow_catalog.json"

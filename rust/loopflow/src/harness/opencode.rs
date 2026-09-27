@@ -120,7 +120,7 @@ impl OpenCodeHarness {
         // proxies, npm-shim grandchildren) that a direct-child kill orphans.
         #[cfg(unix)]
         command.process_group(0);
-        super::configure_vendor_tokio_env(&mut command)?;
+        super::configure_vendor_std_env(command.as_std_mut())?;
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
@@ -391,6 +391,10 @@ impl OpenCodeHarness {
 
 #[async_trait]
 impl Harness for OpenCodeHarness {
+    fn process_id(&self) -> Option<u32> {
+        self.child.as_ref().and_then(Child::id)
+    }
+
     fn set_raw_provider_sender(
         &mut self,
         raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,

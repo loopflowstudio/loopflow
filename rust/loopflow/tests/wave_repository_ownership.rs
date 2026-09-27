@@ -115,6 +115,7 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
         project_id: project.id.clone(),
         worktree: repo.join("task-worktree"),
         workspace_slug: "repository-owned-waves".to_string(),
+        agent: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

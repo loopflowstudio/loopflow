@@ -109,6 +109,18 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE tasks SET agent=?2, updated_at=?3 WHERE id=?1",
+            params![task_id.as_str(), agent, now_unix()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     pub fn settle_task_worker(
         &self,
         task: &Task,
@@ -174,7 +186,7 @@ impl SqliteStore {
         let current = matching_claim_in(&transaction, task_id, expected)?;
         let position =
             super::durable::block_task_flow_in(&transaction, task_id, &current, failure)?;
-        let task = transaction.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
+        let task = task_on(&transaction, task_id)?.ok_or(StoreError::NotFound)?;
         insert_task_event_in(
             &transaction,
             &task,
@@ -301,6 +313,7 @@ impl SqliteStore {
         &self,
         task_id: &TaskId,
         expected: &FlowPosition,
+        feedback: Option<&str>,
     ) -> StoreResult<FlowPosition> {
         if expected.task_id != *task_id || expected.claim.is_some() || expected.failure.is_none() {
             return Err(StoreError::InvalidAuthority(
@@ -318,6 +331,9 @@ impl SqliteStore {
         }
         let mut next = expected.clone();
         next.failure = None;
+        if let Some(feedback) = feedback {
+            next.cursor.leaf_mut().progress.direction = Some(feedback.to_string());
+        }
         next.cursor.leaf_mut().progress.verdict = None;
         next.cursor.leaf_mut().route = None;
         next.updated_at = OffsetDateTime::now_utc();
@@ -345,10 +361,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
-        let task_work = transaction
-            .query_row(TASK_SELECT, params![task.id.as_str()], map_task_row)
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
+        let task_work = task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?;
         transaction.execute(
             "DELETE FROM task_flow_positions WHERE task_id=?1",
             [task.id.as_str()],
@@ -452,9 +465,7 @@ impl SqliteStore {
 
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)
-            .optional()
-            .map_err(StoreError::from)
+        task_on(&conn, task_id)
     }
 
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
@@ -821,7 +832,7 @@ impl SqliteStore {
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = transaction.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
+        let task = task_on(&transaction, task_id)?.ok_or(StoreError::NotFound)?;
         let event = insert_task_event_in(&transaction, &task, kind)?;
         transaction.commit()?;
         Ok(event)
@@ -1245,7 +1256,8 @@ fn insert_initial_task(
         ));
     }
 
-    let parameters = task_params(task);
+    let mut parameters = task_params(task);
+    parameters.push(Box::new(task.agent.clone()));
     conn.execute(
         TASK_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -1304,22 +1316,16 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     id, project_id, external_issue_id, issue_identifier, issue_title,
     issue_description, pm_snapshot_synced_at, pm_writeback_json,
     worktree, workspace_slug,
-    abandon_requested_at, abandon_reason, created_at, updated_at
+    abandon_requested_at, abandon_reason, created_at, updated_at, agent
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
 )";
 const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
-    t.project_id, t.abandon_requested_at, t.abandon_reason
+    t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent
     FROM tasks t JOIN projects p ON p.id=t.project_id";
-pub(super) const TASK_SELECT: &str = "SELECT
-    t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
-    p.wave_id, t.worktree, t.workspace_slug,
-    t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
-    t.project_id, t.abandon_requested_at, t.abandon_reason
-    FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1";
 const TASK_UPDATE: &str = "UPDATE tasks SET
     external_issue_id=?3, issue_identifier=?4,
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
@@ -1567,6 +1573,16 @@ fn task_pr_github_observation_json(pr: &TaskPr) -> StoreResult<Option<String>> {
         .map_err(StoreError::from)
 }
 
+pub(super) fn task_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<Task>> {
+    conn.query_row(
+        &format!("{TASK_COLUMNS} WHERE t.id=?1"),
+        [task_id.as_str()],
+        map_task_row,
+    )
+    .optional()
+    .map_err(StoreError::from)
+}
+
 fn task_pr_on(conn: &Connection, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
     conn.query_row(TASK_PR_SELECT, params![pr_id.as_str()], map_task_pr_row)
         .optional()
@@ -1739,7 +1755,7 @@ fn invalid_column(
     rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(error))
 }
 
-pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let abandon_intent = match (
         row.get::<_, Option<i64>>(13)?,
         row.get::<_, Option<String>>(14)?,
@@ -1765,6 +1781,7 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         project_id: ProjectId::from_raw(row.get::<_, String>(12)?),
         worktree: PathBuf::from(row.get::<_, String>(6)?),
         workspace_slug: row.get(7)?,
+        agent: row.get(15)?,
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(8)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(9)?),

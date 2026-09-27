@@ -382,6 +382,7 @@ pub(crate) mod tests {
             project_id: crate::work::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,

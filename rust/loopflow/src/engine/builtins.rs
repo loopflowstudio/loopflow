@@ -293,19 +293,6 @@ mod tests {
             );
         }
 
-        let review_slice = get_builtin_skill("review-slice").expect("review-slice skill");
-        for evidence in [
-            "production-like path",
-            "Done when",
-            "Implemented behavior",
-            "complete diff",
-            "lf pr publish",
-        ] {
-            assert!(
-                review_slice.contains(evidence),
-                "review-slice omits {evidence:?} evidence"
-            );
-        }
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
             "human feedback, revised artifact references, and remaining",

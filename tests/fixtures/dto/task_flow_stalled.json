@@ -1,0 +1,48 @@
+{
+  "recommended": "feature",
+  "record": {
+    "kind": "pinned",
+    "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+    "graph": {
+      "name": "feature",
+      "steps": [
+        {
+          "key": "1",
+          "id": "implement",
+          "label": "implement",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "parents": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        }
+      ]
+    },
+    "current": "1",
+    "completed": [],
+    "returns": [],
+    "execution": "stalled",
+    "reason": "Run run_9fc06d3999af4bcabf1398cc859d49a9 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.",
+    "restart_required": false,
+    "iterations": [
+      []
+    ]
+  },
+  "controls": [
+    {
+      "kind": "start",
+      "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
+    },
+    {
+      "kind": "resume",
+      "unavailable": "Run run_9fc06d3999af4bcabf1398cc859d49a9 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it."
+    },
+    {
+      "kind": "restart",
+      "unavailable": null
+    }
+  ]
+}

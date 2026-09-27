@@ -5,16 +5,14 @@ use std::sync::{Mutex, OnceLock};
 
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::store::{PmSnapshotRow, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
+use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
-/// Ambient execution identity a live agent process exports. Tests must never inherit the
-/// real Run that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 3] = ["LF_RUN_ID", "LF_WAVE_ID", "LF_ACCOUNT_LEASE"];
+mod ambient;
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -22,30 +20,25 @@ fn env_lock() -> &'static Mutex<()> {
 }
 
 struct HomeOverride {
+    _ambient: ambient::EnvGuard,
     previous_lf_home: Option<OsString>,
     previous_db_path: Option<OsString>,
-    previous_control_home: Option<OsString>,
-    previous_control_db_path: Option<OsString>,
     _temp: TempDir,
 }
 
 impl HomeOverride {
     fn new_temp() -> Self {
+        let ambient = ambient::EnvGuard::new();
         let temp = TempDir::new().expect("temp home dir");
         let previous_lf_home = env::var_os("LF_HOME");
         let previous_db_path = env::var_os("LF_DB_PATH");
-        let previous_control_home = env::var_os(CONTROL_HOME_ENV);
-        let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
         env::remove_var("LF_HOME");
         env::remove_var("LF_DB_PATH");
-        env::remove_var(CONTROL_HOME_ENV);
-        env::remove_var(CONTROL_DB_PATH_ENV);
         env::set_var("LF_HOME", temp.path());
         Self {
+            _ambient: ambient,
             previous_lf_home,
             previous_db_path,
-            previous_control_home,
-            previous_control_db_path,
             _temp: temp,
         }
     }
@@ -60,14 +53,6 @@ impl Drop for HomeOverride {
         match &self.previous_db_path {
             Some(prev) => env::set_var("LF_DB_PATH", prev),
             None => env::remove_var("LF_DB_PATH"),
-        }
-        match &self.previous_control_home {
-            Some(prev) => env::set_var(CONTROL_HOME_ENV, prev),
-            None => env::remove_var(CONTROL_HOME_ENV),
-        }
-        match &self.previous_control_db_path {
-            Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
-            None => env::remove_var(CONTROL_DB_PATH_ENV),
         }
     }
 }
@@ -103,16 +88,14 @@ while read -r line; do :; done
 }
 
 pub struct EnvGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
     previous_path: Option<String>,
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
     previous_db_path: Option<OsString>,
-    previous_control_home: Option<OsString>,
-    previous_control_db_path: Option<OsString>,
-    previous_ambient_context: Vec<(&'static str, Option<OsString>)>,
+    _ambient: ambient::EnvGuard,
     _bin: TempDir,
     _lf_home: TempDir,
+    _lock: std::sync::MutexGuard<'static, ()>,
 }
 
 impl EnvGuard {
@@ -153,21 +136,10 @@ impl EnvGuard {
         }
         let previous_lf_home = env::var_os("LF_HOME");
         let previous_db_path = env::var_os("LF_DB_PATH");
-        let previous_control_home = env::var_os(CONTROL_HOME_ENV);
-        let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
-        let previous_ambient_context = AMBIENT_AGENT_ENV
-            .iter()
-            .map(|name| {
-                let prev = env::var_os(name);
-                env::remove_var(name);
-                (*name, prev)
-            })
-            .collect();
+        let ambient = ambient::EnvGuard::new();
         let lf_home = TempDir::new().expect("temp lf home dir");
         env::remove_var("LF_HOME");
         env::remove_var("LF_DB_PATH");
-        env::remove_var(CONTROL_HOME_ENV);
-        env::remove_var(CONTROL_DB_PATH_ENV);
         if home.is_some() {
             // Keep HOME-based config discovery intact while isolating its store.
             env::set_var("LF_DB_PATH", lf_home.path().join("loopflow.db"));
@@ -180,9 +152,7 @@ impl EnvGuard {
             previous_home,
             previous_lf_home,
             previous_db_path,
-            previous_control_home,
-            previous_control_db_path,
-            previous_ambient_context,
+            _ambient: ambient,
             _bin: bin,
             _lf_home: lf_home,
         }
@@ -215,20 +185,6 @@ impl Drop for EnvGuard {
         match &self.previous_db_path {
             Some(prev) => env::set_var("LF_DB_PATH", prev),
             None => env::remove_var("LF_DB_PATH"),
-        }
-        match &self.previous_control_home {
-            Some(prev) => env::set_var(CONTROL_HOME_ENV, prev),
-            None => env::remove_var(CONTROL_HOME_ENV),
-        }
-        match &self.previous_control_db_path {
-            Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
-            None => env::remove_var(CONTROL_DB_PATH_ENV),
-        }
-        for (name, prev) in &self.previous_ambient_context {
-            match prev {
-                Some(prev) => env::set_var(name, prev),
-                None => env::remove_var(name),
-            }
         }
     }
 }
@@ -307,6 +263,7 @@ fn register_task_fixture(
         project_id: project.id.clone(),
         worktree: worktree.to_path_buf(),
         workspace_slug: "task-pr-proof".to_string(),
+        agent: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

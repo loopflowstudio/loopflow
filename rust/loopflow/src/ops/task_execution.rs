@@ -6,7 +6,7 @@ use crate::durable::{FlowPosition, RunId, TaskId};
 use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
 use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
-use crate::store::{SharedStore, StoreResult};
+use crate::store::{SharedStore, StoreError, StoreResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -14,6 +14,7 @@ pub enum TaskExecutionState {
     Idle,
     Starting,
     Running,
+    Stalled,
     Human,
     Blocked,
     Unknown,
@@ -45,6 +46,45 @@ pub(crate) async fn task_execution_and_flow(
         .and_then(|position| position.claim.as_ref())
         .map(|claim| task_worker_owner_evidence(&claim.owner));
     let mut snapshot = project_execution(position.as_ref(), evidence);
+    if snapshot.state == TaskExecutionState::Running {
+        if let Some(reason) = position
+            .as_ref()
+            .map(crate::ops::human_session::task_waiting_unblock)
+            .transpose()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .flatten()
+        {
+            snapshot.state = TaskExecutionState::Blocked;
+            snapshot.reason = reason;
+        }
+    }
+    if snapshot.state == TaskExecutionState::Running {
+        if let Some(run) = snapshot.run_id.as_ref() {
+            match crate::run_record::activity::read(&crate::store::lf_home_dir(), run).await {
+                crate::run_record::activity::Activity::Stalled => {
+                    snapshot.state = TaskExecutionState::Stalled;
+                    snapshot.reason = format!("Run {run} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
+                }
+                crate::run_record::activity::Activity::Unknown => {
+                    snapshot.state = TaskExecutionState::Unknown;
+                    snapshot.reason = format!("Run {run} is alive; activity samples are unavailable or stale. Inspect its Run before recovery.");
+                }
+                crate::run_record::activity::Activity::Running => {}
+            }
+        }
+    }
+    if let Some(failure) = position
+        .as_ref()
+        .and_then(|position| position.failure.as_ref())
+    {
+        let recovery = if failure.restart_required {
+            "Only Stop & restart can clear this blocker".to_string()
+        } else {
+            let task = store.get_task(task_id).await?.ok_or(StoreError::NotFound)?;
+            format!("Complete the unblock Session, then run `lf task resume {}`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
+        };
+        snapshot.reason.push_str(&format!(". {recovery}"));
+    }
     let record = match position.as_ref() {
         Some(position) => TaskFlowRecord::Pinned(PinnedTaskFlow::new(position, &snapshot)),
         None => match store
@@ -82,9 +122,21 @@ fn project_execution(
         .claim
         .as_ref()
         .and_then(|claim| claim.worker_run_id.clone())
+        .or_else(|| {
+            position
+                .failure
+                .as_ref()
+                .and_then(|failure| failure.run_id.clone())
+        })
         .or_else(|| position.session_run_id.clone());
     let (state, reason) = if let Some(failure) = &position.failure {
-        (TaskExecutionState::Blocked, failure.reason.clone())
+        (
+            TaskExecutionState::Blocked,
+            match &failure.run_id {
+                Some(run) => format!("{} (Run {run})", failure.reason),
+                None => failure.reason.clone(),
+            },
+        )
     } else if position.is_human() {
         (
             TaskExecutionState::Human,
@@ -208,6 +260,16 @@ mod tests {
         .unwrap();
         let snapshot: TaskExecutionSnapshot = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(snapshot.state, TaskExecutionState::Unknown);
+        assert_eq!(serde_json::to_value(snapshot).unwrap(), value);
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_execution_stalled.json"
+        ))
+        .unwrap();
+        let snapshot: TaskExecutionSnapshot = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(snapshot.state, TaskExecutionState::Stalled);
+        assert!(snapshot
+            .reason
+            .contains(snapshot.run_id.as_ref().unwrap().as_str()));
         assert_eq!(serde_json::to_value(snapshot).unwrap(), value);
     }
 }

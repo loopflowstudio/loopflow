@@ -1177,6 +1177,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
             &task.task.id,
             FlowPosition {
                 failure: Some(TaskFlowBlocker {
+                    run_id: None,
                     reason: "Release target is unavailable".into(),
                     restart_required: true,
                     observed_at: time::OffsetDateTime::now_utc(),
@@ -1191,4 +1192,18 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     assert!(unavailable(&flow, "resume")
         .unwrap()
         .contains("Only Stop & restart"));
+    let status = run_lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", "INF-123"],
+        None,
+    );
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status = String::from_utf8(status.stdout).unwrap();
+    assert_eq!(status.lines().next(), Some("INF-123  blocked"));
+    assert!(status.contains("Release target is unavailable"));
 }

@@ -47,3 +47,5 @@ and the app: a Project carries exactly one Wave Initiative and the repository
 Team; its Task carries the stable Project and Team ids used for ownership.
 The shared `LOO-*` identifier and canonical Project name remain presentation;
 the provider's Wave-qualified title is normalized before this wire boundary.
+
+`task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Run and interrupt → resume reason across CLI and desktop.

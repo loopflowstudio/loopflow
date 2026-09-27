@@ -2,6 +2,68 @@
 
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
+## Task convergence (LOO-319, branch evidence 2026-09-27)
+
+[Make the default Task Flow converge, and let a Task choose its agent · LOO-319](https://linear.app/loopflow/issue/LOO-319)
+owns this work; [Task convergence · PR #1301](https://github.com/loopflowstudio/loopflow/pull/1301)
+carries the implementation.
+The retained [slice evidence](https://github.com/loopflowstudio/loopflow/blob/3abb64bf1a25d4109a8353e22f4a55f664a6f4de/scratch/converge-flow-and-task-agent.md)
+and [demo decisions](https://github.com/loopflowstudio/loopflow/blob/3abb64bf1a25d4109a8353e22f4a55f664a6f4de/scratch/task-convergence-demo.md)
+preserve failed attempts, measured replacements and proof scope before scratch
+clearing. These identify local history; remote availability was not checked.
+
+Jack selected implement → compress → review-slice → loop-decide. Compress edits
+anything related to the diff and leaves only a commit explanation and a few slice
+lines. Review-slice owns concept checks and the two-pass no-replacement blocker;
+loop-decide judges caller-supplied criteria generically. Concept-review stays a
+self-contained interactive skill. Ship calls gate directly; task-gate is removed.
+Captured invocations retain their definitions. Tests must locate decision policy
+in the captured Flow rather than copy a catalog step index: shortening pursue
+exposed exactly that stale assumption in CI. The repaired test retains both
+missing-verdict rejection and interrupted-verdict removal; its two focused
+Flow tests passed locally. This is not a new hosted CI result.
+Catalog assertions must track both the authored and expanded Flow after removing
+steps. Ordinary Flow review fixtures also need the shared ambient guard under
+the environment lock: setting `LF_HOME` alone leaves Run reads bound to an
+inherited `LF_CONTROL_HOME` during migration-materialized tests.
+
+Task agent precedence is persisted Task choice → captured skill → checkout
+configuration; the default agent remains unchanged. Failed decisions use the
+existing blocker and keyed unblock Session. A live decision waiting on its Ask
+retains its claim and reassesses in the same Run after completion; a failed Run
+cannot regain authority and requires resume at the same decision. Match Task,
+invocation, boundary and parent Run before projecting an Ask as Blocked. Feedback
+does not supply a verdict. PM refresh and stale settlement cannot overwrite the
+dedicated agent choice; the next launch reloads it, including human review.
+
+Provider tool commands need both the intended executable and Home. The live
+fixture disproved a PATH-only repair: development readers ignore control pins.
+The shared harness environment writer forwards ordinary Home/DB overrides for
+development and pins executable discovery only for uninstalled development,
+preserving installed current-Home selection. Real Codex reached the fixture via
+bare `lf`, opened one policy Ask and reassessed in the same Run after synthetic
+feedback; this does not prove configured Claude or Jack's acceptance.
+
+Run event/CPU observations project Stalled without granting signal authority.
+Retain the first body PID/start identity across missing and replacement samples;
+adopting a replacement later defeats PID-reuse protection. Unknown samples stay
+unknown, active tool CPU prevents a stall, and live Ask takes precedence. Local
+stall proofs use simulated elapsed history, including a real sleeping process;
+they do not establish the configured five-minute observation. Free disk is the
+resource gate; aggregate build bytes are measured only, and 24 GiB triggers
+local cleanup. The sibling/low-disk/self-cleanup proofs use temporary filesystem
+fixtures; another active worktree's oversized build only warns. TESTING.md owns
+the operational resource and fixture-isolation rules.
+
+Jack authorized landing through the Task Flow. The demo's direct landing was
+withdrawn; subsequent delivery belongs to the Flow. Configured Claude launch and
+resume, a real five-minute stall, and rendered desktop agreement remain unverified.
+The retained real Codex policy proof predates the generic loop-decide revision;
+it does not establish fresh policy execution. These gaps are not passing results
+or proof of Task completion. Do not run this branch's binary against the installed
+Home: Jack reported that its drafts broke installed `lf` (LOO-321). Use disposable
+fixture stores for source verification; credential repair remains out of scope.
+
 ## Data model and performance decisions (2026-09-26)
 
 Jack's rule, verbatim: "The main user objects should line up with the main

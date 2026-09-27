@@ -1338,6 +1338,7 @@ mod tests {
             project_id: project.id.clone(),
             worktree: PathBuf::from("/repo.inf-123"),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -2310,6 +2311,7 @@ mod tests {
             .await
             .unwrap();
         let failure = TaskFlowBlocker {
+            run_id: None,
             reason: "late old failure".to_string(),
             restart_required: false,
             observed_at: OffsetDateTime::now_utc(),

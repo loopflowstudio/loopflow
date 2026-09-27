@@ -192,7 +192,7 @@ pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result
                         && !position.is_human(), "this Run does not own the Task decision");
                     anyhow::ensure!(matches!(position.current_plan(), ConcreteStep::Skill(s) if s.policy.repeat.is_some()),
                         "this step does not own a loop decision");
-                    format!("task:{}:{}:{}", task.id, position.invocation.id, position.cursor.boundary_key())
+                    crate::ops::human_session::task_unblock_key(&position)
                 };
                 let summary = crate::ops::human_session::ask_once(&store, &key, &reason, Some("unblock")).await?;
                 println!("Session complete: {summary}\nReassess the current evidence before choosing Advance or Iterate. This returned feedback, not a navigation decision.");
@@ -686,6 +686,7 @@ mod tests {
     #[test]
     fn ordinary_flow_parks_at_the_same_durable_review_after_recovery() {
         let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
         let home = tempdir().unwrap();
         let _home = super::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let _binary =

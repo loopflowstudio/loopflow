@@ -196,11 +196,7 @@ pub async fn resolve_work_selection(
             wave_name: wave.name().to_string(),
             cwd,
             context,
-            agent: Some(
-                crate::engine::config::load_config_or_default(Some(&task.worktree))
-                    .agent()
-                    .to_string(),
-            ),
+            agent: task.agent,
         });
     }
 
@@ -299,7 +295,16 @@ pub(crate) struct TaskWorkerLaunch {
     pub environment: Vec<(String, String)>,
 }
 
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static TEST_TASK_LAUNCH: tokio::sync::mpsc::UnboundedSender<TaskWorkerLaunch>;
+}
+
 pub(crate) async fn launch_task_worker(request: TaskWorkerLaunch) -> OpsResult<()> {
+    #[cfg(test)]
+    if let Ok(sender) = TEST_TASK_LAUNCH.try_with(Clone::clone) {
+        return sender.send(request).map_err(run_error);
+    }
     let environment = request.environment.clone();
     start_work_session(&request, environment).await
 }
@@ -414,6 +419,7 @@ mod tests {
             project_id: project.id.clone(),
             worktree,
             workspace_slug: "runtime-research".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,

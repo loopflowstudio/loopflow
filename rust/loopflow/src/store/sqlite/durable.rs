@@ -601,11 +601,7 @@ impl SqliteStore {
         if text.is_empty() {
             return Err(StoreError::InvalidData("Steer text cannot be empty".into()));
         }
-        let task = tx.query_row(
-            super::children::TASK_SELECT,
-            params![task_id.as_str()],
-            super::children::map_task_row,
-        )?;
+        let task = super::children::task_on(tx, task_id)?.ok_or(StoreError::NotFound)?;
         let event = super::children::insert_task_event_in(
             tx,
             &task,
@@ -630,11 +626,7 @@ impl SqliteStore {
         require_ready_work(&tx, work)?;
         let id = match work {
             WorkRef::Task(task_id) => {
-                let task = tx.query_row(
-                    super::children::TASK_SELECT,
-                    params![task_id.as_str()],
-                    super::children::map_task_row,
-                )?;
+                let task = super::children::task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
                 super::children::insert_task_event_in(&tx, &task, &TaskEventKind::Interrupt)?.id
             }
             WorkRef::Project(project_id) => {
@@ -1132,7 +1124,9 @@ pub(super) fn block_task_flow_in(
 ) -> StoreResult<FlowPosition> {
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
     let expected_json = serde_json::to_string(expected)?;
-    let failure_json = serde_json::to_string(failure)?;
+    let mut failure = failure.clone();
+    failure.run_id = expected.worker_run_id.clone();
+    let failure_json = serde_json::to_string(&failure)?;
     let mut position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
     let leaf = position.cursor.leaf_mut();
     leaf.progress.verdict = None;
@@ -1306,6 +1300,7 @@ fn decode_flow_progress(
             Some(_) => {}
             None => {
                 *failure = Some(TaskFlowBlocker {
+                    run_id: None,
                     reason: reason.into(),
                     restart_required: false,
                     observed_at,
@@ -1630,6 +1625,7 @@ mod durable_store_tests {
             project_id,
             worktree: PathBuf::from("/repo.probe"),
             workspace_slug: "probe".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1688,6 +1684,15 @@ mod durable_store_tests {
         }
     }
 
+    fn find_decision_index(steps: &[ConcreteStep]) -> usize {
+        steps
+            .iter()
+            .position(
+                |step| matches!(step, ConcreteStep::Skill(skill) if skill.policy.repeat.is_some()),
+            )
+            .expect("fixture Flow has a repeating decision")
+    }
+
     #[test]
     fn legacy_flow_decisions_preserve_pinned_progress() {
         let (_dir, store, task_id) = store_with_task();
@@ -1697,7 +1702,7 @@ mod durable_store_tests {
             "pursue",
         )
         .unwrap();
-        position.cursor.index = 4;
+        position.cursor.index = find_decision_index(&position.invocation.steps);
         position.cursor.iteration = 5;
         let position = store.set_flow_position(&task_id, &position).unwrap();
         for (saved, expected) in [
@@ -1757,7 +1762,7 @@ mod durable_store_tests {
                 "pursue",
             )
             .unwrap();
-            position.cursor.index = 4;
+            position.cursor.index = find_decision_index(&position.invocation.steps);
             let position = store.set_flow_position(&task_id, &position).unwrap();
             let verdict =
                 serde_json::json!({"decision": "blocked", "summary": "need a policy choice"});
@@ -1816,7 +1821,7 @@ mod durable_store_tests {
             "feature",
         )
         .unwrap();
-        position.cursor.index = 6;
+        position.cursor.index = find_decision_index(&position.invocation.steps);
         let position = store.set_flow_position(&task_id, &position).unwrap();
         let first_owner = owner(301);
         let claim = match store
@@ -1887,6 +1892,7 @@ mod durable_store_tests {
             )
             .unwrap()
             .steps;
+            let decision_index = find_decision_index(&body);
             let branch = ConcreteStep::Xor(ConcreteXor {
                 router: Skill::named("nested-router"),
                 paths: ["chosen", "other"]
@@ -1920,7 +1926,7 @@ mod durable_store_tests {
             position.cursor.iteration = 7;
             position.cursor.progress.repeats.insert("root".into(), 3);
             let mut leaf = ExecutionCursor {
-                index: if routing { 0 } else { 4 },
+                index: if routing { 0 } else { decision_index },
                 iteration: 2,
                 ..Default::default()
             };
@@ -2001,6 +2007,7 @@ mod durable_store_tests {
                         &task_id,
                         &replacement,
                         &TaskFlowBlocker {
+                            run_id: None,
                             reason: "router failed after publishing".into(),
                             restart_required: false,
                             observed_at: time::OffsetDateTime::now_utc(),
@@ -2228,13 +2235,20 @@ mod durable_store_tests {
             .bind_task_worker_run(&work, &replacement, &RunId::new(), &owner(204))
             .unwrap();
         let failure = TaskFlowBlocker {
+            run_id: None,
             reason: "provider exited".to_string(),
             restart_required: false,
             observed_at: time::OffsetDateTime::now_utc(),
         };
         let failed = store.block_task_flow(&work, &bound, &failure).unwrap();
         assert!(failed.claim.is_none());
-        assert_eq!(failed.failure.as_ref(), Some(&failure));
+        assert_eq!(
+            failed.failure.as_ref(),
+            Some(&TaskFlowBlocker {
+                run_id: bound.worker_run_id.clone(),
+                ..failure.clone()
+            })
+        );
         assert!(store.block_task_flow(&work, &first, &failure).is_err());
         let events = store.task_events_after(&work, 0).unwrap();
         assert_eq!(events.len(), 2);

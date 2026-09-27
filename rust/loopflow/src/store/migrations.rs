@@ -2621,6 +2621,34 @@ mod tests {
     }
 
     #[test]
+    fn task_agent_migration_preserves_existing_tasks() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_agent");
+        conn.execute_batch("INSERT INTO waves (id, name, repo, created_at)
+            VALUES ('wave_agent', 'agent', '/repo', 1);
+            INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
+            VALUES ('project_agent', 'wave_agent', 'linear-project', 1, 1);
+            INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, worktree, workspace_slug, created_at, updated_at)
+            VALUES ('task_agent', 'project_agent', 'linear-issue', 'TEST-1', '/repo.task', 'task-agent', 1, 1);").unwrap();
+        conn.execute_batch(&current_draft_sql("task_agent"))
+            .unwrap();
+        let retained = conn
+            .query_row(
+                "SELECT issue_identifier, worktree, agent FROM tasks WHERE id='task_agent'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(retained, ("TEST-1".into(), "/repo.task".into(), None));
+    }
+
+    #[test]
     fn landing_repair_counter_removal_preserves_supervision() {
         let conn = open();
         let name = "remove_landing_repair_counter";

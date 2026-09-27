@@ -59,6 +59,14 @@ def _resource_report() -> dict[str, object]:
     }
 
 
+def test_healthy_resource_preflight_keeps_sibling_warning_visible() -> None:
+    report = _resource_report()
+    report["after"]["warnings"] = ["landing (/repo.landing) is over its cleanup threshold"]
+    message = gate._resource_summary(report, "preflight")
+    assert "Resource preflight: PASS" in message
+    assert "warning: landing (/repo.landing)" in message
+
+
 @pytest.fixture(autouse=True)
 def _bounded_resource_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "_run_resource_check", lambda _recover: (_resource_report(), None))

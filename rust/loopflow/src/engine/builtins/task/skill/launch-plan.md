@@ -83,7 +83,7 @@ Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
 For an approved design, `--flow pursue` enters implement → compress → review-slice
-→ concept-review → loop-decide. Iterate returns to implementation; Advance
+→ loop-decide. Iterate returns to implementation; Advance
 reaches a human demo. Its completion returns feedback to another loop-decide
 whose explicit edge also targets implement. The `feature` Flow
 retains the initial design review. Preserve intent, constraints, and done-when

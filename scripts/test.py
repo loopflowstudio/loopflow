@@ -783,10 +783,11 @@ def _resource_summary(report: dict[str, object], label: str) -> str:
     nice = after.get("process_nice")
     if not isinstance(free, int) or not isinstance(floor, int):
         return f"Resource {label}: UNKNOWN"
-    return (
+    summary = (
         f"Resource {label}: PASS · {free / 2**30:.1f} GiB free / "
         f"{floor / 2**30:.1f} GiB floor · {jobs} workers · nice +{nice}"
     )
+    return "\n".join([summary, *(f"warning: {warning}" for warning in after.get("warnings", []))])
 
 
 # --- Durable evidence ----------------------------------------------------
@@ -1435,8 +1436,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
     failure_kind = None
     if over_budget:
         failure = (
-            f"VERIFICATION BUDGET: phase '{cmd.label}' ran "
-            f"{elapsed:.1f}s / {budget}s wall limit"
+            f"VERIFICATION BUDGET: phase '{cmd.label}' ran {elapsed:.1f}s / {budget}s wall limit"
         )
         failure_kind = "verification_budget"
     return _finish("passed", failure, failure_kind, over_budget)
@@ -1482,9 +1482,7 @@ def _run_suite(
             if leak is not None:
                 print(f"\n[{plan.suite.name}] {leak}", flush=True)
                 result.ok = False
-                result.failure = (
-                    leak if result.failure is None else f"{result.failure}\n{leak}"
-                )
+                result.failure = leak if result.failure is None else f"{result.failure}\n{leak}"
     finally:
         if lock is not None:
             lock.close()

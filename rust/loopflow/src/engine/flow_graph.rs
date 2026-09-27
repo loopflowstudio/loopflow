@@ -366,7 +366,6 @@ mod tests {
                 "implement",
                 "compress",
                 "review-slice",
-                "concept-review",
                 "loop-decide",
                 "demo",
                 "loop-decide",
@@ -389,9 +388,9 @@ mod tests {
                 (Some("decide_delivery".to_string()), &implement)
             ]
         );
-        assert!(graph.steps[1].human && graph.steps[7].human);
-        assert_eq!(graph.steps[12].kind, FlowNodeKind::Op);
-        assert_eq!(graph.steps[6].parents, ["feature", "pursue"]);
+        assert!(graph.steps[1].human && graph.steps[6].human);
+        assert_eq!(graph.steps[11].kind, FlowNodeKind::Op);
+        assert_eq!(graph.steps[5].parents, ["feature", "pursue"]);
     }
 
     #[test]

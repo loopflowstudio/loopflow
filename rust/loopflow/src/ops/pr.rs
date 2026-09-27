@@ -402,7 +402,7 @@ fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Op
         }
     }
     if removed {
-        progress.status("Removing task-gate artifacts before publication");
+        progress.status("Removing gate artifacts before publication");
     }
     Ok(cached)
 }

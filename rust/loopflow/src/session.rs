@@ -12,6 +12,8 @@ pub struct Session {
     pub kind: SessionKind,
     pub title: String,
     pub title_source: TitleSource,
+    /// What an Ask's caller asked; absent for other kinds.
+    pub request: Option<String>,
     pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub created_at: i64,
@@ -50,6 +52,8 @@ pub struct Run {
     /// Absent on review Runs recorded before providers were stored.
     pub provider: Option<String>,
     pub model: Option<String>,
+    /// The Run that asked for this one. Causality, never membership.
+    pub caller_run_id: Option<RunId>,
 }
 
 /// How this attempt received its work attribution; absent for unrecorded history.

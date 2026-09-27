@@ -127,7 +127,8 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | `.lf/journal/waves/<name>/journal.jsonl` | conversation and resident events | append-only with crash-tail repair |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | provider-launch manifest, streams, terminal | publish once, append, settle once |
 | current Home `flows/<invocation-id>/position.json` | ordinary Flow's captured definition, cursor, active boundary, failure and completion | position lock plus atomic replacement; driver lock serializes continuation |
-| current Home `human-sessions/<ask-id>.json` | Ask question, selected skill, caller/Session Run, readiness and completion summary | Session launch lock serializes startup and human updates; atomic replacement |
+| current Home `human-sessions/.<hash>.launch.lock` | Session launch exclusion only; an Ask's question, caller, readiness and answer are its `sessions` row and its Runs | kernel-held lock, no contents |
+| `$LF_HOME/runs/<prefix>/<run-id>/unrecorded-session.json` | a Session and first Run the store could not take at launch | written once; the next `lf` operation that touches the Run stores the rows and removes it |
 | provider account homes | provider-native login and resume state | provider adapter owns format |
 | absolute Git directory `loopflow/` | writer and rebase receipts | kernel-held lock plus readable JSON |
 | machine-install root | versioned artifacts and switch receipts | stage immutably, select atomically |

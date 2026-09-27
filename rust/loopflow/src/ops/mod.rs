@@ -30,6 +30,7 @@ pub mod task_flow;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
+pub(crate) mod unrecorded_session;
 pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};

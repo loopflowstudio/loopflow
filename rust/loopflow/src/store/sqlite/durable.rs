@@ -392,6 +392,7 @@ impl SqliteStore {
                 skill: Some(position.current().step),
                 provider: None,
                 model: None,
+                caller_run_id: None,
             },
         )?;
         super::runs::select_attempt_in(
@@ -1652,6 +1653,7 @@ mod durable_store_tests {
             skill: Some("implement".into()),
             provider: None,
             model: None,
+            caller_run_id: None,
         };
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
@@ -1829,6 +1831,7 @@ mod durable_store_tests {
                 skill: None,
                 provider: None,
                 model: None,
+                caller_run_id: None,
             },
         )
         .unwrap();
@@ -1889,6 +1892,7 @@ mod durable_store_tests {
             skill: None,
             provider: None,
             model: None,
+            caller_run_id: None,
         };
         let before = crate::store::rows::now_unix();
         let tx = conn

@@ -2,7 +2,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::{FlowPosition, RunId};
+use crate::durable::{FlowPosition, RunId, TaskId};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::ExecutionCursor;
 use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
@@ -269,6 +269,17 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(run)
+    }
+
+    /// Assign a Task to the Session's Runs. Closed Sessions bind too.
+    pub fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(Session, Run)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        super::runs::bind_session_runs_in(&tx, id, task)?;
+        let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(bound)
     }
 
     /// Every open Session. A review is open while its invocation waits on it.

@@ -56,6 +56,20 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             suggest,
             json,
         } => rename(id, name, *suggest, *json).await,
+        SessionCommand::Bind { id, task, json } => {
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::bind(&store, id, task).await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&session)?);
+            } else {
+                println!(
+                    "Session {} belongs to {}.",
+                    session.id,
+                    session.work_path.as_deref().unwrap_or(task)
+                );
+            }
+            Ok(())
+        }
         SessionCommand::Ready { summary } => {
             let text = required_text(summary, "ready summary")?;
             let store = open_shared_store().await?;

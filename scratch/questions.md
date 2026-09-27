@@ -375,3 +375,45 @@ Sessions now report `terminal_ids`. Readiness no longer takes the launch lock;
 the store fences it on the current Run. Saved Flow reviews that exist only in
 `position.json` on old Homes stop listing until the import cut, and their
 `session-name.json` titles are not read.
+
+## Cut E: started, bind, Task Runs (2026-09-27)
+
+Executive choices, recorded in [the cut report](cutover/cut-e-bind.md).
+Jack has not reviewed any of them.
+
+**Bind asks for no confirmation.** The design said the command states its exact
+target and confirms once. `lf session bind` writes at once and reports the
+Session's Work. A prompt would stop an agent or a script that calls it.
+
+**Bind refuses a Session in which any Run has a Task, the same Task included.**
+Jack's rule was that binding a Run that already has a Task is refused and names
+it. A Session whose Runs disagree cannot arise from a launch or a replacement,
+so the refusal covers the whole Session instead of filling around the bound Run.
+
+**Bind refuses a Flow review.** A review's Run names its invocation, and a Run
+and its invocation must agree on the Task. The refusal says so instead of
+surfacing the trigger's message.
+
+**`lf runs --task` lists rows only.** It has no seven-day window and no cap.
+Runs with no row no longer list under `--task`: those begun by the Wave runner,
+PR landing, `lf ops` and child agents. They listed before when their recorded
+subjects matched. `--wave`, `--project`, `lf usage` and `lf activity` still
+scan Run records, so the two readers can disagree until those launches store
+rows.
+
+**A direct launch stores a row only when it names Work.** Every launch the old
+Started writer covered now stores a Run, which is what let that writer go. A
+headless launch with no Task and no Wave still has no row.
+
+**A saved Flow's headless step launched with `--task` names the Task and no
+invocation.** Cut 3 gave that Flow's review Runs the invocation and the Wave,
+with no Task, because the invocation has none. The headless step keeps starting
+the Task as it did before, at the cost of a row that omits its Flow membership.
+The two kinds of Run in one Flow now carry different parents.
+
+**A launch is no longer refused for an unready Task or a Chapter that is not
+current.** Those checks lived in the deleted Started writer. Nothing replaced
+them.
+
+**`lf session list --task` was not added.** The design's demo names it; this
+cut's brief did not.

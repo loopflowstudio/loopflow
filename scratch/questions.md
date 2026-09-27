@@ -225,3 +225,24 @@ be explicit in the import report rather than presented as observed launch time.
 Sidebar/roadmap read one column reader; remove the event writer after complete
 reader conversion. This is an accepted next implementation requirement, not a
 claim that the existing review-only Run writer already stores the column.
+
+## First-assignment storage boundary (2026-09-26)
+
+Executive sequencing: implement the accepted write-once assignment and Started
+invariants at the existing shared Run table before extending its remaining
+callers. SQLite triggers own the set-once timestamp, so constructor, bind and
+offline import cannot disagree or race it. No bind UI or new confirmation
+transport is selected here. Current-Run-only scope and exact confirmed-target
+fencing remain the subsequent bind operation's obligations.
+
+Historical SQL Runs do not establish when their Task first received them. The
+forward draft uses conversion time, explicitly inferred, for those Tasks; it
+never claims MIN(created_at) or an observed launch time. The offline importer
+must identify this schema boundary in its report and preserve a present
+timestamp when importing more Runs. Historical Started events without Run rows
+are retained separately until filesystem import; no successful Run is invented.
+
+The remaining launch paths still write Started events. Keep those readers and
+writers until the general Run conversion, while counting reservations from the
+new column now. This intermediate scope is not a column-only reader acceptance
+claim and cannot be published independently.

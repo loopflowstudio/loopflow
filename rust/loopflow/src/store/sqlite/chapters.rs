@@ -91,16 +91,15 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Durable evidence that execution began: a recorded Started, a worker
-    /// report or finished Flow, a claimed worker generation, or a published
-    /// review Run. Preparing a checkout or reserving a Run is insufficient.
+    /// Run assignment starts a Task, including an unpublished reservation.
+    /// Retain historical execution evidence until all launch paths import Runs.
     pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')
                IN ('started','progress','body_handed_off','flow_finished'))
              OR EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND worker_generation>0)
-             OR EXISTS(SELECT 1 FROM runs WHERE task_id=?1 AND published=1)",
+             OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
             [task.as_str()],
             |row| row.get(0),
         )?)
@@ -111,7 +110,7 @@ impl SqliteStore {
         let begun: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='started')
              OR EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND worker_generation>0)
-             OR EXISTS(SELECT 1 FROM runs WHERE task_id=?1 AND published=1)",
+             OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
             [task.as_str()], |row| row.get(0),
         )?;
         let claimed: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE state='current' AND task_id=?1 AND claim_json IS NOT NULL)", [task.as_str()], |row| row.get(0))?;
@@ -139,7 +138,7 @@ impl SqliteStore {
             "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
              AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='started')
              AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND (worker_generation>0 OR claim_json IS NOT NULL))
-             AND NOT EXISTS(SELECT 1 FROM runs WHERE task_id=?1 AND published=1)",
+             AND started_at IS NULL",
             params![task.as_str(), super::super::rows::now_unix()],
         )?;
         tx.commit()?;

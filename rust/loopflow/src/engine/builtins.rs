@@ -375,10 +375,6 @@ mod tests {
         assert!(!task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
 
-        let flow = get_builtin_flow("wave").expect("Wave flow");
-        assert!(flow.contains("- wave/operate"));
-        assert!(!flow.contains("loop:"));
-
         assert!(get_builtin_flow("task").is_none());
         assert!(get_builtin_flow("task-design")
             .expect("Task first flow")
@@ -396,9 +392,9 @@ mod tests {
             .expect("Task final flow")
             .contains("- op: pr land -c"));
 
-        let design = get_builtin_flow("design").expect("reviewed design flow");
-        assert!(design.contains("id: review_design"));
-        assert_eq!(design.matches("human: true").count(), 1);
+        for wrapper in ["design", "ship-5whys", "wave"] {
+            assert!(get_builtin_flow(wrapper).is_none());
+        }
 
         let launch = get_builtin_flow("launch-plan").expect("launch flow");
         for step in [

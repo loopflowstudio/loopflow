@@ -212,6 +212,23 @@ pub(crate) fn token() -> Result<Option<StepToken>> {
         .transpose()
 }
 
+pub(crate) fn capture_membership() -> Result<crate::run_record::RunFlowMembership> {
+    use crate::run_record::{RunFlowMembership, RunFlowStep};
+    let Some(token) = token()? else {
+        return Ok(RunFlowMembership::Independent);
+    };
+    let run = read(&token.invocation)?;
+    let boundary = run
+        .active
+        .as_ref()
+        .ok_or_else(|| anyhow!("Flow has no active boundary"))?;
+    ensure!(boundary.id == token.boundary, "stale Flow step launch");
+    if boundary.run_id.is_some() {
+        return Ok(RunFlowMembership::Independent);
+    }
+    Ok(RunFlowMembership::Step(RunFlowStep::of_flow(&run)?))
+}
+
 pub(crate) fn bind_run(run_id: &RunId, run_dir: &Path) -> Result<()> {
     let Some(token) = token()? else { return Ok(()) };
     update(&token.invocation, |run| {
@@ -403,12 +420,15 @@ pub(crate) fn begin_boundary(id: &str) -> Result<(StepToken, bool)> {
             completed: false,
             ready_summary: None,
         });
+        let boundary_id = boundary.id.clone();
+        let completed = boundary.completed;
+        crate::ops::flow_session::prepare_run(run)?;
         Ok((
             StepToken {
                 invocation: id.into(),
-                boundary: boundary.id.clone(),
+                boundary: boundary_id,
             },
-            boundary.completed,
+            completed,
         ))
     })
 }
@@ -500,21 +520,29 @@ mod tests {
             .unwrap();
             read(&run.id).unwrap()
         }
+        fn spec(&self) -> RunSpec {
+            RunSpec {
+                harness: "proof".into(),
+                model: None,
+                surface: "headless".into(),
+                cwd: self.dir.path().into(),
+                repo: None,
+                worktree: None,
+                skill: Some("loop-decide".into()),
+                subjects: vec![],
+                flow: crate::run_record::RunFlowMembership::Independent,
+            }
+        }
         fn capture(&self) -> CaptureHandle {
-            CaptureHandle::begin_at(
-                self.dir.path(),
-                RunSpec {
-                    harness: "proof".into(),
-                    model: None,
-                    surface: "headless".into(),
-                    cwd: self.dir.path().into(),
-                    repo: None,
-                    worktree: None,
-                    skill: Some("loop-decide".into()),
-                    subjects: vec![],
-                },
-            )
-            .unwrap()
+            CaptureHandle::begin_at(self.dir.path(), self.spec()).unwrap()
+        }
+        /// A human boundary owns a prepared Run from `begin_boundary`; the
+        /// provider launch consumes that Run instead of binding a fresh capture.
+        fn launch_prepared(&self, flow_id: &str) -> CaptureHandle {
+            let prepared = read(flow_id).unwrap().active.unwrap().run_id.unwrap();
+            let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+            CaptureHandle::start_prepared(self.dir.path(), &prepared, self.spec(), &context)
+                .unwrap()
         }
     }
     impl Drop for Home {
@@ -615,8 +643,7 @@ mod tests {
         .unwrap();
         let (token, _) = begin_boundary(&run.id).unwrap();
         std::env::set_var(FLOW_STEP_ENV, serde_json::to_string(&token).unwrap());
-        let capture = home.capture();
-        bind_run(&capture.run_id(), &capture.artifact_dir()).unwrap();
+        let capture = home.launch_prepared(&run.id);
         // Older positions duplicated policy on the boundary. Recover their
         // attempt identity and receipt using the captured definition's policy.
         let mut old = serde_json::to_value(read(&run.id).unwrap()).unwrap();

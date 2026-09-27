@@ -64,23 +64,39 @@ metrics_evaluated_at, not today's readings or newly edited instrument files.
 
 ## Task briefs
 
-Write the Task from the user's perspective. Explain what they're trying to do, what
-gets in their way, and why it matters. Give it a title naming the problem or desired
-experience. Show what success would look like in a concrete moment of their work.
-Preserve the user's own language when it anchors intent.
+Write a description someone can understand without the planning conversation.
+Open with what the person is trying to do, what gets in their way, and what should
+improve. Use a short title naming that improvement. Preserve useful user language;
+use concrete verbs rather than process phrases such as “establish the bounded
+outcome” or “settle the publication commitment”.
 
-Ground the Task in observations, real constraints, and examples of success. Possible
-solutions can help explain the idea; mark what remains uncertain. The design doc develops
-the architecture, APIs, implementation sequence, and verification. A Task is ready for
-design when the problem is clear, even if the solution isn't. Link accepted decisions
-and keep them binding.
+Usually one or two short paragraphs and a few acceptance bullets are enough.
+Use headings only when they help. Describe observable success, including required
+numbers, windows, failure cases, and constraints; brevity must not erase them.
+Technical Tasks can serve maintainers or operators without inventing a customer.
+Mark possible solutions as tentative. Keep architecture, implementation steps,
+and detailed proof in the design, linked and available to the worker.
 
-Keep the Task useful to someone choosing what to work on now. As understanding changes,
-update the problem and desired experience. Keep blockers and decisions that affect that
-choice visible, with links to evidence.
+Keep the description current. Put dated progress, chapter allocation, queue
+changes, launch attempts, and verification updates in Task comments when posting
+is authorized. A comment should say what changed and what it means; link detailed
+receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Chapter
+records still own application receipts. Proposals draft comments without posting.
+Do not use a description update or worker steering as a substitute log channel.
 
-Preserve earlier reasoning in durable records without making readers replay every
-checkpoint. Retain unresolved constraints, contrary evidence, and recorded decisions.
+Comments may be collapsed by default. Keep current blockers, actual dependencies,
+accepted scope, and unresolved contrary evidence summarized in the description
+when they affect the work. A queue position is not necessarily a dependency.
+When a comment changes the accepted scope, reconcile the description and retain
+the comment as history. Do not append dated amendments or require readers to
+reconstruct the current brief from the thread. Preserve decisions and evidence
+before removing superseded prose.
+
+For example, describe: “After an interrupted release, maintainers need to see
+whether anything shipped and safely continue unfinished work.” Acceptance can
+require that a retry never publishes twice and that failures remain visible.
+Put “Moved into the September chapter; scheduled after the installation repair”
+in a comment. Include that repair in the description only if it is a real blocker.
 Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
 Link related work where you explain its relevance. In prose and PR bodies, use
@@ -91,4 +107,5 @@ In operational lists, put the ID first: `[Task ID or PR number · Title](known U
 
 Apply these rules within the chapter’s existing proposal and acceptance boundaries.
 Preserve the accepted brief when applying it; record application history in the
-chapter record instead of prepending it to the Task.
+chapter record; summarize relevant changes in authorized Task comments, never
+prepend or append allocation logs to the description.

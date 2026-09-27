@@ -1030,13 +1030,14 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         .expect("store auto merge request");
 
     task_resume("INF-123", None).expect("resume Task authored work");
-    assert_eq!(
-        runtime
-            .block_on(task.store.flow_position(&task.task.id))
-            .unwrap(),
-        Some(position),
-        "resume preserves the exact review boundary"
-    );
+    let resumed = runtime
+        .block_on(task.store.flow_position(&task.task.id))
+        .unwrap()
+        .expect("review boundary remains available");
+    assert_eq!(resumed.invocation, position.invocation);
+    assert_eq!(resumed.cursor, position.cursor);
+    assert!(resumed.is_human());
+    assert!(resumed.session_run_id.is_some());
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))

@@ -816,6 +816,7 @@ impl WaveLoop {
                     "wave:{}",
                     self.wave
                 ))],
+                flow: crate::run_record::RunFlowMembership::Independent,
             },
             &prepared.context,
         ) {

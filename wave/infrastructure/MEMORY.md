@@ -2,6 +2,87 @@
 
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
+## Data model and performance decisions (2026-09-26)
+
+Jack's rule, verbatim: "The main user objects should line up with the main
+tables in the DB and when we see stuff like this where a main record is
+actually a union over 4 things, we should be suspicious." The trigger was a
+product-first review of Session/Run/Task/Wave: a Session is four read-time
+projections over four stores (Run dir, `task_flow_positions`,
+`human-sessions/*.json`, `flows/*/position.json`); Run→Task is a `task:`
+string in a ranked subject list with a two-value source, mirrored into a
+Task event because the Run cannot be queried by Task; every post-launch fact
+(name, completion, attachment) became a sidecar beside the manifest; reads
+reuse the launch resolver, so a bound Session turns into an orphan when its
+Task's PR merges. The store's `runs` table has the Task FK and no writer.
+
+The approved model belongs to LOO-298, outside the LOO-291 delivery. Rewrite
+docs first as the spec, then tables/readers, then research what the new model
+makes deletable and remove it. The
+[decision history](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/demo-native-workspace.md)
+and [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
+preserve Jack's approval and the follow-up split. These are target contracts,
+not claims about tables already implemented:
+
+- Repository has Chapters, a repo-wide clock incremented for every Wave at
+  once; Project = (Wave, Chapter), unique, owns Tasks, KRs, metric targets and
+  the Flow template its Tasks run by default; Task ⇒ Project ⇒ Wave.
+- Task owns Flow invocations (0..n, one current) and may invoke any Flow
+  ("trust our users"); the invocation records which. An invocation is one
+  object: unrolled graph + cursor + per-loop return counts + nullable parent
+  for runtime nesting only, never template composition (invocations are
+  always fully unrolled). No step-occurrence object, no path-string node key,
+  no "Flow position", no "recommended Flow".
+- `runs`: nullable `invocation_id ⇒ task_id ⇒ wave_id`, constructor fills
+  upward and refuses a mismatch; node + iteration tuple in an invocation;
+  `work_source` declared|checkout|inherited|bound.
+  A Run may have neither Task nor Wave, or a Wave alone. Task implies Wave;
+  bind preserves invocation membership. The manifest remains launch evidence.
+- `sessions` is a child of `runs` (run_id unique, kind, title + provenance,
+  state, ready_summary). Bind = update the Run's task/wave; rename = update
+  the title; started derived from Runs; bind allowed on done Tasks; usage
+  follows the field.
+  Ask and Flow review Sessions become rows keyed by their existing
+  `session_run_id`, replacing the four-store projection.
+- Every denormalization has a Pydantic-style validator or is deleted. No
+  sidecars, no shim: a one-time migration fills the columns from old
+  subjects and `session-name.json` and drops them ("hack my computer if need
+  be, keep the codebase clean").
+- Method for any model review: derive the user's objects and the APIs between
+  them from the product first, then check the infra for hops.
+
+Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
+intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
+Session paint, every `lf` read, Markdown parse and terminal key-to-draw;
+`scripts/benchmarks/desktop-performance/record_live.py` records local usage
+without telemetry. The retained [90-second idle recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
+measured `session list` at p50 809 ms and `roadmap --all` at 3.49 s; `ps --json`
+was 274 ms, so not every read exceeded the proposed 300 ms budget. It recorded
+zero hitches but one 1.85 s potential hang and nearly flat RSS. The earlier
+installed build's six-second probe measured 51 ms/s hitches; these different
+windows/builds do not prove a causal improvement. Republishing identical readings
+was found in source and removed; remaining hang causes need profiling.
+
+LOO-300 owns Session streaming, projection caching and the density harness after
+the data-model work. The handoff records passes only for cold-start-to-outline
+and terminal-key-to-echo. `PerformanceCatalogueTests` also retains a filter test
+that can skip when SwiftUI exposes no NSTextField; six other tests were removed
+after mounted paint hooks failed to fire. Missing results remain proof gaps.
+Key-to-next-draw and PTY echo are proxies, not glyph presentation. Click ≤100 ms,
+`lf` read ≤300 ms off the main actor and idle ≤5 ms/s hitches remain proposed
+targets until comparable measurements support published budgets.
+
+S5 currently binds checkout launches through the active-PR resolver and records
+inferred subjects as `Declared`. A landed branch without an active PR launches
+unbound. The approved model allows binding to landed/done Tasks; LOO-298 must
+remove the read-time launch-resolver dependency and preserve old attribution
+through the one-time migration rather than mistaking S5's limit for policy.
+
+Staging gotcha: `install.py local --skip cargo` bundled a stale `lf`, and the
+store gate keys on the registered installation path, not the bytes, so a demo
+app must route through the installed `lf` (`LoopflowDevControl.json` →
+`lf_path`) or be promoted.
+
 ## Continuation and recovery lessons (curated 2026-09-25)
 
 Curated from the retired [continuation record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/directions/task-continuation.md).
@@ -71,6 +152,7 @@ The historical Wave deletion directive already had implementation; do not
 launch a duplicate from that older note. Follow-up Task ownership and installed
 acceptance remain unresolved. Historical commit links identify locally recorded
 evidence; remote availability was not checked during curation.
+
 
 ## Delivery and chapter implementation lessons (2026-09-25)
 
@@ -664,3 +746,23 @@ The rebase-efficiency follow-ups are resolved by PR #818: config/naming-schema r
 ### How to judge rebase efficiency (dogfood metrics from `.lf/tmp/metrics/ops.jsonl`)
 
 Local-only JSONL, reviewed weekly. Key product metrics: **agent-rebase rate** (% of rebases launching an agent), **avoidable rebase-agent rate** (stale/empty/generated-only branches that still launched one — target 0), median `land`→queued/merged time, post-land repair rate, and command-drift rate (prompt-recommended commands the installed `lf` can't parse). Then flip one default at a time: stack-by-default `wt create`, stale-empty reset before rebase, land/advance split, generated-only reset policy. Synthetic-workload replay harness (50–100 disposable histories, current vs classifier in trace mode) is unbuilt — file if tuning thresholds needs it.
+
+## Direct invocation and large inputs (2026-09-25)
+
+Work selectors give direct skills/flows attribution, context and placement;
+`lf task run` owns the managed Task Flow. Direct bound contributions receive
+fresh scratch and leave checkpointing to their caller. Bare names prefer skills;
+explicit verbs resolve their own kind. Reuse the skill-to-invocation loader,
+without one-skill wrappers or name-specific dispatch. Started is written at
+explicit interactive/headless CLI dispatch, after capture and before provider
+launch. Generic capture stays registry-independent: putting Started there broke
+the unavailable-registry regression. Read-only Work resolution and unopened review
+preparation never record execution. LOO-298's derivation from Run rows replaces
+this write only when that model is implemented.
+
+Recursive scratch exceeded both argv capacity and a provider input limit.
+Claude batch input uses text stdin backed by an anonymous file, with system
+instructions in the existing context file; captured and streamed output use the
+same launch path. Curate scratch instead of silently truncating instructions.
+The observed Codex rejected `turn/start` remained waiting; that driver failure
+is still unresolved, and Claude's working input path does not establish a fix.

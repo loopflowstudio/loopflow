@@ -16,8 +16,13 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
 uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
+
+The opt-in desktop command exercises the native outline and retained Task panes.
+Use it for relevant UI changes; see [performance measurements](performance/README.md)
+for full sampling, comparison and the explicit capture-versus-presentation boundary.
 
 Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
@@ -118,7 +123,7 @@ Path → suite mapping:
 | `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
-| `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone`, then the multiplatform boundary check |
+| `swift/` | swift | `swift test --package-path swift --no-parallel -Xswiftc -gnone`, then the multiplatform boundary check |
 | `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |
 | local store/worktree code, `tests/e2e/` | e2e *(slow)* | CLI smoke |
 
@@ -161,18 +166,34 @@ source. A Markdown-only edit can fail that check.
 Tests for the Swift package (models, protocols, shared logic).
 
 ```bash
-swift test --package-path swift        # All Swift tests
+cargo build -p loopflow --bin lf # Required by the real CLI transport proof
+swift test --package-path swift --no-parallel # All Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
+
+Pass `--no-parallel` explicitly for the full suite. Native proofs share AppKit's
+main actor; concurrent suites can starve async observations and distort timing
+budgets. Swift Testing otherwise runs suites concurrently.
+
+The Swift transport suite launches `target/debug/lf` against a temporary Home.
+Build the current CLI before running it; an existing developer build can hide
+a missing prerequisite in a clean checkout. CI and `scripts/test.py --swift`
+include this build.
 
 In asynchronous terminal proofs, observe the surface after each wake-up before
 checking the deadline. A busy main actor can resume after the deadline even
 when the PTY produced its output in time; do not fail on a pre-sleep snapshot.
 
+For async model readers, keep generic values crossing actor boundaries
+`Sendable`. A newer local Swift compiler can accept code rejected by CI's
+toolchain; record `swift --version` with compile evidence when investigating
+concurrency diagnostics.
+
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
-`#if canImport(GhosttyKit)`. When changing terminal code or its tests, gate both
+`#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing
+whole-file platform gate. When changing terminal code or its tests, gate both
 configurations: run the focused SwiftPM tests and
 `uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
 the Xcode test target compiles.
@@ -250,6 +271,14 @@ cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matri
 Preserve fixtures for registered Wave directories without Git metadata. Adding
 Git would hide the cached-PM context regression; global-command tests alone do
 not cover it.
+
+Work-command dispatch also needs the registration lifecycle and repository
+ownership proofs. Empty registrations can be forgotten from their registered
+directory without Git metadata; Work operations still enforce repository ownership.
+
+```bash
+cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
+```
 
 When changing Wave chat operations, include the parent module's HTTP and SSE
 tests. Selecting only `runner::tests` or steering-named tests misses them.
@@ -372,6 +401,15 @@ Fresh-store coverage exercises the live SQLite schema. Populated historical
 fixtures exercise the migration chain and verify retained facts. A fresh-store
 pass alone does not prove that an existing Home can upgrade without losing work.
 
+After rebasing across a release cut, run the installed-development migration
+tests as well as the new migration's tests. Adoption fixtures must include the
+draft receipts for every pending release; a fixture pinned to one released
+draft stops representing an adoptable Home when another release is appended.
+
+```bash
+cargo test -p loopflow --lib installed_development_
+```
+
 Run records have focused storage, harness, reducer, and reader checks:
 
 ```bash
@@ -469,3 +507,61 @@ uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 bounda
 ```
 
 When adding features that need manual verification, write or extend a script in `scripts/` rather than documenting a list of commands. One command to run, one environment to verify in.
+
+## Boundary-specific checks
+
+When changing Flow boundary or prepared Run ownership, include the Flow Run
+recovery tests. Human boundaries prepare their Run before provider launch;
+fixtures must start that Run instead of binding a fresh capture.
+
+```bash
+cargo test -p loopflow --lib ops::flow_run::tests
+```
+
+Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
+a human review preserves its invocation and cursor while preparing its Run;
+assert those facts instead of equality of the entire versioned Flow record.
+
+When changing Wave chat operations, include the parent module's HTTP and SSE
+tests. Selecting only `runner::tests` or steering-named tests misses them.
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
+```
+
+Retired operations must be rejected without journaling, while ordinary messages
+and bare interrupts retain their behavior.
+
+When changing Task controls, include the GitHub-cache integration tests as well
+as controller tests. Bare interrupts prove local control during GitHub outages;
+steering publishes to Linear and belongs with the mocked Linear boundary tests.
+
+```bash
+cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
+```
+
+When changing Linear response shapes, run the client tests and PM-operation
+consumers together. Team migration also reads issue comments; its fixtures must
+include the requested pagination metadata.
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+```
+
+### Test without an installed Loopflow
+
+Tests that construct session commands must supply their own `LF_BIN` fixture,
+restore it afterward, and serialize environment changes with `test_env_lock`.
+Reuse `TestLfBinGuard` in Task controller tests. Session spawning remains mocked.
+
+For executable-resolution failures, reproduce with the compiled test binary:
+unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
+Verify the repair in that same environment. A pass under a developer's installed
+Loopflow can hide the CI failure.
+
+### Shared identity fixtures
+
+Exercise Session fixtures through Rust as well as Swift after ancestry changes.
+`wave_id` uses WaveId's UUID encoding; prefixed Task/Project Work IDs are different
+types. A Swift String round trip alone cannot prove that a Rust producer accepts
+an identity value.

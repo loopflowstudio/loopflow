@@ -161,7 +161,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Territory | Main paths | Approx. LOC | What lives there |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | Clap grammar, command dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project control, sessions, PR, Git, release, metrics, PM operations |
+| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/chapter control, sessions, PR, Git, release, metrics, PM operations |
 | Prompt and process engine | `rust/loopflow/src/engine/`, `src/harness/` | 29,300 | Skill/Flow discovery, prompt assembly, provider subprocesses and streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, planning/provider models |
 | Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
@@ -225,16 +225,16 @@ kernel locks                 live local exclusion authority
 
 ### Live SQLite tables
 
-The current schema contains 29 application tables. Grouping them by owner makes
+The current schema contains 31 application tables (including draft migrations). Grouping them by owner makes
 the database easier to navigate:
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
-| Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | Stable Wave/Task identity, status, progress, comments, interrupts, and history |
+| Tracked Work | `waves`, `wave_chapters`, `projects`, `project_events`, `tasks`, `task_events` | Stable Wave/Task identity, status, progress, comments, interrupts, and history |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Serial PR chain and provider observations |
 | Work adjuncts | `tool_responses`, `task_flow_positions`, `work_placements` | Tool answers, Task-only Flow positions and short worker claims, and Home placement; Project/Task correction events live in their Work event streams |
 | Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Blocking requests, answering-attempt fence, typed results, Linear publication |
-| PM projection | `pm_snapshots`, `observation_outbox` | Bounded Linear reads and deferred provider publication |
+| PM projection | `pm_snapshots`, `observation_outbox` | Bounded Linear reads and deferred child-event delivery to the Wave |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head supervision and bounded repair generations |
 | Home and provider authority | `homes`, `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens`, `provider_deliveries` | Machine routes, credentials, selection, limits, and delivery receipts |

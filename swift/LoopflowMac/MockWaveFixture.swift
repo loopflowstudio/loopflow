@@ -349,7 +349,8 @@ enum MockWaveFixture {
                   "status": "ready",
                   "reason": "ready",
                   "updated_at": "2026-07-13T19:00:00Z",
-                  "provider": "codex"
+                  "provider": "codex",
+                  "started": true
                 },
                 "directive": {
                   "version": 2,

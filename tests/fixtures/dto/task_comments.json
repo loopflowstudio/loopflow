@@ -1,0 +1,31 @@
+{
+  "identifier": "LOO-291",
+  "comments": [
+    {
+      "id": "c-bot",
+      "body": "",
+      "author": {
+        "kind": "integration"
+      },
+      "created_at": null
+    },
+    {
+      "id": "c-1",
+      "body": "- first\n  - nested\n\n[spec](https://example.com)",
+      "author": {
+        "kind": "person",
+        "name": "Maya"
+      },
+      "created_at": "2026-09-22T08:00:00Z"
+    },
+    {
+      "id": "c-2",
+      "body": "Moved to review.",
+      "author": {
+        "kind": "person",
+        "name": null
+      },
+      "created_at": "2026-09-23T08:00:00Z"
+    }
+  ]
+}

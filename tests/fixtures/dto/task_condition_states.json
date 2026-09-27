@@ -24,6 +24,26 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Task has no Work yet; start a Flow instead"
+        }
+      ]
+    },
     "condition": {
       "state": "clear",
       "reason": "Task is ready to start",
@@ -62,7 +82,8 @@
       "status": "done",
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "wave",
@@ -73,6 +94,27 @@
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "finished",
+        "flow": "feature"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Task is complete"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Task is complete"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Task is complete"
+        }
+      ]
     },
     "condition": {
       "state": "clear",
@@ -112,7 +154,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -123,6 +166,181 @@
     "actions": {
       "recommended": "resume",
       "reason": "resume the parked Task"
+    },
+    "flow": {
+      "recommended": "build",
+      "record": {
+        "kind": "pinned",
+        "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "graph": {
+          "name": "feature",
+          "steps": [
+            {
+              "key": "0",
+              "id": "design",
+              "label": "task-design",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature"
+              ],
+              "paths": []
+            },
+            {
+              "key": "1",
+              "id": "implement",
+              "label": "implement",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "2",
+              "id": null,
+              "label": "review-slice",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "3",
+              "id": "decide",
+              "label": "loop-decide",
+              "kind": "skill",
+              "human": false,
+              "returns_to": "1",
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "4",
+              "id": "demo",
+              "label": "demo",
+              "kind": "skill",
+              "human": true,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "5",
+              "id": "decide_delivery",
+              "label": "loop-decide",
+              "kind": "skill",
+              "human": false,
+              "returns_to": "1",
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "6",
+              "id": null,
+              "label": "xor-route",
+              "kind": "xor",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature"
+              ],
+              "paths": [
+                {
+                  "name": "fix",
+                  "description": "Repair the failing check",
+                  "steps": [
+                    {
+                      "key": "6/fix/0",
+                      "id": "patch",
+                      "label": "patch",
+                      "kind": "skill",
+                      "human": false,
+                      "returns_to": null,
+                      "parents": [],
+                      "paths": []
+                    }
+                  ]
+                },
+                {
+                  "name": "skip",
+                  "description": "Nothing to repair",
+                  "steps": []
+                }
+              ]
+            },
+            {
+              "key": "7",
+              "id": null,
+              "label": "pr land -c",
+              "kind": "op",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "queue"
+              ],
+              "paths": []
+            }
+          ]
+        },
+        "current": "3",
+        "completed": [
+          "0",
+          "1",
+          "2"
+        ],
+        "returns": [
+          {
+            "decider": "3",
+            "traversals": 0
+          },
+          {
+            "decider": "5",
+            "traversals": 0
+          }
+        ],
+        "execution": "blocked",
+        "reason": "Release target is unavailable",
+        "restart_required": true,
+        "iterations": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Release target is unavailable. Only Stop & restart can clear this blocker"
+        },
+        {
+          "kind": "restart",
+          "unavailable": null
+        }
+      ]
     },
     "condition": {
       "state": "blocked",
@@ -162,7 +380,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -173,6 +392,26 @@
     "actions": {
       "recommended": "resume",
       "reason": "resume the parked Task"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": null
+        }
+      ]
     },
     "condition": {
       "state": "unknown",
@@ -212,7 +451,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "user",
@@ -223,6 +463,182 @@
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "pinned",
+        "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "graph": {
+          "name": "feature",
+          "steps": [
+            {
+              "key": "0",
+              "id": "design",
+              "label": "task-design",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature"
+              ],
+              "paths": []
+            },
+            {
+              "key": "1",
+              "id": "implement",
+              "label": "implement",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "2",
+              "id": null,
+              "label": "review-slice",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "3",
+              "id": "decide",
+              "label": "loop-decide",
+              "kind": "skill",
+              "human": false,
+              "returns_to": "1",
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "4",
+              "id": "demo",
+              "label": "demo",
+              "kind": "skill",
+              "human": true,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "5",
+              "id": "decide_delivery",
+              "label": "loop-decide",
+              "kind": "skill",
+              "human": false,
+              "returns_to": "1",
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "6",
+              "id": null,
+              "label": "xor-route",
+              "kind": "xor",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature"
+              ],
+              "paths": [
+                {
+                  "name": "fix",
+                  "description": "Repair the failing check",
+                  "steps": [
+                    {
+                      "key": "6/fix/0",
+                      "id": "patch",
+                      "label": "patch",
+                      "kind": "skill",
+                      "human": false,
+                      "returns_to": null,
+                      "parents": [],
+                      "paths": []
+                    }
+                  ]
+                },
+                {
+                  "name": "skip",
+                  "description": "Nothing to repair",
+                  "steps": []
+                }
+              ]
+            },
+            {
+              "key": "7",
+              "id": null,
+              "label": "pr land -c",
+              "kind": "op",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "queue"
+              ],
+              "paths": []
+            }
+          ]
+        },
+        "current": "4",
+        "completed": [
+          "0",
+          "1",
+          "2",
+          "3"
+        ],
+        "returns": [
+          {
+            "decider": "3",
+            "traversals": 1
+          },
+          {
+            "decider": "5",
+            "traversals": 1
+          }
+        ],
+        "execution": "human",
+        "reason": "Waiting for your review at demo",
+        "restart_required": false,
+        "iterations": [
+          [
+            1,
+            1
+          ]
+        ]
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Waiting for your review at demo; continue it through its Session"
+        },
+        {
+          "kind": "restart",
+          "unavailable": null
+        }
+      ]
     },
     "condition": {
       "state": "waiting",
@@ -262,7 +678,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -273,6 +690,26 @@
     "actions": {
       "recommended": "resume",
       "reason": "resume the parked Task"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": null
+        }
+      ]
     },
     "condition": {
       "state": "blocked",
@@ -312,7 +749,8 @@
       "status": "ready",
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
-      "provider": "codex"
+      "provider": "codex",
+      "started": true
     },
     "next_move": {
       "owner": "user",
@@ -352,6 +790,180 @@
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "pinned",
+        "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "graph": {
+          "name": "feature",
+          "steps": [
+            {
+              "key": "0",
+              "id": "design",
+              "label": "task-design",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature"
+              ],
+              "paths": []
+            },
+            {
+              "key": "1",
+              "id": "implement",
+              "label": "implement",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "2",
+              "id": null,
+              "label": "review-slice",
+              "kind": "skill",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "3",
+              "id": "decide",
+              "label": "loop-decide",
+              "kind": "skill",
+              "human": false,
+              "returns_to": "1",
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "4",
+              "id": "demo",
+              "label": "demo",
+              "kind": "skill",
+              "human": true,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "5",
+              "id": "decide_delivery",
+              "label": "loop-decide",
+              "kind": "skill",
+              "human": false,
+              "returns_to": "1",
+              "parents": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": "6",
+              "id": null,
+              "label": "xor-route",
+              "kind": "xor",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature"
+              ],
+              "paths": [
+                {
+                  "name": "fix",
+                  "description": "Repair the failing check",
+                  "steps": [
+                    {
+                      "key": "6/fix/0",
+                      "id": "patch",
+                      "label": "patch",
+                      "kind": "skill",
+                      "human": false,
+                      "returns_to": null,
+                      "parents": [],
+                      "paths": []
+                    }
+                  ]
+                },
+                {
+                  "name": "skip",
+                  "description": "Nothing to repair",
+                  "steps": []
+                }
+              ]
+            },
+            {
+              "key": "7",
+              "id": null,
+              "label": "pr land -c",
+              "kind": "op",
+              "human": false,
+              "returns_to": null,
+              "parents": [
+                "feature",
+                "queue"
+              ],
+              "paths": []
+            }
+          ]
+        },
+        "current": "2",
+        "completed": [
+          "0",
+          "1"
+        ],
+        "returns": [
+          {
+            "decider": "3",
+            "traversals": 2
+          },
+          {
+            "decider": "5",
+            "traversals": 0
+          }
+        ],
+        "execution": "running",
+        "reason": "Worker is running review-slice",
+        "restart_required": false,
+        "iterations": [
+          [
+            2,
+            0
+          ]
+        ]
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "The Task worker is already advancing this Flow"
+        },
+        {
+          "kind": "restart",
+          "unavailable": null
+        }
+      ]
     },
     "condition": {
       "state": "waiting",

@@ -242,6 +242,14 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
+        id: "pm task comments",
+        path: &["pm", "task", "comments"],
+        base_args: &["pm", "task", "comments", "--id", "W2-999", "--json"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
         id: "cron add",
         path: &["cron", "add"],
         base_args: &[

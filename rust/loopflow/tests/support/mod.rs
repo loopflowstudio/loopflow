@@ -382,6 +382,43 @@ fn register_task_fixture(
     RegisteredTask { store, task, pr }
 }
 
+/// A second Task in the fixture's Wave and Project, tracking `branch` from its
+/// own `worktree`, so a test can tell "this checkout's Task" from "another
+/// Task". Registered worktrees are unique, so the sibling needs a path of its
+/// own; `TestRepo::create_named_worktree` supplies a real one with the branch.
+#[allow(dead_code)] // Shared helper compiled into integration tests with one Task.
+pub fn register_sibling_task(
+    registered: &RegisteredTask,
+    identifier: &str,
+    branch: &str,
+    worktree: &Path,
+) -> Task {
+    let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
+    let now = OffsetDateTime::now_utc();
+    let mut task = registered.task.clone();
+    task.id = TaskId::new();
+    task.plan.id = LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id");
+    task.plan.identifier = identifier.to_string();
+    task.plan.title = format!("Sibling {identifier}");
+    task.workspace_slug = branch.to_string();
+    task.worktree = worktree.to_path_buf();
+    task.created_at = now;
+    task.updated_at = now;
+    let pr = TaskPr {
+        id: TaskPrId::new(),
+        task_id: task.id.clone(),
+        slug: branch.to_string(),
+        branch: branch.to_string(),
+        created_at: now,
+        updated_at: now,
+        ..registered.pr.clone()
+    };
+    runtime
+        .block_on(registered.store.create_task(&task, &pr))
+        .expect("create sibling Task");
+    task
+}
+
 /// A fake `open` / `xdg-open` that records each invocation to `marker`, so a
 /// test can count presentation attempts through the recorded boundary. Register
 /// it under both `open` and `xdg-open` so the platform opener records on either

@@ -25,6 +25,7 @@ struct GhosttyTerminalTitle {
 
 #if GHOSTTY_ENABLED
 import GhosttyKit
+import CoreVideo
 
 enum GhosttyRuntimeResources {
     static let sourceRevision = "4c838723173da757a16a2f3afd4c94f16732ef6a"
@@ -81,17 +82,19 @@ final class GhosttyManager: ObservableObject {
 
     static let shared = GhosttyManager()
 
-    // Loopflow color scheme — slate grey, adapts to system appearance
+    // Loopflow color scheme — warm charcoal in the canvas's hue family
+    // (`TerminalPalette`). Every ANSI color except 0 clears 3:1 on it; 0 is
+    // black by convention and stays near the surface.
     private static let loopflowConfig = """
-    # Loopflow Terminal Theme - Slate
-    background = #2B3036
-    foreground = #F5F1EA
-    cursor-color = #F5F1EA
-    selection-background = #46505B
-    selection-foreground = #F5F1EA
+    # Loopflow Terminal Theme - Warm charcoal
+    background = \(TerminalPalette.css(TerminalPalette.backgroundHex))
+    foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))
+    cursor-color = \(TerminalPalette.css(TerminalPalette.accentHex))
+    selection-background = \(TerminalPalette.css(TerminalPalette.selectionHex))
+    selection-foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))
 
-    # Palette - muted tones on slate
-    palette = 0=#1E2228
+    # Palette - muted tones on warm charcoal
+    palette = 0=#1A1816
     palette = 1=#D4756A
     palette = 2=#8B9A6B
     palette = 3=#D4A574
@@ -100,8 +103,8 @@ final class GhosttyManager: ObservableObject {
     palette = 6=#7FAFAF
     palette = 7=#C8C1B8
 
-    # Bright variants
-    palette = 8=#3C4550
+    # Bright variants (8 lifted from #3C4550, which was 1.65:1 on the surface)
+    palette = 8=#7F766F
     palette = 9=#E89888
     palette = 10=#ABB97B
     palette = 11=#E8C594
@@ -170,7 +173,17 @@ final class GhosttyManager: ObservableObject {
             path.withCString { ghostty_config_load_file(cfg, $0) }
         }
         ghostty_config_load_default_files(cfg)
-        if let path = writeConfig(Self.embeddedConfig, named: "loopflow-ghostty-embedded") {
+        var embeddedConfig = Self.embeddedConfig
+        // Ghostty treats a failed CoreVideo display link as an allocation error
+        // and refuses every surface. Its timer renderer works without that link.
+        var displayLink: CVDisplayLink?
+        let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+        if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+            embeddedConfig += "\nwindow-vsync = false\n"
+            print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
+        }
+        displayLink = nil
+        if let path = writeConfig(embeddedConfig, named: "loopflow-ghostty-embedded") {
             path.withCString { ghostty_config_load_file(cfg, $0) }
         }
         ghostty_config_finalize(cfg)
@@ -206,6 +219,9 @@ final class GhosttyManager: ObservableObject {
             if action.tag == GHOSTTY_ACTION_SET_TITLE,
                let title = action.action.set_title.title {
                 let value = String(cString: title)
+                MainActor.assumeIsolated {
+                    Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminalTitle = value
+                }
                 Task { @MainActor in
                     NotificationCenter.default.post(
                         name: .ghosttyTerminalTitle,

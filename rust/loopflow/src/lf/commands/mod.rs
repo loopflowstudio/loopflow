@@ -17,6 +17,7 @@ pub mod replay;
 pub mod reply;
 pub mod run;
 pub mod runs;
+mod runs_watch;
 pub mod screenshot;
 pub mod session;
 pub mod ssh;

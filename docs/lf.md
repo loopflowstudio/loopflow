@@ -40,6 +40,8 @@ lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
 lf task prepare DES-123           # tracked Work + worktree, no execution
+lf --task DES-123 design "Revise the discovery design"
+lf --task DES-123 code "Implement the accepted slice"
 lf --task DES-123 research \
   "Map runtime behavior; write scratch/research-runtime.md"
 lf --wave context wave/operate \
@@ -49,7 +51,7 @@ lf task run DES-123 --directive "fix the flaky test" # keep one Task through mer
 lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
 
-`--task` and `--wave` run a named skill or Flow about existing Work
+`--task` and `--wave` run a named skill, Flow or inline prompt about existing Work
 without advancing its managed Flow position. A direct bound Flow has its own
 invocation; attribution does not claim the Task worker's cursor. The most
 specific selector is the Run subject: a Task implies its Wave. Broader
@@ -57,10 +59,17 @@ selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
 Markdown snapshot. Wave binding uses its repository. Several Runs may concern the same Work
 concurrently; each keeps a distinct Run id and none reserves the Work. Bound
-direct skills leave edits uncommitted; give parallel contributions distinct
+direct skills and flows leave edits uncommitted; give parallel contributions distinct
 paths, reconcile the shared tree, then checkpoint one coherent result with `lf
 commit` or aggregate it deliberately with `lf task restart`. Parent Runs use
 this same path without becoming the Task worker or taking its claim.
+A direct flow creates a fresh Run for each skill, with the same Work subject and
+an updated scratch snapshot. Explicit flow operations still execute as authored.
+Use `lf task run DES-123 --flow code` to bind and pursue the managed Task workflow.
+
+Bare names prefer skills when a skill and flow share a name. Select explicitly
+with `lf skill launch-plan` or `lf flow launch-plan`. `design` and `ship-5whys`
+are skills; they need no single-step flow wrapper.
 
 ## Browser Captures
 
@@ -287,7 +296,6 @@ for composition limitations.
 | `deploy` | gate → op: pr land |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `incident` | restore → 5whys |
-| `ship-5whys` | implement the next open prevention from the 5 Whys |
 | `queue` | compress → update-wave → gate |
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `govern-coordination` | s2-scan → s2-assess → mutate |
@@ -327,12 +335,15 @@ lf ask "Review this proof with me"                    # block on a human session
 lf session list --json                                # unresolved human Sessions
 lf session open <session-id> --json                  # reopen the exact boundary
 lf session complete <session-id>                     # return review or Ask feedback
+lf session rename <session-id> "Release notes"        # suggestions preserve human names
 lf task steer DES-123 "rename the flag"
 lf task steer DES-123 "take the smaller approach"
 lf task interrupt DES-123                             # end the active turn
 lf task wait DES-123
 lf task resume DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
+lf task restart DES-123 --flow build                 # replace the pinned Flow; rejected before any checkpoint if unusable
+lf flow list --json                                  # every Flow with the topology it would pin
 lf work status task task_... --json                  # stable Work projection
 lf work interrupt task task_...                      # refuses without exact process ownership
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
@@ -551,6 +562,14 @@ start before the desktop is present. That cradle is not Session identity,
 readiness storage, liveness authority, or the attachment surface. The boundary
 record owns resolution; the ordinary Run owns provider identity and history.
 
+Every Session JSON record includes a required `run_id`. Use it for Run lookup;
+do not parse the Session ID. Ask and FlowStep boundaries prepare their Run before
+publication, so an unopened Session already has an identity without a provider
+process. Launch fills in that Run's context; native resume retains its identity.
+For an older boundary without a Run, `lf session open <id> --json` prepares it
+without starting a provider. Listing fails with that recovery command until the
+boundary is prepared; it never allocates a Run itself.
+
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
@@ -636,11 +655,15 @@ Waves sharing `main`.
 
 ```bash
 lf ls --json                    # every durable Wave and its Home/runtime evidence
+lf ls --current --json          # current Waves, including stopped ones
 lf status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
 lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # recent Home-local Run records
+lf runs --active --json          # current provider-backed Runs and observation gaps
+lf runs --active --watch --json  # retain discovery and stream snapshots (macOS)
+lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
 lf runs --project parser        # one Project's Runs, filtered before the result cap
 lf runs --parent run_ab12 --json # every direct child Run, uncapped
 lf runs run_ab12                 # inspect one Run by unambiguous prefix
@@ -648,7 +671,7 @@ lf runs run_ab12 --final         # print the last durable provider conclusion
 lf runs run_ab12 --events        # print its event stream verbatim
 lf usage --project parser        # direct Run usage for one Project
 lf usage --task INF-123 --json   # direct Run evidence for one Task
-lf session list                  # interactive, Ask, and FlowStep sessions
+lf session list                  # Sessions, Work paths, actions and unavailable reasons
 lf session open run_ab12         # continue a closed native provider session
 lf session open run_ab12 --try   # let the provider arbitrate an active session
 lf session open run_ab12 --replace # stop Loopflow's client, then continue here
@@ -669,12 +692,49 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
-`lf ls` reads the local Wave registry. `lf status` focuses one Wave's local
+`lf ls` reads the local Wave registry. `--current` excludes abandoned and retired
+registrations. `lf roadmap --all` spans repositories without inheriting the
+launching process's Wave; an explicit `--wave` still scopes the query.
+
+```bash
+lf work forget wave <wave-id> --dry-run --json
+lf work forget wave <wave-id> --json
+```
+
+Forget an abandoned, disabled, empty registration after removing its authored
+`GOAL.md`. The command leaves repository files alone and refuses registrations
+with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
+Use the installed Home's `lf`; development binaries operate on their own Home.
+
+`lf status` focuses one Wave's local
 planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, Run, Task PR, and Steer facts; it reuses
 `WorkRef` identity and does not read reconstructable Task or Project wake
-events. `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
+events. Historical `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
+
+`lf runs --active` discovers existing receipts once and checks current processes.
+Waiting native clients count while their owned process remains live; unfinished
+Run metadata alone does not. Exact native receipts and current Exec capture
+bindings supply ownership. No history window, result cap or new launcher marker
+is required. The one-shot cold scan still grows with retained history.
+
+On macOS, `--watch --json` keeps that reader alive, follows filesystem publication,
+and emits newline-delimited snapshots every two seconds. Unchanged warm reads
+recheck live candidates without enumerating historical Runs. Send
+`{"action":"refresh"}` on stdin for an immediate read or `{"action":"rescan"}`
+after sleep/wake or to retry discovery. Closing stdin or stdout exits only this
+reader. Notification loss requests a full cold rescan; errors remain explicit.
+Linux supports one-shot reads and reports continuous discovery as unsupported.
+
+JSON includes required `discovery` (`scanning`, `ready`, `unavailable`), `home`,
+`observed_at`, optional `task`, `runs`, and `gaps`. Empty `runs` confirms no active
+Runs only when discovery is ready and gaps are empty. Missing or ambiguous
+ownership stays incomplete. A replaced Home requires a fresh reader; repeated
+read failures wait for a request instead of repeatedly scanning history.
+Use one unfiltered Home observation for several Task views, matching each row's
+typed `work`, never its checkout. Wave/Project filters remain history reads.
+
 The `--parent` drill resolves one exact Run and returns all direct children
 without the seven-day presentation cap. The one-Run `--final` read projects the
 last durable provider conclusion from normalized conversation events. Records
@@ -844,6 +904,10 @@ lf : "fix the bug" --ide -m codex   # force the Codex app instead
 or Codex in its app. Both override the repo default. Set `session.launch: ide`
 in `.lf/config.yaml` to make the app the default for direct interactive
 skills. Automated flow nodes and `--batch` remain headless.
+
+Inside a Task's worktree, a launch without `--task`/`--wave`/`--as` belongs to
+that Task: its Session lists the Task as Work and `lf runs --task` finds it.
+An explicit selection still wins, and a branch no Task tracks stays unbound.
 
 ### External skills
 
@@ -1071,6 +1135,24 @@ complete release skips asset downloads; missing or stale artifacts are repaired.
 Use `lf rebase` for checkout updates and your project's own tools for dependency
 setup.
 
+To restore a retained development Home while promoting a local build:
+
+```bash
+local-bin/lf install promote --from-build local-bin/lf --reuse-home local-<id> \
+  --cli-target ~/.local/bin/lf --daemon-source local-bin/lfd --daemon-target ~/.local/bin/lfd \
+  --app-source local-bin/Loopflow.app --app-target /Applications/Loopflow.app --preview
+```
+
+Remove `--preview` to apply. `--reuse-home` reads the prior installation receipt
+and preserves that Home's chapter bindings, Tasks and Runs. `--fresh` instead
+forks published data into a new development Home; it does not carry history from
+another development installation.
+
+When a release contains the exact draft SQL already applied in a retained Home,
+local promotion preserves that Home's data and adopts the release receipt without
+rerunning the SQL. Its preview checks the draft order, checksums and resulting
+schema. Changed or unmatched drafts still require explicit recovery.
+
 For an older `lf` whose install command requires a source checkout, upgrade once
 with the external installer, then use `lf install` for subsequent updates:
 
@@ -1186,6 +1268,7 @@ lf wave history --wave designer --json
 lf status designer --chapter 2026-08 --json
 lf pm task create --wave designer --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"
+lf pm task comments --id 1207... --json       # read the complete comment thread
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 lf pm rename --wave designer --title "Designer"   # rename the Initiative
 lf pm reteam                            # dry-run the repository-wide Team migration

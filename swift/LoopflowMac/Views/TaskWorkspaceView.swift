@@ -384,7 +384,7 @@ private struct TaskTerminalWorkspaceView: View {
                     surfacePool: store.surfaces
                 )
                 .id(selected.id)
-                .background(LoopflowPalette.dark.background)
+                .background(TerminalPalette.background)
             }
         }
         .task(id: taskId) {

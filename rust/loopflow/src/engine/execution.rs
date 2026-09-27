@@ -167,6 +167,10 @@ impl ConcreteXor {
     }
 }
 
+pub(crate) fn node_key(prefix: &str, index: usize) -> String {
+    format!("{prefix}{index}")
+}
+
 impl ExecutionCursor {
     pub fn leaf(&self) -> &Self {
         match self.child.as_deref() {
@@ -194,6 +198,17 @@ impl ExecutionCursor {
                 }
             }
             None => (steps, self),
+        }
+    }
+
+    /// Structural occurrence in a captured definition, independent of iteration.
+    pub fn node_key(&self) -> String {
+        let here = node_key("", self.index);
+        match self.child.as_deref() {
+            Some(NestedCursor::Xor { selected, cursor }) => {
+                format!("{here}/{selected}/{}", cursor.node_key())
+            }
+            None => here,
         }
     }
 

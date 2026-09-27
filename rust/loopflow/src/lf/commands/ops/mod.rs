@@ -833,6 +833,29 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 )?;
                 println!("{}: updated task {}", result.wave, result.id);
             }
+            PmTaskCommand::Comments { id, wave, json } => {
+                let result = crate::ops::pm::pm_task_comments(
+                    &repo_root,
+                    ambient_wave(wave.as_deref())?.as_deref(),
+                    id,
+                )?;
+                if *json {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else if result.comments.is_empty() {
+                    println!("{}: no comments", result.identifier);
+                } else {
+                    for comment in &result.comments {
+                        let author = match &comment.author {
+                            crate::ops::pm::TaskCommentAuthor::Person { name } => {
+                                name.as_deref().unwrap_or("unnamed person")
+                            }
+                            crate::ops::pm::TaskCommentAuthor::Integration => "integration",
+                        };
+                        let date = comment.created_at.as_deref().unwrap_or("date unavailable");
+                        println!("── {author} · {date}\n{}\n", comment.body.trim_end());
+                    }
+                }
+            }
             PmTaskCommand::Done { id, wave, pr } => {
                 let result = crate::ops::pm::pm_update(
                     &repo_root,
@@ -2254,6 +2277,7 @@ fn launch_skill_agent(
             worktree: Some(repo_root.to_path_buf()),
             skill: Some(skill_name.to_string()),
             subjects: Vec::new(),
+            flow: crate::run_record::RunFlowMembership::Independent,
         },
         &context,
     )?;

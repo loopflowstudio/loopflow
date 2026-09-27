@@ -122,6 +122,12 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: swift-cli
+      - name: Build CLI for Swift transport tests
+        run: cargo build -p loopflow --bin lf
       - name: Cache SwiftPM build
         uses: actions/cache@v6
         with:
@@ -135,7 +141,9 @@ jobs:
         # -gnone skips debug-info generation; `swift test` here is ~95% compile,
         # and CI never symbolicates. Failure locations come from #file/#line
         # macros, not debug info, so they're preserved.
-        run: swift test --package-path swift -Xswiftc -gnone
+        # Native proofs share AppKit's main actor; concurrent suites starve
+        # async observations and invalidate their timing budgets.
+        run: swift test --package-path swift --no-parallel -Xswiftc -gnone
       - name: Check Swift multiplatform boundaries
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
       - name: Prove the control room renders its four states distinctly

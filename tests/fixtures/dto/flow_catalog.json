@@ -1,0 +1,140 @@
+[
+  {
+    "name": "feature",
+    "graph": {
+      "name": "feature",
+      "steps": [
+        {
+          "key": "0",
+          "id": "design",
+          "label": "task-design",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "parents": [
+            "feature"
+          ],
+          "paths": []
+        },
+        {
+          "key": "1",
+          "id": "implement",
+          "label": "implement",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "parents": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": "2",
+          "id": null,
+          "label": "review-slice",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "parents": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": "3",
+          "id": "decide",
+          "label": "loop-decide",
+          "kind": "skill",
+          "human": false,
+          "returns_to": "1",
+          "parents": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": "4",
+          "id": "demo",
+          "label": "demo",
+          "kind": "skill",
+          "human": true,
+          "returns_to": null,
+          "parents": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": "5",
+          "id": "decide_delivery",
+          "label": "loop-decide",
+          "kind": "skill",
+          "human": false,
+          "returns_to": "1",
+          "parents": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": "6",
+          "id": null,
+          "label": "xor-route",
+          "kind": "xor",
+          "human": false,
+          "returns_to": null,
+          "parents": [
+            "feature"
+          ],
+          "paths": [
+            {
+              "name": "fix",
+              "description": "Repair the failing check",
+              "steps": [
+                {
+                  "key": "6/fix/0",
+                  "id": "patch",
+                  "label": "patch",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": null,
+                  "parents": [],
+                  "paths": []
+                }
+              ]
+            },
+            {
+              "name": "skip",
+              "description": "Nothing to repair",
+              "steps": []
+            }
+          ]
+        },
+        {
+          "key": "7",
+          "id": null,
+          "label": "pr land -c",
+          "kind": "op",
+          "human": false,
+          "returns_to": null,
+          "parents": [
+            "feature",
+            "queue"
+          ],
+          "paths": []
+        }
+      ]
+    },
+    "unavailable": null
+  },
+  {
+    "name": "broken",
+    "graph": null,
+    "unavailable": "failed to load skill \"missing\": not found"
+  }
+]

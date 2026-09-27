@@ -315,6 +315,8 @@ pub struct IssueObservation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssueComment {
     pub id: String,
+    /// Provider creation time; display order. `revision` orders direction.
+    pub created_at: Option<String>,
     pub revision: Option<String>,
     pub body: String,
     pub author_id: Option<String>,

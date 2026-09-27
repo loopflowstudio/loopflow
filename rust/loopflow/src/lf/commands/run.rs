@@ -23,6 +23,14 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+    if let Some(binding) = checkout_binding(cli)? {
+        let mut bound = cli.launch_options();
+        bound.wave = Some(binding.wave_name.clone());
+        if bound.model.is_none() {
+            bound.model = binding.agent.clone();
+        }
+        return run_bound(skill, message, &bound, &binding);
+    }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
 
@@ -76,6 +84,28 @@ pub fn run_bound(
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
+}
+
+/// An `lf` launch inside a registered Task's checkout binds to that Task unless
+/// the caller selected Work explicitly (Jack, 2026-09-26). No registry, an
+/// unreadable one, a checkout outside git or an unregistered branch all leave
+/// the launch unbound; nothing here refuses a launch that worked before.
+fn checkout_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
+    if cli.work_subject_selector().is_some() {
+        return Ok(None);
+    }
+    let Some(repo) = crate::repo::discover_repo_root(&std::env::current_dir()?)? else {
+        return Ok(None);
+    };
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let Some(store) = crate::store::open_existing_store().await else {
+            return Ok(None);
+        };
+        crate::ops::resolve_checkout_binding(&std::sync::Arc::new(store), &repo)
+            .await
+            .map_err(anyhow::Error::from)
+    })
 }
 
 pub(crate) fn bound_message(binding: &crate::ops::WorkBinding, message: Option<&str>) -> String {
@@ -571,6 +601,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
             "tui"
         };
         let capture = begin_run_capture(built, surface, &built.agent_config)?;
+        record_task_start(&built.subjects)?;
         let provider_session_id = if target == LaunchTarget::Tui && built.harness == "claude" {
             let run_id = capture.run_id();
             let raw_id = run_id
@@ -632,6 +663,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let capture = begin_run_capture(built, "headless", &agent_config)?;
+    record_task_start(&built.subjects)?;
 
     let result = launch_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
@@ -752,8 +784,16 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
+        flow: crate::ops::flow_run::capture_membership()?,
     };
-    let capture = if surface == "headless" {
+    let capture = if let Some(id) = crate::ops::human_session::prepared_run_id()? {
+        crate::run_record::CaptureHandle::start_prepared(
+            &crate::store::lf_home_dir(),
+            &id,
+            spec,
+            &built.context,
+        )
+    } else if surface == "headless" {
         let launch = crate::run_record::RunLaunchRequest::from_prepared(
             prepared_config,
             &built.capabilities,
@@ -768,9 +808,33 @@ fn begin_run_capture(
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
-    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
     crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)
+}
+
+/// A Task-bound launch starts work, whether the Task was selected explicitly or
+/// resolved from the checkout; generic capture records attribution only and does
+/// not require a planning registry. Reads and preparation do not start work.
+fn record_task_start(subjects: &[String]) -> Result<()> {
+    let Some(selector) = subjects
+        .iter()
+        .find_map(|subject| subject.strip_prefix("task:"))
+    else {
+        return Ok(());
+    };
+    let path = crate::store::database_path_from_env()?;
+    if !path.try_exists()? {
+        return Ok(());
+    }
+    let store = crate::store::sqlite::SqliteStore::new(&path)?;
+    let task = match crate::durable::TaskId::parse(selector) {
+        Ok(id) => store.task(&id)?,
+        Err(_) => store.task_by_issue(selector)?,
+    };
+    if let Some(task) = task {
+        store.begin_chapter_task(&task.id)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn attributed_context(

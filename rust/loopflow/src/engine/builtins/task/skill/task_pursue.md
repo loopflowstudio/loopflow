@@ -55,7 +55,10 @@ selection. Follow the repo style guide.
 - Do not land or complete the Task from this loop. The pinned final flow owns
   its gate, learning record, and landing disposition.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
-  under the owning Wave. Filing does not authorize launching it in this task.
+  under the owning Wave. Describe the current problem, desired outcome, observable
+  acceptance, and real constraints. Put dated progress in authorized Task comments;
+  keep current blockers visible in the brief when comments are collapsed. Filing
+  does not authorize launching it in this task.
 - Report consequential progress through the Task; its linked events
   keep the owning Wave informed without copying raw tool chatter.
 

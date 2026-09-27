@@ -26,6 +26,7 @@ mod run;
 pub mod task;
 pub mod task_actions;
 pub mod task_execution;
+pub mod task_flow;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
@@ -66,6 +67,9 @@ pub use release::{
 pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
 pub(crate) use run::{render_task_context, render_wave_context};
 #[doc(hidden)]
-pub use run::{resolve_work_binding, resolve_work_selection, WorkBinding, WorkSelection};
+pub use run::{
+    resolve_checkout_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
+    WorkSelection,
+};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

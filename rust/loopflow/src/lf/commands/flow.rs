@@ -6,26 +6,30 @@ use crate::engine::{
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
-use crate::ops::{commit_workflow, flow_run, CommitOptions, NullProgress};
+use crate::ops::{commit_workflow, flow_run, CommitOptions, NullProgress, WorkBinding};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
 /// Run a flow: print pipeline header, then execute each skill sequentially.
-pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    let items = expand_flow(flow, repo)?;
-    print_pipeline_header(&flow.name, &items, repo)?;
-    execute(&flow.name, &items, message, cli, repo)
-}
-
-pub fn run_bound(
+pub fn run(
     flow: &Flow,
     message: Option<&str>,
     cli: &Cli,
-    binding: &crate::ops::WorkBinding,
+    repo: &Path,
+    binding: Option<&WorkBinding>,
 ) -> Result<()> {
-    let message = crate::lf::commands::run::bound_message(binding, message);
-    run(flow, Some(&message), cli, &binding.cwd)
+    let items = expand_flow(flow, repo)?;
+    print_pipeline_header(&flow.name, &items, repo)?;
+    let bound_message =
+        binding.map(|binding| crate::lf::commands::run::bound_message(binding, message));
+    execute(
+        &flow.name,
+        &items,
+        bound_message.as_deref().or(message),
+        cli,
+        repo,
+    )
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
@@ -33,6 +37,22 @@ pub fn show(name: &str, repo: &Path) -> Result<()> {
     let items = expand_flow(&flow, repo)?;
     for line in render_pipeline_lines(&items, repo)? {
         println!("{line}");
+    }
+    Ok(())
+}
+
+/// `lf flow list [--json]` — selectable Flows with the topology each would pin.
+pub fn list(repo: &Path, json: bool) -> Result<()> {
+    let catalog = crate::engine::flow_graph::flow_catalog(repo);
+    if json {
+        println!("{}", serde_json::to_string(&catalog)?);
+        return Ok(());
+    }
+    for entry in catalog {
+        match entry.unavailable {
+            Some(reason) => println!("{}  (unavailable: {reason})", entry.name),
+            None => println!("{}", entry.name),
+        }
     }
     Ok(())
 }
@@ -441,7 +461,10 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                     &launch,
                     &self.repo,
                 )?;
-                commit_skill_work(&self.repo, &skill.skill.name)?;
+                if self.cli.task.is_none() && self.cli.wave.is_none() && self.cli.as_work.is_none()
+                {
+                    commit_skill_work(&self.repo, &skill.skill.name)?;
+                }
                 Ok(())
             },
         );

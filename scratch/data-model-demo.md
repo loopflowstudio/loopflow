@@ -14,7 +14,7 @@ export LF_HOME=/private/tmp/claude-501/-Users-jack-src-loopflow-main-view-task/f
 LF=$PWD/target/debug/lf
 
 $LF session import --dry-run     # a second import changes nothing
-$LF session list --json          # one query: interactive, Ask, Flow review, Task review
+$LF session list --all --json    # one query: interactive, Ask, Flow review, Task review
 $LF runs --task LOO-298 --json   # one query over runs
 $LF session bind <orphan-session> --task <unstarted-issue>
 $LF runs --task <unstarted-issue> --json   # the bound Run; the Task is now started

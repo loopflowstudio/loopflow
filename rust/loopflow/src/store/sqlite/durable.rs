@@ -1753,7 +1753,220 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn task_started_tracks_published_review_history_not_reservation() {
+    fn run_assignment_starts_tasks_once_and_rejects_reassignment_atomically() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conn = store.conn.lock().unwrap();
+        let bound_task = TaskId::new();
+        let losing_task = TaskId::new();
+        for id in [&bound_task, &losing_task] {
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES(?1,?2,?1,?1,?1,1)",
+                rusqlite::params![id.as_str(), task.project_id.as_str()]).unwrap();
+        }
+        // A done Task is still a valid assignment target.
+        conn.execute(
+            "UPDATE tasks SET work_state='done',work_terminal_at=1 WHERE id=?1",
+            [bound_task.as_str()],
+        )
+        .unwrap();
+        let other_wave = WaveId::new();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'other','/repo',1)",
+            [other_wave.as_str()],
+        )
+        .unwrap();
+        let make_run = |task_id, wave_id, created_at| Run {
+            id: RunId::new(),
+            session_id: None,
+            invocation_id: None,
+            task_id,
+            wave_id,
+            work_source: Some(WorkSource::Declared),
+            created_at,
+            published: false,
+            cwd: "/repo".into(),
+            skill: None,
+        };
+        let before = crate::store::rows::now_unix();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let reserved = insert_run_in(&tx, make_run(Some(task_id.clone()), None, 1)).unwrap();
+        let orphan = insert_run_in(&tx, make_run(None, None, 2)).unwrap();
+        let wave_only = insert_run_in(&tx, make_run(None, Some(task.wave_id.clone()), 3)).unwrap();
+        let conflicting = insert_run_in(&tx, make_run(None, Some(other_wave.clone()), 4)).unwrap();
+        tx.commit().unwrap();
+        let started = |conn: &rusqlite::Connection, id: &TaskId| -> Option<i64> {
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let assigned = started(&conn, &task_id).unwrap();
+        assert!((before..=crate::store::rows::now_unix()).contains(&assigned));
+        assert_ne!(assigned, reserved.created_at);
+        assert_eq!(started(&conn, &bound_task), None);
+        let before_bind = crate::store::rows::now_unix();
+        conn.execute(
+            "UPDATE runs SET task_id=?2,wave_id=?3,work_source='bound' WHERE id=?1",
+            rusqlite::params![
+                orphan.id.as_str(),
+                bound_task.as_str(),
+                task.wave_id.as_str()
+            ],
+        )
+        .unwrap();
+        let bound_at = started(&conn, &bound_task).unwrap();
+        assert!((before_bind..=crate::store::rows::now_unix()).contains(&bound_at));
+        assert_ne!(bound_at, orphan.created_at);
+        conn.execute(
+            "UPDATE runs SET task_id=?2,work_source='bound' WHERE id=?1",
+            rusqlite::params![wave_only.id.as_str(), bound_task.as_str()],
+        )
+        .unwrap();
+        for created_at in [0, bound_at + 1000] {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            insert_run_in(&tx, make_run(Some(bound_task.clone()), None, created_at)).unwrap();
+            let later_bind = insert_run_in(&tx, make_run(None, None, created_at)).unwrap();
+            tx.execute(
+                "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
+                rusqlite::params![
+                    later_bind.id.as_str(),
+                    bound_task.as_str(),
+                    task.wave_id.as_str()
+                ],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            assert_eq!(started(&conn, &bound_task), Some(bound_at));
+        }
+        for (id, new_task, new_wave) in [
+            (
+                &orphan.id,
+                Some(losing_task.as_str()),
+                Some(task.wave_id.as_str()),
+            ),
+            (&orphan.id, None, Some(task.wave_id.as_str())),
+            (
+                &conflicting.id,
+                Some(losing_task.as_str()),
+                Some(task.wave_id.as_str()),
+            ),
+            (&conflicting.id, None, None),
+        ] {
+            assert!(conn
+                .execute(
+                    "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
+                    rusqlite::params![id.as_str(), new_task, new_wave]
+                )
+                .is_err());
+            assert_eq!(started(&conn, &losing_task), None);
+            assert_eq!(started(&conn, &bound_task), Some(bound_at));
+        }
+        for timestamp in [None, Some(bound_at - 1), Some(bound_at + 1)] {
+            assert!(conn
+                .execute(
+                    "UPDATE tasks SET started_at=?2 WHERE id=?1",
+                    rusqlite::params![bound_task.as_str(), timestamp]
+                )
+                .is_err());
+        }
+        assert!(conn
+            .execute(
+                "UPDATE tasks SET started_at=1 WHERE id=?1",
+                [losing_task.as_str()]
+            )
+            .is_err());
+        assert!(conn
+            .execute("DELETE FROM runs WHERE id=?1", [reserved.id.as_str()])
+            .is_err());
+        // Failed enclosing writes roll back both the reservation and Started.
+        {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            insert_run_in(&tx, make_run(Some(losing_task.clone()), None, 5)).unwrap();
+            assert!(started(&tx, &losing_task).is_some());
+        }
+        assert_eq!(started(&conn, &losing_task), None);
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM tasks t WHERE
+            (started_at IS NOT NULL) != EXISTS(SELECT 1 FROM runs WHERE task_id=t.id)",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn competing_run_assignments_start_only_the_winning_task() {
+        let (dir, store, task_id) = store_with_task();
+        let wave = store.task(&task_id).unwrap().unwrap().wave_id;
+        let other_task = TaskId::new();
+        let run = RunId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                SELECT ?1,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
+                rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO runs(id,created_at,cwd,published) VALUES(?1,1,'/repo',0)",
+                [run.as_str()],
+            )
+            .unwrap();
+        }
+        let barrier = Arc::new(Barrier::new(2));
+        let writers = [task_id, other_task].map(|target| {
+            let path = dir.path().join("loopflow.db");
+            let barrier = barrier.clone();
+            let wave = wave.clone();
+            let run = run.clone();
+            thread::spawn(move || {
+                let conn = rusqlite::Connection::open(path).unwrap();
+                conn.busy_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+                conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+                barrier.wait();
+                let result = conn.execute(
+                    "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
+                    rusqlite::params![run.as_str(), target.as_str(), wave.as_str()],
+                );
+                (target, result)
+            })
+        });
+        let results = writers.map(|writer| writer.join().unwrap());
+        assert_eq!(
+            results.iter().filter(|(_, result)| result.is_ok()).count(),
+            1
+        );
+        let conn = store.conn.lock().unwrap();
+        for (target, result) in results {
+            let (has_run, started): (bool, bool) = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=?1),started_at IS NOT NULL
+                 FROM tasks WHERE id=?1",
+                    [target.as_str()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(has_run, result.is_ok());
+            assert_eq!(started, result.is_ok());
+            if let Err(error) = result {
+                assert!(error.to_string().contains("assignment cannot change"));
+            }
+        }
+    }
+
+    #[test]
+    fn task_started_tracks_reserved_review_and_retained_history() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         assert!(!store.task_started(&task_id).unwrap());
@@ -1768,7 +1981,9 @@ mod durable_store_tests {
         let position = store.set_flow_position(&task_id, &initial).unwrap();
         let session_id = crate::ops::human_session::flow_id(&position).unwrap();
         let (reserved, run) = store.reserve_review_run(&position).unwrap();
-        assert!(!store.task_started(&task_id).unwrap());
+        assert!(store.task_started(&task_id).unwrap());
+        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
+        assert!(!store.retire_chapter_backlog(&task_id).unwrap());
 
         store
             .publish_review_run(&session_id, &run.id, reserved.version)

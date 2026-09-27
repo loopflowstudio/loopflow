@@ -764,6 +764,68 @@ Executable bytes are unchanged in this compression pass, so earlier static
 receipts retain their stated scope. Only this review note changed; its whitespace
 check does not clear the recorded branch-range whitespace failures.
 
+### Task review ownership compression (2026-09-26)
+
+Reviewed `136e37862` from a clean working tree through the new Session/Run types,
+SQLite draft and transactions, Task controller, launch publication, CLI Session
+dispatch, Rust/Swift DTOs, pane reconciliation and preservation fixtures. The
+amended approval remains authoritative; the older Task title is superseded.
+
+Removed the duplicate update path in `store/sqlite/sessions.rs::save_review_in`.
+Previously an execution checkpoint could insert a replacement Run, switch the
+current pointer, mark a Run published and overwrite saved feedback from copied
+`FlowPosition` fields. Existing Sessions now retain those facts during cursor
+checkpoints. Run reservation, publication and Ready are their mutation owners.
+The only direct caller found depending on the removed update path was the
+controller's restart fixture; it now uses the existing Session reservation,
+publication and Ready operations. No schema or public wire shape changed.
+
+| Fact | Owner / remaining representation | Compression decision |
+| --- | --- | --- |
+| Task execution, capture, cursor and claim | `flow_invocations`; `FlowPosition` carries the execution snapshot | Keep version and invocation fences. Cursor writes no longer update an existing conversation. |
+| Title, feedback, completion and current Run | `sessions`; joined feedback and published Run ID still appear in `FlowPosition` | Keep the read snapshot for exact completion comparisons and feedback delivery; delete its authority to overwrite an existing Session. |
+| Attempt identity, publication and history | `runs`; Session history queries `session_id` | Keep reservation/publication separate from native identity and process receipts. A row's publication flag grants no process authority. |
+| Initial human boundary | Session + Run creation inside the invocation transaction | Retain initial creation, including its supplied seed fields. Removing all seed inputs requires migrating the remaining construction fixtures; this pass removes existing-Session updates only. |
+| Historical inputs | `historical_session_run_id`, `historical_ready_summary`, root cursor columns and shipped migrations | Keep until populated offline conversion proves preservation. No current writer uses the historical Session columns. |
+| Public Session and desktop identity | Rust/Swift `SessionRecord`, composite review ID, pane key | Keep until every conversation kind and DTO consumer moves together. The final stable Session ID and Run-history wire contract are still unfinished. |
+
+Extended the existing repeated-replacement proof: checkpoints carrying an old
+Run and either replacement or absent feedback leave the Session and all three
+history rows unchanged, then the saved answer completes once beside an unrelated
+malformed invocation. This is authored proof, not an executed result. The
+controller restart proof retains its capability assertion with the production
+Session operations supplying its state.
+
+Source review confirmed that existing-Session current-Run, publication and
+feedback UPDATEs now each have one writer in the Session transaction module.
+Initial creation and offline import remain distinct creation paths. The
+four-source public inventory, taskless file driver, manifest-based Run readers,
+Ask feedback reset and provider sidecars remain live; deleting them before the
+all-caller cutover would remove capability. The recorded manifest-publication
+interruption gap also remains. This reduction does not solve that recovery
+boundary, installed conversion, Chapter ownership or the full-design acceptance.
+
+Preflight and safe recovery both fail at active `main-view-task` **15.3 GiB /
+12 GiB**, with **98.7 GiB** free. Recovery preserved the active foreign build.
+TESTING.md therefore prevents product test execution, including materialized
+migration rehearsal. Focused proof owed after preflight permits:
+
+```sh
+cargo test -p loopflow --lib review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors
+cargo test -p loopflow --lib restarting_a_human_node_reuses_the_same_task_position
+```
+
+Use TESTING.md isolation and retain every earlier unexecuted proof. No Home,
+provider, PR, Task disposition or Flow navigation mutation is part of this pass.
+All eight Done When obligations still govern publication.
+
+Static checks pass: `cargo fmt --all --check`, isolated
+`cargo clippy --all-targets -- -D warnings`, and working-diff whitespace.
+Clippy compiled the changed fixtures but did not execute them. Migration files
+and the public DTO/documentation spec are unchanged; earlier receipts retain
+only their recorded scope, including the Chapter inventory and branch-range
+whitespace gaps.
+
 ## Measure
 
 The [2026-09-26 slice review](data-model-slice-review.md) records the current

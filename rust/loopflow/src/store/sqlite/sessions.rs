@@ -275,29 +275,11 @@ pub(super) fn save_review_in(conn: &Connection, position: &FlowPosition) -> Stor
         return Ok(());
     }
     let id = review_id(position)?;
-    if let Some((session, run)) = session_in(conn, &id)? {
+    if let Some((session, _)) = session_in(conn, &id)? {
         if session.completed_at.is_some() {
             return Err(StoreError::InvalidAuthority(
                 "completed review cannot be reopened by a cursor write".into(),
             ));
-        }
-        if let Some(next_run) = &position.session_run_id {
-            if next_run != &run.id {
-                insert_run_in(conn, next_run, &id, position, true)?;
-                conn.execute(
-                    "UPDATE sessions SET current_run_id=?2 WHERE id=?1 AND current_run_id=?3",
-                    params![id, next_run.as_str(), run.id.as_str()],
-                )?;
-            } else {
-                conn.execute("UPDATE runs SET published=1 WHERE id=?1", [run.id.as_str()])?;
-            }
-        }
-        // Cursor checkpoints do not own erasure of conversational feedback.
-        if let Some(summary) = &position.ready_summary {
-            conn.execute(
-                "UPDATE sessions SET ready_summary=?2 WHERE id=?1",
-                params![id, summary],
-            )?;
         }
     } else {
         let run_id = position.session_run_id.clone().unwrap_or_default();

@@ -4828,6 +4828,161 @@ mod tests {
     }
 
     #[test]
+    fn session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints() {
+        let conn = open();
+        let name = "own_sessions_and_runs";
+        apply_before_current_draft(&conn, name);
+        if !_draft_is_canonical(name) {
+            for dependency in ["drop_task_flow_step_projection", "retain_flow_invocations"] {
+                if !_draft_is_canonical(dependency) {
+                    conn.execute_batch(&current_draft_sql(dependency)).unwrap();
+                }
+            }
+        }
+        let wave = crate::id::WaveId::new();
+        let project = crate::durable::ProjectId::new();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'wave','/repo',1)",
+            [wave.as_str()],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",
+            rusqlite::params![project.as_str(), wave.as_str()]).unwrap();
+        let mut imported = Vec::new();
+        for nested in [false, true] {
+            let task = crate::durable::TaskId::new();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at)
+                VALUES(?1,?2,?1,?1,'Parser review',?1,1)",
+                rusqlite::params![task.as_str(), project.as_str()]).unwrap();
+            let mut invocation = crate::durable::test_flow_invocation(
+                "captured",
+                0,
+                "review-design",
+                Some("review"),
+                true,
+            );
+            let mut cursor = crate::engine::ExecutionCursor {
+                iteration: 4,
+                ..Default::default()
+            };
+            if nested {
+                invocation.steps = vec![crate::engine::ConcreteStep::Xor(
+                    crate::engine::ConcreteXor {
+                        router: crate::engine::Skill::named("route"),
+                        paths: [(
+                            "selected".into(),
+                            crate::engine::ConcretePath {
+                                description: "chosen branch".into(),
+                                steps: invocation.steps.clone(),
+                            },
+                        )]
+                        .into(),
+                        flow_parents: vec![],
+                    },
+                )];
+                cursor.child = Some(Box::new(crate::engine::NestedCursor::Xor {
+                    selected: "selected".into(),
+                    cursor: crate::engine::ExecutionCursor::default(),
+                }));
+            }
+            let run = crate::durable::RunId::new();
+            let capture = serde_json::to_string(&invocation).unwrap();
+            let cursor = serde_json::to_string(&cursor).unwrap();
+            conn.execute("INSERT INTO flow_invocations(id,task_id,invocation_json,session_run_id,ready_summary,
+                step_index,iteration,position_version,worker_generation,updated_at,review_json,state)
+                VALUES(?1,?2,?3,?4,'saved answer',0,4,9,0,100,?5,'current')",
+                rusqlite::params![invocation.id, task.as_str(), capture, run.as_str(), cursor]).unwrap();
+            imported.push((task, invocation.id, run, capture, cursor));
+        }
+        conn.execute_batch("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE;")
+            .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        conn.execute_batch("COMMIT").unwrap();
+        for (task, invocation, run, capture, cursor) in &imported {
+            let session = format!("{task}:{invocation}:captured:review:4");
+            let saved: (String, String, String, String, String) = conn
+                .query_row(
+                    "SELECT f.invocation_json,f.review_json,s.ready_summary,s.title,r.id
+                 FROM flow_invocations f JOIN sessions s ON s.id=f.pending_session_id
+                 JOIN runs r ON r.id=s.current_run_id WHERE f.id=?1",
+                    [invocation],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                saved,
+                (
+                    capture.clone(),
+                    cursor.clone(),
+                    "saved answer".into(),
+                    "Parser review".into(),
+                    run.to_string()
+                )
+            );
+            let membership: (String, String, String) = conn
+                .query_row(
+                    "SELECT session_id,task_id,wave_id FROM runs WHERE id=?1",
+                    [run.as_str()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(membership, (session, task.to_string(), wave.to_string()));
+        }
+        // The current Run must belong to this conversation, including at COMMIT.
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        conn.execute(
+            "UPDATE sessions SET current_run_id=?1 WHERE current_run_id=?2",
+            rusqlite::params![imported[1].2.as_str(), imported[0].2.as_str()],
+        )
+        .unwrap();
+        assert!(conn.execute_batch("COMMIT").is_err());
+        conn.execute_batch("ROLLBACK").unwrap();
+        let independent = crate::durable::RunId::new();
+        conn.execute(
+            "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
+            position_version,worker_generation,updated_at,state)
+            VALUES('taskless','{\"id\":\"taskless\"}',0,0,1,0,1,'current')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO runs(id,invocation_id,created_at,published,cwd)
+            VALUES(?1,'taskless',1,1,'/repo')",
+            [independent.as_str()],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
+                rusqlite::params![independent.as_str(), imported[0].0.as_str(), wave.as_str()]
+            )
+            .is_err());
+        assert!(conn
+            .query_row(
+                "SELECT task_id IS NULL AND wave_id IS NULL FROM runs WHERE id=?1",
+                [independent.as_str()],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        assert!(conn
+            .execute(
+                "UPDATE runs SET wave_id=NULL WHERE id=?1",
+                [imported[0].2.as_str()]
+            )
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn task_loop_review_preserves_existing_human_and_claimed_positions() {
         let conn = open();
         apply_before_current_draft(&conn, "task_loop_review");

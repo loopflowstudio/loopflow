@@ -84,3 +84,31 @@ Preflight and safe recovery now observe `main-view-task` at 15.3 GiB / 12 GiB
 commands also include `retaining_invocations_preserves_populated_execution_and_review_bytes`
 and `stale_human_decisions_cannot_target_a_replacement_invocation`; run the
 migration proofs again after materialization in a disposable source copy.
+
+## Task review Session owner draft (2026-09-26)
+
+Implemented the first used Session/Run transaction path for Task reviews. This
+is a narrower internal implementation boundary than the requested all-caller
+cutover; the full design and all acceptance obligations remain unchanged. No
+intermediate publication or Home activation is selected. Ask, interactive and
+taskless Flow owners still need conversion together with their readers and DTOs.
+
+New preservation boundary found during source review: the child can publish its
+immutable manifest and then be interrupted before marking its reserved SQL Run
+published. Retrying retains the reserved Run ID, but today's artifact publisher
+rejects an existing manifest/staging directory. Exact publication recovery must
+settle that boundary without starting duplicate providers or replacing immutable
+input. The draft neither deletes those bytes nor treats missing publication as
+proof of provider death. This is an unfinished recovery obligation, not a reason
+to invent a new Run or mark the implementation accepted.
+
+The SQL draft preserves unmapped Task review inputs under historical column
+names for offline import; current writers never update them. The full importer
+must classify those inputs and remove the conversion-only columns before the
+final installed cutover. The draft by itself does not establish lossless import
+of legacy flat captures, completed conversations or filesystem-owned Sessions.
+
+Latest preflight still reports active `main-view-task` 15.3/12 GiB, 98.7 GiB
+free. Product tests remain unexecuted; do not reinterpret all-target Clippy as
+behavioral evidence. No new decision from the participant is needed to continue
+within the amended model.

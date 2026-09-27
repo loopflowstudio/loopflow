@@ -479,25 +479,101 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-Retain Task invocation identity and history before moving the other execution
-owners. Replace `task_flow_positions` with invocation-keyed `flow_invocations`;
-one partial unique index selects each Task's current invocation. Completion
-and restart close that row instead of deleting capture, cursor, claim and review
-evidence. All Task writers select only the current row; stale Session writes
-must also match invocation identity when a replacement reuses version numbers.
-Chapter retirement reads historical execution evidence, while current claims
-exclude finished invocations. Keep the existing Task projection API for this
-internal cut; taskless file persistence and the Session union still await the
-coherent cutover and must not ship as competing owners.
+Move Task review conversations into their actual Session owner. A Session owns
+its title, saved feedback, completion and current Run; `runs.session_id` retains
+all attempts. Human-boundary creation reserves Session and Run in the invocation
+transaction. Launch publishes that exact reservation before provider start.
+Replacement appends a Run under the same Session and updates the pending attempt
+under the existing version fence. Ready requires the current published Run;
+Complete closes the Session atomically with the exact waiting boundary.
 
-Forward migration preserves all existing columns byte-for-byte and rejects
-ambiguous invocation IDs or dangling Task ownership rather than guessing.
-Focused proof covers populated conversion, autonomous and human completion,
-restart with reused versions, stale writes, retained feedback and retirement.
-Behavioral execution and materialized proof remain conditional on TESTING.md's
-resource preflight. No installed Home is changed by this slice.
+Task review discovery now reads Session/current Run directly, so unrelated
+malformed autonomous captures do not prevent listing valid reviews. Exact Task
+execution reads still identify the unreadable capture. Remove the obsolete
+`human_task_flow_positions` inventory instead of maintaining a second decoder.
+Retain completed and replaced review Run identities when excluding boundary Runs
+from the remaining interactive inventory. Rename updates this Session owner.
+
+This is a used Task-review ownership cut inside the required coherent cutover,
+not completion of slices 2–4 or permission to publish. Ask, interactive and
+ordinary/taskless Flow conversations still use their original owners. The current
+Run row does not yet own general provider/outcome/usage facts; bind, launch
+inference, Run readers, DTO/Swift changes and the shared taskless driver remain.
+The existing composite review identity remains stable across Run replacement;
+the final independent Session IDs and desktop import mapping remain outstanding.
+
+The forward draft imports captured Task review boundaries, including selected
+XOR children, and keeps raw unmapped inputs under historical column names for
+the offline Home importer. No runtime fallback reads those columns. This is not
+an inventory or lossless import claim for all historical conversations. Do not
+activate these readers over an installed Home before the complete import and
+promotion boundary are implemented.
+
+Focused proof combines two replacements, title/feedback/history retention,
+stale Ready/publication/completion rejection, an unrelated malformed capture,
+and one feedback completion. A populated migration proof covers nested review
+capture, current-Run ownership and nullable Task equality. Both remain unexecuted
+while TESTING.md's resource preflight fails. An interruption after manifest
+publication but before SQL publication remains a preparation-recovery gap:
+the reservation is retained, but the immutable manifest publisher rejects its
+retry. Preserve that evidence; do not launch a second provider or claim the
+complete preparation-retry contract yet.
 
 ## Slice ledger
+
+- 2026-09-26 Task review draft static checks: `cargo fmt --all --check`,
+  `cargo clippy --all-targets -- -D warnings`, migration validation and current
+  working-diff whitespace pass. Three drafts are dependency-ordered; all 52
+  shipped migration files remain unchanged. Architecture inventories pass except
+  the existing `wave_chapters` gap (**32/33** SQLite owners). The older whole-
+  branch whitespace findings remain unchanged. No behavioral pass is claimed.
+  In addition to the earlier owed commands, run these under TESTING.md isolation
+  after resource preflight permits execution:
+
+  ```sh
+  cargo test -p loopflow --lib review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors
+  cargo test -p loopflow --lib session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints
+  cargo test -p loopflow --lib controller::task::planning_tests
+  ```
+
+  Repeat the populated migration proof after draft materialization in a
+  disposable source copy. Before a full gate, complete the preparation recovery
+  boundary and the rest of the owner/consumer cutover; these tests cannot stand
+  in for those changes or the configured CLI/app acceptance.
+
+- 2026-09-26 Task review ownership draft: added `sessions` and `runs` with a
+  deferred current-Run/member constraint, indexed history and nullable ancestry
+  checks. Task boundary writes reserve conversations, Session feedback feeds
+  execution reads, and completion shares Task settlement's transaction. Launch
+  reserves/publishes one Run identity; replacement retains the same Session and
+  feedback. `lf session rename` now updates SQL-backed Task reviews. Other kinds
+  are not converted and cannot use that operation yet.
+- 2026-09-26 source review: removed the now-unused Task-position inventory;
+  direct Session discovery does not decode unrelated captures. Exact execution
+  errors name the Task and preserve the unreadable bytes. Corrected discovery
+  of superseded/completed Runs so they cannot reappear as independent interactive
+  Sessions. Closed and replaced conversations retain queryable store history;
+  opening that history through the final CLI/desktop surface remains unfinished.
+  Ready now also rejects claimed boundaries. No process authority comes from the
+  new Session row or the Run's publication flag.
+- 2026-09-26 proof authored: repeated Run replacement with retained human title,
+  feedback and three history rows; stale Run publication/Ready/completion;
+  unrelated corrupt invocation; exactly one completion event. Migration proof
+  preserves nested captured review bytes and rejects a foreign current Run and
+  taskless Invocation Run's null-to-Task binding. Controller fixtures now publish
+  reserved review identities before Ready. These are storage/simulated-provider
+  proofs, not configured acceptance, and have not executed.
+- 2026-09-26 latest resource preflight: active `main-view-task` remains at
+  **15.3 GiB / 12 GiB**, with **98.7 GiB** free. Earlier safe recovery preserved
+  the active foreign build. No product test or materialized migration rehearsal
+  ran. Clippy compiled all targets successfully; compilation does not validate
+  runtime SQL or establish the new behavior. No installed Home, provider,
+  publication or Task disposition was changed.
+- The complete eight-part Done When remains owed. In addition to the unconverted
+  owners and consumers, the manifest-to-SQL preparation recovery boundary above
+  requires repair and fault-injection proof before this owner cutover can ship.
+  Current-Run-only bind remains an assumption, with no new approval inferred.
+
 
 - 2026-09-26 invocation-retention checks: final `cargo fmt --all --check`,
   `cargo clippy --all-targets -- -D warnings`, migration validation (two ordered

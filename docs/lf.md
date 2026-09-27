@@ -700,6 +700,7 @@ lf ls --json                    # every durable Wave and its Home/runtime eviden
 lf ls --current --json          # current Waves, including stopped ones
 lf status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
 lf roadmap --json               # current plan plus that portfolio on every Wave
+lf roadmap --task LOO-303 --all --json # exact Task, including retained history
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # recent Home-local Run records

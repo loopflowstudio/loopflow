@@ -569,7 +569,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             Some(endpoint) => loop_state(endpoint).await,
             None => None,
         };
-        let task_snapshots = wave_tasks(&store, &wave, true).await?;
+        let task_snapshots = wave_tasks(&store, &wave, true, None).await?;
         let metric_portfolio =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
         // Probe the focused Wave's Home once so the detail carries live evidence
@@ -607,12 +607,15 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// read, bounded Git probes for Task Work, and no network. `lf status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
-pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
-    let include_history = wave.is_some();
+pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
+    let include_history = wave.is_some() || task.is_some();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let evaluation_time = now();
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+            if task.is_some() {
+                anyhow::bail!("Task lookup unavailable: local registry could not be opened");
+            }
             let roadmap = RoadmapSnapshot {
                 generated_at: format_time(evaluation_time)
                     .expect("current timestamp formats as RFC 3339"),
@@ -627,7 +630,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         };
         // An explicit all-repositories query must not inherit the Wave of
         // the process that launched the GUI. An explicit --wave still wins.
-        let env_wave_id = if all {
+        let env_wave_id = if all || task.is_some() {
             None
         } else {
             std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
@@ -667,14 +670,20 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
             if !include_history && !current_wave(&snapshot) {
                 continue;
             }
-            let task_snapshots = wave_tasks(&store, wave, false)
-                .await
-                .unwrap_or_else(|error| WaveTasks {
-                    tasks: Evidence::Unavailable {
-                        reason: error.to_string(),
-                    },
-                    unavailable_tasks: Vec::new(),
-                });
+            let task_snapshots =
+                wave_tasks(&store, wave, false, task)
+                    .await
+                    .unwrap_or_else(|error| WaveTasks {
+                        tasks: Evidence::Unavailable {
+                            reason: error.to_string(),
+                        },
+                        unavailable_tasks: Vec::new(),
+                    });
+            if task.is_some()
+                && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
+            {
+                continue;
+            }
             roadmaps.push(WaveRoadmap {
                 wave: snapshot,
                 chapter: chapter_summary(&store, wave).await?,
@@ -716,10 +725,24 @@ struct WaveTasks {
 }
 
 /// Both views retain durable Tasks when the current plan cannot be read.
-async fn wave_tasks(store: &SharedStore, wave: &Wave, probe_pr_empty: bool) -> Result<WaveTasks> {
+async fn wave_tasks(
+    store: &SharedStore,
+    wave: &Wave,
+    probe_pr_empty: bool,
+    identifier: Option<&str>,
+) -> Result<WaveTasks> {
     let projects = store.list_projects(Some(wave.id())).await?;
-    let tasks = store.list_tasks(Some(wave.id())).await?;
-    let (planning, unavailable) = match read_pm_planning(store, wave).await {
+    let mut tasks = store.list_tasks(Some(wave.id())).await?;
+    let planning_read = if identifier.is_some() {
+        store
+            .pm_snapshot(wave.id())
+            .await?
+            .map(|row| decode_pm_planning(wave, &row.payload))
+            .transpose()
+    } else {
+        read_pm_planning(store, wave).await
+    };
+    let (mut planning, unavailable) = match planning_read {
         Ok(Some(planning)) => (planning, None),
         result => (
             PmSnapshot {
@@ -735,12 +758,32 @@ async fn wave_tasks(store: &SharedStore, wave: &Wave, probe_pr_empty: bool) -> R
             }),
         ),
     };
-    let (details, unavailable_tasks) =
-        snapshot_tasks(store, projects, tasks, planning, probe_pr_empty).await?;
+    if let Some(identifier) = identifier {
+        tasks.retain(|task| task.plan.identifier == identifier);
+        planning.items.retain(|item| item.identifier == identifier);
+        // A failed read cannot establish that an unregistered planning Task is absent.
+        if let Some(reason) = unavailable.as_ref().filter(|_| tasks.is_empty()) {
+            return Ok(WaveTasks {
+                tasks: Evidence::Unavailable {
+                    reason: reason.clone(),
+                },
+                unavailable_tasks: Vec::new(),
+            });
+        }
+    }
+    let (details, unavailable_tasks) = snapshot_tasks(
+        store,
+        projects,
+        tasks,
+        planning,
+        probe_pr_empty,
+        identifier.is_some(),
+    )
+    .await?;
     Ok(WaveTasks {
         tasks: match unavailable {
-            Some(reason) => Evidence::Unavailable { reason },
-            None => Evidence::complete(details),
+            Some(reason) if identifier.is_none() => Evidence::Unavailable { reason },
+            _ => Evidence::complete(details),
         },
         unavailable_tasks,
     })
@@ -974,6 +1017,7 @@ async fn snapshot_tasks(
     tasks: Vec<Task>,
     planning: PmSnapshot,
     probe_pr_empty: bool,
+    include_retained: bool,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
     let mut details = Vec::new();
     let mut unavailable_tasks = Vec::new();
@@ -1004,12 +1048,16 @@ async fn snapshot_tasks(
                 .iter()
                 .find(|plan| plan.id == parent.plan.id.as_str())
         });
-        let Some(plan) = current_plan else {
-            if !work_status_is_terminal(&status) {
-                unavailable_tasks.push(unavailable_task(task, status));
+        if current_plan.is_none() {
+            if include_retained || !work_status_is_terminal(&status) {
+                unavailable_tasks.push(unavailable_task(task, status.clone()));
             }
-            continue;
-        };
+            if !include_retained {
+                continue;
+            }
+        }
+        let parent = parent
+            .ok_or_else(|| anyhow!("Task {} has no owning Project {}", task.id, task.project_id))?;
         let item = PmItem {
             id: task.plan.id.as_str().to_string(),
             identifier: task.plan.identifier.clone(),
@@ -1019,12 +1067,14 @@ async fn snapshot_tasks(
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
             state: None,
-            project_id: plan.id.clone(),
-            project: plan.slug.clone(),
+            project_id: parent.plan.id.as_str().to_string(),
+            project: parent.plan.slug.clone(),
             team_id: String::new(),
             assignee: None,
         };
-        let recommended = crate::ops::task::recommended_task_flow(plan).to_string();
+        let recommended = current_plan
+            .map_or("feature", crate::ops::task::recommended_task_flow)
+            .to_string();
         details.push(
             snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
         );

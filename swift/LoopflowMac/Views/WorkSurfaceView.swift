@@ -53,7 +53,10 @@ struct WorkSurfaceView: View {
 
     @ViewBuilder
     private var content: some View {
-        if snapshot == nil, queryError == nil {
+        if let selection = model.selection, selection.kind == .task,
+           model.navigation.selectedTaskEvidence?.task.id == selection.id {
+            taskDetail
+        } else if snapshot == nil, queryError == nil {
             ProgressView("Reading roadmap…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("podium-work-loading")
@@ -194,8 +197,11 @@ struct WorkSurfaceView: View {
     private var taskDetail: some View {
         if let selection = model.selection, let found = model.task(id: selection.id) {
             let task = found.task
-            let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
-                .first { $0.id.work == selection }?.sessions
+            let sessions = model.sessions.value.map { records in
+                records.filter { record in
+                    task.runtime.map { record.work == .task(id: $0.workId) } ?? false
+                }
+            }
             scrollingDetail(identifier: "podium-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
@@ -244,8 +250,14 @@ struct WorkSurfaceView: View {
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
                 }
-                TaskFlowView(model: model, task: task, wave: found.wave.wave)
-                    .id(task.id)
+                if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
+                    evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
+                    if case .pinned = task.flow.record {
+                        TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
+                    }
+                } else {
+                    TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
+                }
                 TaskRunsView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)
                 if let sessions, !sessions.isEmpty {

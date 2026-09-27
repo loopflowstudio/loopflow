@@ -123,6 +123,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
+    public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
+        var args = ["roadmap", "--task", issue, "--json"]
+        if repo == nil { args.append("--all") }
+        return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
+    }
+
     /// Exact OS-live Loopflow process trees and unattributed provider processes.
     public func processActivity() async throws -> ActivitySnapshot {
         let stdout = try await run(["ps", "--json"], nil)

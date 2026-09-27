@@ -313,6 +313,9 @@ struct TaskFlowDraft: Equatable {
 final class WorkspaceNavigation {
     enum Content { case overview, details, terminals }
     var content: Content = .overview
+    var palettePresented = false
+    var recentDestinations: [WorkspaceDestination] = []
+    var inspectedFlow: String?
     var showsActivity = false
     var presentation: WorkspacePresentation = .compact
     var selectedSessionId: String? {

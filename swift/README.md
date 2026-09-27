@@ -99,6 +99,22 @@ ownership evidence cannot report confirmed emptiness. Closing a Monitor preserve
 the window's shared reader and terminals. **Sessions** selects an exact conversation and
 returns keyboard focus to its terminal with unfinished input retained.
 
+Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
+selected repository. Empty search shows recent destinations first; arrows select,
+Return opens and Escape returns focus to the previous terminal. Flow entries
+inspect the template. **Choose Flow for ISSUE** opens the Task's existing picker.
+The sidebar search remains a filter.
+
+```sh
+open 'loopflow://task/LOO-303'
+open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
+```
+
+Task links and palette Task entries open details, including Tasks outside the
+current chapter. They never start work or enter a Task's sole Session. Ambiguous
+links offer repository-qualified choices; unavailable reads keep the current
+workspace and offer Retry. Only one workspace window receives a link.
+
 Wave details show the objective, current chapter plan/KRs, all Tasks and chapter
 history. Projects are internal chapter records and add no navigation tier. Task
 details include the directive, recorded condition, current KRs, Activity, PR and

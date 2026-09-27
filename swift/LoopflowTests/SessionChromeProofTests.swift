@@ -212,6 +212,96 @@ struct SessionChromeProofTests {
         try await expectEcho(draft, on: surface)
     }
 
+    @Test("Cmd-K isolates search from retained PTYs and opens Task details")
+    func paletteRetainsTerminalInput() async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        try #require(GhosttyManager.shared.state == .ready)
+        let repo = "/src/loopflow"
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: repo)
+        var terminals: [GhosttyMetalView] = []
+        for _ in 0..<2 {
+            workspace.multiplexer.newShell()
+            let pane = workspace.multiplexer.focusedPaneId
+            let terminal = registry.surfaces.view(for: .shell(pane))
+            terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
+            terminal.workingDirectory = NSTemporaryDirectory()
+            terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+            terminal.createSurface(manager: GhosttyManager.shared)
+            terminals.append(terminal)
+        }
+        defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
+        let surfaces = try terminals.map { try #require($0.surface) }
+        let (roadmap, _) = try pinnedRoadmap()
+        let record = try renameFixtureRecord("palette-session", title: "Retained conversation", source: "human",
+                                             work: .task(id: "ts_review00000000000000000000000000"))
+        let sessions = String(decoding: try JSONEncoder().encode([record]), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            if args.first == "roadmap" { return roadmap }
+            if args.first == "session" { return sessions }
+            if args.first == "ls" || args.first == "flow" { return "[]" }
+            throw RegistryQueryError("No launch or mutation authorized by palette inspection")
+        }
+        let model = PodiumModel(query: query, repoPath: repo)
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 1100, height: 800),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: view)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        try await settle(window)
+        window.makeFirstResponder(terminals[1])
+        let draft = "palette-retained-draft"
+        draft.withCString { ghostty_surface_text(surfaces[1], $0, UInt(draft.utf8.count)) }
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        #expect(model.navigation.palettePresented)
+        let sheet = try #require(window.attachedSheet)
+        try await settle(sheet)
+        for char in "never-pty" { try press(String(char), keyCode: 0, modifiers: [], in: sheet) }
+        try await settle(sheet)
+        #expect(terminalText(surfaces[0]).contains("never-pty") == false)
+        #expect(terminalText(surfaces[1]).contains("never-pty") == false)
+        try press("\u{1b}", keyCode: 53, modifiers: [], in: sheet)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!model.navigation.palettePresented)
+        #expect(window.firstResponder === terminals[1])
+        try await expectEcho(draft, on: surfaces[1])
+
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        let taskSheet = try #require(window.attachedSheet)
+        try await settle(taskSheet)
+        let issue = try #require(model.task(id: "issue-review")?.task.task.identifier)
+        for char in issue { try press(String(char), keyCode: 0, modifiers: [], in: taskSheet) }
+        try press("\r", keyCode: 36, modifiers: [], in: taskSheet)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.navigation.content == .details)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(terminals[0].surface == surfaces[0])
+        #expect(terminals[1].surface == surfaces[1])
+        #expect(throws: Never.self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
+        }
+
+        // Arrow navigation operates on the visible ranked list, including recents.
+        let second = model.searchDestinations("")[1].id
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        let arrows = try #require(window.attachedSheet)
+        try await settle(arrows)
+        try press("\u{f701}", keyCode: 125, modifiers: [], in: arrows)
+        try press("\r", keyCode: 36, modifiers: [], in: arrows)
+        try await Task.sleep(for: .milliseconds(400))
+        if case .wave(let id) = second { #expect(model.selection == .wave(id: id)) }
+        else { Issue.record("The fixture's second palette destination should be its Wave") }
+    }
+
     // MARK: - helpers
 
     /// Route a key through the application queue so the workspace's local

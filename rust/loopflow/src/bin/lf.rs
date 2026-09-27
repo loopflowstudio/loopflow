@@ -1562,9 +1562,17 @@ fn main() -> anyhow::Result<()> {
                     loopflow::lf::commands::waves::status(wave.as_deref(), *json)
                 }
             }
-            Some(Commands::Roadmap { wave, json, all }) => {
-                loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json, *all)
-            }
+            Some(Commands::Roadmap {
+                wave,
+                task,
+                json,
+                all,
+            }) => loopflow::lf::commands::waves::roadmap(
+                wave.as_deref(),
+                task.as_deref(),
+                *json,
+                *all,
+            ),
             Some(Commands::Activity {
                 since,
                 limit,

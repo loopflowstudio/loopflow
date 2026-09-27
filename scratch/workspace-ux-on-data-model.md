@@ -472,18 +472,52 @@ justified for this scratch-only design.
 
 ## This slice
 
-Design review complete: the participant approved the corrected design. The
-[review feedback](workspace-ux-review-feedback.md) records the decisions and
-retained implementation assumptions. The next implementation cut is slice 1: ⌘K and Task deep
-links share destination routing. Its focused proof must dispatch actual keyboard
-and URL requests through production handlers and verify exact Task details plus
-retained terminal input; a parser unit test alone is insufficient.
+Slice 1 now has a first implementation: ⌘K over existing readings and exact Task
+links route into the current Podium workspace. Task entries open details even
+with one Session. `lf roadmap --task ISSUE [--all] --json` reads current cached
+planning and retained registered Tasks through the existing Task projector;
+no active PR is required. Historical selection uses the existing selected-Task
+evidence, without adding the Task to the current chapter plan. Read errors and
+ambiguous matches retain the current workspace and offer explicit choices/Retry.
 
-Approval covers the design, not implementation, publication, installed acceptance
-or Flow navigation. The user completes this review Session; the following
-loop-decide owns navigation through the selected Flow's authored boundary.
+Focused proof dispatches ⌘K, search, arrows, Escape and Return through AppKit over two
+owned cat PTYs. It proves isolated search, restored focus, retained surfaces and
+draft/child reply, and Task details rather than single-Session drill-down. Shared
+CLI proof covers a retained historical Task, an unstarted planning Task, missing
+identifier, no active PR and unchanged Run/event counts. Source-independent
+folded templates are the next independent implementation cut; room/bind and
+attempt presentation still require the parent contract checklist above.
+
+The complete design and all eight Done When obligations remain authoritative.
+This is local implementation proof, not an installed `open`/cold-launch demo,
+Jack's acceptance, a performance measurement, or permission to publish. Extended
+cross-repository/duplicate-ID CLI cases, two racing links through mounted views,
+and the configured walkthrough remain review/acceptance work. No Flow navigation
+or Task/PR disposition is selected by this implementation step.
 
 ## Slice ledger
+
+- 2026-09-26 navigation implementation: checkpointed the approved review notes
+  through `lf commit` before edits. Added one exact Task filter to the roadmap
+  reader, typed palette destinations, per-window Task-link delivery with cold
+  pending retention, and generation-fenced destination lookup. Retained current
+  and historical Task pages share the existing selected evidence; no new planning
+  or Session store, provider launch, ancestry write or parent conversion.
+- Source review removed an initially redundant historical-Task cache and combined
+  palette/Flow inspection into one modal presentation. Fixed empty-current-plan
+  routing and historical breadcrumbs. Missing owning Project is an explicit
+  error; missing cached planning remains a named retained Task warning instead of
+  a fabricated template. Session grouping and room membership remain unchanged.
+- Verification: real isolated CLI lookup passes; all-target Clippy, formatting,
+  whitespace and Swift platform boundaries pass. Thirty focused Swift tests pass,
+  including the production keyboard/PTY proof and existing navigation behaviors.
+  The Xcode app/test-runner compile passes. Commands, initial counterexamples and
+  exact proof limits are recorded in [navigation evidence](workspace-navigation-proof.md).
+  No installed activation, external writes, timing claims or human acceptance.
+- Final dispatched-key review found the search editor swallowing arrow navigation.
+  Handling the editor's AppKit commands repairs it; seven destination/native
+  checks pass on the final input implementation, including exact Wave selection
+  after Down/Return and retained Task-page/terminal behavior.
 
 - 2026-09-26 interactive review: the participant approved the design after
   clarifying that the Wave Flow UI presents the current Project's default

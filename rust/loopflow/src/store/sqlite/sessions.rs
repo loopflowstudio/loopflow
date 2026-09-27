@@ -173,8 +173,8 @@ impl SqliteStore {
     }
 
     /// Reserve a Session and its first Run together; reserving an id again
-    /// returns the first one. `review` is the saved Flow a review waits in:
-    /// its invocation has no Task and is stored at the cursor of this review.
+    /// returns the first one. `review` is the saved Flow a review waits in,
+    /// stored at the cursor of this review and naming the Run's Task.
     pub fn create_session(
         &self,
         session: Session,
@@ -196,7 +196,7 @@ impl SqliteStore {
             return Ok(existing);
         }
         if let Some((invocation, cursor)) = review {
-            save_flow_in(&tx, invocation, cursor)?;
+            save_flow_in(&tx, invocation, cursor, run.task_id.as_ref())?;
         }
         tx.execute(
             "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at,
@@ -228,15 +228,17 @@ impl SqliteStore {
         Ok(created)
     }
 
-    /// A saved Flow's invocation at the step it is about to run. It has no
-    /// Task; the Runs of the step name it.
+    /// A saved Flow's invocation at the step it is about to run. It names the
+    /// Task the Flow was launched for, as its Runs do, without becoming that
+    /// Task's Flow.
     pub fn save_flow(
         &self,
         invocation: &QueuedInvocation,
         cursor: &ExecutionCursor,
+        task: Option<&TaskId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        save_flow_in(&conn, invocation, cursor)
+        save_flow_in(&conn, invocation, cursor, task)
     }
 
     /// Append an attempt to a Session. Title and feedback stay on the Session.
@@ -251,8 +253,8 @@ impl SqliteStore {
         let run = super::runs::insert_run_in(&tx, run)?;
         if tx.execute(
             "UPDATE sessions SET current_run_id=?3 WHERE id=?1 AND current_run_id=?2
-             AND completed_at IS NULL AND NOT EXISTS(SELECT 1 FROM runs r
-                 WHERE r.id=?2 AND r.invocation_id IS NOT NULL AND r.task_id IS NOT NULL)",
+             AND completed_at IS NULL AND NOT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id
+                 WHERE r.id=?2 AND t.current_invocation_id=r.invocation_id)",
             params![id, expected_run.as_str(), run.id.as_str()],
         )? != 1
         {
@@ -307,12 +309,14 @@ impl SqliteStore {
         rows.map(|row| row?).collect()
     }
 
-    /// The Flow and cursor node of the saved Flow waiting on this review.
+    /// The Flow and cursor node of the saved Flow waiting on this review. A
+    /// Task's own Flow waits through its position instead.
     pub fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT json_extract(invocation_json,'$.flow'), review_json FROM flow_invocations
-             WHERE pending_session_id=?1 AND state='current' AND task_id IS NULL",
+             WHERE pending_session_id=?1 AND state='current'
+             AND NOT EXISTS(SELECT 1 FROM tasks WHERE current_invocation_id=flow_invocations.id)",
             [session_id],
             |row| Ok((row.get(0)?, row.get::<_, String>(1)?)),
         )
@@ -329,7 +333,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE flow_invocations SET state='completed', ended_at=?2
-             WHERE id=?1 AND task_id IS NULL AND state='current'",
+             WHERE id=?1 AND state='current'
+             AND NOT EXISTS(SELECT 1 FROM tasks WHERE current_invocation_id=?1)",
             params![invocation, crate::store::rows::now_unix()],
         )?;
         Ok(())
@@ -343,8 +348,8 @@ impl SqliteStore {
         if conn.execute(
             "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
              AND completed_at IS NULL AND (kind='interactive' OR ready_summary IS NOT NULL)
-             AND NOT EXISTS(SELECT 1 FROM runs r
-                 WHERE r.id=?2 AND r.invocation_id IS NOT NULL AND r.task_id IS NOT NULL)",
+             AND NOT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id
+                 WHERE r.id=?2 AND t.current_invocation_id=r.invocation_id)",
             params![id, expected_run.as_str(), crate::store::rows::now_unix()],
         )? != 1
         {
@@ -424,11 +429,12 @@ fn save_flow_in(
     conn: &Connection,
     invocation: &QueuedInvocation,
     cursor: &ExecutionCursor,
+    task: Option<&TaskId>,
 ) -> StoreResult<()> {
     conn.execute(
-        "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
+        "INSERT INTO flow_invocations(id,task_id,invocation_json,step_index,iteration,
             position_version,worker_generation,updated_at,review_json,state)
-         VALUES(?1,?2,?3,?4,1,0,?5,?6,'current')
+         VALUES(?1,?7,?2,?3,?4,1,0,?5,?6,'current')
          ON CONFLICT(id) DO UPDATE SET step_index=excluded.step_index,
             iteration=excluded.iteration, review_json=excluded.review_json,
             updated_at=excluded.updated_at, position_version=position_version+1,
@@ -439,7 +445,8 @@ fn save_flow_in(
             i64::try_from(cursor.index).map_err(invalid)?,
             i64::from(cursor.iteration),
             crate::store::rows::now_unix(),
-            serde_json::to_string(cursor)?
+            serde_json::to_string(cursor)?,
+            task.map(TaskId::as_str)
         ],
     )?;
     Ok(())

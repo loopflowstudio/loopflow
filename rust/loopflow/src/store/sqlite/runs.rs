@@ -103,14 +103,14 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
             )
             .optional()?
             .ok_or_else(|| invalid(format!("Invocation {invocation} does not exist")))?;
-        // A Flow launched directly for a Task names no Task; its Runs may.
-        if let Some(task) = task {
-            let task = TaskId::parse(&task).map_err(invalid)?;
-            if run.task_id.as_ref().is_some_and(|named| *named != task) {
-                return Err(invalid("Run and Invocation Tasks disagree"));
-            }
-            run.task_id = Some(task);
+        let task = task
+            .map(|task| TaskId::parse(&task))
+            .transpose()
+            .map_err(invalid)?;
+        if run.task_id.is_some() && run.task_id != task {
+            return Err(invalid("Run and Invocation Tasks disagree"));
         }
+        run.task_id = task;
         let (node, iterations) = location_in(conn, invocation)?;
         if run.node.is_some_and(|supplied| supplied != node)
             || run
@@ -200,36 +200,30 @@ fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<WaveId> {
 }
 
 /// Bind is write-once: it fills the Task of the Session's Runs that have none
-/// and never moves or clears one. The Task's Wave is filled upward.
+/// and never moves or clears one. Binding the Task a Session already has
+/// changes nothing. The Task's Wave is filled upward.
 pub(super) fn bind_session_runs_in(
     conn: &Transaction<'_>,
     session: &str,
     task: &TaskId,
 ) -> StoreResult<()> {
-    let bound: Option<String> = conn
+    let bound: Option<(String, String)> = conn
         .query_row(
-            "SELECT t.issue_identifier FROM runs r JOIN tasks t ON t.id=r.task_id
+            "SELECT t.id, t.issue_identifier FROM runs r JOIN tasks t ON t.id=r.task_id
              WHERE r.session_id=?1 ORDER BY r.created_at, r.id LIMIT 1",
             [session],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if let Some(bound) = bound {
+    if let Some((id, issue)) = bound {
+        if id == task.as_str() {
+            return Ok(());
+        }
         return Err(StoreError::InvalidAuthority(format!(
-            "Session {session} already has Task {bound}; a Run's Task never changes"
+            "Session {session} already has Task {issue}; a Run's Task never changes"
         )));
     }
     let wave = task_wave_in(conn, task)?;
-    let flow: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM runs WHERE session_id=?1 AND invocation_id IS NOT NULL)",
-        [session],
-        |row| row.get(0),
-    )?;
-    if flow {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Session {session} is a Flow review; its Runs keep their Flow's Work"
-        )));
-    }
     let other: Option<String> = conn
         .query_row(
             "SELECT w.name FROM runs r JOIN waves w ON w.id=r.wave_id

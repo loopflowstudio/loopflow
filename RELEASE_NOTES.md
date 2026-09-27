@@ -1,5 +1,7 @@
 # v0.12.22
 
+<!-- loopflow:release-notes=narrative;gate=safe -->
+
 v0.12.22 keeps a Task's plan, conversation, review feedback, and running work together. The Mac app brings them into one workspace, while saved Flows carry work through revision and blocked PR landings can recover on the same commit. Getting started also requires less configuration: unconfigured runs choose an installed coding agent, and display names can come from Git.
 
 ## Follow a Task without losing your place

@@ -1,4 +1,4 @@
-use crate::durable::{FlowPosition, RunId};
+use crate::durable::{FlowPosition, RunId, TaskId};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::ExecutionCursor;
 use crate::session::{Run, Session, TitleSource};
@@ -66,6 +66,17 @@ impl Store {
             store.replace_session_run(&expected_run, run)
         })
         .await
+    }
+
+    pub async fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(Session, Run)> {
+        let id = id.to_string();
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.bind_session(&id, &task)).await
+    }
+
+    pub async fn task_runs(&self, task: &TaskId) -> StoreResult<Vec<Run>> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_runs(&task)).await
     }
 
     pub async fn open_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {

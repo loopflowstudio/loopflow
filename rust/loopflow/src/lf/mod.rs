@@ -700,6 +700,15 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Assign a Task to a Session that has none; the Task never changes after
+    Bind {
+        id: String,
+        /// The Task, by its issue identifier (e.g. INF-123)
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Mark the active session ready for your review
     Ready {
         #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]

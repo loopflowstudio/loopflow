@@ -878,6 +878,51 @@ and the public DTO/documentation spec are unchanged; earlier receipts retain
 only their recorded scope, including the Chapter inventory and branch-range
 whitespace gaps.
 
+### Recovery and lookup compression review (2026-09-26)
+
+Reviewed `d57ab33d7` from a clean working tree against `4cd64be3d`, following
+the amended Session ownership and taskless Invocation approval. No further
+executable reduction selected. The model before and after this pass is unchanged:
+
+| Fact | Current owner | Why the remaining representation stays |
+| --- | --- | --- |
+| Task execution capture, cursor and claim | `flow_invocations` | `FlowPosition` is still the controller's checked snapshot; its joined Session feedback supports exact settlement, without regaining feedback-write authority. |
+| Conversation title, feedback, completion and current attempt | `sessions` | `runs.session_id` supplies retained membership. Exact and prefix lookup must consult it before manifest-based interactive dispatch. |
+| Review attempt identity and publication | `runs` | Publication is a one-time SQL claim, distinct from provider start, terminal outcome and exact client ownership. None can be derived from the published flag. |
+| Immutable launch inputs | Manifest and context artifacts | Reserved publication reconciles exact bytes before the SQL claim; ordinary new-ID publication requires exclusive creation. Combining them into an idempotent launcher would weaken the ordinary launch boundary. |
+| Ask and taskless review preparation | Existing Ask/Flow files and prepared Run path | These remain live callers of `start_prepared` and `carry_session_name`. Their removal requires conversion to the common owner, not deletion of their recovery capability. |
+| Desktop identity and grouping | Existing Session DTO, pane keys and `WorkspaceProjection` | Rust/Swift still expose the intermediate projection. Stable history DTOs and all-kind ownership must move together before removing grouping/lookup consumers. |
+
+Traced the SQLite Session/Run API through reservation, publication, Ready and
+Task completion; the launch callback through recorder construction; historical
+lookup through rename/Open/Complete; and public inventory through corrupt-capture
+presentation. Also inspected Taskless Flow persistence, Ask replacement, Rust and
+Swift Session fields, desktop reverse lookup, Chapter activation, the populated
+migration and the current architecture contract. No retired SQL owner was
+restored and no compatibility path was added.
+
+The apparent publication duplication is intentional at this boundary:
+`prepare_manifest` already owns common construction. Artifact reconciliation
+cannot subsume the SQL claim, and the claim must precede `CaptureHandle`
+construction because Drop settles a Run. Likewise, historical membership lookup
+and current-actor checks answer different questions. Preserve both. The duplicate
+composite review-ID formatting and optional lookup wrapper are local cleanup
+candidates; changing those alone would not remove the storage split or a product
+concept, so no cosmetic API churn was selected.
+
+Fresh resource preflight and safe recovery both fail: active `main-view-task`
+is **15.3 GiB / 12 GiB**, with **97.3 GiB** free. Recovery preserved the active
+foreign build. Under TESTING.md no product test or materialized migration
+rehearsal ran. The latest implementation's formatting and all-target Clippy
+receipts retain their scope on unchanged executable bytes; no new behavioral
+pass is claimed. All focused commands in the slice ledger remain owed.
+
+This pass changes only this review note. No interfaces, persisted fields,
+migration bytes or user-visible behavior changed. The complete owner/caller
+cutover, repository Chapter operation, offline import, configured acceptance,
+measurements and final deletion research remain required before publication;
+the architecture and historical branch-whitespace gaps remain unresolved.
+
 ## Measure
 
 The [2026-09-26 slice review](data-model-slice-review.md) records the current

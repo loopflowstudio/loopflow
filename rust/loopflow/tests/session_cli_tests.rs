@@ -436,40 +436,6 @@ fn session_names_are_shared_and_human_names_win() {
     assert!(dir.join("prepared").exists());
 }
 
-#[test]
-fn raw_sessions_are_named_by_a_stable_word_pair() {
-    let home = tempfile::tempdir().unwrap();
-    // A prepared Run with no skill, detached from its Ask and given native
-    // history, lists as a raw interactive Session.
-    let (run_id, dir) = prepare_ask(home.path(), "ask_raw-proof", "Unused seed");
-    std::fs::remove_file(home.path().join("human-sessions/ask_raw-proof.json")).unwrap();
-    std::fs::write(
-        dir.join("provider-session.json"),
-        serde_json::json!({
-            "schema_version": 1, "provider_session_id": "ses_raw-proof", "account_id": null
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let first = listed(home.path(), &run_id);
-    assert_eq!(first["kind"], "interactive");
-    // The provider is the harness recorded on this Run's own manifest.
-    let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
-    assert!(manifest["harness"].is_string());
-    assert_eq!(first["provider"], manifest["harness"]);
-    assert_eq!(first["title_source"], "generated");
-    let title = first["title"].as_str().unwrap();
-    let (magical, musical) = title.split_once('-').expect("magical-musical pair");
-    assert!(!magical.is_empty() && !musical.is_empty() && !musical.contains('-'));
-    assert_eq!(listed(home.path(), &run_id)["title"], title);
-    assert!(!dir.join("session-name.json").exists());
-
-    let named = rename(home.path(), &[&run_id, "Morning", "triage"]);
-    assert_eq!(named["title"], "Morning triage");
-    assert_eq!(listed(home.path(), &run_id)["title_source"], "human");
-}
-
 #[cfg(unix)]
 #[test]
 fn boundary_names_follow_run_ids_and_replacement_runs() {

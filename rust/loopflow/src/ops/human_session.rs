@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
 use std::io::Write;
@@ -369,8 +369,8 @@ struct AskSessionRecord {
 #[derive(Debug)]
 enum SessionTarget {
     Interactive {
-        dir: PathBuf,
-        manifest: Box<RunManifest>,
+        session: crate::session::Session,
+        run: crate::session::Run,
     },
     Ask(AskSessionRecord),
     Flow {
@@ -670,8 +670,9 @@ pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     for session in crate::ops::flow_session::list()? {
         sessions.push(attribute_standalone_session(store, session).await?);
     }
-    let boundary_runs = boundary_run_ids(store).await?;
-    sessions.extend(list_interactive_sessions(store, &boundary_runs).await?);
+    for (session, run) in store.open_interactive_sessions().await? {
+        sessions.push(interactive_surface(store, &session, &run).await?);
+    }
     sessions.sort_by(|left, right| left.title.cmp(&right.title).then(left.id.cmp(&right.id)));
     Ok(sessions)
 }
@@ -686,7 +687,7 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
         Err(_) => store.session(session_id).await?,
     };
     if let Some((session, current)) = owned {
-        return review_target(store, session_id, &session, &current)
+        return owned_target(store, session_id, session, current)
             .await
             .map(Some);
     }
@@ -697,24 +698,14 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
         return Ok(Some(target));
     }
     match crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), session_id) {
-        Ok((dir, manifest)) => {
+        Ok((_, manifest)) => {
             // Prefix selectors also resolve through the canonical Run's owner.
-            if let Some((session, current)) = store.session_for_run(&manifest.run_id).await? {
-                return review_target(store, manifest.run_id.as_str(), &session, &current)
-                    .await
-                    .map(Some);
-            }
-
-            if !crate::run_record::has_interactive_history(&dir, &manifest)? {
-                bail!("Run {} is not an interactive Session", manifest.run_id);
-            }
-            if crate::run_record::provider_session_is_resolved(&dir)? {
-                bail!("Session {} is resolved", manifest.run_id);
-            }
-            return Ok(Some(SessionTarget::Interactive {
-                dir,
-                manifest: Box::new(manifest),
-            }));
+            let Some((session, current)) = store.session_for_run(&manifest.run_id).await? else {
+                bail!("Run {} does not belong to a Session", manifest.run_id);
+            };
+            return owned_target(store, manifest.run_id.as_str(), session, current)
+                .await
+                .map(Some);
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(anyhow!("Session record unavailable: {error}")),
@@ -728,11 +719,11 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
     Ok(None)
 }
 
-async fn review_target(
+async fn owned_target(
     store: &SharedStore,
     selector: &str,
-    session: &crate::session::Session,
-    current: &crate::session::Run,
+    session: crate::session::Session,
+    current: crate::session::Run,
 ) -> Result<SessionTarget> {
     if selector != session.id && selector != current.id.as_str() {
         bail!(
@@ -740,6 +731,21 @@ async fn review_target(
             session.id,
             current.id
         );
+    }
+    match session.kind {
+        crate::session::SessionKind::FlowReview => {}
+        crate::session::SessionKind::Interactive => {
+            if session.completed_at.is_some() {
+                bail!("Session {} is already complete", session.id);
+            }
+            return Ok(SessionTarget::Interactive {
+                session,
+                run: current,
+            });
+        }
+        crate::session::SessionKind::Ask => {
+            bail!("Ask Session {} is not stored here yet", session.id)
+        }
     }
     let (task, position) = find_flow_session(store, &session.id).await?;
     let (latest, _) = store
@@ -761,16 +767,47 @@ async fn review_target(
     })
 }
 
-/// Interactive provider history that open and complete act on.
-fn provider_history(dir: &Path, manifest: &RunManifest) -> Result<ProviderSessionRef> {
-    crate::run_record::read_provider_session(dir)?
-        .ok_or_else(|| anyhow!("Session {} has no provider history yet", manifest.run_id))
+/// Where an interactive Run's provider keeps its history and client receipts.
+struct NativeRun {
+    dir: PathBuf,
+    provider: String,
+}
+
+impl NativeRun {
+    fn of(session: &crate::session::Session, run: &crate::session::Run) -> Result<Self> {
+        Ok(Self {
+            dir: local_session_run_dir(&run.id)
+                .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?,
+            provider: run
+                .provider
+                .clone()
+                .ok_or_else(|| anyhow!("Session {} Run has no recorded provider", session.id))?,
+        })
+    }
+
+    fn clients(&self) -> Result<Vec<crate::run_record::ProviderClientRef>> {
+        crate::lf::commands::util::active_provider_clients(&self.dir, &self.provider)
+    }
+
+    fn history(&self, session: &crate::session::Session) -> Result<ProviderSessionRef> {
+        crate::run_record::read_provider_session(&self.dir)?
+            .ok_or_else(|| anyhow!("Session {} has no provider history yet", session.id))
+    }
+
+    fn stop_clients(&self, reason: crate::run_record::ProviderClientStopReason) -> Result<()> {
+        crate::lf::commands::util::replace_provider_clients(
+            &self.dir,
+            &self.provider,
+            &self.clients()?,
+            reason,
+        )
+    }
 }
 
 async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<SessionRecord> {
     match target {
-        SessionTarget::Interactive { dir, manifest, .. } => {
-            interactive_surface(store, dir, manifest).await
+        SessionTarget::Interactive { session, run } => {
+            interactive_surface(store, session, run).await
         }
         SessionTarget::Ask(record) => ask_surface(store, record).await,
         SessionTarget::Flow { task, position, .. } => flow_surface(store, task, position).await,
@@ -1138,38 +1175,34 @@ pub(crate) async fn open(
             let session = crate::ops::flow_session::open(token, mode, resume).await?;
             attribute_standalone_session(store, session).await
         }
-        SessionTarget::Interactive { dir, manifest } => {
-            let provider_session = provider_history(dir, manifest)?;
+        SessionTarget::Interactive { session, run } => {
+            let native = NativeRun::of(session, run)?;
+            let provider_session = native.history(session)?;
             if resume {
-                crate::lf::commands::util::require_provider_session_launch(dir)?;
+                crate::lf::commands::util::require_provider_session_launch(&native.dir)?;
             }
-            let active_clients =
-                crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?;
             match mode {
-                OpenMode::Refuse if !active_clients.is_empty() => {
+                OpenMode::Refuse if !native.clients()?.is_empty() => {
                     require_session_action(
                         SessionKind::Interactive,
                         SessionState::Active,
                         SessionActionKind::Open,
                     )?;
                 }
-                OpenMode::Replace if resume => crate::lf::commands::util::replace_provider_clients(
-                    dir,
-                    &manifest.harness,
-                    &active_clients,
-                    crate::run_record::ProviderClientStopReason::Moved,
-                )?,
+                OpenMode::Replace if resume => {
+                    native.stop_clients(crate::run_record::ProviderClientStopReason::Moved)?
+                }
                 OpenMode::Replace => {}
                 OpenMode::Refuse | OpenMode::Try => {}
             }
-            let mut session = interactive_surface(store, dir, manifest).await?;
+            let mut session = interactive_surface(store, session, run).await?;
             if resume {
                 crate::lf::commands::util::resume_session(
-                    &manifest.harness,
-                    manifest.model.as_deref(),
-                    &manifest.cwd,
-                    &manifest.run_id,
-                    dir,
+                    &native.provider,
+                    run.model.as_deref(),
+                    &run.cwd,
+                    &run.id,
+                    &native.dir,
                     &provider_session,
                 )?;
             } else {
@@ -1249,9 +1282,12 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     }
     require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
     match &target {
-        SessionTarget::Interactive { dir, manifest } => {
-            provider_history(dir, manifest)?;
-            crate::lf::commands::util::stop_provider_session(dir, &manifest.harness)?;
+        SessionTarget::Interactive { session, run } => {
+            let native = NativeRun::of(session, run)?;
+            crate::lf::commands::util::stop_provider_session(&native.dir, &native.provider)?;
+            store
+                .complete_interactive_session(&session.id, &run.id)
+                .await?;
         }
         SessionTarget::Ask(record) => {
             complete_ask(&record.id).await?;
@@ -1412,21 +1448,6 @@ pub(crate) fn stop_run(run_id: &RunId) -> Result<()> {
     stop_native_run(run_id)
 }
 
-async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
-    let mut run_ids: HashSet<RunId> = store.session_run_ids().await?.into_iter().collect();
-    run_ids.extend(
-        crate::ops::flow_session::reviews()?
-            .into_iter()
-            .filter_map(|(run, _)| run.active.and_then(|boundary| boundary.run_id)),
-    );
-    run_ids.extend(
-        ask_records()?
-            .into_iter()
-            .filter_map(|record| record.session_run_id),
-    );
-    Ok(run_ids)
-}
-
 fn ask_records() -> Result<Vec<AskSessionRecord>> {
     let entries = match fs::read_dir(ask_session_directory()) {
         Ok(entries) => entries,
@@ -1449,73 +1470,59 @@ fn ask_records() -> Result<Vec<AskSessionRecord>> {
     Ok(records)
 }
 
-async fn list_interactive_sessions(
-    store: &SharedStore,
-    human_runs: &HashSet<RunId>,
-) -> Result<Vec<SessionRecord>> {
-    let home = crate::store::observability_home_dir();
-    let runs = crate::run_record::scan_unresolved_provider_runs(&home)
-        .map_err(|error| anyhow!("Session records unavailable: {error}"))?;
-    let mut sessions = Vec::new();
-    for (dir, manifest) in runs {
-        if human_runs.contains(&manifest.run_id) {
-            continue;
-        }
-        sessions.push(interactive_surface(store, &dir, &manifest).await?);
-    }
-    Ok(sessions)
-}
-
 async fn interactive_surface(
     store: &SharedStore,
-    dir: &Path,
-    manifest: &RunManifest,
+    session: &crate::session::Session,
+    run: &crate::session::Run,
 ) -> Result<SessionRecord> {
-    let clients = crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?;
-    let state = if clients.is_empty() {
+    let native = NativeRun::of(session, run)?;
+    let clients = native.clients()?;
+    let state = if !clients.is_empty() {
+        SessionState::Active
+    } else if session.completed_at.is_some()
+        || crate::run_record::read_provider_session(&native.dir)?.is_some()
+    {
         SessionState::Closed
     } else {
-        SessionState::Active
+        SessionState::Waiting
     };
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
-    let work = crate::run_record::attributed_work(store, manifest).await;
-    let name = session_name(
-        Some(dir),
-        manifest
-            .skill
-            .clone()
-            .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
-    )?;
+    let work = match (&run.task_id, &run.wave_id) {
+        (Some(task), _) => Some(WorkRef::Task(task.clone())),
+        (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
+        (None, None) => None,
+    };
     Ok(SessionRecord {
-        id: manifest.run_id.to_string(),
-        run_id: manifest.run_id.clone(),
+        id: session.id.clone(),
+        run_id: run.id.clone(),
         kind: SessionKind::Interactive,
-        wave_id: session_wave_id(store, work.as_ref()).await?,
+        wave_id: run.wave_id.clone(),
         work_path: session_work_path(store, work.as_ref()).await?,
         work,
         actions: session_actions(SessionKind::Interactive, state),
-        title: name.title,
-        title_source: name.source,
-        flow_membership: run_flow_membership(store, Some(manifest), &manifest.run_id).await,
-        detail: match &manifest.model {
-            Some(model) => format!("{}:{model}", manifest.harness),
-            None => manifest.harness.clone(),
+        title: session.title.clone(),
+        title_source: wire_title_source(session.title_source),
+        flow_membership: SessionFlowMembership::Independent,
+        detail: match &run.model {
+            Some(model) => format!("{}:{model}", native.provider),
+            None => native.provider.clone(),
         },
-        provider: Some(manifest.harness.clone()),
-        cwd: manifest.cwd.display().to_string(),
+        provider: Some(native.provider),
+        cwd: run.cwd.display().to_string(),
         state,
         ready_summary: None,
         terminal_ids: clients
             .into_iter()
             .filter_map(|client| client.terminal_id)
             .collect(),
-        open_argv: vec![
-            lf.display().to_string(),
-            "session".to_string(),
-            "open".to_string(),
-            manifest.run_id.to_string(),
-        ],
+        open_argv: human_open_argv(None, None, &session.id)?,
     })
+}
+
+fn wire_title_source(source: crate::session::TitleSource) -> SessionTitleSource {
+    match source {
+        crate::session::TitleSource::Human => SessionTitleSource::Human,
+        crate::session::TitleSource::Generated => SessionTitleSource::Generated,
+    }
 }
 
 async fn attribute_standalone_session(
@@ -1607,6 +1614,25 @@ pub(crate) async fn rename(
     let mut target = find_session(store, session_id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
+    let title = crate::run_record::validate_session_title(title)
+        .map_err(|error| anyhow!("cannot rename Session {session_id}: {error}"))?;
+    let title_source = match source {
+        SessionTitleSource::Human => crate::session::TitleSource::Human,
+        SessionTitleSource::Generated => crate::session::TitleSource::Generated,
+        SessionTitleSource::Unavailable => bail!("unavailable is not a title source"),
+    };
+    if let SessionTarget::Interactive { session, run } = &target {
+        // A Run selector names that attempt; the Session id names the conversation.
+        let expected_run = (session_id != session.id).then_some(&run.id);
+        store
+            .rename_session(&session.id, expected_run, title, title_source)
+            .await?;
+        let (session, run) = store
+            .session(&session.id)
+            .await?
+            .ok_or_else(|| session_not_found(session_id))?;
+        return interactive_surface(store, &session, &run).await;
+    }
     let expected_run = match &target {
         SessionTarget::Flow {
             run_id, position, ..
@@ -1614,27 +1640,16 @@ pub(crate) async fn rename(
         _ => None,
     };
     // Retain the caller's exact/prefix selector while waiting for replacement.
-    let _launch_lock = if matches!(target, SessionTarget::Interactive { .. }) {
-        None
-    } else {
-        let id = boundary_id(&target)?;
-        let lock_id = id.clone();
-        let pending_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id));
-        #[cfg(test)]
-        action_test::after_lookup("rename", session_id).await;
-        let lock = pending_lock.await??;
-        target = find_session(store, session_id)
-            .await?
-            .ok_or_else(|| session_not_found(session_id))?;
-        Some(lock)
-    };
+    let id = boundary_id(&target)?;
+    let pending_lock = tokio::task::spawn_blocking(move || lock_session_launch(&id));
+    #[cfg(test)]
+    action_test::after_lookup("rename", session_id).await;
+    let _launch_lock = pending_lock.await??;
+    target = find_session(store, session_id)
+        .await?
+        .ok_or_else(|| session_not_found(session_id))?;
     if let SessionTarget::Flow { position, .. } = &target {
         let id = flow_id(position)?;
-        let title_source = match source {
-            SessionTitleSource::Human => crate::session::TitleSource::Human,
-            SessionTitleSource::Generated => crate::session::TitleSource::Generated,
-            SessionTitleSource::Unavailable => bail!("unavailable is not a title source"),
-        };
         store
             .rename_session(&id, expected_run.as_ref(), title, title_source)
             .await?;
@@ -1651,7 +1666,7 @@ pub(crate) async fn rename(
 /// The durable id of a boundary Session, whichever id resolved it.
 fn boundary_id(target: &SessionTarget) -> Result<String> {
     Ok(match target {
-        SessionTarget::Interactive { manifest, .. } => manifest.run_id.to_string(),
+        SessionTarget::Interactive { session, .. } => session.id.clone(),
         SessionTarget::Ask(record) => record.id.clone(),
         SessionTarget::Flow { position, .. } => flow_id(position)?,
         SessionTarget::StandaloneFlow(token) => crate::ops::flow_session::session_id(token),
@@ -1895,10 +1910,7 @@ async fn review_surface(
     }
     Ok(SessionRecord {
         run_id: run.id.clone(),
-        title_source: match session.title_source {
-            crate::session::TitleSource::Human => SessionTitleSource::Human,
-            crate::session::TitleSource::Generated => SessionTitleSource::Generated,
-        },
+        title_source: wire_title_source(session.title_source),
         work_path: session_work_path(store, Some(&work)).await?,
         actions,
         flow_membership,

@@ -1,6 +1,6 @@
 //! Run creation resolves ancestors inside the caller's write transaction.
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::{RunId, TaskId};
 use crate::id::WaveId;
@@ -111,15 +111,7 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
         run.iterations = Some(iterations);
     }
     if let Some(task) = &run.task_id {
-        let wave: String = conn
-            .query_row(
-                "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
-                [task.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or_else(|| invalid(format!("Task {task} does not exist")))?;
-        let wave = WaveId::parse(&wave).map_err(invalid)?;
+        let wave = task_wave_in(conn, task)?;
         if run
             .wave_id
             .as_ref()
@@ -176,6 +168,69 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
         ],
     )?;
     Ok(run)
+}
+
+fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<WaveId> {
+    let wave: String = conn
+        .query_row(
+            "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| invalid(format!("Task {task} does not exist")))?;
+    WaveId::parse(&wave).map_err(invalid)
+}
+
+/// Bind is write-once: it fills the Task of the Session's Runs that have none
+/// and never moves or clears one. The Task's Wave is filled upward.
+pub(super) fn bind_session_runs_in(
+    conn: &Transaction<'_>,
+    session: &str,
+    task: &TaskId,
+) -> StoreResult<()> {
+    let bound: Option<String> = conn
+        .query_row(
+            "SELECT t.issue_identifier FROM runs r JOIN tasks t ON t.id=r.task_id
+             WHERE r.session_id=?1 ORDER BY r.created_at, r.id LIMIT 1",
+            [session],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(bound) = bound {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Session {session} already has Task {bound}; a Run's Task never changes"
+        )));
+    }
+    let wave = task_wave_in(conn, task)?;
+    let flow: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM runs WHERE session_id=?1 AND invocation_id IS NOT NULL)",
+        [session],
+        |row| row.get(0),
+    )?;
+    if flow {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Session {session} is a Flow review; its Runs keep their Flow's Work"
+        )));
+    }
+    let other: Option<String> = conn
+        .query_row(
+            "SELECT w.name FROM runs r JOIN waves w ON w.id=r.wave_id
+             WHERE r.session_id=?1 AND r.wave_id!=?2 LIMIT 1",
+            params![session, wave.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(other) = other {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Session {session} belongs to Wave {other}, which does not own this Task"
+        )));
+    }
+    conn.execute(
+        "UPDATE runs SET task_id=?2, wave_id=?3, work_source='bound' WHERE session_id=?1",
+        params![session, task.as_str(), wave.as_str()],
+    )?;
+    Ok(())
 }
 
 fn location_in(conn: &Connection, invocation: &str) -> StoreResult<(u32, Vec<Vec<u32>>)> {
@@ -246,6 +301,26 @@ impl super::SqliteStore {
         )
         .optional()?
         .transpose()
+    }
+
+    /// A Run that belongs to no Session: a headless launch.
+    pub fn create_run(&self, run: Run) -> StoreResult<Run> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = insert_run_in(&tx, run)?;
+        tx.commit()?;
+        Ok(run)
+    }
+
+    /// Every launched Run of a Task, newest first, however it got its Task.
+    pub fn task_runs(&self, task: &TaskId) -> StoreResult<Vec<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM runs WHERE task_id=?1 AND published=1
+             ORDER BY created_at DESC, id"
+        ))?;
+        let rows = query.query_map([task.as_str()], |row| read_run(row, 0))?;
+        rows.map(|row| row?).collect()
     }
 
     pub fn position_runs(

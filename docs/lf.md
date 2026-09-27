@@ -609,8 +609,7 @@ Tmux remains process containment, not product identity or advancement authority.
 # Start in a checkout without a registered Task.
 lf --interactive : "Review the change"
 lf session rename <session-id> "Parser review"
-lf session bind <session-id> --task INF-123 --json  # confirm this permanent target
-lf session list --task INF-123 --json
+lf session bind <session-id> --task INF-123 --json  # permanent
 lf runs --task INF-123 --json
 ```
 
@@ -626,15 +625,14 @@ explicit selector, a registered Task checkout supplies the Task. Otherwise the
 Run can remain unbound. This changes ancestry only; a companion terminal does
 not inherit its neighboring Session's Flow membership.
 
-Bind assigns ancestry once to the current Run. A Run without parents may take
-a Wave or a Task; a Wave-only Run may take a Task in that same Wave. The command
-and desktop show the exact target and ask for one confirmation before assigning
-it. An existing Task cannot be changed or cleared, and there is no unbind or
-`--repository` clearing form. Binding to a completed Task or a landed PR works
-without reopening Work. Session lists, Recent runs, usage attribution and the
-sidebar follow the same fields; usage and history never move between Tasks.
-An invocation's Run must also retain its invocation's nullable Task, so a
-taskless invocation's Run cannot be bound independently to a Task.
+Bind assigns a Task once to the Session's Runs that have none, and the Task's
+Wave with it. A Session that already has a Task is refused with that Task's
+name: a Task is never changed or cleared, and there is no unbind. A Session in
+another Wave is refused, and so is a Flow review, whose Runs keep their Flow's
+Work. Binding to a completed Task or a landed PR works without reopening Work.
+The first Run to name a Task starts it, by launch or by bind; `started_at` is
+that moment and never changes. `lf runs --task` lists every Run that names the
+Task, bound or launched; usage and history never move between Tasks.
 
 Rename keeps the Session ID, provider, terminal, draft and Flow membership.
 A human name survives generated suggestions. Bind keeps the same properties
@@ -783,10 +781,10 @@ planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, Run, Task PR, and Steer facts; it reuses
 `WorkRef` identity and does not read reconstructable Task or Project wake
-events. `lf runs`, `lf replay`, and `lf usage` select Run rows from the Home's
-SQLite store. Task and Wave filters use indexed typed fields; Project filters
-join through the Task's Project. Detail reads open only the selected evidence
-artifacts.
+events. `lf runs --task` selects the Task's Run rows from the Home's SQLite
+store and reads each selected Run's record for its evidence. Wave and Project
+filters, `lf usage` and `lf activity` still scan Run records and match their
+recorded subjects.
 
 `lf runs --active` discovers existing receipts once and checks current processes.
 Waiting native clients count while their owned process remains live; unfinished

@@ -81,6 +81,36 @@ fn collect_child_runs_at(lf_home: &Path, parent: &str) -> Result<Vec<RunSnapshot
         })
 }
 
+/// A Task's Runs are the rows that name it, launched or bound; each Run's
+/// evidence is read from its own record.
+fn collect_task_runs(selector: &str) -> Result<Vec<RunSnapshot>> {
+    let path = crate::store::observability_database_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&path)?;
+    let task = match crate::durable::TaskId::parse(selector) {
+        Ok(id) => store.task(&id)?,
+        Err(_) => store.task_by_issue(selector)?,
+    };
+    let Some(task) = task else {
+        return Ok(Vec::new());
+    };
+    let home = crate::store::observability_home_dir();
+    let mut runs = Vec::new();
+    for run in store.task_runs(&task.id)? {
+        let dir = crate::run_record::record_dir(&home, &run.id)
+            .ok_or_else(|| anyhow!("Run {} has an invalid id", run.id))?;
+        match crate::run_record::read_run_snapshot(&dir) {
+            Ok(snapshot) => runs.push(snapshot),
+            // A Run launched on another Home keeps its record there.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(anyhow!("Run record unavailable: {error}")),
+        }
+    }
+    Ok(runs)
+}
+
 fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<RunSnapshot>> {
     collect_runs_started_since_at(
         &crate::store::observability_home_dir(),
@@ -128,13 +158,16 @@ pub fn list(
     task: Option<&str>,
     parent: Option<&str>,
 ) -> Result<()> {
-    let runs = match parent {
-        Some(parent) => collect_child_runs_at(&crate::store::observability_home_dir(), parent)?,
-        None => {
+    let runs = match (parent, task) {
+        (Some(parent), _) => {
+            collect_child_runs_at(&crate::store::observability_home_dir(), parent)?
+        }
+        (None, Some(task)) => collect_task_runs(task)?,
+        (None, None) => {
             let (runs, _truncated) = collect_runs(WorkFilter {
                 wave,
                 project,
-                task,
+                task: None,
             })?;
             runs
         }
@@ -149,7 +182,7 @@ pub fn list(
         match (parent, wave, project, task) {
             (Some(parent), _, _, _) => println!("No child Runs recorded for {parent}."),
             (None, _, _, Some(task)) => {
-                println!("No Runs recorded for {task} in the last {WINDOW_DAYS} days.")
+                println!("No Runs recorded for {task}.")
             }
             (None, _, Some(project), None) => {
                 println!("No Runs recorded for project/{project} in the last {WINDOW_DAYS} days.")

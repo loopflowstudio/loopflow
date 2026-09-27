@@ -1375,6 +1375,29 @@ pub(crate) async fn rename(
     session_surface(store, &target).await
 }
 
+/// Assign a Task to a Session's Runs that have none. The id is the Session's
+/// or any of its Runs'; a closed Session binds like an open one.
+pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
+    let owned = match RunId::parse(id) {
+        Ok(run_id) => store.session_for_run(&run_id).await?,
+        Err(_) => store.session(id).await?,
+    };
+    let (session, _) = owned.ok_or_else(|| session_not_found(id))?;
+    let task = match crate::durable::TaskId::parse(task) {
+        Ok(id) => store.get_task(&id).await?,
+        Err(_) => store.get_task_by_issue(task).await?,
+    }
+    .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
+    let (session, run) = store
+        .bind_session(&session.id, &task.id)
+        .await
+        .map_err(|error| match error {
+            crate::store::StoreError::InvalidAuthority(reason) => anyhow!(reason),
+            error => anyhow!(error),
+        })?;
+    surface(store, &session, &run).await
+}
+
 fn session_not_found(id: &str) -> anyhow::Error {
     anyhow!("Session {id} was not found")
 }

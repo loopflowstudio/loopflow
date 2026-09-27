@@ -1,5 +1,9 @@
 # Attempt history review and Session cutover requirement
 
+Latest disposition: [Session cutover review](session-cutover-review.md) reviews
+the withdrawn implementation attempt at `ca1be1116d`, preserves this historical
+proof, and reproduces the remaining file authority through the actual CLI.
+
 2026-09-26 · LOO-298 · Review of `762e546673bf926e469e463fde6bf83c23301950`
 plus the cursor-decoder repair described below. The supplied compression note
 was preserved in `59046135c` before edits. This review chooses no Flow edge.

@@ -55,7 +55,7 @@ impl SqliteStore {
         }
         progress.verdict = Some(verdict.clone());
         tx.execute(
-            "UPDATE flow_invocations SET review_json=?2 WHERE state='current' AND task_id=?1",
+            &format!("UPDATE flow_invocations SET review_json=?2 WHERE {TASK_INVOCATION}"),
             params![task_id.as_str(), serde_json::to_string(&position.cursor)?],
         )?;
         tx.commit()?;
@@ -101,7 +101,7 @@ impl SqliteStore {
         }
         leaf.route = Some(path.to_string());
         tx.execute(
-            "UPDATE flow_invocations SET review_json=?2 WHERE state='current' AND task_id=?1",
+            &format!("UPDATE flow_invocations SET review_json=?2 WHERE {TASK_INVOCATION}"),
             params![task_id.as_str(), serde_json::to_string(&position.cursor)?],
         )?;
         tx.commit()?;
@@ -254,9 +254,11 @@ impl SqliteStore {
         };
         let claim_json = serde_json::to_string(&claim)?;
         let changed = tx.execute(
-            "UPDATE flow_invocations
-             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4, review_json=?6
-             WHERE state='current' AND task_id=?1 AND position_version=?5 AND claim_json IS NULL",
+            &format!(
+                "UPDATE flow_invocations
+                 SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4, review_json=?6
+                 WHERE {TASK_INVOCATION} AND position_version=?5 AND claim_json IS NULL"
+            ),
             params![
                 task_id.as_str(),
                 i64::try_from(generation).map_err(invalid_durable)?,
@@ -310,9 +312,11 @@ impl SqliteStore {
         let expected_json = serde_json::to_string(expected)?;
         let replacement_json = serde_json::to_string(&replacement)?;
         if tx.execute(
-            "UPDATE flow_invocations
-             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4, review_json=?7
-             WHERE state='current' AND task_id=?1 AND position_version=?5 AND claim_json=?6",
+            &format!(
+                "UPDATE flow_invocations
+                 SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4, review_json=?7
+                 WHERE {TASK_INVOCATION} AND position_version=?5 AND claim_json=?6"
+            ),
             params![
                 task_id.as_str(),
                 i64::try_from(generation).map_err(invalid_durable)?,
@@ -351,8 +355,10 @@ impl SqliteStore {
         let expected_json = serde_json::to_string(expected)?;
         let bound_json = serde_json::to_string(&bound)?;
         if tx.execute(
-            "UPDATE flow_invocations SET claim_json=?2
-             WHERE state='current' AND task_id=?1 AND position_version=?3 AND claim_json=?4",
+            &format!(
+                "UPDATE flow_invocations SET claim_json=?2
+                 WHERE {TASK_INVOCATION} AND position_version=?3 AND claim_json=?4"
+            ),
             params![
                 task_id.as_str(),
                 bound_json,
@@ -875,6 +881,10 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
     }
 }
 
+/// The invocation a Task points at: the one its worker advances. Every other
+/// invocation naming the Task is a Flow about it. `?1` is the Task id.
+pub(super) const TASK_INVOCATION: &str = "id=(SELECT current_invocation_id FROM tasks WHERE id=?1)";
+
 const FLOW_POSITION_SELECT: &str = "SELECT task_id, invocation_json,
             (SELECT CASE WHEN r.published=1 THEN r.id END FROM sessions s
                 JOIN runs r ON r.id=s.current_run_id WHERE s.id=flow_invocations.pending_session_id),
@@ -921,7 +931,7 @@ pub(super) fn flow_position_in(
 ) -> StoreResult<Option<FlowPosition>> {
     let row = conn
         .query_row(
-            &format!("{FLOW_POSITION_SELECT} WHERE state='current' AND task_id=?1"),
+            &format!("{FLOW_POSITION_SELECT} WHERE {TASK_INVOCATION}"),
             [task_id.as_str()],
             read_flow_position_row,
         )
@@ -955,7 +965,7 @@ pub(super) fn set_flow_position_in(
         .map(serde_json::to_string)
         .transpose()?;
     let changed = if position.version == 0 {
-        conn.execute(
+        let inserted = conn.execute(
             "INSERT INTO flow_invocations (
                 id, task_id, invocation_json,
                 step_index, iteration, position_version, worker_generation,
@@ -974,15 +984,26 @@ pub(super) fn set_flow_position_in(
                 serde_json::to_string(&position.cursor)?,
                 position.invocation.id
             ],
-        )?
+        )?;
+        if inserted == 1 {
+            conn.execute(
+                "UPDATE tasks SET current_invocation_id=?2
+                 WHERE id=?1 AND current_invocation_id IS NULL",
+                params![task_id.as_str(), position.invocation.id],
+            )?
+        } else {
+            0
+        }
     } else {
         conn.execute(
-            "UPDATE flow_invocations
-             SET invocation_json=?2,
+            &format!(
+                "UPDATE flow_invocations
+                 SET invocation_json=?2,
                  step_index=?3, iteration=?4, position_version=position_version + 1,
                  worker_generation=0, claim_json=NULL, failure_json=?5,
                  updated_at=?6, review_json=?8
-             WHERE state='current' AND task_id=?1 AND position_version=?7 AND claim_json IS NULL AND id=?9",
+                 WHERE {TASK_INVOCATION} AND position_version=?7 AND claim_json IS NULL AND id=?9"
+            ),
             params![
                 task_id.as_str(),
                 serde_json::to_string(&position.invocation)?,
@@ -1024,9 +1045,11 @@ pub(super) fn block_task_flow_in(
     leaf.progress.verdict = None;
     leaf.route = None;
     if conn.execute(
-        "UPDATE flow_invocations
-         SET claim_json=NULL, failure_json=?2, updated_at=?3, review_json=?6
-         WHERE state='current' AND task_id=?1 AND position_version=?4 AND claim_json=?5",
+        &format!(
+            "UPDATE flow_invocations
+             SET claim_json=NULL, failure_json=?2, updated_at=?3, review_json=?6
+             WHERE {TASK_INVOCATION} AND position_version=?4 AND claim_json=?5"
+        ),
         params![
             task_id.as_str(),
             failure_json,
@@ -1057,10 +1080,12 @@ pub(super) fn release_task_worker_in(
     leaf.progress.verdict = None;
     leaf.route = None;
     if conn.execute(
-        "UPDATE flow_invocations
-         SET claim_json=NULL, failure_json=NULL, updated_at=?2,
+        &format!(
+            "UPDATE flow_invocations
+             SET claim_json=NULL, failure_json=NULL, updated_at=?2,
              review_json=?5
-         WHERE state='current' AND task_id=?1 AND position_version=?3 AND claim_json=?4",
+             WHERE {TASK_INVOCATION} AND position_version=?3 AND claim_json=?4"
+        ),
         params![
             task_id.as_str(),
             OffsetDateTime::now_utc().unix_timestamp(),
@@ -1096,12 +1121,14 @@ pub(super) fn settle_task_worker_in(
     }
     let expected_json = serde_json::to_string(expected)?;
     if conn.execute(
-        "UPDATE flow_invocations
-         SET invocation_json=?2,
+        &format!(
+            "UPDATE flow_invocations
+             SET invocation_json=?2,
              step_index=?3, iteration=?4, position_version=position_version + 1,
              worker_generation=0, claim_json=NULL, failure_json=NULL,
              updated_at=?5, review_json=?8
-         WHERE state='current' AND task_id=?1 AND position_version=?6 AND claim_json=?7",
+             WHERE {TASK_INVOCATION} AND position_version=?6 AND claim_json=?7"
+        ),
         params![
             task_id.as_str(),
             serde_json::to_string(&next.invocation)?,
@@ -1136,8 +1163,10 @@ pub(super) fn finish_task_flow_in(
     }
     let expected_json = serde_json::to_string(expected)?;
     if conn.execute(
-        "UPDATE flow_invocations SET state='completed', ended_at=?4
-         WHERE state='current' AND task_id=?1 AND position_version=?2 AND claim_json=?3",
+        &format!(
+            "UPDATE flow_invocations SET state='completed', ended_at=?4
+             WHERE {TASK_INVOCATION} AND position_version=?2 AND claim_json=?3"
+        ),
         params![
             task_id.as_str(),
             i64::try_from(expected.position_version).map_err(invalid_durable)?,
@@ -1148,6 +1177,10 @@ pub(super) fn finish_task_flow_in(
     {
         return Err(stale_task_worker(task_id));
     }
+    conn.execute(
+        "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
+        [task_id.as_str()],
+    )?;
     Ok(())
 }
 
@@ -1697,14 +1730,6 @@ mod durable_store_tests {
                 None,
                 Some(other_wave.clone()),
             ),
-            // A Flow launched directly for a Task names no Task; its step does.
-            (
-                Some(taskless.id.clone()),
-                Some(task_id.clone()),
-                None,
-                Some(task_id.clone()),
-                Some(task.wave_id.clone()),
-            ),
         ] {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1749,6 +1774,7 @@ mod durable_store_tests {
         for (invocation, task_input, wave_input) in [
             (None, Some(task_id.clone()), Some(other_wave.clone())),
             (Some(position.invocation.id.clone()), Some(other_task), None),
+            (Some(taskless.id.clone()), Some(task_id.clone()), None),
             (Some("missing".into()), None, None),
             (None, Some(TaskId::new()), None),
             (None, None, Some(WaveId::new())),
@@ -2099,6 +2125,103 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn a_task_points_at_one_invocation_while_other_flows_name_it() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let managed = store
+            .set_flow_position(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        // `lf --task X flow review-design`: a Flow about the Task, not its Flow.
+        let about = crate::engine::invocation::QueuedInvocation::new(
+            "review-design",
+            managed.invocation.steps.clone(),
+        )
+        .unwrap();
+        store
+            .save_flow(&about, &ExecutionCursor::default(), Some(&task_id))
+            .unwrap();
+        assert_eq!(
+            store.flow_position(&task_id).unwrap(),
+            Some(managed.clone())
+        );
+
+        // Its Runs name the Task, filled from the invocation, and list under it.
+        let new_run = |invocation: &str, task: Option<TaskId>| Run {
+            id: RunId::new(),
+            session_id: None,
+            invocation_id: Some(invocation.to_string()),
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id: task,
+            wave_id: None,
+            work_source: Some(WorkSource::Declared),
+            created_at: 100,
+            published: true,
+            cwd: "/repo".into(),
+            skill: Some("review-design".into()),
+            provider: None,
+            model: None,
+            caller_run_id: None,
+            ended: None,
+        };
+        let run = store.create_run(new_run(&about.id, None)).unwrap();
+        assert_eq!(run.task_id, Some(task_id.clone()));
+        assert_eq!(run.wave_id, Some(task.wave_id.clone()));
+        let other_task = TaskId::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+            SELECT ?1,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
+            rusqlite::params![other_task.as_str(), task_id.as_str()],
+        )
+        .unwrap();
+        assert!(store
+            .create_run(new_run(&about.id, Some(other_task.clone())))
+            .is_err());
+        assert_eq!(
+            store
+                .runs(None, None, Some(task_id.as_str()), None, 0)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Restart closes the Task's Flow and clears the pointer; the other Flow
+        // stays current, and the pointer accepts only an invocation naming X.
+        store.restart_task_flow(&task, "checkpoint").unwrap();
+        assert_eq!(store.flow_position(&task_id).unwrap(), None);
+        assert_eq!(
+            retained_invocation(&store, &managed.invocation.id).1,
+            "replaced"
+        );
+        let conn = store.conn.lock().unwrap();
+        let state: String = conn
+            .query_row(
+                "SELECT state FROM flow_invocations WHERE id=?1",
+                [&about.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "current");
+        let point = |task: &TaskId, invocation: &str| {
+            conn.execute(
+                "UPDATE tasks SET current_invocation_id=?2 WHERE id=?1",
+                rusqlite::params![task.as_str(), invocation],
+            )
+        };
+        assert!(point(&other_task, &about.id).is_err());
+        point(&task_id, &about.id).unwrap();
+        drop(conn);
+        assert_eq!(
+            store
+                .flow_position(&task_id)
+                .unwrap()
+                .map(|position| position.invocation.id),
+            Some(about.id)
+        );
+    }
+
+    #[test]
     fn competing_run_assignments_start_only_the_winning_task() {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
@@ -2353,6 +2476,11 @@ mod durable_store_tests {
                 position_version,worker_generation,updated_at,state)
                 VALUES('broken',?1,'{\"id\":\"broken\",\"flow\":\"broken\",\"steps\":\"unreadable\"}',0,0,1,0,1,'current')",
                 [broken.as_str()]).unwrap();
+            conn.execute(
+                "UPDATE tasks SET current_invocation_id='broken' WHERE id=?1",
+                [broken.as_str()],
+            )
+            .unwrap();
         }
         assert_eq!(
             store.open_sessions().unwrap(),

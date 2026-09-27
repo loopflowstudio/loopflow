@@ -510,13 +510,26 @@ fn binding_an_orphan_session_starts_its_task_once() {
     );
     assert_eq!(listed[0]["work_path"], "task-pr-tests / INF-123");
 
-    // A Run's Task never moves.
-    for other in ["INF-124", "INF-123"] {
-        let refused = fixture.run(&["session", "bind", &session, "--task", other, "--json"]);
-        assert!(!refused.status.success());
-        let reason = String::from_utf8_lossy(&refused.stderr);
-        assert!(reason.contains("already has Task INF-123"), "{reason}");
-    }
+    // A Run's Task never moves; binding it again to the same Task is a no-op.
+    let refused = fixture.run(&["session", "bind", &session, "--task", "INF-124", "--json"]);
+    assert!(!refused.status.success());
+    let reason = String::from_utf8_lossy(&refused.stderr);
+    assert!(reason.contains("already has Task INF-123"), "{reason}");
+    let again = fixture.run(&["session", "bind", &session, "--task", "INF-123", "--json"]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&again.stdout).unwrap(),
+        bound
+    );
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains(&format!("Binding {session} to INF-123 (")),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
     assert_eq!(
         fixture.run_parents(&orphan).0,
         Some(task.task.id.to_string())

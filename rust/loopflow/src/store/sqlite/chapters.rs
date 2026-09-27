@@ -126,7 +126,15 @@ impl SqliteStore {
             [task.as_str()],
             |row| row.get(0),
         )?;
-        let claimed: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE state='current' AND task_id=?1 AND claim_json IS NOT NULL)", [task.as_str()], |row| row.get(0))?;
+        let claimed: bool = conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM flow_invocations
+                 WHERE {} AND claim_json IS NOT NULL)",
+                super::durable::TASK_INVOCATION
+            ),
+            [task.as_str()],
+            |row| row.get(0),
+        )?;
         let (abandoned, completed): (bool, bool) = conn.query_row(
             "SELECT work_state='abandoned',work_state='done' FROM tasks WHERE id=?1",
             [task.as_str()],

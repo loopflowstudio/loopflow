@@ -496,6 +496,12 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
+This section records the reviewed attempt-history cut. Jack Heart's later
+2026-09-26 comment `50cf5b12-8a17-4390-a6a1-be69a50cbb7f` requires the next
+implementation to cut over Session list/lookup and delete the replaced paths in
+the same pass. The [current review](data-model-slice-review.md) names the exact
+remaining dependencies. Another owner-only foundation does not meet that direction.
+
 Jack's 2026-09-26 attempt-cardinality steer makes the position contract explicit:
 `(invocation, node, iteration tuple)` owns 0..n Run attempts and selects one
 current attempt. Session is its conversational instance; headless retries retain
@@ -536,6 +542,32 @@ steer; no claim of a taskless CLI recovery or configured acceptance follows.
 All eight complete-design Done When obligations still govern publication.
 
 ## Slice ledger
+
+- 2026-09-26 attempt-history review: reproduced replacement of a historical
+  review failing with `missing field index`. Run location and Flow position had
+  different cursor decoders. Extracted and reused the existing historical/current
+  decoder; retained the cursor bytes, Session, title, feedback and ordered Runs.
+  The regression failed before repair and passes afterward, including on the
+  retained canonical six-draft schema. No migration or DTO changed.
+- Executed review proof: 29 Task-controller tests pass before the decoder repair;
+  all 20 durable-store tests pass on the final source (49 distinct tests across
+  the suites). The new historical regression repeats successfully on materialized
+  `0.12.23.001_release`. Formatting, all-target Clippy (18.5 s) and working-diff
+  whitespace pass. Architecture still reports 32/33 SQLite owners, missing
+  `wave_chapters`; seven other inventories pass. Full evidence and failure logs
+  are recorded in [the review](data-model-slice-review.md).
+- Deletion verdict: Session list still concatenates four sources; lookup, Ask,
+  taskless Flow and interactive naming/ancestry retain file authorities. No
+  intermediate publication. Jack Heart's next-pass direction is a complete
+  Session read-path cutover with those dependencies converted and deleted in
+  the same pass, not another owner-only slice.
+- Measured against merge-base `4cd64be3d`: non-test prefixes are +1,617 / −556
+  across 18 Rust/Swift production files; this review adds 46 and removes 31
+  relative to `762e546673`. Zero files deleted. `human_session.rs` remains
+  2,350 lines before the trailing test attribute (2,351 including it). The
+  reproducible method excludes test files and terminal test modules, retaining
+  inline test helpers; these scoped counts do not replace Jack's all-code
+  measurement. No cutover or installed acceptance is claimed.
 
 - 2026-09-26 attempt-history implementation: completed the supplied in-progress
   edits after preserving their exact bytes in

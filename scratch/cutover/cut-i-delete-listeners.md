@@ -129,3 +129,20 @@ Manual, on a private Home (`LF_DB_PATH=<copy>`; per memory, dev `lf` refuses the
 ## 7. Order of work
 
 I.1 → I.2 → I.5 (small, unblocks the build) → I.3 (largest; move `metrics.rs`, `ensure_wave_row`, `relocate.rs` first, then delete `controller/wave/`) → I.4 → I.6 → I.7 → docs and fixtures → forward migrations (`provider_deliveries`, `observation_outbox`) → proof. Commit per group so each step is reviewable and revertable.
+
+## Discord (Jack, 2026-09-27)
+
+"I don't want to delete the discord integration, but I want to move that to be
+an independent thing on top of other foundations, not assume some other idea of
+a wave resident. Its exact behavior is not super important and will require
+future followup, though better if it still works in some basic form for now."
+
+So I.3 does not delete the Discord client. It moves it out of the Wave listener
+into an independent bridge that owns nothing about Waves: a channel message
+becomes one bounded Run (`lf --wave <mapped wave> : "<message>"` or the Wave's
+`wave/operate` with the message as input), and the Run's final answer is posted
+back to the channel. Configuration maps channel → Wave in `.lf/config.yaml` or
+GOAL.md frontmatter as today. Whether the bridge is a cron-fired poll or a small
+standalone `lf discord serve` process is the implementer's call; either is
+independent of any resident and must not reintroduce a Wave HTTP server, journal
+reader or inbox. Basic send/receive is the bar; anything beyond is follow-up.

@@ -1,6 +1,140 @@
 # Data model storage slice review
 
-## Current review: invocation retention
+## Current review: Task review Session ownership
+
+2026-09-26 · LOO-298 · review-slice
+
+Reviewed HEAD `11fdf61cdf62f629ba7961945fdb6b37ecfc855c` against Task PR base
+`a48eeb6aed383123c51a6c6cc673591ae19b1417`; entry tree was clean. Scope is the
+branch change, especially the Task review owner and subsequent compression.
+The [amended design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md)
+and [Session decision](session-runs-and-current-run.md) govern over the older
+Task title: taskless Invocations and Session owning Runs plus a current Run.
+
+**Disposition: not ready to publish.** Task reviews now use a real Session
+owner, and the old unrelated-capture discovery defect is removed at source
+level. This advances the design; it remains an internal prerequisite with no
+executed behavioral proof, not the requested all-caller cutover. All eight
+Done When obligations still apply. No navigation decision is made here.
+
+### Findings and bounded correction
+
+1. **Preparation recovery still strands a reserved Run.**
+   `lf/commands/run.rs:754–774` publishes the reserved manifest before
+   `publish_run_binding` marks the SQL Run published. An interruption between
+   these writes retains the unpublished reservation. `reserve_review_run`
+   (`store/sqlite/sessions.rs:84`) returns that same ID, but
+   `run_record.rs:1860` creates an exclusive staging directory and renames it
+   over the published directory. Existing staging or published contents make
+   the retry fail. This confirms the recorded gap by source tracing; no fault
+   injection ran. Recovery must reconcile the exact immutable input and launch
+   evidence without deleting artifacts or assuming an absent receipt proves
+   provider death. The newly reported upstream prepared-Run implementation
+   must be reconciled before choosing that repair.
+2. **The behavioral proof stops at the store boundary.**
+   `review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors`
+   directly seeds a published Run, replaces it twice, and checks store
+   discovery/settlement. It does not call CLI Open, reserve through the real
+   child launcher, publish artifacts, or exercise
+   `require_current_review_actor` from a superseded provider. It is useful
+   ownership proof once executed, but cannot establish the required launch,
+   reopen, stale-actor or configured desktop experience by itself.
+3. **Fixed an obsolete schema assertion.**
+   `store/migrations.rs::native_human_session_schema_uses_flow_invocations`
+   applied the current draft tail, then required the now-renamed
+   `session_run_id` and `ready_summary` columns. Updated it to require
+   `pending_session_id` and the two historical inputs and reject the retired
+   column names. No migration bytes changed. This is a source-detected test
+   defect; execution remains blocked, so no red-to-green result is claimed.
+4. **The remaining owners still prevent acceptance.**
+   Public Session inventory remains a four-source union. Ask replacement still
+   clears saved feedback (`human_session.rs:644,840`); ordinary/taskless Flow
+   persistence still uses files; general Run readers still scan manifests.
+   Bind, typed general launch ancestry, common taskless driver, Session history
+   DTO/desktop consumers, repository Chapter rotation and offline import remain
+   incomplete. Do not publish or activate this draft over an installed Home.
+
+### Evidence matrix
+
+`pass (source)` means inspected implementation only. No product behavior ran.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+| --- | --- | --- | --- | --- |
+| Slice: stable conversation | Two replacements retain identity, title, feedback and old Runs | Session owns feedback/current pointer; replacement appends Run under an immediate transaction | `sessions.rs:84,269,341`; repeated-replacement fixture | pass (source); execution gap |
+| Slice: exact settlement | Stale replacement, Ready and Complete fail; feedback consumed once | Expected position/current Run/publication checks; completion and Task event share transaction | `sessions.rs:118,224`; `children.rs:231,271`; fixture at `durable.rs:1613` | pass (source); actor/CLI proof gap |
+| Slice: available review | Unrelated malformed invocation cannot hide valid Session | Direct Session/current Run query; exact selected Task capture still validates | `human_session.rs:1167,1266`; `sessions.rs:149`; corrupt-neighbor fixture | pass (source); Open unproven |
+| Done 1: complete validators | Nullable ancestry, node/tuple/parent and current-Run invariants | Session member FK and Run parent triggers present; general constructors and runtime parent tree absent | Session SQL draft; populated import fixture | gap |
+| Done 2: common CLI reader | Launch, bind/rename and Run/usage/Session agree | Rename works through SQL for Task reviews only; other kinds/readers unconverted | `lf/commands/session.rs:33`, `human_session.rs:305`, `lf/commands/runs.rs:57` | gap |
+| Done 3: execution preservation | Shared taskless driver; captured recovery and exact stale-result fencing | Task transactions retain history; file adapter and publication retry gap remain | `flow_run.rs:108,136`, finding 1 | gap |
+| Done 4: repository Chapter | All Waves rotate with frozen evidence and active identities | Still Wave-scoped activation | `store/sqlite/chapters.rs:39` | gap |
+| Done 5: populated Home import | Idempotent complete import; interruption/cutover preservation | Task review SQL conversion only; historical columns retained; no Home rehearsal | Draft plus `session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints` | gap; unexecuted |
+| Done 6: DTO/desktop | Stable pane, Run history and typed grouping | Existing Rust/Swift Session wire shape unchanged | Branch diff and Session consumers | gap |
+| Done 7: configured acceptance | Actual backed-up Home and installed CLI/app demo; measurements | No Home conversion, promotion, CLI demo or mounted pane proof | None attempted | gap |
+| Done 8: deletion/consistency | One owner for every kind, no old readers/writers, passing checks | Task review inventory removed; other old owners and Started writes remain | Negative searches below; static checks | gap |
+
+### Negative architectural proof and verification
+
+`human_task_flow_positions` is gone. Current SQL no longer addresses
+`task_flow_positions` or writes the two historical Session-input columns.
+Cursor checkpointing an existing Session cannot replace its Run or feedback;
+reservation, publication and Ready own those updates. Current invocation
+claims and retained closed claims remain distinct. Those are useful reductions.
+
+Still reachable: four-source `human_session::list` at `:305`, Ask JSON
+read/write, `flow_run` `position.json` read/write at `:108,136`, manifest/subject
+Run filters at `lf/commands/runs.rs:57`, provider identity/client/resolution
+sidecars in `run_record.rs`, and Started writes in `chapters.rs:86` and the
+invocation migration trigger. There is no complete architectural deletion proof.
+
+| Check | Result |
+| --- | --- |
+| Resource preflight and safe `--recover` | FAIL: active `main-view-task` **15.3 GiB / 12 GiB**, **98.7 GiB** free; active foreign build preserved |
+| Product tests, materialized migration rehearsal, configured demo | NOT RUN: TESTING.md resource rule blocks execution; installed code is not a substitute |
+| `cargo fmt --all --check` | PASS |
+| Isolated `cargo clippy --all-targets -- -D warnings` | PASS; compiled test targets, did not execute them |
+| Migration validation | PASS: three ordered drafts; 52 shipped files unchanged |
+| Architecture checker | FAIL: SQLite owner coverage **32/33**, missing `wave_chapters`; other seven inventories pass |
+| Portable architecture HTML consistency | PASS in website environment |
+| Whole-branch whitespace | FAIL: earlier blank draft dependency header and copied patch context; unchanged |
+| Working-diff whitespace | PASS |
+
+Clippy compilation cannot establish runtime SQL behavior. Earlier review findings about Task review
+feedback reset and unrelated-invocation inventory failure are superseded by
+the new source path, while their behavioral acceptance remains unproven.
+
+### Next action and proof
+
+The new directive reports LOO-291 merged as `4cd64be3d` / PR #1277 and requests
+`lf rebase` at the next boundary. It adds two delivery gaps to LOO-298:
+publication of #1296 missing from its Task PR row, and stacking already-created
+Tasks. These are supplied observations, not independently reproduced defects
+in this review. Keep them in scope without silently rewriting delivery state.
+`lf rebase --plan` selects `direct_rebase` (`clean_authored`, 14 unique commits).
+Preserve this dated review before integration; rebase may invalidate its exact
+line references and executable evidence. Reconcile upstream prepared Run,
+checkout binding, Session and migration-tail changes through `lf rebase`.
+
+When resource preflight permits, run the focused proof under TESTING.md's
+isolated environment, including the corrected schema assertion:
+
+```sh
+cargo test -p loopflow --lib native_human_session_schema_uses_flow_invocations
+cargo test -p loopflow --lib review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors
+cargo test -p loopflow --lib session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints
+cargo test -p loopflow --lib controller::task::planning_tests
+cargo test -p loopflow --lib store::sqlite::durable::durable_store_tests
+```
+
+Keep the earlier projection and invocation preservation commands owed; repeat
+populated migration proofs after materialization in a disposable source copy.
+Add real launch-path fault injection around manifest/SQL publication and
+superseded-Run completion, then finish the common Invocation/Run/Session owner
+and all consumers. Preserve the current-Run-only bind assumption, earlier Run
+attribution, and atomic taskless null-to-Task rejection. Chapter, Home import,
+desktop/configured acceptance, measurements and deletion research remain the
+full design's obligations. No intermediate publication is warranted.
+
+## Earlier review: invocation retention
 
 2026-09-26 · LOO-298 · review-slice
 

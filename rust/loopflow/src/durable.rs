@@ -264,6 +264,80 @@ pub struct TaskFlowBlocker {
     pub observed_at: OffsetDateTime,
 }
 
+impl TaskFlowBlocker {
+    pub fn now(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            restart_required: false,
+            observed_at: OffsetDateTime::now_utc(),
+        }
+    }
+}
+
+/// The current attempt at an invocation's cursor: its Run and, once the Run
+/// settled, the Run's outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowAttempt {
+    pub run_id: RunId,
+    pub outcome: Option<String>,
+}
+
+/// One Flow invocation as its row holds it: the captured graph, the cursor,
+/// the launch facts, the current attempt and the failure. A saved Flow is
+/// driven from this record alone; a Task's own invocation is read through
+/// [`FlowPosition`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowInvocation {
+    pub invocation: QueuedInvocation,
+    pub cursor: crate::engine::ExecutionCursor,
+    pub version: u64,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<WaveId>,
+    pub cwd: std::path::PathBuf,
+    pub message: Option<String>,
+    pub model: Option<String>,
+    pub current_attempt: Option<FlowAttempt>,
+    pub pending_session_id: Option<String>,
+    pub failure: Option<TaskFlowBlocker>,
+    pub finished: bool,
+}
+
+impl FlowInvocation {
+    pub fn id(&self) -> &str {
+        &self.invocation.id
+    }
+
+    pub fn current_step(&self) -> Option<&ConcreteStep> {
+        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
+        steps.get(cursor.index)
+    }
+
+    pub fn is_human(&self) -> bool {
+        matches!(self.current_step(), Some(ConcreteStep::Skill(skill)) if skill.policy.human)
+    }
+
+    /// The name a step is reported by.
+    pub fn step_name(&self) -> Option<String> {
+        Some(match self.current_step()? {
+            ConcreteStep::Skill(skill) => skill.skill.name.clone(),
+            ConcreteStep::Op(op) => format!("op: {}", op.item.display_name()),
+            ConcreteStep::Xor(branch) => branch.router.name.clone(),
+        })
+    }
+
+    /// The Work the Flow was launched with, as its Runs declare it.
+    pub fn declared_work(&self) -> Option<crate::session::RunWork> {
+        if self.task_id.is_none() && self.wave_id.is_none() {
+            return None;
+        }
+        Some(crate::session::RunWork {
+            task_id: self.task_id.clone(),
+            wave_id: self.wave_id.clone(),
+            source: crate::session::WorkSource::Declared,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TaskWorkerClaimOutcome {

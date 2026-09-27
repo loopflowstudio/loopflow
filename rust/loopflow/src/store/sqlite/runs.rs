@@ -95,11 +95,11 @@ pub(super) fn read_run(
 /// The caller holds an immediate transaction, including any Session reservation.
 pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult<Run> {
     if let Some(invocation) = &run.invocation_id {
-        let task: Option<String> = conn
+        let (task, wave): (Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT task_id FROM flow_invocations WHERE id=?1",
+                "SELECT task_id, wave_id FROM flow_invocations WHERE id=?1",
                 [invocation],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or_else(|| invalid(format!("Invocation {invocation} does not exist")))?;
@@ -111,6 +111,16 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
             return Err(invalid("Run and Invocation Tasks disagree"));
         }
         run.task_id = task;
+        let wave = wave
+            .map(|wave| WaveId::parse(&wave))
+            .transpose()
+            .map_err(invalid)?;
+        if wave.is_some() {
+            if run.wave_id.is_some() && run.wave_id != wave {
+                return Err(invalid("Run and Invocation Waves disagree"));
+            }
+            run.wave_id = wave;
+        }
         let (node, iterations) = location_in(conn, invocation)?;
         if run.node.is_some_and(|supplied| supplied != node)
             || run
@@ -245,19 +255,7 @@ pub(super) fn bind_session_runs_in(
 }
 
 fn location_in(conn: &Connection, invocation: &str) -> StoreResult<(u32, Vec<Vec<u32>>)> {
-    let (capture, cursor, index, iteration, updated_at): (String, Option<String>, i64, i64, i64) = conn.query_row(
-        "SELECT invocation_json,review_json,step_index,iteration,updated_at FROM flow_invocations WHERE id=?1",
-        [invocation],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-    )?;
-    let capture: crate::engine::invocation::QueuedInvocation = serde_json::from_str(&capture)?;
-    let cursor = super::durable::decode_flow_cursor(
-        cursor.as_deref(),
-        index,
-        iteration,
-        &mut None,
-        time::OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?,
-    )?;
+    let (capture, cursor) = super::flows::capture_in(conn, invocation)?;
     Ok((
         capture.node_id(&cursor).map_err(invalid)?,
         crate::engine::flow_graph::flow_iterations(&capture.steps, &cursor),

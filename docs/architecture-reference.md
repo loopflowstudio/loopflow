@@ -154,7 +154,7 @@ CLI names and issue identifiers resolve once at the boundary.
 | `waves` | Stable identity and repository locator; authored goal/memory/instrument definitions stay in repository files |
 | `projects` | `wave_id`, `chapter_id`, Flow template selection, provider Project identity; read/update the Linear-backed plan |
 | `tasks` | `project_id`, provider Issue identity, Work state, worktree, delivery facts and validated set-once `started_at`; derive Wave through Project |
-| `flow_invocations` | Nullable Task, nullable runtime parent, captured Flow name/source and complete graph, local node cursor, loop return counts, status, claim/version/generation, pending boundary; create, claim, settle, interrupt, restart |
+| `flow_invocations` | Nullable Task and Wave, launch facts (`cwd`, `message`, `model`) for a saved Flow, captured Flow name/source and complete graph, local node cursor, loop return counts, status, claim/version/generation, current attempt Run, pending review Session; create, claim, checkpoint, record decision/route, settle, recover, retry, restart |
 | `runs` | ID, nullable `session_id` FK, causal parent Run, Home/repository/cwd, provider/model/skill, timestamps/outcome, nullable `invocation_id`, `task_id`, `wave_id`, `work_source`, node, iteration tuple and `membership_known`; create, settle, bind, query |
 | `sessions` | Stable `id`, `current_run_id` FK; `kind` = `interactive | flow_review | ask`; `title`, `title_source` = `generated | human`; `state` = `waiting | active | ready | closed`; `ready_summary`; query Runs, open, ready, complete, rename |
 

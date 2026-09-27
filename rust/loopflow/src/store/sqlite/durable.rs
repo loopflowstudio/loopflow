@@ -22,42 +22,10 @@ impl SqliteStore {
         run_id: &RunId,
         verdict: &crate::engine::transitions::FlowVerdict,
     ) -> StoreResult<()> {
-        if verdict.summary.trim().is_empty() {
-            return Err(StoreError::InvalidData(
-                "review evidence cannot be empty".to_string(),
-            ));
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, &WorkRef::Task(task_id.clone()))?;
-        let mut position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-        if position
-            .claim
-            .as_ref()
-            .and_then(|claim| claim.worker_run_id.as_ref())
-            != Some(run_id)
-            || position.current().policy.repeat.is_none()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "only the current claimed loop reviewer may record a verdict".to_string(),
-            ));
-        }
-        super::runs::require_attempt_in(&tx, &position.invocation.id, run_id)?;
-        let progress = &mut position.cursor.leaf_mut().progress;
-        if progress
-            .verdict
-            .as_ref()
-            .is_some_and(|saved| saved != verdict)
-        {
-            return Err(StoreError::InvalidAuthority(
-                "step already has a different decision".into(),
-            ));
-        }
-        progress.verdict = Some(verdict.clone());
-        tx.execute(
-            &format!("UPDATE flow_invocations SET review_json=?2 WHERE {TASK_INVOCATION}"),
-            params![task_id.as_str(), serde_json::to_string(&position.cursor)?],
-        )?;
+        let position = claimed_position_in(&tx, task_id, run_id)?;
+        super::flows::record_verdict_in(&tx, &position.invocation.id, run_id, verdict)?;
         tx.commit()?;
         Ok(())
     }
@@ -70,40 +38,8 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, &WorkRef::Task(task_id.clone()))?;
-        let mut position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-        if position
-            .claim
-            .as_ref()
-            .and_then(|claim| claim.worker_run_id.as_ref())
-            != Some(run_id)
-        {
-            return Err(StoreError::InvalidAuthority(
-                "only the current claimed router may select a path".into(),
-            ));
-        }
-        super::runs::require_attempt_in(&tx, &position.invocation.id, run_id)?;
-        let crate::engine::ConcreteStep::Xor(branch) = position.current_plan() else {
-            return Err(StoreError::InvalidAuthority(
-                "current Flow step is not a router".into(),
-            ));
-        };
-        if !branch.paths.contains_key(path) {
-            return Err(StoreError::InvalidData(format!(
-                "unknown Flow route {path:?}"
-            )));
-        }
-        let leaf = position.cursor.leaf_mut();
-        if leaf.route.as_deref().is_some_and(|saved| saved != path) {
-            return Err(StoreError::InvalidAuthority(
-                "step already has a different route".into(),
-            ));
-        }
-        leaf.route = Some(path.to_string());
-        tx.execute(
-            &format!("UPDATE flow_invocations SET review_json=?2 WHERE {TASK_INVOCATION}"),
-            params![task_id.as_str(), serde_json::to_string(&position.cursor)?],
-        )?;
+        let position = claimed_position_in(&tx, task_id, run_id)?;
+        super::flows::record_route_in(&tx, &position.invocation.id, run_id, path)?;
         tx.commit()?;
         Ok(())
     }
@@ -881,6 +817,27 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
     }
 }
 
+/// The Task's Flow while `run_id` is its claimed worker Run.
+fn claimed_position_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    run_id: &RunId,
+) -> StoreResult<FlowPosition> {
+    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    let position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
+    if position
+        .claim
+        .as_ref()
+        .and_then(|claim| claim.worker_run_id.as_ref())
+        != Some(run_id)
+    {
+        return Err(StoreError::InvalidAuthority(
+            "only the current claimed Task worker Run may record on its Flow".to_string(),
+        ));
+    }
+    Ok(position)
+}
+
 /// The invocation a Task points at: the one its worker advances. Every other
 /// invocation naming the Task is a Flow about it. `?1` is the Task id.
 pub(super) const TASK_INVOCATION: &str = "id=(SELECT current_invocation_id FROM tasks WHERE id=?1)";
@@ -967,11 +924,13 @@ pub(super) fn set_flow_position_in(
     let changed = if position.version == 0 {
         let inserted = conn.execute(
             "INSERT INTO flow_invocations (
-                id, task_id, invocation_json,
+                id, task_id, wave_id, invocation_json,
                 step_index, iteration, position_version, worker_generation,
                 claim_json, failure_json, updated_at, review_json, state
              ) VALUES (
-                ?8, ?1, ?2, ?3, ?4, 1, 0, NULL, ?5, ?6, ?7, 'current'
+                ?8, ?1, (SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id
+                    WHERE t.id=?1),
+                ?2, ?3, ?4, 1, 0, NULL, ?5, ?6, ?7, 'current'
              )
              ON CONFLICT DO NOTHING",
             params![
@@ -2138,7 +2097,20 @@ mod durable_store_tests {
         )
         .unwrap();
         store
-            .save_flow(&about, &ExecutionCursor::default(), Some(&task_id))
+            .create_flow(&crate::durable::FlowInvocation {
+                invocation: about.clone(),
+                cursor: ExecutionCursor::default(),
+                version: 0,
+                task_id: Some(task_id.clone()),
+                wave_id: Some(task.wave_id.clone()),
+                cwd: "/repo".into(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                failure: None,
+                finished: false,
+            })
             .unwrap();
         assert_eq!(
             store.flow_position(&task_id).unwrap(),
@@ -2472,9 +2444,10 @@ mod durable_store_tests {
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
                 SELECT ?1,project_id,?1,?1,'/repo.broken',1 FROM tasks WHERE id=?2",
                 rusqlite::params![broken.as_str(), task_id.as_str()]).unwrap();
-            conn.execute("INSERT INTO flow_invocations(id,task_id,invocation_json,step_index,iteration,
+            conn.execute("INSERT INTO flow_invocations(id,task_id,wave_id,invocation_json,step_index,iteration,
                 position_version,worker_generation,updated_at,state)
-                VALUES('broken',?1,'{\"id\":\"broken\",\"flow\":\"broken\",\"steps\":\"unreadable\"}',0,0,1,0,1,'current')",
+                SELECT 'broken',?1,p.wave_id,'{\"id\":\"broken\",\"flow\":\"broken\",\"steps\":\"unreadable\"}',0,0,1,0,1,'current'
+                FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
                 [broken.as_str()]).unwrap();
             conn.execute(
                 "UPDATE tasks SET current_invocation_id='broken' WHERE id=?1",

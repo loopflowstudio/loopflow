@@ -651,3 +651,17 @@ row". Only Homes that ran this branch's earlier cuts have such rows.
 `LF_HOME`/`LF_DB_PATH` into `LF_CONTROL_*`, which a development build ignores,
 so a nested `lf flow decide` in a test stand-in must name the fixture Home
 itself. Unchanged behavior, observed while writing the taskless proof.
+
+## Scope confirmed and listeners deleted (2026-09-27)
+
+Jack's Linear comment `c5cd2dd2` keeps in LOO-298: repository Chapters and
+Project-owned Flows, the saved Flow cursor on the row, and the remaining
+redundant pairs. Warning from LOO-321: this branch carries drafts; never run
+its binary against the installed Home or promote it before it lands.
+
+Same day, in this review: "we should just delete lf wave serve and all other
+notion of wave listener or residents at all", and "be aggressive about adding
+deletion to this diff." Cut I deletes the listener, resident and lfd stack in
+this branch. The lfd research that prompted it found the CLI-vs-client executor
+split already gone (#872, #1099) and today's lfd a 2026-07 re-creation whose only
+job needing a resident process is hosting Wave listeners.

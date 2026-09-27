@@ -444,7 +444,8 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                 flow: flow.flow,
                 steps: flow.steps,
             };
-            store.save_flow(invocation, flow.cursor).await?;
+            let task = work.as_ref().and_then(|work| work.task_id.clone());
+            store.save_flow(invocation, flow.cursor, task).await?;
             Ok::<_, anyhow::Error>(work)
         };
         let work = saved.await.unwrap_or_else(|error| {

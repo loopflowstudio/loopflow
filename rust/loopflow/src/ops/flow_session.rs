@@ -1,5 +1,6 @@
 //! Human review of a saved Flow. The review is a Session whose Runs name the
-//! Flow's invocation; the saved position keeps only the Flow's execution.
+//! Flow's invocation and the Flow's Work, Task included; the saved position
+//! keeps only the Flow's execution.
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
 use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
@@ -93,11 +94,9 @@ pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Op
             let config = crate::engine::config::load_config(Some(&flow.cwd))?.unwrap_or_default();
             let (provider, model) =
                 crate::engine::config::parse_agent(flow.model.as_deref().unwrap_or(config.agent()));
-            // The review closes through its Session, not a Task's managed
-            // Flow, so its Runs carry the Work's Wave and no Task.
-            let wave_id = declared_work(store, &flow)
-                .await
-                .and_then(|work| work.wave_id);
+            // A Flow about a Task names it on its review without becoming
+            // the Task's Flow; the review still closes through its Session.
+            let work = declared_work(store, &flow).await;
             let run = human_session::prepare_run(
                 Run {
                     id: crate::durable::RunId::new(),
@@ -106,9 +105,9 @@ pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Op
                     node: None,
                     iterations: None,
                     attempt: None,
-                    task_id: None,
-                    work_source: wave_id.as_ref().map(|_| WorkSource::Declared),
-                    wave_id,
+                    task_id: work.as_ref().and_then(|work| work.task_id.clone()),
+                    work_source: work.as_ref().map(|_| WorkSource::Declared),
+                    wave_id: work.and_then(|work| work.wave_id),
                     created_at: 0,
                     published: true,
                     cwd: flow.cwd.clone(),

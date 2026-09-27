@@ -384,19 +384,7 @@ impl Import<'_> {
         let dir = self.run_dir(&run_id)?;
         let manifest = crate::run_record::read_manifest(&dir).context("the review's Run record")?;
         let (title, title_source) = name(&dir, skill.clone())?;
-        let selector = flow
-            .as_work
-            .clone()
-            .or(flow.task.as_ref().map(|id| format!("task:{id}")))
-            .or(flow.wave.as_ref().map(|id| format!("wave:{id}")));
-        // The invocation has no Task, so its Runs carry the Work's Wave.
-        let wave_id = match selector {
-            Some(selector) => crate::ops::resolve_work_binding(self.store, &flow.cwd, &selector)
-                .await
-                .ok()
-                .map(|binding| binding.wave_id),
-            None => None,
-        };
+        let work = crate::ops::flow_session::declared_work(self.store, &flow).await;
         let created_at = manifest.created_at.unix_timestamp();
         let run = Run {
             id: run_id,
@@ -405,9 +393,9 @@ impl Import<'_> {
             node: None,
             iterations: None,
             attempt: None,
-            task_id: None,
-            work_source: wave_id.as_ref().map(|_| WorkSource::Declared),
-            wave_id,
+            task_id: work.as_ref().and_then(|work| work.task_id.clone()),
+            work_source: work.as_ref().map(|_| WorkSource::Declared),
+            wave_id: work.and_then(|work| work.wave_id),
             created_at,
             published: true,
             cwd: manifest.cwd,

@@ -1,20 +1,23 @@
 # LOO-298 concept review
 
-2026-09-26 · Reviewed `df1443c044aadaa80ddddd71c7ee8cda61db3afd`
-against `4cd64be3d0432aa04dd9256293eef7088db97ccc`; entry tree clean.
+2026-09-26 · Reviewed `cb4ee961ff88784db591758ad87605ca0008cfd8`
+against `4cd64be3d0432aa04dd9256293eef7088db97ccc`, including the supplied
+uncommitted [slice review](data-model-slice-review.md). That review is preserved
+unchanged. This pass changes only this concept review.
 
 **Judgment: keep the amended concepts; the branch is not ready to publish.**
-Task reviews now have a Session owner that retains title, feedback and Run
-history. This supports the approved experience. The remaining work is carrying
-that ownership through lookup, preparation recovery, all conversation kinds and
-consumers. No speculative redesign or additional product noun is selected.
+Session is the conversation Jack keeps; Run is an attempt within it. The latest
+storage and recovery changes support that distinction. The remaining P1 is that
+an action can lose the selected attempt while crossing API layers. Fix that
+boundary within the approved model; no additional product noun or lifecycle is
+needed. All eight Done When obligations remain.
 
 The [amended design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md)
 and [Session decision](session-runs-and-current-run.md) govern. Jack commissioned
 one SQLite owner per main product object. The later participant (name unresolved)
-approved taskless Invocations and Session owning Runs plus a current Run. The
-older Task title and copied handoff do not override those corrections. All eight
-Done When obligations remain; this review does not choose Flow navigation.
+approved taskless Invocations, Session owning Runs plus a current Run, and Flow /
+Invocation naming. The older Task title and Wave memory do not override those
+corrections. This review supplies evidence and chooses no Flow navigation.
 
 ## Usage first
 
@@ -30,236 +33,202 @@ lf runs --task INF-123 --json
 lf session open <session-id>
 ```
 
-Jack starts outside a registered Task checkout. Rename gives the conversation a
-human title. Bind assigns its current Run to INF-123, even after that Task's PR
-lands. The same Session remains selected and its live terminal keeps its draft.
-INF-123 is illustrative. Bind and the Task-filtered Session list remain target
-behavior; the integrated rename command exists, with SQL ownership for Task
-reviews and sidecar ownership for the other kinds.
+Jack starts an unbound conversation, gives it a name, and binds it to INF-123
+even after its PR lands. Every view agrees about the current Run's Task. The
+same selected Session and live terminal retain the draft. INF-123 is illustrative;
+bind and the filtered Session list remain target behavior.
 
-Recovery uses the same Session and Open action. Resume native history when
-recoverable; when exact execution evidence permits replacement, append a Run and
-switch the current pointer without losing title, feedback or earlier attempts.
-Stable Session identity does not recover a dead provider's unsaved native state.
-Ready saves review feedback; Complete returns it once to the waiting boundary.
-Provider exit and pane closure never complete a review. An unrelated broken
-invocation must not prevent opening a valid conversation.
+Recovery keeps the same Open action. Resume native history when recoverable;
+when exact execution evidence permits replacement, append a Run and select it
+without losing the Session's title, feedback or earlier attempts. Missing launch
+receipts cannot justify another provider launch. Retaining Session identity does
+not recover a dead provider's unsaved native state.
 
-Keep the examples and present-tense specification in `docs/lf.md` (Sessions).
-Before shipping, reconcile its preceding prepared-Run paragraph with the final
-publication contract: it currently describes preparation and launch-time context
-from the integrated file path, while Task reviews use SQL reservation. Jack
-should not need two recovery instructions depending on storage kind.
-The architecture reference owns transactions and validators; `docs/waves.md`
-owns Chapter history. The builtin headless surface correctly distinguishes
-Ready from completion (`engine/builtins/surfaces/headless.md:9`), and
-`task/skill/review-design.md:112` already requires recording assumptions. Keep
-those skills unchanged; storage instructions do not belong in every review.
+For a review, Ready saves feedback; Complete returns it once to the waiting
+boundary. Pane closure and provider exit never complete the review. A broken
+neighboring invocation should leave this conversation reachable.
 
-Two usage clarifications remain draft review copy, not new product approval:
+Draft clarification for `docs/lf.md` Sessions, after the implementation proves it:
 
-- Binding affects the current Run and attribution inherited by its replacement.
-  Earlier Runs retain their Task and usage attribution; one Session's history
-  may span Tasks.
-- A taskless Run can still belong to an Invocation. Under nullable Task equality,
-  binding that individual Run to a Task rejects atomically. Orphan does not mean
-  independent of execution.
+> Use the Session ID to act on the conversation's current attempt. A Run ID or
+> Run prefix selects that attempt: if it has been replaced, the command reports
+> its Session and current Run without acting on the replacement. Once Complete
+> selects an attempt, it saves that attempt's feedback and tears down that same
+> attempt. A concurrent change rejects completion instead of selecting again.
+
+This carries forward the latest slice review's expectation and the design's
+existing stale-attempt guarantee; it is not new participant approval. Stable
+Session-ID rename remains a conversation operation. The implementation need not
+turn a rename into an execution operation, but it must preserve the distinction
+between a Session selector and an explicitly selected Run.
+
+Keep the already-clear usage in `docs/lf.md:576` unchanged during this review.
+Before shipping, reconcile the preceding prepared-Run paragraph (`:562`) with
+the final reservation/publication contract: it still describes the integrated
+file-backed path and launch-time context filling. The architecture reference
+owns transactions and validators; `docs/waves.md` owns Chapter history. The
+builtin headless surface already distinguishes Ready from completion, and
+`task/skill/review-design.md:112` requires explicit assumptions. No skill rewrite
+is needed to teach storage internals or a new recovery command.
 
 ## Core model in one screen
 
-| Action | Identity and owner | State-changing responsibility |
+| Action | Identity and owner | State change |
 | --- | --- | --- |
-| Choose a workflow | Flow template; Project's default | Explicit Task selection may override the default |
-| Start, resume or restart execution | Invocation ID; captured graph, cursor, returns and claim | Resume retains capture; restart creates a new execution identity and retains history |
-| Enter a nested loop body on a pass | Child Invocation ID | Runtime parentage only; template composition creates no invocation parent |
-| Inspect an attempt | Run ID; nullable Invocation, Task, Wave and Session | Run owns outcome, usage and exact process evidence |
-| Open, name or complete a conversation | Session ID; title, feedback, completion and current Run | Replacement appends a Run; current pointer must select a member |
-| Assign the conversation to work | Current Run's Task/Wave | Validated bind, without changing invocation membership or reopening Work |
-| Investigate a past plan | Repository Chapter; Project at (Wave, Chapter) | Synchronized rotation preserves execution identity and frozen evidence |
+| Choose a workflow | Flow template; Project default | Task may explicitly select another Flow |
+| Execute or restart it | Invocation; captured graph, cursor, returns, claim | Resume retains capture; restart retains history under a new execution identity |
+| Enter a nested loop body | Child Invocation | Runtime nesting only; template composition is expanded before execution |
+| Inspect an attempt | Run; nullable Invocation, Task, Wave and Session | Run owns outcome, usage and exact process evidence |
+| Name or reopen a conversation | Session; title, feedback, completion, current Run | Replacement appends a member Run and compares the current pointer |
+| Complete a review | Selected Run and exact waiting boundary | Settle saved feedback once, then tear down the same attempt |
+| Assign the conversation to work | Current Run's Task/Wave | Validated bind; membership and earlier Run attribution remain intact |
+| Inspect past plans | Repository Chapter; Project at (Wave, Chapter) | Rotation preserves active identity and freezes predecessor evidence |
 
-A node and launch-time iteration tuple locate an attempt; no additional
-occurrence object is needed. Loop return, Run retry, Session reopen and
-Invocation restart remain distinct transitions because they preserve different
-facts. There is no reason to rename Flow / Invocation again.
+A node and launch-time iteration tuple locate a Run. No occurrence object is
+needed. Loop return, Run retry, Session reopen and Invocation restart preserve
+different facts and remain distinct transitions. The selected Run expectation
+is an input to an operation, not another durable object.
 
 ## Findings and consequences
 
-Source paths below are relative to `rust/loopflow/src/` unless stated otherwise.
-These are inspected paths, not executed reproductions.
+Source paths below are relative to `rust/loopflow/src/`. These are source
+observations and interleavings, not runtime reproductions.
 
-### 1. The Session owner now prevents feedback loss for Task reviews
+### 1. P1: the selected Run is discarded before the effect
 
-`store/sqlite/sessions.rs:84` reserves or appends a Run inside an immediate
-transaction, compares the expected position, and switches the current pointer
-with the invocation version. Rename at `:203` respects human-over-generated
-ordering; Ready at `:224` requires the current published Run and invalidates a
-pending completion snapshot. Completion at `:341` compares Run and feedback
-inside the Task settlement transaction. `save_review_in` at `:269` no longer
-lets an execution checkpoint overwrite an existing Session's conversation facts.
+`ops/human_session.rs:585` resolves retained Run membership and rejects an
+already historical selector. But `complete_flow` (`:717`) converts its resolved
+position into `FlowSessionToken`. That token (`:69`, constructed at `:1918`)
+contains the boundary identity, but neither Run ID nor position version.
+`controller/task/mod.rs:764` then reloads a position and uses that new snapshot
+as the settlement expectation.
 
-Normal path: `human_session::rename` (`ops/human_session.rs:1404`) resolves the
-review and updates its Session row. Recovery path: `open_boundary` (`:1089`)
-tries native resume, retains the Task review's feedback, and delegates Run
-reservation after checking launch/native-client evidence. The earlier concept
-review's claim that Task reopen clears feedback is superseded. Ask reopen still
-clears feedback (`:1121`) and copies a name (`:1125`); its conversion remains.
+If Run A was selected, then Open publishes replacement B at the same boundary,
+the token still matches. An external CLI caller has no superseded provider
+`LF_RUN_ID` for `require_current_review_actor` (`human_session.rs:740`) to reject.
+Completion can therefore consume B's retained feedback while `stop_flow_run`
+receives A's old position. The store compares the exact position in
+`store/sqlite/children.rs:235,271` and checks current Run/feedback in
+`sessions.rs:352`; those checks protect the snapshot supplied to them, not the
+expectation the caller discarded.
 
-The desired simplification is now concrete: Jack keeps one named conversation
-while attempts change underneath it. Preserve the existing fences and exact
-process authority. A Session row or `published` flag supplies neither provider
-liveness nor permission to signal a process.
+The same identity loss appears before other effects. Rename resolves the
+original selector, acquires the Session launch lock, then resolves the Session
+ID (`human_session.rs:1451`). Open similarly switches to the boundary ID
+(`:1083`); its native resume occurs before the later replacement lock in
+`open_boundary` (`:1176`). An attempt-specific request can become an action on
+the conversation's newer attempt. A read immediately before the effect does
+not close the remaining race.
 
-The repeated-replacement fixture (`store/sqlite/durable.rs:1613`) checks three
-history rows, stale writes, checkpoint preservation and one completion. It
-seeds publication and calls store APIs. The integrated naming/membership fixture
-(`controller/task/mod.rs:2335`) exercises rename and listing with a replacement.
-Both are compiled but unexecuted. Neither establishes real Open/launch recovery
-or stale-provider completion through CLI dispatch.
+Simpler experience: an explicit attempt reference keeps its meaning throughout
+the operation. Carry the selected Run and expected boundary from lookup through
+settlement; retain original exact/prefix selector semantics across lock waits.
+Coordinate native effects with replacement so the attempt validated is the one
+resumed or stopped. A stable Session-ID action may select the current attempt,
+but completion and teardown must agree about that selection. Preserve the
+existing transaction, invocation and process-ownership fences; do not add a
+second current-attempt store or infer control permission from Session state.
 
-### 2. An old Run ID can still become a second conversation on lookup
+The existing naming/membership fixture (`controller/task/mod.rs:2335`) rejects
+historical selectors only after replacement and separately checks a superseded
+provider actor. It does not exercise this interleaving. The latest slice review's
+P1 remains unresolved; a clear concept model cannot downgrade it.
 
-Inventory and lookup disagree about ownership. `boundary_run_ids`
-(`ops/human_session.rs:1219`) excludes all SQL Session Runs from independent
-inventory. But `find_boundary_for_run` (`:1457`) considers only current Runs of
-open reviews. `find_session` (`:585`) then falls through to a Run manifest.
-`run_record.rs:1016` accepts a TUI manifest as interactive history, regardless of
-its retained SQL Session membership.
+### 2. Earlier lookup and publication findings have advanced at source level
 
-Consequently, a superseded or completed review Run with an unresolved TUI
-manifest can resolve as `SessionTarget::Interactive`. Rename then reaches the
-sidecar writer (`human_session.rs:1440`) instead of the retained Session title.
-Open/Complete likewise dispatch by that reclassified target. This does **not**
-establish that an old Run can settle the current Flow boundary; it establishes
-an alternate conversation identity and operation path. Native availability and
-action checks still constrain what those operations can do.
+| Earlier counterexample | Current implementation | Remaining proof or limit |
+| --- | --- | --- |
+| Superseded/completed review Run becomes an independent interactive Session | Exact and manifest-prefix lookup query retained membership first (`human_session.rs:589,606`); historical references identify their owner | Sequential fixtures exist; the action race above remains; final history DTO/inspection still absent |
+| Existing artifacts strand an unpublished SQL reservation | `run_record.rs:2205` reconciles immutable manifest/context inputs and original creation time; `:1581` claims SQL before constructing the recorder | Execute partial-staging, artifact-before-SQL, conflicts and duplicate-claim proofs; conflicting bytes remain a named failure |
+| Rejected SQL publication writes a false terminal receipt via recorder Drop | Recorder construction follows the publication callback (`run_record.rs:1598`) | Authored publication fixture is compiled, unexecuted |
+| Published Run without start evidence gets replaced | Open requires recoverable native history or terminal evidence and preserves uncertainty (`human_session.rs:1196`) | Automatic recovery from an uncertain launch still needs the Run process/outcome owner; a publication flag proves no provider start or death |
+| Malformed selected human capture hides valid conversations | `review_surface` represents selected `InvalidData` on its own Session and disables its actions (`human_session.rs:1698`); other errors propagate | Public-list/Open-preparation fixture exists; no actual native Open or CLI dispatch proof |
 
-Simpler interaction: every known Run resolves through its Session membership,
-including historical attempts. Keep inspection/history distinct from authority:
-an old Run reference must not silently become the current actor or gain a right
-to complete its replacement. Closed Session history remains inspectable without
-reopening it. Carry this through the common lookup and DTO/history API; do not
-add another manifest predicate as a permanent ownership layer.
+These supersede the previous concept review's source findings for those paths.
+They do not establish that every recovery case works. Keep immutable conflict
+inputs, corrupt captures and exact process evidence. Do not generalize the
+bounded invalid-capture handling into swallowing database or I/O failures.
 
-Smallest disproof/proof: create two published review attempts with TUI manifests,
-then address the older Run through the actual lookup/rename path. It must resolve
-the same Session or explicitly report historical status, never mint an independent
-identity or write `session-name.json`. Repeat after completion. Retain the separate
-superseded-actor Ready/Complete rejection proof. Current-Run naming coverage does
-not exercise this counterexample.
+### 3. Stable ownership is useful, but remains limited to Task reviews
 
-### 3. Recovery still exposes the storage publication boundary
+`store/sqlite/sessions.rs:84` replaces a published Run inside an immediate
+transaction and increments the invocation version. Conversation fields remain
+on Session. `save_review_in` no longer lets cursor checkpoints overwrite an
+existing conversation; Ready (`:245`) requires the exact current published Run
+and invalidates an in-flight completion snapshot. Preserve these boundaries.
 
-`lf/commands/run.rs:791–819` publishes a reserved manifest/context before
-`publish_run_binding` marks its SQL Run published (`human_session.rs:957`).
-An interruption between those writes leaves the reservation unpublished.
-`reserve_review_run` retains its ID, but `run_record.rs:2170` publishes via an
-exclusive staging directory and rename over the final directory. Existing
-staging or final contents can prevent retry. The integrated prepared-file path
-(`run_record.rs:1500`) does not reconcile this SQL reservation path.
+The full model still has live unconverted consumers: `human_session::list`
+(`:571`) combines four sources; Ask Open clears feedback and copies names
+(`:1158,1163`); taskless `flow_run.rs:108,136` persists `position.json`;
+`lf/commands/runs.rs:87` scans manifests through `WorkCatalog`. General Run
+provider/outcome/usage and node/tuple fields are absent from `session.rs`.
+Swift `SessionRecord.swift:134` still exposes the old projection without a
+current-Run/history contract. Chapter activation clears current by Wave
+(`store/sqlite/chapters.rs:44`).
 
-Jack's recovery action should remain Open, with no manual deletion or new
-conversation. Reconcile the exact immutable inputs and publication evidence,
-retain mismatches as named failures, and preserve the no-duplicate-launch
-boundary. Missing receipts do not prove provider death. This is the slice
-review's unresolved implementation finding, not a reason to change Session
-identity or add a user-facing preparation lifecycle.
+The simplifying result is one conversation list, one Open action, and stable
+pane identity through replacement. Achieve it by completing the common owners
+and callers, then deleting the live alternate storage paths. Removing those
+paths now would remove supported behavior. Keep the full implementation,
+import, installed acceptance and deletion scope; no intermediate dual-owner
+publication is selected.
 
-Fault-inject before artifact publication, after artifact publication but before
-SQL publication, and after SQL publication before provider start. Assert retained
-identity/bytes and exact launch authority. A store-only reservation test cannot
-prove any of these filesystem/process boundaries.
+## Unresolved product consequences
 
-### 4. Direct storage discovery is necessary but not yet sufficient
+Current-Run-only bind remains an implementation assumption. If A belonged to X,
+replacement B initially belongs to X; binding the Session to Y changes B to Y
+while A's attribution and usage stay on X. Session identity approval did not
+approve a bulk historical rewrite. Any requirement to move all history needs
+an explicit ownership decision before implementation changes that scope.
 
-`open_review_sessions` (`store/sqlite/sessions.rs:143`) reads Session/current Run
-without decoding unrelated captures. This removes the earlier autonomous-capture
-inventory dependency. Exact Session lookup also reads its own Session before
-validating that Task (`human_session.rs:1753`).
+A taskless Run may still belong to an Invocation. Nullable Task equality then
+rejects binding that individual Run to a Task atomically. Orphan does not imply
+independent execution. Allowing that bind would require changing the accepted
+ancestry contract or deciding how whole-invocation attribution moves; neither
+is silently selected here. These choices do not block repairing the action race
+or continuing within the recorded assumptions, and this autonomous review opens
+no Ask.
 
-However, `list_flow_sessions` (`:1635`) calls `review_surface` for every selected
-review, which calls fallible `flow_position` at `:1670`. One selected malformed
-review aborts the whole list before Ask, ordinary Flow and interactive Sessions
-are appended (`:571`). The existing corrupt-neighbor fixture inserts an
-autonomous invocation and asserts the store query; it cannot establish isolation
-from a malformed human review in the public list.
+## Smallest next action and proof
 
-Keep conversations discoverable through their own records. Validate execution
-when an execution action needs it, and expose the broken invocation's identified
-recovery problem without dropping its bytes or hiding other Sessions. Complete
-Run membership/provider storage so presentation no longer needs a capture decode
-or a manifest per row. Prove the public list and Open for a valid Session beside
-both malformed autonomous and malformed review invocations. No new human flag,
-blanket error swallowing or fallback owner is selected.
+Repair selected-attempt propagation across lookup, controller settlement and
+native effects as one change. Deterministically pause external Complete after
+resolving A, publish B with retained feedback at the same boundary, then resume.
+Require rejection, unchanged B/cursor/feedback, and no stopped client. Repeat
+with rename waiting for its launch lock and Open at the native-effect boundary,
+including a Run prefix. Then complete B once and verify its saved feedback and
+exact stopped Run. Use synchronization barriers, real lookup/store transactions,
+and mocked provider effects; sleeps or mock-call wiring alone are insufficient.
+Keep sequential old-Run, stale-provider and Ready rejection coverage.
 
-### 5. Two binding consequences remain assumptions, with visible effects
+When TESTING.md preflight permits, execute that proof and the focused publication,
+historical lookup, corrupt-neighbor, repeated-replacement, schema, Task controller,
+durable-store and populated migration commands already listed in the design and
+slice review. Repeat populated preservation after materialization in a disposable
+source copy. No test pass is inferred from compilation.
 
-| Interaction | Displayed Task | Earlier Run A | Current Run B |
-| --- | --- | --- | --- |
-| A starts on X; recovery appends B | X | X | X |
-| Bind the Session to Y | Y | X | Y |
-
-Usage for A stays on X; usage for B follows Y. Keep this current-Run-only scope
-for implementation. If assigning a conversation should move its entire history,
-that is a product ownership choice requiring review; it can conflict with
-invocation-owned Runs. Stable Session identity approval did not decide it.
-
-Likewise, `Run.invocation.task == Run.task` includes null. Assigning an individual
-Run of a taskless Invocation to a Task therefore rejects. The exact future choice
-is whether universal bind accepts that invariant rejection or must move such a
-Run to a Task. The latter requires changing the ancestry contract; assigning a
-whole Invocation affects other Runs and children. No such change was approved.
-Prove the two-Run attribution example and atomic null-to-Task rejection; do not
-silently reparent execution or present a fresh conversation as equivalent bind.
-
-## Remaining scope and next proof
-
-The retained Invocation and Task review owners are useful internal progress.
-`human_session::list` still combines four sources, `flow_run.rs:108,136` still
-persists taskless execution in `position.json`, and `lf/commands/runs.rs:95`
-still scans manifests through `WorkCatalog`. `session.rs` lacks general Run
-outcome/provider/usage and node/tuple fields; `swift/Loopflow/Models/SessionRecord.swift:134`
-still exposes the old projection without a current-Run/history contract. Chapter
-activation still clears current by Wave (`store/sqlite/chapters.rs:44`).
-
-Complete the coherent Invocation/Run/Session owner and caller cutover, including
-shared taskless execution and source-independent review recovery. Then satisfy
-repository Chapter rotation, populated offline import/materialization, real-Home
-maintenance and configured CLI/app acceptance, pane retention/grouping,
-measurements, and deletion research followed by deletion. Preserve all import
-inputs until conversion proves them accounted for. This review does not authorize
-an intermediate dual-owner publication.
-
-The supplied reports about PR #1296 missing its Task publication record and
-stacking already-created Tasks remain in implementation scope. They were not
-reproduced here; no delivery state was repaired or inferred from remote success.
-
-Smallest next implementation/proof: fix exact artifact/SQL publication recovery
-and extend the real Session lookup path to retain historical Run ownership.
-Exercise repeated replacement and stale actor rejection through that path; keep
-the public-list corrupt-review counterexample alongside the store proof. These
-are refinements of approved ownership, not a new approval requirement.
-
-When TESTING.md resource preflight permits, execute the focused commands already
-owed in [slice review](data-model-slice-review.md), including the repeated
-replacement, populated Session migration, schema assertion, Task controller,
-naming/membership and earlier invocation-preservation tests. Rehearse populated
-migration after materialization in a disposable source copy. Compilation is not
-behavior, and fixtures are not configured acceptance.
+Then continue the shared taskless driver, general Run facts, all Session kinds,
+bind/read/launch callers, DTO/Swift pane identity and caches, repository Chapter
+operation, populated offline import and real-Home maintenance. Configured CLI/app
+acceptance, retained drafts, comparable measurements and deletion research followed
+by deletion remain required. The supplied PR #1296 publication-record and
+existing-Task stacking reports remain unreproduced implementation scope; this
+review changes no delivery state.
 
 ## Evidence boundary
 
-This pass inspected the integrated diff, store transactions, normal rename and
-Open paths, publication failure path, old-Run lookup, public inventory, DTOs,
-usage docs, relevant builtin guidance and the preceding slice review. Only this
-review note changed. No product test, provider, Home inventory/import, promotion,
-PR mutation, Task disposition or execution restart ran.
+Inspected the latest diff and slice review, normal rename and Complete, Open
+recovery, token construction, store settlement/replacement, publication ordering,
+historical lookup, corrupt-capture rendering, retained fixtures, DTOs and affected
+usage/skill guidance. Only this note changed. No implementation, provider, Home,
+PR, Task disposition or execution restart changed.
 
 Reused the slice review's resource receipt: active `main-view-task` **15.3 GiB /
 12 GiB**, **97.3 GiB** free; safe recovery preserved the active foreign build.
-This review did not resample it. Its recorded fmt, all-target Clippy, migration
-validation and HTML consistency passes retain their stated scope. Architecture
-still has the **32/33** SQLite-owner gap (`wave_chapters`), and branch-range
-whitespace still fails on the earlier draft header and copied patch context.
-A clean whitespace check of this note clears neither issue. No existing proof
-is invalidated by this documentation-only review; the broader identity and
-availability claims need the additional behavioral cases above.
+This documentation-only pass did not resample resources or execute product tests.
+The note's whitespace check and all four local-link checks pass.
+Earlier formatting, Clippy, migration and HTML checks retain only their recorded
+scope. SQLite owner coverage still has the recorded **32/33** `wave_chapters`
+gap; historical branch-range whitespace findings remain. A clean diff check of
+this note clears neither. No existing executed proof is invalidated by the note;
+the exact-attempt acceptance claim requires the new interleaving proof above.

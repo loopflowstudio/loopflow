@@ -1,5 +1,134 @@
 # Data model storage slice review
 
+## Current review: publication recovery and retained Run lookup
+
+2026-09-26 · LOO-298 · review-slice
+
+**Not ready to publish.** Reviewed `cb4ee961ff88784db591758ad87605ca0008cfd8`
+against `4cd64be3d0432aa04dd9256293eef7088db97ccc`, concentrating on the recovery
+and lookup implementation in `d57ab33d7`. Entry tree was clean. The
+[amended design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md)
+and [Session decision](session-runs-and-current-run.md) govern over the older
+Task title and copied handoff: taskless Invocations; Session owns Runs and a
+current Run; Flow remains the template. All eight Done When obligations remain.
+
+The slice advances the chosen owner model. Historical exact/prefix selectors
+now consult retained SQL membership before interactive manifest dispatch;
+invalid selected review captures appear on their own conversation rather than
+aborting the list; artifact reconciliation precedes the SQL launch claim and
+recorder construction. These are source findings, not executed behavior.
+A remaining lookup-to-action race prevents accepting the exact-attempt claim.
+
+### Finding: a replacement between lookup and action loses the Run selector
+
+**P1 — carry the selected attempt through completion, Open and rename.**
+Paths below are relative to `rust/loopflow/src/`. This is a source-traced
+interleaving, not a reproduced runtime result:
+
+1. An external caller addresses current review Run A. `find_session`
+   (`ops/human_session.rs:585`) resolves A through its Session and returns its
+   `FlowPosition`. The new `review_target` check correctly rejects A if it was
+   already historical at that read.
+2. Open replaces A with B under the same Session and human boundary. B is
+   published; the retained feedback remains ready. Invocation, node, Skill and
+   iteration stay identical, while the current Run and position version change.
+3. Complete's `complete_flow` (`:717`) reduces A's position to a
+   `FlowSessionToken`. That token has no Run ID or position version.
+   `controller/task/mod.rs:764` reloads the current position, now B, and passes
+   **B's** snapshot to the otherwise correctly fenced settlement transaction.
+   `require_current_review_actor` protects a superseded provider's `LF_RUN_ID`,
+   but an ordinary external CLI caller has no such actor. It does not protect
+   the Run ID explicitly supplied to Complete. The operation can therefore
+   complete B from a request that selected A. Teardown still receives A's old
+   position (`human_session.rs:731`), so it can stop the wrong attempt as well.
+4. Rename similarly resolves the supplied selector, waits for the Session
+   launch lock, then resolves the **Session ID** (`:1469`) instead of retaining
+   that selector. Open also re-resolves the Session ID (`:1085`) and enters
+   `open_boundary` with only that ID. A concurrent replacement after the first
+   lookup can turn an attempt-specific request into a current-Session action.
+
+The store's exact-position comparison is necessary and remains intact. It does
+not recover the expectation discarded by the caller. The existing new fixture
+addresses A only **after** replacement, and checks the superseded provider actor
+separately; neither exercises replacement between lookup and action.
+
+Correct this as one caller/settlement change: retain the selected Run and
+expected position from resolution to the mutation transaction; recheck the
+original exact/prefix selector after acquiring the launch lock; make Open's
+native-resume/replacement path honor that expectation too. Do not merely add
+one more unfenced read before the effect. A stable Session-ID action may select
+its current attempt, but must then settle and tear down that same attempt.
+This spans lookup, controller settlement and native effects; no isolated
+predicate change was made that would leave the other operation paths unsafe.
+
+Smallest missing proof: deterministically pause an external Complete after it
+resolves A, publish B under the same Session with retained feedback, then resume
+the request. It must reject, leave B and the cursor unchanged, and stop no client.
+Repeat at the rename lock and Open effect boundaries, including a prefix
+selector. Then complete B once and verify the exact stopped Run and saved
+feedback. Mock provider effects, not the store or lookup. Avoid sleeps as a
+race synchronizer. Keep the existing sequential old-Run and old-provider proofs.
+
+### Evidence matrix
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+| --- | --- | --- | --- | --- |
+| Slice: interrupted publication | Retain ID/bytes; claim launch once; no false terminal receipt | `reconcile_reserved_manifest` checks inputs and retained creation time; SQL publication precedes `RunCapture` | `run_record.rs:1581,2210`; `reserved_publication_*`; `review_publication_retry_preserves_identity_and_claims_sql_once` | source advance; fixtures unexecuted |
+| Slice: uncertain launch | Missing receipts cannot authorize replacement | Open refuses a published Run lacking native history and a valid terminal outcome | `human_session.rs:1196`; publication fixture calls Open with `resume=true` | source advance; automatic recovery remains a gap |
+| Slice: historical identity | Older/completed Runs never become independent conversations | Exact and manifest-prefix lookup consult SQL membership; historical requests identify Session/current Run | `human_session.rs:585`; `flow_session_name_and_membership_survive_sql_run_replacement` | sequential source path repaired; concurrent action gap above |
+| Slice: available neighboring Sessions | Malformed autonomous/review capture preserves valid list/Open | Only selected `InvalidData` becomes an identified unavailable review; other store errors propagate | `human_session.rs:1698`; `session_list_and_open_preserve_valid_reviews_beside_unreadable_captures` | source advance; fixture uses Open preparation, not provider resume |
+| Done 1: validators/history | All nullable ancestry, structure and replacement constraints | Task review membership/current-Run constraints present; general constructors and runtime nesting absent | SQL drafts, Session transactions, repeated-replacement fixture | gap; no executed ancestry matrix |
+| Done 2: common reader/bind | CLI, usage and sidebar share typed Run ancestry | Task-review rename uses SQL; no general bind/filter cutover; manifest readers remain | Session dispatch, `lf/commands/runs.rs:77,91` | gap |
+| Done 3: execution preservation | Shared taskless driver; captured recovery; exact stale-result rejection | Task SQL capture retained; taskless file driver remains; action race above | `ops/flow_run.rs:108,136`, controller/session paths | gap |
+| Done 4: Chapter operation | One repository boundary, active identity and frozen history | Activation still clears current by Wave | `store/sqlite/chapters.rs:44` | gap |
+| Done 5: populated import | All old SQL/files preserved; idempotence and interrupted cutover | Task-review draft only; historical inputs retained; no full offline importer | Populated migration fixtures and draft dependency chain | gap; materialized rehearsal unexecuted |
+| Done 6: DTO/desktop | Stable Session panes/history, typed grouping and cached reads | Existing Session wire shape; no integrated current-Run/history DTO or pane migration | Rust `SessionRecord`, Swift model/projection and branch diff | gap |
+| Done 7: configured acceptance | Backed-up actual Homes; matching CLI/app; measured demo | No Home conversion, provider/app demo or comparable latency sample | No configured proof attempted | gap |
+| Done 8: deletion/consistency | One owner per object; retired paths absent; checks green | Other Session owners, sidecars, file Flow and Started writers still reachable | Negative searches; static checks below | gap |
+
+### Verification and negative architectural proof
+
+Fresh preflight and safe `--recover` both fail: active `main-view-task` is
+**15.3 GiB / 12 GiB**; this checkout is **332.9 MiB**; free disk is **97.3 GiB**.
+Recovery preserved the active foreign build. TESTING.md's resource rule stops
+product tests under unresolved pressure. No behavioral test, fresh-Home CLI
+demo or materialized migration rehearsal ran. An installed older CLI would not
+prove this branch. The new tests remain compiled-only evidence from the earlier
+implementation's Clippy pass; this review did not rerun Clippy.
+
+Fresh `cargo fmt --all --check` and migration validation pass: three ordered
+drafts, all 52 shipped migration files unchanged. Architecture still fails only
+SQLite owner coverage: **32/33**, missing `wave_chapters`; the other seven
+inventories pass. Whole-branch whitespace still fails on the unchanged blank
+draft dependency header and copied historical patch context. Applied draft bytes
+were not rewritten for whitespace. This review's note-only whitespace check
+does not clear those branch findings.
+
+The removed Task table has no current SQL writer or compatibility view. SQL
+Session membership is authoritative for retained Task review attempts, and
+cursor checkpoints cannot overwrite their title, feedback or current Run.
+Still reachable: four-source list (`human_session.rs:571`), Ask JSON and name
+copy (`:1230,2190`), taskless `position.json` reads/writes, manifest/WorkCatalog
+Run filtering, name/resolution/provider sidecars (`run_record.rs`), and
+`record_task_start` (`lf/commands/run.rs:832`). No all-caller deletion proof
+follows from the narrower repair. These are unfinished live dependencies;
+deleting them before conversion would remove supported behavior.
+
+Continue the coherent ownership cutover with the action race included. Once
+preflight permits, run the four recovery/lookup commands in the design's latest
+slice ledger plus the new interleaving proof, then the earlier schema,
+replacement, populated-import, controller and durable-store proofs already owed.
+Repeat populated migration after materialization in a disposable exact source
+copy. Keep current-Run-only binding as an assumption, including retained earlier
+usage and atomic nullable-Task mismatch rejection. Repository Chapter, offline
+import, real maintenance, configured desktop proof, measurement and deletion
+research remain required. The supplied #1296 publication-record and existing-Task
+stacking reports remain unreproduced scope; no delivery state was repaired here.
+
+This review changes only this topic note. No product source, migration, Home,
+provider, PR, Task disposition or Flow navigation changed. It does not authorize
+an intermediate publication; the following decision step owns navigation.
+
 ## Current disposition after integrating LOO-291
 
 2026-09-26 · LOO-298 · review-slice

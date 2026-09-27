@@ -603,3 +603,44 @@ taskless invocation and every Run in it (today the strict trigger pair refuses
 with its raw constraint text); who owns Done-when 4's "`lf task run X --flow F`
 moves the pointer" — `ensure_flow_position` keeps an existing Flow and ignores
 `--flow`, so restart is the only mover.
+
+## Cut H2: the saved Flow runs on the row (2026-09-27)
+
+Executive choices, recorded in [the Cut H ledger](cutover/cut-h-one-flow-driver.md#2026-09-27--h2--the-saved-flow-runs-on-the-row).
+Jack has not reviewed them.
+
+**`flow_invocations` gains `wave_id` with `cwd`, `message`, `model`.** The
+brief named three columns; a `--wave` Flow loses its Wave on resume without
+the fourth, and the H1 ledger reserved "the Wave if it is one" for this draft.
+Triggers refuse an invocation whose Task and Wave disagree; the Run constructor
+fills a Run's Wave from its invocation.
+
+**A saved review's Session id is opaque now.** New reviews are
+`session_<uuid>`, linked through `pending_session_id` and `runs.invocation_id`;
+`LF_HUMAN_SESSION` carries the Session id. H5's rule arrives early for this
+kind because the boundary UUID the old id carried no longer exists. Old
+`flow:<invocation>:<boundary>` ids survive on existing rows and in the import.
+
+**An Op step has no Run, so an interrupted Op replays.** The position file's
+"interrupted before a completion receipt" guard covered a crash between
+starting an Op (or a skill launch) and its receipt. The row has no boundary
+for a step without a Run; the next `lf flow resume` runs the Op again. A Run
+row for an Op would make `lf runs` list operations, which is a DTO question.
+
+**The driver writes a step's failure once.** The launch error becomes
+`"<skill> Run failed: <error>"`; recovery of a settled Run writes
+`"<step> Run failed|interrupted"`. Both use the Task's `TaskFlowBlocker` shape
+in `failure_json`.
+
+**A saved Flow's step is not a managed Task step.** `RunFlowStep.task_id`
+stays `None` for `lf --task X flow F`; the Run takes X from the Flow's declared
+Work. `record_row` keeps reading a Task in the membership as "stored at claim".
+
+**Pre-H2 saved Flows on a dev Home cannot resume from the row.** Their rows
+have no `cwd`; `lf flow resume` refuses with "has no launch record on its
+row". Only Homes that ran this branch's earlier cuts have such rows.
+
+**A development `lf` inside an agent has its own Home.** The launch converts
+`LF_HOME`/`LF_DB_PATH` into `LF_CONTROL_*`, which a development build ignores,
+so a nested `lf flow decide` in a test stand-in must name the fixture Home
+itself. Unchanged behavior, observed while writing the taskless proof.

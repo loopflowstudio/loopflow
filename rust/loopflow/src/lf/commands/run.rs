@@ -872,7 +872,6 @@ fn begin_run_capture(
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
-    crate::ops::flow_run::bind_run(&capture.run_id())?;
     Ok(capture)
 }
 

@@ -23,6 +23,7 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
+mod flows;
 mod metrics;
 mod pr_landings;
 mod provider_deliveries;

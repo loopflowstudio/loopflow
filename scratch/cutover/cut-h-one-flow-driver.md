@@ -218,3 +218,113 @@ Append one entry per implement or review-slice pass: date, commit, slice,
 what passed and failed with the command, what was deleted with line counts,
 decisions made on Jack's behalf (also in `../questions.md`), and the next
 failing assertion.
+
+### 2026-09-27 · H1 — Task points at its invocation; strict equality
+
+Implement pass. Code commit `4820e1f86`; this entry follows it.
+
+**Owners now.** `tasks.current_invocation_id` is the one selector of a Task's
+Flow; every store write that advanced "the current invocation naming Task X"
+(`flow_position_in`, claim, reclaim, bind worker Run, block, release, settle,
+finish, verdict, route, human completion, restart, reopen, chapter evidence)
+selects `id=(SELECT current_invocation_id FROM tasks WHERE id=?1)`
+(`durable::TASK_INVOCATION`). `set_flow_position` at version 0 inserts the
+invocation and points the Task at it, refusing a Task that already points
+somewhere; finish, human completion, restart and reopen clear the pointer in
+their transaction. A saved Flow launched with `--task X` writes `task_id=X` on
+its invocation (`save_flow_in`, from the launch's `declared_work`) and on its
+step and review Runs; `insert_run_in` and the `validate_run_parents_*`
+triggers require `f.task_id IS NEW.task_id` again. A review is the Task's own
+when its Run's invocation is the Task's pointer (`human_session::managed_review`);
+`waiting_flow`, `end_flow`, `replace_session_run` and `complete_session` use the
+pointer for the same distinction. Bind: same Task returns the record unchanged;
+`lf session bind` prints `Binding <session> to <ISSUE> (<title>). Permanent.`
+on stderr before writing.
+
+**Commands and results.** Ambient `LF_*` cleared; `-j 4`; `nice -n 10`;
+`scripts/resource_envelope.py` PASS (86.4 GiB free / 64.0 GiB floor).
+
+| Command | Result |
+| --- | --- |
+| `cargo nextest run -p loopflow --no-fail-fast --lib --test flow_tests --test session_cutover_tests -E 'test(a_task_points_at) \| test(run_constructor_infers) \| test(bound_flows_keep) \| test(binding_an_orphan)'` before production edits | **4 failed**: `a_task_points_at_one_invocation_while_other_flows_name_it` — `UNIQUE constraint failed: flow_invocations.task_id`; `run_constructor_infers_ancestors_and_rejects_conflicts_atomically` — `assertion failed: insert_run_in(&tx, requested).is_err()` (a Task-naming Run in a taskless invocation was accepted); `binding_an_orphan_session_starts_its_task_once` — `Session session_195d… already has Task INF-123; a Run's Task never changes` on the same-Task rebind; `bound_flows_keep_task_context…` — review `work` was `{"kind":"wave"}`, expected `{"kind":"task"}` |
+| Same, after | **4 passed** |
+| `cargo nextest run -p loopflow --no-fail-fast --test session_cutover_tests --test session_cli_tests --test dto_fixtures --test flow_tests` | 40 passed, **1 failed**: `flow_tests::observing_and_preparing_a_task_are_not_execution` at `starts() == 0` — the review Run of `lf --task INF-123 flow review-first` now names the Task, and the first Run naming a Task sets `started_at`. Rewritten (below); rerun alone: passed. All 41 pass |
+| `cargo nextest run -p loopflow --no-fail-fast --lib -E 'test(ops::) \| test(run_record) \| test(store::) \| test(controller::task) \| test(lf::commands)'` (plus the rewritten flow test) | **620 passed, 0 failed** |
+| `cargo fmt --all --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| `uv run python scripts/check_migrations.py` | 52 shipped migrations unchanged since v0.12.21 |
+| `uv run python scripts/check_architecture.py` | only the known `wave_chapters` miss |
+
+The oauth contention test did not fail in this pass.
+
+**Draft.** `point_task_at_invocation` (depends on `name_tasks_on_flow_step_runs`,
+42 lines): `tasks.current_invocation_id` filled from the current invocation per
+Task, `DROP INDEX task_current_invocation`, `validate_task_invocation` (the
+pointed-at invocation names this Task), strict `validate_run_parents_insert` /
+`_update`. No released migration changed.
+
+**Deleted.**
+
+| Item | Where |
+| --- | --- |
+| `task_current_invocation` partial unique index | dropped by the draft |
+| Relaxed `validate_run_parents_*` (`f.task_id IS NULL OR …`) | replaced by the draft |
+| "A Flow launched directly for a Task names no Task; its Runs may" branch of `insert_run_in` | `store/sqlite/runs.rs` |
+| Flow-review refusal in `bind_session_runs_in` | `store/sqlite/runs.rs` |
+| "its Runs carry the Work's Wave and no Task" in `flow_session::reserve` | `ops/flow_session.rs` |
+| Selector re-resolution and Wave-only Run in `session_import::flow_review` (now `declared_work`) | `ops/session_import.rs` |
+| `(FlowReview, Some(task))` kind-and-Task dispatch in `owned_target`; the `(Some, None)` / `(Some, Some)` split in `surface` | `ops/human_session.rs` |
+| `task_id IS NULL` in `waiting_flow`, `end_flow`; `r.invocation_id IS NOT NULL AND r.task_id IS NOT NULL` in `replace_session_run`, `complete_session` | `store/sqlite/sessions.rs` |
+| `ON CONFLICT DO NOTHING` on the unique index as the "Task already has a Flow" refusal | `set_flow_position_in`, now the pointer update |
+
+**Production lines** (before the first `#[cfg(test)] mod`, against `7eb3046a8`):
+`store/sqlite/durable.rs` 1,530 → 1,569 (+39); `ops/human_session.rs` 1,872 →
+1,894 (+22); `store/sqlite/children.rs` 2,211 → 2,225 (+14); `store/sqlite/
+chapters.rs` 131 → 139 (+8); `store/sqlite/sessions.rs` 598 → 605 (+7);
+`lf/commands/flow.rs` 612 → 613 (+1); `store/sessions.rs` 173 → 174 (+1);
+`ops/flow_session.rs` 204 → 203 (−1); `store/sqlite/runs.rs` 425 → 419 (−6);
+`ops/session_import.rs` 585 → 573 (−12). **Net +73.** The growth is the
+`&format!` wrapping of eleven SQL statements in `durable.rs` and the pointer
+clears; the draft SQL is not counted. Docs: `docs/architecture/data.md`,
+`docs/architecture-reference.md` (invocation-structure row). Swift and
+`tests/fixtures/dto` untouched.
+
+**Tests.** New `store::…::a_task_points_at_one_invocation_while_other_flows_name_it`.
+Constructor matrix: the taskless-invocation Task-naming Run moved back to
+rejected. `flow_tests::bound_flows_keep_task_context…` asserts the review
+`work` is the Task and `lf runs --task INF-123` lists the review Run.
+`session_cutover_tests::binding_an_orphan…` binds INF-123 twice: the second
+returns the same record and prints the target. `flow_tests::observing_and_
+preparing_a_task_are_not_execution` asserted that a `--task` Flow's review left
+`started_at` NULL (Cut 3's Wave-only review); it now asserts the Task starts at
+the review's reservation. The unreadable-capture store test points its broken
+Task at the broken invocation.
+
+**Decisions made here** (also in `../questions.md`):
+
+1. No `wave_id` column on `flow_invocations` in H1; H2's `own_flow_launch`
+   owns the launch facts. Runs carry the Wave.
+2. A review Run naming the Task starts it (store rule "reservation counts"),
+   so `lf --task X flow <review-first>` starts X when it parks at the review.
+3. The bind line goes to stderr, on the no-op too; `--json` stdout stays clean.
+4. `owned_target` refuses a review whose invocation is neither the Task's
+   pointer nor a waiting saved Flow with "Session … is no longer waiting".
+5. The Rust `Task` struct does not carry `current_invocation_id`; the store is
+   its only reader.
+6. Import of an old saved-Flow review resolves its Work through
+   `declared_work`, so it names the Task too.
+
+**Consequence to keep visible.** Binding a *taskless* Flow's review to a Task is
+now refused by the strict trigger (`Run and Invocation nullable Tasks
+disagree`) rather than by a bind-specific message: the Run cannot take a Task
+its invocation does not name, and the invocation cannot take one its Runs do
+not. Whether bind should assign a whole taskless invocation is for Jack.
+
+**Not proven.** `lf session bind` on a review through the binary; a `--wave`
+or `--as` launch's review under the strict trigger beyond the existing
+`session_cutover_tests` Wave-only saved Flow; the draft against a Home copy.
+
+**Next failing assertion (H2).** Launch `lf --task X flow <flow with a review>`
+against an isolated Home and assert `flows/<id>/position.json` never existed:
+fails at `flow_run::create` → `write` (`lf/commands/flow.rs`), which writes the
+file at launch.

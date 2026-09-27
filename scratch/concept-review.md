@@ -1,6 +1,6 @@
 # One Session interaction across all conversation kinds
 
-2026-09-26 · LOO-298 · Autonomous concept review of `eeb6098815088fcd853572f3467534d7aa89cc62`
+2026-09-26 · LOO-298 · Autonomous concept review of `c2cfeac412618a9b53579898574ce887bdbe53de`
 
 ## Judgment
 
@@ -12,9 +12,15 @@ The next implementation must complete Session list/lookup and its dependent
 writers/import, deleting the replaced paths in the same pass. Another foundation
 without that public cutover does not satisfy Jack's latest direction.
 
+The latest attempt withdrew its executable edits. The actual CLI still lists
+and renames an interactive Session without creating either SQL record. The
+model is clear; its implementation remains incomplete. No additional product
+concept or revised approval is needed to finish the accepted interaction.
+
 This is review evidence, not a navigation decision. The
-[slice review](data-model-slice-review.md) remains authoritative for executed
-behavior and unresolved acceptance. The [amended approval](data-model-review-feedback.md),
+[cutover review](session-cutover-review.md) owns the latest CLI counterexample;
+the [slice review](data-model-slice-review.md) retains the Task attempt proofs.
+The [amended approval](data-model-review-feedback.md),
 [complete design](data-model-one-table-per.md) and [dated corrections](questions.md)
 supersede the original Task title and copied Session-as-Run-child proposals.
 
@@ -107,6 +113,15 @@ an already-running external effect by itself.
 
 ## Challenge and proof boundary
 
+The latest review already supplies a smaller disproof of architectural acceptance:
+one synthetic interactive conversation. Its retained
+`.lf/tmp/loo298-cutover-review/receipt.json` records one listed Session,
+zero `sessions` rows, zero `runs` rows, a human title in `session-name.json`,
+and unchanged manifest bytes. The review exercised actual CLI list and rename;
+this concept pass inspected its receipt rather than rerunning it. No provider
+was launched. Successful commands here prove the old file authority still works,
+not that the accepted SQL ownership exists.
+
 The smallest counterexample to a list-only change is a Home containing one
 interactive Session, a completed keyed Ask, and a taskless pending review with
 its source removed. The existing SQL open-review query cannot represent that
@@ -154,10 +169,15 @@ the historical replacement regression passed on materialized schema. These are
 the slice review's 49 distinct source tests plus one canonical repeat, with
 simulated providers, not fresh test execution or installed acceptance.
 
-Compared the 2,035 entries in `.lf/tmp/loo298-attempts/final-source-hashes.json`:
+The cutover review's retained source comparison covers the 2,035 entries in
+`.lf/tmp/loo298-attempts/final-source-hashes.json`:
 only `store/sqlite/durable.rs`, `store/sqlite/runs.rs` and the two design/question
 notes differ. The two Rust differences are the reviewed decoder repair and its
-regression. Earlier passing claims keep the scope recorded by the slice review;
+regression. This pass independently checked `git diff eeb609881 -- rust swift`:
+empty. Reinspected list/lookup, general capture, SQL reservation/inventory,
+Ask persistence and replacement, taskless persistence and replacement, title
+sidecars, derived ancestry, and Swift grouping. Their conversion dependencies
+remain exactly those recorded above. Earlier passing claims keep the scope recorded by the slice review;
 the proposed all-kind changes will require new behavior/import/DTO proof, not
 reuse of Task-only results as evidence for the new callers.
 
@@ -167,5 +187,13 @@ has **2,350 lines before the test attribute**, 2,351 including it. This review
 adds/removes zero executable lines. The method excludes test files and trailing
 test modules but retains inline test helpers; it is not Jack's whole-file count.
 
+The smallest next implementation action is to make the populated four-origin
+Home proof exercise the common owner: convert its dependent writers and import,
+then replace public inventory/lookup/actions and delete their file authorities
+within the same pass. A table-only list over unimported history, another unused
+store API, or a shorter file produced by moving functions does not pass.
+
 Only this review document changes. No product tests were repeated, no API or
 migration changed, and no execution, publication or Task disposition was selected.
+Working-diff whitespace passes. The review changes no accepted requirement and
+invalidates no earlier proof; the conversion will require new all-kind evidence.

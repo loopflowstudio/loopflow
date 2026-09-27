@@ -496,6 +496,14 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
+Execution recovery accepted on 2026-09-27: the participant (name unresolved)
+approved starting with a failing four-origin actual-CLI proof, then retaining
+implementation progress across continuations through import, writers,
+readers/actions and deletion. Review the complete cutover; no intermediate
+owner-only stage satisfies it. [Execution handoff](session-cutover-execution.md)
+records the feedback and concrete sequence. Model and preservation requirements
+remain unchanged.
+
 This section records the reviewed attempt-history cut. Jack Heart's later
 2026-09-26 comment `50cf5b12-8a17-4390-a6a1-be69a50cbb7f` requires the next
 implementation to cut over Session list/lookup and delete the replaced paths in

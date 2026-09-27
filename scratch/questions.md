@@ -137,3 +137,16 @@ cargo test -p loopflow --lib controller::task::planning_tests::claimed_autonomou
 The resolved files have no conflict markers. Whole-branch whitespace still
 reports the previously recorded draft dependency header and copied historical
 patch; neither was changed during resolution. No push was performed.
+
+Post-rebase review compiled the reconciled Rust with all-target Clippy after
+removing an unused preparation parameter. Formatting, migration validation and
+HTML consistency pass; architecture retains the `wave_chapters` gap. Behavioral
+execution remains blocked by the resource receipt above. The restored SQL-backed
+Session naming/membership regression is compiled, not executed; details and the
+current disposition are in [the slice review](data-model-slice-review.md).
+
+The supplied Linear comment also adds two delivery reports to implementation
+scope: publication of PR #1296 missing from its Task PR row, and support for
+stacking an already-created Task. These were not reproduced or repaired during
+review. Investigate through the existing delivery owners; do not infer that a
+successful remote publication proves its Task row was updated.

@@ -817,7 +817,7 @@ pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) ->
          WHERE t.id=?1 AND c.project_id != p.external_project_id
          AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=t.id AND json_extract(kind_json,'$.kind')='started')
          AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=t.id AND worker_generation>0)
-         AND NOT EXISTS(SELECT 1 FROM runs WHERE task_id=t.id AND published=1))",
+         AND t.started_at IS NULL)",
         [task.as_str()], |row| row.get(0),
     )?;
     if expired {
@@ -1397,6 +1397,7 @@ mod durable_store_tests {
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::session::{Run, WorkSource};
     use crate::store::sqlite::SqliteStore;
+    use crate::work::chapter::{Chapter, ChapterId, ChapterPhase};
     use crate::work::project::Project;
     use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
@@ -1984,6 +1985,31 @@ mod durable_store_tests {
         assert!(store.task_started(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
         assert!(!store.retire_chapter_backlog(&task_id).unwrap());
+
+        // Activation may precede transfer. A reserved Task is already started
+        // and must retain execution while its Project is still the predecessor.
+        store
+            .save_chapter(
+                &Chapter {
+                    id: ChapterId::parse("successor").unwrap(),
+                    wave_id: task.wave_id.clone(),
+                    wave: "infrastructure".into(),
+                    project_id: "successor-project".into(),
+                    content: crate::ops::chapter::empty_plan(),
+                    predecessors: Vec::new(),
+                    predecessor_metrics: Vec::new(),
+                    tasks: Vec::new(),
+                    phase: ChapterPhase::Transferring,
+                    created_at: 1,
+                    activated_at: Some(1),
+                    completed_at: None,
+                    error: None,
+                },
+                true,
+            )
+            .unwrap();
+        let reserved = store.set_flow_position(&task_id, &reserved).unwrap();
+        assert_eq!(store.session(&session_id).unwrap().unwrap().1, run);
 
         store
             .publish_review_run(&session_id, &run.id, reserved.version)

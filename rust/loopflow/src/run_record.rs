@@ -1625,10 +1625,31 @@ impl CaptureHandle {
         spec: RunSpec,
         run_id: RunId,
         context: &crate::trace::PreparedTurnContext,
+        publish: impl FnOnce(&RunId) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::authority_home_dir();
         let parent = inherited_parent().and_then(|id| verified_parent(&home, id));
-        Self::begin_at_with_id(&home, spec, run_id, parent, None, Some(context))
+        Self::begin_reserved_at(&home, spec, run_id, parent, context, publish)
+    }
+
+    fn begin_reserved_at(
+        home: &Path,
+        spec: RunSpec,
+        run_id: RunId,
+        parent: Option<RunId>,
+        context: &crate::trace::PreparedTurnContext,
+        publish: impl FnOnce(&RunId) -> StoreResult<()>,
+    ) -> StoreResult<Self> {
+        let (manifest, context) =
+            prepare_manifest(spec, run_id, parent, None, Some(context)).map_err(record_error)?;
+        let (manifest, dir) = reconcile_reserved_manifest(home, manifest, context.as_deref())
+            .map_err(record_error)?;
+        // Only the reservation transaction grants launch authority. A rejected
+        // publication must not start a recorder or settle somebody else's Run.
+        publish(&manifest.run_id)?;
+        Ok(Self(Arc::new(Mutex::new(RunCapture::from_manifest(
+            manifest, dir,
+        )))))
     }
 
     pub(crate) fn begin_replay_at(
@@ -1885,42 +1906,8 @@ impl RunCapture {
         launch: Option<RunLaunchRequest>,
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> std::io::Result<Self> {
-        let (runtime_path, runtime_digest) = runtime_identity();
-        let context_bytes = context
-            .map(|context| {
-                serde_json::to_vec_pretty(&RunContextArtifact {
-                    schema_version: SCHEMA_VERSION,
-                    context,
-                })
-                .map_err(std::io::Error::other)
-            })
-            .transpose()?;
-        let context_ref = context_bytes.as_ref().map(|bytes| RunContextRef {
-            path: "context.json".to_string(),
-            content_sha256: hex::encode(Sha256::digest(bytes)),
-            bytes: bytes.len() as u64,
-        });
-        let manifest = RunManifest {
-            schema_version: SCHEMA_VERSION,
-            run_id: run_id.clone(),
-            parent_run_id,
-            created_at: OffsetDateTime::now_utc(),
-            harness: spec.harness.clone(),
-            model: spec.model.clone(),
-            surface: spec.surface,
-            cwd: spec.cwd,
-            repo: spec.repo,
-            worktree: spec.worktree,
-            skill: spec.skill,
-            subjects: spec.subjects,
-            flow: Some(spec.flow),
-            launch,
-            context: context_ref,
-            runtime_path,
-            runtime_digest,
-            host: gethostname::gethostname().to_string_lossy().into_owned(),
-            boot_id: boot_id(),
-        };
+        let (manifest, context_bytes) =
+            prepare_manifest(spec, run_id, parent_run_id, launch, context)?;
         let dir = publish_manifest(lf_home, &manifest, context_bytes.as_deref())?;
         Ok(Self::from_manifest(manifest, dir))
     }
@@ -2239,6 +2226,124 @@ fn observed_run_ids_at(lf_home: &Path, selectors: &[String]) -> std::io::Result<
     });
     observed.dedup_by(|left, right| left.1 == right.1);
     Ok(observed.into_iter().map(|(_, run_id)| run_id).collect())
+}
+
+fn prepare_manifest(
+    spec: RunSpec,
+    run_id: RunId,
+    parent_run_id: Option<RunId>,
+    launch: Option<RunLaunchRequest>,
+    context: Option<&crate::trace::PreparedTurnContext>,
+) -> std::io::Result<(RunManifest, Option<Vec<u8>>)> {
+    let (runtime_path, runtime_digest) = runtime_identity();
+    let context_bytes = context
+        .map(|context| {
+            serde_json::to_vec_pretty(&RunContextArtifact {
+                schema_version: SCHEMA_VERSION,
+                context,
+            })
+            .map_err(std::io::Error::other)
+        })
+        .transpose()?;
+    let context_ref = context_bytes.as_ref().map(|bytes| RunContextRef {
+        path: "context.json".to_string(),
+        content_sha256: hex::encode(Sha256::digest(bytes)),
+        bytes: bytes.len() as u64,
+    });
+    let manifest = RunManifest {
+        schema_version: SCHEMA_VERSION,
+        run_id,
+        parent_run_id,
+        created_at: OffsetDateTime::now_utc(),
+        harness: spec.harness,
+        model: spec.model,
+        surface: spec.surface,
+        cwd: spec.cwd,
+        repo: spec.repo,
+        worktree: spec.worktree,
+        skill: spec.skill,
+        subjects: spec.subjects,
+        flow: Some(spec.flow),
+        launch,
+        context: context_ref,
+        runtime_path,
+        runtime_digest,
+        host: gethostname::gethostname().to_string_lossy().into_owned(),
+        boot_id: boot_id(),
+    };
+    Ok((manifest, context_bytes))
+}
+
+/// Resume artifact publication only. The caller must still claim the SQL
+/// reservation before launching; readable artifacts confer no launch authority.
+fn reconcile_reserved_manifest(
+    home: &Path,
+    mut manifest: RunManifest,
+    context: Option<&[u8]>,
+) -> std::io::Result<(RunManifest, PathBuf)> {
+    let published =
+        record_dir(home, &manifest.run_id).expect("Run ids always contain a UUID prefix");
+    let parent = published
+        .parent()
+        .expect("Run record has a prefix directory");
+    create_private_dir(parent)?;
+    let staging = parent.join(format!(".{}.staging", manifest.run_id));
+    let dir = if published.try_exists()? {
+        &published
+    } else {
+        &staging
+    };
+    if !dir.try_exists()? {
+        create_private_dir_exclusive(dir)?;
+    }
+    if dir.join("terminal.json").try_exists()? {
+        return Err(std::io::Error::other(format!(
+            "reserved Run {} already has terminal evidence; retained unchanged",
+            manifest.run_id
+        )));
+    }
+    let manifest_path = dir.join("manifest.json");
+    if manifest_path.try_exists()? {
+        let existing = read_manifest(dir)?;
+        // Creation time belongs to the first publication attempt. All other
+        // immutable inputs, including exact context digest and parent, must match.
+        manifest.created_at = existing.created_at;
+        if serde_json::to_value(&manifest)? != serde_json::to_value(&existing)? {
+            return Err(std::io::Error::other(format!(
+                "reserved Run {} has different immutable launch inputs at {}",
+                manifest.run_id,
+                dir.display()
+            )));
+        }
+        manifest = existing;
+    }
+    if let Some(context) = context {
+        reconcile_private_file(&dir.join("context.json"), context)?;
+    }
+    reconcile_private_file(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)?;
+    sync_dir(dir)?;
+    if dir == &staging {
+        fs::rename(&staging, &published)?;
+        sync_dir(parent)?;
+    }
+    Ok((manifest, published))
+}
+
+fn reconcile_private_file(path: &Path, expected: &[u8]) -> std::io::Result<()> {
+    match write_private_exclusive(path, expected) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if fs::read(path)? == expected {
+                Ok(())
+            } else {
+                Err(std::io::Error::other(format!(
+                    "reserved Run artifact differs at {}; retained unchanged",
+                    path.display()
+                )))
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn publish_manifest(
@@ -2659,6 +2764,143 @@ mod tests {
         let name = read_session_name(&dir).unwrap().unwrap();
         assert_eq!(name.title, "Human name");
         assert_eq!(name.source, SessionTitleSource::Human);
+    }
+
+    #[test]
+    fn reserved_publication_recovers_artifacts_without_repeating_launch_authority() {
+        for boundary in [
+            "before_artifacts",
+            "context_staged",
+            "manifest_staged",
+            "artifacts_published",
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let id = crate::durable::RunId::new();
+            let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+            let (manifest, bytes) =
+                super::prepare_manifest(spec(home.path()), id.clone(), None, None, Some(&context))
+                    .unwrap();
+            let dir = super::record_dir(home.path(), &id).unwrap();
+            let staging = dir.parent().unwrap().join(format!(".{id}.staging"));
+            if boundary == "context_staged" || boundary == "manifest_staged" {
+                std::fs::create_dir_all(&staging).unwrap();
+                std::fs::write(staging.join("context.json"), bytes.as_ref().unwrap()).unwrap();
+                if boundary == "manifest_staged" {
+                    std::fs::write(
+                        staging.join("manifest.json"),
+                        serde_json::to_vec_pretty(&manifest).unwrap(),
+                    )
+                    .unwrap();
+                }
+            }
+            if boundary == "artifacts_published" {
+                super::publish_manifest(home.path(), &manifest, bytes.as_deref()).unwrap();
+            }
+            // Interrupt after artifacts, before SQL publication. There must be
+            // no capture Drop receipt falsely settling the prepared Run.
+            let denied = || {
+                Err(crate::store::StoreError::InvalidAuthority(
+                    "interrupted publication".into(),
+                ))
+            };
+            assert!(CaptureHandle::begin_reserved_at(
+                home.path(),
+                spec(home.path()),
+                id.clone(),
+                None,
+                &context,
+                |_| denied()
+            )
+            .is_err());
+            let original = std::fs::read(dir.join("manifest.json")).unwrap();
+            assert!(!dir.join("terminal.json").exists());
+            assert!(!dir.join("events.jsonl").exists());
+            let capture = CaptureHandle::begin_reserved_at(
+                home.path(),
+                spec(home.path()),
+                id.clone(),
+                None,
+                &context,
+                |_| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(capture.run_id(), id);
+            assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
+            assert_eq!(
+                std::fs::read(dir.join("context.json")).unwrap(),
+                bytes.unwrap()
+            );
+            // SQL has granted authority once, but no provider has started.
+            // An absent provider receipt does not grant a second launch.
+            assert!(CaptureHandle::begin_reserved_at(
+                home.path(),
+                spec(home.path()),
+                id.clone(),
+                None,
+                &context,
+                |_| denied()
+            )
+            .is_err());
+            assert!(!dir.join("terminal.json").exists());
+            capture.finish("interrupted").unwrap();
+            let terminal = std::fs::read(dir.join("terminal.json")).unwrap();
+            assert!(CaptureHandle::begin_reserved_at(
+                home.path(),
+                spec(home.path()),
+                id,
+                None,
+                &context,
+                |_| Ok(())
+            )
+            .is_err());
+            assert_eq!(std::fs::read(dir.join("terminal.json")).unwrap(), terminal);
+        }
+    }
+
+    #[test]
+    fn reserved_publication_retains_conflicting_inputs() {
+        let home = tempfile::tempdir().unwrap();
+        let id = crate::durable::RunId::new();
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+        let (manifest, bytes) =
+            super::prepare_manifest(spec(home.path()), id.clone(), None, None, Some(&context))
+                .unwrap();
+        let dir = super::publish_manifest(home.path(), &manifest, bytes.as_deref()).unwrap();
+        let original = std::fs::read(dir.join("manifest.json")).unwrap();
+        let changed = crate::trace::PreparedTurnContext::from_prompts("system", "different review");
+        let error = CaptureHandle::begin_reserved_at(
+            home.path(),
+            spec(home.path()),
+            id.clone(),
+            None,
+            &changed,
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("different immutable launch inputs"));
+        assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
+        assert_eq!(
+            std::fs::read(dir.join("context.json")).unwrap(),
+            bytes.unwrap()
+        );
+        assert!(!dir.join("terminal.json").exists());
+
+        std::fs::write(dir.join("context.json"), b"interrupted write").unwrap();
+        assert!(CaptureHandle::begin_reserved_at(
+            home.path(),
+            spec(home.path()),
+            id,
+            None,
+            &context,
+            |_| Ok(())
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read(dir.join("context.json")).unwrap(),
+            b"interrupted write"
+        );
     }
 
     #[test]

@@ -793,7 +793,15 @@ fn begin_run_capture(
             flow: membership,
             ..spec
         };
-        crate::run_record::CaptureHandle::begin_reserved_with_context(spec, run_id, &built.context)
+        crate::run_record::CaptureHandle::begin_reserved_with_context(
+            spec,
+            run_id,
+            &built.context,
+            |run_id| {
+                crate::ops::human_session::publish_run_binding(run_id)
+                    .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
+            },
+        )
     } else if let Some(id) = crate::ops::human_session::prepared_run_id()? {
         crate::run_record::CaptureHandle::start_prepared(
             &crate::store::lf_home_dir(),
@@ -815,7 +823,6 @@ fn begin_run_capture(
         crate::run_record::CaptureHandle::begin_with_context(spec, &built.context)
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
-    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
     capture.record_input("initial", &built.context.task.text);
     crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)

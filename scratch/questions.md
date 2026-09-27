@@ -5,7 +5,7 @@
 - **Confirmed scope:** Jack corrected the review on 2026-09-26: “Unbounded size
   per PR.” Implement the full Task; there is no Conducting-only delivery or
   page-count limit. This confirms scope, not new copy. See
-  [review feedback](docs-voice-review.md).
+  [review feedback](docs-voice-feedback.md).
 - **Interpretation:** Glossary acceptance covers product concepts and borrowed
   engineering terminology beyond CS 101, including explanatory table text and
   comments. Ordinary English and individual CLI tokens do not each need entries.

@@ -338,7 +338,7 @@ publish, or mark the Task finished.
   “No. This is totally wrong. Unbounded size per PR.” Removed the
   Conducting-only implementation boundary and page-by-page PR plan. The full
   Task is the implementation scope. This confirms delivery scope, not approval
-  of new copy or every other design detail. See [review notes](docs-voice-review.md).
+  of new copy or every other design detail. See [review notes](docs-voice-feedback.md).
 - At design review, implementation, website tests, app demonstration, and reader study were
   unperformed. No quantitative chapter target or comprehension baseline exists.
 - 2026-09-26 — After the agent reported no other blocking design questions,

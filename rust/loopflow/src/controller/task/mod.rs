@@ -3659,9 +3659,16 @@ mod planning_tests {
         let mut broken_review_id = None;
         for human in [false, true] {
             let broken_id = TaskId::new();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                SELECT ?1,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
-                rusqlite::params![broken_id.as_str(), task.id.as_str()]).unwrap();
+            conn.execute(
+                "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,
+                issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json,
+                worktree,workspace_slug,created_at,updated_at)
+                SELECT ?1,project_id,?1,?1,issue_title,issue_description,
+                pm_snapshot_synced_at,pm_writeback_json,?1,?1,created_at,updated_at
+                FROM tasks WHERE id=?2",
+                rusqlite::params![broken_id.as_str(), task.id.as_str()],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO work_placements(task_id,home_id,enabled,placed_at)
                 SELECT ?1,home_id,enabled,placed_at FROM work_placements WHERE task_id=?2",

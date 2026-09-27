@@ -652,13 +652,12 @@ Tmux remains process containment, not product identity or advancement authority.
 ## Sessions
 
 ```bash
-lf --interactive --task INF-123 : "Review the change"
-lf session list --task INF-123 --json
+# Start in a checkout without a registered Task.
+lf --interactive : "Review the change"
 lf session rename <session-id> "Parser review"
-lf session bind <session-id> --task INF-124 --json
-lf runs --task INF-124 --json
-lf session bind <session-id> --wave infrastructure --json
-lf session bind <session-id> --repository --json
+lf session bind <session-id> --task INF-123 --json  # confirm this permanent target
+lf session list --task INF-123 --json
+lf runs --task INF-123 --json
 ```
 
 Session has its own stable ID, a history of Runs, and a current Run. A Run
@@ -673,12 +672,15 @@ explicit selector, a registered Task checkout supplies the Task. Otherwise the
 Run can remain unbound. This changes ancestry only; a companion terminal does
 not inherit its neighboring Session's Flow membership.
 
-Bind updates the current Run's Task and Wave. `--wave` clears Task while retaining the
-chosen Wave; `--repository` clears both. Binding to a completed Task or a landed
-PR works without reopening Work. Session lists, Recent runs, usage attribution
-and the sidebar follow the same fields. A Run owned by an invocation cannot
-change to another Task or lose its Task; the command explains that constraint
-and leaves the record unchanged.
+Bind assigns ancestry once to the current Run. A Run without parents may take
+a Wave or a Task; a Wave-only Run may take a Task in that same Wave. The command
+and desktop show the exact target and ask for one confirmation before assigning
+it. An existing Task cannot be changed or cleared, and there is no unbind or
+`--repository` clearing form. Binding to a completed Task or a landed PR works
+without reopening Work. Session lists, Recent runs, usage attribution and the
+sidebar follow the same fields; usage and history never move between Tasks.
+An invocation's Run must also retain its invocation's nullable Task, so a
+taskless invocation's Run cannot be bound independently to a Task.
 
 Rename keeps the Session ID, provider, terminal, draft and Flow membership.
 A human name survives generated suggestions. Bind keeps the same properties

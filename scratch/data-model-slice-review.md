@@ -1,6 +1,234 @@
 # Data model storage slice review
 
-## Current review: selected-attempt propagation
+## Current review: Run construction and executed proof debt
+
+2026-09-26 · LOO-298 · review-slice · **Not ready to publish**
+
+Reviewed `90cc69572` against active base `4cd64be3d`, including the branch
+inventory and earlier owner/selected-attempt changes. The supplied compression
+note was preserved with `lf commit` at `6d09c7b86`. This review fixes one test
+fixture, updates the spec to Jack's latest binding/Started decisions, and
+executes the accumulated behavioral proofs. It selects no Flow navigation.
+The [design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md)
+and [Session decision](session-runs-and-current-run.md) remain governing,
+with the latest corrections below superseding older binding proposals.
+
+**The prior resource blocker is cleared.** Initial preflight and safe recovery
+still observed main-view-task at 15.2 GiB / 12 GiB with 94.3 GiB free. After the
+supplied cleanup steer, a fresh preflight passed: main-view-task 546.8 MiB,
+this checkout 332.9 MiB, 107.3 GiB free. No foreign build was removed here.
+Earlier compiled-but-unexecuted receipts remain historical; the execution
+results below supersede their proof gaps only for the named behaviors.
+
+### Latest decisions and implementation boundary
+
+Jack's final Started decision is one fact: any Run with `task = X`. His final
+timestamp refinement (`2ecb585f-fc78-4b75-a356-aa3cc678b85c`) requires
+`tasks.started_at` set once at first assignment by the single Run writer, in
+that launch/bind transaction. First bind uses bind time. Later launches or
+binds of older/newer Runs leave it byte-identical. Validate presence iff a Run
+exists, never equality with MIN(created_at). Import populates every Task with
+Runs and leaves the rest null. Sidebar/roadmap use one column reader; the old
+event source is removed after caller conversion. The intervening three-facts
+and minimum-timestamp proposals are superseded.
+
+Jack's bind decision (`7f5c129f-d90f-489d-ac88-f68e13fb2788`) fills missing
+ancestry once. A Task cannot move or clear; an existing Wave cannot change
+through bind. A Wave-only Run may take a Task in that Wave. Every caller
+confirms the exact permanent target once. No unbind/clearing flag exists.
+Done/landed Tasks remain eligible, nullable invocation Task equality still
+applies, and authorized cross-Wave Task moves remain a separate operation.
+Current-Run-only binding does not authorize rewriting prior Runs.
+
+Updated the active architecture/CLI/Wave docs and design accordingly. Historical
+copied proposals remain evidence. **These are specifications, not implemented
+bind or Started acceptance.** There is no general bind writer or started_at
+column yet. The current task_started reader still combines events, worker
+generations and published review Runs. Its passing reservation/publication
+test proves that transitional behavior; its reservation-is-false assertion is
+not acceptance of the final any-Run contract. Existing Started writes stay
+until the complete replacement can preserve retirement evidence.
+
+### Evidence matrix
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+| --- | --- | --- | --- | --- |
+| Ancestry | Infer nullable parents, reject mismatches atomically | One transactional Run INSERT serves review reservation and replacement; shared current/history decoder | Constructor matrix, competing Project writer, nullable-parent import | Pass for this cut; node/tuple/runtime-parent validation remains a gap |
+| Conversation retention | Replacement retains Session/title/feedback/history; stale attempts cannot act | Task review SQL owner and selected-attempt fences | Replacement, action matrix, stale-review controller and publication proofs | Pass for Task reviews; Ask/interactive conversion remains a gap |
+| Common CLI readers/bind/Started | One owner, confirmed write-once attribution, validated started_at | Manifest Run scans and split Session list still reachable; no bind/started_at writer | Negative source inventory below; isolated CLI proof recorded below | Gap |
+| Execution | Common Task/taskless driver and captured nesting | Retained Task invocations; taskless file driver remains | 29 Task-controller tests, 16 durable-store tests, five taskless Flow tests | Pass for existing simulated boundaries; shared driver/runtime nesting gap |
+| Chapter | One repository clock, preserved active identity and frozen predecessor evidence | Per-Wave current chapter remains | chapters.rs source and owner inventory | Gap |
+| Populated import | Preserve SQL plus Run/Ask/Flow files, idempotence and interrupted cutover | Forward SQL migrations preserve tested captures/feedback/claims | Three populated preservation fixtures, canonical rehearsal below | SQL proof only; offline Home importer gap |
+| DTO/desktop | Stable Session pane identity/history and cached typed grouping | Old DTO and Swift Work/path projection remain | Rust SessionRecord and Swift SessionRecord.swift inventory | Gap |
+| Configured acceptance | Backed-up real Homes, matching CLI/app, retained live pane/draft | No real Home migration or installed activation attempted | No configured receipt | Gap |
+| Deletion/consistency | No alternate mutable owners; all owner inventories green | Constructor consolidates two writes/decoders, but four Session sources persist | fmt/Clippy/migration/HTML checks plus negative inventory | Partial; architecture 32/33 and whole-cutover deletion gap |
+
+### Counterexamples and repair
+
+The first execution of
+`session_list_and_open_preserve_valid_reviews_beside_unreadable_captures`
+failed before testing corrupt captures: `InvalidColumnType(issue_title, Null)`
+while creating its neighboring review. The fixture inserted only Task identity
+columns even though the domain Task reader requires planning fields. Repairing
+only title/description exposed a second omitted required value,
+`pm_writeback_json`. An intermediate repair also copied the original worktree,
+which correctly failed its unique constraint; the final fixture retains distinct
+worktree/slug values and copies all required planning/writeback/timestamp fields.
+No production fallback or nullable-title policy was introduced.
+
+The focused test then passed, and the complete 29-test Task-controller suite
+passed with it. The fixture now reaches both corrupt autonomous and human
+captures, keeps a valid neighboring Session listable/openable, and exposes the
+broken review as unavailable. Initial failures remain in the local logs.
+
+### Executed source-tree proofs
+
+All commands used the assigned checkout, a temporary LF_HOME, all inherited
+LF_* authority removed, four low-priority Cargo workers and a 900-second
+process-group timeout per command. Rust tests ran serially with
+`-- --test-threads=1`; no timeout fired. Logs and exact command filters are in
+`.lf/tmp/loo298-proof/`, including `results.txt`, `filters.txt` and
+`passed-tests.txt`. **58 distinct library tests passed**, deduplicated across
+the individual filters and the two overlapping suites; this is not a full
+library/CI pass.
+
+Each row below uses `cargo test -p loopflow --lib <filter>`:
+
+| Filter | Executed result |
+| --- | --- |
+| run_constructor_infers_ancestors_and_rejects_conflicts_atomically | 1 pass |
+| run_reservation_serializes_with_project_ancestry_changes | 1 pass |
+| review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors | 1 pass |
+| session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints | 1 pass |
+| retaining_invocations_preserves_populated_execution_and_review_bytes | 1 pass |
+| dropping_task_step_projection_preserves_execution_and_review_evidence | 1 pass |
+| native_human_session_schema_uses_flow_invocations | 1 pass |
+| review_actions_preserve_selected_attempt_across_replacement | 1 pass |
+| intentional_session_move_exits_cleanly | 1 pass |
+| task_started_tracks_published_review_history_not_reservation | 1 pass; transitional semantics only |
+| reopening_ask_cannot_overwrite_a_concurrent_completion | 1 pass |
+| ops::flow_run::tests | 5 pass |
+| reserved_publication_ | 2 pass |
+| review_publication_retry_preserves_identity_and_claims_sql_once | 1 pass |
+| flow_session_name_and_membership_survive_sql_run_replacement | 1 pass |
+| session_list_and_open_preserve_valid_reviews_beside_unreadable_captures | Passed after the fixture repair above |
+| controller::task::planning_tests | 29 pass, 90.92 s execution / 125.8 s command |
+| store::sqlite::durable::durable_store_tests | 16 pass, 38.39 s execution / 73.1 s command |
+
+The controller suite includes the owed restart, stale-human-decision,
+claimed-autonomous-boundary, nested feedback, finite provider-turn and failed
+candidate recovery proofs. Providers/GitHub effects are simulated. The native
+handoff test uses its owned shell stand-in; it does not prove configured native
+provider recovery. Taskless unit tests do not prove actual taskless CLI review
+recovery after source removal.
+
+### Canonical rehearsal and public CLI proof
+
+Copied 2,037 tracked/untracked source files (preserving symlinks and verifying
+content hashes) into a disposable directory, without another Git worktree:
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-materialized-gki9v_nh`.
+`source-hashes.json` records the inputs. Canonicalization with
+`0.12.22 --materialize-for-tests` produced `0.12.23.001_release`, folding all
+four drafts and advancing only the disposable Cargo version. The production
+checkout's draft bytes, version and migration registry remain unchanged.
+
+Two rehearsal setup failures are preserved: the migration checker initially
+rejected Cargo/Python version disagreement; after aligning only the copy's
+pyproject version, it lacked Git history and misclassified shipped legacy
+migrations as new. The final checker used the original Git directory strictly
+for its read-only describe/ls-tree/show queries. Those Git environment overrides
+were absent from every test process. It passed, with all 52 shipped migrations
+unchanged since v0.12.21. This source copy is not a released candidate.
+
+On the materialized copy, the projection-preservation, invocation-retention and
+Session-ownership populated tests **each passed**, as did
+`native_human_session_schema_uses_flow_invocations`. They retain captures,
+cursors, review feedback, claims and unknown provenance while checking parent
+constraints. Their passing canonical versions prove draft-path independence;
+they do not supply the still-missing filesystem importer or real-Home cutover.
+
+`cargo test -p loopflow --test status_tests merge_request -- --test-threads=1`
+passed **both** `persisted_merge_request_without_copy_keeps_status_and_roadmap_readable`
+and `previous_release_merge_request_migrates_into_readable_status_and_roadmap`.
+These execute the actual compiled CLI against isolated registered Task PRD-52
+with present/missing PM items and a prior-release store. Both status and roadmap
+remain readable after the new schema. PM/GitHub inputs are fixtures; there is no
+installed/app acceptance claim. This closes the owed CLI consumer proof for the
+deleted-table repair.
+
+TESTING.md's fresh-Home checks also ran on the materialized CLI: `runs --json`
+and `usage --json` returned empty arrays, exit 0; `doctor --json` exited 0 with
+matching known/applied `0.12.23.001_release`, no migration error, and the expected
+warning that a copy without Git metadata has unknown build revision. The binary
+SHA-256 was `c86788a736debf25a5a08af503e9b4c487496541ee2e83a26523f0a7e64b53db`.
+Doctor's read of installed fallback metadata is not a promotion receipt.
+
+Final static checks: formatting, all-target Clippy (**19.2 s**), source and
+materialized migration validation, working-diff whitespace and generated HTML
+consistency pass. Rendering first failed in the root Python environment without
+fasthtml; rerunning with `uv run --project website` succeeded. Architecture
+retains the known **32/33** owner gap (`wave_chapters`); the other seven
+inventories pass. Branch-range whitespace retains the draft dependency-header
+space and copied historical patch findings; neither is concealed by the clean
+working diff. Post-proof resource preflight passes at **102.8 GiB free**, this
+checkout's build **3.1 GiB / 12 GiB**. No timeout or resource waiver was used.
+
+### Source judgment and negative architectural proof
+
+`store/sqlite/runs.rs` resolves Invocation → nullable Task → Wave inside its
+caller's immediate transaction, rejects explicit mismatches, and shares decoding
+across current Session and retained history. Both production Task-review INSERT
+paths use it. The concurrent-writer fixture proves a Project Wave update cannot
+race that reservation into inconsistent ancestry. The WorkSource draft leaves
+historical provenance unknown instead of inventing it. No additional production
+constructor defect was identified in this review.
+
+The selected-attempt repair now has executed evidence, not only source review.
+Keep its original Run/position expectations through Open, Complete and rename;
+keep launch exclusion through native publication, releasing before provider
+wait. Session-ID rename remains a conversation operation. No second action store
+or abstraction is required.
+
+Negative searches still find the unfinished owners (paths under
+`rust/loopflow/src/`): `ops/human_session.rs:575` concatenates four Session
+sources; `:1204` resets Ask feedback and `:1208` copies a name;
+`ops/flow_run.rs:108,136` reads/writes position.json;
+`lf/commands/runs.rs:77,101` scans manifests and WorkCatalog matches subjects;
+`lf/commands/run.rs:604,666,832` writes Started events;
+`store/sqlite/chapters.rs:44` selects current Chapter per Wave. Run sidecars and
+Swift's old SessionRecord work/workPath projection remain. Current Rust outside
+migration history has no task_flow_positions reference. The general update
+trigger validates ancestry but does not enforce write-once Task assignment;
+that new constraint must accompany the shared bind writer.
+
+This slice advances the accepted model and its local behavior is now exercised.
+It is not a publishable dual-owner intermediate. Remaining owners are live
+capabilities: deleting them before conversion/import would lose behavior.
+
+### Recommended next action
+
+With the owed canonical and CLI proofs executed, continue the common Task and
+taskless invocation owner/driver, captured runtime nesting, general Run facts,
+all Session kinds and all launch/read consumers. The shared Run writer must
+also own confirmed write-once bind and set-once started_at with the exact latest
+validation matrix. Preserve nullable invocation equality, uncertain published
+attempts, original claims/process evidence, title/feedback/history and retired
+input evidence. No intermediate publication.
+
+All eight full-design obligations remain, including populated filesystem import,
+real-Home maintenance, Rust/Swift/pane acceptance, comparable measurements,
+deletion research and documentation reconciliation. The prepared-Run paragraph
+in docs/lf.md still needs final implementation alignment. Existing PR #1296
+publication-record and existing-Task stacking reports remain unreproduced.
+The new cancellation report `bb5410ba-cc7a-4247-824e-4ec9c4f3fda6` adds
+`lf pm task cancel --id` using the Team canceled-type state, cancellation from
+Task abandonment, and no orphan issue after a refused Task start. Implement
+through the existing lf Linear client; this review neither accessed tokens nor
+changed PM state. No Task disposition, PR state or Flow edge changed here.
+
+---
+
+## Earlier review: selected-attempt propagation
 
 2026-09-26 · LOO-298 · review-slice
 

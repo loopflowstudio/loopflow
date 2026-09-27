@@ -1590,6 +1590,39 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn task_started_tracks_published_review_history_not_reservation() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+        let mut initial = autonomous_position(&task_id);
+        initial.invocation = crate::durable::test_flow_invocation(
+            "review",
+            0,
+            "review-design",
+            Some("review"),
+            true,
+        );
+        let position = store.set_flow_position(&task_id, &initial).unwrap();
+        let session_id = crate::ops::human_session::flow_id(&position).unwrap();
+        let (reserved, run) = store.reserve_review_run(&position).unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+
+        store
+            .publish_review_run(&session_id, &run.id, reserved.version)
+            .unwrap();
+        assert!(store.task_started(&task_id).unwrap());
+        store
+            .ready_session(&session_id, &run.id, "approved scope")
+            .unwrap();
+        let position = store.flow_position(&task_id).unwrap().unwrap();
+        store
+            .finish_human_task_boundary(&task, &position, "approved scope")
+            .unwrap();
+        assert!(store.flow_position(&task_id).unwrap().is_none());
+        assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
     fn review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();

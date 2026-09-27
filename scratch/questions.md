@@ -334,3 +334,44 @@ Observation: the known first-Home initialization race reproduced once here
 (`no such table: task_flow_positions`) when a waiting Ask caller opened a fresh
 store while another command initialized it. The caller no longer opens a store
 while its reservation is unrecorded. The race itself is not repaired.
+
+## Cut 3: saved Flow reviews as rows; no sidecar (2026-09-27)
+
+Executive choices, recorded in [the cut report](cutover/cut-3-flow-review.md).
+Jack has not reviewed any of them.
+
+**No sidecar, decided on Jack's behalf.** `unrecorded-session.json` and every
+hook that replayed it are deleted. A launch never fails because the store cannot
+be written: the launch proceeds, prints one warning line naming the store error,
+and that Session is not recorded. Nothing records it later, so it never lists and
+its Run id resolves to no Session. This reverses Cut 2's deferred recording and
+follows Jack's standing "no sidecars" decision.
+
+**An Ask is refused when the store cannot be written.** This narrows the rule
+above. An Ask's only product is an answer, and the answer returns through its
+row. Launching a conversation whose answer cannot return would strand the person
+answering and the Run asking, so `lf ask` reports the store error and opens
+nothing. Cut 2's test expected the opposite; it now asserts this.
+
+**A saved Flow's review carries its Work's Wave, not its Task.** The invocation
+of `lf --task X flow <name>` has no Task: one Task has one current invocation,
+and that one is the Task's managed Flow. Run and invocation Tasks must agree, so
+the review's Run stores the declared Work's Wave and a null Task. The Session
+DTO's `work` is therefore the Wave where it was the Task. The launched review
+still receives `--task X` for its prompt context.
+
+**The saved Flow's position file is still the driver's owner.** The
+`flow_invocations` row of a saved Flow is written when the Flow first waits at a
+review and rewritten at each later review; it holds the capture and the cursor
+of that review, and is marked completed when the Flow finishes. Between reviews
+`flows/<id>/position.json` alone knows the cursor, the active headless boundary
+and the failure. A saved Flow that never reaches a review has no row. This is
+two owners of one cursor until the common driver cut.
+
+Smaller consequences: a plain `lf ask` whose launcher fails now leaves its
+stored Ask open (it was stored nothing); `lf session open` can still launch it.
+Task review Runs record their provider and model when they publish. Task review
+Sessions now report `terminal_ids`. Readiness no longer takes the launch lock;
+the store fences it on the current Run. Saved Flow reviews that exist only in
+`position.json` on old Homes stop listing until the import cut, and their
+`session-name.json` titles are not read.

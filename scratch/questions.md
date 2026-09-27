@@ -583,3 +583,23 @@ assign a whole taskless invocation and every Run in it?
 
 **`Task` in Rust does not carry the pointer.** Only the store reads
 `tasks.current_invocation_id`; the struct grows when a reader needs it.
+
+## Cut H1 review (2026-09-27)
+
+Executive choices, recorded in [the Cut H review](cutover/cut-h-review.md).
+Jack has not reviewed them.
+
+**The draft backfills pre-H1 Task Flows.** `point_task_at_invocation` now gives
+a taskless invocation whose Runs name exactly one Task that Task, on the
+invocation and on its Task-less Runs (Cut F step Runs and Cut 3 Wave-only
+reviews), so strict Run ↔ invocation equality holds for rows written before the
+draft. An invocation whose Runs never named a Task stays taskless; one whose
+Runs disagree is left alone rather than guessed. Only dev Homes that ran this
+branch's drafts have such rows.
+
+**Kept for Jack.** Whether `Binding … Permanent.` should print after the write
+(a refused bind currently prints it first); whether bind may assign a whole
+taskless invocation and every Run in it (today the strict trigger pair refuses
+with its raw constraint text); who owns Done-when 4's "`lf task run X --flow F`
+moves the pointer" — `ensure_flow_position` keeps an existing Flow and ignores
+`--flow`, so restart is the only mover.

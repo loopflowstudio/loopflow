@@ -11,8 +11,12 @@ cursor. The same day's [concept review](concept-review.md) recorded three
 decisions: a Task points at its one managed invocation while other Flows may
 name the Task; every launch refuses without its Run row; bind writes from the
 CLI and confirms in the app. [Cut H](cutover/cut-h-one-flow-driver.md) carries
-them through in five slices. Repository Chapters and Project-owned Flows are
-not built. The cut reports under [cutover/](cutover/) own actual results.
+them through: H1 and H2 are done and reviewed; H3–H7 remain, with H7 building
+repository Chapters and Project-owned Flows. Jack's Linear comment `c5cd2dd2`
+keeps all of that in this Task. He also decided to delete `lf wave serve`,
+Wave listeners, residents and lfd entirely, in this branch:
+[Cut I](cutover/cut-i-delete-listeners.md). The cut reports under
+[cutover/](cutover/) own actual results.
 
 ## One implementation
 

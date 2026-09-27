@@ -168,6 +168,9 @@ succeeds twice. The first test fails today at its first assertion.
   since the attempt-history rehearsal.
 - Concurrent first-Home initialization race (`no such table`), observed twice.
 - `pm_read_linear_oauth_sqlite_contention…` flaky, outside this Task.
+- 2026-09-27 later: Jack kept Chapters/Project Flows and every redundant pair in
+  LOO-298 (Cut H6/H7) and decided to delete Wave listeners, residents and lfd
+  (Cut I). H1 and H2 have landed and passed review.
 - Swift and DTO shapes untouched; `SessionTitleSource::Unavailable` and
   `ActiveRun.subjects` await the DTO pass. Repository Chapters and Project-owned
   Flows are not built.

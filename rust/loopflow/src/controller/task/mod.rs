@@ -1149,7 +1149,9 @@ mod planning_tests {
     use crate::engine::invocation::StepKind;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::{ExecId, TraceId};
+    use crate::ops::human_session::{self, SessionFlowMembership};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::run_record::SessionTitleSource;
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -2327,6 +2329,61 @@ mod planning_tests {
         let recovered = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(recovered.session_run_id, Some(run_id));
         assert_eq!(recovered.ready_summary.as_deref(), Some("ready"));
+    }
+
+    #[tokio::test]
+    async fn flow_session_name_and_membership_survive_sql_run_replacement() {
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, task, flow) = human_task_fixture().await;
+        let position = store.set_flow_position(&task.id, flow).await.unwrap();
+        let id = human_session::flow_id(&position).unwrap();
+        let (_, first) = store.session(&id).await.unwrap().unwrap();
+        let named = human_session::rename(
+            &store,
+            first.id.as_str(),
+            "Parser review",
+            SessionTitleSource::Human,
+        )
+        .await
+        .unwrap();
+        assert_eq!(named.id, id);
+        assert_eq!(named.run_id, first.id);
+        assert_eq!(named.work, Some(WorkRef::Task(task.id.clone())));
+        assert!(matches!(
+            &named.flow_membership,
+            SessionFlowMembership::Step { invocation_id, .. }
+                if invocation_id == &position.invocation.id
+        ));
+
+        ready_review(&store, &task, "Keep this answer").await;
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        let (_, replacement) = store.reserve_review_run(&position).await.unwrap();
+        let retained = human_session::rename(
+            &store,
+            replacement.id.as_str(),
+            "Generated suggestion",
+            SessionTitleSource::Generated,
+        )
+        .await
+        .unwrap();
+        assert_eq!(retained.id, id);
+        assert_ne!(retained.run_id, first.id);
+        assert_eq!(retained.run_id, replacement.id);
+        assert_eq!(retained.title, "Parser review");
+        assert_eq!(retained.title_source, SessionTitleSource::Human);
+        assert_eq!(retained.flow_membership, named.flow_membership);
+        assert_eq!(retained.ready_summary.as_deref(), Some("Keep this answer"));
+        let listed = human_session::list(&store)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|session| session.id == id)
+            .unwrap();
+        assert_eq!(listed, retained);
+        let history = store.session_runs(&id).await.unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(history.iter().any(|run| run.id == first.id));
+        assert!(history.iter().any(|run| run.id == replacement.id));
     }
 
     #[tokio::test]

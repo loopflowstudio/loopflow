@@ -323,8 +323,6 @@ PUBLIC_DOC_SLUGS = {page.slug for page in DOC_PAGES}
 ARCHITECTURE_PAGES = ARCHITECTURE_AREA.pages
 ARCHITECTURE_SLUGS = {page.slug for page in ARCHITECTURE_PAGES}
 ALL_DOC_PAGES = DOC_PAGES + ARCHITECTURE_PAGES
-DOCS_NAV = [(page.title, page.slug) for page in DOC_PAGES]
-DOC_DESCRIPTIONS = {page.slug: page.description for page in DOC_PAGES}
 DOC_PAGE_BY_SLUG = {page.slug: page for page in ALL_DOC_PAGES}
 DOC_AREA_BY_PAGE = {
     page.slug: area for area in DOCS_AREAS for page in area.pages
@@ -337,9 +335,9 @@ DOC_AREA_BY_PAGE.update(
 def generate_llms_txt() -> str:
     """llms.txt per llmstxt.org: H1, blockquote summary, context, H2 link sections."""
     doc_links = "\n".join(
-        f"- [{title}]({BASE_URL}/docs/{slug}.md): {DOC_DESCRIPTIONS.get(slug, title)}"
-        for title, slug in DOCS_NAV
-        if doc_path(slug)
+        f"- [{page.title}]({BASE_URL}/docs/{page.slug}.md): {page.description}"
+        for page in DOC_PAGES
+        if doc_path(page.slug)
     )
     return f"""# Loopflow
 > A software instrument. It doesn't make the software for you. You make the software through it.
@@ -366,11 +364,11 @@ The complete public docs are at {BASE_URL}/llms-full.txt.
 def generate_llms_full_txt() -> str:
     """The whole docs corpus in one markdown file, in nav order."""
     sections = []
-    for title, slug in DOCS_NAV:
-        body = load_doc(slug)
+    for page in DOC_PAGES:
+        body = load_doc(page.slug)
         if not body:
             continue
-        sections.append(f"<!-- {BASE_URL}/docs/{slug} -->\n\n{body.strip()}")
+        sections.append(f"<!-- {BASE_URL}/docs/{page.slug} -->\n\n{body.strip()}")
     header = (
         "# Loopflow — complete documentation\n\n"
         f"> Concatenation of every page under {BASE_URL}/docs, in reading order. "
@@ -381,9 +379,9 @@ def generate_llms_full_txt() -> str:
 
 def generate_sitemap_xml() -> str:
     pages = ["", "/download", "/docs"] + [
-        f"/docs/{slug}"
-        for _, slug in DOCS_NAV
-        if slug != "index" and doc_path(slug)
+        f"/docs/{page.slug}"
+        for page in DOC_PAGES
+        if page.slug != "index" and doc_path(page.slug)
     ]
     entries = []
     for page in pages:
@@ -806,7 +804,7 @@ def markdown_doc_response(
 
 def markdown_not_found(slug: str) -> PlainTextResponse:
     """Markdown 404 with nearest-match suggestions — agents recover; HTML error shells dead-end them."""
-    slugs = [s for _, s in DOCS_NAV]
+    slugs = [page.slug for page in DOC_PAGES]
     close = difflib.get_close_matches(slug, slugs, n=3, cutoff=0.4) or slugs
     suggestions = "\n".join(f"- {BASE_URL}/docs/{s}.md" for s in close)
     body = (

@@ -444,3 +444,42 @@ Implementation proof is complete. The selected implement step leaves broader
 gate checks (`scripts/check_architecture.py` and the full website suite),
 publication, and Task completion to their authored later steps. Reader evidence
 remains a growth-program follow-up; it is not claimed by this branch.
+
+## Compression review — 2026-09-26
+
+The remaining gate and reader-evidence work above is unchanged.
+
+### Ownership and reduction
+
+Canonical prose lives in `docs/*.md`; the glossary owns vocabulary. The
+website's sync command makes deployment copies, and HTML, Markdown downloads,
+and `llms-full.txt` consume those same pages. `DOCS_AREAS` owns public membership,
+order, titles, and descriptions as `DocPage` records. Architecture keeps its
+separate inventory. No Task, Run, Session, persistence, or wire type changes
+are needed for this documentation branch.
+
+Before compression, `DOC_PAGES` was split into `DOCS_NAV` title/slug tuples
+and a `DOC_DESCRIPTIONS` dictionary. The agent index joined them back together
+with a title fallback even though every page requires a description. The full
+index, sitemap, and missing-page suggestions also consumed the tuples.
+
+Those four consumers now read `DOC_PAGES` directly. Removed both intermediate
+collections and the unreachable description fallback. Repository search found
+no other code consumers; no compatibility alias is needed. Public content,
+ordering, URLs, missing-file behavior, and architecture exclusion are retained.
+
+Retained page-local explanations beside glossary links: readers arriving at a
+deep link need them. Retained the README/index opening and its parity test as
+required by the accepted design. Deployment copies are generated, not another
+authoring surface. Slug lookup maps and membership sets still serve actual
+lookups; no new content abstraction or schema was introduced.
+
+### Focused proof
+
+- `cd website && uv run --extra test pytest tests/e2e/test_agent_readers.py -q`:
+  **9 passed in 1.56s**, covering both agent indexes, sitemap, Markdown recovery,
+  retrieval, and architecture separation with the existing server fixture.
+- `uv run ruff check website/main.py` and `git diff --check`: passed.
+- Review confirmed all four migrated consumers preserve their original order
+  and filtering. Public prose and docs tests are unchanged in this step; their
+  earlier 22-test result remains recorded above, not claimed as a new full run.

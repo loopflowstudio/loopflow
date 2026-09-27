@@ -417,6 +417,151 @@ fn interactive_run_records_checkout_and_declared_work() {
     assert_eq!(fixture.count("sessions"), 3);
 }
 
+#[test]
+fn binding_an_orphan_session_starts_its_task_once() {
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "task-binding",
+        &fixture.repo.head_sha(),
+    );
+    let sibling_worktree = fixture.repo.create_named_worktree("task-sibling");
+    let sibling =
+        support::register_sibling_task(&task, "INF-124", "task-sibling", &sibling_worktree);
+    let launch = |args: &[&str]| -> String {
+        let before = fixture.launches().len();
+        let output = fixture.run(args);
+        assert!(
+            output.status.success(),
+            "lf {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fixture.launches()[before].clone()
+    };
+    let started = |id: &str| -> Option<i64> {
+        fixture
+            .db()
+            .query_row("SELECT started_at FROM tasks WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    };
+    let now = || -> i64 {
+        fixture
+            .db()
+            .query_row("SELECT CAST(strftime('%s','now') AS INTEGER)", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    };
+    let task_runs = |issue: &str| -> Vec<String> {
+        fixture
+            .json(&["runs", "--task", issue, "--json"])
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|run| run["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let orphan = launch(&LAUNCH);
+    let (session, ..) = fixture.session_row(&orphan);
+    assert_eq!(fixture.run_parents(&orphan), (None, None, None));
+    assert_eq!(started(task.task.id.as_str()), None);
+    assert!(task_runs("INF-123").is_empty());
+
+    // The bind happens measurably after the Run was created.
+    std::thread::sleep(Duration::from_secs(2));
+    let before = now();
+    let bound = fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
+    let after = now();
+    assert_eq!(bound["id"], session.as_str());
+    assert_eq!(bound["run_id"], orphan.as_str());
+    assert_eq!(
+        bound["work"],
+        serde_json::json!({"kind": "task", "id": task.task.id})
+    );
+    assert_eq!(
+        fixture.run_parents(&orphan),
+        (
+            Some(task.task.id.to_string()),
+            Some(task.task.wave_id.to_string()),
+            Some("bound".to_string()),
+        )
+    );
+    let bound_at = started(task.task.id.as_str()).expect("the bind starts the Task");
+    assert!((before..=after).contains(&bound_at), "{bound_at}");
+    let created: i64 = fixture
+        .db()
+        .query_row(
+            "SELECT created_at FROM runs WHERE id=?1",
+            [orphan.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(bound_at > created, "Started is the bind, not the launch");
+    assert_eq!(task_runs("INF-123"), vec![orphan.clone()]);
+    let listed = fixture.sessions();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0]["work"],
+        serde_json::json!({"kind": "task", "id": task.task.id})
+    );
+    assert_eq!(listed[0]["work_path"], "task-pr-tests / INF-123");
+
+    // A Run's Task never moves.
+    for other in ["INF-124", "INF-123"] {
+        let refused = fixture.run(&["session", "bind", &session, "--task", other, "--json"]);
+        assert!(!refused.status.success());
+        let reason = String::from_utf8_lossy(&refused.stderr);
+        assert!(reason.contains("already has Task INF-123"), "{reason}");
+    }
+    assert_eq!(
+        fixture.run_parents(&orphan).0,
+        Some(task.task.id.to_string())
+    );
+    assert_eq!(started(sibling.id.as_str()), None);
+    assert!(task_runs("INF-124").is_empty());
+
+    std::thread::sleep(Duration::from_secs(2));
+    let later = launch(&[
+        "--task",
+        "INF-123",
+        "--tui",
+        "--model",
+        "opencode",
+        ":",
+        "Review the parser",
+    ]);
+    assert_eq!(started(task.task.id.as_str()), Some(bound_at));
+    assert_eq!(task_runs("INF-123"), vec![later, orphan]);
+
+    // Started is stored once and only beside a Run that names the Task.
+    let db = fixture.db();
+    let disagreeing: i64 = db
+        .query_row(
+            "SELECT count(*) FROM tasks t WHERE (t.started_at IS NOT NULL)
+                != EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.id)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(disagreeing, 0);
+    for (id, value) in [
+        (task.task.id.as_str(), Some(bound_at + 1)),
+        (task.task.id.as_str(), None),
+        (sibling.id.as_str(), Some(bound_at)),
+    ] {
+        assert!(db
+            .execute(
+                "UPDATE tasks SET started_at=?2 WHERE id=?1",
+                rusqlite::params![id, value]
+            )
+            .is_err());
+    }
+}
+
 fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
     let deadline = Instant::now() + PATIENCE;
     loop {

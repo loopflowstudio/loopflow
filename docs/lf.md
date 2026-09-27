@@ -692,6 +692,18 @@ A human name survives generated suggestions. Bind keeps the same properties
 and the name. Orphan sessions have no Task, including Wave-only conversations;
 absence from the visible Task plan does not turn a bound Session into an orphan.
 
+```bash
+lf session import --dry-run   # what an older Home's files would store
+lf session import             # store them; run once per Home
+```
+
+A Home that ran a release older than the Session tables kept its
+conversations in files: interactive Run records, Asks under `human-sessions/`,
+saved Flow reviews in `flows/<id>/position.json`, and names in
+`session-name.json`. `import` stores each as a Session with its Runs and reports
+every file it could not store with the reason. The files stay in place and no
+other command reads them. Running it again stores nothing new.
+
 `open` resumes provider-native history. `ready` saves feedback without closing
 anything. `complete` closes the Session and retains its history; default lists
 show open Sessions. A Flow review passes its feedback onward, while an Ask

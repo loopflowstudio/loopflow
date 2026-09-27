@@ -21,6 +21,9 @@ use crate::run_record::{
 use crate::store::SharedStore;
 use crate::work::task::{Task, TaskId};
 
+#[cfg(test)]
+pub(crate) mod action_test;
+
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_RUN_ENV: &str = "LF_HUMAN_SESSION_RUN";
 const REVIEW_RUN_ENV: &str = "LF_REVIEW_RUN_RESERVATION";
@@ -376,6 +379,7 @@ enum SessionTarget {
     Flow {
         task: Box<Task>,
         position: FlowPosition,
+        run_id: RunId,
     },
     StandaloneFlow(crate::ops::flow_run::StepToken),
 }
@@ -741,9 +745,12 @@ async fn review_target(
         );
     }
     let (task, position) = find_flow_session(store, &session.id).await?;
-    if selector != session.id
-        && current.published
-        && position.session_run_id.as_ref() != Some(&current.id)
+    let (latest, _) = store
+        .session(&session.id)
+        .await?
+        .ok_or_else(|| session_not_found(&session.id))?;
+    if latest.current_run_id != current.id
+        || (current.published && position.session_run_id.as_ref() != Some(&current.id))
     {
         bail!(
             "Session {} changed its current Run during lookup; open the Session again",
@@ -753,6 +760,7 @@ async fn review_target(
     Ok(SessionTarget::Flow {
         task: Box::new(task),
         position,
+        run_id: current.id.clone(),
     })
 }
 
@@ -768,7 +776,7 @@ async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<
             interactive_surface(store, dir, manifest).await
         }
         SessionTarget::Ask(record) => ask_surface(store, record).await,
-        SessionTarget::Flow { task, position } => flow_surface(store, task, position).await,
+        SessionTarget::Flow { task, position, .. } => flow_surface(store, task, position).await,
         SessionTarget::StandaloneFlow(token) => {
             attribute_standalone_session(store, crate::ops::flow_session::surface(token)?).await
         }
@@ -811,7 +819,9 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
 
 async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition) -> Result<()> {
     let token = flow_token(task, position)?;
-    crate::controller::task::complete_human_flow_step(store, &token).await?;
+    let lock_id = flow_id(position)?;
+    let launch_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
+    crate::controller::task::complete_human_flow_step(store, &token, position).await?;
     let mut task = store
         .get_task(&token.task_id)
         .await?
@@ -824,6 +834,7 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition
         Ok(())
     };
     stop_flow_run(store, &task, position).await;
+    drop(launch_lock);
     launch.with_context(|| {
         format!(
             "Review feedback saved; continue with `lf task run {}`",
@@ -970,23 +981,22 @@ pub(crate) async fn serve_flow(
     if current.session_run_id.is_some() {
         return Ok(());
     }
-    serve_flow_locked(store, token, launch_lock).await
+    serve_flow_locked(store, token, &current, launch_lock)
+        .await
+        .map(|_| ())
 }
 
 async fn serve_flow_locked(
     store: SharedStore,
     token: FlowSessionToken,
+    position: &FlowPosition,
     launch_lock: File,
-) -> Result<()> {
+) -> Result<RunId> {
     let task = store
         .get_task(&token.task_id)
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared", token.task_id))?;
     validate_token(&store, &token).await?;
-    let position = store
-        .flow_position(&token.task_id)
-        .await?
-        .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
     if let Some(failure) = &position.failure {
         bail!("review session cannot start: {}", failure.reason);
     }
@@ -996,7 +1006,7 @@ async fn serve_flow_locked(
     let serialized = serde_json::to_string(&HumanSessionToken::Flow {
         token: Box::new(token.clone()),
     })?;
-    let (position, reserved) = store.reserve_review_run(&position).await?;
+    let (position, reserved) = store.reserve_review_run(position).await?;
     let reservation = ReviewRunReservation {
         session_id: flow_token_id(&token),
         run_id: reserved.id.clone(),
@@ -1022,10 +1032,10 @@ async fn serve_flow_locked(
     if !token_is_current(&store, &token).await? {
         let execution = crate::ops::task_execution::task_execution(&store, &token.task_id).await?;
         println!("Review session finished. {}", execution.reason);
-        return Ok(());
+        return Ok(reserved.id);
     }
     if status.success() {
-        Ok(())
+        Ok(reserved.id)
     } else {
         Err(anyhow!("review skill exited with {status}"))
     }
@@ -1182,7 +1192,35 @@ pub(crate) async fn open(
             }
             Ok(session)
         }
-        SessionTarget::Ask(_) | SessionTarget::Flow { .. } => {
+        SessionTarget::Flow { task, position, .. } => {
+            if mode != OpenMode::Refuse {
+                bail!("--replace and --try apply only to interactive provider sessions");
+            }
+            #[cfg(test)]
+            action_test::after_lookup("open", session_id).await;
+            let id = flow_id(position)?;
+            let lock_id = id.clone();
+            let launch_lock =
+                tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
+            let current = find_session(store, session_id)
+                .await?
+                .ok_or_else(|| session_not_found(session_id))?;
+            let SessionTarget::Flow {
+                position: current, ..
+            } = current
+            else {
+                bail!("review Session changed while opening");
+            };
+            if current != *position {
+                bail!("review Run changed while opening; open the Session again");
+            }
+            let mut session = session_surface(store, &target).await?;
+            if resume {
+                session.run_id = open_flow_locked(store, task, position, launch_lock).await?;
+            }
+            Ok(session)
+        }
+        SessionTarget::Ask(_) => {
             if mode != OpenMode::Refuse {
                 bail!("--replace and --try apply only to interactive provider sessions");
             }
@@ -1193,7 +1231,7 @@ pub(crate) async fn open(
                 .ok_or_else(|| session_not_found(&id))?;
             let mut session = session_surface(store, &target).await?;
             if resume {
-                session.run_id = open_boundary(store, &id).await?;
+                session.run_id = open_ask(&id).await?;
             }
             Ok(session)
         }
@@ -1204,6 +1242,8 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     let target = find_session(store, session_id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
+    #[cfg(test)]
+    action_test::after_lookup("complete", session_id).await;
     let session = session_surface(store, &target).await?;
     if matches!(&target, SessionTarget::Flow { .. }) {
         if let Some(destination) = super::task_destination::destination()? {
@@ -1227,7 +1267,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
         SessionTarget::Ask(record) => {
             complete_ask(&record.id).await?;
         }
-        SessionTarget::Flow { task, position } => {
+        SessionTarget::Flow { task, position, .. } => {
             complete_flow(store, task, position).await?;
         }
         SessionTarget::StandaloneFlow(token) => {
@@ -1237,23 +1277,13 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     Ok(session)
 }
 
-async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
+async fn open_ask(session_id: &str) -> Result<RunId> {
     if let Some(mut record) = read_ask_record(session_id)? {
         loop {
             if !matches!(record.status, AskSessionStatus::Waiting) {
                 bail!("session {session_id:?} is already complete");
             }
             let observed_run = record.session_run_id.clone();
-            if let Some(run_id) = &observed_run {
-                if resume_native_run(
-                    run_id,
-                    &HumanSessionToken::Ask {
-                        id: record.id.clone(),
-                    },
-                )? {
-                    return Ok(run_id.clone());
-                }
-            }
             let lock_id = session_id.to_string();
             let launch_lock =
                 tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
@@ -1265,6 +1295,18 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
             if record.session_run_id != observed_run {
                 drop(launch_lock);
                 continue;
+            }
+            let mut launch_lock = Some(launch_lock);
+            if let Some(run_id) = &observed_run {
+                if resume_native_run(
+                    run_id,
+                    &HumanSessionToken::Ask {
+                        id: record.id.clone(),
+                    },
+                    &mut launch_lock,
+                )? {
+                    return Ok(run_id.clone());
+                }
             }
             if let Some(run_id) = &record.session_run_id {
                 if !run_is_prepared(run_id)? {
@@ -1280,28 +1322,36 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
             )?;
             write_ask_record(&record)?;
             let run_id = session_run_id(session_id, record.session_run_id.as_ref())?;
-            serve_ask_locked(session_id, launch_lock).await?;
+            serve_ask_locked(
+                session_id,
+                launch_lock.expect("unresumed Ask retains its launch lock"),
+            )
+            .await?;
             return Ok(run_id);
         }
     }
-    let (task, position) = find_flow_session(store, session_id).await?;
+    Err(session_not_found(session_id))
+}
+
+async fn open_flow_locked(
+    store: &SharedStore,
+    task: &Task,
+    position: &FlowPosition,
+    launch_lock: File,
+) -> Result<RunId> {
     let previous = position.session_run_id.clone();
-    let token = flow_token(&task, &position)?;
+    let token = flow_token(task, position)?;
+    let mut launch_lock = Some(launch_lock);
     if let Some(run_id) = &previous {
         if resume_native_run(
             run_id,
             &HumanSessionToken::Flow {
                 token: Box::new(token.clone()),
             },
+            &mut launch_lock,
         )? {
             return Ok(run_id.clone());
         }
-    }
-    let lock_id = session_id.to_string();
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
-    let (_, current) = find_flow_session(store, session_id).await?;
-    if current.session_run_id != previous {
-        bail!("review Run changed while opening; open the Session again");
     }
     if let Some(run_id) = &previous {
         let (dir, manifest) = crate::run_record::resolve_manifest(
@@ -1322,12 +1372,13 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
             bail!("review Run {run_id} has no terminal outcome; launch status is unresolved, so Open cannot authorize a replacement");
         }
     }
-    serve_flow_locked(store.clone(), token, launch_lock).await?;
-    let (session, _) = store
-        .session(session_id)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
-    Ok(session.current_run_id)
+    serve_flow_locked(
+        store.clone(),
+        token,
+        position,
+        launch_lock.expect("unresumed review retains its launch lock"),
+    )
+    .await
 }
 
 /// A replacement Run continues the same Session, so it keeps that Session's
@@ -1567,17 +1618,25 @@ pub(crate) async fn rename(
     let mut target = find_session(store, session_id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
-    // A boundary may replace its Run while opening. Serialize with that
-    // preparation and name the Run it publishes, not the one it replaced.
+    let expected_run = match &target {
+        SessionTarget::Flow {
+            run_id, position, ..
+        } if session_id != flow_id(position)? => Some(run_id.clone()),
+        _ => None,
+    };
+    // Retain the caller's exact/prefix selector while waiting for replacement.
     let _launch_lock = if matches!(target, SessionTarget::Interactive { .. }) {
         None
     } else {
         let id = boundary_id(&target)?;
         let lock_id = id.clone();
-        let lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
-        target = find_session(store, &id)
+        let pending_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id));
+        #[cfg(test)]
+        action_test::after_lookup("rename", session_id).await;
+        let lock = pending_lock.await??;
+        target = find_session(store, session_id)
             .await?
-            .ok_or_else(|| session_not_found(&id))?;
+            .ok_or_else(|| session_not_found(session_id))?;
         Some(lock)
     };
     if let SessionTarget::Flow { position, .. } = &target {
@@ -1587,7 +1646,9 @@ pub(crate) async fn rename(
             SessionTitleSource::Generated => crate::session::TitleSource::Generated,
             SessionTitleSource::Unavailable => bail!("unavailable is not a title source"),
         };
-        store.rename_session(&id, title, title_source).await?;
+        store
+            .rename_session(&id, expected_run.as_ref(), title, title_source)
+            .await?;
         return session_surface(store, &target).await;
     }
     let session = session_surface(store, &target).await?;
@@ -1698,7 +1759,15 @@ fn session_run_is_resumable(dir: &Path, manifest: &RunManifest) -> Result<bool> 
     Ok(!crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?.is_empty())
 }
 
-pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Result<bool> {
+pub(crate) fn resume_native_run(
+    run_id: &RunId,
+    token: &HumanSessionToken,
+    launch_lock: &mut Option<File>,
+) -> Result<bool> {
+    #[cfg(test)]
+    if let Some(result) = action_test::resume(run_id, launch_lock) {
+        return result;
+    }
     let home = crate::store::observability_home_dir();
     let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
         Ok(value) => value,
@@ -1726,11 +1795,16 @@ pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Re
         &dir,
         &provider_session,
         &environment,
+        launch_lock.take(),
     )?;
     Ok(true)
 }
 
 fn stop_native_run(run_id: &RunId) -> Result<()> {
+    #[cfg(test)]
+    if action_test::stop(run_id) {
+        return Ok(());
+    }
     let home = crate::store::observability_home_dir();
     let (dir, manifest) = crate::run_record::resolve_manifest(&home, run_id.as_str())
         .with_context(|| {
@@ -2660,7 +2734,7 @@ mod tests {
             record.retain_completed = true;
             write_ask_record(&record).unwrap();
             let lock = super::lock_session_launch(&record.id).unwrap();
-            let mut reopening = Box::pin(super::open_boundary(&store, &record.id));
+            let mut reopening = Box::pin(super::open_ask(&record.id));
             let progress = std::future::poll_fn(|cx| {
                 std::task::Poll::Ready(std::future::Future::poll(reopening.as_mut(), cx))
             })

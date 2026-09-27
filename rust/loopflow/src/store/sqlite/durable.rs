@@ -1555,6 +1555,7 @@ mod durable_store_tests {
         store
             .rename_session(
                 &session_id,
+                None,
                 "Parser review",
                 crate::session::TitleSource::Human,
             )
@@ -1594,6 +1595,7 @@ mod durable_store_tests {
         store
             .rename_session(
                 &session_id,
+                None,
                 "generated suggestion",
                 crate::session::TitleSource::Generated,
             )

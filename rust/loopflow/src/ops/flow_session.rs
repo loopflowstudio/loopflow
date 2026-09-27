@@ -331,9 +331,9 @@ pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Res
             // Retain a published native identity even if history is temporarily absent.
             // The launch lock guards startup only, not the whole interactive session.
             let run_id = run_id.clone();
-            drop(lock);
+            let mut launch_lock = Some(lock);
             ensure!(
-                human_session::resume_native_run(&run_id, &human_token)?,
+                human_session::resume_native_run(&run_id, &human_token, &mut launch_lock)?,
                 "Flow Session {0} has Run {run_id} but native history is unavailable",
                 session_id(token)
             );

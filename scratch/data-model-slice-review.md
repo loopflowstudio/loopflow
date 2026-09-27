@@ -1,6 +1,65 @@
 # Data model storage slice review
 
-## Current review: Task review Session ownership
+## Current disposition after integrating LOO-291
+
+2026-09-26 · LOO-298 · review-slice
+
+**Not ready to publish.** `lf rebase` completed onto
+`4cd64be3d0432aa04dd9256293eef7088db97ccc` after checkpointing the review below.
+Integration HEAD was `afed3cffd693169df30ac765f4869f8a3df41255`; this addendum
+also covers the bounded corrections in its working diff. No push, Task
+completion, installed Home change or Flow navigation was requested.
+
+The amended design and all eight Done When obligations still govern. The
+pre-rebase matrix below remains the detailed scope inventory; its exact source
+line references and upstream-absence claims are historical. Reconciled source
+now includes LOO-291's checkout binding, required Session Run ID, membership
+DTOs and desktop work. These are useful prerequisites, but do not provide the
+target Session/current-Run/history DTO or table-only general Run readers.
+
+| Claim | Planned behavior | Integrated implementation | Proof | Result |
+| --- | --- | --- | --- | --- |
+| Task review ownership | Session retains name, feedback and history across replacement | SQL reservation and current-Run pointer retained; child manifest receives reserved ID and captured membership | `reserved_run`, `reserve_review_run`, launch dispatch, source review | source only; behavior gap |
+| Rename through current Run | Human title survives generated suggestions and replacement; membership unchanged | Existing rename command routes Task reviews to SQL; other kinds still write sidecars | Added `flow_session_name_and_membership_survive_sql_run_replacement` | compiled, unexecuted |
+| Preparation recovery | Interrupted publication resumes without losing evidence or duplicating provider | Task path still publishes immutable artifacts before SQL publication; upstream prepared-file path serves other kinds | `lf/commands/run.rs`, `begin_reserved_with_context`, `publish_run_binding` | gap; finding 1 below persists |
+| Independent discovery | Unrelated malformed autonomous capture does not hide valid review | SQL selects review Sessions; `review_surface` validates each selected review's invocation for membership/actions | `list_flow_sessions`, `review_surface`, `open_review_sessions` | source only; selected malformed reviews can still fail list |
+| One owner across callers | Common Session/Run/Invocation records, bind and shared taskless driver | Four-source inventory, file Flow/Ask, name-copy helper, manifest Run readers and sidecars remain | Negative source inspection after rebase | gap; intermediate publication remains disallowed |
+
+Conflict resolution removed an upstream naming/membership test written for the
+former Task file owner. Restored its useful behavior against SQL: rename by
+current Run ID, replace the Run, reject a generated title overwrite, retain
+feedback/membership/Task, agree with Session listing, and retain both Run IDs.
+The test uses an ephemeral store and the existing isolated Home/executable
+fixture, without provider launch. It does not substitute for the repeated
+replacement/stale-actor or configured CLI/app proofs. Removed the now-unused
+store parameter from `prepare_boundary`; post-rebase Clippy had rejected it.
+The earlier schema assertion correction survived integration.
+
+Post-rebase verification on these corrections:
+
+- `cargo fmt --all --check` and isolated
+  `cargo clippy --all-targets -- -D warnings`: **PASS** (Clippy 17.45 seconds).
+- Migration validation: **PASS**, three ordered drafts and 52 unchanged shipped
+  files. Architecture HTML consistency: **PASS** in the website environment.
+- Architecture: **FAIL**, still **32/33** SQLite owners, missing `wave_chapters`;
+  the other seven inventories pass. Working-diff whitespace passes; branch
+  whitespace still reports the unchanged draft header and copied patch context.
+- Behavioral execution: **NOT RUN**. Rebase recovery reran resource preflight
+  and safe recovery: active `main-view-task` **15.3 GiB / 12 GiB**, **97.3 GiB**
+  free. The active foreign build was preserved. This review reuses that receipt;
+  compilation is not runtime SQL, provider, migration or desktop proof.
+
+Next implementation should repair the exact artifact/SQL publication boundary,
+then complete the approved owner/caller cutover. When resource preflight permits,
+run the focused commands below plus
+`flow_session_name_and_membership_survive_sql_run_replacement` and the
+reconciliation command recorded in [questions](questions.md#rebase-onto-main-4cd64be3d-2026-09-26).
+Repeat populated preservation after draft materialization. The new publication
+tracking and existing-Task stacking reports remain explicit implementation scope,
+not reproduced defects or repaired delivery state. No new approval is needed to
+continue the approved implementation.
+
+## Pre-rebase review: Task review Session ownership
 
 2026-09-26 · LOO-298 · review-slice
 

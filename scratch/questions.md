@@ -150,3 +150,28 @@ scope: publication of PR #1296 missing from its Task PR row, and support for
 stacking an already-created Task. These were not reproduced or repaired during
 review. Investigate through the existing delivery owners; do not infer that a
 successful remote publication proves its Task row was updated.
+
+## Recovery and historical lookup cut (2026-09-26)
+
+Executive choice within the amended model: historical Run selectors return an
+explicit message naming their retained Session and current Run. They do not
+silently target a replacement. Stable history remains in SQL; general history
+inspection and all conversation kinds still need the planned owner/DTO cutover.
+
+Observation: publication previously constructed a CaptureHandle before claiming
+SQL. Rejection could therefore settle the Run as failed through Drop. Publication
+now reconciles immutable artifacts, claims SQL, and only then constructs capture.
+Rebuilding different prompt/runtime/parent inputs is a named conflict, not license
+to rewrite the original preparation. Complete staged files retry; conflicting or
+partial file bytes remain preserved for explicit recovery.
+
+Observation: the published flag does not establish whether a provider started.
+Open now leaves a published attempt unresolved without native history or a valid
+terminal outcome. The remaining Run-owned process lifecycle must recover that
+case using exact evidence. Missing receipts alone cannot authorize replacement.
+This is not a claim of complete automatic preparation/launch recovery.
+
+Resource preflight and safe recovery again fail on active `main-view-task` at
+15.3/12 GiB with 97.3 GiB free; no behavioral test or materialized rehearsal ran.
+Ordinary implementation continued. The complete eight-part acceptance and the
+supplied delivery/stacking reports remain unfinished; no new Ask is needed.

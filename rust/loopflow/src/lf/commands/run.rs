@@ -29,7 +29,13 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
         if bound.model.is_none() {
             bound.model = binding.agent.clone();
         }
-        return run_bound(skill, message, &bound, &binding);
+        return launch_bound(
+            skill,
+            message,
+            &bound,
+            &binding,
+            crate::session::WorkSource::Checkout,
+        );
     }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -69,6 +75,22 @@ pub fn run_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<()> {
+    launch_bound(
+        skill,
+        message,
+        cli,
+        binding,
+        crate::session::WorkSource::Declared,
+    )
+}
+
+fn launch_bound(
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+    source: crate::session::WorkSource,
+) -> Result<()> {
     let message = bound_message(binding, message);
     let resolved_skill = skill
         .map(crate::ops::human_session::active_flow_skill)
@@ -81,6 +103,14 @@ pub fn run_bound(
         binding.wave_id.to_string(),
     );
     built.subjects = binding.subjects.clone();
+    built.work = Some(RunWork {
+        task_id: match &binding.work {
+            crate::durable::WorkRef::Task(id) => Some(id.clone()),
+            crate::durable::WorkRef::Wave(_) | crate::durable::WorkRef::Project(_) => None,
+        },
+        wave_id: binding.wave_id.clone(),
+        source,
+    });
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
@@ -140,6 +170,14 @@ struct PromptBuild {
     skill_name: Option<String>,
     log_name: String,
     subjects: Vec<String>,
+    work: Option<RunWork>,
+}
+
+/// Work resolved once at the launch boundary; a Task's Wave is its own.
+struct RunWork {
+    task_id: Option<crate::durable::TaskId>,
+    wave_id: crate::id::WaveId,
+    source: crate::session::WorkSource,
 }
 
 #[derive(Debug, Default)]
@@ -484,6 +522,7 @@ fn build_prompt_at(
         skill_name,
         log_name,
         subjects: Vec::new(),
+        work: None,
     })
 }
 
@@ -809,6 +848,14 @@ fn begin_run_capture(
             spec,
             &built.context,
         )
+    } else if surface == "tui" && spec.flow == crate::run_record::RunFlowMembership::Independent {
+        let run = interactive_run(built, &spec);
+        crate::run_record::CaptureHandle::begin_reserved_with_context(
+            spec,
+            run.id.clone(),
+            &built.context,
+            |_| reserve_interactive_session(run),
+        )
     } else if surface == "headless" {
         let launch = crate::run_record::RunLaunchRequest::from_prepared(
             prepared_config,
@@ -826,6 +873,39 @@ fn begin_run_capture(
     capture.record_input("initial", &built.context.task.text);
     crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)
+}
+
+fn interactive_run(built: &PromptBuild, spec: &crate::run_record::RunSpec) -> crate::session::Run {
+    crate::session::Run {
+        id: crate::durable::RunId::new(),
+        session_id: Some(format!("session_{}", uuid::Uuid::new_v4().simple())),
+        invocation_id: None,
+        node: None,
+        iterations: None,
+        attempt: None,
+        task_id: built.work.as_ref().and_then(|work| work.task_id.clone()),
+        wave_id: built.work.as_ref().map(|work| work.wave_id.clone()),
+        work_source: built.work.as_ref().map(|work| work.source),
+        created_at: crate::store::rows::now_unix(),
+        published: true,
+        cwd: spec.cwd.clone(),
+        skill: spec.skill.clone(),
+        provider: Some(spec.harness.clone()),
+        model: spec.model.clone(),
+    }
+}
+
+/// An interactive launch is a conversation: its Session and first Run are
+/// stored together before the provider starts.
+fn reserve_interactive_session(run: crate::session::Run) -> crate::store::StoreResult<()> {
+    let path = crate::store::database_path_from_env()
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+    let title = run
+        .skill
+        .clone()
+        .unwrap_or_else(|| crate::engine::naming::word_pair(run.id.as_str()));
+    crate::store::sqlite::SqliteStore::new(&path)?.create_interactive_session(&title, run)?;
+    Ok(())
 }
 
 /// A Task-bound launch starts work, whether the Task was selected explicitly or
@@ -1407,6 +1487,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             skill_name: Some("implement".to_string()),
             log_name: "generic-run-proof".to_string(),
             subjects: vec!["task:LOO-265".to_string()],
+            work: None,
         };
         let capture = begin_run_capture(&built, "headless", &built.agent_config).unwrap();
         let run_id = capture.run_id();
@@ -1524,6 +1605,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 skill_name: Some("research".to_string()),
                 log_name: log_name.to_string(),
                 subjects: vec!["task:LOO-267".to_string()],
+                work: None,
             }
         }
 

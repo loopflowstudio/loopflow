@@ -3,15 +3,16 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::{FlowPosition, RunId};
-use crate::session::{Run, Session, TitleSource, WorkSource};
+use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
 const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_source,
-    s.ready_summary, s.completed_at, s.created_at,
+    s.ready_summary, s.completed_at, s.created_at, s.kind,
     r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
-    r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt
+    r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt,
+    r.provider, r.model
     FROM sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Session, Run)>> {
@@ -22,13 +23,20 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
     let ready_summary = row.get(4)?;
     let completed_at = row.get(5)?;
     let created_at = row.get(6)?;
-    let run = super::runs::read_run(row, 7)?;
+    let kind: String = row.get(7)?;
+    let run = super::runs::read_run(row, 8)?;
     Ok((|| {
         let run_id = RunId::parse(&run_id).map_err(invalid)?;
         Ok((
             Session {
                 id: id.clone(),
                 current_run_id: run_id.clone(),
+                kind: match kind.as_str() {
+                    "interactive" => SessionKind::Interactive,
+                    "flow_review" => SessionKind::FlowReview,
+                    "ask" => SessionKind::Ask,
+                    _ => return Err(invalid("unknown Session kind")),
+                },
                 title,
                 title_source: match source.as_str() {
                     "human" => TitleSource::Human,
@@ -148,10 +156,55 @@ impl SqliteStore {
         .transpose()
     }
 
+    /// Reserve an interactive conversation and its first Run together.
+    pub fn create_interactive_session(&self, title: &str, run: Run) -> StoreResult<(Session, Run)> {
+        let id = run
+            .session_id
+            .clone()
+            .ok_or_else(|| invalid("an interactive Run belongs to its Session"))?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,created_at)
+            VALUES(?1,?2,'interactive',?3,'generated',?4)",
+            params![id, run.id.as_str(), title, run.created_at],
+        )?;
+        super::runs::insert_run_in(&tx, run)?;
+        let created = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(created)
+    }
+
+    pub fn open_interactive_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND s.kind='interactive'
+             ORDER BY s.created_at, s.id"
+        ))?;
+        let rows = query.query_map([], read_session)?;
+        rows.map(|row| row?).collect()
+    }
+
+    /// Completion closes the conversation; its Runs and provider history remain.
+    pub fn complete_interactive_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute(
+            "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
+             AND kind='interactive' AND completed_at IS NULL",
+            params![id, expected_run.as_str(), crate::store::rows::now_unix()],
+        )? != 1
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Session changed before completion".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn open_review_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND EXISTS(
+            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND s.kind='flow_review' AND EXISTS(
                 SELECT 1 FROM flow_invocations f WHERE f.pending_session_id=s.id AND f.state='current')
              ORDER BY s.created_at, s.id"
         ))?;
@@ -159,21 +212,12 @@ impl SqliteStore {
         rows.map(|row| row?).collect()
     }
 
-    pub fn session_run_ids(&self) -> StoreResult<Vec<RunId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT id FROM runs WHERE session_id IS NOT NULL")?;
-        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
-        rows.map(|row| RunId::parse(&row?).map_err(invalid))
-            .collect()
-    }
-
     pub fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT id, session_id, invocation_id, task_id, wave_id, work_source,
-             created_at, published, cwd, skill, node, iterations, attempt
-             FROM runs WHERE session_id=?1 ORDER BY created_at, id",
-        )?;
+        let mut query = conn.prepare(&format!(
+            "SELECT {} FROM runs WHERE session_id=?1 ORDER BY created_at, id",
+            super::runs::RUN_COLUMNS
+        ))?;
         let rows = query.query_map([id], |row| super::runs::read_run(row, 0))?;
         rows.map(|row| row?).collect()
     }
@@ -292,8 +336,8 @@ pub(super) fn save_review_in(conn: &Transaction<'_>, position: &FlowPosition) ->
             |row| row.get(0),
         )?;
         conn.execute(
-            "INSERT INTO sessions(id,current_run_id,title,title_source,ready_summary,created_at)
-            VALUES(?1,?2,?3,'generated',?4,?5)",
+            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,ready_summary,created_at)
+            VALUES(?1,?2,'flow_review',?3,'generated',?4,?5)",
             params![
                 id,
                 run_id.as_str(),
@@ -357,6 +401,8 @@ fn insert_review_run_in(
             published,
             cwd: cwd.into(),
             skill: Some(position.current().step),
+            provider: None,
+            model: None,
         },
     )?;
     Ok(())

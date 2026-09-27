@@ -496,54 +496,96 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-Make first Run assignment a database invariant before extending the common
-writer to the remaining launch paths. This is an internal storage cut within
-the full owner conversion, not completion of the requested shared invocation
-driver or an independently publishable change.
+Jack's 2026-09-26 attempt-cardinality steer makes the position contract explicit:
+`(invocation, node, iteration tuple)` owns 0..n Run attempts and selects one
+current attempt. Session is its conversational instance; headless retries retain
+the same history and reject superseded decision writers. This is a foundation
+cut for the common invocation driver, not completion of that driver.
 
-A forward `record_task_first_run` draft adds `tasks.started_at`. The Run table's
-INSERT and null-to-Task UPDATE triggers form one assignment boundary: set a
-null timestamp to the operation's time, in the same transaction, and never
-change a present timestamp. Both existing review reservation and replacement
-use this boundary through the shared Run constructor. An unpublished reserved
-Run counts immediately. No provider success or liveness is inferred from it.
-The database rejects Task reassignment/clearing, a Wave-only Run moving or
-clearing its Wave, direct timestamp changes, a timestamp without a Run, and
-deletion of the last Run supporting a started Task. Existing nullable
-Invocation/Task and Task/Wave constraints still apply.
+Extend the existing Run constructor to record Task headless attempts as well as
+review attempts. A captured graph assigns deterministic local numeric nodes by
+preorder, sorting XOR alternatives by name; template composition stays captured.
+Record the existing captured loop tuple and a transactional attempt ordinal on
+each new Run. The position index is deliberately nonunique. Invocation keeps
+one current Run reference; both human and headless selection use its version
+fence and validate membership, while existing exact claim/generation, Session,
+publication and process fences remain. Successful settlement also checks the
+selected Run. Failed claims keep their cursor and Run history.
 
-The populated SQL conversion uses conversion time for Tasks with existing Run
-rows, leaving other Tasks null. That is an inferred historical timestamp, not
-an observed launch or bind time; the later offline Home import report must
-retain this provenance. Captures, Session names/feedback, Run IDs, creation
-times and attribution remain unchanged. Old Started events without mapped
-Runs remain evidence, not fabricated Runs.
+The forward draft preserves existing Run/Session rows, names, feedback and
+capture bytes. It restores the current pointer from an existing pending Session;
+it leaves historical locations/attempt ordinals unknown instead of inventing
+them from the latest cursor. The full offline importer still must recover exact
+locations and multiple headless attempts from retained execution evidence.
+No runtime file fallback is introduced. Existing claim-only headless history
+must be imported before activation; the schema draft alone is not that import.
 
-Current Started and retirement readers now recognize the column, including
-reservations. Historical event/worker evidence and `record_task_start` remain
-until all general launch writers and the filesystem importer are converted.
-Removing those now would hide real work that has no SQL Run yet. Thus the
-column's presence invariant is implemented for table-owned Runs, while the
-final column-only product reader remains dependent on that conversion.
+Proof: a headless failed candidate followed by a successful replacement at the
+same tuple, ordered attempt history, stale decision/settlement rejection; the
+existing human replacement proof gains ordered position-attempt assertions.
+A populated migration preserves multiple Session Runs and rejects partial
+location fields without a one-Run-per-position constraint. Controller recovery
+continues to prove that a candidate from a failed/interrupted provider Run is
+not a successful decision. These are isolated storage/provider-fixture proofs.
 
-Focused proof exercises constructor reservation, first bind of an old Run at
-bind time, same-Wave binding, a done Task, subsequent older/newer insertions
-and binds, rejected conflicting assignments, rollback, concurrent competing
-targets and timestamp presence against Run existence. The existing review
-lifecycle proof changes its obsolete reservation-is-false assertion and
-proves retirement cannot abandon a reserved Task. The populated Session
-migration proof checks the new column, historical inference and nullable
-Invocation mismatch, including after canonical materialization.
-
-This cut does not expose a bind command or claim that SQL UPDATE tests prove
-confirmation, Session selection races, configured providers or desktop
-retention. Those belong to the all-caller conversion. Common Task/taskless
-invocation storage and driver, runtime nesting, general Run lifecycle/process
-facts, Ask/interactive Sessions, bind confirmation and all consumers, Chapter
-scope, offline Home import, configured acceptance and deletion research remain
-required. All eight Done When obligations still govern publication.
+The existing tuple still follows captured XOR cursor levels. Runtime loop-child
+Invocations, all-kind Run outcome/process storage, Task/taskless common driver,
+public attempt DTOs and usage/duration aggregation remain required. Taskless
+Flow persistence was inspected but not converted in this cut after the new
+steer; no claim of a taskless CLI recovery or configured acceptance follows.
+All eight complete-design Done When obligations still govern publication.
 
 ## Slice ledger
+
+- 2026-09-26 attempt-history implementation: completed the supplied in-progress
+  edits after preserving their exact bytes in
+  `.lf/tmp/loo298-attempts/supplied-edits.tar.gz`. Task headless binding now inserts
+  a Run through the review Run constructor. Captured local node, loop tuple and
+  transactional ordinal retain multiple attempts at a position. Headless and
+  human selection share the invocation version fence and membership check;
+  verdicts, routes and settlement also require the selected Run. Existing claim,
+  original successful-Run recovery and process fences remain.
+- Source review: added the missing INSERT constraint for a foreign current
+  attempt (UPDATE already checked it), and covered both rejection paths in the
+  populated migration proof. The constructor also rejects a supplied foreign
+  node or tuple without inserting anything. The first compile failed because
+  SQLite cannot decode `usize`; the decoder now reads `i64` and checks conversion.
+  No product assertion failed in the executed attempt proofs.
+- Executed source proof: 19 durable-store tests, the populated attempt-schema
+  proof, and four Task driver/recovery tests pass (**24 distinct tests**).
+  The amended constructor matrix passed again with node/tuple rejection.
+  Driver fixtures exercise captured source deletion, finite repeated turns,
+  nested review feedback, and original successful-Run decision recovery.
+  Provider effects are simulated; store completion alone is not a success receipt.
+- Canonical rehearsal: verified 2,035 file hashes plus copied symlinks in a
+  disposable source copy; materialized six drafts as `0.12.23.001_release`.
+  Five focused tests pass there: populated invocation retention, Session import,
+  attempt migration, headless retry and repeated review replacement. The first
+  materializer invocation omitted its required version argument and did no work;
+  retry succeeded. Migration checking initially found the disposable Python
+  version still at 0.12.22; synchronizing that copy alone to 0.12.23 fixed it.
+  All 52 shipped migrations remain unchanged. Original Git metadata was used
+  only for the checker's read-only history queries, never by test processes.
+- Canonical CLI checks: `runs --json` and `doctor --json` pass on an isolated
+  Home; doctor reports the canonical frontier and unknown source revision.
+  Concurrent first-time doctor/usage exposed `no such table: run_events` in
+  usage. Usage passes both after initialization and on a separate pristine Home.
+  Preserve that failed read as an unresolved initialization-race observation,
+  detailed in `questions.md`; this is not an all-green concurrent CLI claim.
+  Logs, source hashes and the copy location remain in `.lf/tmp/loo298-attempts/`.
+- Scope remains the internal Task attempt foundation. Taskless execution,
+  runtime loop-child invocations, all-kind Run/Session recording, attempt DTOs,
+  usage aggregation and filesystem import remain unfinished. The draft preserves
+  unknown historical positions; it does not import claim-only headless history.
+  All eight Done When obligations still govern publication. No live Home,
+  installed provider, desktop, PR, Task disposition or Flow navigation changed.
+- Static checks: formatting, all-target Clippy (18.7 seconds on the final pass),
+  migration validation and working-diff whitespace pass. Clippy first rejected
+  a complex fixture tuple annotation; moving those types to the row reads
+  resolved it without changing assertions or production behavior. Canonical
+  test receipts precede only that annotation cleanup and these notes.
+  Architecture remains **32/33** SQLite owners with `wave_chapters` missing;
+  its seven other inventories pass. No broad gate or intermediate publication.
 
 - 2026-09-26 first-assignment slice review: reproduced a missed chapter
   eligibility consumer that rejected an unpublished reserved Run after

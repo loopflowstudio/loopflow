@@ -1,6 +1,6 @@
 //! Run creation resolves ancestors inside the caller's write transaction.
 
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::durable::{RunId, TaskId};
 use crate::id::WaveId;
@@ -25,11 +25,19 @@ pub(super) fn read_run(
     let published = row.get(offset + 7)?;
     let cwd: String = row.get(offset + 8)?;
     let skill = row.get(offset + 9)?;
+    let node = row.get(offset + 10)?;
+    let iterations: Option<String> = row.get(offset + 11)?;
+    let attempt = row.get(offset + 12)?;
     Ok((|| {
         Ok(Run {
             id: RunId::parse(&id).map_err(invalid)?,
             session_id,
             invocation_id,
+            node,
+            iterations: iterations
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            attempt,
             task_id: task_id
                 .map(|id| TaskId::parse(&id))
                 .transpose()
@@ -75,6 +83,19 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
             return Err(invalid("Run and Invocation nullable Tasks disagree"));
         }
         run.task_id = task;
+        let (node, iterations) = location_in(conn, invocation)?;
+        if run.node.is_some_and(|supplied| supplied != node)
+            || run
+                .iterations
+                .as_ref()
+                .is_some_and(|supplied| supplied != &iterations)
+        {
+            return Err(invalid(
+                "Run location differs from the captured Invocation cursor",
+            ));
+        }
+        run.node = Some(node);
+        run.iterations = Some(iterations);
     }
     if let Some(task) = &run.task_id {
         let wave: String = conn
@@ -101,12 +122,109 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
         WorkSource::Inherited => "inherited",
         WorkSource::Bound => "bound",
     });
+    let iterations = run
+        .iterations
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    if run.attempt.is_some() {
+        return Err(invalid("new Run attempt ordinal is assigned by the writer"));
+    }
+    if let (Some(invocation), Some(node), Some(iterations)) =
+        (&run.invocation_id, run.node, &iterations)
+    {
+        run.attempt = Some(conn.query_row(
+            "SELECT coalesce(max(attempt),0)+1 FROM runs WHERE invocation_id=?1 AND node=?2 AND iterations=?3",
+            params![invocation, node, iterations], |row| row.get(0),
+        )?);
+    }
     conn.execute(
-        "INSERT INTO runs(id,session_id,invocation_id,task_id,wave_id,work_source,created_at,published,cwd,skill)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO runs(id,session_id,invocation_id,task_id,wave_id,work_source,created_at,published,cwd,skill,node,iterations,attempt)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
         params![run.id.as_str(), run.session_id, run.invocation_id,
             run.task_id.as_ref().map(TaskId::as_str), run.wave_id.as_ref().map(WaveId::as_str),
-            source, run.created_at, run.published, run.cwd.to_string_lossy(), run.skill],
+            source, run.created_at, run.published, run.cwd.to_string_lossy(), run.skill,
+            run.node, iterations, run.attempt],
     )?;
     Ok(run)
+}
+
+fn location_in(conn: &Connection, invocation: &str) -> StoreResult<(u32, Vec<Vec<u32>>)> {
+    let (capture, cursor, index, iteration): (String, Option<String>, i64, u32) = conn.query_row(
+        "SELECT invocation_json,review_json,step_index,iteration FROM flow_invocations WHERE id=?1",
+        [invocation],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?;
+    let capture: crate::engine::invocation::QueuedInvocation = serde_json::from_str(&capture)?;
+    let cursor: crate::engine::ExecutionCursor = match cursor {
+        Some(cursor) => serde_json::from_str(&cursor)?,
+        None => crate::engine::ExecutionCursor {
+            index: usize::try_from(index).map_err(invalid)?,
+            iteration,
+            ..Default::default()
+        },
+    };
+    Ok((
+        capture.node_id(&cursor).map_err(invalid)?,
+        crate::engine::flow_graph::flow_iterations(&capture.steps, &cursor),
+    ))
+}
+
+/// Human and headless reservations select the attempt under the same version fence.
+pub(super) fn select_attempt_in(
+    conn: &Connection,
+    invocation: &str,
+    version: u64,
+    run: &RunId,
+) -> StoreResult<()> {
+    let (node, iterations) = location_in(conn, invocation)?;
+    let iterations = serde_json::to_string(&iterations)?;
+    if conn.execute(
+        "UPDATE flow_invocations SET current_run_id=?3 WHERE id=?1 AND state='current' AND position_version=?2
+         AND EXISTS(SELECT 1 FROM runs r WHERE r.id=?3 AND r.invocation_id=?1 AND ((r.node=?4 AND r.iterations=?5) OR (r.node IS NULL AND r.id=current_run_id)))
+         AND (pending_session_id IS NULL OR EXISTS(SELECT 1 FROM sessions s
+             WHERE s.id=pending_session_id AND s.current_run_id=?3))",
+        params![invocation, i64::try_from(version).map_err(invalid)?, run.as_str(), node, iterations],
+    )? != 1 {
+        return Err(StoreError::InvalidAuthority("Invocation changed before attempt selection".into()));
+    }
+    Ok(())
+}
+
+pub(super) fn require_attempt_in(
+    conn: &Connection,
+    invocation: &str,
+    run: &RunId,
+) -> StoreResult<()> {
+    let current: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE id=?1 AND current_run_id=?2 AND state='current')",
+        params![invocation, run.as_str()], |row| row.get(0),
+    )?;
+    if !current {
+        return Err(StoreError::InvalidAuthority(
+            "Run is not the current Invocation attempt".into(),
+        ));
+    }
+    Ok(())
+}
+
+impl super::SqliteStore {
+    pub fn position_runs(
+        &self,
+        invocation: &str,
+        node: u32,
+        iterations: &[Vec<u32>],
+    ) -> StoreResult<Vec<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id,session_id,invocation_id,task_id,wave_id,work_source,
+            created_at,published,cwd,skill,node,iterations,attempt FROM runs
+            WHERE invocation_id=?1 AND node=?2 AND iterations=?3 ORDER BY attempt",
+        )?;
+        let rows = query.query_map(
+            params![invocation, node, serde_json::to_string(iterations)?],
+            |row| read_run(row, 0),
+        )?;
+        rows.map(|row| row?).collect()
+    }
 }

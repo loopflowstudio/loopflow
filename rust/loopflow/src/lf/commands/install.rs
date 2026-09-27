@@ -1770,15 +1770,13 @@ fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<
     let Some(app) = app_to_resume(receipt)? else {
         return Ok(());
     };
-    let status = Command::new("/usr/bin/open")
-        .args(["-g"])
-        .arg(app)
-        .status()
-        .with_context(|| format!("restart installed app {}", app.display()))?;
-    if !status.success() {
-        return Err(anyhow!("restart installed app {}: {status}", app.display()));
-    }
     let expected = [app.join("Contents/MacOS/Loopflow")];
+    // A previous attempt may have opened the app before the coordinator exited.
+    // Observe it before asking Launch Services to open another window.
+    if !running_app_processes(&expected)?.is_empty() {
+        return Ok(());
+    }
+    open_installed_app(app)?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if !running_app_processes(&expected)?.is_empty() {
@@ -1791,6 +1789,26 @@ fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<
         "installed app {} did not report the expected executable within 10s",
         app.display()
     ))
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn open_installed_app(app: &Path) -> Result<()> {
+    let status = Command::new("/usr/bin/open")
+        .args(["-g"])
+        .arg(app)
+        .status()
+        .with_context(|| format!("restart installed app {}", app.display()))?;
+    if !status.success() {
+        return Err(anyhow!("restart installed app {}: {status}", app.display()));
+    }
+    Ok(())
+}
+
+// Unit tests may observe fixture processes, but must never open a GUI on the
+// developer's account. A missing fixture process exercises failed-open recovery.
+#[cfg(all(target_os = "macos", test))]
+fn open_installed_app(_app: &Path) -> Result<()> {
+    Err(anyhow!("app launch unavailable in isolated process tests"))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -2368,35 +2386,17 @@ fn restore_before_local_advance(
     lock: crate::promotion_lock::PromotionLock,
     error: anyhow::Error,
 ) -> anyhow::Error {
-    let cleanup = discard_unadvanced_disposable_store(receipt);
-    let clear = if cleanup.is_ok() {
-        crate::machine_install::clear_switch(root, &receipt.id)
-    } else {
-        Err(anyhow!("disposable target cleanup failed"))
-    };
+    let restore = (|| {
+        discard_unadvanced_disposable_store(receipt)?;
+        resume_home_with_selection(paused, receipt.prior.as_ref(), None)?;
+        cancel_unadvanced_switch(root, receipt)
+    })();
     drop(lock);
-    let resume = resume_home_with_selection(paused, receipt.prior.as_ref(), None);
-    let app = resume_switch_app(receipt);
-    match (cleanup, clear, resume, app) {
-        (Ok(()), Ok(()), Ok(()), Ok(())) => error,
-        (cleanup, clear, resume, app) => anyhow!(
-            "{error}; restoring the prior install also failed (target: {}, receipt: {}, keeper: {}, app: {})",
-            cleanup
-                .err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string()),
-            clear
-                .err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string()),
-            resume
-                .err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string()),
-            app.err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string())
-        ),
+    match restore {
+        Ok(()) => error,
+        Err(restore) => {
+            anyhow!("{error}; prior installation recovery remains pending: {restore:#}")
+        }
     }
 }
 
@@ -2711,11 +2711,11 @@ fn promote_local_candidate(
     resume_home_for_switch(&paused, &switch)?;
     verify_switch_home(&paused, &switch)?;
     settle_app_artifacts(&prepared)?;
-    resume_switch_app(&switch)?;
     crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-    settle_switch(&root, &mut switch, &active)?;
+    commit_switch_selection(&root, &mut switch, &active)?;
     reload_home_for_install_selection(&paused, &active.selection)?;
     verify_switch_home(&paused, &switch)?;
+    finish_switch(&root, &switch, &active)?;
     println!(
         "promoted local {}: {} -> {} (store {})",
         preview.candidate.display_version(),
@@ -3114,8 +3114,15 @@ fn exact_published_switch_candidate(
 }
 
 fn active_install_from_switch(
+    root: &Path,
     receipt: &crate::machine_install::SwitchReceipt,
-) -> crate::machine_install::ActiveInstall {
+) -> Result<crate::machine_install::ActiveInstall> {
+    let recorded = crate::machine_install::active_install(root)?;
+    if let Some(active) = &recorded {
+        if active.selection == receipt.target {
+            return Ok(active.clone());
+        }
+    }
     let published_fallback = match receipt.target.source {
         crate::machine_install::InstallSource::Published => receipt
             .target_published_fallback
@@ -3126,21 +3133,27 @@ fn active_install_from_switch(
             .clone()
             .expect("validated development switch retains a published fallback"),
     };
-    let mut retained = vec![published_fallback.clone()];
-    if let Some(prior_fallback) = &receipt.published_fallback {
-        if prior_fallback != &published_fallback {
-            retained.push(prior_fallback.clone());
+    let mut retained = recorded
+        .map(|active| active.retained_published_sets)
+        .unwrap_or_default();
+    for fallback in receipt
+        .published_fallback
+        .iter()
+        .chain([&published_fallback])
+    {
+        if !retained.contains(fallback) {
+            retained.push(fallback.clone());
         }
     }
-    crate::machine_install::ActiveInstall {
+    Ok(crate::machine_install::ActiveInstall {
         schema_version: 1,
         selection: receipt.target.clone(),
         published_fallback,
         retained_published_sets: retained,
-    }
+    })
 }
 
-fn settle_switch(
+fn commit_switch_selection(
     root: &Path,
     receipt: &mut crate::machine_install::SwitchReceipt,
     active: &crate::machine_install::ActiveInstall,
@@ -3148,8 +3161,26 @@ fn settle_switch(
     receipt.published_fallback = Some(active.published_fallback.clone());
     receipt.phase = crate::machine_install::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
-    crate::machine_install::write_switch(root, receipt)?;
+    // Ordinary app/helper startup now routes to the target, while the active
+    // receipt still owns unfinished Home restart and app reopen work.
+    crate::machine_install::write_switch(root, receipt)
+}
+
+fn finish_switch(
+    root: &Path,
+    receipt: &crate::machine_install::SwitchReceipt,
+    active: &crate::machine_install::ActiveInstall,
+) -> Result<()> {
+    resume_switch_app(receipt)?;
     crate::machine_install::settle_switch(root, receipt, active)
+}
+
+fn cancel_unadvanced_switch(
+    root: &Path,
+    receipt: &crate::machine_install::SwitchReceipt,
+) -> Result<()> {
+    resume_switch_app(receipt)?;
+    crate::machine_install::clear_switch(root, &receipt.id)
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
@@ -3193,20 +3224,21 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     if receipt.phase == crate::machine_install::SwitchPhase::Settled
         && receipt.active_selection_committed
     {
-        let active = active_install_from_switch(&receipt);
-        crate::machine_install::settle_switch(&root, &receipt, &active)?;
+        let active = active_install_from_switch(&root, &receipt)?;
+        let home = resume_store_home(&active.selection, None)?;
+        verify_switch_home(&home, &receipt)?;
+        finish_switch(&root, &receipt, &active)?;
         drop(lock);
         return Ok(());
     }
 
     if !receipt.target_store_advance_started {
         discard_unadvanced_disposable_store(&receipt)?;
-        crate::machine_install::clear_switch(&root, &receipt.id)?;
-        drop(lock);
         if let Some(prior) = &receipt.prior {
             resume_store_home(prior, None)?;
         }
-        resume_switch_app(&receipt)?;
+        cancel_unadvanced_switch(&root, &receipt)?;
+        drop(lock);
         return Ok(());
     }
 
@@ -3255,13 +3287,14 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         crate::machine_install::write_switch(&root, &receipt)?;
     }
 
-    let active = active_install_from_switch(&receipt);
+    let active = active_install_from_switch(&root, &receipt)?;
     if exact_recovery {
         let keeper_mode = crate::lfd::service::pause()?;
         crate::lfd::service::finish_install_switch(keeper_mode, &receipt.activation.daemon)?;
-        settle_switch(&root, &mut receipt, &active)?;
-        resume_store_home(&active.selection, None)?;
-        resume_switch_app(&receipt)?;
+        commit_switch_selection(&root, &mut receipt, &active)?;
+        let home = resume_store_home(&active.selection, None)?;
+        verify_switch_home(&home, &receipt)?;
+        finish_switch(&root, &receipt, &active)?;
         if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
             remove_path(legacy)?;
         }
@@ -3276,11 +3309,11 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     )?;
     let home = resume_store_home(&active.selection, Some(&receipt))?;
     verify_switch_home(&home, &receipt)?;
-    resume_switch_app(&receipt)?;
     crate::lfd::service::finish_install_switch(keeper_mode, &receipt.activation.daemon)?;
-    settle_switch(&root, &mut receipt, &active)?;
+    commit_switch_selection(&root, &mut receipt, &active)?;
     reload_home_for_install_selection(&home, &active.selection)?;
     verify_switch_home(&home, &receipt)?;
+    finish_switch(&root, &receipt, &active)?;
     if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
         remove_path(legacy)?;
     }
@@ -3465,7 +3498,7 @@ fn promote_published_from_machine_install(
     settle_app_artifacts(&prepared)?;
     if store_is_exact(&preview.verdict) {
         crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-        settle_switch(&root, &mut switch, &active)?;
+        commit_switch_selection(&root, &mut switch, &active)?;
         resume_home_for_install_selection(&paused, &active.selection)?;
     } else {
         crate::lfd::service::prepare_install_switch(
@@ -3476,11 +3509,11 @@ fn promote_published_from_machine_install(
         resume_home_for_switch(&paused, &switch)?;
         verify_switch_home(&paused, &switch)?;
         crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-        settle_switch(&root, &mut switch, &active)?;
+        commit_switch_selection(&root, &mut switch, &active)?;
         reload_home_for_install_selection(&paused, &active.selection)?;
         verify_switch_home(&paused, &switch)?;
     }
-    resume_switch_app(&switch)?;
+    finish_switch(&root, &switch, &active)?;
     println!(
         "promoted published {}: {} -> {} (store {})",
         preview.candidate.display_version(),
@@ -3899,6 +3932,16 @@ mod app_activation_tests {
                     &retained.join("Contents/MacOS/Loopflow"),
                 )
                 .unwrap(),
+                ArtifactIdentity::capture(
+                    ArtifactRole::AppHelper("lf".to_string()),
+                    &retained.join("Contents/MacOS/lf"),
+                )
+                .unwrap(),
+                ArtifactIdentity::capture(
+                    ArtifactRole::AppHelper("lfd".to_string()),
+                    &retained.join("Contents/MacOS/lfd"),
+                )
+                .unwrap(),
             ],
         };
         SwitchReceipt {
@@ -3929,6 +3972,55 @@ mod app_activation_tests {
             app_was_running: false,
             disposable_store_owned: false,
         }
+    }
+
+    fn activated_install(directory: &Path) -> SwitchReceipt {
+        let mut receipt = first_install(directory);
+        receipt.phase = SwitchPhase::Activated;
+        receipt.recovery_owner = RecoveryOwner::Candidate;
+        receipt.target_store_advance_started = true;
+        receipt.target_store_advanced = true;
+        receipt
+    }
+
+    fn pending_switch(root: &Path) -> SwitchReceipt {
+        match crate::machine_install::read_state(root).unwrap() {
+            crate::machine_install::MachineInstallState::Switching(receipt) => *receipt,
+            state => panic!("expected pending recovery, got {state:?}"),
+        }
+    }
+
+    fn assert_target_startup(root: &Path, receipt: &SwitchReceipt) {
+        let app = receipt.activation.app.as_ref().unwrap();
+        for (path, role) in [
+            (receipt.candidate.path.clone(), ArtifactRole::Cli),
+            (app.join("Contents/MacOS/lf"), ArtifactRole::Cli),
+            (app.join("Contents/MacOS/lfd"), ArtifactRole::Daemon),
+        ] {
+            assert_eq!(
+                crate::machine_install::authorize(root, &path, &role).unwrap(),
+                Some(receipt.target.clone()),
+            );
+        }
+    }
+
+    #[test]
+    fn helper_only_installation_completes_without_opening_an_app() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("machine");
+        let mut receipt = activated_install(directory.path());
+        crate::machine_install::write_switch(&root, &receipt).unwrap();
+        let active = super::active_install_from_switch(&root, &receipt).unwrap();
+        super::commit_switch_selection(&root, &mut receipt, &active).unwrap();
+        assert_target_startup(&root, &pending_switch(&root));
+
+        super::finish_switch(&root, &receipt, &active).unwrap();
+
+        assert!(matches!(
+            crate::machine_install::read_state(&root).unwrap(),
+            crate::machine_install::MachineInstallState::Settled(found) if *found == active
+        ));
+        assert!(!receipt.app_was_running);
     }
 
     #[test]
@@ -3990,8 +4082,9 @@ mod app_activation_tests {
         use std::thread;
         use std::time::{Duration, Instant};
 
-        use super::first_install;
+        use super::{activated_install, assert_target_startup, first_install, pending_switch};
         use crate::lf::commands::install::{quiesce_switch_app, running_app_processes};
+        use crate::machine_install::{self, ArtifactRole, InstallSource, MachineInstallState};
 
         struct FixtureProcess(Child);
 
@@ -4000,6 +4093,157 @@ mod app_activation_tests {
                 let _ = self.0.kill();
                 let _ = self.0.wait();
             }
+        }
+
+        fn start_app(receipt: &machine_install::SwitchReceipt) -> FixtureProcess {
+            let path = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/Loopflow");
+            let process = FixtureProcess(Command::new(&path).arg("30").spawn().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while running_app_processes(std::slice::from_ref(&path))
+                .unwrap()
+                .is_empty()
+            {
+                assert!(Instant::now() < deadline, "fixture app did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+            process
+        }
+
+        #[test]
+        fn failed_reopen_preserves_target_startup_and_retry_completes_without_restart() {
+            for (update, source) in [
+                (false, InstallSource::Published),
+                (true, InstallSource::Published),
+                (true, InstallSource::Development),
+            ] {
+                let directory = tempfile::tempdir().unwrap();
+                let root = directory.path().join("machine");
+                let mut receipt = activated_install(directory.path());
+                let prior_directory = tempfile::tempdir().unwrap();
+                let older_directory = tempfile::tempdir().unwrap();
+                if update {
+                    let prior = first_install(prior_directory.path());
+                    let older = first_install(older_directory.path());
+                    let mut active =
+                        super::super::active_install_from_switch(&root, &prior).unwrap();
+                    active
+                        .retained_published_sets
+                        .push(older.target.artifact_set);
+                    machine_install::write_active(&root, &active).unwrap();
+                    receipt.coordinator = prior.candidate;
+                    receipt.published_fallback = Some(prior.target.artifact_set.clone());
+                    receipt.prior = Some(prior.target);
+                }
+                receipt.target.source = source;
+                receipt.target.artifact_set.source = source;
+                if source == InstallSource::Development {
+                    receipt.target_published_fallback = None;
+                }
+                receipt.app_was_running = true;
+                machine_install::write_switch(&root, &receipt).unwrap();
+                // Interruption before selection commit preserves ordinary startup's
+                // prior-store routing (and refuses an unfinished first install).
+                let mut receipt = pending_switch(&root);
+                if let Some(prior) = &receipt.prior {
+                    assert_eq!(
+                        machine_install::authorize(
+                            &root,
+                            &receipt.coordinator.path,
+                            &ArtifactRole::Cli
+                        )
+                        .unwrap(),
+                        Some(prior.clone()),
+                    );
+                } else {
+                    assert!(machine_install::authorize(
+                        &root,
+                        &receipt.candidate.path,
+                        &ArtifactRole::Cli
+                    )
+                    .is_err());
+                }
+                let active = super::super::active_install_from_switch(&root, &receipt).unwrap();
+                super::super::commit_switch_selection(&root, &mut receipt, &active).unwrap();
+                // Read durable state as a replacement coordinator would.
+                let receipt = pending_switch(&root);
+                let recovered = super::super::active_install_from_switch(&root, &receipt).unwrap();
+                assert_eq!(recovered, active);
+                assert_target_startup(&root, &receipt);
+                let error = super::super::finish_switch(&root, &receipt, &active).unwrap_err();
+                assert!(error.to_string().contains("app launch unavailable"));
+                assert_eq!(pending_switch(&root), receipt);
+                assert!(!root
+                    .join("receipts")
+                    .join(format!("{}.json", receipt.id))
+                    .exists());
+
+                // Simulate interruption after the app starts but before archival.
+                let mut app = start_app(&receipt);
+                super::super::resume_switch_app(&receipt).unwrap();
+                let receipt = pending_switch(&root);
+                super::super::finish_switch(&root, &receipt, &active).unwrap();
+                assert!(app.0.try_wait().unwrap().is_none());
+                assert!(matches!(
+                    machine_install::read_state(&root).unwrap(),
+                    MachineInstallState::Settled(found) if *found == active
+                ));
+                assert_target_startup(&root, &receipt);
+                // Model an exit after active.json and the archive are durable,
+                // but before removal of the active switch. Recovery must keep
+                // the exact retained selections and accept the immutable archive.
+                machine_install::write_switch(&root, &receipt).unwrap();
+                let recovered = super::super::active_install_from_switch(&root, &receipt).unwrap();
+                assert_eq!(recovered, active);
+                super::super::finish_switch(&root, &receipt, &recovered).unwrap();
+                assert!(app.0.try_wait().unwrap().is_none());
+                assert!(matches!(
+                    machine_install::read_state(&root).unwrap(),
+                    MachineInstallState::Settled(_)
+                ));
+                // No active receipt remains for later startup to replay.
+                assert!(root
+                    .join("receipts")
+                    .join(format!("{}.json", receipt.id))
+                    .is_file());
+            }
+        }
+
+        #[test]
+        fn failed_rollback_reopen_keeps_prior_selection_until_app_returns() {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().join("machine");
+            let mut receipt = first_install(directory.path());
+            let prior_directory = tempfile::tempdir().unwrap();
+            let prior = first_install(prior_directory.path());
+            let active = super::super::active_install_from_switch(&root, &prior).unwrap();
+            machine_install::write_active(&root, &active).unwrap();
+            receipt.coordinator = prior.candidate;
+            receipt.activation.app = prior.activation.app;
+            receipt.published_fallback = Some(prior.target.artifact_set.clone());
+            receipt.prior = Some(prior.target.clone());
+            receipt.app_was_running = true;
+            machine_install::write_switch(&root, &receipt).unwrap();
+
+            assert!(super::super::cancel_unadvanced_switch(&root, &receipt).is_err());
+            let receipt = pending_switch(&root);
+            assert_eq!(
+                machine_install::authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli)
+                    .unwrap(),
+                Some(prior.target),
+            );
+            let mut app = start_app(&receipt);
+            super::super::cancel_unadvanced_switch(&root, &receipt).unwrap();
+            assert!(app.0.try_wait().unwrap().is_none());
+            assert!(matches!(
+                machine_install::read_state(&root).unwrap(),
+                MachineInstallState::Settled(found) if *found == active
+            ));
+            assert!(!root.join("receipts").exists());
         }
 
         #[test]

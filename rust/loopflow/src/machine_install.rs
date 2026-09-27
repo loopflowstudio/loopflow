@@ -307,6 +307,8 @@ pub enum SwitchPhase {
     TargetPrepared,
     Advancing,
     Activated,
+    // Target selection is committed. While this receipt remains active, the
+    // coordinator still owes Home restart/app reopen; archival completes it.
     Settled,
 }
 
@@ -871,13 +873,22 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
         receipt.validate()?;
         return Ok(MachineInstallState::Switching(Box::new(receipt)));
     }
-    let active_path = root.join(ACTIVE_FILE);
-    if path_exists(&active_path)? {
-        let active: ActiveInstall = read_json(&active_path)?;
-        active.validate()?;
-        return Ok(MachineInstallState::Settled(Box::new(active)));
+    Ok(match active_install(root)? {
+        Some(active) => MachineInstallState::Settled(Box::new(active)),
+        None => MachineInstallState::Legacy,
+    })
+}
+
+/// Last written selection, including retained artifacts, even during recovery.
+/// Ordinary startup must use `read_state` so the active switch takes precedence.
+pub fn active_install(root: &Path) -> Result<Option<ActiveInstall>> {
+    let path = root.join(ACTIVE_FILE);
+    if !path_exists(&path)? {
+        return Ok(None);
     }
-    Ok(MachineInstallState::Legacy)
+    let active: ActiveInstall = read_json(&path)?;
+    active.validate()?;
+    Ok(Some(active))
 }
 
 /// The install selection ordinary startup should use while a switch receipt is

@@ -1,12 +1,21 @@
 # LOO-312 assumptions and outstanding evidence
 
-- The selected step is concept-review. Review of `f8260ba70` retains the accepted
-  setup interaction and existing owners; see `concept-review.md`. The prior
-  `installer-slice-review.md` evidence still applies: settlement can remove the
-  reopen obligation before the window reopens, and retained-helper survival
-  lacks boundary proof. No new product decision is needed for that repair.
-  Copied-app activation is not accepted; no publication or Flow navigation
-  decision was made. The earlier `compress-review.md` is historical evidence.
+- The selected step is implement. This pass repairs the completion ordering
+  identified in `installer-slice-review.md` and `concept-review.md`: commit
+  selection before reopening, retain the active receipt until Home recovery
+  and reopening succeed, and observe an already reopened app on retry. The
+  existing receipt and startup-routing rules remain authoritative. No new
+  product decision was needed. See the design's current slice and ledger for
+  proof and limits; the earlier reviews remain historical findings.
+- Recovery must preserve retained release history even if interruption falls
+  after active.json/archival and before pending-receipt removal. The same
+  recorded ActiveInstall is now reused at that boundary.
+- First-install cancellation has no prior installation to authorize. Ordinary
+  helper startup stays unavailable until cancellation completes; install
+  commands bypass that authorization. A live copied-app activation/retry proof
+  must cover this boundary, in addition to the isolated unadvanced-update
+  rollback fixture. Do not authorize an unadvanced candidate's normal startup
+  to make that proof pass.
 - The no-rendering constraint prevents the live baseline required before UI
   edits. Continue with installer-owned work and isolated process fixtures;
   do not substitute those fixtures for the baseline or clean-account trial.

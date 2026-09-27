@@ -419,24 +419,42 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## This slice
 
-Copied-app activation remains the current slice. The first implementation pass
-repairs its existing installer process lifecycle: first-install target discovery,
-shutdown limited to the selected paths, retained execution for bundled published
-helpers, and verified reopening before or after store advancement. Helpers alone
-do not request a window; a repeated quiesce preserves the original restart intent.
+Copied-app activation remains the current slice. This implementation pass
+repairs the completion boundary identified by the installer and concept reviews.
+Local and published promotion commit selection in the existing active receipt
+before reopening; Home recovery and app reopen must succeed before that receipt
+is archived and removed. Recovery of a committed receipt does not quiesce or
+replace the app again. Reopening first observes the verified app executable, so
+retry after an already successful open does not request another window. Failed
+unadvanced rollback retains the receipt until the prior Home and app return.
 
-Still required: the repo-independent signed-bundle activation entry and Swift
-first-launch integration, durable PATH setup, destination retention on updates,
-and settled-registration/reopen proofs. The machine entry gate does not redirect
-an unregistered bundled helper, so this entry can reach the existing installer
-without inventing another authority. Rust currently validates helper identities
-and tree digests; signature checking lives in the shell installer and must move
-into the shared owner for bundle activation.
+No receipt field, schema, startup-routing rule, or installation authority was
+added. The existing `Settled` phase records committed selection; the active
+receipt's presence still means completion work remains. Recovery preserves the
+recorded retained releases, including when active selection and archival are
+already durable but removal of the pending receipt was interrupted. This closes
+the source-ordering gap in the earlier reviews; it does not establish live
+acceptance of the installer entry, keeper, Launch Services, or copied app.
 
-Record the live baseline before UI edits. This headless run supplies neither that
-baseline nor the clean-account trial. No UI or newcomer walkthrough is changed.
-The full design above remains the target; the process fixtures establish only
-the repaired installer behavior, not a working download-to-setup journey.
+Focused fixtures exercise first installation, published and development updates,
+startup authorization before and after selection commit, failed open, retry with
+an already running fixture app, interruption after archival, helper-only
+completion, and unadvanced update rollback. Native `/bin/sleep` copies stand in
+for app processes; the GUI-open boundary explicitly fails under unit tests.
+Tests use temporary machine roots, not HOME overrides or this account's install
+state. They do not execute real promotion/recovery commands or prove the retained
+helper survives its GUI parent's exit. First-install rollback still refuses
+ordinary helper startup until cancellation completes; the copied-app activation
+entry must exercise its install-command recovery bypass in the eventual live
+proof rather than treating an unadvanced candidate as an active installation.
+
+Still required: signed repo-independent bundle activation, Swift first-launch
+integration, shared durable PATH setup with isolated HOME/ZDOTDIR fixtures,
+recorded destination retention, and real helper/registration/reopen proofs. The
+running-app baseline remains required before UI edits. This headless run has no
+rendering environment or fresh account; no UI or newcomer walkthrough is changed.
+The complete design, provider/GitHub setup, clean-account acceptance, and public
+channel verification above remain the target.
 
 ## Slice ledger
 
@@ -452,6 +470,9 @@ the repaired installer behavior, not a working download-to-setup journey.
 | Bundle staging, 2026-09-26 | `cargo test -p loopflow --lib artifact_tests`: 4 passed, including same-source/destination staging without changing the original bundle. | File fixtures only; not signed-release acceptance or interruption of a real promotion. |
 | Implementation review, 2026-09-26 | Removed the app-ID-wide quit operation. A bundled published promotion helper re-execs retained bytes before shutdown so it is not one of the processes being stopped. No new receipt or installation authority. | Full helper re-exec, GUI-exit survival, registration, actual reopen, and repeated first launch still need configured-path proof. |
 | Static checks, 2026-09-26 | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. | No affected-suite gate, Swift/UI tests, or public-channel trial in this implementation pass. |
+| Completion boundary, 2026-09-26 | `cargo test -p loopflow --lib app_activation_tests`: 7 passed, 1.25 seconds after compilation. First install, published/development updates, failed open, prior/target CLI and bundled-helper store authorization, existing-process retry, interruption after archival, helper-only completion, and unadvanced-update rollback pass. | Temporary machine roots and native sleep processes; open is a test-only failing side effect. No real installer-entry recovery, keeper restart, GUI window, or clean-account trial. |
+| Completion implementation review, 2026-09-26 | Kept the existing receipt schema and routing. Moved local reopen after selection commit; delayed archive/removal through Home recovery and reopen; preserved pending rollback. Found and fixed retained-release loss during reconstruction and reused the exact recorded active selection after partial archival. | P1's source-ordering defect is repaired. P2's retained-helper exec/GUI-parent-exit proof remains missing, along with configured-path verification of completion. |
+| Completion verification, 2026-09-26 | `cargo test -p loopflow --lib machine_install::tests`: 23 passed, 0.29 seconds after compilation. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. | Focused implementation proof and static checks only; no affected-suite gate, UI changes/tests, machine promotion, account sign-in, or publication. |
 
 ## Measure
 

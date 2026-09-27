@@ -50,7 +50,10 @@ Mac promotion stops only processes belonging to the selected app paths. It
 also handles a running app at the destination before the first installation
 receipt exists. It reopens the app only when the app itself was running;
 background helpers alone do not open a window. Recovery verifies the retained
-bundle before reopening it.
+bundle before reopening it. The switch receipt stays active until Home recovery
+and reopening succeed. Once selection is committed, the app and its helpers use
+the selected installation and store even while reopening is pending. Retrying
+observes an already running app before requesting another open.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.

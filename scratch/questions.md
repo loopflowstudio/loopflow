@@ -112,3 +112,28 @@ Latest preflight still reports active `main-view-task` 15.3/12 GiB, 98.7 GiB
 free. Product tests remain unexecuted; do not reinterpret all-target Clippy as
 behavioral evidence. No new decision from the participant is needed to continue
 within the amended model.
+
+## Rebase onto main 4cd64be3d (2026-09-26)
+
+The owned rebase completed locally. Documentation retains the approved model
+and main's active-Run watch protocol, Ask tables, and required Session Run ID.
+Later commits also conflicted in Task review launch/controller code. Task
+reviews reserve their Run in SQLite and publish that exact ID with captured
+Flow membership; Ask and standalone Flow preparation retain main's file path.
+The existing rename command keeps generated suggestions and routes Task review
+names to the Session row. Duplicate rename declarations were removed.
+
+Verification is blocked before behavioral execution. Both resource preflight
+and safe recovery reported the active `jack-heart/main-view-task` build at
+15.3 GiB against a 12 GiB budget; this checkout uses 331.5 MiB and free disk is
+97.3 GiB. Recovery did not remove active build output. No compiled or passing
+behavioral result is claimed for the reconciled Rust. The waiting parent must
+verify before pushing. The focused reconciliation command is:
+
+```sh
+cargo test -p loopflow --lib controller::task::planning_tests::claimed_autonomous_boundary_settles_once_at_the_human_node
+```
+
+The resolved files have no conflict markers. Whole-branch whitespace still
+reports the previously recorded draft dependency header and copied historical
+patch; neither was changed during resolution. No push was performed.

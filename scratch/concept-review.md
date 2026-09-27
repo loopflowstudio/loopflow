@@ -1,12 +1,13 @@
 # LOO-298 concept review
 
-2026-09-26 · Reviewed `d55ad174d7214b2cf586880713a598b30bf1041f`
+2026-09-26 · Reviewed `54abb81ff5deb165bc4e39473766efa53220d65b`
 
 **Judgment: keep the amended concepts; the branch is not ready to publish.**
 Session identity surviving execution replacement makes the product easier to
 use. Flow / Invocation naming and taskless execution need no further redesign.
-The implemented column reduction does not yet deliver that experience. Binding
-has two product consequences that need explicit visibility before acceptance.
+The implemented column reduction and Task invocation retention do not yet
+deliver that experience. Binding has two product consequences that need explicit
+visibility before acceptance. No further concept change is selected.
 
 This autonomous review follows the supplied concept-review skill. Governing
 intent is the [amended design](data-model-one-table-per.md),
@@ -91,17 +92,17 @@ their different lifetimes; collapsing them would lose required recovery facts.
 
 Observed source: `ops/human_session.rs:289` resolves interactive identity via a
 Run manifest, then dispatches to Ask and Task review owners. Task review lookup
-at `:1162` enumerates positions. Ordinary Flow boundaries have another path,
-backed by `ops/flow_run.rs:107` and `:122` reading/writing `position.json`.
+at `:1166` enumerates current invocations. Ordinary Flow boundaries have another
+path, backed by `ops/flow_run.rs:108` and `:122` reading/writing `position.json`.
 `swift/Loopflow/Models/SessionRecord.swift:19` exposes the current projection;
 it has no current-Run/history contract.
 
 Normal path today: CLI Open → target dispatch → kind-specific surface → native
 resume. Failure path: `open_boundary` (`human_session.rs:748`) attempts native
-resume, then clears the Ask's old Run binding and feedback at `:779`, or the
-Task position's binding and feedback at `:798`, before relaunch. The relaunch
-writers at `:547` and `:593` also reset feedback. This is source evidence of
-the existing model, not a regression introduced by the four-column removal.
+resume, then clears the Ask's old Run binding and feedback at `:780`, or the
+Task position's binding and feedback at `:799`, before relaunch. The relaunch
+writers at `:548` and `:594` also reset feedback. This is source evidence of
+the existing model, not a regression introduced by either storage cut.
 
 Accepted replacement: Open addresses one Session row, follows its current Run,
 and switches that pointer together with the exact pending review binding when
@@ -165,7 +166,7 @@ or implementing the already-approved owners.
 
 Carried from [review-slice](data-model-slice-review.md), confirmed by source:
 `store/sqlite/durable.rs:392` decodes every Task position before selecting human
-steps; `decode_flow_position:1244` parses capture, cursor, failure and claim.
+steps; `decode_flow_position:1247` parses capture, cursor, failure and claim.
 Errors propagate through Session listing (`human_session.rs:269`) and exact Task
 review lookup (`:1166`). A malformed autonomous capture can prevent reaching a
 valid unrelated review. This remains unexecuted source-traced behavior.
@@ -179,28 +180,71 @@ the accepted ownership model.
 
 The four removed columns have no remaining current SQL consumer in the inspected
 diff. Retain root index/iteration until historical conversion: the decoder at
-`durable.rs:1270` still reconstructs old flat progress. The smaller SQL shape is
+`durable.rs:1273` still reconstructs old flat progress. The smaller SQL shape is
 useful, but it cannot count as the Session availability or ownership result.
+
+### 5. Invocation history is preserved; conversation history still needs its owner
+
+New source evidence since the previous concept review: the
+`retain_flow_invocations` draft replaces `task_flow_positions` with an
+invocation-keyed table. Its partial unique index selects one current invocation
+per Task. Task completion closes that row (`store/sqlite/children.rs:275`,
+`durable.rs:1177`); restart marks it replaced (`children.rs:355`). Capture,
+cursor, pending Run, feedback and final claim remain stored. The JSON identity
+constraint and the unclaimed update's invocation-ID predicate
+(`durable.rs:1030`) preserve the distinction between execution identity and
+reused numeric versions. The populated preservation fixture at
+`store/migrations.rs:4778` also checks rejection of duplicate invocation IDs
+and dangling Task parents; it has not been executed.
+
+This supports a simpler future interaction: finish or restart work and still
+inspect the previous execution. It introduces no extra recovery action for Jack.
+Closed claims are history, not permission to control a process; chapter evidence
+includes past execution while active-claim reads select only the current row
+(`store/sqlite/chapters.rs:98–101`). Keep those distinctions through the cutover.
+
+Retention alone does not make completed conversations accessible. Session
+discovery still selects only current Task invocations, and Run replacement still
+overwrites their pending binding. There is no Session row or Run-history query
+behind that retained feedback. Do not describe invocation history as completed
+Session history, or build another Session projection over closed invocation rows.
+Complete the approved Session/Run owner and use the retained execution as its
+preservation input. The nullable SQL Task column likewise does not establish
+shared taskless execution: `FlowRun` still has its separate file owner.
+
+No new lifecycle or API wrapper earns its place here. Keep the public distinction
+between resuming a conversation and restarting an invocation; deleting that
+distinction would confuse native recovery, new execution and historical evidence.
+The existing static receipts are unaffected by this review. Retained-feedback,
+Session availability and history claims need their own behavior proofs; neither
+compiled migration fixtures nor existing reopen tests establish them.
 
 ## Evidence, next action and handoff
 
-The working tree was clean at entry. Relative to review-slice's inspected HEAD,
-only two scratch notes changed; executable and canonical documentation bytes
-are unchanged. This review inspected the branch diff and the normal/recovery
-paths above. It ran no product tests, Home inventory, migration or live demo.
+The entry tree contained the preceding step's uncommitted
+`scratch/data-model-slice-review.md` update. It was read and preserved unchanged;
+this review edits only `scratch/concept-review.md`. HEAD matches that review's
+inspected HEAD. Inspected the invocation-retention diff, migration, settlement,
+chapter evidence, CLI/Swift Session shape and normal/recovery paths above.
+No product tests, Home inventory, migration or live demo ran in this review.
 
-Reuse review-slice's evidence limits: the last resource preflight and safe
-recovery failed on the active `main-view-task` build at 14.5 GiB / 12 GiB.
-This review did not resample that condition. Behavioral tests are still owed;
-compilation is not their execution. Its architecture inventory gaps
-(`task_flow_positions`, `wave_chapters`) and branch-range whitespace failure
-remain unresolved. A clean check of this new note does not clear them.
+Reuse the current review-slice's evidence limits: its resource preflight and safe
+recovery failed on the active `main-view-task` build at **15.3 GiB / 12 GiB**,
+with **98.8 GiB** free. This review did not resample that condition. Behavioral
+tests are still owed; compilation is not their execution. That review records
+formatting, migration validation and HTML consistency passing. Architecture
+coverage is now **30/31**, with only `wave_chapters` missing; the retired Task
+table gap is resolved. The branch-range whitespace failure remains (earlier
+draft header and copied patch context). A clean check of this note clears
+neither that failure nor the remaining architecture gap.
 
 Smallest next proof, after TESTING.md resource preflight permits execution:
 
 ```sh
 cargo test -p loopflow --lib dropping_task_step_projection_preserves_execution_and_review_evidence
+cargo test -p loopflow --lib retaining_invocations_preserves_populated_execution_and_review_bytes
 cargo test -p loopflow --lib store::sqlite::durable::durable_store_tests
+cargo test -p loopflow --lib stale_human_decisions_cannot_target_a_replacement_invocation
 ```
 
 Use TESTING.md's isolated environment; also prove populated preservation after
@@ -209,7 +253,10 @@ Invocation/Run/Session owner cutover with all readers and writers. Its first
 Session proof should combine retained feedback across repeated replacement with
 an unrelated malformed invocation, and verify that stale results cannot settle
 the current boundary. Add the two-Run bind example and taskless null-to-Task
-rejection to make the assumptions observable.
+rejection to make the assumptions observable. Prove taskless review recovery
+after template removal through the same invocation owner and settlement fences.
+Resource-blocked execution does not block ordinary implementation of the
+approved owners; no new Ask is needed to proceed within that scope.
 
 Repository-wide Chapter conversion remains required: current
 `store/sqlite/chapters.rs:39` activates per Wave. DTO/desktop integration,

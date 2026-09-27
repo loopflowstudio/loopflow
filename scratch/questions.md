@@ -665,3 +665,34 @@ deletion to this diff." Cut I deletes the listener, resident and lfd stack in
 this branch. The lfd research that prompted it found the CLI-vs-client executor
 split already gone (#872, #1099) and today's lfd a 2026-07 re-creation whose only
 job needing a resident process is hosting Wave listeners.
+
+## Rebase onto main 90a232aaf (2026-09-27)
+
+Main's #1301 landed while Cut H was in flight. Its behaviors were rebuilt on
+the row model; these choices were Claude's, not Jack's.
+
+**One unblock key.** A Task decision's unblock Session is keyed
+`flow:<invocation>:<node>:<iterations>` (H2's `flow_blocker_key`), not main's
+`task:<task>:<invocation>:<boundary>`. The deciding Run's `lf flow blocked` and
+the driver's recovery after a verdict-less exit therefore share one Session.
+A Home that already holds a `task:`-keyed Ask from main's binary would open a
+second Session for the same boundary once; the old one lists until completed.
+
+**The review agent lives on the reserved Run.** `select_review_agent` writes
+the Task's choice as `runs.provider/model` on the review Run while
+`published=0`, and `serve_flow_locked` launches `lf --tui --model <agent>` from
+the same resolution. A published Run is never re-targeted. Main's
+`retarget_prepared_task_review` replaced the prepared Run and carried the
+Session name; here the same row changes.
+
+**An Ask's caller is its row.** `launch_ask` passes `LF_RUN_ID` from the Ask
+Run's `caller_run_id` (the failed decision Run for a Task unblock) and
+`LF_RUN_DIR` only when that Run's directory resolves. Main kept the caller's
+environment for `lf ask` and an optional directory for `task_unblock`.
+
+**A saved Flow's failed decision blocks with its Run but opens no Ask.**
+`settle_attempt_in` now fills `failure.run_id`; only the Task path opens the
+unblock Session, as on main.
+
+**Verdict message.** The shared verdict writer says main's "review evidence
+cannot be empty"; H2's "decision requires evidence or direction" went.

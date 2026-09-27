@@ -68,6 +68,21 @@ impl Store {
         .await
     }
 
+    pub async fn retarget_unpublished_run(
+        &self,
+        run: &RunId,
+        provider: &str,
+        model: Option<&str>,
+    ) -> StoreResult<()> {
+        let run = run.clone();
+        let provider = provider.to_string();
+        let model = model.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.retarget_unpublished_run(&run, &provider, model.as_deref())
+        })
+        .await
+    }
+
     pub async fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(Session, Run)> {
         let id = id.to_string();
         let task = task.clone();

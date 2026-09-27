@@ -292,10 +292,11 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowInvocation) -> StoreResult<
     }
     let mut cursor = flow.cursor.clone();
     clear_candidate(&mut cursor);
-    let failure = TaskFlowBlocker::now(format!(
+    let mut failure = TaskFlowBlocker::now(format!(
         "{} Run {outcome}",
         flow.step_name().unwrap_or_default()
     ));
+    failure.run_id = Some(attempt.run_id.clone());
     write_cursor_in(tx, &id, flow.version, &cursor, Some(&failure), false)?;
     current_flow_in(tx, &id)
 }
@@ -329,7 +330,7 @@ pub(super) fn record_verdict_in(
     verdict: &FlowVerdict,
 ) -> StoreResult<()> {
     if verdict.summary.trim().is_empty() {
-        return Err(invalid("decision requires evidence or direction"));
+        return Err(invalid("review evidence cannot be empty"));
     }
     super::runs::require_attempt_in(tx, id, run)?;
     let (invocation, mut cursor) = capture_in(tx, id)?;
@@ -566,14 +567,7 @@ impl SqliteStore {
                 "this step cannot report a loop blocker".into(),
             ));
         }
-        Ok(format!(
-            "flow:{id}:{}:{}",
-            flow.invocation.node_id(&flow.cursor).map_err(invalid)?,
-            serde_json::to_string(&crate::engine::flow_graph::flow_iterations(
-                &flow.invocation.steps,
-                &flow.cursor
-            ))?
-        ))
+        flow.invocation.blocker_key(&flow.cursor).map_err(invalid)
     }
 
     /// The saved Flow waiting on this review Session.

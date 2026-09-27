@@ -159,6 +159,11 @@ impl FlowPosition {
         WorkRef::Task(self.task_id.clone())
     }
 
+    /// The unblock Ask key of this position's decision (`flow:<invocation>:…`).
+    pub fn blocker_key(&self) -> anyhow::Result<String> {
+        self.invocation.blocker_key(&self.cursor)
+    }
+
     pub fn current_plan(&self) -> &crate::engine::ConcreteStep {
         let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
         steps
@@ -268,6 +273,7 @@ pub struct TaskFlowBlocker {
 impl TaskFlowBlocker {
     pub fn now(reason: impl Into<String>) -> Self {
         Self {
+            run_id: None,
             reason: reason.into(),
             restart_required: false,
             observed_at: OffsetDateTime::now_utc(),

@@ -1045,6 +1045,49 @@ obligations, the Chapter inventory gap, historical whitespace findings and the
 unreproduced publication/stacking reports remain. No intermediate publication is
 selected.
 
+### Run-construction compression review (2026-09-26)
+
+Reviewed `90cc69572` from a clean tree, tracing the latest constructor change
+and the branch's owner model against `4cd64be3d`. No further executable reduction
+selected. The amended approval governs: taskless Invocations and stable Session
+identity with member Runs and a current Run. Model before and after this pass:
+
+| Fact | Owner and consumers | Retention decision |
+| --- | --- | --- |
+| Run ancestry and provenance | `runs`; transactional `insert_run_in`, shared `read_run` | Initial review and replacement now use one constructor; Session joins and history use one decoder. Keep nullable provenance for imported history. |
+| Ancestor consistency | Constructor plus SQL constraints and parent-update triggers | Constructor fills omitted ancestors; constraints also protect direct imports and later parent writes. These enforce different entry points, not competing owners. |
+| Conversation and history | `sessions`; `runs.session_id` and current pointer | Keep title/feedback on Session. Replacement inherits Run ancestry, refreshes launch cwd from Task and retains previous attempts. |
+| Execution and selected attempt | `flow_invocations`, checked `FlowPosition`, expected Run | Keep identity/version/claim comparisons and launch exclusion. An ancestry-valid Run does not grant settlement or process authority. |
+| Publication | Reserved Run row plus immutable artifacts | Keep reconciliation before SQL publication and recorder construction; published is not proof of provider start. |
+
+Inspected `session.rs`, both Store layers, the Run constructor/decoder, Session
+reservation and replacement, Task settlement, publication dispatch, ancestry
+triggers and populated migration fixtures. Followed public Session discovery,
+Run filtering, the Rust/Swift Session DTO and `WorkspaceProjection`, Chapter
+activation, and the canonical model contract. The repeated-replacement test
+retains old attribution; the constructor matrix and competing-writer fixture
+exercise distinct failure boundaries. None is a disposable representation test.
+
+The Task-specific initial-review helper still supplies real launch inputs; merely
+inlining it or centralizing enum string matches would not simplify ownership.
+The remaining file-backed Ask/taskless paths, name copying, manifest Run readers
+and desktop projection still have live callers. Their deletion requires the
+approved common-owner conversion and populated import. No fallback, wrapper,
+schema change or public interface was added or removed in this pass.
+
+Fresh preflight and safe recovery both fail at active `main-view-task`
+**15.2 GiB / 12 GiB**, with **94.4 GiB** free; this checkout is **332.9 MiB**.
+Recovery preserved the active foreign build. TESTING.md therefore blocks product
+tests and materialized rehearsal. No behavioral proof ran. Executable bytes are
+unchanged, so the latest formatting/Clippy/migration receipts retain only their
+recorded scope; all four Run-construction commands and earlier proofs remain owed.
+
+Only this note changed; working-diff whitespace passes. All eight Done When
+obligations remain, including all-kind ownership, runtime nesting, Chapter scope,
+DTO/desktop conversion, offline import, configured acceptance, measurements and
+deletion research. Existing architecture/branch-whitespace gaps and supplied
+publication/stacking reports remain unresolved. No intermediate publication.
+
 ## Measure
 
 The [2026-09-26 slice review](data-model-slice-review.md) records the current

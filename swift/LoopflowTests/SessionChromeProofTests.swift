@@ -237,10 +237,12 @@ struct SessionChromeProofTests {
         let record = try renameFixtureRecord("palette-session", title: "Retained conversation", source: "human",
                                              work: .task(id: "ts_review00000000000000000000000000"))
         let sessions = String(decoding: try JSONEncoder().encode([record]), as: UTF8.self)
+        let flows = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/flow_catalog.json"), encoding: .utf8)
         let query = RegistryQuery { args, _ in
             if args.first == "roadmap" { return roadmap }
             if args.first == "session" { return sessions }
-            if args.first == "ls" || args.first == "flow" { return "[]" }
+            if args.first == "flow" { return flows }
+            if args.first == "ls" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
         }
         let model = PodiumModel(query: query, repoPath: repo)
@@ -259,7 +261,7 @@ struct SessionChromeProofTests {
         draft.withCString { ghostty_surface_text(surfaces[1], $0, UInt(draft.utf8.count)) }
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
-        #expect(model.navigation.palettePresented)
+        #expect(model.navigation.palette == .search)
         let sheet = try #require(window.attachedSheet)
         try await settle(sheet)
         for char in "never-pty" { try press(String(char), keyCode: 0, modifiers: [], in: sheet) }
@@ -268,7 +270,7 @@ struct SessionChromeProofTests {
         #expect(terminalText(surfaces[1]).contains("never-pty") == false)
         try press("\u{1b}", keyCode: 53, modifiers: [], in: sheet)
         try await Task.sleep(for: .milliseconds(400))
-        #expect(!model.navigation.palettePresented)
+        #expect(model.navigation.palette == nil)
         #expect(window.firstResponder === terminals[1])
         try await expectEcho(draft, on: surfaces[1])
 
@@ -300,6 +302,23 @@ struct SessionChromeProofTests {
         try await Task.sleep(for: .milliseconds(400))
         if case .wave(let id) = second { #expect(model.selection == .wave(id: id)) }
         else { Issue.record("The fixture's second palette destination should be its Wave") }
+
+        // Flow inspection replaces search in the same sheet and dismisses once.
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        let flowSheet = try #require(window.attachedSheet)
+        try await settle(flowSheet)
+        for char in "feature" { try press(String(char), keyCode: 0, modifiers: [], in: flowSheet) }
+        try press("\r", keyCode: 36, modifiers: [], in: flowSheet)
+        try await settle(flowSheet)
+        #expect(model.navigation.palette == .flow("feature"))
+        #expect(window.attachedSheet === flowSheet)
+        try press("\u{1b}", keyCode: 53, modifiers: [], in: flowSheet)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(model.navigation.palette == nil)
+        #expect(window.attachedSheet == nil)
+        #expect(terminals[0].surface == surfaces[0])
+        #expect(terminals[1].surface == surfaces[1])
     }
 
     // MARK: - helpers

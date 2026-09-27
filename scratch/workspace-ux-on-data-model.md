@@ -548,6 +548,49 @@ or Task/PR disposition is selected by this implementation step.
   and the new agenda link are checked separately. Product tests are unnecessary
   for these scratch-only changes.
 
+## Navigation compression (2026-09-26)
+
+Reviewed `abfa364b0` against the active base `c832aaede`, following the complete
+approved design through the roadmap CLI, RegistryQuery, window routing, navigation,
+palette, historical Task display, Session grouping, terminal ownership and tests.
+Jack's light-only/no-teardown scope remains unchanged.
+
+| Fact | Owner | Reduction or reason to retain |
+| --- | --- | --- |
+| Exact Task identity and planning | Existing shared roadmap projector and durable Task/Project records | Keep `roadmap --task` as a filter on that reader, with unavailable evidence distinct from no match. No new DTO or persistence owner. |
+| Selected historical Task | `WorkspaceNavigation.selectedTaskEvidence` | Retain outside the current plan so refresh cannot eject an inspected historical page. Breadcrumb and details consume the same evidence. |
+| Palette sheet content | `WorkspaceNavigation.palette` | Replaced `palettePresented` plus `inspectedFlow` with one optional enum: search or Flow inspection. Sheet rendering, dismissal and shortcut exclusion read it directly. |
+| Task-link request and reading | `PodiumModel`, fenced by destination generation | Keep asynchronous resolution and its error/ambiguity presentation separate from palette search; late results cannot replace a later click. |
+| Window delivery | `WorkspaceLinkRouter`, weak native windows and one pending URL | Keep pending cold delivery and per-window targeting; no global selection broadcast. |
+| Focus and terminal lifetime | Palette coordinator's weak responder, window workspace registry's surfaces | Keep focus restoration independent of navigation selection. The sheet never owns or releases a PTY. |
+
+Removed both old palette fields and migrated all readers/writers without aliases.
+Terminal shortcuts now defer throughout search and Flow inspection. Source review
+checked the search-to-inspection transition and dismissal as one modal lifetime.
+Extended the existing native keyboard proof to select a catalog Flow, retain the
+same sheet, dismiss once and preserve both surfaces, alongside its existing
+search isolation, restored responder, draft/child reply and Task-detail checks.
+
+The remaining `WorkspaceProjection` grouping, reverse Session lookup, current
+Work/path DTOs, flat Flow preview and Task-level running-line selection still have
+live consumers. Their approved replacements depend on template resolution or the
+parent's all-kind Session/bind/attempt contracts. Current `SessionCommand` still
+has no bind, and `Run` lacks position/attempt projection; deleting those consumers
+now would remove capability. No parent storage/migration or public wire changes
+were made. User documentation still describes the same routes.
+
+Focused native proof passes: `SessionChromeProofTests/paletteRetainsTerminalInput`
+(one test, 4.6 seconds; 44.5 seconds including build). It uses fixture transport
+and owned cat PTYs, with Ghostty's timer-renderer fallback; it is not configured
+provider, installed-app or compositor proof. Resource preflight passed at 89.5
+GiB free. Swift platform boundaries and working-diff whitespace pass. Logs are
+under `.lf/tmp/workspace-navigation/compress-*`. XcodeGen and signed ad-hoc Xcode
+`build-for-testing` pass (42.0 seconds); hosted UI tests were not run. No broader
+behavioral suite was repeated; unchanged
+Rust/navigation receipts retain only their prior scope. All full-design acceptance
+and parent-integration obligations remain open; no publication or navigation edge
+is selected.
+
 ## Measure
 
 Reuse existing `hierarchy_interaction_ms` and `task_workspace_ready_ms`; keep them

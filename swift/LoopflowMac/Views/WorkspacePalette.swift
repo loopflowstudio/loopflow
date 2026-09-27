@@ -89,7 +89,7 @@ struct WorkspacePalette: View {
         VStack(alignment: .leading, spacing: 12) {
             PaletteSearchField(text: $search, move: move, submit: {
                 if let id = highlighted ?? rows.first?.id { activate(id) }
-            }, cancel: { model.navigation.palettePresented = false })
+            }, cancel: { model.navigation.palette = nil })
             .frame(height: 24)
             Divider()
             if model.paletteIsStale {
@@ -118,7 +118,7 @@ struct WorkspacePalette: View {
         }
         .padding(20).frame(width: 560, height: 420).background(palette.background)
         .onChange(of: search) { _, _ in highlighted = rows.first?.id }
-        .onExitCommand { model.navigation.palettePresented = false }
+        .onExitCommand { model.navigation.palette = nil }
         .task {
             await model.loadFlowCatalog()
             if !model.paletteIsStale && !model.roadmap.isLoading && !model.sessions.isLoading {

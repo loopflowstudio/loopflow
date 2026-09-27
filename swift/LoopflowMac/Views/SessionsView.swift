@@ -410,25 +410,28 @@ struct SessionsView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible && !navigation.palettePresented {
+            if terminalsVisible && navigation.palette == nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
         }
         .background {
-            WorkspacePaletteShortcut(presented: navigation.palettePresented, restoreFocus: restorePaletteFocus) {
+            WorkspacePaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus) {
                 restorePaletteFocus = true
-                navigation.palettePresented = true
+                navigation.palette = .search
             }.frame(width: 0, height: 0)
         }
         .sheet(isPresented: Binding(
-            get: { navigation.palettePresented || navigation.inspectedFlow != nil },
-            set: { if !$0 { navigation.palettePresented = false; navigation.inspectedFlow = nil } }
+            get: { navigation.palette != nil },
+            set: { if !$0 { navigation.palette = nil } }
         )) {
-            if let name = navigation.inspectedFlow {
+            switch navigation.palette {
+            case .flow(let name):
                 FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name })
-            } else {
+            case .search:
                 WorkspacePalette(model: model, activate: navigate)
+            case nil:
+                EmptyView()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
@@ -467,7 +470,7 @@ struct SessionsView: View {
         // Refreshes can remove an action while the palette is open.
         guard model.paletteRows.contains(where: { $0.id == destination }) else { return }
         restorePaletteFocus = false
-        navigation.palettePresented = false
+        navigation.palette = nil
         switch destination {
         case .wave(let id): model.select(.wave(id: id))
         case .task(let id):
@@ -476,7 +479,7 @@ struct SessionsView: View {
         case .session(let id):
             guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
             openSession(record)
-        case .flow(let name): navigation.inspectedFlow = name
+        case .flow(let name): navigation.palette = .flow(name)
         case .chooseFlow(let id):
             guard let found = model.task(id: id) else { return }
             model.select(.task(id: id))

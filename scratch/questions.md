@@ -626,6 +626,13 @@ kind because the boundary UUID the old id carried no longer exists. Old
 starting an Op (or a skill launch) and its receipt. The row has no boundary
 for a step without a Run; the next `lf flow resume` runs the Op again. A Run
 row for an Op would make `lf runs` list operations, which is a DTO question.
+*Reversed by the H2 review-slice, same day:* the Task path already records an
+operation as a Run (`run_task_op_boundary`, provider `loopflow`), so the saved
+executor now does the same, and recovery blocks a receipt-less operation with
+`op: <name> Run interrupted before its completion receipt; inspect its effect
+before retrying` until `--retry`. A skill launch that dies before its Run row
+exists still replays; nothing external had started. Review:
+[cut-h-review.md](cutover/cut-h-review.md#cut-h-review--h2-the-saved-flow-runs-on-the-row).
 
 **The driver writes a step's failure once.** The launch error becomes
 `"<skill> Run failed: <error>"`; recovery of a settled Run writes

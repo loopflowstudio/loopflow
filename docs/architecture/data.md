@@ -126,9 +126,8 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | authored Wave intent and evidence contracts | ordinary reviewed file edits |
 | `.lf/journal/waves/<name>/journal.jsonl` | conversation and resident events | append-only with crash-tail repair |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | provider-launch manifest, streams, terminal | publish once, append, settle once |
-| current Home `flows/<invocation-id>/position.json` | ordinary Flow's captured definition, cursor, active boundary, failure and completion | position lock plus atomic replacement; driver lock serializes continuation |
+| current Home `flows/<invocation-id>/position.json` | ordinary Flow's captured definition, cursor, active boundary, failure and completion; a human review's Runs, title, feedback and completion are its `sessions` row | position lock plus atomic replacement; driver lock serializes continuation |
 | current Home `human-sessions/.<hash>.launch.lock` | Session launch exclusion only; an Ask's question, caller, readiness and answer are its `sessions` row and its Runs | kernel-held lock, no contents |
-| `$LF_HOME/runs/<prefix>/<run-id>/unrecorded-session.json` | a Session and first Run the store could not take at launch | written once; the next `lf` operation that touches the Run stores the rows and removes it |
 | provider account homes | provider-native login and resume state | provider adapter owns format |
 | absolute Git directory `loopflow/` | writer and rebase receipts | kernel-held lock plus readable JSON |
 | machine-install root | versioned artifacts and switch receipts | stage immutably, select atomically |

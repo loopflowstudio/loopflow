@@ -901,7 +901,11 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         .iter()
         .find(|s| s["id"].as_str().unwrap().starts_with("flow:"))
         .unwrap();
-    assert_eq!(session["work"]["id"], task.task.id.to_string());
+    // A saved Flow's invocation has no Task, so its review carries the Wave.
+    assert_eq!(
+        session["work"],
+        serde_json::json!({"kind": "wave", "id": task.task.wave_id})
+    );
     assert_eq!(session["flow_membership"]["flow"], "review-contribution");
     assert_eq!(session["flow_membership"]["occurrence"], "current");
     assert_eq!(session["flow_membership"]["node"], "0");

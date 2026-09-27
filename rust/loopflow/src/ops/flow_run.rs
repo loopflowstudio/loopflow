@@ -26,7 +26,6 @@ pub(crate) struct Boundary {
     pub run_id: Option<RunId>,
     pub run_dir: Option<PathBuf>,
     pub completed: bool,
-    pub ready_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,7 +222,8 @@ pub(crate) fn capture_membership() -> Result<crate::run_record::RunFlowMembershi
         .as_ref()
         .ok_or_else(|| anyhow!("Flow has no active boundary"))?;
     ensure!(boundary.id == token.boundary, "stale Flow step launch");
-    if boundary.run_id.is_some() {
+    // A review's Run is prepared with its Session; launches inside either are helpers.
+    if boundary.run_id.is_some() || run.is_human()? {
         return Ok(RunFlowMembership::Independent);
     }
     Ok(RunFlowMembership::Step(RunFlowStep::of_flow(&run)?))
@@ -232,13 +232,15 @@ pub(crate) fn capture_membership() -> Result<crate::run_record::RunFlowMembershi
 pub(crate) fn bind_run(run_id: &RunId, run_dir: &Path) -> Result<()> {
     let Some(token) = token()? else { return Ok(()) };
     update(&token.invocation, |run| {
+        let human = run.is_human()?;
         let active = run
             .active
             .as_mut()
             .ok_or_else(|| anyhow!("Flow has no active step"))?;
         ensure!(active.id == token.boundary, "stale Flow step launch");
         // Nested helper Runs inherit context, not the parent's decision authority.
-        if active.run_id.is_none() {
+        // A review's Runs belong to its Session.
+        if active.run_id.is_none() && !human {
             active.run_id = Some(run_id.clone());
             active.run_dir = Some(run_dir.to_path_buf());
         }
@@ -418,11 +420,9 @@ pub(crate) fn begin_boundary(id: &str) -> Result<(StepToken, bool)> {
             run_id: None,
             run_dir: None,
             completed: false,
-            ready_summary: None,
         });
         let boundary_id = boundary.id.clone();
         let completed = boundary.completed;
-        crate::ops::flow_session::prepare_run(run)?;
         Ok((
             StepToken {
                 invocation: id.into(),
@@ -438,7 +438,6 @@ pub(crate) fn finish_boundary(
     failure: Option<&str>,
 ) -> Result<crate::engine::SkillOutcome> {
     update(&token.invocation, |run| {
-        let human = run.is_human()?;
         let boundary = run
             .active
             .as_mut()
@@ -456,9 +455,7 @@ pub(crate) fn finish_boundary(
             crate::engine::SkillOutcome::Routed(route.clone())
         } else {
             cursor.progress.verdict.clone().map_or(
-                crate::engine::SkillOutcome::Completed {
-                    feedback: human.then(|| boundary.ready_summary.clone()).flatten(),
-                },
+                crate::engine::SkillOutcome::Completed { feedback: None },
                 crate::engine::SkillOutcome::Decided,
             )
         })
@@ -535,14 +532,6 @@ mod tests {
         }
         fn capture(&self) -> CaptureHandle {
             CaptureHandle::begin_at(self.dir.path(), self.spec()).unwrap()
-        }
-        /// A human boundary owns a prepared Run from `begin_boundary`; the
-        /// provider launch consumes that Run instead of binding a fresh capture.
-        fn launch_prepared(&self, flow_id: &str) -> CaptureHandle {
-            let prepared = read(flow_id).unwrap().active.unwrap().run_id.unwrap();
-            let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
-            CaptureHandle::start_prepared(self.dir.path(), &prepared, self.spec(), &context)
-                .unwrap()
         }
     }
     impl Drop for Home {
@@ -641,7 +630,13 @@ mod tests {
         .unwrap();
         let (token, _) = begin_boundary(&run.id).unwrap();
         std::env::set_var(FLOW_STEP_ENV, serde_json::to_string(&token).unwrap());
-        let capture = home.launch_prepared(&run.id);
+        // A review's Runs belong to its Session, so its launch binds nothing.
+        let capture = home.capture();
+        bind_run(&capture.run_id(), &capture.artifact_dir()).unwrap();
+        assert_eq!(
+            super::capture_membership().unwrap(),
+            crate::run_record::RunFlowMembership::Independent
+        );
         // Older positions duplicated policy on the boundary. Recover their
         // attempt identity and receipt using the captured definition's policy.
         let mut old = serde_json::to_value(read(&run.id).unwrap()).unwrap();
@@ -662,8 +657,7 @@ mod tests {
         let saved = read(&run.id).unwrap();
         let boundary = saved.active.as_ref().unwrap();
         assert_eq!(boundary.id, token.boundary);
-        assert_eq!(boundary.run_id, Some(capture.run_id()));
-        assert_eq!(boundary.run_dir, Some(capture.artifact_dir()));
+        assert_eq!((&boundary.run_id, &boundary.run_dir), (&None, &None));
         assert!(!boundary.completed);
         assert!(saved.cursor.progress.verdict.is_none());
         let encoded = serde_json::to_value(&saved).unwrap();
@@ -719,9 +713,7 @@ mod tests {
         let (_, _) = begin_boundary(&run.id).unwrap();
         let waiting = read(&run.id).unwrap().cursor;
         update(&run.id, |run| {
-            let boundary = run.active.as_mut().unwrap();
-            boundary.ready_summary = Some("implement the revised design".into());
-            boundary.completed = true;
+            run.active.as_mut().unwrap().completed = true;
             Ok(())
         })
         .unwrap();
@@ -729,12 +721,7 @@ mod tests {
         let saved = read(&run.id).unwrap();
         assert!(saved.cursor.progress.verdict.is_none());
         assert_eq!(saved.cursor, waiting);
-        let boundary = saved.active.unwrap();
-        assert!(boundary.completed);
-        assert_eq!(
-            boundary.ready_summary.as_deref(),
-            Some("implement the revised design")
-        );
+        assert!(saved.active.unwrap().completed);
     }
     #[test]
     fn routing_is_run_owned_and_recovers_only_after_success() {

@@ -804,12 +804,13 @@ fn begin_run_capture(
             flow: membership,
             ..spec
         };
+        let (provider, model) = (spec.harness.clone(), spec.model.clone());
         crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec,
             run_id,
             &built.context,
             |run_id| {
-                crate::ops::human_session::publish_run_binding(run_id)
+                crate::ops::human_session::publish_run_binding(run_id, &provider, model.as_deref())
                     .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
             },
         )
@@ -870,7 +871,7 @@ fn interactive_run(built: &PromptBuild, spec: &crate::run_record::RunSpec) -> cr
 
 /// An interactive launch is a conversation: its Session and first Run are
 /// stored together before the provider starts. Bookkeeping never refuses the
-/// launch: a store that cannot take the rows leaves them beside the Run.
+/// launch: when the store cannot take the rows, the Session is not recorded.
 fn reserve_interactive_session(run: crate::session::Run) -> crate::store::StoreResult<()> {
     let session = crate::session::Session {
         id: run.session_id.clone().unwrap_or_default(),
@@ -889,15 +890,9 @@ fn reserve_interactive_session(run: crate::session::Run) -> crate::store::StoreR
     let stored = crate::store::database_path_from_env()
         .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
         .and_then(|path| crate::store::sqlite::SqliteStore::new(&path))
-        .and_then(|store| store.create_session(session.clone(), run.clone()));
+        .and_then(|store| store.create_session(session, run, None));
     if let Err(error) = stored {
-        let deferred =
-            crate::ops::unrecorded_session::defer(&crate::ops::unrecorded_session::Reservation {
-                session,
-                run,
-            });
-        tracing::warn!(%error, ?deferred,
-            "Session is not stored yet; it will not list until it is");
+        eprintln!("warning: this Session is not recorded and will not list: {error}");
     }
     Ok(())
 }

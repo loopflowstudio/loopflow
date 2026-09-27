@@ -311,3 +311,26 @@ derived, not stored; only independent `tui` launches create a Session, so IDE
 handoff and headless Runs still have no rows; an interactive launch fails when
 the store cannot be written. Interactive Sessions that exist only as Run
 directories on old Homes stop listing until the import cut.
+
+## Cut 2: Ask Sessions as rows (2026-09-27)
+
+Executive choices, recorded in [the cut report](cutover/cut-2-ask.md). The
+keyed retry identity is the Session id (`ask_once_<hash>`), not a separate
+column. A completed Ask stays as a closed row holding its answer, keyed or not.
+`sessions.request` holds the question; `runs.caller_run_id` holds the asking
+Run as causality only. Ask `detail` is now the selected Skill. A headless
+caller has no Run row yet, so its Ask inherits Work from the caller's manifest
+until the headless cut.
+
+Reversal of Cut 1, decided on Jack's behalf under the "prefer flexible, not
+rigid" doctrine: a launch never fails because the store cannot be written. The
+Session and Run wait in `unrecorded-session.json` beside the Run and are stored
+by the next `lf` operation that resolves that Run. This is a deliberate
+exception to "ordinary reads never create rows": it replays one reservation the
+launch itself wrote, and never reads old Homes' files. An Ask reserved with no
+reachable store records no Work. Jack has not reviewed either consequence.
+
+Observation: the known first-Home initialization race reproduced once here
+(`no such table: task_flow_positions`) when a waiting Ask caller opened a fresh
+store while another command initialized it. The caller no longer opens a store
+while its reservation is unrecorded. The race itself is not repaired.

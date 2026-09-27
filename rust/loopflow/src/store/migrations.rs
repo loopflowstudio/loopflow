@@ -5376,6 +5376,52 @@ mod tests {
         }
         conn.execute_batch(&current_draft_sql("record_run_work_source"))
             .unwrap();
+        let unstarted = crate::durable::TaskId::new();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+            VALUES(?1,?2,?1,?1,?1,1)",
+            rusqlite::params![unstarted.as_str(), project.as_str()]).unwrap();
+        // An old Started event without a mapped Run remains retirement evidence,
+        // not permission to fabricate a Run or an observed assignment timestamp.
+        conn.execute(
+            "INSERT INTO task_events(task_id,kind_json,created_at)
+            VALUES(?1,'{\"kind\":\"started\"}',1)",
+            [unstarted.as_str()],
+        )
+        .unwrap();
+        let before_import = crate::store::rows::now_unix();
+        conn.execute_batch(&current_draft_sql("record_task_first_run"))
+            .unwrap();
+        for (task, _, _, _, _) in &imported {
+            let assigned: i64 = conn
+                .query_row(
+                    "SELECT started_at FROM tasks WHERE id=?1",
+                    [task.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!((before_import..=crate::store::rows::now_unix()).contains(&assigned));
+            assert_ne!(
+                assigned, 100,
+                "conversion time is not the historical Run timestamp"
+            );
+        }
+        assert!(conn
+            .query_row(
+                "SELECT started_at IS NULL FROM tasks WHERE id=?1",
+                [unstarted.as_str()],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM tasks t WHERE
+            (started_at IS NOT NULL) != EXISTS(SELECT 1 FROM runs WHERE task_id=t.id)",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
         for (_, invocation, run, capture, cursor) in &imported {
             let saved: (String, String, Option<String>, String) = conn
                 .query_row(
@@ -5423,13 +5469,20 @@ mod tests {
         assert!(conn
             .execute(
                 "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
-                rusqlite::params![independent.as_str(), imported[0].0.as_str(), wave.as_str()]
+                rusqlite::params![independent.as_str(), unstarted.as_str(), wave.as_str()]
             )
             .is_err());
         assert!(conn
             .query_row(
                 "SELECT task_id IS NULL AND wave_id IS NULL FROM runs WHERE id=?1",
                 [independent.as_str()],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        assert!(conn
+            .query_row(
+                "SELECT started_at IS NULL FROM tasks WHERE id=?1",
+                [unstarted.as_str()],
                 |row| row.get::<_, bool>(0)
             )
             .unwrap());

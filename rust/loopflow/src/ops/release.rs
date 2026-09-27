@@ -179,8 +179,6 @@ struct GhReleasePr {
     state: String,
     #[serde(default, rename = "mergeCommit")]
     merge_commit: Option<GhPrMergeCommit>,
-    #[serde(default)]
-    url: Option<String>,
     #[serde(default, rename = "headRefOid")]
     head_ref_oid: Option<String>,
 }
@@ -2453,7 +2451,7 @@ fn find_release_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhReleasePr>> 
             "--state",
             "all",
             "--json",
-            "number,state,mergeCommit,url,headRefOid",
+            "number,state,mergeCommit,headRefOid",
         ],
     )?;
     let prs: Vec<GhReleasePr> = serde_json::from_str(&output)
@@ -4042,7 +4040,6 @@ mod tests {
             number,
             state: state.to_string(),
             merge_commit: None,
-            url: None,
             head_ref_oid: None,
         };
 

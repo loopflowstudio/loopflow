@@ -7,7 +7,7 @@ and the kernel owns live exclusion.
 
 ```bash
 lf status product --json   # joins planning and provider evidence
-lf runs --json             # scans this Home's Run-record files directly
+lf runs --json             # selects Run rows, then reads each Run's record
 lf ps --json               # samples live OS facts
 ```
 
@@ -36,6 +36,7 @@ kernel locks                  live local exclusion authority
 | What Task boundary should resume? | Work domain state joined to its exact `flow_invocations` row |
 | What ordinary Flow boundary should resume? | the invocation's Home-local `flows/<id>/position.json` |
 | What human input is pending? | Session projections of Task/ordinary Flow boundaries and human Ask records |
+| Which Runs worked on this Wave or Task? | `runs` rows |
 | What did one provider launch emit? | the Run record on the Home that launched it |
 | Is a local process moving now? | the OS process table joined to local command receipts |
 | Did a PR merge? | GitHub |
@@ -61,7 +62,7 @@ The current application tables group by owner:
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
 | Project and Task progression | `projects`, `tasks`, `flow_invocations` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
-| Task review conversations | `sessions`, `runs` | stable conversation identity, current Run, retained Run history, title and saved feedback |
+| Conversations and execution | `sessions`, `runs` | stable conversation identity, current Run, title and saved feedback; every Run's Session, invocation, Task, Wave, caller, provider, times and end |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
 | Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current human Ask Sessions use files |
@@ -110,8 +111,9 @@ The Session draft converts captured Task reviews, including selected XOR
 children, without reading templates. Old pending Run and feedback columns are
 retained under historical names solely for offline import evidence; current
 readers and writers use Session rows. `lf session import` stores the other
-conversation kinds from an older Home's files, once, and gives the converted
-Task reviews their names and providers. Earlier attempts of a review and
+conversation kinds from an older Home's files, once, gives the converted
+Task reviews their names and providers, and stores a row for every other Run
+record. Earlier attempts of a review and
 captures the draft could not map are reported, not stored.
 
 Store open uses a short OS migration lock around backup plus schema
@@ -133,9 +135,10 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | absolute Git directory `loopflow/` | writer and rebase receipts | kernel-held lock plus readable JSON |
 | machine-install root | versioned artifacts and switch receipts | stage immutably, select atomically |
 
-Run records are deliberately decentralized. A scan can rebuild the complete
-local read model. A future index may accelerate queries, but index failure must
-not gate launch and the Run record remains evidence truth.
+A Run's identity, parents, provider, times and end are its `runs` row. Its
+record holds what it emitted: events, transcript, usage and final answer. A
+store that cannot take the row never gates launch; that Run is unrecorded and
+does not list.
 
 Flow positions capture skills, XOR routers and every path before execution.
 The captured occurrence owns its name and human/decision policy. An ordinary
@@ -192,7 +195,7 @@ refresh before a later transition that needs current truth
 | `pm_snapshots` | Linear planning | status, roadmap, Mac app |
 | `task_linear_observations` | Linear Issue state | Task reconciliation and delivery guards |
 | `task_prs`, `ci_incidents` | GitHub PR and check state | Task delivery and landing supervisor |
-| `RunSnapshot` | Home-local Run-record files | runs, usage, Work activity, status, Mac app |
+| `RunSnapshot` | `runs` rows and each Run's record | runs, usage, Work activity, status, Mac app |
 | DTO fixtures under `tests/fixtures/dto/` | Rust JSON wire shapes | Rust and Swift fixture tests |
 | migration fixtures | draft migrations and canonicalizer | build, runtime, and release checks |
 

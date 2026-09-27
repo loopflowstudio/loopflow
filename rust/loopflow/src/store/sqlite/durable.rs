@@ -417,6 +417,7 @@ impl SqliteStore {
                 provider: None,
                 model: None,
                 caller_run_id: None,
+                ended: None,
             },
         )?;
         super::runs::select_attempt_in(
@@ -1707,6 +1708,7 @@ mod durable_store_tests {
             provider: None,
             model: None,
             caller_run_id: None,
+            ended: None,
         };
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
@@ -1745,6 +1747,14 @@ mod durable_store_tests {
                 Some(other_wave.clone()),
                 None,
                 Some(other_wave.clone()),
+            ),
+            // A Flow launched directly for a Task names no Task; its step does.
+            (
+                Some(taskless.id.clone()),
+                Some(task_id.clone()),
+                None,
+                Some(task_id.clone()),
+                Some(task.wave_id.clone()),
             ),
         ] {
             let tx = conn
@@ -1790,7 +1800,6 @@ mod durable_store_tests {
         for (invocation, task_input, wave_input) in [
             (None, Some(task_id.clone()), Some(other_wave.clone())),
             (Some(position.invocation.id.clone()), Some(other_task), None),
-            (Some(taskless.id.clone()), Some(task_id.clone()), None),
             (Some("missing".into()), None, None),
             (None, Some(TaskId::new()), None),
             (None, None, Some(WaveId::new())),
@@ -1885,6 +1894,7 @@ mod durable_store_tests {
                 provider: None,
                 model: None,
                 caller_run_id: None,
+                ended: None,
             },
         )
         .unwrap();
@@ -1946,6 +1956,7 @@ mod durable_store_tests {
             provider: None,
             model: None,
             caller_run_id: None,
+            ended: None,
         };
         let before = crate::store::rows::now_unix();
         let tx = conn
@@ -2097,6 +2108,7 @@ mod durable_store_tests {
                 provider: None,
                 model: None,
                 caller_run_id: None,
+                ended: None,
             };
             let session = crate::session::Session {
                 id: id.to_string(),
@@ -2133,7 +2145,8 @@ mod durable_store_tests {
         let refused = store.bind_session("elsewhere", &task_id).unwrap_err();
         assert!(refused.to_string().contains("Wave other"), "{refused}");
         assert_eq!(store.session("elsewhere").unwrap().unwrap().1.task_id, None);
-        assert_eq!(store.task_runs(&task_id).unwrap().len(), 2);
+        let listed = store.runs(None, None, Some(task_id.as_str()), None, 0);
+        assert_eq!(listed.unwrap().len(), 2);
     }
 
     #[test]
@@ -3079,6 +3092,34 @@ mod durable_store_tests {
             attempts
         );
         assert!(store.finish_task_flow(&task, &replacement, None).is_err());
+
+        // The launch names the provider the claim could not know, and the
+        // Run's end is its row. Both attempts list once under their Task.
+        let end = crate::session::RunEnd {
+            outcome: "completed".into(),
+            at: 9,
+        };
+        store.fill_run_provider(&second, "codex", None).unwrap();
+        store.end_run(&second, &end).unwrap();
+        let listed = store
+            .runs(None, None, Some(task.plan.identifier.as_str()), None, 0)
+            .unwrap();
+        assert_eq!(listed.len(), 2);
+        for listed in &listed {
+            assert_eq!(listed.run.task_id, Some(task_id.clone()));
+            assert_eq!(listed.run.wave_id, Some(task.wave_id.clone()));
+            assert_eq!(
+                listed.run.invocation_id.as_ref(),
+                Some(&position.invocation.id)
+            );
+            assert_eq!(listed.task.as_deref(), Some(task.plan.identifier.as_str()));
+        }
+        let settled = listed
+            .iter()
+            .find(|listed| listed.run.id == second)
+            .unwrap();
+        assert_eq!(settled.run.provider.as_deref(), Some("codex"));
+        assert_eq!(settled.run.ended, Some(end));
     }
 
     #[test]

@@ -45,6 +45,10 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.run(&id)).await
     }
 
+    pub async fn create_run(&self, run: Run) -> StoreResult<Run> {
+        run_sqlite(&self.sqlite, move |store| store.create_run(run)).await
+    }
+
     pub async fn create_session(
         &self,
         session: Session,
@@ -89,9 +93,26 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.bind_session(&id, &task)).await
     }
 
-    pub async fn task_runs(&self, task: &TaskId) -> StoreResult<Vec<Run>> {
-        let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_runs(&task)).await
+    pub async fn runs(
+        &self,
+        wave: Option<&str>,
+        project: Option<&str>,
+        task: Option<&str>,
+        caller: Option<&str>,
+        since: i64,
+    ) -> StoreResult<Vec<super::sqlite::ListedRun>> {
+        let [wave, project, task, caller] =
+            [wave, project, task, caller].map(|name| name.map(str::to_string));
+        run_sqlite(&self.sqlite, move |store| {
+            store.runs(
+                wave.as_deref(),
+                project.as_deref(),
+                task.as_deref(),
+                caller.as_deref(),
+                since,
+            )
+        })
+        .await
     }
 
     pub async fn open_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
@@ -101,6 +122,17 @@ impl Store {
     pub async fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
         let session_id = session_id.to_string();
         run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
+    }
+
+    pub async fn save_flow(
+        &self,
+        invocation: QueuedInvocation,
+        cursor: ExecutionCursor,
+    ) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.save_flow(&invocation, &cursor)
+        })
+        .await
     }
 
     pub async fn end_flow(&self, invocation: &str) -> StoreResult<()> {

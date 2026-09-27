@@ -817,6 +817,16 @@ impl WaveLoop {
                     self.wave
                 ))],
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: self.planning.as_ref().and_then(|planning| {
+                    let WorkRef::Wave(wave) = &planning.work else {
+                        return None;
+                    };
+                    Some(crate::session::RunWork {
+                        task_id: None,
+                        wave_id: Some(wave.clone()),
+                        source: crate::session::WorkSource::Declared,
+                    })
+                }),
             },
             &prepared.context,
         ) {

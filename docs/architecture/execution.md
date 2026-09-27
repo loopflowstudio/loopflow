@@ -127,7 +127,8 @@ Core types:
 | `RunManifest` | Immutable, serialized launch record |
 | `CaptureHandle` | Bounded best-effort event writer plus synchronous settlement |
 | `TerminalReceipt` | First terminal outcome; exclusive-create wins |
-| `RunSnapshot` | Disposable projection rebuilt by scanning records |
+| `Run` | The `runs` row: identity, Session, invocation, Task, Wave, caller, provider, times and end |
+| `RunSnapshot` | A Run's row joined to the usage and launch evidence in its record |
 | `RunUsage` | Provider-authored usage reduced by stream |
 
 ## Observe without gating
@@ -178,13 +179,23 @@ without that receipt are labeled and return normalized streamed prose from
 their last completed provider turn, including commentary, so callers can
 recover evidence without a false claim of exact extraction.
 
-`scan_runs_since` reduces record files into `RunSnapshot`. `lf runs` and `lf
-usage` apply the same Wave/Task attribution drill over that projection;
-Work activity, status views, and the Mac app consume it too. There is no
-authoritative Run index to repair.
+Every Run is a row in `runs`, stored when it begins and ended when it
+settles. One query selects the Runs a reader asked for, by Wave, Project, Task
+or calling Run. `lf runs`, `lf usage`, Work activity, status views and the Mac
+app read that query; `lf runs --active` reads each live Run's Work from its
+row. A Run's usage, events and final answer stay in its record and are read
+per Run.
 
-Direct-child reads resolve the parent manifest first and scan the Home-local
-records without the recent-history cap. Final-answer reads project normalized
+A launch is never refused because the store cannot take its row. It prints
+one warning, runs, and does not list. A Run whose record lives on another
+Home is left out of this Home's listings.
+
+A Run that names no Work takes its calling Run's Task and Wave. A saved
+Flow's step Runs and its review's Runs name the Flow's invocation; several
+Runs at one step are its attempts, and the invocation names the current one.
+
+Direct-child reads select Runs by their calling Run, without the recent-history
+cap. Final-answer reads project normalized
 `ConversationEvent::ItemCompleted` messages, preferring the explicit
 `final_answer` phase and retaining untagged conclusions for older harnesses.
 

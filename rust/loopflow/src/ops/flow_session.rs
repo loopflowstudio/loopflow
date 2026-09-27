@@ -6,7 +6,7 @@ use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
 use crate::ops::flow_run::{self, FlowRun, StepToken};
 use crate::ops::human_session;
 use crate::run_record::{RunFlowMembership, RunFlowStep};
-use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
+use crate::session::{Run, RunWork, Session, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 fn session_id(token: &StepToken) -> String {
@@ -62,6 +62,25 @@ pub(crate) fn membership(token: &StepToken) -> Result<RunFlowMembership> {
     )?)?))
 }
 
+/// The Work a saved Flow was launched with.
+pub(crate) async fn declared_work(store: &SharedStore, flow: &FlowRun) -> Option<RunWork> {
+    let selector = flow
+        .as_work
+        .clone()
+        .or(flow.task.as_ref().map(|id| format!("task:{id}")))
+        .or(flow.wave.as_ref().map(|id| format!("wave:{id}")))?;
+    let binding = crate::ops::resolve_work_binding(store, &flow.cwd, &selector).await;
+    let binding = binding.ok()?;
+    Some(RunWork {
+        task_id: match binding.work {
+            crate::durable::WorkRef::Task(id) => Some(id),
+            _ => None,
+        },
+        wave_id: Some(binding.wave_id),
+        source: WorkSource::Declared,
+    })
+}
+
 /// Store the review the Flow waits at, with its first Run prepared. Returns
 /// the feedback once the review is complete.
 pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Option<String>> {
@@ -74,19 +93,11 @@ pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Op
             let config = crate::engine::config::load_config(Some(&flow.cwd))?.unwrap_or_default();
             let (provider, model) =
                 crate::engine::config::parse_agent(flow.model.as_deref().unwrap_or(config.agent()));
-            let selector = flow
-                .as_work
-                .clone()
-                .or(flow.task.as_ref().map(|id| format!("task:{id}")))
-                .or(flow.wave.as_ref().map(|id| format!("wave:{id}")));
-            // The invocation has no Task, so its Runs carry the Work's Wave.
-            let wave_id = match selector {
-                Some(selector) => crate::ops::resolve_work_binding(store, &flow.cwd, &selector)
-                    .await
-                    .ok()
-                    .map(|binding| binding.wave_id),
-                None => None,
-            };
+            // The review closes through its Session, not a Task's managed
+            // Flow, so its Runs carry the Work's Wave and no Task.
+            let wave_id = declared_work(store, &flow)
+                .await
+                .and_then(|work| work.wave_id);
             let run = human_session::prepare_run(
                 Run {
                     id: crate::durable::RunId::new(),
@@ -105,6 +116,7 @@ pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Op
                     provider: Some(provider.to_string()),
                     model,
                     caller_run_id: None,
+                    ended: None,
                 },
                 RunFlowMembership::Step(RunFlowStep::of_flow(&flow)?),
             )?;

@@ -452,6 +452,25 @@ impl SkillExecutor for CliFlowExecutor<'_> {
         if completed {
             return flow_run::finish_boundary(&token, None);
         }
+        // The step's Run names this invocation at this cursor, and the
+        // Flow's Work. Without the row the Run launches unrecorded.
+        let flow = flow_run::read(&self.invocation)?;
+        let saved = async {
+            let config = crate::store::storage_config_from_env()?;
+            let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
+            let work = crate::ops::flow_session::declared_work(&store, &flow).await;
+            let invocation = crate::engine::invocation::QueuedInvocation {
+                id: flow.id,
+                flow: flow.flow,
+                steps: flow.steps,
+            };
+            store.save_flow(invocation, flow.cursor).await?;
+            Ok::<_, anyhow::Error>(work)
+        };
+        let work = saved.await.unwrap_or_else(|error| {
+            tracing::warn!(%error, "saved Flow invocation is not recorded");
+            None
+        });
         let encoded = serde_json::to_string(&token)?;
         let _token = EnvVarGuard::set(flow_run::FLOW_STEP_ENV, &encoded);
         let mut message = self.message.unwrap_or_default().to_string();
@@ -478,6 +497,7 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                     Some(&message),
                     &launch,
                     &self.repo,
+                    work,
                 )?;
                 if self.cli.task.is_none() && self.cli.wave.is_none() && self.cli.as_work.is_none()
                 {

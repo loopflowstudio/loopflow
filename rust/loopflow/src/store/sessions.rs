@@ -1,6 +1,4 @@
-use crate::durable::{FlowPosition, RunId, TaskId};
-use crate::engine::invocation::QueuedInvocation;
-use crate::engine::ExecutionCursor;
+use crate::durable::{FlowInvocation, FlowPosition, RunId, TaskId};
 use crate::session::{Run, Session, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -39,13 +37,10 @@ impl Store {
         &self,
         session: Session,
         run: Run,
-        review: Option<(QueuedInvocation, ExecutionCursor)>,
+        review: Option<FlowInvocation>,
     ) -> StoreResult<(Session, Run)> {
         run_sqlite(&self.sqlite, move |store| {
-            let review = review
-                .as_ref()
-                .map(|(invocation, cursor)| (invocation, cursor));
-            store.create_session(session, run, review)
+            store.create_session(session, run, review.as_ref())
         })
         .await
     }
@@ -108,18 +103,6 @@ impl Store {
     pub async fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
         let session_id = session_id.to_string();
         run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
-    }
-
-    pub async fn save_flow(
-        &self,
-        invocation: QueuedInvocation,
-        cursor: ExecutionCursor,
-        task: Option<TaskId>,
-    ) -> StoreResult<()> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.save_flow(&invocation, &cursor, task.as_ref())
-        })
-        .await
     }
 
     pub async fn end_flow(&self, invocation: &str) -> StoreResult<()> {

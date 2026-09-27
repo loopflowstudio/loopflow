@@ -107,22 +107,27 @@ impl RunFlowStep {
         }
     }
 
-    pub(crate) fn of_flow(run: &crate::ops::flow_run::FlowRun) -> anyhow::Result<Self> {
-        let step = match run.current_step()? {
+    pub(crate) fn of_flow(flow: &crate::durable::FlowInvocation) -> anyhow::Result<Self> {
+        let step = match flow
+            .current_step()
+            .ok_or_else(|| anyhow::anyhow!("saved Flow position has no current step"))?
+        {
             crate::engine::ConcreteStep::Skill(skill) => skill.skill.name.clone(),
             crate::engine::ConcreteStep::Op(op) => op.item.display_name(),
             crate::engine::ConcreteStep::Xor(branch) => branch.router.name.clone(),
         };
+        // A saved Flow's step is not a managed Task step, even when the Flow
+        // names a Task; its Run takes the Task from the Flow's declared Work.
         Ok(Self {
             task_id: None,
             task_pr_id: None,
-            invocation_id: run.id.clone(),
-            flow: run.flow.clone(),
+            invocation_id: flow.invocation.id.clone(),
+            flow: flow.invocation.flow.clone(),
             step,
-            node: Some(run.cursor.node_key()),
+            node: Some(flow.cursor.node_key()),
             iterations: Some(crate::engine::flow_graph::flow_iterations(
-                &run.steps,
-                &run.cursor,
+                &flow.invocation.steps,
+                &flow.cursor,
             )),
         })
     }

@@ -16,11 +16,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::{RunId, TaskId, WorkRef};
+use crate::durable::{FlowInvocation, RunId, TaskId, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
-use crate::ops::flow_run::{FlowRun, StepToken};
 use crate::run_record::{AttributionSource, RunFlowMembership, RunManifest};
 use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
@@ -87,15 +86,79 @@ enum AskStatus {
     Completed { summary: String },
 }
 
-/// The field `flows/<id>/position.json` kept on its active boundary.
+/// `flows/<id>/position.json`: the saved Flow's definition, cursor, launch
+/// selectors and active review boundary, before the invocation row owned them.
 #[derive(Deserialize)]
 struct FlowFile {
+    id: String,
+    flow: String,
+    cwd: PathBuf,
+    steps: Vec<ConcreteStep>,
+    cursor: ExecutionCursor,
+    message: Option<String>,
+    model: Option<String>,
+    wave: Option<String>,
+    task: Option<String>,
+    as_work: Option<String>,
     active: Option<FlowFileBoundary>,
+    finished: bool,
 }
 
 #[derive(Deserialize)]
 struct FlowFileBoundary {
+    id: String,
+    run_id: Option<RunId>,
+    completed: bool,
     ready_summary: Option<String>,
+}
+
+impl FlowFile {
+    fn current_step(&self) -> Option<&ConcreteStep> {
+        let (steps, cursor) = self.cursor.current_body(&self.steps);
+        steps.get(cursor.index)
+    }
+
+    /// The Work the Flow was launched with, resolved once from its selectors.
+    async fn declared_work(&self, store: &SharedStore) -> Option<(Option<TaskId>, WaveId)> {
+        let selector = self
+            .as_work
+            .clone()
+            .or(self.task.as_ref().map(|id| format!("task:{id}")))
+            .or(self.wave.as_ref().map(|id| format!("wave:{id}")))?;
+        let binding = crate::ops::resolve_work_binding(store, &self.cwd, &selector)
+            .await
+            .ok()?;
+        let task = match binding.work {
+            WorkRef::Task(id) => Some(id),
+            _ => None,
+        };
+        Some((task, binding.wave_id))
+    }
+
+    fn invocation(&self, work: Option<(Option<TaskId>, WaveId)>) -> FlowInvocation {
+        let (task_id, wave_id) = match work {
+            Some((task, wave)) => (task, Some(wave)),
+            None => (None, None),
+        };
+        FlowInvocation {
+            invocation: QueuedInvocation {
+                id: self.id.clone(),
+                flow: self.flow.clone(),
+                steps: self.steps.clone(),
+            },
+            cursor: self.cursor.clone(),
+            version: 0,
+            task_id,
+            wave_id,
+            cwd: self.cwd.clone(),
+            message: self.message.clone(),
+            model: self.model.clone(),
+            current_attempt: None,
+            pending_session_id: None,
+            failure: None,
+            finished: self.finished,
+        }
+    }
 }
 
 // ---- Import ----
@@ -217,7 +280,7 @@ impl Import<'_> {
         kind: Stored,
         session: Session,
         run: Run,
-        review: Option<(QueuedInvocation, ExecutionCursor)>,
+        review: Option<FlowInvocation>,
     ) -> Result<Option<Stored>> {
         if self.store.session(&session.id).await?.is_some() {
             return Ok(Some(Stored::Unchanged));
@@ -353,49 +416,46 @@ impl Import<'_> {
     }
 
     async fn flow_review(&mut self, path: &Path) -> Result<Option<Stored>> {
-        let bytes = std::fs::read(path)?;
-        let flow: FlowRun = serde_json::from_slice(&bytes)?;
-        let file: FlowFile = serde_json::from_slice(&bytes)?;
-        let (Some(active), Some(old)) = (flow.active.clone(), file.active) else {
+        let file: FlowFile = serde_json::from_slice(&std::fs::read(path)?)?;
+        let Some(active) = &file.active else {
             return Ok(None);
         };
-        let skill = match flow.current_step()? {
-            ConcreteStep::Skill(skill) if skill.policy.human && !flow.finished => {
+        let skill = match file.current_step() {
+            Some(ConcreteStep::Skill(skill)) if skill.policy.human && !file.finished => {
                 skill.skill.name.clone()
             }
             _ => return Ok(None),
         };
         self.claimed.extend(active.run_id.clone());
-        let id = format!("flow:{}:{}", flow.id, active.id);
-        let Some(run_id) = active.run_id else {
+        let id = format!("flow:{}:{}", file.id, active.id);
+        let work = file.declared_work(self.store).await;
+        let flow = file.invocation(work.clone());
+        let Some(run_id) = active.run_id.clone() else {
             // Never opened: nothing to preserve but the wait itself.
-            if self.store.session(&id).await?.is_some() {
+            let stored = self.store.flow(&file.id).await?;
+            if stored.is_some_and(|flow| flow.pending_session_id.is_some()) {
                 return Ok(Some(Stored::Unchanged));
             }
             if !self.report.dry_run {
-                let token = StepToken {
-                    invocation: flow.id,
-                    boundary: active.id,
-                };
-                crate::ops::flow_session::reserve(self.store, &token).await?;
+                let flow = self.store.create_flow(flow).await?;
+                crate::ops::flow_session::reserve(self.store, &flow).await?;
             }
             return Ok(Some(Stored::FlowReview));
         };
         let dir = self.run_dir(&run_id)?;
         let manifest = crate::run_record::read_manifest(&dir).context("the review's Run record")?;
         let (title, title_source) = name(&dir, skill.clone())?;
-        let work = crate::ops::flow_session::declared_work(self.store, &flow).await;
         let created_at = manifest.created_at.unix_timestamp();
         let run = Run {
             id: run_id,
             session_id: Some(id.clone()),
-            invocation_id: Some(flow.id.clone()),
+            invocation_id: Some(file.id.clone()),
             node: None,
             iterations: None,
             attempt: None,
-            task_id: work.as_ref().and_then(|work| work.task_id.clone()),
+            task_id: flow.task_id.clone(),
             work_source: work.as_ref().map(|_| WorkSource::Declared),
-            wave_id: work.and_then(|work| work.wave_id),
+            wave_id: flow.wave_id.clone(),
             created_at,
             published: true,
             cwd: manifest.cwd,
@@ -412,25 +472,15 @@ impl Import<'_> {
             title,
             title_source,
             request: None,
-            ready_summary: old.ready_summary,
+            ready_summary: active.ready_summary.clone(),
             completed_at: match active.completed {
                 true => Some(modified(path)?),
                 false => None,
             },
             created_at,
         };
-        let invocation = QueuedInvocation {
-            id: flow.id,
-            flow: flow.flow,
-            steps: flow.steps,
-        };
-        self.store(
-            Stored::FlowReview,
-            session,
-            run,
-            Some((invocation, flow.cursor)),
-        )
-        .await
+        self.store(Stored::FlowReview, session, run, Some(flow))
+            .await
     }
 
     async fn run(&mut self, dir: &Path) -> Result<Option<Stored>> {

@@ -15,6 +15,7 @@ mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
+mod flows;
 mod metrics;
 mod migration_catalog;
 mod migration_schema;

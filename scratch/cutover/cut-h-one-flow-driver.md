@@ -358,3 +358,132 @@ pass. For Jack: bind line prints before a refused write; whether bind may assign
 a taskless invocation; Done-when 4's "`task run --flow` moves the pointer" has
 no owner (`ensure_flow_position` ignores `--flow` on a live Flow; restart is the
 mover). Verdict: proceed to H2.
+
+### 2026-09-27 · H2 — the saved Flow runs on the row
+
+Implement pass. Code and this entry in one commit.
+
+**Owners now.** `flow_invocations` is the only cursor owner of a saved Flow.
+`lf flow <name>` inserts the row (`SqliteStore::create_flow`, draft
+`own_flow_launch`: `cwd`, `message`, `model`, `wave_id`; selectors resolve at
+launch into `task_id`/`wave_id`) and refuses to start when the store cannot be
+written. `CliFlowExecutor` reads the row before every step (`recover_flow`),
+checkpoints under the `position_version` fence (`checkpoint_flow`: a decision
+or route recorded on the same position survives, a moved position releases
+`current_run_id` and `pending_session_id`), and the driver writes a failure
+once (`fail_flow`). The active boundary is `current_run_id` plus the Run's
+position; a completed attempt is the step's completion; a failed or interrupted
+Run becomes `failure_json` (`TaskFlowBlocker` shape, same as a Task's); a live
+Run keeps the Flow waiting. `lf flow resume --retry` clears the failure and the
+attempt under the fence (`retry_flow`). `lf flow decide|route` write
+`review_json` through `record_verdict_in`/`record_route_in`, keyed by
+invocation id and fenced by `current_run_id`; the Task-keyed
+`record_flow_verdict`/`record_flow_route` now check the claim and call the
+same writer. `lf flow blocked` keys its Ask by
+`flow:<invocation>:<node>:<iterations>`. `LF_FLOW_STEP` carries
+`ActiveStep { invocation, version }`. A saved review's Session id is
+`session_<uuid>`; the row links it through `pending_session_id`, and
+`LF_HUMAN_SESSION` carries `{"kind":"standalone_flow","id":<session>}`.
+`flows/<id>/` holds `driver.lock` and nothing else. `human_session::bind`
+prints `Binding … Permanent.` after the store write.
+
+**Commands and results.** Ambient `LF_*`/`LOOPFLOW_*` cleared; `-j 4`;
+`nice -n 10`; `scripts/resource_envelope.py` PASS (86.2 GiB free / 64.0 GiB
+floor).
+
+| Command | Result |
+| --- | --- |
+| `cargo nextest run -p loopflow --test session_cutover_tests -E 'test(a_task_flow_runs_on_its_row) \| test(a_taskless_step_records)'` before production edits | **2 failed**: `a_task_flow_runs_on_its_row_through_failure_retry_and_review` at `flows/<id>/position.json` exists ("the row is the only cursor owner"); `a_taskless_step_records_its_decision_on_the_invocation` at `Flow … blocked: repeat at step 1 requires a decision` (the stand-in's `lf flow decide` reached no store) |
+| Same, after | **2 passed** |
+| `cargo nextest run -p loopflow --no-fail-fast --test session_cutover_tests --test session_cli_tests --test dto_fixtures --test flow_tests` | **43 passed, 0 failed** (1 slow) |
+| `cargo nextest run -p loopflow --no-fail-fast --lib -E 'test(ops::) \| test(run_record) \| test(store::) \| test(controller::task) \| test(lf::commands)'` | 616 run: 615 passed, **1 failed** — `review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors` seeded a Task invocation with no Wave by raw SQL; the new `validate_invocation_wave_insert` trigger refused it. Fixture given its Wave; rerun with the flows and pointer tests: 3 passed |
+| `cargo nextest run -p loopflow --test session_cutover_tests -E 'test(a_flow_refuses_to_start)'` | 1 passed (added after the suites; the locked-store refusal names `unable to open database file` and starts no provider) |
+| `cargo fmt --all --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| `uv run python scripts/check_migrations.py` | 52 shipped migrations unchanged since v0.12.21 |
+| `uv run python scripts/check_architecture.py` | only the known `wave_chapters` miss |
+
+The oauth contention test did not fail in this pass.
+
+**Draft.** `own_flow_launch` (depends on `point_task_at_invocation`, 35 lines):
+`cwd`, `message`, `model`, `wave_id` on `flow_invocations`; Wave filled from the
+Task for Task invocations and from a taskless Flow's Runs where they agree;
+`validate_invocation_wave_insert`/`_update` refuse an invocation whose Task and
+Wave disagree. `set_flow_position_in` fills `wave_id` from the Task;
+`insert_run_in` fills a Run's Wave from its invocation and refuses a different
+one. No released migration changed.
+
+**Deleted.**
+
+| Item | Where |
+| --- | --- |
+| `FlowRun`, `Boundary`, `StepToken`, `directory`, `lock`, `read`, `write`, `update`, `create`, `checkpoint`, `bind_run`, `record_decision`, `record_route`, `require_active`, `recover`, `retry`, `begin_boundary`, `finish_boundary`, `position.json`, `position.lock`, five file-semantics tests | `ops/flow_run.rs` |
+| `session_id`, `token`, `waiting` (file reader), selector-resolving `declared_work` | `ops/flow_session.rs` |
+| `save_flow`, `save_flow_in` (the UPSERT copy of the cursor) | `store/sqlite/sessions.rs`, `store/sessions.rs` |
+| Task-path duplicates of the repeat, conflict and router checks in `record_flow_verdict`/`record_flow_route` | `store/sqlite/durable.rs` |
+| `flow_run::bind_run` call after capture | `lf/commands/run.rs` |
+| "this review's Session is not recorded" warning; `save_flow` before each step; `LOOPFLOW_FLOW_NAME`-era `record.wave/task/as_work` relaunch | `lf/commands/flow.rs` |
+| `HumanSessionToken::StandaloneFlow { token: StepToken }` | `ops/human_session.rs` |
+
+**Production lines** (before the first `#[cfg(test)] mod`, against `d0a5469f5`):
+`ops/flow_run.rs` 465 → 88 (−377); `ops/flow_session.rs` 203 → 161 (−42);
+`store/sqlite/sessions.rs` 605 → 564 (−41); `store/sqlite/durable.rs` 1,569 →
+1,528 (−41); `store/sessions.rs` 174 → 157 (−17); `ops/human_session.rs`
+1,894 → 1,885 (−9); `store/sqlite/runs.rs` 419 → 417 (−2); `lf/commands/run.rs`
+1,224 → 1,223 (−1); `lf/commands/flow.rs` 613 → 717 (+104); `ops/session_import.rs`
+573 → 623 (+50, the old `position.json` shape and its selector resolution);
+`run_record.rs` 2,255 → 2,260 (+5); `durable.rs` 359 → 433 (+74,
+`FlowInvocation`/`FlowAttempt`); `store/sqlite/flows.rs` new 582;
+`store/flows.rs` new 100; `store/mod.rs`, `store/sqlite.rs` +1 each.
+**Net +387**, above the concept review's estimate: the store gained the
+sixteen-column row decode, the checkpoint merge, recover, retry, the two
+fenced writers and the blocker key, each with its fence spelled out. Docs:
+`docs/architecture/data.md`, `docs/architecture/planning.md`,
+`docs/architecture-reference.md` (`flow_invocations` row), `TESTING.md`.
+Swift and `tests/fixtures/dto` untouched.
+
+**Tests.** New `session_cutover_tests::a_task_flow_runs_on_its_row_through_
+failure_retry_and_review` (the concept review's first test: provider stand-in
+exits 7 on the first launch, `--retry`, review under INF-123, `lf runs --task`
+lists the failed attempt, the retry and the review Run, `position.json` never
+exists, state `completed`), `a_taskless_step_records_its_decision_on_the_
+invocation` (the stand-in runs `lf flow decide advance` inside the deciding
+step; the Flow takes the edge and completes), `a_flow_refuses_to_start_without_
+its_row`, `store::sqlite::flows::tests::a_decision_belongs_to_the_current_
+attempt_and_recovery_reads_its_outcome` (fences: wrong Run, wrong version,
+conflicting decision, unsettled Run, failed Run → blocker, retry, second
+attempt, moved position). `flow_session::nested_review_is_one_session…`
+rewritten on the row. `flow_tests::bound_flows_keep…` finds the review by
+`kind`; the cutover `inside` helper carries the Session id.
+
+**Decisions made here** (also in `../questions.md`):
+
+1. `own_flow_launch` adds `wave_id` with the three launch columns; a `--wave`
+   Flow's Wave has to survive resume, and the H1 ledger reserved it for H2.
+2. Saved review Sessions are `session_<uuid>` now; the old `flow:<inv>:<boundary>`
+   shape lives only in the import. The `LF_HUMAN_SESSION` token carries the
+   Session id.
+3. An Op step has no Run, so an Op interrupted mid-way replays on resume; the
+   old "interrupted before a completion receipt" guard (also for a skill step
+   that died before its Run row existed) is gone.
+4. The driver is the one failure writer: `"<skill> Run failed: <error>"` from
+   the launch, `"<step> Run <outcome>"` from recovery.
+5. `failure_json` has one shape (`TaskFlowBlocker`) for every invocation.
+6. `RunFlowStep.task_id` stays `None` for a saved Flow's step: `record_row`
+   reads a Task there as "managed Task step, stored at claim".
+7. A development `lf` inside an agent resolves its own worktree Home; the test
+   stand-in passes the fixture's Home to its nested `lf flow decide`.
+8. Pre-H2 saved Flows on a dev Home (rows without `cwd`) are refused by
+   `lf flow resume` with "has no launch record on its row".
+
+**Not proven.** A saved Flow with two reviews; an `--as` launch's review
+through the binary beyond `flow_tests`; a real driver crash (the failed attempt
+is a provider exit, not a kill); `own_flow_launch` against a Home copy; a
+`--wave` review launch (`flow_session::launch` passes the Wave id, which
+`resolve_explicit_wave` accepts by id or name).
+
+**Next failing assertion (H3).** `claim_task_worker` inserts the worker's Run
+in the claim transaction: after `store.claim_task_worker(...)`,
+`SELECT count(*) FROM runs WHERE invocation_id=?1 AND published=0` is 0; and
+`rg "cursor.finish" rust/loopflow/src/controller/task/mod.rs` still returns
+`finish_task_flow_turn`.

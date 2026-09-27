@@ -3211,7 +3211,7 @@ mod planning_tests {
         let recovered = park_human_task(&store, &task, &restarted_flow).await;
 
         assert_eq!(recovered, original);
-        assert_eq!(store.open_review_sessions().await.unwrap().len(), 1);
+        assert_eq!(store.open_sessions().await.unwrap().len(), 1);
         let recovered = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(recovered.session_run_id, Some(run_id));
         assert_eq!(recovered.ready_summary.as_deref(), Some("ready"));
@@ -3244,7 +3244,11 @@ mod planning_tests {
                     },
                     first.id.clone(),
                     &crate::trace::PreparedTurnContext::from_prompts("system", "review"),
-                    |run| store.sqlite.publish_review_run(&id, run, position.version),
+                    |run| {
+                        store
+                            .sqlite
+                            .publish_review_run(&id, run, position.version, "codex", None)
+                    },
                 )
                 .unwrap();
                 store
@@ -3291,7 +3295,7 @@ mod planning_tests {
                     let (reserved, replacement) = store.reserve_review_run(&before).await.unwrap();
                     store
                         .sqlite
-                        .publish_review_run(&id, &replacement.id, reserved.version)
+                        .publish_review_run(&id, &replacement.id, reserved.version, "codex", None)
                         .unwrap();
                     clients.add(&id, &replacement.id);
                     let position = store.flow_position(&task.id).await.unwrap().unwrap();
@@ -3601,7 +3605,7 @@ mod planning_tests {
             |id| {
                 store
                     .sqlite
-                    .publish_review_run(&session_id, id, retry.version)
+                    .publish_review_run(&session_id, id, retry.version, "codex", None)
             },
         )
         .unwrap();
@@ -3624,7 +3628,7 @@ mod planning_tests {
                 &context,
                 |id| store
                     .sqlite
-                    .publish_review_run(&session_id, id, retry.version),
+                    .publish_review_run(&session_id, id, retry.version, "codex", None),
             )
             .is_err()
         );
@@ -3825,7 +3829,7 @@ mod planning_tests {
         assert!(settled.is_human());
         assert!(settled.claim.is_none());
         assert_eq!(settled.version, initial.version + 1);
-        assert_eq!(store.open_review_sessions().await.unwrap().len(), 1);
+        assert_eq!(store.open_sessions().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -3891,7 +3895,7 @@ mod planning_tests {
         let (position, run) = store.reserve_review_run(&position).await.unwrap();
         store
             .sqlite
-            .publish_review_run(&id, &run.id, position.version)
+            .publish_review_run(&id, &run.id, position.version, "codex", None)
             .unwrap();
         store.ready_session(&id, &run.id, feedback).await.unwrap();
     }

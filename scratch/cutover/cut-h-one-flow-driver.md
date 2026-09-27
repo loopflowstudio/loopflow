@@ -487,3 +487,32 @@ in the claim transaction: after `store.claim_task_worker(...)`,
 `SELECT count(*) FROM runs WHERE invocation_id=?1 AND published=0` is 0; and
 `rg "cursor.finish" rust/loopflow/src/controller/task/mod.rs` still returns
 `finish_task_flow_turn`.
+
+### 2026-09-27 · H2 review-slice
+
+Review of `4bed6f562`; full matrix in [cut-h-review.md](cut-h-review.md#cut-h-review--h2-the-saved-flow-runs-on-the-row).
+Every H2 claim passes through the compiled `lf` against a private Home, plus
+the two paths the implement pass left unproven (a saved Flow with two reviews;
+a `--wave` launch's review). One decision reversed and fixed: an operation
+interrupted mid-way replayed on resume. `run_op` now records the operation as
+a Run the way the Task path already does (`harness loopflow`, `surface
+operation`, `skill None`), and `settle_attempt_in` ends a receipt-less
+operation Run as `interrupted` and blocks with `op: <name> Run interrupted
+before its completion receipt; inspect its effect before retrying`; `--retry`
+is the explicit replay. Proof: `store::sqlite::flows::tests::an_interrupted_
+operation_blocks_for_inspection_instead_of_replaying` (failed with the old arm:
+`waiting for Run …; its completion is not recorded`; passes), the Op Run row
+live on a `--wave op-then-review` launch. Production: `lf/commands/flow.rs`
+717 → 753, `store/sqlite/flows.rs` 582 → 597; cut net +438. Suites: integration
+44 passed, lib 617 passed; fmt, clippy, `check_migrations` (52 unchanged),
+`check_architecture` (only `wave_chapters`) pass. Duplicate-logic finding: the
+saved fence is spelled next to the Task's (decode, insert, cursor write, block,
+release, attempt authority, settle, blocker key, Op Run); H3's deletion list
+must name `settle_task_worker_in`, `block_task_flow_in`,
+`release_task_worker_in`, `set_flow_position_in`'s UPDATE branch,
+`FlowPosition`/`read_flow_position_row`, `recover_task_decision`,
+`run_task_op_boundary` and the `task:` blocker key. Two Task-presence branches
+for H3 beyond the decide/route fallback: `cwd` lives on `tasks.worktree` for a
+Task invocation and on the row for a saved one (`decode_flow` refuses `cwd IS
+NULL`); `RunFlowStep.task_id` doubles as the "stored at claim" flag in
+`record_row`. Verdict: proceed to H3.

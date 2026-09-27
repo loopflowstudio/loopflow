@@ -390,6 +390,8 @@ impl SqliteStore {
                 published: true,
                 cwd: cwd.into(),
                 skill: Some(position.current().step),
+                provider: None,
+                model: None,
             },
         )?;
         super::runs::select_attempt_in(
@@ -1650,6 +1652,8 @@ mod durable_store_tests {
             published: false,
             cwd: "/repo".into(),
             skill: Some("implement".into()),
+            provider: None,
+            model: None,
         };
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
@@ -1699,8 +1703,10 @@ mod durable_store_tests {
             tx.commit().unwrap();
             let read = conn
                 .query_row(
-                    "SELECT id,session_id,invocation_id,task_id,wave_id,work_source,
-                created_at,published,cwd,skill,node,iterations,attempt FROM runs WHERE id=?1",
+                    &format!(
+                        "SELECT {} FROM runs WHERE id=?1",
+                        crate::store::sqlite::runs::RUN_COLUMNS
+                    ),
                     [saved.id.as_str()],
                     |row| read_run(row, 0),
                 )
@@ -1823,6 +1829,8 @@ mod durable_store_tests {
                 published: false,
                 cwd: "/repo".into(),
                 skill: None,
+                provider: None,
+                model: None,
             },
         )
         .unwrap();
@@ -1881,6 +1889,8 @@ mod durable_store_tests {
             published: false,
             cwd: "/repo".into(),
             skill: None,
+            provider: None,
+            model: None,
         };
         let before = crate::store::rows::now_unix();
         let tx = conn
@@ -2274,8 +2284,6 @@ mod durable_store_tests {
         assert_eq!(completed.ready_summary, session.ready_summary);
         assert_eq!(store.session_runs(&session_id).unwrap(), history);
         assert!(store.open_review_sessions().unwrap().is_empty());
-        let known_runs = store.session_run_ids().unwrap();
-        assert!(runs.iter().all(|id| known_runs.contains(id)));
         let events = store.task_events_after(&task_id, 0).unwrap();
         assert_eq!(
             events

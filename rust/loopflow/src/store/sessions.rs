@@ -38,12 +38,25 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session_for_run(&run_id)).await
     }
 
-    pub async fn open_review_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
-        run_sqlite(&self.sqlite, |store| store.open_review_sessions()).await
+    pub async fn open_interactive_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
+        run_sqlite(&self.sqlite, |store| store.open_interactive_sessions()).await
     }
 
-    pub async fn session_run_ids(&self) -> StoreResult<Vec<RunId>> {
-        run_sqlite(&self.sqlite, |store| store.session_run_ids()).await
+    pub async fn complete_interactive_session(
+        &self,
+        id: &str,
+        expected_run: &RunId,
+    ) -> StoreResult<()> {
+        let id = id.to_string();
+        let expected_run = expected_run.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_interactive_session(&id, &expected_run)
+        })
+        .await
+    }
+
+    pub async fn open_review_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
+        run_sqlite(&self.sqlite, |store| store.open_review_sessions()).await
     }
 
     pub async fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {

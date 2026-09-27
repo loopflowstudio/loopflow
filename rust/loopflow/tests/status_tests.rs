@@ -771,6 +771,43 @@ fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
 }
 
 #[test]
+fn reserved_run_starts_task_in_status_and_roadmap_without_publication() {
+    let home = tempfile::tempdir().unwrap();
+    seed_persisted_merge_request_without_copy(home.path());
+    let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    connection
+        .execute("DELETE FROM task_prs WHERE task_id=?1", [PERSISTED_TASK_ID])
+        .unwrap();
+
+    for assigned in [false, true] {
+        if assigned {
+            connection
+                .execute(
+                    "INSERT INTO runs(id,task_id,wave_id,created_at,cwd,published)
+                     SELECT ?1,t.id,p.wave_id,1,t.worktree,0
+                     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?2",
+                    rusqlite::params![loopflow::durable::RunId::new().as_str(), PERSISTED_TASK_ID],
+                )
+                .unwrap();
+        }
+        let status = status_json(home.path(), &["product"], None);
+        let roadmap = roadmap_json(home.path(), "product");
+        for task in [
+            &status["tasks"]["items"][0],
+            &roadmap["waves"][0]["tasks"]["items"][0],
+        ] {
+            assert_eq!(task["task"]["identifier"], "PRD-52");
+            assert_eq!(task["runtime"]["started"], assigned);
+        }
+    }
+    assert!(
+        !home.path().join("runs").exists(),
+        "no provider was launched"
+    );
+}
+
+#[test]
 fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
     for missing_provider_task in [false, true] {
         let home = tempfile::tempdir().expect("tempdir");

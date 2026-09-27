@@ -1,19 +1,41 @@
 # Conducting
 
-Running one agent is a conversation. Running many is conducting: knowing what
-is playing, what is stuck, what needs you, what it cost — and redirecting a
-performer without stopping the piece.
+Read this when work is running and you want to know where it stands.
+
+Working with one AI agent is a conversation. Working with several means
+keeping track: what is moving, what is stuck, what is waiting on you, and
+what it cost. Conducting is how you see all of that and step in without
+stopping everything else.
+
+## In the Mac app
+
+The app opens on your projects, their Waves, and a roadmap of every task on
+this computer. It shows the same information the commands on this page
+print, and keeps no separate copy.
+
+- **Wave chat**: the ongoing conversation with a Wave. Send a message, or
+  interrupt it.
+- **Roadmap**: every task across every Wave, each marked waiting, blocked,
+  clear, or unknown.
+- **Sessions**: the conversations that are open, including the ones waiting
+  for your review. Each one is a terminal inside the app, where you talk to
+  the AI directly.
+- **Task workspace**: the files a task changed, and what changed in each.
+- **Telemetry**: what the work cost, how the project grew, and whether
+  Loopflow's own records are healthy.
+
+## From the command line
 
 ```bash
-lf roadmap                 # planning across this repository
-lf roadmap --all           # every repository on this machine
-lf top                     # processes moving right now
-lf runs --wave infra       # append-only launch evidence on this Home
-lf ssh <home-id> roadmap   # ask another Home the same question
+lf roadmap                 # tasks in this project, sorted by what they need
+lf roadmap --all           # every project on this computer
+lf top                     # what is running right now
+lf runs --wave infra       # the record of each time the AI was started
+lf ssh <home-id> roadmap   # ask another computer the same question
 ```
 
-There is no hidden global conductor. Each command reads the machine where it
-executes; `lf ssh` is the explicit remote boundary.
+Each command reads the computer it runs on. Nothing watches every machine
+at once; `lf ssh` is how you ask a different one.
 
 ## See everything
 
@@ -124,20 +146,6 @@ provider-native conversation for the authored `lf --as task:<id>` Skill. The
 agent may mark the session ready, but that does not remove it or advance
 anything. Approve advances the playhead; Iterate returns to autonomous
 work with new direction; closing or provider exit never advances it.
-
-## The Mac app
-
-The Loopflow app is the podium. It opens on a repository rail, the wave list,
-and the machine-wide roadmap, and it is a pure client over `lf --json` — no
-second database, no machine-wide service. What the CLI reads, it renders:
-
-- **Wave Chat** — the persistent conversation, with ordinary messages and an explicit interrupt.
-- **Roadmap** — every Task across every wave with lifecycle controls and one
-  condition: waiting, blocked, clear, or unknown.
-- **Sessions** — interactive Runs, Asks, and Task FlowSteps with their exact
-  provider-native conversation and valid resolution actions.
-- **Task workspace** — changed files, per-file patches, and local inspection tools.
-- **Telemetry** — token spend, codebase growth, registry health.
 
 ## Inspect and resume
 

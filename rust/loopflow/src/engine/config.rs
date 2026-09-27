@@ -10,6 +10,8 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(test))]
+use crate::engine::agent::check_cli_available;
 use crate::engine::error::LoadError;
 
 /// Request participant carried across foreground launches, including SSH.
@@ -62,9 +64,21 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Agent used when neither the caller, config, nor skill chooses one.
+/// Agents Loopflow can drive, in the order it prefers them.
+const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
+
+/// Agent used when neither the caller, config, nor skill chooses one: the
+/// first known agent installed on this machine.
 pub fn default_agent() -> &'static str {
-    "codex"
+    #[cfg(test)]
+    let is_installed = |agent: &str| agent == KNOWN_AGENTS[0];
+    #[cfg(not(test))]
+    let is_installed = check_cli_available;
+    installed_agent(is_installed).unwrap_or(KNOWN_AGENTS[0])
+}
+
+fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
+    KNOWN_AGENTS.into_iter().find(|agent| is_installed(agent))
 }
 
 /// Keys that combine lists from global + repo config.
@@ -476,6 +490,13 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_agent_is_the_one_installed() {
+        assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
+        assert_eq!(installed_agent(|_| true), Some("codex"));
+        assert_eq!(installed_agent(|_| false), None);
+    }
 
     // ==========================================================================
     // parse_agent tests

@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::engine::{check_cli_available, codex_permission_args, workspace_add_dirs, LaunchTarget};
+use crate::engine::{
+    check_cli_available, codex_permission_args, missing_agent_message, workspace_add_dirs,
+    LaunchTarget,
+};
 use crate::provider_auth::Provider;
 use crate::run_record::{ProviderClientRef, ProviderClientStopReason};
 
@@ -512,10 +515,7 @@ fn session_command_status_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
 ) -> Result<SessionCommandOutcome> {
     if !check_cli_available(&command.program) {
-        return Err(anyhow!(
-            "'{}' CLI not found. Install it and rerun `lf init`.",
-            command.program
-        ));
+        return Err(anyhow!(missing_agent_message(&command.program)));
     }
 
     let provider = match command.program.as_str() {

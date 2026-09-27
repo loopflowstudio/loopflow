@@ -91,8 +91,9 @@ team-wide repo configuration merely to mirror `command -v` on this machine.
 Resolve repo agent configuration conservatively:
 
 - Preserve a valid existing `agent` override.
-- Codex is the implicit default. An absent `agent` is valid even when this Home
-  lacks Codex; report the local mismatch instead of changing repo policy.
+- An absent `agent` is valid: Loopflow then uses the first of Codex, Claude,
+  and OpenCode installed on this Home. Do not write `agent` to work around a
+  missing harness.
 - Change `agent` or `supported_harnesses` only when the user explicitly wants
   a team-wide policy. Ask whether the choice is repo-wide or Home-local before
   writing it.

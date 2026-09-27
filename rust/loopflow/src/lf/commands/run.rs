@@ -1,8 +1,8 @@
 use crate::engine::{
-    check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
-    write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
-    LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
-    StreamFormat, Surface,
+    check_cli_available, launch_agent, load_config_or_default, missing_agent_message, parse_agent,
+    prepare_launch_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
+    ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents,
+    Skill, SkillSyncOptions, StreamFormat, Surface,
 };
 use crate::lf::commands::util::launch_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -647,10 +647,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
-        return Err(anyhow!(
-            "'{}' CLI not found. Install it and rerun `lf init`.",
-            built.harness
-        ));
+        return Err(anyhow!(missing_agent_message(&built.harness)));
     }
     debug!(
         elapsed_ms = cli_check_start.elapsed().as_millis(),

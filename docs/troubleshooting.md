@@ -161,15 +161,18 @@ See [Configuration](config.md) for context options.
 
 ## Claude Code not found
 
-**Symptom:** `lf` fails with "claude not found" or similar.
+**Symptom:** `lf` fails with "'claude' is not installed" or similar.
 
-Run the setup wizard:
+Loopflow drives an AI coding tool and needs one installed. The error names
+the install command. For Claude Code:
 
 ```bash
-lf init
+npm install -g @anthropic-ai/claude-code
+lf auth claude
 ```
 
-If an agent CLI is missing, install that vendor's CLI and rerun `lf init`.
+With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and
+OpenCode it finds, so installing any one of them is enough.
 
 ## See Also
 

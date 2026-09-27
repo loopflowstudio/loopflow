@@ -1609,6 +1609,19 @@ mod durable_store_tests {
             assert!(history.iter().any(|saved| &saved.id == run));
         }
 
+        // Checkpointing execution cannot replace or erase conversation state.
+        for summary in [Some("checkpoint feedback".to_string()), None] {
+            let mut checkpoint = position.clone();
+            checkpoint.session_run_id = Some(runs[0].clone());
+            checkpoint.ready_summary = summary;
+            position = store.set_flow_position(&task_id, &checkpoint).unwrap();
+            assert_eq!(
+                store.session(&session_id).unwrap(),
+                Some((session.clone(), current.clone()))
+            );
+            assert_eq!(store.session_runs(&session_id).unwrap(), history);
+        }
+
         // An unrelated malformed autonomous capture remains an identified error,
         // while direct Session discovery does not deserialize that invocation.
         let broken = TaskId::new();

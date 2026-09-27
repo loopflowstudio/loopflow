@@ -6,20 +6,6 @@ use crate::session::{Run, Session, TitleSource};
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn position_runs(
-        &self,
-        invocation: &str,
-        node: u32,
-        iterations: &[Vec<u32>],
-    ) -> StoreResult<Vec<Run>> {
-        let invocation = invocation.to_owned();
-        let iterations = iterations.to_vec();
-        run_sqlite(&self.sqlite, move |store| {
-            store.position_runs(&invocation, node, &iterations)
-        })
-        .await
-    }
-
     pub async fn reserve_review_run(
         &self,
         expected: &FlowPosition,

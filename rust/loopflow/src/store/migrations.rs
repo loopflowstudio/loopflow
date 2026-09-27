@@ -5368,6 +5368,143 @@ mod tests {
     }
 
     #[test]
+    fn invocation_attempt_schema_preserves_existing_review_history() {
+        let conn = open();
+        let name = "record_invocation_attempts";
+        apply_before_current_draft(&conn, name);
+        if !_draft_is_canonical(name) {
+            for dependency in [
+                "drop_task_flow_step_projection",
+                "retain_flow_invocations",
+                "own_sessions_and_runs",
+                "record_run_work_source",
+                "record_task_first_run",
+            ] {
+                if !_draft_is_canonical(dependency) {
+                    conn.execute_batch(&current_draft_sql(dependency)).unwrap();
+                }
+            }
+        }
+        let capture =
+            crate::durable::test_flow_invocation("saved", 0, "review", Some("review"), true);
+        let cursor = serde_json::to_string(&crate::engine::ExecutionCursor::default()).unwrap();
+        conn.execute("INSERT INTO flow_invocations(id,invocation_json,review_json,step_index,iteration,position_version,worker_generation,updated_at,state)
+            VALUES(?1,?2,?3,0,0,3,0,1,'current')", rusqlite::params![capture.id, serde_json::to_string(&capture).unwrap(), cursor]).unwrap();
+        let first = crate::durable::RunId::new();
+        let second = crate::durable::RunId::new();
+        conn.execute_batch("BEGIN").unwrap();
+        conn.execute(
+            "INSERT INTO sessions(id,current_run_id,title,title_source,ready_summary,created_at)
+            VALUES('conversation',?1,'Human title','human','retained feedback',1)",
+            [second.as_str()],
+        )
+        .unwrap();
+        for (run, created) in [(&first, 1), (&second, 2)] {
+            conn.execute(
+                "INSERT INTO runs(id,session_id,invocation_id,created_at,cwd,skill,published)
+                VALUES(?1,'conversation',?2,?3,'/repo','review',1)",
+                rusqlite::params![run.as_str(), capture.id, created],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "UPDATE flow_invocations SET pending_session_id='conversation' WHERE id=?1",
+            [&capture.id],
+        )
+        .unwrap();
+        conn.execute_batch("COMMIT").unwrap();
+        let before: String = conn
+            .query_row("SELECT invocation_json FROM flow_invocations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let saved: (String, String, String) = conn
+            .query_row(
+                "SELECT invocation_json,review_json,current_run_id FROM flow_invocations",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(saved, (before, cursor, second.to_string()));
+        let history = conn
+            .prepare("SELECT id,node,iterations,attempt FROM runs ORDER BY created_at")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<u32>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<u32>>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            history,
+            vec![
+                (first.to_string(), None, None, None),
+                (second.to_string(), None, None, None)
+            ]
+        );
+        let conversation: (String, String, String) = conn
+            .query_row(
+                "SELECT current_run_id,title,ready_summary FROM sessions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            conversation,
+            (
+                second.to_string(),
+                "Human title".into(),
+                "retained feedback".into()
+            )
+        );
+        let foreign = crate::durable::test_flow_invocation("other", 0, "work", None, false);
+        assert!(conn.execute(
+            "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state,current_run_id)
+             VALUES(?1,?2,0,0,1,0,1,'current',?3)",
+            rusqlite::params![foreign.id, serde_json::to_string(&foreign).unwrap(), second.as_str()],
+        ).is_err());
+        conn.execute(
+            "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
+             VALUES(?1,?2,0,0,1,0,1,'current')",
+            rusqlite::params![foreign.id, serde_json::to_string(&foreign).unwrap()],
+        ).unwrap();
+        assert!(conn
+            .execute(
+                "UPDATE flow_invocations SET current_run_id=?2 WHERE id=?1",
+                rusqlite::params![foreign.id, second.as_str()],
+            )
+            .is_err());
+        // Position identity intentionally permits multiple Runs; only Run identity is unique.
+        for attempt in 1..=2 {
+            conn.execute("INSERT INTO runs(id,invocation_id,node,iterations,attempt,created_at,cwd,published)
+                VALUES(?1,?2,0,'[[]]',?3,3,'/repo',0)", rusqlite::params![crate::durable::RunId::new().as_str(),capture.id,attempt]).unwrap();
+        }
+        assert!(conn
+            .execute("UPDATE runs SET node=5 WHERE id=?1", [first.as_str()])
+            .is_err());
+        assert!(conn
+            .execute(
+                "INSERT INTO runs(id,invocation_id,node,created_at,cwd,published)
+            VALUES('partial',?1,0,3,'/repo',0)",
+                [&capture.id]
+            )
+            .is_err());
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn session_ownership_import_preserves_nested_reviews_and_nullable_parent_constraints() {
         let conn = open();
         let name = "own_sessions_and_runs";

@@ -246,3 +246,40 @@ The remaining launch paths still write Started events. Keep those readers and
 writers until the general Run conversion, while counting reservations from the
 new column now. This intermediate scope is not a column-only reader acceptance
 claim and cannot be published independently.
+
+## Run attempts at one position (2026-09-26)
+
+Jack's comment `a98697b2-240c-4b88-8c94-4af7209068b8` requires 0..n Runs
+per `(invocation, node, iteration tuple)` with one current attempt, for both
+headless and human steps. A successful current attempt alone advances; prior
+failed/interrupted attempts remain history. Step usage/duration aggregates all
+attempts, while a running status line uses the current one. Public DTOs and
+node/Session detail must expose that multiplicity. The two kickoff IDs
+`run_d4b210c9` (stalled/interrupted) and `run_3776027a` are supplied evidence of
+one position with two attempts, not complete IDs guessed for import.
+
+Executive sequencing: establish the shared Run/current-attempt boundary before
+moving the ordinary Flow file owner. The current slice adds Task headless Run
+recording through the same constructor as reviews, ordered position history and
+one pointer-selection helper. It does not complete the previously requested
+common Task/taskless driver. Existing historical rows retain unknown location;
+no cursor-based guess is made during schema migration. The offline import must
+map exact attempts before activating readers over real Homes. No intermediate
+publication or live Home mutation is selected.
+
+## Concurrent first-Home read observation (2026-09-26)
+
+On the disposable canonical attempt-history binary, `usage --json` failed with
+`no such table: run_events` while `doctor --json` initialized the same empty Home
+concurrently. Doctor succeeded and reported `0.12.23.001_release`; usage then
+passed. Usage on a separate pristine Home also passed. All commands cleared
+inherited LF authority and used private paths beneath `.lf/tmp/loo298-attempts/`.
+No installed store was modified.
+
+Source observation: `WorkCatalog::load_at` checks file existence, then
+`SqliteStore::open_run_ledger_read_only` validates `run_events`. Schema creation
+opens the SQLite file before migrations finish. This supports an initialization
+publication race, not loss of a table in the new draft. The concurrent failing
+log is retained; the sequential passes do not repair or disprove it. The complete
+reader/cutover work must account for a newly visible but uninitialized store.
+Do not add a missing-table-as-empty fallback that could conceal failed migration.

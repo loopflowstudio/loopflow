@@ -28,6 +28,53 @@ pub struct QueuedInvocation {
 }
 
 impl QueuedInvocation {
+    /// Local preorder index in the captured graph, including every XOR alternative.
+    pub(crate) fn node_id(&self, cursor: &crate::engine::ExecutionCursor) -> Result<u32> {
+        fn count(steps: &[ConcreteStep]) -> usize {
+            steps
+                .iter()
+                .map(|step| {
+                    1 + match step {
+                        ConcreteStep::Xor(branch) => {
+                            branch.paths.values().map(|path| count(&path.steps)).sum()
+                        }
+                        _ => 0,
+                    }
+                })
+                .sum()
+        }
+        fn locate(
+            steps: &[ConcreteStep],
+            cursor: &crate::engine::ExecutionCursor,
+        ) -> Result<usize> {
+            let step = steps
+                .get(cursor.index)
+                .ok_or_else(|| anyhow!("cursor has no captured node"))?;
+            let mut index = count(&steps[..cursor.index]);
+            if let Some(child) = cursor.child.as_deref() {
+                let (
+                    ConcreteStep::Xor(branch),
+                    crate::engine::NestedCursor::Xor { selected, cursor },
+                ) = (step, child)
+                else {
+                    return Err(anyhow!("cursor child does not belong to a captured XOR"));
+                };
+                let mut paths: Vec<_> = branch.paths.iter().collect();
+                paths.sort_by_key(|(name, _)| *name);
+                index += 1;
+                for (name, path) in paths {
+                    if name == selected {
+                        return Ok(index + locate(&path.steps, cursor)?);
+                    }
+                    index += count(&path.steps);
+                }
+                return Err(anyhow!("cursor selects an uncaptured XOR alternative"));
+            }
+            Ok(index)
+        }
+        Ok(u32::try_from(locate(&self.steps, cursor)?)?)
+    }
+
     pub fn new(flow: impl Into<String>, steps: Vec<ConcreteStep>) -> Result<Self> {
         let flow = flow.into();
         if steps.is_empty() {

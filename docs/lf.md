@@ -272,8 +272,12 @@ output is a terminal (TTY); automated Flow steps default to headless. Use a
 ## Model Flags
 
 A harness is the coding tool, such as Claude Code or Codex; a model is the AI
-it uses. `harness:model` selects both. Without an override, skill defaults
-apply, then Loopflow uses the first installed tool: Codex, Claude, OpenCode.
+it uses. `harness:model` selects both. For direct skill launches, selection
+follows this order: CLI `-m`, the skill's `agent`, saved `agent` configuration,
+the skill's `default_agent`, then the first installed tool: Codex, Claude,
+OpenCode. Saved configuration uses the repository value before the personal
+value. Managed Tasks use their repository's resolved agent configuration;
+see [Task permissions](config.md#yolo).
 
 | Flag | Description |
 |------|-------------|
@@ -853,7 +857,7 @@ session.
 Without an account flag, managed Claude and Codex launches use the repository
 route, then the default route. If neither exists, all automatic managed logins
 are eligible and Loopflow skips known cooling or limited accounts. If no
-managed login exists, the provider CLI uses its ambient default credentials.
+managed login exists, the provider CLI uses its existing default credentials.
 
 `lf usage` scans the same Home-local bundles as `lf runs`, ordered newest first.
 `--days` filters by Run start time and defaults to 30; zero selects all recorded

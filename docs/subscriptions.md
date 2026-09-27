@@ -41,7 +41,7 @@ Claude or Codex account.
 lf auth connect claude personal@example.com --chrome-profile personal@example.com
 lf auth connect codex work@example.com --chrome-profile work@example.com
 
-lf auth import claude --email personal@example.com  # adopt the ambient Claude login
+lf auth import claude --email personal@example.com  # adopt the existing default Claude login
 lf auth disconnect claude --email personal@
 ```
 
@@ -64,7 +64,7 @@ that proves access to the account. Connecting records and verifies it:
 If verification fails, the staging login is discarded and an existing identity
 is left unchanged. `lf auth import claude --email <email>` is the explicit
 exception: it copies
-the ambient Claude login from `~/.claude` or the macOS Keychain into a new
+the existing default Claude login from `~/.claude` or the macOS Keychain into a new
 isolated account home, then performs the same login verification.
 
 The provider home holds the provider CLI's authentication and session state.

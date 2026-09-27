@@ -53,7 +53,7 @@ come first, followed by the engineering terms used in commands and explanations.
 | **Access profile** | A saved choice of browser profile used to sign in; it does not choose the account that spends usage. |
 | **Pin** | A recorded association that stays fixed, such as the account owning a conversation or the Flow definition used by an invocation. |
 | **Disposition, rotation** | Disposition says what happens after merge; rotation moves a Task to its next PR or a Wave to its next chapter. |
-| **Slice, boundary** | A slice is a coherent part of work; an execution boundary is the point where a saved step starts, stops, or waits. |
+| **Slice, Flow boundary** | A slice is a coherent part of work; a Flow boundary is the point where a saved step starts, stops, or waits. Security docs also use boundary for limits on a program's access; see below. |
 
 ## Borrowed from software engineering
 
@@ -84,6 +84,8 @@ come first, followed by the engineering terms used in commands and explanations.
 | **IDE** | An app for editing and running code; Loopflow’s `--ide` selects the coding tool’s app. |
 | **Interactive, headless, batch** | Interactive work accepts live conversation; headless or batch work runs without someone typing replies. |
 | **Argument, flag, argv** | An argument is a value passed to a command, a flag is a named option, and argv is the list of command arguments. |
+| **Namespace** | A prefix grouping names, such as `team/` in `team/review`. |
+| **Canonical** | The designated source or name to use when several copies or forms exist. |
 | **Standard input/output, stdin/stdout, pipe** | Standard input and output are a program’s incoming and outgoing text; a pipe (`\|`) sends one command’s output to another’s input. |
 | **Environment variable, PATH** | A named setting inherited by a program at launch; PATH lists directories the shell searches for commands. |
 | **Glob** | A filename pattern such as `*.md` that selects matching paths. |
@@ -96,6 +98,7 @@ come first, followed by the engineering terms used in commands and explanations.
 | **MCP, plugin** | MCP connects AI tools through a common protocol; a plugin is an installed extension that may provide tools or instructions. |
 | **Authentication, authorization, auth** | Authentication proves who is signing in; authorization determines permitted actions; auth can refer to either. |
 | **Credential, secret** | A credential proves access, such as a password or token; a secret is sensitive information that must not be exposed. |
+| **Capability, grant** | In access control, a capability permits a specific operation and a grant records the access allowed; elsewhere capability can simply mean a supported feature. |
 | **Access token, refresh token, OAuth** | An access token permits requests, a refresh token can obtain new access tokens, and OAuth connects accounts through an authorization flow. |
 | **Browser profile** | A browser’s separate set of logins, cookies, and settings. |
 | **Keychain, secret service** | Operating-system facilities for storing credentials with restricted access. |

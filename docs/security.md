@@ -265,13 +265,14 @@ service sends when something changes. Linear and GitHub webhook routes check
 signatures to verify who sent them. `/health` and `/status` are public on the bound interface,
 so a non-loopback listener must sit behind a firewall or authenticating proxy.
 Wave start and stop require a random per-process control capability stored in
-the local endpoint record with owner-only permissions; the capability is never
+the local endpoint record with owner-only permissions. This secret authorizes
+those control requests; the capability is never
 logged or sent to agents.
 
 The detached development fallback that `lf start` launches when no lfd service
 is live is deliberately scrubbed. It can host Waves, but it does not retain
 webhook secrets from the invoking shell. Install lfd as the Home service for
-durable webhook ingress.
+continued receipt of webhook requests after the launching command exits.
 
 `lfd` keeps webhook secrets inside the Home server process. Its in-process
 `WaveHost` listeners are trusted Loopflow control code, not agents. When they

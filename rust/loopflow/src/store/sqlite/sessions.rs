@@ -140,6 +140,17 @@ impl SqliteStore {
         session_in(&conn, id)
     }
 
+    pub fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<(Session, Run)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM runs WHERE id=?1)"),
+            [run_id.as_str()],
+            read_session,
+        )
+        .optional()?
+        .transpose()
+    }
+
     pub fn open_review_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(

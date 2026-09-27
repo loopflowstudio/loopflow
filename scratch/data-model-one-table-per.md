@@ -479,47 +479,99 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-Move Task review conversations into their actual Session owner. A Session owns
-its title, saved feedback, completion and current Run; `runs.session_id` retains
-all attempts. Human-boundary creation reserves Session and Run in the invocation
-transaction. Launch publishes that exact reservation before provider start.
-Replacement appends a Run under the same Session and updates the pending attempt
-under the existing version fence. Ready requires the current published Run;
-Complete closes the Session atomically with the exact waiting boundary.
+Repair Task review publication and lookup through their existing Session owner.
+Reserved artifact publication now reconciles staged or published manifest/context
+against the exact launch inputs, retaining the first creation time and original
+bytes. A mismatch remains a named error with its input intact. Only after that
+reconciliation does the SQL reservation transaction grant launch authority;
+recorder construction and terminal-on-drop settlement begin after it succeeds.
+A rejected or interrupted SQL publication cannot falsely settle the reserved Run.
 
-Task review discovery now reads Session/current Run directly, so unrelated
-malformed autonomous captures do not prevent listing valid reviews. Exact Task
-execution reads still identify the unreadable capture. Remove the obsolete
-`human_task_flow_positions` inventory instead of maintaining a second decoder.
-Retain completed and replaced review Run identities when excluding boundary Runs
-from the remaining interactive inventory. Rename updates this Session owner.
+Exact Run IDs and manifest prefix selectors consult retained Session membership
+before independent interactive dispatch. Superseded attempts report their Session
+and current Run explicitly, including after completion; they never become a
+second conversation, rename sidecar or current actor. Current completed attempts
+report completion. The Session/history DTO and user-facing history inspection
+remain part of the complete caller cutover.
 
-This is a used Task-review ownership cut inside the required coherent cutover,
-not completion of slices 2–4 or permission to publish. Ask, interactive and
-ordinary/taskless Flow conversations still use their original owners. The current
-Run row does not yet own general provider/outcome/usage facts; bind, launch
-inference, Run readers, DTO/Swift changes and the shared taskless driver remain.
-The existing composite review identity remains stable across Run replacement;
-the final independent Session IDs and desktop import mapping remain outstanding.
+A malformed selected review capture now appears in the public inventory with its
+identified recovery error and unavailable actions. Other reviews remain listable
+and their Open preparation remains reachable. Database/I/O failures still surface;
+only invalid captured execution is represented on the affected conversation.
+Execution actions continue to validate the exact capture and retain its bytes.
+This remains an intermediate Task-review path within the unshippable coherent
+cutover; discovery still consults captures for membership/actions.
 
-The forward draft imports captured Task review boundaries, including selected
-XOR children, and keeps raw unmapped inputs under historical column names for
-the offline Home importer. No runtime fallback reads those columns. This is not
-an inventory or lossless import claim for all historical conversations. Do not
-activate these readers over an installed Home before the complete import and
-promotion boundary are implemented.
+Publication does not prove provider start or death. After SQL publication with
+no native history and no terminal outcome, Open retains the same Run and reports
+unresolved launch status. It cannot authorize a replacement from absent receipts.
+Native resume checks for recoverable provider history before stopping clients.
+This closes unsafe replacement and the pre-SQL artifact retry defect; it does
+not supply automatic recovery from uncertain launcher death or a complete durable
+Run lifecycle. Those require the remaining Run process/outcome owner conversion.
 
-Focused proof combines two replacements, title/feedback/history retention,
-stale Ready/publication/completion rejection, an unrelated malformed capture,
-and one feedback completion. A populated migration proof covers nested review
-capture, current-Run ownership and nullable Task equality. Both remain unexecuted
-while TESTING.md's resource preflight fails. An interruption after manifest
-publication but before SQL publication remains a preparation-recovery gap:
-the reservation is retained, but the immutable manifest publisher rejects its
-retry. Preserve that evidence; do not launch a second provider or claim the
-complete preparation-retry contract yet.
+Authored proofs cover partial staging, completed artifacts before SQL publication,
+SQL publication before provider start, immutable-input conflicts, duplicate SQL
+claims, two replacements, historical exact/prefix lookup and rename before/after
+completion, stale actor/Ready rejection, and public list/Open preparation beside
+malformed autonomous and review captures. They are compiled, not executed while
+the resource preflight fails. No provider startup, actual CLI dispatch, mounted
+pane or installed-Home acceptance is claimed by these fixtures.
+
+The remaining shared taskless driver, Ask/interactive owners, general Run facts,
+bind/launch/read cutover, DTO/Swift identity and caches, Chapter operation, offline
+import and real maintenance, measurements and deletion research still govern.
+No intermediate publication or new approval boundary is selected. Current-Run-only
+bind remains the recorded assumption; all eight Done When obligations remain.
 
 ## Slice ledger
+
+- 2026-09-26 final static proof for the recovery/lookup cut: `cargo fmt --all
+  --check`, isolated `cargo clippy --all-targets -- -D warnings` (25.34 seconds),
+  and working-diff whitespace pass. Clippy compiled the authored fixtures; no
+  behavioral pass is claimed. No migration/DTO bytes changed, so earlier migration
+  receipts retain their scope; Chapter architecture coverage and historical
+  branch-range whitespace remain unresolved.
+- 2026-09-26 simulated code review: fixed prefix-selector ownership bypass and
+  removed redundant final SQL lookup; moved native-history lookup before client
+  transfer so a non-resumable attempt is not stopped merely while probing Open.
+  Preserved SQL compare-and-write authority, independent historical Run identity,
+  immutable artifacts and identified corrupt-capture bytes. Remaining model
+  owners are still live dependencies and were not deleted speculatively.
+
+- 2026-09-26 recovery and lookup implementation: checkpointed the supplied concept
+  review with `lf commit` before editing. Added indexed Run → Session lookup and
+  removed open-review enumeration from exact lookup. Historical exact and prefix
+  references report retained ownership before any file-backed interactive action.
+- 2026-09-26 publication review: moved SQL publication ahead of capture/recorder
+  construction. Source review found that an earlier rejected publication would
+  drop its CaptureHandle and write a failed terminal receipt; that alternate
+  settlement is removed. Staged and published artifacts reconcile exact inputs;
+  conflicts and terminal evidence remain unchanged. Unknown post-publication
+  execution now stays unresolved, instead of being replaced from missing history.
+- 2026-09-26 availability implementation: public review rendering exposes an
+  invalid capture on its own Session and keeps neighboring conversations visible.
+  Exact action lookup continues to fail with the identified capture error.
+- 2026-09-26 resource receipt: preflight and safe recovery both fail at active
+  `main-view-task` **15.3 GiB / 12 GiB**, **97.3 GiB** free. Recovery preserved
+  the foreign active build. No behavioral or materialized migration test ran.
+  No installed Home, provider, PR, Task disposition or Flow navigation changed.
+- 2026-09-26 focused proofs authored for this cut (in addition to every earlier
+  owed command):
+
+  ```sh
+  cargo test -p loopflow --lib reserved_publication_
+  cargo test -p loopflow --lib review_publication_retry_preserves_identity_and_claims_sql_once
+  cargo test -p loopflow --lib flow_session_name_and_membership_survive_sql_run_replacement
+  cargo test -p loopflow --lib session_list_and_open_preserve_valid_reviews_beside_unreadable_captures
+  ```
+
+  The SQL-backed publication fixture uses the production capture entry and real
+  store claim, with interruption injected at the publication callback. Its Open
+  path proves retention of an uncertain attempt, not successful provider recovery.
+  The corrupt-neighbor fixture runs public list and Open preparation (`resume=false`),
+  not a native provider. Preserve those limits when the tests eventually execute.
+
 
 - 2026-09-26 Task review draft static checks: `cargo fmt --all --check`,
   `cargo clippy --all-targets -- -D warnings`, migration validation and current

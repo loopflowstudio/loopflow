@@ -19,6 +19,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await
     }
 
+    pub async fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<(Session, Run)>> {
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.session_for_run(&run_id)).await
+    }
+
     pub async fn open_review_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
         run_sqlite(&self.sqlite, |store| store.open_review_sessions()).await
     }

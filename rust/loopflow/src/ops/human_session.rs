@@ -632,7 +632,7 @@ fn session_run_id(id: &str, run: Option<&RunId>) -> Result<RunId> {
 
 /// Upgrade an old unbound boundary only through the existing opening mutation.
 /// Listing never allocates a Run or changes persisted Session state.
-async fn prepare_boundary(store: &SharedStore, id: &str) -> Result<()> {
+async fn prepare_boundary(id: &str) -> Result<()> {
     let _lock = lock_session_launch(id)?;
     if let Some(mut record) = read_ask_record(id)? {
         if record.session_run_id.is_none() {
@@ -1138,7 +1138,7 @@ pub(crate) async fn open(
                 bail!("--replace and --try apply only to interactive provider sessions");
             }
             let id = boundary_id(&target)?;
-            prepare_boundary(store, &id).await?;
+            prepare_boundary(&id).await?;
             let target = find_session(store, &id)
                 .await?
                 .ok_or_else(|| session_not_found(&id))?;

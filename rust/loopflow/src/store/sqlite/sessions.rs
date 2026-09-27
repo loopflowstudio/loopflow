@@ -272,6 +272,22 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Choose the agent of a Run that has not launched. A published Run keeps
+    /// the provider it launched with.
+    pub fn retarget_unpublished_run(
+        &self,
+        run: &RunId,
+        provider: &str,
+        model: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE runs SET provider=?2, model=?3 WHERE id=?1 AND published=0",
+            params![run.as_str(), provider, model],
+        )?;
+        Ok(())
+    }
+
     /// Assign a Task to the Session's Runs. Closed Sessions bind too.
     pub fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(Session, Run)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

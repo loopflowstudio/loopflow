@@ -46,13 +46,10 @@ pub(crate) async fn task_execution_and_flow(
         .and_then(|position| position.claim.as_ref())
         .map(|claim| task_worker_owner_evidence(&claim.owner));
     let mut snapshot = project_execution(position.as_ref(), evidence);
-    if snapshot.state == TaskExecutionState::Running {
-        if let Some(reason) = position
-            .as_ref()
-            .map(crate::ops::human_session::task_waiting_unblock)
-            .transpose()
+    if let (TaskExecutionState::Running, Some(position)) = (snapshot.state, position.as_ref()) {
+        if let Some(reason) = crate::ops::human_session::task_waiting_unblock(store, position)
+            .await
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            .flatten()
         {
             snapshot.state = TaskExecutionState::Blocked;
             snapshot.reason = reason;

@@ -740,28 +740,43 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
                 .unwrap()
                 .unwrap()
         });
-        let key = format!(
-            "task:{}:{}:{}",
-            task.task.id,
-            before.invocation.id,
-            before.cursor.boundary_key()
-        );
-        let session = format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())));
-        let record_path = home
-            .path()
-            .join("human-sessions")
-            .join(format!("{session}.json"));
-        std::fs::create_dir_all(record_path.parent().unwrap()).unwrap();
-        let mut record = serde_json::json!({
-            "id": session, "parent_run_id": run, "parent_run_dir": null,
-            "work": null, "work_selector": null, "title": "Choose a consumer",
-            "detail": "Fixture decision wait", "prompt": "Choose a consumer",
-            "skill": "unblock", "cwd": repo.path(), "model": "claude:sonnet",
-            "session_run_id": null, "ready_summary": null, "status": "waiting",
-            "retain_completed": true
-        });
-        let write = |record: &serde_json::Value| {
-            std::fs::write(&record_path, serde_json::to_vec(record).unwrap()).unwrap()
+        // The deciding Run and its recovery share one keyed unblock Session.
+        let keyed = |position: &FlowPosition| {
+            format!(
+                "ask_once_{}",
+                hex::encode(Sha256::digest(position.blocker_key().unwrap().as_bytes()))
+            )
+        };
+        let session = keyed(&before);
+        let ask_run = |session: &str, caller: RunId| loopflow::session::Run {
+            id: RunId::new(),
+            session_id: Some(session.to_string()),
+            invocation_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id: Some(task.task.id.clone()),
+            wave_id: None,
+            work_source: Some(loopflow::session::WorkSource::Inherited),
+            created_at: 1,
+            published: true,
+            cwd: repo.path().to_path_buf(),
+            skill: Some("unblock".to_string()),
+            provider: Some("claude".to_string()),
+            model: Some("sonnet".to_string()),
+            caller_run_id: Some(caller),
+            ended: None,
+        };
+        let ask_session = |run: &loopflow::session::Run| loopflow::session::Session {
+            id: run.session_id.clone().unwrap(),
+            current_run_id: run.id.clone(),
+            kind: loopflow::session::SessionKind::Ask,
+            title: "Choose a consumer".to_string(),
+            title_source: loopflow::session::TitleSource::Generated,
+            request: Some("Choose a consumer".to_string()),
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
         };
         let read = |args: &[&str]| {
             let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -778,11 +793,27 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             );
             serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
         };
-        write(&record);
         let status_args = ["task", "status", "INF-123", "--json"];
+        // A waiting Ask from an earlier Run cannot repaint this worker.
+        let stale = ask_run(&session, RunId::new());
+        runtime
+            .block_on(task.store.create_session(ask_session(&stale), stale.clone(), None))
+            .unwrap();
+        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        // The same Session on the deciding Run blocks it, in the CLI and the desktop alike.
+        let current = runtime
+            .block_on(
+                task.store
+                    .replace_session_run(&stale.id, ask_run(&session, run.clone())),
+            )
+            .unwrap();
         let status = read(&status_args);
         assert_eq!(status["execution"]["state"], "blocked");
         assert_eq!(status["execution"]["run_id"], run.as_str());
+        assert!(status["execution"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains(&session));
         let roadmap = read(&["roadmap", "--json"]);
         let snapshot = &roadmap["waves"][0]["tasks"]["items"][0];
         assert_eq!(snapshot["flow"]["record"]["execution"], "blocked");
@@ -797,8 +828,15 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             .unwrap()
             .contains("without Task resume"));
         // Completion changes only observation; it neither releases the claim nor navigates.
-        record["status"] = serde_json::json!({"completed": {"summary": "Switch the reader"}});
-        write(&record);
+        runtime
+            .block_on(
+                task.store
+                    .ready_session(&session, &current.id, "Switch the reader"),
+            )
+            .unwrap();
+        runtime
+            .block_on(task.store.complete_session(&session, &current.id))
+            .unwrap();
         assert_eq!(read(&status_args)["execution"]["state"], "running");
         assert_eq!(
             runtime
@@ -807,14 +845,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
                 .unwrap(),
             before
         );
-        // A waiting Ask from an earlier Run cannot repaint this worker.
-        record["status"] = serde_json::json!("waiting");
-        record["parent_run_id"] = serde_json::json!(RunId::new());
-        write(&record);
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
         // Nor can the same Run's Ask from another boundary or invocation.
-        std::fs::remove_file(&record_path).unwrap();
-        record["parent_run_id"] = serde_json::json!(run);
         for invocation_changed in [false, true] {
             let mut historical = before.clone();
             if invocation_changed {
@@ -822,19 +853,10 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             } else {
                 historical.cursor.iteration += 1;
             }
-            let key = format!(
-                "task:{}:{}:{}",
-                task.task.id,
-                historical.invocation.id,
-                historical.cursor.boundary_key()
-            );
-            let id = format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())));
-            record["id"] = serde_json::json!(id);
-            std::fs::write(
-                record_path.parent().unwrap().join(format!("{id}.json")),
-                serde_json::to_vec(&record).unwrap(),
-            )
-            .unwrap();
+            let other = ask_run(&keyed(&historical), run.clone());
+            runtime
+                .block_on(task.store.create_session(ask_session(&other), other.clone(), None))
+                .unwrap();
             assert_eq!(read(&status_args)["execution"]["state"], "running");
         }
         // The body is real; the five-minute observation history is simulated.

@@ -842,6 +842,14 @@ pub(crate) async fn ensure_flow_position(
 ) -> Result<FlowPosition> {
     let task = load_task(store, task_id).await?;
     if let Some(current) = store.flow_position(&task.id).await? {
+        if current
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.run_id.is_some())
+            && current.is_decision()
+        {
+            crate::ops::human_session::task_unblock(store, &task, &current).await?;
+        }
         return Ok(current);
     }
     let selected_flow = selected_flow.ok_or_else(|| {
@@ -1811,6 +1819,7 @@ mod planning_tests {
                         skill: Some("loop-decide".into()),
                         subjects: vec![],
                         flow: crate::run_record::RunFlowMembership::Independent,
+                        work: None,
                     },
                 )
                 .unwrap();
@@ -1823,7 +1832,7 @@ mod planning_tests {
                 std::env::set_var(crate::durable::RUN_ID_ENV, run.as_str());
                 std::env::set_var(crate::run_record::RUN_DIR_ENV, capture.artifact_dir());
                 let before = store.flow_position(&task.id).await.unwrap().unwrap();
-                let key = crate::ops::human_session::task_unblock_key(&before);
+                let key = crate::ops::human_session::task_unblock_key(&before).unwrap();
                 let ask = crate::ops::human_session::ask_once(
                     &store,
                     &key,
@@ -2429,6 +2438,14 @@ mod planning_tests {
 
     async fn human_task_fixture_with_database(
     ) -> (SharedStore, Task, FlowPosition, std::path::PathBuf) {
+        let database = tempfile::tempdir().unwrap().keep().join("registry.db");
+        let (store, task, position) = human_task_fixture_at(&database).await;
+        (store, task, position, database)
+    }
+
+    async fn human_task_fixture_at(
+        database: &std::path::Path,
+    ) -> (SharedStore, Task, FlowPosition) {
         let repository =
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
@@ -2538,7 +2555,7 @@ mod planning_tests {
         store.create_task(&task, &pr).await.unwrap();
         let mut flow = super::start_task_flow(&task, "task-design").unwrap();
         flow.cursor.index = 1;
-        (store, task, flow, database)
+        (store, task, flow)
     }
 
     #[tokio::test]
@@ -2915,7 +2932,7 @@ mod planning_tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // isolates review Run capture and executable resolution
     async fn task_agent_changed_during_worker_applies_to_next_review() {
-        let guard = super::TestLfBinGuard::pin();
+        let _guard = super::TestLfBinGuard::pin();
         let (store, mut task, _) = human_task_fixture().await;
         let flow = super::start_task_flow(&task, "task-design").unwrap();
         let mut flow = store.set_flow_position(&task.id, flow).await.unwrap();
@@ -2953,19 +2970,22 @@ mod planning_tests {
 
         let next = store.flow_position(&task.id).await.unwrap().unwrap();
         assert!(next.is_human());
-        let (_, manifest) = crate::run_record::resolve_manifest(
-            guard.ledger.home(),
-            next.session_run_id.as_ref().unwrap().as_str(),
-        )
-        .unwrap();
-        assert_eq!(manifest.harness, "claude");
-        assert_eq!(manifest.model.as_deref(), Some("sonnet"));
+        let (_, review) = store
+            .session(&crate::ops::human_session::flow_id(&next).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!review.published);
+        assert_eq!(
+            (review.provider.as_deref(), review.model.as_deref()),
+            (Some("claude"), Some("sonnet"))
+        );
     }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // isolates Run capture and executable resolution
     async fn task_agent_survives_refresh_and_selects_autonomous_and_human_steps() {
-        let guard = super::TestLfBinGuard::pin();
+        let _guard = super::TestLfBinGuard::pin();
         let (store, task, mut flow) = human_task_fixture().await;
         std::fs::create_dir_all(task.worktree.join(".lf")).unwrap();
         std::fs::write(task.worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
@@ -2993,22 +3013,23 @@ mod planning_tests {
             prepared.task_pr_id,
             store.active_task_pr(&task.id).await.unwrap().unwrap().id
         );
-        crate::ops::human_session::prepare_flow_run(&store, &resumed, &mut flow)
-            .await
-            .unwrap();
-        let (_, manifest) = crate::run_record::resolve_manifest(
-            guard.ledger.home(),
-            flow.session_run_id.as_ref().unwrap().as_str(),
-        )
-        .unwrap();
-        assert_eq!(manifest.harness, "claude");
-        assert_eq!(manifest.model.as_deref(), Some("sonnet"));
-
-        let old_run = flow.session_run_id.clone();
-        store
+        // Parking at the review reserves its Run; the choice lands on that row.
+        let mut flow = store
             .set_flow_position(&task.id, flow.clone())
             .await
             .unwrap();
+        let review_id = crate::ops::human_session::flow_id(&flow).unwrap();
+        let agent = crate::ops::human_session::select_review_agent(&store, &resumed, &flow)
+            .await
+            .unwrap();
+        assert_eq!(agent, "claude:sonnet");
+        let (_, review) = store.session(&review_id).await.unwrap().unwrap();
+        assert_eq!(
+            (review.provider.as_deref(), review.model.as_deref()),
+            (Some("claude"), Some("sonnet"))
+        );
+
+        // A later choice re-targets the same unlaunched Run in place.
         store
             .set_task_agent(&task.id, "codex:replacement")
             .await
@@ -3018,14 +3039,33 @@ mod planning_tests {
             .unwrap();
         let retargeted = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(retargeted.cursor, flow.cursor);
-        assert_ne!(retargeted.session_run_id, old_run);
-        let (_, manifest) = crate::run_record::resolve_manifest(
-            guard.ledger.home(),
-            retargeted.session_run_id.as_ref().unwrap().as_str(),
-        )
-        .unwrap();
-        assert_eq!(manifest.harness, "codex");
-        assert_eq!(manifest.model.as_deref(), Some("replacement"));
+        let (_, retargeted_run) = store.session(&review_id).await.unwrap().unwrap();
+        assert_eq!(retargeted_run.id, review.id);
+        assert!(!retargeted_run.published);
+        assert_eq!(
+            (
+                retargeted_run.provider.as_deref(),
+                retargeted_run.model.as_deref()
+            ),
+            (Some("codex"), Some("replacement"))
+        );
+        // A launched Run keeps the provider it launched with.
+        store
+            .sqlite
+            .publish_review_run(
+                &review_id,
+                &retargeted_run.id,
+                retargeted.version,
+                "codex",
+                Some("replacement"),
+            )
+            .unwrap();
+        store.set_task_agent(&task.id, "claude:opus").await.unwrap();
+        crate::ops::human_session::retarget_prepared_task_review(&store, &task)
+            .await
+            .unwrap();
+        let (_, published) = store.session(&review_id).await.unwrap().unwrap();
+        assert_eq!(published.model.as_deref(), Some("replacement"));
 
         // Without a Task choice, either form of captured step default beats config.
         let prepared = super::prepare_task_flow_step(&store, &task, "human-task-proof", &flow)

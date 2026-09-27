@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -298,14 +299,31 @@ pub(crate) async fn ask_once(
     skill: Option<&str>,
 ) -> Result<String> {
     active_run_manifest()?;
-    let id = format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())));
+    let id = keyed_ask_id(key)?;
+    let (session, _) = launch_keyed_ask(store, id.clone(), |id| {
+        reserve_ask(store, id, question, skill)
+    })
+    .await?;
+    if session.completed_at.is_none() {
+        report_ask_wait(&id);
+    }
+    wait_for_ask(store, &id).await
+}
+
+/// Open the keyed Session once: the first caller stores it, every caller
+/// launches it if no launcher holds it, and a completed one is returned as is.
+async fn launch_keyed_ask<F: Future<Output = Result<(Session, Run)>>>(
+    store: &SharedStore,
+    id: String,
+    reserve: impl FnOnce(String) -> F,
+) -> Result<(Session, Run)> {
     // The server holds this lock through provider publication. Wait off the
     // async runtime so concurrent callers can still finish their launches.
     let lock_id = id.clone();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
     let (session, run) = match store.session(&id).await? {
         Some(found) => found,
-        None => reserve_ask(store, id.clone(), question, skill).await?,
+        None => reserve(id.clone()).await?,
     };
     if session.completed_at.is_none()
         && run_is_prepared(&run.id)?
@@ -318,10 +336,110 @@ pub(crate) async fn ask_once(
         })?;
     }
     drop(launch_lock);
-    if session.completed_at.is_none() {
-        report_ask_wait(&id);
+    Ok((session, run))
+}
+
+fn keyed_ask_id(key: &str) -> Result<String> {
+    anyhow::ensure!(
+        !key.trim().is_empty(),
+        "Ask continuation key cannot be empty"
+    );
+    Ok(format!(
+        "ask_once_{}",
+        hex::encode(Sha256::digest(key.as_bytes()))
+    ))
+}
+
+/// The unblock Session of a Task decision that failed: the same Session the
+/// deciding Run opens with `lf flow blocked`, keyed by the position. Returns
+/// its id and, once the human completed it, the feedback.
+pub(crate) async fn task_unblock(
+    store: &SharedStore,
+    task: &Task,
+    position: &FlowPosition,
+) -> Result<(String, Option<String>)> {
+    let failure = position
+        .failure
+        .as_ref()
+        .ok_or_else(|| anyhow!("Task is not blocked"))?;
+    let failed = failure
+        .run_id
+        .clone()
+        .ok_or_else(|| anyhow!("Task blocker has no Run"))?;
+    // A replacement invocation must not acquire an obsolete unblock Session.
+    anyhow::ensure!(
+        store.flow_position(&task.id).await?.as_ref() == Some(position),
+        "Task failure changed before opening unblock"
+    );
+    let id = keyed_ask_id(&task_unblock_key(position)?)?;
+    let (session, _) = launch_keyed_ask(store, id, |id| async move {
+        let agent = crate::ops::task::resolve_task_agent(&task.worktree, task.agent.as_deref(), None);
+        let (provider, model) = crate::engine::config::parse_agent(&agent);
+        let run = Run {
+            id: failed.clone(),
+            session_id: Some(id.clone()),
+            invocation_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id: Some(task.id.clone()),
+            wave_id: Some(task.wave_id.clone()),
+            work_source: Some(WorkSource::Inherited),
+            created_at: 0,
+            published: true,
+            cwd: task.worktree.clone(),
+            skill: Some("unblock".to_string()),
+            provider: Some(provider),
+            model,
+            caller_run_id: Some(failed.clone()),
+            ended: None,
+        };
+        let request = format!(
+            "{}\n\nFailed Run: {failed}. Resolve the blocker and leave feedback for reassessment. Completion does not choose Advance or Iterate.",
+            failure.reason
+        );
+        store_ask(store, id, question_title(&failure.reason), request, run).await
+    })
+    .await?;
+    let feedback = session
+        .completed_at
+        .is_some()
+        .then_some(session.ready_summary)
+        .flatten();
+    Ok((session.id, feedback))
+}
+
+pub(crate) fn task_unblock_key(position: &FlowPosition) -> Result<String> {
+    position.blocker_key()
+}
+
+/// The unblock Session the current decision Run waits on, if one is open.
+pub(crate) async fn task_waiting_unblock(
+    store: &SharedStore,
+    position: &FlowPosition,
+) -> Result<Option<String>> {
+    if !position.is_decision() {
+        return Ok(None);
     }
-    wait_for_ask(store, &id).await
+    let Some(run) = position
+        .claim
+        .as_ref()
+        .and_then(|claim| claim.worker_run_id.as_ref())
+    else {
+        return Ok(None);
+    };
+    let Some((session, ask)) = store
+        .session(&keyed_ask_id(&task_unblock_key(position)?)?)
+        .await?
+    else {
+        return Ok(None);
+    };
+    Ok((ask.caller_run_id.as_ref() == Some(run) && session.completed_at.is_none()).then(|| {
+        format!(
+            "Run {run} is waiting for unblock Session {}: {}. Complete the Session; the same decision Run receives feedback and reassesses without Task resume.",
+            session.id, session.title
+        )
+    }))
 }
 
 fn report_ask_wait(id: &str) {
@@ -352,36 +470,53 @@ async fn reserve_ask(
         Some(run) => (run.task_id, run.wave_id),
         None => (None, None),
     };
-    let run = prepare_run(
-        Run {
-            id: caller.run_id.clone(),
-            session_id: Some(id.clone()),
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
-            work_source: wave_id.as_ref().map(|_| WorkSource::Inherited),
-            task_id,
-            wave_id,
-            created_at: 0,
-            published: true,
-            cwd,
-            skill: skill.map(str::to_string),
-            provider: Some(caller.harness),
-            model: caller.model,
-            caller_run_id: Some(caller.run_id),
-            ended: None,
-        },
-        // An Ask is a human boundary requested by a Run, never a Flow step.
-        crate::run_record::RunFlowMembership::Independent,
-    )?;
+    let run = Run {
+        id: caller.run_id.clone(),
+        session_id: Some(id.clone()),
+        invocation_id: None,
+        node: None,
+        iterations: None,
+        attempt: None,
+        work_source: wave_id.as_ref().map(|_| WorkSource::Inherited),
+        task_id,
+        wave_id,
+        created_at: 0,
+        published: true,
+        cwd,
+        skill: skill.map(str::to_string),
+        provider: Some(caller.harness),
+        model: caller.model,
+        caller_run_id: Some(caller.run_id),
+        ended: None,
+    };
+    store_ask(
+        store,
+        id,
+        question_title(question),
+        question.to_string(),
+        run,
+    )
+    .await
+}
+
+/// Store an Ask's Session with its first Run prepared; `run` supplies the
+/// caller, the Work, the checkout and the agent.
+async fn store_ask(
+    store: &SharedStore,
+    id: String,
+    title: String,
+    request: String,
+    run: Run,
+) -> Result<(Session, Run)> {
+    // An Ask is a human boundary requested by a Run, never a Flow step.
+    let run = prepare_run(run, crate::run_record::RunFlowMembership::Independent)?;
     let session = Session {
         id,
         current_run_id: run.id.clone(),
         kind: crate::session::SessionKind::Ask,
-        title: question_title(question),
+        title,
         title_source: crate::session::TitleSource::Generated,
-        request: Some(question.to_string()),
+        request: Some(request),
         ready_summary: None,
         completed_at: None,
         created_at: run.created_at,
@@ -433,9 +568,51 @@ pub(crate) async fn prepare(
         bail!("session starts on its placed Home; resume the Task there");
     }
     if position.session_run_id.is_none() {
+        select_review_agent(store, task, position).await?;
         launch_flow(task, position).await?;
     }
     flow_surface(store, task, position).await
+}
+
+/// Choose the reserved review Run's agent from the Task's current choice,
+/// then the step's, then the checkout's config. A published Run keeps what
+/// it launched with; the choice is read back at launch.
+pub(crate) async fn select_review_agent(
+    store: &SharedStore,
+    task: &Task,
+    position: &FlowPosition,
+) -> Result<String> {
+    let task = store.get_task(&task.id).await?.ok_or_else(|| {
+        anyhow!(
+            "Task {} disappeared while selecting its review agent",
+            task.id
+        )
+    })?;
+    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
+    let agent = crate::ops::task::resolve_task_agent(
+        &task.worktree,
+        task.agent.as_deref(),
+        skill.as_ref().map(|step| &step.skill),
+    );
+    if let Some((_, run)) = store.session(&flow_id(position)?).await? {
+        let (provider, model) = crate::engine::config::parse_agent(&agent);
+        store
+            .retarget_unpublished_run(&run.id, &provider, model.as_deref())
+            .await?;
+    }
+    Ok(agent)
+}
+
+/// A changed Task choice applies to a review that has not launched.
+pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Task) -> Result<()> {
+    if let Some(position) = store
+        .flow_position(&task.id)
+        .await?
+        .filter(FlowPosition::is_human)
+    {
+        select_review_agent(store, task, &position).await?;
+    }
+    Ok(())
 }
 
 /// The Task whose own Flow waits at this Run's review: the Run's invocation is
@@ -756,6 +933,7 @@ async fn serve_flow_locked(
         token: Box::new(token.clone()),
     })?;
     let (position, reserved) = store.reserve_review_run(position).await?;
+    let agent = select_review_agent(&store, &task, &position).await?;
     let reservation = ReviewRunReservation {
         session_id: flow_token_id(&token),
         run_id: reserved.id.clone(),
@@ -763,15 +941,8 @@ async fn serve_flow_locked(
     };
     let mut command = tokio::process::Command::new(lf);
     command
-        .args([
-            "--tui",
-            "--as",
-            &selector,
-            "skill",
-            "--",
-            &token.skill.name,
-            &message,
-        ])
+        .args(["--tui", "--model", &agent, "--as", &selector])
+        .args(["skill", "--", &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized)
         .env(REVIEW_RUN_ENV, serde_json::to_string(&reservation)?);
@@ -1686,18 +1857,20 @@ async fn launch_ask(session: &Session, run: &Run) -> Result<()> {
         "serve-ask".to_string(),
         run.id.to_string(),
     ];
-    let caller = std::env::var(crate::durable::RUN_ID_ENV).context("read the asking Run")?;
-    let caller_dir = std::env::var(RUN_DIR_ENV).context("read the asking Run directory")?;
-    start_durable_session(
-        &ask_background_name(&session.id),
-        &run.cwd,
-        &argv,
-        &[
-            (crate::durable::RUN_ID_ENV, caller.as_str()),
-            (RUN_DIR_ENV, caller_dir.as_str()),
-        ],
-    )
-    .await
+    let caller = run
+        .caller_run_id
+        .as_ref()
+        .ok_or_else(|| anyhow!("Ask {} has no asking Run", session.id))?
+        .to_string();
+    let caller_dir =
+        crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), &caller)
+            .ok()
+            .map(|(directory, _)| directory.to_string_lossy().to_string());
+    let mut env = vec![(crate::durable::RUN_ID_ENV, caller.as_str())];
+    if let Some(directory) = &caller_dir {
+        env.push((RUN_DIR_ENV, directory.as_str()));
+    }
+    start_durable_session(&ask_background_name(&session.id), &run.cwd, &argv, &env).await
 }
 
 #[cfg(not(test))]

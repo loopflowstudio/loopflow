@@ -3197,12 +3197,9 @@ mod planning_tests {
     async fn restarting_a_human_node_reuses_the_same_task_position() {
         let (store, task, flow) = human_task_fixture().await;
         let original = park_human_task(&store, &task, &flow).await;
-        let run_id = RunId::new();
-        let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
-        position.session_run_id = Some(run_id.clone());
-        position.ready_summary = Some("ready".to_string());
-        store.set_flow_position(&task.id, position).await.unwrap();
+        ready_review(&store, &task, "ready").await;
         let persisted = store.flow_position(&task.id).await.unwrap().unwrap();
+        let run_id = persisted.session_run_id.clone().unwrap();
         let restarted_flow = super::ensure_flow_position(&store, &task.id, None)
             .await
             .unwrap();

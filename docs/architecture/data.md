@@ -92,7 +92,10 @@ Session discovery joins `sessions` to its current `runs` row without decoding
 unrelated invocations. Exact Task execution reads still validate the selected
 capture. Completion and restart close the invocation without deleting its
 capture, cursor or exact claim. Session completion and boundary settlement share
-a transaction; Run replacement preserves the Session title and saved feedback. A partial unique index selects one current invocation per
+a transaction; Run replacement preserves the Session title and saved feedback.
+Cursor checkpoints retain an existing Session unchanged; reservation, publication
+and Ready own updates to its current Run and feedback.
+A partial unique index selects one current invocation per
 Task. Run reservation and publication compare invocation identity, version and
 current Run; Ready rejects a superseded Run. Chapter
 retirement retains evidence from earlier invocations, while only the current

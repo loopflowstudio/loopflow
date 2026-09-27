@@ -96,6 +96,8 @@ Draft `own_flow_launch` (depends on `point_task_at_invocation`): `cwd`, `message
   `failure_json` and `current_run_id` under the version fence.
 - `lf flow resume` and `launch_driver` read the row. `driver.lock` stays.
 - Refuse to start a Flow when the store cannot be written (decision 2).
+- From the H1 review: `human_session::bind` prints the `Binding … Permanent.`
+  line after the store write succeeds, so a refused bind prints only its refusal.
 - Delete: `FlowRun`, `Boundary`, `flow_run::{read,write,update,create,
   checkpoint,capture_membership,bind_run,record_decision,record_route,
   require_active,recover,retry,begin_boundary,finish_boundary}`, `position.json`,
@@ -120,6 +122,10 @@ launches; `lf flow resume --retry` after a failed step.
   `chapter_task_evidence` drop the `worker_generation>0` clause; the
   `task_chapter_started` trigger and Started event go once `chat/turns.rs`
   renders "Task started" from `tasks.started_at`.
+- `lf task run X --flow F` moves the pointer: `ensure_flow_position` today
+  returns the existing Flow and ignores `--flow`. Selecting a different Flow
+  closes the current tree as `replaced` and points the Task at the new
+  invocation in one transaction (H1 review, Done when 4).
 - `record_flow_verdict(task_id, …)` and `record_flow_route(task_id, …)` become
   the H2 invocation-keyed functions; `ops/task::task_verdict` resolves the
   Task's pointer then calls them.
@@ -187,6 +193,12 @@ once through the mapping; the DTO fixtures round-trip in Rust and Swift.
    the proof commands pass once at the end.
 8. Net production lines for the cut are reported per file, before the first
    test module, against `e7f3e22fd`.
+
+## Open for Jack, not blocking
+
+Whether `lf session bind` may assign a whole taskless invocation (its row and
+every Run) to a Task. Today the strict triggers make it unspellable; the
+refusal reads "Run and Invocation nullable Tasks disagree". H1 review.
 
 ## Forbidden
 

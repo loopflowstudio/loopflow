@@ -20,7 +20,6 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1576,13 +1575,12 @@ fn read_home_context(
 }
 
 fn app_executable_paths(
-    selection: &crate::machine_install::InstallSelection,
+    selection: Option<&crate::machine_install::InstallSelection>,
     app_target: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut paths = selection
-        .artifact_set
-        .artifacts
-        .iter()
+        .into_iter()
+        .flat_map(|selection| &selection.artifact_set.artifacts)
         .filter(|artifact| {
             matches!(
                 artifact.role,
@@ -1690,11 +1688,6 @@ fn quiesce_app_processes(paths: &[PathBuf]) -> Result<()> {
     if paths.is_empty() {
         return Ok(());
     }
-    let _ = Command::new("/usr/bin/osascript")
-        .args(["-e", "tell application id \"com.loopflow.mac\" to quit"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
     let deadline = Instant::now() + Duration::from_secs(10);
     let force_at = Instant::now() + Duration::from_secs(5);
     loop {
@@ -1741,20 +1734,20 @@ fn quiesce_switch_app(
     root: &Path,
     receipt: &mut crate::machine_install::SwitchReceipt,
 ) -> Result<()> {
-    let paths = receipt
-        .prior
-        .as_ref()
-        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
-        .unwrap_or_default();
-    receipt.app_was_running = !running_app_processes(&paths)?.is_empty();
+    let paths = app_executable_paths(receipt.prior.as_ref(), receipt.activation.app.as_deref());
+    // Helpers alone do not mean a window was open. Preserve an earlier
+    // observation when recovering after the app has already stopped.
+    receipt.app_was_running |= running_app_processes(&paths)?
+        .iter()
+        .any(|(_, path)| path.file_name().is_some_and(|name| name == "Loopflow"));
     crate::machine_install::write_switch(root, receipt)?;
     quiesce_app_processes(&paths)
 }
 
-#[cfg(target_os = "macos")]
-fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+#[cfg(any(target_os = "macos", test))]
+fn app_to_resume(receipt: &crate::machine_install::SwitchReceipt) -> Result<Option<&Path>> {
     if !receipt.app_was_running {
-        return Ok(());
+        return Ok(None);
     }
     let app = receipt
         .activation
@@ -1764,9 +1757,19 @@ fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<
     let selection = if receipt.target_store_advance_started {
         &receipt.target
     } else {
-        receipt.prior.as_ref().context("no prior app to resume")?
+        // Before a first install advances, the copied app is still in place.
+        // Its bytes must match the retained candidate before reopening it.
+        receipt.prior.as_ref().unwrap_or(&receipt.target)
     };
     verify_selected_app_bundle(app, &selection.artifact_set)?;
+    Ok(Some(app))
+}
+
+#[cfg(target_os = "macos")]
+fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+    let Some(app) = app_to_resume(receipt)? else {
+        return Ok(());
+    };
     let status = Command::new("/usr/bin/open")
         .args(["-g"])
         .arg(app)
@@ -1779,7 +1782,7 @@ fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if !running_app_processes(&expected)?.is_empty() {
-            verify_selected_app_bundle(app, &selection.artifact_set)?;
+            app_to_resume(receipt)?;
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -3239,15 +3242,8 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
             | crate::machine_install::SwitchPhase::Quiesced
             | crate::machine_install::SwitchPhase::Planned
     );
-    let mut paths = receipt
-        .prior
-        .as_ref()
-        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
-        .unwrap_or_default();
-    paths.extend(app_executable_paths(
-        &receipt.target,
-        receipt.activation.app.as_deref(),
-    ));
+    let mut paths = app_executable_paths(receipt.prior.as_ref(), receipt.activation.app.as_deref());
+    paths.extend(app_executable_paths(Some(&receipt.target), None));
     paths.sort();
     paths.dedup();
     quiesce_app_processes(&paths)?;
@@ -3526,6 +3522,25 @@ pub fn promote(
     let current = fs::canonicalize(
         std::env::current_exe().context("resolve running promotion coordinator")?,
     )?;
+    // A published helper invoked from the app must leave the bundle before
+    // quiescing its processes or replacing its files. Keep the same PID and
+    // invocation, now backed by retained bytes outside the activation target.
+    if !preview_only && from_build.is_none() && coordinated_build.is_none() {
+        let in_bundle = [artifacts.app_source, artifacts.app_target]
+            .into_iter()
+            .flatten()
+            .map(crate::store::canonicalize_with_missing_tail)
+            .collect::<std::io::Result<Vec<_>>>()?
+            .iter()
+            .any(|bundle| current.starts_with(bundle));
+        if in_bundle {
+            let retained = stage_binary(&current, &lf_bin_dir())?;
+            let mut command = Command::new(&retained);
+            command.args(std::env::args_os().skip(1));
+            stamp_next_promote_hop(&mut command, current_promote_hop());
+            return Err(command.exec()).context("continue promotion outside the app bundle");
+        }
+    }
     if let (Some(from_build), Some(coordinated_build)) = (from_build, coordinated_build) {
         let from_build = fs::canonicalize(from_build)
             .with_context(|| format!("resolve promotion build {}", from_build.display()))?;
@@ -3761,7 +3776,7 @@ mod hop_guard_tests {
 
 #[cfg(test)]
 mod artifact_tests {
-    use super::{commit_cli_symlink, copy_tree, stage_binary, tree_digest};
+    use super::{commit_cli_symlink, copy_tree, stage_app_copy, stage_binary, tree_digest};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
@@ -3815,5 +3830,260 @@ mod artifact_tests {
                 & 0o777,
             0o755
         );
+    }
+
+    #[test]
+    fn staging_a_copied_app_at_its_own_destination_preserves_the_original() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Loopflow.app");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::write(app.join("Contents/MacOS/Loopflow"), b"app").unwrap();
+        let original = tree_digest(&app).unwrap();
+
+        let staged = stage_app_copy(&app, &app).unwrap();
+
+        assert_ne!(staged, app);
+        assert_eq!(tree_digest(&app).unwrap(), original);
+        assert_eq!(tree_digest(&staged).unwrap(), original);
+    }
+}
+
+#[cfg(test)]
+mod app_activation_tests {
+    use std::fs;
+    use std::path::Path;
+
+    use super::{app_to_resume, copy_tree};
+    use crate::machine_install::{
+        ActivationTargets, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection,
+        InstallSource, RecoveryOwner, SwitchPhase, SwitchReceipt,
+    };
+
+    fn first_install(directory: &Path) -> SwitchReceipt {
+        let directory = directory.canonicalize().unwrap();
+        let app = directory.join("Applications/Loopflow.app");
+        let binaries = app.join("Contents/MacOS");
+        fs::create_dir_all(&binaries).unwrap();
+        for name in ["Loopflow", "lf", "lfd"] {
+            fs::copy("/bin/sleep", binaries.join(name)).unwrap();
+        }
+        fs::write(
+            app.join("Contents/version"),
+            directory.to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        let retained = directory.join("retained/Loopflow.app");
+        fs::create_dir_all(retained.parent().unwrap()).unwrap();
+        copy_tree(&app, &retained).unwrap();
+        fs::write(directory.join("cli"), b"cli").unwrap();
+        fs::write(directory.join("daemon"), b"daemon").unwrap();
+        let cli = ArtifactIdentity::capture(ArtifactRole::Cli, &directory.join("cli")).unwrap();
+        let daemon =
+            ArtifactIdentity::capture(ArtifactRole::Daemon, &directory.join("daemon")).unwrap();
+        let set = ArtifactSet {
+            id: "published-test".to_string(),
+            source: InstallSource::Published,
+            source_revision: "test-revision".to_string(),
+            source_identity: "test-identity".to_string(),
+            content_sha256: crate::machine_install::artifact_set_sha256(
+                &cli.path,
+                &daemon.path,
+                Some(&retained),
+            )
+            .unwrap(),
+            artifacts: vec![
+                cli.clone(),
+                daemon,
+                ArtifactIdentity::capture(
+                    ArtifactRole::App,
+                    &retained.join("Contents/MacOS/Loopflow"),
+                )
+                .unwrap(),
+            ],
+        };
+        SwitchReceipt {
+            schema_version: 1,
+            id: "switch-first-app".to_string(),
+            prior: None,
+            target: InstallSelection {
+                installation_id: "published-test".to_string(),
+                source: InstallSource::Published,
+                artifact_set: set.clone(),
+                store: directory.join("loopflow.db"),
+            },
+            published_fallback: None,
+            target_published_fallback: Some(set),
+            phase: SwitchPhase::Planned,
+            recovery_owner: RecoveryOwner::Coordinator,
+            target_store_advance_started: false,
+            target_store_advanced: false,
+            active_selection_committed: false,
+            coordinator: cli.clone(),
+            candidate: cli,
+            activation: ActivationTargets {
+                cli: directory.join("bin/lf"),
+                daemon: directory.join("bin/lfd"),
+                app: Some(app),
+                legacy_app: None,
+            },
+            app_was_running: false,
+            disposable_store_owned: false,
+        }
+    }
+
+    #[test]
+    fn first_install_reopens_only_the_verified_copied_app() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut receipt = first_install(directory.path());
+        assert_eq!(app_to_resume(&receipt).unwrap(), None);
+        receipt.app_was_running = true;
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+        receipt.target_store_advance_started = true;
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+        fs::write(
+            receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/resource"),
+            b"changed",
+        )
+        .unwrap();
+        assert!(app_to_resume(&receipt).is_err());
+    }
+
+    #[test]
+    fn interrupted_update_resumes_prior_bytes_only_until_store_advance() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut receipt = first_install(directory.path());
+        let prior_directory = tempfile::tempdir().unwrap();
+        let prior = first_install(prior_directory.path());
+        receipt.prior = Some(prior.target);
+        receipt.activation.app = prior.activation.app;
+        receipt.app_was_running = true;
+
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+        receipt.target_store_advance_started = true;
+        assert!(app_to_resume(&receipt).is_err());
+        let target = receipt.activation.app.as_ref().unwrap();
+        fs::remove_dir_all(target).unwrap();
+        copy_tree(&directory.path().join("retained/Loopflow.app"), target).unwrap();
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    mod processes {
+        use std::process::{Child, Command};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        use super::first_install;
+        use crate::lf::commands::install::{quiesce_switch_app, running_app_processes};
+
+        struct FixtureProcess(Child);
+
+        impl Drop for FixtureProcess {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        #[test]
+        fn stopping_a_background_helper_does_not_request_an_app_window() {
+            let directory = tempfile::tempdir().unwrap();
+            let mut receipt = first_install(directory.path());
+            let helper = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/lf");
+            let mut process = FixtureProcess(Command::new(&helper).arg("30").spawn().unwrap());
+            let waiter = thread::spawn(move || process.0.wait().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while running_app_processes(std::slice::from_ref(&helper))
+                .unwrap()
+                .is_empty()
+            {
+                assert!(Instant::now() < deadline, "fixture helper did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            quiesce_switch_app(directory.path(), &mut receipt).unwrap();
+
+            assert!(!waiter.join().unwrap().success());
+            assert!(!receipt.app_was_running);
+            assert_eq!(super::app_to_resume(&receipt).unwrap(), None);
+        }
+
+        #[test]
+        fn first_install_stops_its_app_and_helpers_without_stopping_another_copy() {
+            let directory = tempfile::tempdir().unwrap();
+            let mut receipt = first_install(directory.path());
+            let other = tempfile::tempdir().unwrap();
+            let other_receipt = first_install(other.path());
+            let app = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/Loopflow");
+            let helper = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/lf");
+            let other_app = other_receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/Loopflow");
+            let mut unrelated = FixtureProcess(Command::new(other_app).arg("30").spawn().unwrap());
+            let mut waiters = Vec::new();
+            for path in [&app, &helper] {
+                let mut process = FixtureProcess(Command::new(path).arg("30").spawn().unwrap());
+                waiters.push(thread::spawn(move || process.0.wait().unwrap()));
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while running_app_processes(&[app.clone(), helper.clone()])
+                .unwrap()
+                .len()
+                != 2
+            {
+                assert!(Instant::now() < deadline, "fixture processes did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            quiesce_switch_app(directory.path(), &mut receipt).unwrap();
+
+            assert!(receipt.app_was_running);
+            for waiter in waiters {
+                assert!(!waiter.join().unwrap().success());
+            }
+            assert!(unrelated.0.try_wait().unwrap().is_none());
+            quiesce_switch_app(directory.path(), &mut receipt).unwrap();
+            assert!(receipt.app_was_running, "retry lost the restart intent");
+            let saved = crate::machine_install::read_state(directory.path()).unwrap();
+            let crate::machine_install::MachineInstallState::Switching(saved) = saved else {
+                panic!("expected a recoverable switch");
+            };
+            assert!(saved.app_was_running);
+        }
     }
 }

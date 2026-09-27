@@ -1,8 +1,19 @@
 # LOO-312 assumptions and outstanding evidence
 
-- The selected step is interactive review-design. Product implementation,
-  publication, and landing are not part of this step. The design distinguishes
-  Jack's review direction from choices still awaiting discussion.
+- The selected step is now implement. The previous review notes are checkpointed.
+  This pass changes the existing installer's copied-app process lifecycle;
+  publication and landing remain outside this step.
+- The no-rendering constraint prevents the live baseline required before UI
+  edits. Continue with installer-owned work and isolated process fixtures;
+  do not substitute those fixtures for the baseline or clean-account trial.
+- Source inspection found that `quiesce_switch_app` ignored the app target when
+  no prior receipt existed and the old AppleScript quit addressed an app ID,
+  not the selected copy. Both are repaired in this pass. A published helper
+  running inside the bundle must re-exec retained bytes before quiescing.
+- Signature validation currently lives in `release/install.sh` (`codesign`),
+  while Rust validates bundled helper identity and tree digests. The forthcoming
+  bundle-activation entry must bring signature verification into the installation
+  owner; calling promotion directly does not establish signed-bundle acceptance.
 - Jack wants Linear to be optional sharing, not a requirement anywhere in the
   ordinary local experience. Existing Task/planning coupling needs actual
   product work; determine the full boundary with the related LOO-316 work.

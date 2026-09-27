@@ -419,13 +419,24 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## This slice
 
-Review changed the first executable cut to copied-app activation. First inspect
-the machine entry gate and promotion behavior for an unregistered bundled helper
-and a running app with no prior installation receipt. Record a live baseline,
-then connect first launch to the existing owner and prove settled registration,
-restart/retry, and the no-op on reopening. Use isolated fixtures for focused
-behavioral proofs; the actual fresh-account drag/open trial remains required.
-The earlier shell-only slice is supporting coverage, not the primary finish.
+Copied-app activation remains the current slice. The first implementation pass
+repairs its existing installer process lifecycle: first-install target discovery,
+shutdown limited to the selected paths, retained execution for bundled published
+helpers, and verified reopening before or after store advancement. Helpers alone
+do not request a window; a repeated quiesce preserves the original restart intent.
+
+Still required: the repo-independent signed-bundle activation entry and Swift
+first-launch integration, durable PATH setup, destination retention on updates,
+and settled-registration/reopen proofs. The machine entry gate does not redirect
+an unregistered bundled helper, so this entry can reach the existing installer
+without inventing another authority. Rust currently validates helper identities
+and tree digests; signature checking lives in the shell installer and must move
+into the shared owner for bundle activation.
+
+Record the live baseline before UI edits. This headless run supplies neither that
+baseline nor the clean-account trial. No UI or newcomer walkthrough is changed.
+The full design above remains the target; the process fixtures establish only
+the repaired installer behavior, not a working download-to-setup journey.
 
 ## Slice ledger
 
@@ -437,6 +448,10 @@ The earlier shell-only slice is supporting coverage, not the primary finish.
 | Real installer script with isolated fixture transport | Exit 0; installed fixture; no profile files; new login shell could not find lf. | CLI-only simulation; app and machine activation stubbed. |
 | Primary-window and auth source review | Corrected the assumed UI location and found reusable auth plus native-status gaps. | No rendered/live app observation. |
 | Simulated design review | Added DMG-vs-installer distinction, safe test HOME isolation, same-window opening, and provider default persistence. | These are proposed changes, not implementation evidence. |
+| Installer process lifecycle, 2026-09-26 | `cargo test -p loopflow --lib app_activation_tests`: 4 passed. Selected native fixture processes stop, another copy survives, helper-only shutdown requests no window, restart intent is persisted, and restart targets must match retained bytes. | Native `/bin/sleep` copies in temporary bundles; no real app, promotion, account, or browser sign-in. Initial fixture setup failed on a missing parent directory; fixed before the passing run. |
+| Bundle staging, 2026-09-26 | `cargo test -p loopflow --lib artifact_tests`: 4 passed, including same-source/destination staging without changing the original bundle. | File fixtures only; not signed-release acceptance or interruption of a real promotion. |
+| Implementation review, 2026-09-26 | Removed the app-ID-wide quit operation. A bundled published promotion helper re-execs retained bytes before shutdown so it is not one of the processes being stopped. No new receipt or installation authority. | Full helper re-exec, GUI-exit survival, registration, actual reopen, and repeated first launch still need configured-path proof. |
+| Static checks, 2026-09-26 | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. | No affected-suite gate, Swift/UI tests, or public-channel trial in this implementation pass. |
 
 ## Measure
 

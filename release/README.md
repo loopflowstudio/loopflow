@@ -46,6 +46,12 @@ same keeper, then reconciles every enabled open Work onto a new Run. `lf install
 prints the terminal upgrade result directly; no manual zero-Run window is
 required.
 
+Mac promotion stops only processes belonging to the selected app paths. It
+also handles a running app at the destination before the first installation
+receipt exists. It reopens the app only when the app itself was running;
+background helpers alone do not open a window. Recovery verifies the retained
+bundle before reopening it.
+
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
 

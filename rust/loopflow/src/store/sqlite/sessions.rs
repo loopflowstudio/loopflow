@@ -211,24 +211,34 @@ impl SqliteStore {
         .collect()
     }
 
-    pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
+    pub fn rename_session(
+        &self,
+        id: &str,
+        expected_run: Option<&RunId>,
+        title: &str,
+        source: TitleSource,
+    ) -> StoreResult<()> {
         if title.trim().is_empty() {
             return Err(invalid("Session title cannot be empty"));
         }
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (session, _) = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if expected_run.is_some_and(|run| *run != session.current_run_id) {
+            return Err(StoreError::InvalidAuthority(
+                "Session changed before rename".into(),
+            ));
+        }
         let source = match source {
             TitleSource::Human => "human",
             TitleSource::Generated => "generated",
         };
-        if conn.execute(
+        tx.execute(
             "UPDATE sessions SET title=?2, title_source=?3
              WHERE id=?1 AND (title_source='generated' OR ?3='human')",
             params![id, title.trim(), source],
-        )? == 0
-            && session_in(&conn, id)?.is_none()
-        {
-            return Err(StoreError::NotFound);
-        }
+        )?;
+        tx.commit()?;
         Ok(())
     }
 

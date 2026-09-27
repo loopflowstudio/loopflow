@@ -523,6 +523,7 @@ mod activity_tests {
                 skill: None,
                 subjects: vec![],
                 flow: RunFlowMembership::Independent,
+                work: None,
             },
         )
         .unwrap();

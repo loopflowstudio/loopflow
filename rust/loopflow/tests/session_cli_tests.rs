@@ -512,13 +512,16 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         .spawn()
         .unwrap();
     // An upper bound: a debug `lf` on a busy machine launches slowly.
+    // The shell creates the file before writing the id, so wait for the id.
     let deadline = Instant::now() + Duration::from_secs(180);
-    while !evidence.exists() && Instant::now() < deadline && opened.try_wait().unwrap().is_none() {
+    let written = || std::fs::read_to_string(&evidence).unwrap_or_default();
+    while written().is_empty() && Instant::now() < deadline && opened.try_wait().unwrap().is_none()
+    {
         std::thread::sleep(Duration::from_millis(20));
     }
     let started = evidence.exists();
     // Leave the provider waiting while the agent-facing rename runs inside it.
-    let replacement = std::fs::read_to_string(&evidence).unwrap_or_default();
+    let replacement = written();
     let inside = command(
         home.path(),
         &[

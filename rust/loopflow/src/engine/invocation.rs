@@ -75,6 +75,22 @@ impl QueuedInvocation {
         Ok(u32::try_from(locate(&self.steps, cursor)?)?)
     }
 
+    /// The Ask key of a loop blocker raised at this cursor:
+    /// `flow:<invocation>:<node>:<iterations>`. A Task's decision and a saved
+    /// Flow's decision share it, so the deciding Run and its recovery meet the
+    /// same unblock Session.
+    pub fn blocker_key(&self, cursor: &crate::engine::ExecutionCursor) -> Result<String> {
+        Ok(format!(
+            "flow:{}:{}:{}",
+            self.id,
+            self.node_id(cursor)?,
+            serde_json::to_string(&crate::engine::flow_graph::flow_iterations(
+                &self.steps,
+                cursor
+            ))?
+        ))
+    }
+
     pub fn new(flow: impl Into<String>, steps: Vec<ConcreteStep>) -> Result<Self> {
         let flow = flow.into();
         if steps.is_empty() {

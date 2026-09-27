@@ -252,12 +252,7 @@ pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result
                             matches!(position.current_plan(), ConcreteStep::Skill(s) if s.policy.repeat.is_some()),
                             "this step does not own a loop decision"
                         );
-                        format!(
-                            "task:{}:{}:{}",
-                            task.id,
-                            position.invocation.id,
-                            position.cursor.boundary_key()
-                        )
+                        position.blocker_key()?
                     }
                 };
                 let summary =

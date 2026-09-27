@@ -2,8 +2,10 @@
 
 LOO-303 · Product · 2026-09-26
 
-Status: kickoff design, ready for review; no implementation or installed
-acceptance claimed. Source inspected at `c832aaede633a8996bf694dfb7ae2579dbabce3a`.
+Status: approved in interactive review on 2026-09-26 with the Project-template /
+Task-invocation presentation correction below. The current participant's name
+is unresolved. No implementation or installed acceptance claimed.
+Source inspected at `c832aaede633a8996bf694dfb7ae2579dbabce3a`.
 The supplied placement stacks this Task on LOO-298 / PR #1296. That is placement
 evidence, not evidence that its owner conversion is complete or merged.
 
@@ -202,10 +204,25 @@ old callbacks cannot overwrite it. Provider retry/usage streams **inside one Run
 remain separate from these position-level Run attempts (the current architecture
 reference's retry/failover sentence concerns that inner level).
 
-Taskless Flow Sessions remain openable from room/palette. Their chips open a
-captured invocation inspector using the same graph/detail component, with no
-synthetic Task or invented breadcrumb. This can be a detail sheet in the current
-workspace; it is not another navigation tree.
+### Project Flow on the Wave page
+
+The current participant (name unresolved) clarified in interactive review on
+2026-09-26 that “wave flows” means the Project's default Flow for its Tasks.
+Present that template on the Wave page through its current Project, using the
+same folded/disclosable template UI. Project remains its owner; Tasks inherit
+the default and may explicitly choose another Flow. This is not a Wave execution
+surface and introduces no Wave default, Wave invocation inspector or Wave-level
+start controls.
+
+Task pages show their captured invocations and attempts. Invocations outside
+Tasks remain in overall monitoring, including those attributed to a Wave; they
+receive no Task-like page or standalone main-pane inspector. Flow catalog rows
+still inspect templates and never start execution merely by selection.
+
+Session presentation is distinct from invocation presentation. The existing
+Session inventory and null-Task orphan rule remain unchanged by this correction;
+outstanding review Sessions are not silently hidden or resolved. Their treatment
+is an implementation assumption, not separate participant confirmation.
 
 ### Orphan room: membership and terminal ownership
 
@@ -338,20 +355,23 @@ retention proofs below target those failures.
   contracts. Swift owns presentation and input state only.
 - Distinguish a Task that has started from a Flow invocation that exists. Preserve
   independent conversation launch and completed invocation history.
-- Orphan membership does not imply Task-bind eligibility. Taskless invocation
-  Sessions remain visible and navigable even when bind is unavailable.
+- The Wave page presents its current Project's default Flow for Tasks. Only Task
+  pages get invocation detail; non-Task invocations stay in overall monitoring.
+  Session inventory and orphan membership remain unchanged by this decision.
 - Keep one mounted native terminal per identity and window, with retained drafts
   across room/Task/repository navigation. Closing a view is not completion.
 
 ## Scope
 
 - In scope: ⌘K; exact Task URLs and read-only resolution; folded template view;
+  the current Project's default Flow template on the Wave page;
   captured invocation/child and attempt presentation; correct orphan section,
   room and universal bind; affected DTOs, focused tests and user docs.
 - Out of scope: LOO-298's migration/driver/storage rewrite or PR-record repair;
   dark mode; current-surface teardown/polish; Wave-page launch expansion; first-run
   onboarding; automatic historical binding; rebind/unbind; Session streaming and
-  broad performance work; provider authentication; a new Chapter UI.
+  broad performance work; provider authentication; a new Chapter UI; separate
+  Task-like detail pages for non-Task Flow invocations.
 
 ## Done when
 
@@ -368,15 +388,18 @@ retention proofs below target those failures.
 3. **Template:** repeated same-named compositions remain separate; recursive
    disclosure, empty composition, Xor paths, repeated skills and both return edges
    survive. Flattened projection equals shared expansion. Missing/cyclic source
-   is named unavailable. Rust and Swift fixtures have no silent defaults.
+   is named unavailable. Rust and Swift fixtures have no silent defaults. The
+   Wave page reads its current Project's default, with no duplicate Wave setting
+   or new execution controls; Task overrides remain independent.
 4. **Invocation/attempt:** failed Run A then current Run B at the same position
    renders attempt 2 in node detail, running line and Session chip. Concurrent
    independent Run C cannot change the line. Old attempt selection stays exact;
    loop returns, child entry and restart preserve their distinct identities.
    Delete/change template sources after capture; retained history still renders.
-   Unknown historical ordinal stays unknown; taskless inspector creates no Task.
+   Unknown historical ordinal stays unknown. Non-Task invocations remain visible
+   in overall monitoring and have no new main-pane invocation destination.
 5. **Room/bind:** mounted production views with owned PTYs exercise parentless,
-   Wave-only, taskless Flow, bound-but-missing-roadmap and shell-attached Sessions,
+   Wave-only, bound-but-missing-roadmap and shell-attached Sessions,
    including more than six orphans and two records on one shell. Bind from all
    three entry points names/confirms the target once, preserves Session/surface/
    draft/membership, and reads Started from the server. Done Task stays done.
@@ -430,14 +453,15 @@ justified for this scratch-only design.
    destination dispatch, exact Task read and Podium URL delivery, focus retention.
    One coherent user path and independent of the new Session tables.
 2. **Folded templates:** shared resolution retains composition; catalog DTO,
-   disclosure UI and source/fixture equivalence proof. Independent of Run owners.
+   disclosure UI on Task pages and for the current Project default on the Wave
+   page; source/fixture equivalence proof. Independent of Run owners.
 3. **Parent integration:** integrate final LOO-298 DTOs/operations, verify the
    contract checklist, remove overlapping obsolete code once. Extend its shared
    attempt projection if the delivered parent lacks the evening amendment; do not
    manufacture an interim Swift model. Parent incomplete means this slice waits;
    slices 1–2 remain useful work.
 4. **Invocation and attempts:** current and retained execution, child invocations,
-   exact attempt detail/status/chip and taskless inspector. Source-independent
+   exact Task attempt detail/status/chip. Source-independent
    recovery proof and independent-Run counterexample.
 5. **Control room and universal bind:** correct grouping, one mounted host,
    unlimited tiles, one picker/confirmation path, post-bind reconciliation and
@@ -448,17 +472,24 @@ justified for this scratch-only design.
 
 ## This slice
 
-Kickoff only: reconcile decisions, inspect feasibility and define the complete
-architecture and proof. The next implementation cut is slice 1: ⌘K and Task deep
+Design review complete: the participant approved the corrected design. The
+[review feedback](workspace-ux-review-feedback.md) records the decisions and
+retained implementation assumptions. The next implementation cut is slice 1: ⌘K and Task deep
 links share destination routing. Its focused proof must dispatch actual keyboard
 and URL requests through production handlers and verify exact Task details plus
 retained terminal input; a parser unit test alone is insufficient.
 
-No new review approval, implementation, publication or Flow navigation is implied
-by writing this design. Continue through the selected Flow's authored boundary.
+Approval covers the design, not implementation, publication, installed acceptance
+or Flow navigation. The user completes this review Session; the following
+loop-decide owns navigation through the selected Flow's authored boundary.
 
 ## Slice ledger
 
+- 2026-09-26 interactive review: the participant approved the design after
+  clarifying that the Wave Flow UI presents the current Project's default
+  template for Tasks. Removed the standalone non-Task invocation inspector and
+  the agent's mistaken Wave execution UI. Non-Task invocations stay in overall
+  monitoring. Full proof and parent-integration requirements remain unchanged.
 - 2026-09-26: read inherited design/decisions, repository conventions, Product
   objective/memory and current architecture spec. Inspected the source named in
   De-risking at the supplied base. Preserved inherited LOO-298 notes unchanged.

@@ -5,6 +5,22 @@ This inherited LOO-298 agenda remains evidence, not this Task's implementation p
 Its later `data-model-slice-review.md` reference was not copied into this checkout;
 those review claims retain their original limits and have not been revalidated here.
 
+## LOO-303 interactive review (2026-09-26)
+
+The current participant (name unresolved) clarified that “wave flows” means
+the Project's default Flow for Tasks, presented on the Wave page. The agent's
+Wave-level execution interpretation is superseded. No Wave invocation inspector
+or new Wave-level start controls belong in this design. All non-Task invocations
+remain in overall monitoring, with no Task-like main-pane page.
+
+The existing Session inventory and orphan predicate remain unchanged as an
+implementation assumption; removing invocation pages does not itself remove
+conversations or outstanding review work. Current-Run-only bind remains an
+inherited assumption. The participant approved the corrected design on
+2026-09-26. These assumptions remain explicit implementation defaults; no new
+blocking design decision is required before the independent navigation slice.
+See [review feedback](workspace-ux-review-feedback.md).
+
 ## LOO-303 kickoff assumptions (2026-09-26)
 
 Jack's evening comment `41ea97a6-1532-4453-87b2-86fc7634aad2` governs:

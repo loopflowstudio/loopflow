@@ -40,13 +40,15 @@ impl Store {
     pub async fn rename_session(
         &self,
         id: &str,
+        expected_run: Option<&RunId>,
         title: &str,
         source: TitleSource,
     ) -> StoreResult<()> {
         let id = id.to_string();
+        let expected_run = expected_run.cloned();
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.rename_session(&id, &title, source)
+            store.rename_session(&id, expected_run.as_ref(), &title, source)
         })
         .await
     }

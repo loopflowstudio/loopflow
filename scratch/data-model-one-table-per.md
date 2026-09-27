@@ -479,52 +479,88 @@ data mutation even though the real-Home pass follows implementation.
 
 ## This slice
 
-Repair Task review publication and lookup through their existing Session owner.
-Reserved artifact publication now reconciles staged or published manifest/context
-against the exact launch inputs, retaining the first creation time and original
-bytes. A mismatch remains a named error with its input intact. Only after that
-reconciliation does the SQL reservation transaction grant launch authority;
-recorder construction and terminal-on-drop settlement begin after it succeeds.
-A rejected or interrupted SQL publication cannot falsely settle the reserved Run.
+Preserve the selected Task review attempt across Complete, Open and rename.
+Complete now carries the lookup's full expected position into controller
+settlement; the transaction compares that original Run, version and feedback.
+The existing launch lock spans settlement and teardown of that same Run.
+Continuation still launches before teardown, so stopping the review provider
+cannot prevent the next worker from being requested.
 
-Exact Run IDs and manifest prefix selectors consult retained Session membership
-before independent interactive dispatch. Superseded attempts report their Session
-and current Run explicitly, including after completion; they never become a
-second conversation, rename sidecar or current actor. Current completed attempts
-report completion. The Session/history DTO and user-facing history inspection
-remain part of the complete caller cutover.
+Open retains the original exact/prefix selector while acquiring the Session
+launch lock, rejects a changed snapshot, and holds exclusion through native
+client transfer and receipt publication. The launcher releases it before waiting
+for provider exit, allowing Ready and Complete during the conversation.
+Replacement reserves against the opening snapshot and returns the Run it actually
+launched, rather than reading a possibly newer current pointer after the provider
+exits. Ask and taskless native-resume callers pass their existing launch lock
+through the same handoff; their separate owners remain unfinished cutover scope.
 
-A malformed selected review capture now appears in the public inventory with its
-identified recovery error and unavailable actions. Other reviews remain listable
-and their Open preparation remains reachable. Database/I/O failures still surface;
-only invalid captured execution is represented on the affected conversation.
-Execution actions continue to validate the exact capture and retain its bytes.
-This remains an intermediate Task-review path within the unshippable coherent
-cutover; discovery still consults captures for membership/actions.
+Rename preserves the original selector across its lock wait. An explicit Run or
+prefix also supplies its selected Run to the SQL transaction, so replacement
+between validation and UPDATE rejects without changing the title. A stable
+Session-ID rename remains a conversation operation and may name its newer attempt.
+No token fields, schema columns or second current-attempt owner were added.
 
-Publication does not prove provider start or death. After SQL publication with
-no native history and no terminal outcome, Open retains the same Run and reports
-unresolved launch status. It cannot authorize a replacement from absent receipts.
-Native resume checks for recoverable provider history before stopping clients.
-This closes unsafe replacement and the pre-SQL artifact retry defect; it does
-not supply automatic recovery from uncertain launcher death or a complete durable
-Run lifecycle. Those require the remaining Run process/outcome owner conversion.
+The deterministic regression pauses each public action after lookup (rename has
+already requested its held launch lock), publishes B with A's retained feedback,
+then resumes. It covers exact IDs, prefixes and Session IDs using real lookup and
+SQLite writes, with native client effects simulated. Rejected requests leave
+B/cursor/feedback/clients intact; a subsequent Open and Complete of B preserve
+A's simulated client, stop B, and record the answer once. A separate existing
+native-launcher test now uses the startup lock itself to observe receipt publication
+and stop its owned stand-in, without sleep-based race synchronization.
+These tests remain unexecuted under the resource rule; compilation is not a
+behavioral result.
 
-Authored proofs cover partial staging, completed artifacts before SQL publication,
-SQL publication before provider start, immutable-input conflicts, duplicate SQL
-claims, two replacements, historical exact/prefix lookup and rename before/after
-completion, stale actor/Ready rejection, and public list/Open preparation beside
-malformed autonomous and review captures. They are compiled, not executed while
-the resource preflight fails. No provider startup, actual CLI dispatch, mounted
-pane or installed-Home acceptance is claimed by these fixtures.
-
-The remaining shared taskless driver, Ask/interactive owners, general Run facts,
-bind/launch/read cutover, DTO/Swift identity and caches, Chapter operation, offline
-import and real maintenance, measurements and deletion research still govern.
-No intermediate publication or new approval boundary is selected. Current-Run-only
-bind remains the recorded assumption; all eight Done When obligations remain.
+The complete shared taskless driver, general Run facts, all Session kinds,
+bind/read/launch cutover, DTO/Swift identity and caches, repository Chapter
+operation, populated offline import, real-Home maintenance, measurements and
+deletion research followed by deletion remain required. Current-Run-only bind
+remains the recorded assumption. All eight Done When obligations and the supplied
+publication-record/stacking reports remain; no intermediate publication is selected.
 
 ## Slice ledger
+
+- 2026-09-26 final selected-attempt static verification: `cargo fmt --all --check`,
+  isolated `cargo clippy --all-targets -- -D warnings` (**1m 43s**), and
+  working-diff whitespace pass. Clippy compiles the new action matrix and native
+  handoff fixture; neither executed. Initial compile failures from the private
+  Open split (unused arguments and an old test caller) were corrected before
+  this final pass. No migration, DTO or canonical documentation bytes changed;
+  previous receipts retain only their recorded scope. The `wave_chapters`
+  inventory gap, historical branch whitespace and all eight Done When
+  obligations remain unresolved.
+
+- 2026-09-26 selected-attempt implementation: preserved both supplied review
+  notes with `lf commit` before editing. Completion uses the caller's expected
+  position; native resume/stop share replacement exclusion; exact/prefix rename
+  compares the selected Run in its write transaction. Existing invocation,
+  worker, publication and exact process fences remain.
+- 2026-09-26 source review found two secondary identity hazards and repaired
+  them within this cut: Open must return the reserved Run after child exit, not
+  reread the current pointer; native startup must release its launch lock after
+  publishing the client receipt, not retain it for the interactive lifetime.
+  Kept continuation-before-teardown ordering. Ask/standalone callers use the
+  shared lock handoff without converting their storage or claiming their
+  selected-attempt contract is finished.
+- 2026-09-26 preflight and safe recovery both fail: active `main-view-task`
+  **15.3 GiB / 12 GiB**, **97.2 GiB** free. Recovery preserved the foreign active
+  build. TESTING.md blocks behavioral execution and materialized migration
+  rehearsal. No provider, installed Home, PR or Task disposition changed.
+- Focused commands owed for this cut, in addition to every prior unexecuted
+  command and populated materialization proof:
+
+  ```sh
+  cargo test -p loopflow --lib review_actions_preserve_selected_attempt_across_replacement
+  cargo test -p loopflow --lib intentional_session_move_exits_cleanly
+  cargo test -p loopflow --lib reopening_ask_cannot_overwrite_a_concurrent_completion
+  cargo test -p loopflow --lib ops::flow_run::tests
+  ```
+
+  Retain the preceding replacement, historical-selector, Ready/stale-provider,
+  publication, schema, Task controller and durable-store proofs. The new action
+  matrix calls public operations with simulated native effects; it is not actual
+  CLI dispatch, configured provider recovery, a mounted pane or installed proof.
 
 - 2026-09-26 final static proof for the recovery/lookup cut: `cargo fmt --all
   --check`, isolated `cargo clippy --all-targets -- -D warnings` (25.34 seconds),

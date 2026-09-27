@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -117,7 +118,13 @@ pub(crate) fn launch_session_with_env(
         }
     }
 
-    spawn_session_command_with_env(&launch.command, environment, provider_session_id, None)
+    spawn_session_command_with_env(
+        &launch.command,
+        environment,
+        provider_session_id,
+        None,
+        None,
+    )
 }
 
 fn build_session_launch(
@@ -239,9 +246,11 @@ pub(crate) fn resume_session(
         run_dir,
         provider_session,
         &BTreeMap::new(),
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Native launch inputs plus its startup exclusion lock.
 pub(crate) fn resume_session_with_env(
     harness: &str,
     model: Option<&str>,
@@ -250,6 +259,7 @@ pub(crate) fn resume_session_with_env(
     run_dir: &Path,
     provider_session: &crate::run_record::ProviderSessionRef,
     extra_environment: &BTreeMap<String, String>,
+    launch_lock: Option<File>,
 ) -> Result<()> {
     let user_name = crate::engine::config::launch_user_name()?;
     let command = build_resume_session_command(
@@ -275,6 +285,7 @@ pub(crate) fn resume_session_with_env(
         &environment,
         Some(&provider_session.provider_session_id),
         provider_session.account_id.as_ref(),
+        launch_lock,
     )
 }
 
@@ -466,12 +477,14 @@ fn spawn_session_command_with_env(
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
+    launch_lock: Option<File>,
 ) -> Result<()> {
     let outcome = session_command_status_with_env(
         command,
         environment,
         provider_session_id,
         exact_account_id,
+        launch_lock,
     )?;
     if let Some(reason) = outcome.stop_reason {
         eprintln!("{}", provider_client_stop_message(reason));
@@ -510,6 +523,7 @@ fn session_command_status_with_env(
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
+    launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
     if !check_cli_available(&command.program) {
         return Err(anyhow!(
@@ -598,6 +612,8 @@ fn session_command_status_with_env(
             return Err(error);
         }
     };
+    // Completion and another Open can proceed once exact client ownership is visible.
+    drop(launch_lock);
     let status = child.wait()?;
     let stop_reason = client
         .as_ref()
@@ -887,7 +903,7 @@ mod tests {
     #[test]
     fn intentional_session_move_exits_cleanly() {
         let temp = tempfile::tempdir().unwrap();
-        let provider = fake_provider(&temp, "trap 'exit 143' TERM\nwhile :; do sleep 0.05; done");
+        let provider = fake_provider(&temp, "trap 'exit 143' TERM\ni=0; while [ \"$i\" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done");
         let capture = crate::run_record::CaptureHandle::begin_at(
             temp.path(),
             crate::run_record::RunSpec {
@@ -905,27 +921,28 @@ mod tests {
         .unwrap();
         let run_dir = capture.artifact_dir();
         let stop_dir = run_dir.clone();
+        let lock_path = temp.path().join("launch.lock");
+        let launch_lock = File::create(&lock_path).unwrap();
+        fs2::FileExt::lock_exclusive(&launch_lock).unwrap();
         let stop = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            loop {
-                let clients = crate::run_record::read_provider_clients(&stop_dir).unwrap();
-                if !clients.is_empty() {
-                    let pid = clients[0].pid;
-                    replace_provider_clients(
-                        &stop_dir,
-                        "fake-provider",
-                        &clients,
-                        ProviderClientStopReason::Moved,
-                    )
-                    .unwrap();
-                    return pid;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "provider client was not published"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
+            let lock = File::open(lock_path).unwrap();
+            fs2::FileExt::lock_exclusive(&lock).unwrap();
+            // Release must follow receipt publication but precede provider exit.
+            let clients = crate::run_record::read_provider_clients(&stop_dir).unwrap();
+            assert_eq!(
+                clients.len(),
+                1,
+                "launch exclusion ended without a live receipt"
+            );
+            let pid = clients[0].pid;
+            replace_provider_clients(
+                &stop_dir,
+                "fake-provider",
+                &clients,
+                ProviderClientStopReason::Moved,
+            )
+            .unwrap();
+            pid
         });
         let command = SessionCommand {
             program: provider.display().to_string(),
@@ -933,7 +950,13 @@ mod tests {
             cwd: temp.path().to_path_buf(),
         };
 
-        let result = spawn_session_command_with_env(&command, &capture.environment(), None, None);
+        let result = spawn_session_command_with_env(
+            &command,
+            &capture.environment(),
+            None,
+            None,
+            Some(launch_lock),
+        );
         let pid = stop.join().unwrap();
 
         assert!(result.is_ok());
@@ -977,8 +1000,9 @@ mod tests {
             cwd: temp.path().to_path_buf(),
         };
 
-        let error = spawn_session_command_with_env(&command, &capture.environment(), None, None)
-            .expect_err("unexplained SIGTERM must remain an error");
+        let error =
+            spawn_session_command_with_env(&command, &capture.environment(), None, None, None)
+                .expect_err("unexplained SIGTERM must remain an error");
 
         assert!(error.to_string().contains("signal: 15"));
         assert!(
@@ -1211,6 +1235,7 @@ mod tests {
                 &run_dir,
                 &session,
                 &BTreeMap::new(),
+                None,
             )
             .unwrap();
             let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
@@ -1300,7 +1325,8 @@ mod tests {
         };
 
         let outcome =
-            session_command_status_with_env(&command, &capture.environment(), None, None).unwrap();
+            session_command_status_with_env(&command, &capture.environment(), None, None, None)
+                .unwrap();
 
         assert!(outcome.status.success());
         assert_eq!(

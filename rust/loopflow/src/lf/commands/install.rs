@@ -2690,19 +2690,7 @@ fn promote_local_candidate(
     )?;
     switch.phase = crate::machine_install::SwitchPhase::Activated;
     crate::machine_install::write_switch(&root, &switch)?;
-    let mut retained = prior.retained_published_sets.clone();
-    if !retained
-        .iter()
-        .any(|set| set.id == prior.published_fallback.id)
-    {
-        retained.push(prior.published_fallback.clone());
-    }
-    let active = crate::machine_install::ActiveInstall {
-        schema_version: 1,
-        selection: target,
-        published_fallback: prior.published_fallback,
-        retained_published_sets: retained,
-    };
+    let active = active_install_from_switch(&root, &switch)?;
     crate::lfd::service::prepare_install_switch(
         paused.keeper_mode,
         &switch.activation.daemon,
@@ -3415,7 +3403,7 @@ fn promote_published_from_machine_install(
         prior: prior.as_ref().map(|prior| prior.selection.clone()),
         target: target.clone(),
         published_fallback: prior.as_ref().map(|prior| prior.published_fallback.clone()),
-        target_published_fallback: Some(target_published_fallback.clone()),
+        target_published_fallback: Some(target_published_fallback),
         phase: crate::machine_install::SwitchPhase::Planned,
         recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
         target_store_advance_started: false,
@@ -3483,18 +3471,7 @@ fn promote_published_from_machine_install(
     )?;
     switch.phase = crate::machine_install::SwitchPhase::Activated;
     crate::machine_install::write_switch(&root, &switch)?;
-    let mut retained = prior
-        .map(|prior| prior.retained_published_sets)
-        .unwrap_or_default();
-    if !retained.iter().any(|set| set == &target_published_fallback) {
-        retained.push(target_published_fallback.clone());
-    }
-    let active = crate::machine_install::ActiveInstall {
-        schema_version: 1,
-        selection: target.clone(),
-        published_fallback: target_published_fallback.clone(),
-        retained_published_sets: retained,
-    };
+    let active = active_install_from_switch(&root, &switch)?;
     settle_app_artifacts(&prepared)?;
     if store_is_exact(&preview.verdict) {
         crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
@@ -4126,9 +4103,14 @@ mod app_activation_tests {
                 let mut receipt = activated_install(directory.path());
                 let prior_directory = tempfile::tempdir().unwrap();
                 let older_directory = tempfile::tempdir().unwrap();
+                let mut expected_releases = Vec::new();
                 if update {
                     let prior = first_install(prior_directory.path());
                     let older = first_install(older_directory.path());
+                    expected_releases = vec![
+                        prior.target.artifact_set.clone(),
+                        older.target.artifact_set.clone(),
+                    ];
                     let mut active =
                         super::super::active_install_from_switch(&root, &prior).unwrap();
                     active
@@ -4143,6 +4125,8 @@ mod app_activation_tests {
                 receipt.target.artifact_set.source = source;
                 if source == InstallSource::Development {
                     receipt.target_published_fallback = None;
+                } else {
+                    expected_releases.push(receipt.target.artifact_set.clone());
                 }
                 receipt.app_was_running = true;
                 machine_install::write_switch(&root, &receipt).unwrap();
@@ -4168,6 +4152,7 @@ mod app_activation_tests {
                     .is_err());
                 }
                 let active = super::super::active_install_from_switch(&root, &receipt).unwrap();
+                assert_eq!(active.retained_published_sets, expected_releases);
                 super::super::commit_switch_selection(&root, &mut receipt, &active).unwrap();
                 // Read durable state as a replacement coordinator would.
                 let receipt = pending_switch(&root);

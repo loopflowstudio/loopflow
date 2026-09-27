@@ -460,6 +460,7 @@ channel verification above remain the target.
 
 | Evidence | Result | Limit |
 |---|---|---|
+| Completion model compression, 2026-09-26 | Local promotion, published promotion and recovery now share `active_install_from_switch`; removed both promotion-specific retention constructors. `cargo test -p loopflow --lib app_activation_tests`: 7 passed, 1.24 seconds after compilation, including exact retained-history assertions. Formatting, clippy and diff checks passed. | Same isolated process fixtures; no receipt, startup, UI or external contract changes. Live helper survival, copied-app activation and clean-account proof remain outstanding. See `compress-review.md`. |
 | Initial branch inspection | Clean at supplied base; scratch contained only `.gitkeep`; repo guide and growth memory read. | No previous design to reconcile. |
 | Minimal environment zsh probe | Login and interactive shells omitted `.local/bin`; explicit PATH resolved the fixture. | Developer OS, temporary HOME, stand-in executable. |
 | Existing shell installer tests | 16 passed, 6.13 seconds. | Simulated release transport/promotion; no new-shell test. |

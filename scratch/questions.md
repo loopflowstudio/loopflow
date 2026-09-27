@@ -1,6 +1,10 @@
 # LOO-312 assumptions and outstanding evidence
 
-- The selected step is implement. This pass repairs the completion ordering
+- The selected step is compress. Both promotion paths now derive ActiveInstall
+  through the existing recovery constructor, removing duplicate retention
+  logic without changing receipt or startup contracts. See `compress-review.md`.
+  No new product decision is needed; live proof limits below still apply.
+- The preceding implementation pass repaired the completion ordering
   identified in `installer-slice-review.md` and `concept-review.md`: commit
   selection before reopening, retain the active receipt until Home recovery
   and reopening succeed, and observe an already reopened app on retry. The

@@ -13,6 +13,15 @@ the [concept review](../concept-review.md). Jack's decisions of 2026-09-27 gover
 3. Bind: the CLI prints the exact target and writes; the app owns confirmation;
    binding a Session again to the Task it already has is a no-op success.
 
+Jack's Linear comment `c5cd2dd2` (2026-09-27) keeps three items in LOO-298:
+repository Chapters and Project-owned Flows (H7), the saved Flow cursor on the
+row (H2, done), and every remaining redundant pair (H3–H6). The same day he
+decided to delete `lf wave serve` and every notion of a Wave listener or
+resident, lfd included, and to add that deletion to this branch aggressively:
+[Cut I](cut-i-delete-listeners.md). Order after H2: H3, I, H4, H5, H6, H7.
+`cut-h-handoff.md` and `cut-h-wip.patch` were the stopped worker's partial
+Cut H; H2 supersedes them and they are deleted.
+
 The [complete design](../data-model-one-table-per.md) still governs everything
 this brief does not restate; its "One implementation" rules decide every choice
 here. A slice is done when the old owner is deleted in the same commit.
@@ -129,8 +138,21 @@ launches; `lf flow resume --retry` after a failed step.
 - `record_flow_verdict(task_id, …)` and `record_flow_route(task_id, …)` become
   the H2 invocation-keyed functions; `ops/task::task_verdict` resolves the
   Task's pointer then calls them.
-- Delete: the controller's parallel traversal, Task-keyed verdict/route store
-  functions, the Started event writer.
+- One row type and one fence set. `FlowPosition`, `read_flow_position_row`,
+  `flow_position_in` and `decode_flow` become one `FlowInvocation` read;
+  `set_flow_position_in`'s UPDATE, `settle_task_worker_in`, `block_task_flow_in`
+  and `release_task_worker_in` become the H2 `write_cursor_in`, `fail_flow` and
+  `retry_flow` with the claim as an extra predicate; `recover_task_decision`
+  (terminal.json) becomes `settle_attempt_in` (runs.outcome);
+  `run_task_op_boundary` becomes the shared `run_op`; the `task:` blocker key
+  becomes the `flow:` key. The H2 review lists the pairs with line refs.
+- `cwd`: a Task invocation stores NULL and the one SELECT reads
+  `COALESCE(f.cwd, t.worktree)`; a trigger refuses a stored cwd on a Task
+  invocation. `lf flow resume <id>` then works on a Task's invocation too.
+- `RunFlowStep.task_id` loses its "stored at claim" meaning; the row says so.
+- Delete: the controller's parallel traversal, the Task-keyed store functions
+  above, the `None`-token Task fallback in `lf flow decide|route|blocked`, the
+  Started event writer.
 
 Proof: the 29 `controller::task` tests; `driver_runs_fresh_slice_turns_until_
 the_flow_finishes` unchanged in meaning; a Task step through the real binary
@@ -174,6 +196,43 @@ Proof: a Task review and a saved Flow review both list, open, rename and
 complete through the same `owned_target` path; an old structured id resolves
 once through the mapping; the DTO fixtures round-trip in Rust and Swift.
 
+### H6 — remaining pairs and the wire
+
+- `WorkCatalog` (`lf/commands/work_catalog.rs`) goes; `lf activity` filters PR,
+  Steer and creation entries with the same SQL Work filter Runs use.
+- String subjects go: `RunSpec.subjects`, `RunManifest.subjects`,
+  `PromptBuild.subjects`, `WorkBinding.subjects`, `human_session::work_selector`,
+  and `ActiveRun.subjects` on the wire. DTOs carry typed `task_id`/`wave_id`
+  (plus names from the row's join); Swift and `tests/fixtures/dto` move in the
+  same commit. The prompt's Work context renders from the typed Work.
+- `lf session list --task <issue>` exists (the demo names it).
+- The `task_flow_positions` migration test keeps its historical subject; note
+  it as history in the ledger, do not delete a released migration's proof.
+- `historical_session_run_id` / `historical_ready_summary`: Jack's open
+  decision; leave until he answers.
+
+Proof: DTO fixture round-trips in Rust and Swift (`swift test`); `lf activity
+--task X` lists a PR entry and a Run through one filter; `rg subjects
+rust/loopflow/src swift` returns only the import.
+
+### H7 — repository Chapters and Project-owned Flows
+
+Target per [docs/waves.md](../../docs/waves.md#the-planning-model) and the
+complete design's "Repository Chapter rotation": a Chapter is the repository's
+clock; `chapters(id, repository, status, activated_at, …)` with one current per
+repository; `projects.chapter_id` and `UNIQUE(wave_id, chapter_id)`; a Project
+owns its default Flow template (`projects.flow`). `wave_chapters` and the
+per-Wave `Chapter.wave_id` go; `ops/chapter.rs` keeps classification, provider
+reconciliation and frozen evidence but rotates every Wave in one transaction
+(`lf wave new-chapter --plan chapter.json`, preview, retry by Chapter id).
+`lf task run` defaults to the Project's Flow; `--flow` overrides and moves the
+pointer (H3). `check_architecture.py` stops reporting the `wave_chapters` gap.
+
+Proof: the complete design's Done when 4 (two Waves incl. an empty plan,
+concurrent start vs retirement, lost provider response, retry after
+activation, one current repo Chapter, frozen predecessor evidence); `lf wave
+history --wave X` and `lf status X --chapter <id>` through the binary.
+
 ## Done when (whole cut)
 
 1. `rg "position\.json|FlowRun\b|StepToken|resolve_manifest|run_is_prepared|
@@ -208,6 +267,11 @@ Legacy/New branch on Task presence in any Flow operation; a Run that runs
 without a row; an id that a reader parses for structure.
 
 ## Proof commands
+
+This branch carries drafts (LOO-321 incident): never run its binary against
+the installed Home and never promote it before it lands. Every proof uses its
+own `LF_HOME` with `LF_CONTROL_HOME`/`LF_CONTROL_DB_PATH` unset or pointed at
+that same private Home.
 
 Preflight once per pass: `uv run python scripts/resource_envelope.py`. Clear
 `LF_*` and `LOOPFLOW_*` from the environment for every cargo command; `-j 4`,

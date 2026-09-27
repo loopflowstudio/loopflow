@@ -458,6 +458,13 @@ channel verification above remain the target.
 
 ## Slice ledger
 
+Completion review on 2026-09-26: [installer-completion-review.md](installer-completion-review.md)
+supersedes the earlier receipt-ordering finding after reviewing the full branch
+through `c64bfbc62`. Seven lifecycle tests passed in 1.65 seconds after compilation;
+ownership searches found no competing completion authority. Real command-entry
+recovery, retained-helper survival, signed copied-app activation and clean-account
+acceptance remain unproven. No production code changed or publication occurred.
+
 | Evidence | Result | Limit |
 |---|---|---|
 | Completion model compression, 2026-09-26 | Local promotion, published promotion and recovery now share `active_install_from_switch`; removed both promotion-specific retention constructors. `cargo test -p loopflow --lib app_activation_tests`: 7 passed, 1.24 seconds after compilation, including exact retained-history assertions. Formatting, clippy and diff checks passed. | Same isolated process fixtures; no receipt, startup, UI or external contract changes. Live helper survival, copied-app activation and clean-account proof remain outstanding. See `compress-review.md`. |

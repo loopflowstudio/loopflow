@@ -5007,8 +5007,9 @@ mod tests {
             "task_id",
             "invocation_json",
             "review_json",
-            "session_run_id",
-            "ready_summary",
+            "pending_session_id",
+            "historical_session_run_id",
+            "historical_ready_summary",
         ] {
             assert!(position_columns.contains(&present.to_string()));
         }
@@ -5019,6 +5020,8 @@ mod tests {
             "step",
             "node_id",
             "human",
+            "session_run_id",
+            "ready_summary",
         ] {
             assert!(!position_columns.contains(&deleted.to_string()));
         }

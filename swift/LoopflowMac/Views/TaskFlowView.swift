@@ -538,7 +538,7 @@ private struct TemplateDiagram: View {
                     inspected = nil
                 } else { inspected = key }
             }
-        ), templateSpans: FlowTemplateView.spans(graph, projection: projection))
+        ), templateSpans: FlowTemplateView.spans(graph, projection: projection), detailGraph: graph)
     }
 }
 
@@ -554,6 +554,8 @@ struct FlowDiagram: View {
     var delivery: String? = nil
     @Binding var inspected: String?
     var templateSpans: [LoopSpan]? = nil
+    /// Layout may fold nodes; descriptive facts come from the complete definition.
+    var detailGraph: FlowGraph? = nil
 
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -610,8 +612,8 @@ struct FlowDiagram: View {
                     reader.scrollTo(root.key, anchor: .center)
                 }
             }
-            if let key = inspected, let node = graph.node(key) {
-                FlowNodeDetail(node: node, state: states[key] ?? .pending, pinned: pinned, graph: graph)
+            if let key = inspected, let node = (detailGraph ?? graph).node(key) {
+                FlowNodeDetail(node: node, state: states[key] ?? .pending, pinned: pinned, graph: detailGraph ?? graph)
             }
         }
     }
@@ -965,7 +967,7 @@ private struct FlowNodeDetail: View {
         }
         if let id = node.id { facts.append("id \(id)") }
         if let target = node.returnsTo {
-            let label = graph.steps.first { $0.key == target }?.label ?? target
+            let label = graph.node(target)?.label ?? target
             let taken = pinned?.returns.first { $0.decider == node.key }?.traversals
             facts.append("Iterate returns to \(label)" + (taken.map { " · taken \($0)×" } ?? ""))
         }

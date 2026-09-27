@@ -128,6 +128,7 @@ struct TaskFlowProofTests {
     @Test("Flow preview, controls and execution updates keep the Session's terminal, draft and companion")
     func flowControlsRetainTerminals() async throws {
         _ = NSApplication.shared
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry()
@@ -165,7 +166,8 @@ struct TaskFlowProofTests {
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1500, height: 820),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: view)
-        defer { window.contentView = nil }
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
         try await settle(window)
         let draft = "flow-proof-draft"
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
@@ -213,6 +215,38 @@ struct TaskFlowProofTests {
         #expect((try? find("flow-node-4")) == nil, "a new source revision starts folded")
         #expect(await source.controls.isEmpty)
 
+        // A return outside a folded composition still names its semantic target.
+        try await source.crossingReturns()
+        await model.loadFlowCatalog(force: true)
+        try await settle(window)
+        for prefix in ["", "3/fix/"] {
+            print("return proof path: \(prefix)")
+            if !prefix.isEmpty {
+                let path = try #require(accessible(window.contentView!).first { ax($0, "Label") as? String == "xor-route · fix" })
+                try clickElement(path, in: window)
+                try await settle(window)
+            }
+            for expanded in [false, true, false] {
+                print("return proof expanded: \(expanded)")
+                let group = try find("template-group-\(prefix)outer").disclosureGroup()
+                if expanded {
+                    try group.expand()
+                    try await settle(window)
+                    try find("template-group-\(prefix)inner").disclosureGroup().expand()
+                } else { try group.collapse() }
+                try await settle(window)
+                for (number, key) in ["1", "2"].enumerated() {
+                    print("return proof node: \(prefix)\(key)")
+                    #expect(try text("task-flow-loop-\(prefix)\(key)") == "Loop \(number + 1)")
+                    try pressElement("flow-node-\(prefix)\(key)", in: window)
+                    try await settle(window)
+                    let detail = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }.joined(separator: " | ")
+                    #expect(detail.contains("Iterate returns to implement"), "detail: \(detail)")
+                }
+            }
+        }
+        #expect(await source.controls.isEmpty, "template inspection never starts work")
+
         // Started alone does not establish historical Run membership.
         model.select(.task(id: "issue-later"))
         try await settle(window)
@@ -255,6 +289,12 @@ struct TaskFlowProofTests {
         #expect(try find("task-flow-loop-5").text().string() == "Loop 2 · 1 return")
         #expect(try text("task-flow-iteration") == "Iteration (1, 1)")
         #expect(try find("task-flow-resume").button().isDisabled())
+        for key in ["3", "5"] {
+            try pressElement("flow-node-\(key)", in: window)
+            try await settle(window)
+            let detail = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }.joined(separator: " | ")
+            #expect(detail.contains("Iterate returns to implement · taken 1×"))
+        }
         try captureIfRequested(window, name: "task-flow-pinned")
 
         // Stop & restart: Cancel leaves everything; a rejected replacement keeps
@@ -310,9 +350,40 @@ struct TaskFlowProofTests {
         }
     }
 
+    private func ax(_ element: NSObject, _ property: String) -> Any? {
+        let key = "accessibility" + property
+        guard element.responds(to: NSSelectorFromString(key)) else { return nil }
+        return element.value(forKey: key)
+    }
+
+    private func accessible(_ root: Any) -> [NSObject] {
+        guard let element = root as? NSObject else { return [] }
+        return [element] + ((ax(element, "Children") as? [Any]) ?? []).flatMap { accessible($0) }
+    }
+
+    private func pressElement(_ id: String, in window: NSWindow) throws {
+        let element = try #require(accessible(window.contentView!).first { ax($0, "Identifier") as? String == id })
+        try clickElement(element, in: window)
+    }
+
+    private func clickElement(_ element: NSObject, in window: NSWindow) throws {
+        let frame = try #require(ax(element, "Frame") as? NSValue).rectValue
+        let point = window.convertPoint(fromScreen: CGPoint(x: frame.midX, y: frame.midY))
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            window.sendEvent(event)
+        }
+    }
+
     private func settle(_ window: NSWindow) async throws {
         window.contentView?.layoutSubtreeIfNeeded()
         window.layoutIfNeeded()
+        if let content = window.contentView,
+           let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+        }
         try await Task.sleep(for: .milliseconds(100))
     }
 
@@ -360,6 +431,37 @@ private actor FlowSource {
         entries.insert(build, at: 1)
         catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
         self.session = String(decoding: session, as: UTF8.self)
+    }
+
+    func crossingReturns() throws {
+        var entries = try #require(JSONSerialization.jsonObject(with: Data(catalog.utf8)) as? [[String: Any]])
+        func steps(_ prefix: String) -> [[String: Any]] {
+            (0...2).map { index in
+                ["key": "\(prefix)\(index)", "id": NSNull(),
+                 "label": index == 0 ? "implement" : "loop-decide", "kind": "skill",
+                 "human": false, "returns_to": index == 0 ? NSNull() : "\(prefix)0",
+                 "parents": ["feature"], "paths": []]
+            }
+        }
+        func items(_ prefix: String) -> [[String: Any]] {
+            [["kind": "group", "id": "\(prefix)outer", "name": "build", "items": [
+                ["kind": "group", "id": "\(prefix)inner", "name": "edit", "items": [
+                    ["kind": "node", "key": "\(prefix)0", "paths": [:]]
+                ]],
+                ["kind": "group", "id": "\(prefix)empty", "name": "empty", "items": []]
+            ]],
+             ["kind": "node", "key": "\(prefix)1", "paths": [:]],
+             ["kind": "node", "key": "\(prefix)2", "paths": [:]]]
+        }
+        var nodes = steps("")
+        nodes.append(["key": "3", "id": NSNull(), "label": "xor-route", "kind": "xor",
+                      "human": false, "returns_to": NSNull(), "parents": ["feature"],
+                      "paths": [["name": "fix", "description": "Repair", "steps": steps("3/fix/")]]])
+        var tree = items("")
+        tree.append(["kind": "node", "key": "3", "paths": ["fix": items("3/fix/")]])
+        entries[0]["graph"] = ["name": "feature", "steps": nodes]
+        entries[0]["template"] = ["revision": "crossing-returns", "items": tree]
+        catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
     }
 
     func reviseTemplate() throws {

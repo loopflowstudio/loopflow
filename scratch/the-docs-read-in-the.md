@@ -1,11 +1,12 @@
 # The docs read in the new voice
 
-Design for LOO-309 · 2026-09-26 · Draft implementation direction
+Design for LOO-309 · 2026-09-26 · Reviewed implementation direction
 
 Task: The docs read in the new voice, from the overview to the reference.
 Base: `102522bc25adc146d4b8cc3f343677ed8170f636` (PR #1297).
 Accepted audience and writing decisions: [growth memory](../wave/growth/MEMORY.md).
-This design proposes implementation; it does not record Jack's approval of new copy.
+Jack completed the design review with the full Task as the implementation scope
+and unbounded PR size. This does not record approval of new copy.
 
 ## Problem
 
@@ -38,8 +39,9 @@ then points to the same pages without a second technical introduction.
 
 ## Approach
 
-Rewrite existing pages in place, one independently useful page per delivery
-slice. Extend the one glossary with each page. Preserve URLs, reference tables,
+Rewrite the full in-scope documentation in place. Jack confirmed that PR size
+is unbounded; page boundaries do not limit delivery scope. Extend the one
+glossary alongside the pages. Preserve URLs, reference tables,
 flags, and valid technical examples. Keep advanced explanations on their current
 pages; explain the term and consequence where the reader encounters them.
 
@@ -77,7 +79,7 @@ Every revised page follows this editorial contract:
 No new content store, docs generator, vocabulary schema, or parallel edition.
 Delete obsolete explanations in their owning pages rather than retaining both
 old and current instructions. Preserve existing heading anchors when possible;
-if a heading must change, update all referring links in the same slice.
+if a heading must change, update all referring links in the same change.
 
 ### Page plan
 
@@ -184,12 +186,9 @@ view. This Task makes no new claim about LOO-317's completion.
 
 ## Key decisions
 
-- Start with Conducting. It continues an accepted opening, covers the daily
-  app experience, and fixes a verified review-semantics error. Glossary changes
-  are part of that page's delivery, not a prerequisite-only PR.
-- One page per PR is permitted by LOO-309 and keeps each review focused. These
-  are independent editorial changes, not parallel implementations. Finishing one
-  page does not complete the Task. Later typed PR operations own rotation.
+- Jack's review correction on 2026-09-26: “Unbounded size per PR.” The current
+  implementation scope is the full Task. Do not stop after Conducting or split
+  delivery by page count. The page plan organizes the work within that scope.
 - Reference tables and flag spelling stay intact. Correct verified stale
   instructions in surrounding prose/examples; if a table itself is wrong,
   record the exact discrepancy and source before making a targeted correction.
@@ -224,7 +223,7 @@ view. This Task makes no new claim about LOO-317's completion.
 
 ## Done when
 
-For every page slice:
+For every in-scope page:
 
 1. Its opening states when it is useful; existing app context comes before the
    corresponding commands. Command-only capabilities are identified plainly.
@@ -238,7 +237,7 @@ For every page slice:
 5. The page remains useful when opened directly; the glossary is support, not
    required reading before understanding every sentence.
 
-Focused implementation proof for Conducting:
+Focused implementation proof for docs rendering and retrieval:
 
 ```bash
 cd website
@@ -289,7 +288,9 @@ an observed running-app walkthrough.
   summaries that diverge from the public docs.
 - Passing wording assertions reported as proof of non-engineer comprehension.
 
-## Internal slices
+## Implementation coverage
+
+These are parts of the full implementation, not separate PR boundaries.
 
 1. **Conducting + its glossary coverage.** Review current work, read history and
    usage, steer, and complete a review with accurate semantics.
@@ -300,29 +301,28 @@ an observed running-app walkthrough.
 4. **Agent API + vocabulary.** Agent operation in the same model; correct the
    stale Project and learning-contract descriptions.
 5. **Reference pages.** `lf`, Configuration, Subscriptions, Security, and
-   Troubleshooting, each with explanations and glossary coverage. These may be
-   separate PRs; retain the complete Task acceptance above.
+   Troubleshooting, each with explanations and glossary coverage.
 6. **Corpus closure.** Overview/remaining public-term audit, page descriptions,
    `/llms.txt`, README parity, links, and retrieval checks. Reconcile drift from
    neighboring docs Tasks without taking over their walkthroughs.
 
-## This slice
+## Current implementation scope
 
-The current executable implementation slice is Conducting plus required glossary
-entries. Preserve its accepted opening and rewrite the remaining explanatory
-text. Correct Complete/ready/deciding-step semantics, pair existing app surfaces
-with commands, remove the public Project-hierarchy framing, and explain the
-observation defaults and missing-data cases.
+Implement the full page plan: Conducting, Waves, Authoring, Agent API, reference
+pages, glossary coverage, overview terminology, page descriptions, and the
+`/llms.txt` opening. PR size is unbounded. Conducting is a useful reading
+scenario, not a stopping point or a separate delivery requirement.
 
-Touch `docs/conducting.md` and `docs/glossary.md`; modify an existing website test
-only if needed for a meaningful link/retrieval assertion. No new app walkthrough,
-runtime changes, or `/llms.txt` changes in this slice. The focused proof is the
-Conducting reading scenario plus the docs/retrieval checks above.
+Edit canonical `docs/*.md` and the relevant descriptions and summary in
+`website/main.py`. Modify existing website tests where needed for meaningful
+link, retrieval, or semantic assertions. Preserve the scope exclusions above,
+including new app walkthroughs and runtime changes. Verify the complete public
+corpus against the Done when criteria.
 
-This kickoff produces the design only. It does not execute later Flow steps,
-publish, rotate a PR, or mark the Task finished.
+This review updates the design only. It does not execute later Flow steps,
+publish, or mark the Task finished.
 
-## Slice ledger
+## Evidence and review ledger
 
 - 2026-09-26 — Kickoff at `102522bc2`. Clean initial workspace; read repository
   guide, growth goal/memory, public inventory, guide sources, reference openings,
@@ -333,7 +333,15 @@ publish, rotate a PR, or mark the Task finished.
   code alone to validate examples.
 - 2026-09-26 — Review findings incorporated: preserve reference material while
   fixing actual stale prose; do not infer app paths from source; avoid phantom
-  glossary anchors; distinguish review completion from flow navigation; keep
-  page deliveries subordinate to the complete Task acceptance.
+  glossary anchors; distinguish review completion from flow navigation.
+- 2026-09-26 — Jack rejected the page-sized delivery interpretation:
+  “No. This is totally wrong. Unbounded size per PR.” Removed the
+  Conducting-only implementation boundary and page-by-page PR plan. The full
+  Task is the implementation scope. This confirms delivery scope, not approval
+  of new copy or every other design detail. See [review notes](docs-voice-review.md).
 - Implementation, website tests, app demonstration, and reader study remain
   unperformed. No quantitative chapter target or comprehension baseline exists.
+- 2026-09-26 — After the agent reported no other blocking design questions,
+  Jack requested “ok Complete”. The corrected design is ready to drive
+  implementation; remaining editorial choices follow the recorded audience
+  and writing rules. No Flow navigation decision is recorded by this review.

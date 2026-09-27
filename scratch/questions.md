@@ -2,9 +2,10 @@
 
 2026-09-26. Working design: [The docs read in the new voice](the-docs-read-in-the.md).
 
-- **Decision:** Start with Conducting and extend the glossary in the same slice.
-  LOO-309 permits one page per PR. This is an implementation choice, not evidence
-  that Jack approved new copy or that one page completes the Task.
+- **Confirmed scope:** Jack corrected the review on 2026-09-26: “Unbounded size
+  per PR.” Implement the full Task; there is no Conducting-only delivery or
+  page-count limit. This confirms scope, not new copy. See
+  [review feedback](docs-voice-review.md).
 - **Interpretation:** Glossary acceptance covers product concepts and borrowed
   engineering terminology beyond CS 101, including explanatory table text and
   comments. Ordinary English and individual CLI tokens do not each need entries.

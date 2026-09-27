@@ -328,3 +328,21 @@ or `--as` launch's review under the strict trigger beyond the existing
 against an isolated Home and assert `flows/<id>/position.json` never existed:
 fails at `flow_run::create` → `write` (`lf/commands/flow.rs`), which writes the
 file at launch.
+
+### 2026-09-27 · H1 review-slice
+
+Review of `4820e1f86`/`0fdda5066`; full matrix in [cut-h-review.md](cut-h-review.md).
+Every H1 claim passes; the Task-about review, the held pointer under a third
+`lf --task INF-123 flow review-first`, the same-Task bind no-op with its
+`Binding … Permanent.` line and the taskless-review refusal were driven through
+the compiled `lf` against a private Home. One gap fixed: the draft left pre-H1
+rows (Cut F step Runs, Cut 3 Wave-only reviews) disagreeing with their taskless
+invocation under the strict trigger; `point_task_at_invocation` now backfills a
+taskless invocation whose Runs name one Task, proven by
+`migrations::tests::pointing_tasks_at_invocations_names_the_task_on_earlier_task_flows`
+(failed `1 != 0` before, passes after). Suites: store lib filter plus the H1
+flow/cutover tests 159 passed; fmt, clippy, `check_migrations` (52 unchanged)
+pass. For Jack: bind line prints before a refused write; whether bind may assign
+a taskless invocation; Done-when 4's "`task run --flow` moves the pointer" has
+no owner (`ensure_flow_position` ignores `--flow` on a live Flow; restart is the
+mover). Verdict: proceed to H2.

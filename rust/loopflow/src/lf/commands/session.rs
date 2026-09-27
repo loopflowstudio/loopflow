@@ -83,7 +83,10 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             )
             .await
         }
-        SessionCommand::ServeAsk { id } => crate::ops::human_session::serve_ask(id).await,
+        SessionCommand::ServeAsk { run_id } => {
+            let store = open_shared_store().await.ok();
+            crate::ops::human_session::serve_ask(store, run_id).await
+        }
         SessionCommand::StopRun { run_id } => crate::ops::human_session::stop_run(run_id),
     }
 }

@@ -301,3 +301,13 @@ that broke historical review replacement. Its 49 source-suite passes have the
 boundaries recorded in [the review](data-model-slice-review.md). That bounded
 repair does not satisfy the requested Session cutover. The review names exact
 remaining dependencies; another owner-only foundation is not the next action.
+
+## Cut 1: interactive Sessions as rows (2026-09-27)
+
+Executive choices, recorded in [the cut report](cutover/cut-1-interactive.md):
+interactive Session ids are `session_<uuid>`, distinct from Run ids; Sessions
+list from launch (`waiting`) instead of from first provider history; `state` is
+derived, not stored; only independent `tui` launches create a Session, so IDE
+handoff and headless Runs still have no rows; an interactive launch fails when
+the store cannot be written. Interactive Sessions that exist only as Run
+directories on old Homes stop listing until the import cut.

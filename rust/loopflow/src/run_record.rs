@@ -264,13 +264,6 @@ struct ProviderClientStop {
     reason: ProviderClientStopReason,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct SessionResolution {
-    schema_version: u32,
-    #[serde(with = "time::serde::rfc3339")]
-    resolved_at: OffsetDateTime,
-}
-
 #[derive(Serialize)]
 struct RunContextArtifact<'a> {
     schema_version: u32,
@@ -533,62 +526,6 @@ pub fn scan_runs_since(lf_home: &Path, since: i64) -> std::io::Result<Vec<RunSna
             .started
             .cmp(&left.started)
             .then_with(|| right.id.cmp(&left.id))
-    });
-    Ok(runs)
-}
-
-/// Read unresolved native provider Sessions without reducing every Run's events.
-pub(crate) fn scan_unresolved_provider_runs(
-    lf_home: &Path,
-) -> std::io::Result<Vec<(PathBuf, RunManifest)>> {
-    let mut runs = Vec::new();
-    for dir in record_dirs(lf_home)? {
-        let manifest = match read_manifest(&dir).and_then(|manifest| {
-            validate_manifest_path(&dir, &manifest)?;
-            Ok(manifest)
-        }) {
-            Ok(manifest) => manifest,
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    record = %dir.display(),
-                    "invalid Run record omitted from Sessions"
-                );
-                continue;
-            }
-        };
-        if !has_interactive_history(&dir, &manifest)? {
-            continue;
-        }
-        let unresolved = match provider_session_is_resolved(&dir) {
-            Ok(resolved) => !resolved,
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    run_id = %manifest.run_id,
-                    "invalid Session resolution omitted"
-                );
-                continue;
-            }
-        };
-        if !unresolved {
-            continue;
-        }
-        match read_provider_session(&dir) {
-            Ok(Some(_)) => runs.push((dir, manifest)),
-            Ok(None) => {}
-            Err(error) => tracing::warn!(
-                %error,
-                run_id = %manifest.run_id,
-                "invalid provider Session omitted"
-            ),
-        }
-    }
-    runs.sort_by(|(_, left), (_, right)| {
-        right
-            .created_at
-            .cmp(&left.created_at)
-            .then_with(|| right.run_id.as_str().cmp(left.run_id.as_str()))
     });
     Ok(runs)
 }
@@ -1015,12 +952,6 @@ pub(crate) fn remove_provider_client_stop(dir: &Path, pid: u32) -> std::io::Resu
     }
 }
 
-/// The client directory survives its last client: it records that an initially
-/// headless Run was opened interactively. Client files alone describe liveness.
-pub(crate) fn has_interactive_history(dir: &Path, manifest: &RunManifest) -> std::io::Result<bool> {
-    Ok(manifest.surface == "tui" || dir.join("provider-clients").try_exists()?)
-}
-
 pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
     let path = dir.join("provider-clients").join(format!("{pid}.json"));
     match fs::remove_file(path) {
@@ -1055,6 +986,24 @@ struct SessionNameRecord {
 }
 
 const SESSION_TITLE_MAX_CHARS: usize = 80;
+
+/// One trimmed, non-empty line of at most `SESSION_TITLE_MAX_CHARS` characters.
+pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
+    let title = title.trim();
+    if title.is_empty() || title.contains(['\n', '\r']) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Session name must be one non-empty line",
+        ));
+    }
+    if title.chars().count() > SESSION_TITLE_MAX_CHARS {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Session name must be at most {SESSION_TITLE_MAX_CHARS} characters"),
+        ));
+    }
+    Ok(title)
+}
 
 /// The stored Session name, or `None` while the Run still has its seed name.
 pub(crate) fn read_session_name(dir: &Path) -> std::io::Result<Option<SessionName>> {
@@ -1091,19 +1040,7 @@ pub(crate) fn write_session_name(
             "a Session name is either generated or human-assigned",
         ));
     }
-    let title = title.trim();
-    if title.is_empty() || title.contains(['\n', '\r']) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "Session name must be one non-empty line",
-        ));
-    }
-    if title.chars().count() > SESSION_TITLE_MAX_CHARS {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("Session name must be at most {SESSION_TITLE_MAX_CHARS} characters"),
-        ));
-    }
+    let title = validate_session_title(title)?;
     read_manifest(dir)?;
     let lock = OpenOptions::new()
         .read(true)
@@ -1133,43 +1070,6 @@ pub(crate) fn write_session_name(
         title: title.to_string(),
         source,
     })
-}
-
-pub(crate) fn provider_session_is_resolved(dir: &Path) -> std::io::Result<bool> {
-    match fs::read(dir.join("session-resolution.json")) {
-        Ok(bytes) => {
-            let resolution: SessionResolution =
-                serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-            if resolution.schema_version != SCHEMA_VERSION {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "unsupported session resolution schema",
-                ));
-            }
-            Ok(true)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-pub(crate) fn resolve_provider_session(dir: &Path) -> std::io::Result<()> {
-    read_manifest(dir)?;
-    if provider_session_is_resolved(dir)? {
-        return Ok(());
-    }
-    let path = dir.join("session-resolution.json");
-    let staging = dir.join(format!(".session-resolution-{}.staging", Uuid::new_v4()));
-    write_private_exclusive(
-        &staging,
-        &serde_json::to_vec_pretty(&SessionResolution {
-            schema_version: SCHEMA_VERSION,
-            resolved_at: OffsetDateTime::now_utc(),
-        })
-        .map_err(std::io::Error::other)?,
-    )?;
-    fs::rename(staging, path)?;
-    sync_dir(dir)
 }
 
 fn context_ref_is_valid(dir: &Path, context: Option<&RunContextRef>) -> bool {
@@ -2510,11 +2410,9 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        observed_run_ids_at, provider_session_is_resolved, read_final_answer,
-        read_provider_clients, read_provider_session, read_run_snapshot, remove_provider_client,
-        resolve_provider_session, scan_runs_since, scan_unresolved_provider_runs,
-        write_provider_client, write_provider_session, CaptureHandle, RunLaunchRequest,
-        RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
+        observed_run_ids_at, read_final_answer, read_provider_clients, read_provider_session,
+        read_run_snapshot, remove_provider_client, scan_runs_since, write_provider_client,
+        CaptureHandle, RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
@@ -3099,65 +2997,6 @@ mod tests {
 
         remove_provider_client(&dir, 101).unwrap();
         assert_eq!(read_provider_clients(&dir).unwrap()[0].pid, 202);
-    }
-
-    #[test]
-    fn resolving_a_session_keeps_its_provider_history() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let dir = capture.artifact_dir();
-        write_provider_session(&dir, "provider-session", None).unwrap();
-
-        assert!(!provider_session_is_resolved(&dir).unwrap());
-        resolve_provider_session(&dir).unwrap();
-
-        assert!(provider_session_is_resolved(&dir).unwrap());
-        assert_eq!(
-            read_provider_session(&dir)
-                .unwrap()
-                .expect("provider history remains")
-                .provider_session_id,
-            "provider-session"
-        );
-    }
-
-    #[test]
-    fn unresolved_provider_scan_keeps_interactive_resumes_until_resolution() {
-        let home = tempfile::tempdir().unwrap();
-
-        let mut open_spec = spec(home.path());
-        open_spec.surface = "tui".to_string();
-        let open = CaptureHandle::begin_at(home.path(), open_spec).unwrap();
-        write_provider_session(&open.artifact_dir(), "open-session", None).unwrap();
-
-        let mut resolved_spec = spec(home.path());
-        resolved_spec.surface = "tui".to_string();
-        let resolved = CaptureHandle::begin_at(home.path(), resolved_spec).unwrap();
-        write_provider_session(&resolved.artifact_dir(), "resolved-session", None).unwrap();
-        resolve_provider_session(&resolved.artifact_dir()).unwrap();
-
-        let headless = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        write_provider_session(&headless.artifact_dir(), "headless-session", None).unwrap();
-
-        let runs = scan_unresolved_provider_runs(home.path()).unwrap();
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].1.run_id, open.run_id());
-
-        let dir = headless.artifact_dir();
-        write_provider_client(&dir, 101).unwrap();
-        let resumed = scan_unresolved_provider_runs(home.path()).unwrap();
-        assert!(resumed
-            .iter()
-            .any(|(_, manifest)| manifest.run_id == headless.run_id()));
-        remove_provider_client(&dir, 101).unwrap();
-        let closed = scan_unresolved_provider_runs(home.path()).unwrap();
-        assert!(closed
-            .iter()
-            .any(|(_, manifest)| manifest.run_id == headless.run_id()));
-        resolve_provider_session(&dir).unwrap();
-        let resolved = scan_unresolved_provider_runs(home.path()).unwrap();
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].1.run_id, open.run_id());
     }
 
     #[test]

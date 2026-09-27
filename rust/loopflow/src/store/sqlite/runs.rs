@@ -7,6 +7,10 @@ use crate::id::WaveId;
 use crate::session::{Run, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
+/// Column order read by `read_run`.
+pub(super) const RUN_COLUMNS: &str = "id,session_id,invocation_id,task_id,wave_id,work_source,
+    created_at,published,cwd,skill,node,iterations,attempt,provider,model";
+
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
@@ -28,6 +32,8 @@ pub(super) fn read_run(
     let node = row.get(offset + 10)?;
     let iterations: Option<String> = row.get(offset + 11)?;
     let attempt = row.get(offset + 12)?;
+    let provider = row.get(offset + 13)?;
+    let model = row.get(offset + 14)?;
     Ok((|| {
         Ok(Run {
             id: RunId::parse(&id).map_err(invalid)?,
@@ -60,6 +66,8 @@ pub(super) fn read_run(
             published,
             cwd: cwd.into(),
             skill,
+            provider,
+            model,
         })
     })())
 }
@@ -139,12 +147,27 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
         )?);
     }
     conn.execute(
-        "INSERT INTO runs(id,session_id,invocation_id,task_id,wave_id,work_source,created_at,published,cwd,skill,node,iterations,attempt)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-        params![run.id.as_str(), run.session_id, run.invocation_id,
-            run.task_id.as_ref().map(TaskId::as_str), run.wave_id.as_ref().map(WaveId::as_str),
-            source, run.created_at, run.published, run.cwd.to_string_lossy(), run.skill,
-            run.node, iterations, run.attempt],
+        &format!(
+            "INSERT INTO runs({RUN_COLUMNS})
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"
+        ),
+        params![
+            run.id.as_str(),
+            run.session_id,
+            run.invocation_id,
+            run.task_id.as_ref().map(TaskId::as_str),
+            run.wave_id.as_ref().map(WaveId::as_str),
+            source,
+            run.created_at,
+            run.published,
+            run.cwd.to_string_lossy(),
+            run.skill,
+            run.node,
+            iterations,
+            run.attempt,
+            run.provider,
+            run.model
+        ],
     )?;
     Ok(run)
 }
@@ -215,11 +238,10 @@ impl super::SqliteStore {
         iterations: &[Vec<u32>],
     ) -> StoreResult<Vec<Run>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT id,session_id,invocation_id,task_id,wave_id,work_source,
-            created_at,published,cwd,skill,node,iterations,attempt FROM runs
-            WHERE invocation_id=?1 AND node=?2 AND iterations=?3 ORDER BY attempt",
-        )?;
+        let mut query = conn.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM runs
+            WHERE invocation_id=?1 AND node=?2 AND iterations=?3 ORDER BY attempt"
+        ))?;
         let rows = query.query_map(
             params![invocation, node, serde_json::to_string(iterations)?],
             |row| read_run(row, 0),

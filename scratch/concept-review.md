@@ -1,30 +1,30 @@
 # LOO-298 concept review
 
-2026-09-26 · Reviewed `246f0006002f43bdef906db052509c04a0b8120c`
+2026-09-26 · Reviewed `654e2777cb036b956eeb5c1792165b486a6c7af8`
 against `4cd64be3d0432aa04dd9256293eef7088db97ccc`, concentrating on the
-selected-attempt repair at `830e9af7b` and the latest
-[slice review](data-model-slice-review.md). Entry tree was clean. This pass
-changes only this concept review; the implementation and slice review are preserved.
+Run constructor and the latest [slice review](data-model-slice-review.md).
+Entry tree was clean. This pass changes only this review.
 
-**Judgment: keep the amended concepts; the branch is not ready to publish.**
-Session is the conversation Jack keeps; Run is an attempt within it. The previous
-lookup-to-action P1 is repaired at source level. The Task-start reader's reference
-to the deleted table is also repaired. Neither repair has executed behavioral
-proof. No additional product noun, recovery command or lifecycle is needed.
-The complete owner/caller conversion and all eight Done When obligations remain.
+**Judgment: retain the amended model; the branch is not ready to publish.**
+Session is the conversation Jack keeps; Run is an attempt within it. The
+constructor and selected-attempt repair now have executed local proof. The
+next work is the common owner/caller conversion, not another attempt to prove
+that compilation is sufficient or another redesign of Session identity.
 
-The [amended design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md)
-and [Session decision](session-runs-and-current-run.md) govern. Jack commissioned
-one SQLite owner per main product object. The later participant (name unresolved)
-approved taskless Invocations, Session owning Runs plus a current Run, and Flow /
-Invocation naming. The older Task title and Wave memory do not override those
-corrections. This review supplies evidence and chooses no Flow navigation.
+The [design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md),
+[Session decision](session-runs-and-current-run.md) and final dated steers in
+[questions](questions.md) govern. The participant whose name remains unresolved
+approved taskless Invocations and Session owning Runs plus a current Run. Jack
+subsequently selected write-once bind and a set-once Started timestamp. Those
+corrections supersede the Task title, older Wave memory and this note's former
+example moving a Run from Task X to Y. All eight Done When obligations remain.
 
 ## Usage first
 
 Proposed end-state walkthrough, not an executed demonstration:
 
 ```sh
+# In a checkout without a registered Task:
 lf --interactive : "Review the parser"
 lf session list --json
 lf session rename <session-id> "Parser review"
@@ -34,213 +34,229 @@ lf runs --task INF-123 --json
 lf session open <session-id>
 ```
 
-From an unregistered checkout, Jack starts an unbound conversation, names it,
-and binds it to INF-123 even after its PR lands. Every view agrees about the
-current Run's Task. The same selected Session and live terminal retain the
-draft. INF-123 is illustrative; bind and the filtered Session list remain target
-behavior. A registered Task checkout supplies ancestry at launch instead.
+Jack selects the unbound conversation, sees its name and the exact permanent
+Task target, and confirms once. A landed or done INF-123 remains eligible.
+Binding preserves the Session, terminal draft and Flow membership. Every reader
+shows the current Run's same Task; there is no move-to-another-Task or unbind
+interaction. A Wave-only Run can receive a Task within that Wave. A taskless
+invocation's Run cannot independently receive a Task under nullable parent
+equality; “orphan” does not mean “independent.”
 
-Recovery keeps the same Open action. Resume native history when recoverable;
-when exact execution evidence permits replacement, append a Run and select it
-without losing the Session's title, feedback or earlier attempts. Missing launch
-receipts cannot justify another provider launch. Retaining Session identity does
-not recover a dead provider's unsaved native state.
+Recovery uses the same Open action. Resume native history when recoverable;
+when exact evidence permits replacement, append a Run and select it without
+losing the Session's title, feedback or earlier attempts. Missing receipts
+cannot authorize another provider launch. Stable Session identity preserves
+navigation, not a dead provider's unsaved native state. Ready saves review
+feedback; Complete returns it once to the waiting boundary. Provider exit and
+pane closure do not complete a review.
 
-For a review, Ready saves feedback; Complete returns it once to the waiting
-boundary. Pane closure and provider exit never complete the review. A broken
-neighboring invocation should leave this conversation reachable.
+Keep the updated examples and bind language in [CLI Sessions](../docs/lf.md#sessions).
+The following clarification remains a draft for the final all-kind conversion:
 
-Draft clarification for `docs/lf.md` Sessions, after all-kind implementation and
-proof; the latest Task-review source supports this interaction:
+> Use the Session ID for the conversation. A Run ID or Run prefix selects that
+> attempt; a replaced attempt reports its Session and current Run without acting
+> on the replacement. Open and Complete retain the attempt selected at entry.
+> Bind retains the current attempt and exact target shown for confirmation; a
+> concurrent change rejects the write rather than redirecting it. Renaming by
+> Session ID names the conversation even if its current attempt changes.
 
-> Use the Session ID to name the conversation. A Run ID or Run prefix selects
-> that attempt: if it has been replaced, the command reports its Session and
-> current Run without acting on the replacement. Open and Complete select a
-> current attempt and keep that selection through the operation. A concurrent
-> change rejects the operation instead of redirecting it. Complete saves that
-> attempt's feedback and tears down the same attempt. Renaming by Session ID
-> names the conversation even if its current attempt changes.
+This extends the accepted selected-attempt and confirmed-target contracts to
+bind; it adds no recovery command or durable confirmation record. Confirmation
+transport for headless/JSON callers belongs in the existing CLI/UI interaction
+pattern during implementation. No new flag is specified here, and JSON output
+alone must not count as confirmation.
 
-This clarifies the existing stale-attempt guarantee; it is not a new approval.
-It avoids making Jack choose among different recovery commands or understand
-locks. Keep the already-clear examples in `docs/lf.md:576` unchanged here.
-Before shipping, reconcile the preceding prepared-Run paragraph (`:562`) with
-the final reservation/publication contract: it still describes the integrated
-file-backed path and launch-time context filling. The architecture reference
-owns transactions and validators; `docs/waves.md` owns Chapter history.
-The builtin `LOOPFLOW.md:75` already distinguishes readiness from completion,
-and `task/skill/review-design.md:112` requires explicit assumptions. No skill
-rewrite is needed to teach storage internals.
+Before shipping, reconcile `docs/lf.md:562`: its prepared-Run paragraph still
+says listing fails until an old boundary is prepared and launch fills context.
+The final all-kind reservation/import/publication behavior must own that wording.
+The architecture reference owns validators; Waves owns Chapter history.
+Builtin `LOOPFLOW.md:75` already separates Ready from Complete, and
+`task/skill/review-design.md:112` separates decisions from assumptions. Keep
+those instructions; storage details do not warrant a skill rewrite.
 
 ## Core model in one screen
 
-| Action | Identity and owner | State change |
+| Action | Identity and owner | Transition |
 | --- | --- | --- |
-| Choose a workflow | Flow template; Project default | Task may explicitly select another Flow |
-| Execute or restart it | Invocation; captured graph, cursor, returns, claim | Resume retains capture; restart retains history under a new execution identity |
-| Enter a nested loop body | Child Invocation | Runtime nesting only; template composition is expanded before execution |
-| Inspect an attempt | Run; nullable Invocation, Task, Wave and Session | Run owns outcome, usage and exact process evidence |
-| Name or reopen a conversation | Session; title, feedback, completion, current Run | Replacement appends a member Run and compares the current pointer |
+| Choose a workflow | Flow template, default on Project | Task may select another Flow |
+| Execute or restart | Invocation: capture, cursor, returns, claim | Resume retains capture; restart retains the old execution as history |
+| Enter a nested loop pass | Child Invocation | Runtime parentage, never template composition |
+| Inspect an attempt | Run: nullable Invocation, Task, Wave and Session | Record outcome, usage and exact process evidence |
+| Name or reopen a conversation | Session: title, feedback, completion, current Run | Replacement appends a member Run and compares the current pointer |
+| Assign missing ancestry | Selected current Run | Confirm once, fill missing parents, preserve membership and previous Runs |
+| Show Started | Task's `started_at`, maintained by the Run writer | Set once at first Task assignment, including bind; never recompute from Run ages |
 | Complete a review | Selected Run and exact waiting boundary | Settle saved feedback once, then tear down the same attempt |
-| Assign the conversation to work | Current Run's Task/Wave | Validated bind; membership and earlier Run attribution remain intact |
-| Inspect past plans | Repository Chapter; Project at (Wave, Chapter) | Rotation preserves active identity and freezes predecessor evidence |
+| Inspect past plans | Repository Chapter; Project at (Wave, Chapter) | Freeze old evidence and transfer active identity through one repository boundary |
 
-A node and launch-time iteration tuple locate a Run. No occurrence object is
-needed. Loop return, Run retry, Session reopen and Invocation restart preserve
-different facts. An operation's selected-attempt expectation is an input, not
-another durable record. Session identity grants neither process control nor
-permission to settle an invocation.
+This is the target model. Current SQL implements only part of it. A node and
+launch-time iteration tuple locate a Run without an occurrence object. Loop
+return, Run replacement and Invocation restart preserve different identities.
+Session identity grants no execution or process-control authority.
 
 ## Findings and consequences
 
-Source paths below are relative to `rust/loopflow/src/`. These are source
-observations, not runtime reproductions.
+Source paths below are relative to `rust/loopflow/src/` unless stated otherwise.
+Source observations and reused behavioral evidence are distinguished explicitly.
 
-### 1. The selected attempt now survives the action boundary
+### 1. Write-once assignment removes a product lifecycle
 
-The former experience could redirect a request for Run A to replacement B,
-while teardown still addressed A. The current path keeps the original choice:
+The earlier reversible model required explaining rebind, unbind, moved usage
+and a Task becoming unstarted. Jack's final contract removes those transitions.
+Bind fills a null Task once, preserving an existing Wave. Usage cannot move
+between Tasks. Authorized cross-Wave Task moves remain a separate operation.
 
-- `ops/human_session.rs:724` holds launch exclusion through Complete's
-  settlement, continuation request and teardown. `controller/task/mod.rs:764`
-  accepts the original `FlowPosition`; it no longer reloads B as the expected
-  position. `store/sqlite/children.rs:235,271` compares that original snapshot
-  in the transaction, and `sessions.rs:362` compares current Run and feedback.
-  Continuation remains requested before stopping the selected review provider.
-- Open (`human_session.rs:1035`) re-resolves the original exact/prefix selector
-  under the launch lock and rejects a changed position. Native-history lookup
-  precedes client transfer (`:1632`); transfer and client receipt publication
-  retain exclusion. `lf/commands/util.rs:616` releases the lock before waiting
-  for provider exit. Ready and Complete can then proceed during the conversation.
-  Replacement reserves against the opening snapshot and returns its own Run
-  (`human_session.rs:894`), rather than reading a later current pointer on exit.
-- Rename (`human_session.rs:1505`) retains the supplied selector across the lock
-  wait. Exact/prefix requests also pass the selected Run into the SQL transaction
-  (`store/sqlite/sessions.rs:214`). A stable Session-ID rename deliberately
-  remains a conversation operation.
+The current constructor (`store/sqlite/runs.rs:60`) resolves Invocation's nullable
+Task, fills Wave through Project, and rejects supplied mismatches within its
+caller's transaction. Both review creation and replacement use it
+(`store/sqlite/sessions.rs:84,313`); current/history reads share `read_run`.
+Replacement inherits attribution and gets the Task's current worktree, while
+older attempts retain their launch cwd. These are useful common owners to extend.
 
-The public CLI dispatch preserves the supplied ID (`lf/commands/session.rs`).
-Its separate completion-worktree lookup supplies journal scope and does not
-rewrite the selector. JSON Open prepares an action; it is not native resume.
+The update trigger in the `own_sessions_and_runs` draft validates matching
+parents, but does not prohibit changing a Run between two otherwise valid Tasks.
+There is no general bind API in `SessionCommand` (`lf/mod.rs:733`). Thus the new
+write-once rule is an implementation obligation, not a passing constructor claim.
+Keep the selected Run and resolved target through confirmation and the final
+transaction. The existing selected-attempt race is the counterexample to
+resolving again after confirmation. No generic action framework is needed.
 
-The deterministic action matrix (`controller/task/mod.rs:2338`) pauses after
-lookup, replaces A with B retaining feedback, and resumes Complete/Open/rename
-for exact, prefix and Session selectors. It asserts unchanged B/cursor/feedback
-and simulated clients on rejection; Session-ID rename is the intended exception.
-Subsequent Open and Complete of B preserve A's simulated client, stop B and save
-one completion event. The native handoff fixture (`lf/commands/util.rs:904`)
-separately observes actual receipt publication through the startup lock and stops
-its owned shell stand-in. These complementary fixtures have compiled, not run.
+### 2. Started has one meaning; its timestamp records assignment
 
-**Consequence:** retain this API distinction and its fences. There is no need
-for a second current-attempt store or a generic action abstraction. The original
-P1 is no longer an outstanding source defect; acceptance still needs execution.
-Ask and taskless native-resume callers share the lock handoff, but their separate
-owners and action contracts are not thereby converted.
+Jack's final rule is any Run with Task X. The denormalized timestamp records
+when X first received a Run, not the oldest Run's creation time. This permits one
+reader without a second worker-claimed definition or a worktree-content definition.
+A first bind uses bind time; later older/newer Runs leave the exact timestamp
+unchanged. The writer checks timestamp presence iff a Task Run exists.
 
-### 2. Task-start repair preserves history without claiming provider success
+Current source still differs: `store/sqlite/chapters.rs:97` combines historical
+events, worker generations and **published** review Runs. `record_task_start`
+remains at `lf/commands/run.rs:832`. The shared INSERT neither sets a
+`tasks.started_at` column nor validates its presence. Its passed reservation test
+(`store/sqlite/durable.rs:1829`) correctly proves the transitional reader; its
+reservation-is-false assertion must change with the final any-Run contract.
+A reserved attributed Run will count as Started without proving provider launch,
+liveness, successful output or Task completion.
 
-The latest slice found `store/sqlite/chapters.rs:97` still reading the dropped
-`task_flow_positions` table through Task detail (`lf/commands/waves.rs:1090`).
-It now reads retained `flow_invocations` and published Runs, alongside historical
-events. Current Rust outside migration history has no remaining reference to
-that table. This supersedes earlier negative-inventory claims that missed it.
+No previous passing test is invalidated by this note. During conversion, replace
+that transitional expectation and retain its history/status-read coverage.
+Keep retirement's separate authored-work, PR, claim and unknown-evidence checks.
+Import must populate Started for Tasks with Runs without inventing successful
+Runs to explain older events; report any inferred timestamp provenance explicitly.
 
-The fixture at `store/sqlite/durable.rs:1613` uses an ephemeral migrated store:
-reservation leaves Started false; publication makes it true; completing the
-review and removing its current invocation retains Started. It is unexecuted.
-Publication here is durable launch progress, not proof of a provider start,
-liveness, successful outcome or completed work. Keep those distinctions when
-general Run lifecycle fields replace the remaining event-based read.
+### 3. The local ownership proofs now run
 
-**Consequence:** no new Task lifecycle is needed. Displayed Started and safe
-backlog retirement ask different questions. The target can derive the display
-from Runs while preserving historical execution/authored/PR evidence for
-retirement. Binding away the last current attribution must not make old work
-eligible for automatic abandonment.
+The latest slice records **58 distinct library tests passing**, including the
+constructor matrix, competing Project ancestry writer, repeated Session
+replacement, selected-attempt races, publication recovery, stale actors,
+corrupt-neighbor availability, 29 Task-controller tests and 16 durable-store
+tests (overlap counted once). The retained results file includes the corrupt-
+neighbor setup failures and subsequent pass. The repair supplies required Task
+planning fields and distinct worktree/slug values; it does not loosen the domain.
 
-### 3. One conversation owner remains the unfinished product improvement
+The populated projection, invocation and Session migrations and schema fixture
+also pass after canonical materialization in a disposable source copy. Two
+actual CLI status/roadmap integration tests pass against isolated current and
+prior-release stores. Inspected the retained result ledger and the materialized
+Session/CLI log summaries in `.lf/tmp/loo298-proof/` alongside the source diff.
+The prior concept review's unexecuted-proof and resource-blocked conclusions
+are superseded for these named checks. The design's `Measure` paragraph at
+`:1131` still repeats the old blocker; use its current ledger and slice review
+for evidence, and correct that stale paragraph at the next design update.
 
-| Experience still split | Current source | Required continuation |
+The selected-attempt matrix (`controller/task/mod.rs:2338`) now supports the
+repaired API: a superseded Run cannot redirect Complete/Open/rename; Session-ID
+rename intentionally stays conversational. Native handoff uses an owned shell
+stand-in. These proofs do not establish configured provider recovery, all Session
+kinds, taskless CLI recovery after source removal, desktop retention or Home import.
+The earlier P1 is repaired and locally exercised; another review loop over that
+same repair is not the remaining work.
+
+### 4. The one-conversation experience still crosses live owners
+
+| Remaining experience gap | Current source | Required continuation |
 | --- | --- | --- |
-| List conversations | `human_session.rs:575` combines four sources | Query Session/current Run rows for every kind |
-| Keep Ask feedback/name on replacement | `human_session.rs:1204,1208` resets feedback and copies names | Convert Ask to stable Session ownership; remove the copy |
-| Execute a taskless Flow | `ops/flow_run.rs:108,136` reads/writes `position.json` | Shared invocation owner and driver; preserve captured recovery |
-| Find a Task's Runs | `lf/commands/runs.rs:77,91` scans manifests and matches Work selectors | Indexed typed Run parents, also used by usage and Sessions |
-| Bind and inspect history in the desktop | `session.rs` contains partial Run facts; Swift `SessionRecord.swift:134` retains the old projection | Complete general Run facts/validators and common DTO/history/pane identity |
-| Rotate the repository plan | `store/sqlite/chapters.rs:44` clears current by Wave | One repository Chapter activation and frozen predecessor plans |
+| One Session list | `ops/human_session.rs:575` combines four sources | Query Session/current Run for every kind after import |
+| Retain Ask feedback/name on replacement | `human_session.rs:1204,1208` resets feedback and copies names | Stable Session row; remove the copy operation |
+| Taskless execution and review recovery | `ops/flow_run.rs:108,136` reads/writes `position.json` | Common captured invocation owner/driver and runtime nesting |
+| Task Run history and usage | `lf/commands/runs.rs:77,101` scans manifests | Indexed typed Run ancestry shared by consumers |
+| Stable pane/history and correct grouping | Swift `SessionRecord.swift:134`, `WorkspaceProjection.swift:43,107` | Distinct Session/current Run IDs, typed parents/history and cached projection |
+| One repository planning clock | `store/sqlite/chapters.rs:44` clears current by Wave | Repository activation and frozen predecessor plans |
 
-The earlier publication/lookup improvements remain: retained SQL membership
-precedes interactive dispatch for exact/prefix Run selectors; reserved artifacts
-reconcile before SQL publication and recorder construction (`run_record.rs:1581,2205`);
-unknown published launches cannot be replaced merely from missing receipts;
-invalid selected captures render on their own unavailable Session
-(`human_session.rs:1743`). Those authored proofs remain owed too.
+`WorkspaceProjection` still groups through visible roadmap matches and reverse
+searches them. A bound Session missing from that roadmap must remain bound and
+reachable; Wave-only Sessions are orphans under the accepted null-Task definition.
+Run's current Rust type also lacks the general lifecycle/process/location facts.
+Deleting these remaining adapters before replacement would lose capability.
+Adding table-only readers over an unimported Home is equally unacceptable.
 
-The simplifying result is one conversation list, one Open action, and stable
-pane identity across replacement. Complete the common owners and all callers,
-then delete the alternate paths. They still support live behavior, so deleting
-them now would lose capability. Table-only readers over an unimported Home are
-also forbidden. No intermediate dual-owner publication is selected.
+## Remaining decisions and scope
 
-## Unresolved product consequences
+Current-Run-only bind remains an implementation assumption. The valid example
+is now: A and replacement B began unbound; Jack binds B to X; A stays unbound
+and B's usage belongs to X. Later replacement C inherits X. If A already belonged
+to X, B inherits X and cannot bind to Y. Stable Session approval did not authorize
+bulk binding of old Runs. Keep that boundary; an all-history assignment would
+need a separate product decision before expanding it.
 
-Current-Run-only bind remains an implementation assumption. If A belonged to X,
-replacement B initially belongs to X; binding the Session to Y changes B while
-A's attribution and usage remain on X. Approval of stable conversation identity
-did not approve a bulk historical rewrite. Any requirement to move all history
-needs an explicit ownership decision before expanding that behavior.
+Nullable invocation Task equality still prevents individually binding a taskless
+invocation Run to a Task. Keep the explicit explanation at the bind surface.
+Relaxing equality or binding an entire invocation would change the accepted
+model; neither is selected or necessary to continue. No Ask is required here.
 
-A taskless Run can belong to an Invocation. Nullable Task equality then rejects
-binding that individual Run to a Task atomically. Orphan does not imply
-independent execution. Allowing that bind requires changing the accepted parent
-constraint or deciding how whole-invocation attribution moves. Neither is
-silently selected here. No new participant decision is required to continue
-within the recorded assumptions, and this bounded review opens no Ask.
+The supplied PR #1296 publication-record and existing-Task stacking reports stay
+unreproduced scope. The cancellation steer also remains: `lf pm task cancel --id`
+should use the existing Linear client's Team canceled-type state; abandoning
+local Task Work should cancel its issue; a refused Task start must not leave a
+new issue behind. Cancel must not report completed work. `PmTaskCommand`
+(`lf/mod.rs:1499`) has create/update/comments/done, without cancel. This review
+checks that surface only; it neither reproduces the remote incidents nor changes
+issues, credentials or delivery state. No new planning object is warranted.
 
 ## Smallest next action and proof
 
-When TESTING.md preflight permits, execute the selected-attempt matrix, native
-handoff and Task-start reader fixtures first. Also retain the Ask reopening and
-taskless Flow regression commands from the latest slice review. A passing matrix
-would prove these simulated interleavings, not configured provider recovery or
-actual CLI dispatch. Add the isolated CLI status/roadmap read against a registered
-Task to exercise the repaired reader's public consumer.
+Continue the approved common Task/taskless invocation owner and driver, extending
+the existing Run writer to general launches and all Session kinds. Include
+write-once bind and set-once Started in that conversion. The accumulated local
+proof debt has been repaid; preserve those receipts instead of rerunning the
+same suites merely because this review began.
 
-Keep every owed publication, historical-selector, stale-provider/Ready,
-corrupt-neighbor, repeated-replacement, schema, Task-controller and durable-store
-proof in the design ledger. Repeat populated preservation after canonical
-materialization in a disposable source copy. Compilation proves none of their
-runtime results.
+The first new bind/Started proof should reserve an attributed Run, assign a
+previously unbound older Run to another Task at bind time, and compare timestamp
+presence with actual Run existence. Later launch and older/newer binds must
+preserve the timestamp bytes. Competing targets or replacement during
+confirmation must fail atomically without changing ancestry, Session feedback,
+artifacts or the losing Task's timestamp. Include same-Wave assignment, conflicting
+Wave, done/landed Task and nullable invocation mismatch cases. Prove import
+presence and timestamp provenance separately from observed runtime assignments.
 
-Continue the approved shared taskless driver and runtime nesting, general Run
-facts, all Session kinds, launch/read/bind callers, Rust/Swift DTOs and stable
-pane identity/caches, repository Chapter operation, populated offline import,
-exact-writer real-Home maintenance and configured CLI/app acceptance. Comparable
-measurements, deletion research followed by deletion, and final documentation
-consistency remain required. All eight Done When obligations still govern.
-The supplied PR #1296 publication-record and existing-Task stacking reports remain
-unreproduced implementation scope; this review changes no delivery state.
+For the common execution owner, run an isolated actual taskless CLI Flow, remove
+its template, recover its review, replace the Run twice and complete saved
+feedback once. Preserve exact claims, stale-result rejection, uncertainty after
+publication and native process authority. Re-run affected preservation proofs
+when those executable bytes change, including canonical materialization when
+migration inputs change. This is the next behavioral distinction, not a new
+acceptance substitute.
+
+All eight design obligations remain: complete ancestry/structure validation;
+common CLI/usage/bind readers; captured execution preservation; repository
+Chapter operation; populated filesystem import; Rust/Swift DTO and retained-pane
+proof; backed-up exact-writer real-Home conversion with configured CLI/app
+acceptance; deletion research followed by deletion and final documentation
+consistency. Comparable measurements, the recorded **32/33** owner inventory gap
+for `wave_chapters`, historical branch whitespace and the three added reports
+remain outstanding. No intermediate publication is selected.
 
 ## Evidence boundary
 
-Inspected the branch inventory and latest implementation diff, normal Complete
-and rename, Open recovery, reservation/publication, native lock handoff, exact
-settlement, deterministic fixtures, Task-start consumers, current alternate
-owners, DTOs and affected usage/skill guidance. No new blocking source defect
-was identified in the selected-attempt repair. No repository-wide history
-survey, implementation change, execution restart or product test was needed for
-this concept judgment.
+This pass inspected the latest diff, constructor and Session transactions,
+ancestry triggers, Started/retirement readers, live alternate owners, Swift
+projection, usage/skill guidance and retained proof logs. No new blocking source
+defect was found in the constructor cut. The final bind/Started obligations are
+accepted but unimplemented requirements, not failures concealed by existing tests.
 
-Reused the latest slice review's resource receipt: active `main-view-task`
-**15.3 GiB / 12 GiB**, **97.2 GiB** free. This documentation-only pass did not
-resample resources or run safe recovery. That review records passing formatting,
-all-target Clippy, migration validation and generated HTML consistency; tests
-remain unexecuted under TESTING.md's resource rule. Prior receipts keep their
-scope. SQLite owner coverage still has the recorded **32/33** `wave_chapters`
-gap; historical branch-range whitespace findings remain.
-
-Only this note changed. Its whitespace and local-link checks pass; those checks
-clear neither the architectural gap nor historical whitespace. No Home, provider,
-PR, Task disposition or Flow navigation changed. No executed proof was invalidated
-by this note, and no full-design acceptance claim is promoted by it.
+Only this note changed. Its whitespace and local-link checks pass. No product
+tests were rerun; the latest slice's formatting, Clippy, migration, HTML and
+behavioral receipts retain their stated scope. That slice's post-proof resource
+preflight passed at 102.8 GiB free and 3.1 GiB for this checkout; this review did
+not resample resources. No Home, provider, PR, Task disposition or Flow navigation
+changed. This review supplies evidence and chooses no next Flow edge.

@@ -2,8 +2,9 @@
 
 LOO-298 · Infrastructure · 2026-09-26
 
-Status: reviewed specification with the first storage reduction implemented;
-behavioral verification remains blocked by the resource envelope.
+Status: reviewed specification with partial storage implementation. Resource
+pressure cleared on 2026-09-26; all owed slice proofs have executed. The
+latest [slice review](data-model-slice-review.md) owns actual results.
 The current participant (name unresolved) approved proceeding with taskless
 Invocations, Session owning Runs plus a current Run, and Flow / Invocation
 naming. This supersedes the earlier Session-as-Run-child and Task-required
@@ -120,7 +121,7 @@ Run parent. Project-level historic launch context remains in immutable evidence.
 | Human Flow step | Reserve Run + `flow_review` Session and bind the pending boundary atomically |
 | Ask | Child Run with causal caller ID, inherited Task/Wave, independent membership; `ask` Session stores request, retry key and result |
 | Replay | New Run with inherited ancestry; causality is not authority to join the previous invocation |
-| Bind | Update current Run parents/provenance through the same validator; no name, graph, node or process change; historical Run scope is an explicit assumption below |
+| Bind | Confirm the exact target once; fill current Run missing parents/provenance transactionally. Never change or clear its Task or existing Wave; historical Run scope remains below |
 | Rename | Update Session title/provenance with human-over-generated ordering |
 | Replace conversational Run | Append a Run under the same Session; compare the expected current Run, then update current Run and any pending review attempt atomically; preserve earlier Runs and Session attributes |
 | Ready/Complete | Persist Session feedback; Complete closes once and settles the exact waiting boundary before teardown |
@@ -174,15 +175,26 @@ bind and parent-changing writes use the same checks as launch.
 | Run outcome vs terminal artifact | Row lifecycle is query authority; immutable terminal receipt is settlement evidence; validate receipt identity during recovery |
 | Native provider ID vs attachment/process evidence | Different facts; each has one Run-owned record, exact process receipts still fence stop/move |
 | Generated and human names | One conversational title; conditional update prevents generated overwrite |
-| `started` event vs Run existence | Delete new Started writes; displayed started derives from Runs; old event evidence still protects chapter retirement |
+| `started_at` vs Run existence | Shared Run writer sets the timestamp once at first assignment (launch or bind); validate non-null iff any Run names the Task. Readers use the column; retire event writer only after conversion |
 | Swift Work/path vs Run parents | Typed IDs in DTOs; labels computed from cached readings, no selector decoding or cwd-based regrouping |
 
-Two consequences require explicit review visibility. Binding away the last Run
-can make the displayed `started` false; it must not erase historical execution
-or make authored work eligible for automatic abandonment. An invocation-owned
-Run cannot change Task without violating Jack's parent constraint. The universal
-Bind API reports that constraint from Rust; it is not a UI-only kind prohibition.
-Asks without invocation membership may bind independently of their caller.
+Jack's 2026-09-26 correction selects one Started fact: any Run with `task = X`.
+His final timestamp correction stores `tasks.started_at` once at first assignment
+by launch or bind, using that operation's time. It is not `MIN(created_at)`;
+later assignment of older or newer Runs leaves it byte-identical. The single
+Run writer sets it atomically and validates non-null iff a Task has Runs.
+Offline import sets it for Tasks with Runs and leaves all others null. Sidebar
+and roadmap read the column through one reader. His write-once bind decision
+makes this monotonic. Bind fills a null Task
+and its Wave, or a Wave on a parentless Run; a Wave-only Run can take a Task only
+in that same Wave. No rebind, unbind or clearing form exists. The operation and
+every UI state the exact target and confirm once before writing. Usage and
+history never move between Tasks. Invocation nullable Task equality also still
+applies: binding a taskless invocation's Run independently to a Task rejects.
+Authorized cross-Wave Task moves are separate and retain their existing rule.
+Chapter retirement still checks authored work, PRs and claims; missing Runs alone
+never prove untouched backlog. The two intervening alternative Started steers
+are superseded, not additional requirements.
 
 Cross-Run attribution is an implementation assumption, not a newly confirmed
 product decision: preserve the existing Run-owned ancestry model, project the
@@ -405,9 +417,13 @@ For the full implementation, collect these proofs on the final integrated bytes:
    taskless Flow through the CLI and resume its review after template removal.
    Replace a Session's Run twice; retain its ID/name/feedback and both previous
    Runs. Reject a late replacement or completion from the superseded Run.
-2. **One CLI reader:** isolated actual CLI launch, rename, bind/rebind/unbind,
+2. **One CLI reader:** isolated actual CLI launch, rename, confirmed write-once bind,
    landed/done Task and explicit-selector-vs-checkout cases; Session and Run
-   outputs agree. Usage moves attribution without changing counters or artifacts.
+   outputs agree. Initial attribution fills without changing counters or artifacts; Task attribution
+   never moves. Reject rebind, clear and Wave conflicts; confirm the exact target
+   once in CLI and UI, including a competing bind. Launch and first bind set `started_at`; later
+   launches and binds of older/newer Runs preserve its exact bytes. Compare
+   timestamp presence against Run existence, including after offline import.
    Reject a conflicting bind on an invocation Run atomically.
 3. **Execution preservation:** multiple provider turns, nested loop returns,
    Xor selection, review completion and keyed Ask retry; remove template sources
@@ -444,7 +460,8 @@ Do not claim a full CI, deployed recovery or UI acceptance result from this spec
 
 - Creating tables while `session list` still reconstructs product records from
   four stores, or fallback reads that silently repair missing imports.
-- Rebinding execution membership to satisfy a requested ancestry change.
+- Changing or clearing a Run Task, moving its existing Wave through bind, or
+  rebinding execution membership to satisfy a requested ancestry change.
 - Replacing a Run by replacing its Session, copying its title, dropping earlier
   Runs, or letting a late old Run change the current pointer or settle a review.
 - Inferring membership, Task or process authority from cwd text, provider identity,
@@ -506,8 +523,10 @@ rollback including a reserved Session; and a competing Project Wave update.
 The existing repeated-replacement proof now checks ancestry/provenance and
 unchanged prior attempts. The populated migration fixture also checks that
 adding provenance retains unknown values and exact capture/feedback bytes.
-These fixtures are authored; execution remains blocked by TESTING.md's resource
-rule. Compilation is not a behavioral result.
+These fixtures now pass, including the populated migration after canonical
+materialization. The [current review](data-model-slice-review.md) records actual
+results and the corrected corrupt-neighbor fixture. They do not establish the
+complete target contract or the newly selected bind/Started semantics.
 
 The next cut must use this constructor for general launches while completing
 the common invocation owner/driver, captured runtime nesting and all Session
@@ -520,6 +539,24 @@ and the supplied publication/stacking reports still govern; no intermediate
 publication is selected.
 
 ## Slice ledger
+
+- 2026-09-26 executed review: **58 distinct library tests pass**, including
+  every previously owed filter, the 29-test Task-controller suite and 16-test
+  durable-store suite (overlap counted once). The corrupt-neighbor fixture
+  initially failed on omitted required Task planning/writeback fields; the
+  repaired fixture and its full suite pass. Three populated preservation
+  tests plus the schema proof pass again after canonicalization in a disposable
+  source copy. Two real CLI status/roadmap integration tests pass against
+  isolated registered-Task/current and prior-release data. Fresh-Home runs,
+  usage and doctor all exit 0; doctor warns that the disposable binary has no
+  known revision. Full details, initial failures, commands and evidence limits
+  are in [the current review](data-model-slice-review.md). No installed proof.
+- Latest decisions carried into the spec: confirmed write-once bind and
+  set-once `tasks.started_at` at first assignment time, not MIN(Run.created_at).
+  These still need the common Run writer and all-reader conversion. No new
+  production owner cut occurred during proof-debt repayment. Jack's new PM
+  cancellation/refused-start cleanup report joins the publication and stacking
+  scope; no issue was mutated here.
 
 - 2026-09-26 Run-construction static verification: `cargo fmt --all --check`,
   isolated `cargo clippy --all-targets -- -D warnings` (**18.14 s**) and

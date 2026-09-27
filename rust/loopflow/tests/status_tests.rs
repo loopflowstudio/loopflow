@@ -241,6 +241,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         project_id: stale.id.clone(),
         worktree: home.join("repo.w2-127"),
         workspace_slug: "w2-127".to_string(),
+        agent: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

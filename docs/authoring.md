@@ -47,8 +47,8 @@ Skills chain through `scratch/`: a step writes `scratch/<branch>.md`, the
 next step reads it. That contract is what makes flows work — if your skill
 produces something a later step needs, write it to `scratch/`, not to chat.
 
-Use `concept-review` to reconsider the product mid-task with a human, or after
-`review-slice` for an autonomous assessment. Draft the affected usage docs and
+Use `concept-review` to reconsider the product with someone present, on request
+or inside unblock. Review-slice owns autonomous assessment. Draft the affected usage docs and
 skill guidance first, then follow the simpler interaction through types, APIs,
 and infrastructure. Product clarity is valuable even without deleting code.
 Keep proposed alternatives distinct from accepted requirements and verified
@@ -173,9 +173,6 @@ deciding step stable ids:
 - compress
 - review-slice
 - step:
-    id: review_concepts
-    name: concept-review
-- step:
     id: decide
     name: loop-decide
     repeat:
@@ -191,12 +188,12 @@ deciding step stable ids:
       from: implement
 ```
 
-One pass runs implement, compress, review-slice, concept-review, and loop-decide.
-The reviews supply evidence; loop-decide chooses Advance or Iterate through the
+One pass runs implement, compress, review-slice, and loop-decide.
+The review supplies evidence; loop-decide chooses Advance or Iterate through the
 [decision protocol](lf.md#flow-decisions-and-recovery). Iterate returns to `from`
 with direction; Advance reaches the human demo. Complete returns the demo's
 feedback and revised design to the second loop-decide. Its own explicit edge
-also targets implement: the outer loop repeats implementation, both reviews,
+also targets implement: the outer loop repeats implementation, slice review,
 the inner decision loop, and demo. Review completion itself chooses no edge.
 
 At the deciding occurrence, use `lf flow decide advance "evidence"` or

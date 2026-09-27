@@ -46,6 +46,7 @@ pub enum TaskWaitUntil {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskLaunchOptions {
+    pub agent: Option<String>,
     pub name: Option<String>,
     pub flow: Option<String>,
     pub stack_on: Option<String>,
@@ -90,7 +91,7 @@ pub struct TaskSnapshot {
     pub runs_truncated: bool,
     pub worktree: String,
     pub workspace_slug: String,
-    pub agent: String,
+    pub agent: Option<String>,
     pub provider: String,
     pub prs: Vec<TaskPr>,
     pub active_pr: Option<TaskPrId>,
@@ -323,32 +324,43 @@ async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
 
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<Task> {
     let TaskLaunchOptions {
+        agent,
         name,
         flow,
         stack_on,
         directive,
     } = options;
-    prepare_task(repo, issue, name, stack_on, directive, flow, true)
+    prepare_task(
+        repo,
+        issue,
+        TaskPrepareOptions {
+            name,
+            stack_on,
+            directive,
+        },
+        flow,
+        agent,
+        true,
+    )
 }
 
 pub fn task_prepare(repo: &Path, issue: &str, options: TaskPrepareOptions) -> OpsResult<Task> {
-    let TaskPrepareOptions {
-        name,
-        stack_on,
-        directive,
-    } = options;
-    prepare_task(repo, issue, name, stack_on, directive, None, false)
+    prepare_task(repo, issue, options, None, None, false)
 }
 
 fn prepare_task(
     repo: &Path,
     issue: &str,
-    name: Option<String>,
-    stack_on: Option<String>,
-    directive: Option<String>,
+    options: TaskPrepareOptions,
     requested_flow: Option<String>,
+    requested_agent: Option<String>,
     launch: bool,
 ) -> OpsResult<Task> {
+    let TaskPrepareOptions {
+        name,
+        stack_on,
+        directive,
+    } = options;
     let directive = directive
         .map(|directive| {
             let directive = directive.trim().to_string();
@@ -438,6 +450,7 @@ fn prepare_task(
         let flow = select_task_worker_flow(repo, issue, requested_flow.as_deref())?;
         return block_on_task(async move {
             let store = task_store().await?;
+            select_task_agent(&store, &mut existing, requested_agent.as_deref()).await?;
             if task_worker_live(&store, &existing).await? {
                 return Ok(existing);
             }
@@ -540,7 +553,7 @@ fn prepare_task(
         // Re-resolve after worktree planning: a concurrent run may have created
         // the Task in the gap. Non-terminal Work wins. Terminal Work remains
         // authoritative and requires an explicit recovery transition.
-        if let Some(existing) = store
+        if let Some(mut existing) = store
             .get_task_by_issue(&resolved.item.id)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?
@@ -559,6 +572,7 @@ fn prepare_task(
                     )))
                 }
                 WorkStatus::Ready => {
+                    select_task_agent(&store, &mut existing, requested_agent.as_deref()).await?;
                     return Ok(existing);
                 }
             }
@@ -579,6 +593,7 @@ fn prepare_task(
             pm_writeback: PmWritebackState::Current,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
+            agent: requested_agent,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -614,18 +629,18 @@ fn prepare_task(
                 }
             }
             Err(StoreError::Sqlite(_)) => {
-                if let Some(existing) =
-                    store
-                        .get_task_by_issue(&resolved.item.id)
-                        .await
-                        .map_err(|error| {
-                            task_error(format!("failed to recover task reservation: {error}"))
-                        })?
+                if let Some(mut existing) = store
+                    .get_task_by_issue(&resolved.item.id)
+                    .await
+                    .map_err(|error| {
+                        task_error(format!("failed to recover task reservation: {error}"))
+                    })?
                 {
                     if !matches!(
                         task_work_status(&store, &existing).await?,
                         WorkStatus::Done | WorkStatus::Abandoned
                     ) {
+                        select_task_agent(&store, &mut existing, task.agent.as_deref()).await?;
                         return Ok(existing);
                     }
                 }
@@ -718,9 +733,16 @@ pub fn task_start(
         .map_err(|error| task_error(error.to_string()))?;
     let project =
         crate::ops::task_pm::resolve_current_project(&main, wave, crate::ops::pm::PmRefresh::Auto)?;
-    select_task_worker_flow_from_project(&main, &project.project, options.flow.as_deref())?;
-    let config = load_config_or_default(Some(&main));
-    block_on_task(preflight_task_execution(&main, config.agent()))?;
+    let flow =
+        select_task_worker_flow_from_project(&main, &project.project, options.flow.as_deref())?;
+    let (_, steps) = load_task_flow(&main, &flow)?;
+    let skill = crate::engine::current_skill(&steps, &crate::engine::ExecutionCursor::default());
+    let agent = resolve_task_agent(
+        &main,
+        options.agent.as_deref(),
+        skill.as_ref().map(|step| &step.skill),
+    );
+    block_on_task(preflight_task_execution(&main, &agent))?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
@@ -780,28 +802,57 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
     title
 }
 
-fn task_agent(task: &Task) -> String {
-    load_config_or_default(Some(&task.worktree))
-        .agent()
-        .to_string()
+pub(crate) fn resolve_task_agent(
+    worktree: &Path,
+    agent: Option<&str>,
+    skill: Option<&crate::engine::Skill>,
+) -> String {
+    agent
+        .map(str::to_string)
+        .or_else(|| {
+            skill.and_then(|skill| skill.agent.clone().or_else(|| skill.default_agent.clone()))
+        })
+        .unwrap_or_else(|| load_config_or_default(Some(worktree)).agent().to_string())
 }
 
-fn validate_task_launch(task: &Task) -> OpsResult<()> {
-    task_execution_boundary(&task.worktree, &task_agent(task))?;
+async fn select_task_agent(
+    store: &SharedStore,
+    task: &mut Task,
+    agent: Option<&str>,
+) -> OpsResult<()> {
+    if let Some(agent) = agent {
+        task_execution_boundary(&task.worktree, agent)?;
+        store
+            .set_task_agent(&task.id, agent)
+            .await
+            .map_err(|error| task_error(format!("failed to save Task agent: {error}")))?;
+        task.agent = Some(agent.to_string());
+        crate::ops::human_session::retarget_prepared_task_review(store, task)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
     Ok(())
 }
 
-fn task_configuration_refusal(task: &Task) -> Option<String> {
-    validate_task_launch(task)
-        .err()
-        .map(|error| error.to_string())
+fn task_configuration_refusal(task: &Task, skill: Option<&crate::engine::Skill>) -> Option<String> {
+    task_execution_boundary(
+        &task.worktree,
+        &resolve_task_agent(&task.worktree, task.agent.as_deref(), skill),
+    )
+    .err()
+    .map(|error| error.to_string())
 }
 
 pub(crate) async fn task_launch_refusal(
     store: &SharedStore,
     task: &Task,
 ) -> crate::store::StoreResult<Option<String>> {
-    if let Some(refusal) = task_configuration_refusal(task) {
+    let position = store.flow_position(&task.id).await?;
+    let skill = position.as_ref().and_then(|position| {
+        crate::engine::current_skill(&position.invocation.steps, &position.cursor)
+    });
+    if let Some(refusal) = task_configuration_refusal(task, skill.as_ref().map(|step| &step.skill))
+    {
         return Ok(Some(refusal));
     }
     persisted_task_launch_refusal(store, task).await
@@ -2228,8 +2279,13 @@ pub(crate) async fn launch_task_process(
     if position.is_human() {
         return Ok(());
     }
-    validate_task_launch(task)?;
-    let agent = task_agent(task);
+    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
+    let agent = resolve_task_agent(
+        &task.worktree,
+        task.agent.as_deref(),
+        skill.as_ref().map(|step| &step.skill),
+    );
+    task_execution_boundary(&task.worktree, &agent)?;
     let requires_provider = matches!(
         position.current_plan(),
         crate::engine::ConcreteStep::Skill(_)
@@ -2310,6 +2366,7 @@ pub(crate) async fn launch_task_process(
             Err(error) => {
                 let reason = error.to_string();
                 let failure = crate::durable::TaskFlowBlocker {
+                    run_id: None,
                     reason: reason.clone(),
                     restart_required: false,
                     observed_at: time::OffsetDateTime::now_utc(),
@@ -3987,10 +4044,17 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .work_status(&work)
             .await
             .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
+        let position = store
+            .flow_position(&task.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        let skill = position.as_ref().and_then(|position| {
+            crate::engine::current_skill(&position.invocation.steps, &position.cursor)
+        });
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task)
+            task_configuration_refusal(&task, skill.as_ref().map(|step| &step.skill))
                 .or_else(|| task_event_launch_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let execution = crate::ops::task_execution::task_execution(&store, &task.id)
@@ -4021,7 +4085,11 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             launch_refusal: launch_refusal.as_deref(),
         };
         let actions = derive_task_actions(&action_evidence);
-        let agent = task_agent(&task);
+        let agent = resolve_task_agent(
+            &task.worktree,
+            task.agent.as_deref(),
+            skill.as_ref().map(|step| &step.skill),
+        );
         let (provider, _) = parse_agent(&agent);
         Ok(TaskSnapshot {
             issue_id: task.plan.id.as_str().to_string(),
@@ -4039,7 +4107,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             runs_truncated,
             worktree: task.worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
-            agent,
+            agent: task.agent,
             provider,
             prs,
             active_pr,
@@ -4402,7 +4470,12 @@ pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_restart(issue: &str, advice: Option<String>, flow: Option<String>) -> OpsResult<Task> {
+pub fn task_restart(
+    issue: &str,
+    advice: Option<String>,
+    flow: Option<String>,
+    agent: Option<String>,
+) -> OpsResult<Task> {
     let issue = issue.to_string();
     let advice = advice
         .map(|value| value.trim().to_string())
@@ -4414,13 +4487,14 @@ pub fn task_restart(issue: &str, advice: Option<String>, flow: Option<String>) -
             }
         })
         .transpose()?;
-    block_on_task(async move { restart_task_async(&issue, advice, flow).await })
+    block_on_task(async move { restart_task_async(&issue, advice, flow, agent).await })
 }
 
 async fn restart_task_async(
     issue: &str,
     advice: Option<String>,
     flow: Option<String>,
+    agent: Option<String>,
 ) -> OpsResult<Task> {
     let store = task_store().await?;
     let mut task = store
@@ -4442,6 +4516,9 @@ async fn restart_task_async(
             )))
         }
         WorkStatus::Ready => {}
+    }
+    if let Some(agent) = agent.as_deref() {
+        task_execution_boundary(&task.worktree, agent)?;
     }
     // Reject an unusable replacement before any refresh, checkpoint, or stop so
     // the pinned Flow and its worker stay exactly as they were.
@@ -4506,6 +4583,7 @@ async fn restart_task_async(
         super::linear_observe::publish_task_steer(&store, &task, advice).await?;
     }
     stop_task_worker(&store, &task).await?;
+    select_task_agent(&store, &mut task, agent.as_deref()).await?;
     store
         .restart_task_flow(&task, &head)
         .await
@@ -4564,9 +4642,13 @@ async fn _recover_abandoned_task(
     Ok(task)
 }
 
-pub fn task_resume(issue: &str, reason: Option<String>) -> OpsResult<TaskControlResult> {
+pub fn task_resume(
+    issue: &str,
+    reason: Option<String>,
+    agent: Option<String>,
+) -> OpsResult<TaskControlResult> {
     let issue = issue.to_string();
-    block_on_task(async move { resume_task_async(&issue, reason).await })
+    block_on_task(async move { resume_task_async(&issue, reason, agent).await })
 }
 
 pub fn task_verdict(
@@ -4620,6 +4702,7 @@ pub fn task_advance(issue: &str) -> OpsResult<Task> {
 pub(crate) async fn resume_task_async(
     issue: &str,
     reason: Option<String>,
+    agent: Option<String>,
 ) -> OpsResult<TaskControlResult> {
     let store = task_store().await?;
     let mut task = store
@@ -4627,10 +4710,15 @@ pub(crate) async fn resume_task_async(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-    validate_task_launch(&task)?;
+    select_task_agent(&store, &mut task, agent.as_deref()).await?;
     let position = crate::controller::task::ensure_flow_position(&store, &task.id, None)
         .await
         .map_err(|error| task_error(error.to_string()))?;
+    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
+    if let Some(refusal) = task_configuration_refusal(&task, skill.as_ref().map(|step| &step.skill))
+    {
+        return Err(task_error(refusal));
+    }
     if let Some(failure) = position.failure.as_ref() {
         if failure.restart_required {
             return Err(task_error(format!(
@@ -4638,20 +4726,33 @@ pub(crate) async fn resume_task_async(
                 failure.reason, task.plan.identifier
             )));
         }
+        let feedback = if failure.run_id.is_some() && position.is_decision() {
+            let (session, summary) = super::human_session::task_unblock(&store, &task, &position)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            Some(summary.ok_or_else(|| {
+                task_error(format!(
+                    "{}\nComplete unblock Session {session}, then resume {} for reassessment.",
+                    failure.reason, task.plan.identifier
+                ))
+            })?)
+        } else {
+            None
+        };
         let reason = reason
             .as_deref()
             .map(str::trim)
             .filter(|reason| !reason.is_empty());
-        let Some(reason) = reason else {
+        if let Some(reason) = reason {
+            super::linear_observe::publish_task_steer(&store, &task, reason).await?;
+        } else if feedback.is_none() {
             return Err(task_error(format!(
-                "{}\nThe same execution cannot be resumed. Correct the capability, then use `lf task resume {} --reason \"<what changed>\"` so the new durable input starts a fresh boundary.",
-                failure.reason,
-                task.plan.identifier
+                "{}\nCorrect the capability, then use `lf task resume {} --reason \"<what changed>\"`.",
+                failure.reason, task.plan.identifier
             )));
-        };
-        super::linear_observe::publish_task_steer(&store, &task, reason).await?;
+        }
         store
-            .retry_task_flow(&task.id, &position)
+            .retry_task_flow(&task.id, &position, feedback.as_deref())
             .await
             .map_err(|error| task_error(format!("failed to retry Task advancement: {error}")))?;
     }
@@ -4862,6 +4963,7 @@ mod tests {
             project_id: project.id.clone(),
             worktree: repository,
             workspace_slug: "task-recovery-fixture".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -4959,6 +5061,7 @@ mod tests {
 
         let mut blocked = stored;
         blocked.failure = Some(crate::durable::TaskFlowBlocker {
+            run_id: None,
             reason: "Saved instructions are unavailable; explicitly restart this Task".to_string(),
             restart_required: true,
             observed_at: time::OffsetDateTime::now_utc(),

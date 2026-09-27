@@ -737,6 +737,10 @@ impl CodexHarness {
 
 #[async_trait]
 impl Harness for CodexHarness {
+    fn process_id(&self) -> Option<u32> {
+        self.child.as_ref().and_then(Child::id)
+    }
+
     fn set_raw_provider_sender(
         &mut self,
         raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
@@ -974,7 +978,16 @@ impl CodexHarness {
         // spawn as a grandchild.
         #[cfg(unix)]
         command.process_group(0);
-        super::configure_vendor_tokio_env(&mut command)?;
+        super::configure_vendor_std_env(command.as_std_mut())?;
+        // A login shell/snapshot can replace the launcher's PATH with the
+        // machine installation, losing a development Run's executable/Home.
+        command.args([
+            "-c",
+            "allow_login_shell=false",
+            "-c",
+            "features.shell_snapshot=false",
+        ]);
+
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;

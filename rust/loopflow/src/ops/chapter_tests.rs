@@ -353,6 +353,7 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
                 project_id: project.id,
                 worktree: task_checkout.clone(),
                 workspace_slug: "backlog".into(),
+                agent: None,
                 abandon_intent: None,
                 created_at: now,
                 updated_at: now,

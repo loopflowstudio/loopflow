@@ -24,21 +24,8 @@ use crate::chat::types::ConversationEvent;
 use crate::engine::agent::AgentConfig;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
-    let (control_bin, control_home, control_db) = vendor_control_context()?;
-    set_vendor_std_env(command, &control_bin, &control_home, &control_db);
-    Ok(())
-}
-
-pub(crate) fn configure_vendor_tokio_env(command: &mut tokio::process::Command) -> Result<()> {
-    let (control_bin, control_home, control_db) = vendor_control_context()?;
-    command
-        .env(crate::store::CONTROL_BIN_ENV, control_bin)
-        .env(crate::store::CONTROL_HOME_ENV, control_home)
-        .env(crate::store::CONTROL_DB_PATH_ENV, control_db)
-        .env_remove("LF_BIN")
-        .env_remove("LF_HOME")
-        .env_remove("LF_DB_PATH");
-    Ok(())
+    let context = crate::engine::process::pinned_execution_context()?;
+    set_vendor_std_env(command, &context.lf_bin, &context.lf_home, &context.db_path)
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
@@ -54,18 +41,12 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     }
 }
 
-fn vendor_control_context() -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)>
-{
-    let context = crate::engine::process::pinned_execution_context()?;
-    Ok((context.lf_bin, context.lf_home, context.db_path))
-}
-
 fn set_vendor_std_env(
     command: &mut std::process::Command,
     control_bin: &std::path::Path,
     control_home: &std::path::Path,
     control_db: &std::path::Path,
-) {
+) -> Result<()> {
     command
         .env(crate::store::CONTROL_BIN_ENV, control_bin)
         .env(crate::store::CONTROL_HOME_ENV, control_home)
@@ -73,6 +54,26 @@ fn set_vendor_std_env(
         .env_remove("LF_BIN")
         .env_remove("LF_HOME")
         .env_remove("LF_DB_PATH");
+    // Development readers intentionally ignore inherited control pins. Forward
+    // this freshly resolved private context through their ordinary overrides;
+    // never change release relaunches into historical-binary launches.
+    if !crate::build_info::provenance().is_release() {
+        command
+            .env("LF_HOME", control_home)
+            .env("LF_DB_PATH", control_db);
+        if crate::machine_install::selection_for_current_executable()?.is_none() {
+            command.env("LF_BIN", control_bin);
+            let mut paths = vec![control_bin
+                .parent()
+                .expect("absolute lf has a parent")
+                .to_path_buf()];
+            paths.extend(std::env::split_paths(
+                &std::env::var_os("PATH").unwrap_or_default(),
+            ));
+            command.env("PATH", std::env::join_paths(paths)?);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -90,7 +91,7 @@ mod environment_tests {
     use crate::engine::agent::AgentConfig;
 
     #[test]
-    fn vendor_receives_control_context_but_not_ordinary_store_context() {
+    fn vendor_environment_preserves_development_and_release_contexts() {
         let mut command = std::process::Command::new("vendor");
         command
             .env("LF_BIN", "/ambient/lf")
@@ -103,15 +104,26 @@ mod environment_tests {
             Path::new("/control/lf"),
             Path::new("/custom"),
             Path::new("/custom/loopflow.db"),
-        );
+        )
+        .unwrap();
 
         let environment = command
             .get_envs()
             .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
             .collect::<std::collections::HashMap<_, _>>();
-        assert_eq!(environment["LF_HOME"], None);
-        assert_eq!(environment["LF_DB_PATH"], None);
-        assert_eq!(environment["LF_BIN"], None);
+        let development = !crate::build_info::provenance().is_release();
+        assert_eq!(
+            environment["LF_HOME"],
+            development.then(|| OsString::from("/custom"))
+        );
+        assert_eq!(
+            environment["LF_DB_PATH"],
+            development.then(|| OsString::from("/custom/loopflow.db"))
+        );
+        assert_eq!(
+            environment["LF_BIN"],
+            development.then(|| OsString::from("/control/lf"))
+        );
         assert_eq!(
             environment["LF_CONTROL_BIN"],
             Some(OsString::from("/control/lf"))
@@ -285,6 +297,11 @@ pub trait Harness: Send + Sync {
     /// opencode announce it by the time `start` returns; claude announces it
     /// on the first turn's stream. Callers persist this before driving turns.
     fn provider_session_id(&self) -> Option<String>;
+    /// The owned provider child, for read-only activity sampling. This does not
+    /// grant process-group signal authority.
+    fn process_id(&self) -> Option<u32> {
+        None
+    }
     /// Independently isolated provider process group, when the harness owns
     /// one. Providers that remain in the runner's process group return None;
     /// the Run retains the runner group recorded at activation.

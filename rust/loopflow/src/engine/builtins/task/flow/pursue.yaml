@@ -4,9 +4,6 @@
 - compress
 - review-slice
 - step:
-    id: review_concepts
-    name: concept-review
-- step:
     id: decide
     name: loop-decide
     repeat:

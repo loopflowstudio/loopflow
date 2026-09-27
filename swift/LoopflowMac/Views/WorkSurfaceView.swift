@@ -400,16 +400,11 @@ struct WorkSurfaceView: View {
     }
 
     /// The plan row's state, read from the shared Task projection. Only running,
-    /// done, human and blocked earn a chip; stopped and unstarted rows keep the dot.
+    /// done, human, blocked and stalled earn a chip; stopped and unstarted rows keep the dot.
     private func planState(_ task: RoadmapTask) -> (label: String?, tone: WorkspaceTone) {
         if task.task.completed { return ("Completed", .done) }
         if case .pinned(let pinned) = task.flow.record {
-            switch pinned.execution {
-            case .running, .starting: return ("Running", .running)
-            case .human: return ("Your review", .human)
-            case .blocked: return ("Blocked", .blocked)
-            case .idle, .unknown: return (nil, .stopped)
-            }
+            return pinned.execution.presentation
         }
         return (nil, .neutral)
     }

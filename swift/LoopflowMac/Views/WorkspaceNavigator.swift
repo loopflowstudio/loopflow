@@ -435,12 +435,8 @@ struct WorkspaceNavigator: View {
     private func taskTone(_ row: WorkspaceOutlineRow) -> WorkspaceTone? {
         guard let work = row.workKey?.work, work.kind == .task, let found = model.task(id: work.id),
               case .pinned(let pinned) = found.task.flow.record else { return nil }
-        switch pinned.execution {
-        case .running, .starting: return .running
-        case .human: return .human
-        case .blocked: return .blocked
-        case .idle, .unknown: return nil
-        }
+        let state = pinned.execution.presentation
+        return state.label == nil ? nil : state.tone
     }
 
     private func warning(_ text: String) -> some View {

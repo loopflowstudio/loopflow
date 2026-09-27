@@ -44,6 +44,15 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_task(&task)).await
     }
 
+    pub async fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let agent = agent.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_task_agent(&task_id, &agent)
+        })
+        .await
+    }
+
     pub async fn settle_task_worker(
         &self,
         task: &Task,
@@ -140,11 +149,13 @@ impl Store {
         &self,
         task_id: &TaskId,
         expected: &FlowPosition,
+        feedback: Option<&str>,
     ) -> StoreResult<FlowPosition> {
         let task_id = task_id.clone();
         let expected = expected.clone();
+        let feedback = feedback.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.retry_task_flow(&task_id, &expected)
+            store.retry_task_flow(&task_id, &expected, feedback.as_deref())
         })
         .await
     }

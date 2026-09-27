@@ -13,6 +13,7 @@ enum FlowNodeState: Equatable {
     case running
     case waitingForHuman
     case blocked
+    case stalled
     case stopped
     case unknown
     case pendingHuman
@@ -41,6 +42,7 @@ private func state(of node: FlowNode, pinned: PinnedTaskFlow?) -> FlowNodeState 
         case .running, .starting: return .running
         case .human: return .waitingForHuman
         case .blocked: return .blocked
+        case .stalled: return .stalled
         case .idle: return .stopped
         case .unknown: return .unknown
         }
@@ -115,7 +117,7 @@ struct TaskFlowView: View {
                     .accessibilityHidden(true)
                 statusText
                     .font(Typography.body(13))
-                    .foregroundStyle(pinned?.execution == .blocked ? WorkspaceTone.blocked.ink : palette.textSecondary)
+                    .foregroundStyle(statusTone == .blocked ? statusTone.ink : palette.textSecondary)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-flow-status")
             }
@@ -179,13 +181,7 @@ struct TaskFlowView: View {
 
     private var statusTone: WorkspaceTone {
         switch flow.record {
-        case .pinned(let pinned):
-            switch pinned.execution {
-            case .running, .starting: .running
-            case .human: .human
-            case .blocked: .blocked
-            case .idle, .unknown: .stopped
-            }
+        case .pinned(let pinned): pinned.execution.presentation.tone
         case .finished: .done
         case .none: .neutral
         }
@@ -400,7 +396,7 @@ struct TaskFlowView: View {
             switch pinned.execution {
             case .blocked: return "Blocked · \(pinned.reason)"
             case .idle: return "Stopped · \(pinned.reason)"
-            case .running, .starting, .human, .unknown: return pinned.reason
+            case .running, .starting, .human, .unknown, .stalled: return pinned.reason
             }
         case .finished(let name):
             return "\(name) finished · its pinned definition is not retained. Preview: \(previewName)"
@@ -727,7 +723,7 @@ struct FlowDiagram: View {
         let tone = FlowPalette.tone(state)
         let shape = RoundedRectangle(cornerRadius: 7)
         let selected = inspected == node.key || inspected?.hasPrefix(node.key + "/") == true
-        let emphasized = state == .running || state == .blocked
+        let emphasized = state == .running || state == .blocked || state == .stalled
         return Button {
             inspected = selected ? nil : node.key
         } label: {
@@ -900,7 +896,7 @@ enum FlowPalette {
         case .completed: .done
         case .running: .running
         case .waitingForHuman, .pendingHuman: .human
-        case .blocked: .blocked
+        case .blocked, .stalled: .blocked
         case .stopped, .unknown: .stopped
         case .pending: .neutral
         }
@@ -912,6 +908,7 @@ enum FlowPalette {
         case .running: "running"
         case .waitingForHuman: "waiting for your review"
         case .blocked: "blocked"
+        case .stalled: "stalled; interrupt then resume"
         case .stopped: "stopped here"
         case .unknown: "current, worker state unknown"
         case .pendingHuman: "human review, pending"

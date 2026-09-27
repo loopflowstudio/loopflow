@@ -1215,10 +1215,8 @@ async fn snapshot_task_detail(
     let flow_controls = crate::ops::task_flow::task_flow_controls(
         &flow_record,
         &crate::ops::task_flow::TaskFlowGate {
-            identifier: &item.identifier,
             status: runtime.as_ref().map(|runtime| &runtime.status),
             plan_completed: item.completed,
-            execution: execution.as_ref(),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -1391,7 +1389,9 @@ fn derive_task_condition(
         let state = match execution.state {
             TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
             TaskExecutionState::Human => TaskConditionState::Waiting,
-            TaskExecutionState::Blocked => TaskConditionState::Blocked,
+            TaskExecutionState::Blocked | TaskExecutionState::Stalled => {
+                TaskConditionState::Blocked
+            }
             TaskExecutionState::Unknown => TaskConditionState::Unknown,
             TaskExecutionState::Idle => unreachable!("idle execution uses local progress"),
         };

@@ -1,6 +1,7 @@
 //! Authoritative, Home-local evidence for one Loopflow harness launch.
 
 pub mod active;
+pub(crate) mod activity;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -279,6 +280,9 @@ struct RunContextArtifact<'a> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum RunEvent {
+    Activity {
+        observation: activity::Observation,
+    },
     ProviderAttemptStarted {
         provider: String,
         model: Option<String>,
@@ -1798,6 +1802,7 @@ struct RunCapture {
     recorder: RunRecorder,
     telemetry_warned: bool,
     settled_outcome: Option<String>,
+    activity: activity::Observer,
 }
 
 impl RunCapture {
@@ -1870,6 +1875,7 @@ impl RunCapture {
             recorder,
             telemetry_warned: false,
             settled_outcome: None,
+            activity: activity::Observer::default(),
         }
     }
 
@@ -2066,6 +2072,9 @@ impl RunCapture {
     }
 
     fn append_event(&mut self, event: RunEvent) -> std::io::Result<()> {
+        if !matches!(&event, RunEvent::Activity { .. }) {
+            self.activity.note_event(OffsetDateTime::now_utc());
+        }
         let envelope = EventEnvelope {
             schema_version: SCHEMA_VERSION,
             seq: self.event_seq,

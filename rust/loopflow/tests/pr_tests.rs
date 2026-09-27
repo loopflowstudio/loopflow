@@ -312,7 +312,7 @@ fn publish_makes_no_presentation_attempt() {
 }
 
 #[test]
-fn task_gate_artifacts_never_reach_the_published_head() {
+fn gate_artifacts_never_reach_the_published_head() {
     let gh_script = write_gh_script("[]", None);
     let marker_dir = tempfile::TempDir::new().expect("marker dir");
     let agent_marker = marker_dir.path().join("agent-called");
@@ -369,12 +369,12 @@ fn task_gate_artifacts_never_reach_the_published_head() {
     ] {
         assert!(
             !scratch.join(artifact).exists(),
-            "task-gate artifact survived publication: {artifact}"
+            "gate artifact survived publication: {artifact}"
         );
     }
     assert!(
         !agent_marker.exists(),
-        "valid task-gate copy must be consumed without launching another provider"
+        "valid gate copy must be consumed without launching another provider"
     );
     let status = Command::new("git")
         .args(["status", "--porcelain"])
@@ -1029,7 +1029,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
 
-    task_resume("INF-123", None).expect("resume Task authored work");
+    task_resume("INF-123", None, None).expect("resume Task authored work");
     let resumed = runtime
         .block_on(task.store.flow_position(&task.task.id))
         .unwrap()

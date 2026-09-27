@@ -621,6 +621,8 @@ pub struct Task {
     pub project_id: ProjectId,
     pub worktree: PathBuf,
     pub workspace_slug: String,
+    /// Explicit choice for every Flow step; None uses the step/config defaults.
+    pub agent: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -829,6 +831,7 @@ mod tests {
             project_id: crate::work::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,

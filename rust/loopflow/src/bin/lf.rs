@@ -13,6 +13,7 @@ use loopflow::lf::{Cli, Commands, InstallCommand, TaskCommand, WaveCommand};
 use loopflow::ops::chapter::{
     chapter_history, empty_plan, new_chapter, update_plan, NewChapterRequest,
 };
+use loopflow::ops::task_execution::TaskExecutionState;
 use loopflow::work::chapter::{ChapterId, ChapterPhase};
 
 #[derive(Clone, Default)]
@@ -741,17 +742,25 @@ fn print_task(task: &loopflow::work::task::Task, json: bool) -> anyhow::Result<(
             .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
             .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
-        let body = format!("agent {}, provider {}", snapshot.agent, snapshot.provider);
+        let body = format!(
+            "agent {}, provider {}",
+            snapshot.agent.as_deref().unwrap_or("default"),
+            snapshot.provider
+        );
+        let status = match snapshot.execution.state {
+            TaskExecutionState::Blocked => "blocked".to_string(),
+            TaskExecutionState::Stalled => "stalled".to_string(),
+            _ => snapshot.status.to_string(),
+        };
         println!(
-            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}",
             task.plan.identifier,
-            snapshot.status,
+            status,
             task.id,
             body,
             task.worktree.display(),
             branch,
             pm_writeback,
-            snapshot.status,
         );
         println!("  execution: {}", snapshot.execution.reason);
         if let Some(run) = &snapshot.execution.run_id {
@@ -917,7 +926,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
+fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> anyhow::Result<()> {
     match command {
         TaskCommand::Advance { issue, json } => {
             let task = loopflow::ops::task::task_advance(issue)?;
@@ -956,6 +965,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 issue,
                 loopflow::ops::task::TaskLaunchOptions {
+                    agent: agent.map(str::to_string),
                     name: name.clone(),
                     flow: flow.clone(),
                     stack_on: stack_on.clone(),
@@ -979,6 +989,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 title.clone(),
                 piped_task_report()?,
                 loopflow::ops::task::TaskLaunchOptions {
+                    agent: agent.map(str::to_string),
                     name: name.clone(),
                     flow: flow.clone(),
                     stack_on: stack_on.clone(),
@@ -1083,7 +1094,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             reason,
             json,
         } => {
-            let result = loopflow::ops::task::task_resume(issue, reason.clone())?;
+            let result =
+                loopflow::ops::task::task_resume(issue, reason.clone(), agent.map(str::to_string))?;
             print_task_control(&result, *json)
         }
         TaskCommand::Restart {
@@ -1092,7 +1104,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             flow,
             json,
         } => {
-            let task = loopflow::ops::task::task_restart(issue, advice.clone(), flow.clone())?;
+            let task = loopflow::ops::task::task_restart(
+                issue,
+                advice.clone(),
+                flow.clone(),
+                agent.map(str::to_string),
+            )?;
             print_task(&task, *json)
         }
         TaskCommand::Recover {
@@ -1469,9 +1486,9 @@ fn main() -> anyhow::Result<()> {
                 tokio::runtime::Runtime::new()?
                     .block_on(loopflow::controller::task::run_worker(task_id.clone()))
             }),
-            Some(Commands::Task { cmd }) => {
-                in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
-            }
+            Some(Commands::Task { cmd }) => in_repo_runtime(&args, |repo| {
+                run_task_command(repo, cmd, cli.model.as_deref())
+            }),
             Some(Commands::Work { cmd }) => {
                 in_directory_runtime(&args, |repo| loopflow::lf::commands::work::run(cmd, repo))
             }

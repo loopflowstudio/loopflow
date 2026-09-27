@@ -70,6 +70,12 @@ struct TaskFlowTests {
 
         guard case .pinned(let blocked) = snapshots[3].record else { Issue.record("pinned"); return }
         #expect(flowNodeStates(blocked.graph, pinned: blocked)["3"] == .blocked)
+        let stalledSnapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("task_flow_stalled.json"))
+        guard case .pinned(let stalled) = stalledSnapshot.record else { Issue.record("pinned"); return }
+        #expect(stalled.execution == .stalled)
+        #expect(flowNodeStates(stalled.graph, pinned: stalled)["1"] == .stalled)
+        #expect(FlowPalette.describe(.stalled).contains("interrupt then resume"))
+        #expect(stalled.reason.contains("run_9fc06d3999af4bcabf1398cc859d49a9"))
         // A preview only marks human boundaries.
         let preview = flowNodeStates(human.graph, pinned: nil)
         #expect(preview["4"] == .pendingHuman && preview["1"] == .pending)

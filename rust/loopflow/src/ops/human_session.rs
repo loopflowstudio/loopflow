@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
+use std::future::Future;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -305,7 +306,7 @@ enum AskSessionStatus {
 struct AskSessionRecord {
     id: String,
     parent_run_id: RunId,
-    parent_run_dir: PathBuf,
+    parent_run_dir: Option<PathBuf>,
     work: Option<WorkRef>,
     work_selector: Option<String>,
     title: String,
@@ -342,7 +343,8 @@ pub(crate) async fn ask(
     question: &str,
     skill: Option<&str>,
 ) -> Result<String> {
-    let record = prepare_ask_record(store, question, skill).await?;
+    let mut record = prepare_ask_record(store, question, skill).await?;
+    prepare_ask_run(&mut record)?;
     write_ask_record(&record)?;
     if let Err(error) = launch_ask(&record).await {
         let _ = fs::remove_file(ask_record_path(&record.id));
@@ -359,19 +361,26 @@ pub(crate) async fn ask_once(
     question: &str,
     skill: Option<&str>,
 ) -> Result<String> {
-    if key.trim().is_empty() {
-        bail!("Ask continuation key cannot be empty");
-    }
     active_run_manifest()?;
-    let id = format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())));
-    let candidate = if read_ask_record(&id)?.is_none() {
+    let record = launch_keyed_ask(key, |id| async move {
         let mut record = prepare_ask_record(store, question, skill).await?;
-        record.id = id.clone();
-        record.retain_completed = true;
-        Some(record)
-    } else {
-        None
-    };
+        record.id = id;
+        Ok(record)
+    })
+    .await?;
+    report_ask_wait(&record.id);
+    wait_for_ask(&record.id).await
+}
+
+async fn launch_keyed_ask<F: Future<Output = Result<AskSessionRecord>>>(
+    key: &str,
+    prepare: impl FnOnce(String) -> F,
+) -> Result<AskSessionRecord> {
+    anyhow::ensure!(
+        !key.trim().is_empty(),
+        "Ask continuation key cannot be empty"
+    );
+    let id = keyed_ask_id(key);
     // The server holds this lock through provider publication. Wait off the
     // async runtime so concurrent callers can still finish their launches.
     let lock_id = id.clone();
@@ -379,14 +388,16 @@ pub(crate) async fn ask_once(
     let record = match read_ask_record(&id)? {
         Some(record) => record,
         None => {
-            let record = candidate.ok_or_else(|| anyhow!("Ask {id} disappeared"))?;
+            let mut record = prepare(id.clone()).await?;
+            record.retain_completed = true;
+            prepare_ask_run(&mut record)?;
             write_ask_record(&record)?;
             record
         }
     };
     if matches!(record.status, AskSessionStatus::Completed { .. }) {
         drop(launch_lock);
-        return wait_for_ask(&id).await;
+        return Ok(record);
     }
     let needs_launch = record
         .session_run_id
@@ -402,8 +413,90 @@ pub(crate) async fn ask_once(
         })?;
     }
     drop(launch_lock);
-    report_ask_wait(&id);
-    wait_for_ask(&id).await
+    Ok(record)
+}
+
+/// Prepare the same unblock Session for a failed decision without borrowing
+/// the failed provider's execution authority or the recovery caller's environment.
+pub(crate) async fn task_unblock(
+    store: &SharedStore,
+    task: &Task,
+    position: &FlowPosition,
+) -> Result<(String, Option<String>)> {
+    let failure = position
+        .failure
+        .as_ref()
+        .ok_or_else(|| anyhow!("Task is not blocked"))?;
+    let run = failure
+        .run_id
+        .as_ref()
+        .ok_or_else(|| anyhow!("Task blocker has no Run"))?;
+    let key = task_unblock_key(position);
+    // A replacement invocation must not acquire an obsolete unblock Session.
+    anyhow::ensure!(
+        store.flow_position(&task.id).await?.as_ref() == Some(position),
+        "Task failure changed before opening unblock"
+    );
+    let record = launch_keyed_ask(&key, |id| async move {
+        Ok(AskSessionRecord {
+            id,
+            parent_run_id: run.clone(),
+            parent_run_dir: crate::run_record::resolve_manifest(
+                &crate::store::observability_home_dir(), run.as_str(),
+            ).ok().map(|(directory, _)| directory),
+            work: Some(WorkRef::Task(task.id.clone())),
+            work_selector: Some(format!("task:{}", task.id)),
+            title: question_title(&failure.reason),
+            detail: format!("{}: {} failed (Run {run})", task.plan.identifier, position.current().step),
+            prompt: format!("{}\n\nFailed Run: {run}. Resolve the blocker and leave feedback for reassessment. Completion does not choose Advance or Iterate.", failure.reason),
+            skill: Some("unblock".to_string()),
+            cwd: task.worktree.clone(),
+            model: crate::ops::task::resolve_task_agent(&task.worktree, task.agent.as_deref(), None),
+            session_run_id: None,
+            ready_summary: None,
+            status: AskSessionStatus::Waiting,
+            retain_completed: true,
+        })
+    }).await?;
+    let feedback = match record.status {
+        AskSessionStatus::Completed { summary } => Some(summary),
+        AskSessionStatus::Waiting => None,
+    };
+    Ok((record.id, feedback))
+}
+
+pub(crate) fn task_unblock_key(position: &FlowPosition) -> String {
+    format!(
+        "task:{}:{}:{}",
+        position.task_id,
+        position.invocation.id,
+        position.cursor.boundary_key()
+    )
+}
+
+fn keyed_ask_id(key: &str) -> String {
+    format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())))
+}
+
+pub(crate) fn task_waiting_unblock(position: &FlowPosition) -> Result<Option<String>> {
+    if !position.is_decision() {
+        return Ok(None);
+    }
+    let Some(run) = position
+        .claim
+        .as_ref()
+        .and_then(|claim| claim.worker_run_id.as_ref())
+    else {
+        return Ok(None);
+    };
+    let Some(record) = read_ask_record(&keyed_ask_id(&task_unblock_key(position)))? else {
+        return Ok(None);
+    };
+    Ok((record.parent_run_id == *run && record.status == AskSessionStatus::Waiting)
+        .then(|| format!(
+            "Run {run} is waiting for unblock Session {}: {}. Complete the Session; the same decision Run receives feedback and reassesses without Task resume.",
+            record.id, record.title
+        )))
 }
 
 fn report_ask_wait(id: &str) {
@@ -437,12 +530,12 @@ async fn prepare_ask_record(
         Some(model) => format!("{}:{model}", manifest.harness),
         None => manifest.harness.clone(),
     };
-    let mut record = AskSessionRecord {
+    let record = AskSessionRecord {
         id: format!("ask_{}", uuid::Uuid::new_v4().simple()),
         parent_run_id: manifest.run_id,
-        parent_run_dir: PathBuf::from(
+        parent_run_dir: Some(PathBuf::from(
             std::env::var_os(RUN_DIR_ENV).expect("active Run manifest requires LF_RUN_DIR"),
-        ),
+        )),
         work,
         work_selector,
         title: question_title(question),
@@ -458,7 +551,6 @@ async fn prepare_ask_record(
         status: AskSessionStatus::Waiting,
         retain_completed: false,
     };
-    prepare_ask_run(&mut record)?;
     Ok(record)
 }
 
@@ -468,8 +560,13 @@ pub(crate) fn prepare_flow_run(task: &Task, position: &mut FlowPosition) -> Resu
     if !position.is_human() || position.session_run_id.is_some() {
         return Ok(());
     }
-    let config = crate::engine::config::load_config(Some(&task.worktree))?.unwrap_or_default();
-    let (harness, model) = crate::engine::config::parse_agent(config.agent());
+    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
+    let agent = crate::ops::task::resolve_task_agent(
+        &task.worktree,
+        task.agent.as_deref(),
+        skill.as_ref().map(|step| &step.skill),
+    );
+    let (harness, model) = crate::engine::config::parse_agent(&agent);
     position.session_run_id = Some(crate::run_record::CaptureHandle::prepare(
         crate::run_record::RunSpec {
             harness: harness.to_string(),
@@ -489,6 +586,58 @@ pub(crate) fn prepare_flow_run(task: &Task, position: &mut FlowPosition) -> Resu
         },
         None,
     )?);
+    Ok(())
+}
+
+/// A changed Task choice applies to an unstarted review, preserving launched Runs.
+pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Task) -> Result<()> {
+    let Some(position) = store
+        .flow_position(&task.id)
+        .await?
+        .filter(FlowPosition::is_human)
+    else {
+        return Ok(());
+    };
+    let id = flow_token_id(&flow_token(task, &position)?);
+    let _lock = lock_session_launch(&id)?;
+    let Some(mut position) = store
+        .flow_position(&task.id)
+        .await?
+        .filter(FlowPosition::is_human)
+    else {
+        return Ok(());
+    };
+    if flow_token_id(&flow_token(task, &position)?) != id {
+        return Ok(());
+    }
+    let Some(previous) = position.session_run_id.clone() else {
+        return Ok(());
+    };
+    if !run_is_prepared(&previous)? {
+        return Ok(());
+    }
+    let task = store
+        .get_task(&task.id)
+        .await?
+        .ok_or_else(|| anyhow!("Task disappeared while selecting its review agent"))?;
+    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
+    let agent = crate::ops::task::resolve_task_agent(
+        &task.worktree,
+        task.agent.as_deref(),
+        skill.as_ref().map(|step| &step.skill),
+    );
+    let (harness, model) = crate::engine::config::parse_agent(&agent);
+    let (_, manifest) = crate::run_record::resolve_manifest(
+        &crate::store::observability_home_dir(),
+        previous.as_str(),
+    )?;
+    if manifest.harness == harness && manifest.model == model {
+        return Ok(());
+    }
+    position.session_run_id = None;
+    prepare_flow_run(&task, &mut position)?;
+    carry_session_name(&id, Some(&previous), position.session_run_id.as_ref())?;
+    store.set_flow_position(&task.id, position).await?;
     Ok(())
 }
 
@@ -1913,17 +2062,15 @@ async fn launch_ask(record: &AskSessionRecord) -> Result<()> {
         record.id.clone(),
     ];
     let run_id = record.parent_run_id.to_string();
-    let run_dir = record.parent_run_dir.to_string_lossy().to_string();
-    start_durable_session(
-        &ask_background_name(&record.id),
-        &record.cwd,
-        &argv,
-        &[
-            (crate::durable::RUN_ID_ENV, run_id.as_str()),
-            (RUN_DIR_ENV, run_dir.as_str()),
-        ],
-    )
-    .await
+    let run_dir = record
+        .parent_run_dir
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string());
+    let mut env = vec![(crate::durable::RUN_ID_ENV, run_id.as_str())];
+    if let Some(directory) = &run_dir {
+        env.push((RUN_DIR_ENV, directory.as_str()));
+    }
+    start_durable_session(&ask_background_name(&record.id), &record.cwd, &argv, &env).await
 }
 
 #[cfg(not(test))]
@@ -2227,29 +2374,23 @@ mod tests {
     struct AskHome {
         home: tempfile::TempDir,
         previous: Vec<(&'static str, Option<OsString>)>,
+        _ambient: crate::test_ambient::EnvGuard,
     }
 
     impl AskHome {
         fn new() -> Self {
+            ASK_LAUNCHERS.lock().unwrap().clear();
+            FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
+            let ambient = crate::test_ambient::EnvGuard::new();
             let home = tempfile::tempdir().unwrap();
-            let previous = [
-                "LF_HOME",
-                "LF_BIN",
-                "LF_DB_PATH",
-                "LF_CONTROL_HOME",
-                "LF_CONTROL_DB_PATH",
-                "LF_RUN_ID",
-                "LF_RUN_DIR",
-                "LF_RUN_CONTEXT",
-                "LF_HUMAN_SESSION",
-            ]
-            .into_iter()
-            .map(|name| {
-                let value = std::env::var_os(name);
-                std::env::remove_var(name);
-                (name, value)
-            })
-            .collect();
+            let previous = ["LF_HOME", "LF_BIN", "LF_DB_PATH"]
+                .into_iter()
+                .map(|name| {
+                    let value = std::env::var_os(name);
+                    std::env::remove_var(name);
+                    (name, value)
+                })
+                .collect();
             std::env::set_var("LF_HOME", home.path());
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
             let manifest = RunManifest {
@@ -2280,7 +2421,11 @@ mod tests {
             .unwrap();
             std::env::set_var("LF_RUN_DIR", home.path());
             std::env::set_var("LF_RUN_ID", manifest.run_id.as_str());
-            Self { home, previous }
+            Self {
+                home,
+                previous,
+                _ambient: ambient,
+            }
         }
 
         async fn store(&self) -> SharedStore {
@@ -2343,7 +2488,7 @@ mod tests {
                     assert!(session.id.starts_with("ask_once_"));
                     assert!(!session.id.contains("checkout"));
                     let record = read_ask_record(&session.id).unwrap().unwrap();
-                    assert_eq!(record.parent_run_dir, home.home.path());
+                    assert_eq!(record.parent_run_dir.as_deref(), Some(home.home.path()));
                     assert_eq!(record.model, "codex:test");
                     let summary = if record.prompt == "Second choice" {
                         "second"
@@ -2973,7 +3118,7 @@ mod tests {
         let record = AskSessionRecord {
             id: "ask_skill_proof".to_string(),
             parent_run_id: RunId::new(),
-            parent_run_dir: home.path().join("parent"),
+            parent_run_dir: Some(home.path().join("parent")),
             work: None,
             work_selector: None,
             title: "Choose the delivery policy".to_string(),

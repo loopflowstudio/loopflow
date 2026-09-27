@@ -70,7 +70,7 @@ Chapter planning edits use `lf wave update-plan`; chapter replacement uses
 its current internal Project is resolved automatically.
 
 Select from the installed catalog: `feature` runs design review, repeats
-implement → compress → review-slice → concept-review → loop-decide, then parks
+implement → compress → review-slice → loop-decide, then parks
 at a human demo when the decision is Advance. Demo completion returns feedback
 to a second loop-decide with its own edge to implement. For an
 already-approved design, `pursue` starts at implementation. Check installed help

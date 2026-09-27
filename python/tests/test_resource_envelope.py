@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/resource_envelope.py"
@@ -17,8 +18,7 @@ _spec.loader.exec_module(resources)
 def _policy(**overrides) -> "resources.ResourcePolicy":
     values = {
         "minimum_free_disk_bytes": 100,
-        "maximum_worktree_build_bytes": 100,
-        "maximum_aggregate_build_bytes": 150,
+        "worktree_build_cleanup_bytes": 100,
         "maximum_run_record_bytes": 100,
         "maximum_uv_cache_bytes": 100,
         "maximum_cargo_cache_bytes": 100,
@@ -106,15 +106,14 @@ def test_snapshot_measures_home_run_records_and_names_retention(
     )
 
     source = next(source for source in snapshot.sources if source.id == "runs:home")
-    issue = next(issue for issue in snapshot.issues if issue.code == "runs:home")
     assert source.kind == "runs"
     assert source.paths == (home / "runs",)
     assert source.bytes > 0
     assert source.disposable is False
-    assert issue.owner == "Loopflow Home"
-    assert issue.recoverable is False
-    assert str(home / "runs") in issue.action
-    assert "reconcile" not in issue.action
+    assert snapshot.ok
+    warning = next(warning for warning in snapshot.warnings if "Loopflow Home" in warning)
+    assert str(home / "runs") in warning
+    assert "never auto-deleted" in warning
 
 
 def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> None:
@@ -131,7 +130,7 @@ def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> No
     (run_dir / "events.jsonl").write_text("durable\n")
     (durable / "loopflow.db").write_bytes(b"sqlite")
 
-    policy = _policy(maximum_aggregate_build_bytes=1)
+    policy = _policy()
     sources = [
         _source(active, id="build:active", owner="active", active=True),
         _source(inactive, id="build:inactive", owner="inactive"),
@@ -149,7 +148,7 @@ def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> No
         ),
     ]
 
-    actions = resources.recover_resources(tmp_path, policy, _snapshot(policy, sources))
+    actions = resources.recover_resources(policy, _snapshot(policy, sources))
 
     assert [action.source for action in actions] == ["build:inactive"]
     assert not (inactive / "target").exists()
@@ -166,12 +165,10 @@ def test_recovery_root_limit_is_a_hard_bound(tmp_path: Path) -> None:
     for root in roots:
         (root / "target").mkdir(parents=True)
         (root / "target/artifact").write_bytes(b"x" * 4096)
-    policy = _policy(maximum_aggregate_build_bytes=1, maximum_recovery_roots=1)
-    sources = [
-        _source(root, id=f"build:{root.name}", owner=root.name) for root in roots
-    ]
+    policy = _policy(maximum_recovery_roots=1)
+    sources = [_source(root, id=f"build:{root.name}", owner=root.name) for root in roots]
 
-    actions = resources.recover_resources(tmp_path, policy, _snapshot(policy, sources))
+    actions = resources.recover_resources(policy, _snapshot(policy, sources))
 
     assert len(actions) == 1
     assert sum((root / "target").exists() for root in roots) == 1
@@ -207,7 +204,6 @@ def test_disk_pressure_prunes_uv_through_its_supported_boundary(
     monkeypatch.setattr(resources, "_prune_uv_cache", _prune)
 
     actions = resources.recover_resources(
-        tmp_path,
         policy,
         _snapshot(policy, [source], free=100),
     )
@@ -216,15 +212,59 @@ def test_disk_pressure_prunes_uv_through_its_supported_boundary(
     assert actions[0].source == "cache:uv"
 
 
-def test_active_over_budget_build_is_named_but_not_auto_recoverable(tmp_path: Path) -> None:
-    root = tmp_path / "active"
-    (root / "target").mkdir(parents=True)
-    (root / "target/artifact").write_bytes(b"x" * 4096)
-    policy = _policy(maximum_worktree_build_bytes=1, maximum_aggregate_build_bytes=1_000_000)
-    source = _source(root, id="build:active", active=True, budget=1)
+def test_sibling_build_warns_self_cleans_and_real_disk_pressure_stops(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo, sibling = tmp_path / "current", tmp_path / "landing"
+    for root in (repo, sibling):
+        (root / "target").mkdir(parents=True)
+        (root / "source.rs").write_text("fn main() {}\n")
+    (sibling / "target/artifact").write_bytes(b"x" * 4096)
+    monkeypatch.delenv("LF_CONTROL_HOME", raising=False)
+    monkeypatch.setenv("LF_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv"))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
+    monkeypatch.setattr(
+        resources,
+        "_discover_worktrees",
+        lambda _: (
+            [resources.Worktree(repo, "current"), resources.Worktree(sibling, "landing")],
+            None,
+        ),
+    )
+    monkeypatch.setattr(resources, "_running_cwds", lambda: ({repo, sibling}, None))
+    allocated_bytes = resources._allocated_bytes
+    monkeypatch.setattr(
+        resources,
+        "_allocated_bytes",
+        lambda path: 200 * 2**30 if path == sibling / "target" else allocated_bytes(path),
+    )
+    disk = SimpleNamespace(total=1024 * 2**30, free=128 * 2**30)
+    monkeypatch.setattr(resources.shutil, "disk_usage", lambda _: disk)
+    policy = _policy(worktree_build_cleanup_bytes=1)
 
-    issues = resources._assess_sources(1_000_000, policy, [source])
+    report = resources.inspect_resources(repo, policy, recover=False)
+    assert report.ok
+    assert not report.recovery
+    resources._print_report(report)
+    output = capsys.readouterr().out
+    assert "Resource envelope: PASS" in output
+    assert f"warning: landing ({sibling})" in output
+    assert "200.0 GiB" in output
+    assert (sibling / "target/artifact").exists()
 
-    assert len(issues) == 1
-    assert issues[0].code == "build:active"
-    assert issues[0].recoverable is False
+    # The current Session is active; its own next build still self-recovers.
+    (repo / "target/artifact").write_bytes(b"x" * 4096)
+    report = resources.inspect_resources(repo, policy, recover=True)
+    assert report.ok
+    assert [action.source for action in report.recovery] == ["build:current"]
+    assert not (repo / "target").exists()
+    assert (repo / "source.rs").exists()
+    assert (sibling / "target/artifact").exists()
+
+    disk.free = 50
+    monkeypatch.setattr(resources, "_running_cwds", lambda: ({repo}, None))
+    report = resources.inspect_resources(repo, policy, recover=False)
+    assert not report.ok
+    issue = next(issue for issue in report.after.issues if issue.code == "disk:free")
+    assert f"landing: {sibling}" in issue.action

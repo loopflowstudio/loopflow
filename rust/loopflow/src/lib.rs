@@ -31,3 +31,7 @@ pub mod trace;
 pub(crate) mod wave_host;
 pub mod webhook;
 pub mod work;
+
+#[cfg(test)]
+#[path = "../tests/support/ambient.rs"]
+pub(crate) mod test_ambient;

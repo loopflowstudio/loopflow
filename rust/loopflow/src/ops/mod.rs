@@ -73,3 +73,6 @@ pub use run::{
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;
+
+#[cfg(test)]
+pub(crate) use run::TEST_TASK_LAUNCH;

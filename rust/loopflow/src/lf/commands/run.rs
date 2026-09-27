@@ -165,8 +165,10 @@ pub(crate) fn prepare_harness_turn_from_skill_at(
     wave: &str,
     max_turns: Option<u32>,
     repo_root: &Path,
+    agent: Option<&str>,
 ) -> Result<PreparedHarnessTurn> {
     let cli = Cli {
+        model: agent.map(str::to_string),
         batch: true,
         wave: Some(wave.to_string()),
         max_turns,
@@ -1278,6 +1280,7 @@ mod tests {
             "proof",
             None,
             repo.path(),
+            None,
         )
         .unwrap();
         assert!(!background.input.contains("<lf:user>"));
@@ -1811,9 +1814,15 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ),
         };
 
-        let prepared =
-            prepare_harness_turn_from_skill_at(&skill, "prove it", "proof-wave", None, repo.path())
-                .unwrap();
+        let prepared = prepare_harness_turn_from_skill_at(
+            &skill,
+            "prove it",
+            "proof-wave",
+            None,
+            repo.path(),
+            None,
+        )
+        .unwrap();
 
         assert!(prepared.input.contains("captured at Flow start"));
         assert!(!prepared.input.contains("edited after the Flow started"));

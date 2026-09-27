@@ -143,6 +143,11 @@ pub struct FlowPosition {
 }
 
 impl FlowPosition {
+    pub fn is_decision(&self) -> bool {
+        matches!(self.current_plan(), ConcreteStep::Xor(_))
+            || self.current().policy.repeat.is_some()
+    }
+
     pub fn has_pending_decision(&self) -> bool {
         let leaf = self.cursor.leaf();
         (self.current().policy.repeat.is_some() && leaf.progress.verdict.is_some())
@@ -253,6 +258,7 @@ pub struct TaskWorkerClaim {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFlowBlocker {
+    pub run_id: Option<RunId>,
     pub reason: String,
     pub restart_required: bool,
     #[serde(with = "time::serde::rfc3339")]

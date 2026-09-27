@@ -116,7 +116,7 @@ impl ClaudeHarness {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
-        super::configure_vendor_tokio_env(&mut cmd)?;
+        super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let mut child = cmd
@@ -285,6 +285,10 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl Harness for ClaudeHarness {
+    fn process_id(&self) -> Option<u32> {
+        self.child.as_ref().and_then(Child::id)
+    }
+
     fn set_raw_provider_sender(
         &mut self,
         raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
@@ -481,6 +485,62 @@ impl Harness for ClaudeHarness {
         self.account_route
             .as_ref()
             .map(|route| route.account_id().clone())
+    }
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use std::time::Duration;
+
+    use tokio::process::Command;
+    use tokio::sync::mpsc;
+
+    use super::ClaudeHarness;
+    use crate::harness::Harness;
+    use crate::run_record::{activity, CaptureHandle, RunFlowMembership, RunSpec};
+
+    #[tokio::test]
+    async fn claude_body_activity_does_not_require_process_group_authority() {
+        let home = tempfile::tempdir().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = ClaudeHarness::new(tx);
+        harness.child = Some(
+            Command::new("sleep")
+                .arg("300")
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap(),
+        );
+        let capture = CaptureHandle::begin_at(
+            home.path(),
+            RunSpec {
+                harness: "claude".into(),
+                model: None,
+                surface: "headless".into(),
+                cwd: home.path().into(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: vec![],
+                flow: RunFlowMembership::Independent,
+            },
+        )
+        .unwrap();
+        capture.observe_activity(harness.process_id()).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if activity::read(home.path(), &capture.run_id()).await
+                    == activity::Activity::Running
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a live Claude child must have observable CPU without a process group");
+        assert_eq!(harness.process_group_id(), None);
+        harness.stop().await.unwrap();
     }
 }
 

@@ -60,13 +60,20 @@ uv run python scripts/resource_envelope.py --recover
 
 The resource preflight names the owner and budget for every worktree build,
 gate-artifact root, the Home-local Run record store, uv cache, Cargo cache, and
-free disk. Budgets live in `performance/budgets.json`: 64 GiB free, 12 GiB per
-worktree build, 128 GiB across builds, 16 GiB each for Run records and uv, and
-four low-priority verification workers. Recovery removes only allowlisted build
-roots from inactive worktrees, old disposable gate output, and entries accepted
-by `uv cache prune`. It never removes source, a worktree, gate receipts, Run
-bundles, or SQLite state. Unresolved pressure stops before product tests run and
-prints the local path that needs an explicit retention decision.
+free disk. `performance/budgets.json` sets a 64 GiB free-space floor and four
+low-priority verification workers. Total build size is measured, not capped.
+Individual root thresholds are cleanup signals, not gates: an oversized sibling names its
+worktree in a warning and does not block a healthy checkout. Before building,
+preflight automatically removes this checkout's allowlisted build roots when
+they exceed 24 GiB. This threshold accommodates combined Rust and Swift builds;
+it does not cap what a worktree may build.
+
+`--recover` also removes inactive worktrees' allowlisted build roots, old
+disposable gate output, and entries accepted by `uv cache prune`. Other active
+worktrees, source, worktree metadata, gate receipts, Run bundles, and SQLite
+state are retained. Insufficient free disk stops product tests;
+low-disk output names the largest recoverable build roots. Measurement failures
+remain explicit because unmeasured capacity cannot establish a safe build.
 
 Every phase runs under a printed wall-clock limit. A phase that overruns is
 killed—process group and all—and reported as `VERIFICATION BUDGET`, so
@@ -279,6 +286,42 @@ directory without Git metadata; Work operations still enforce repository ownersh
 ```bash
 cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
 ```
+
+Task decision recovery has a focused public-operation proof:
+
+```bash
+cargo test -p loopflow --lib task_decision_public_resume -- --test-threads=1
+```
+
+It runs the driver-created Ask through resume, including a later branch-adoption
+refusal, retained feedback and direction, and a fresh Run with the saved agent.
+PM, provider and process-launch effects are simulated; the public resume core,
+account selection, store, prompt and driver execute.
+
+The opt-in `task_decision_live_policy_blocks_two_empty_replacement_passes` test
+uses actual Codex judgment and simulated PM. Run it with `--ignored --nocapture`
+and explicitly set `LOOPFLOW_LIVE_TASK_LF` to the source `lf` built in this checkout,
+`LOOPFLOW_LIVE_CODEX_HOME` to an existing configured account Home, and
+`LOOPFLOW_LIVE_TASK_OUTPUT` to a fresh evidence directory. It retains its isolated
+Home and Run records on failure. This also tests the provider tool shell's
+executable/Home propagation: manually supplying a verdict or rewriting the
+prompt's commands does not satisfy the proof. The test first runs a separate provider tool-shell probe:
+`command -v lf`, `lf task status TEST-1 --json`, and an allowlisted Home/database
+capture must identify the source fixture despite an installed `lf` on PATH.
+It then judges the recorded passes, completes the resulting policy Ask with
+explicitly synthetic feedback, and checks that the same decision Run finishes.
+Keep earlier failed receipts; an automatic failure Ask is not policy acceptance.
+
+Task stall proof uses `run_record::activity::tests`, `task_live_unblock`, and
+Swift `TaskFlowProofTests`. The sampler retains PID/start identity and cumulative
+CPU for the body and descendants in existing Run events. Five quiet minutes
+requires samples no more than 45 seconds apart; the worker samples every 15
+seconds. Unit proofs advance a simulated clock; the CLI/desktop proof samples a
+real sleeping process with a seeded five-minute history. Neither establishes a
+five-minute configured provider stall. Preserve CPU-active silence, fresh-event,
+missing-sample and PID-reuse counterexamples when changing the projection.
+Repeated samples of a reused body PID must remain Unknown; they cannot replace
+the observer's original body identity and later establish a stall for that Run.
 
 When changing Wave chat operations, include the parent module's HTTP and SSE
 tests. Selecting only `runner::tests` or steering-named tests misses them.
@@ -565,3 +608,13 @@ Exercise Session fixtures through Rust as well as Swift after ancestry changes.
 `wave_id` uses WaveId's UUID encoding; prefixed Task/Project Work IDs are different
 types. A Swift String round trip alone cannot prove that a Rust producer accepts
 an identity value.
+
+Session fixtures share `AMBIENT_TASK_ENV` in
+`rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Home,
+Run identity/directory, Task authority, and review Session identity under the
+suite's environment lock and restores them afterward. Prove isolation from a
+live Session without shell-level scrubbing:
+
+```bash
+cargo test -p loopflow --lib ops::flow_session::tests -- --test-threads=1
+```

@@ -424,12 +424,14 @@ mod tests {
     use crate::ops::human_session::SessionState;
 
     struct TestHome {
+        _ambient: crate::test_ambient::EnvGuard,
         directory: tempfile::TempDir,
         previous: Vec<(&'static str, Option<OsString>)>,
     }
 
     impl TestHome {
         fn new() -> Self {
+            let ambient = crate::test_ambient::EnvGuard::new();
             let directory = tempfile::tempdir().unwrap();
             let previous = ["LF_HOME", "LF_BIN"]
                 .into_iter()
@@ -438,6 +440,7 @@ mod tests {
             std::env::set_var("LF_HOME", directory.path());
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
             Self {
+                _ambient: ambient,
                 directory,
                 previous,
             }

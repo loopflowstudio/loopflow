@@ -304,6 +304,9 @@ struct SessionChromeProofTests {
         else { Issue.record("The fixture's second palette destination should be its Wave") }
 
         // Flow inspection replaces search in the same sheet and dismisses once.
+        model.navigation.content = .terminals
+        try await settle(window)
+        window.makeFirstResponder(terminals[1])
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
         let flowSheet = try #require(window.attachedSheet)
@@ -317,6 +320,7 @@ struct SessionChromeProofTests {
         try await Task.sleep(for: .milliseconds(400))
         #expect(model.navigation.palette == nil)
         #expect(window.attachedSheet == nil)
+        #expect(window.firstResponder === terminals[1])
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
     }

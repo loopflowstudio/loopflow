@@ -950,3 +950,64 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
         "inspection must not create execution or Started evidence"
     );
 }
+
+#[test]
+fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() {
+    let home = tempfile::tempdir().unwrap();
+    seed_stale_project_work(home.path(), false);
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let original = store.list_waves(None).unwrap().remove(0);
+    let other_repo = home.path().join("other-repo");
+    std::fs::create_dir_all(&other_repo).unwrap();
+    // Registered repositories without Git metadata remain valid cached readers.
+    let other = Wave::new(
+        WaveId::new(),
+        "other".into(),
+        other_repo.display().to_string(),
+    );
+    store.create_wave(&other).unwrap();
+    let mut snapshot = store.pm_snapshot(original.id()).unwrap().unwrap();
+    let mut payload: serde_json::Value = serde_json::from_str(&snapshot.payload).unwrap();
+    payload["projects"][0]["id"] = "other-project".into();
+    payload["projects"][0]["initiative_ids"] = serde_json::json!(["other-initiative"]);
+    payload["items"][0]["id"] = "other-task".into();
+    payload["items"][0]["project_id"] = "other-project".into();
+    payload["items"][0]["completed"] = true.into();
+    snapshot.wave_id = other.id().clone();
+    snapshot.initiative = "other-initiative".into();
+    snapshot.payload = serde_json::to_string(&payload).unwrap();
+    store.put_pm_snapshot(&snapshot).unwrap();
+    bind_chapter(&store, &other, "other-project");
+
+    for all in [true, false] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command.args(["roadmap", "--task", "PRD-52", "--json"]);
+        if all {
+            command.arg("--all");
+        }
+        command
+            .env("LF_HOME", home.path())
+            .env_remove("LF_DB_PATH")
+            .env_remove("LF_CONTROL_HOME")
+            .env_remove("LF_CONTROL_DB_PATH")
+            .env_remove("LF_RUN_ID")
+            .env("LF_WAVE_ID", original.id().to_string())
+            .current_dir(&other_repo);
+        prepend_test_bin(&mut command, home.path());
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let waves = result["waves"].as_array().unwrap();
+        assert_eq!(waves.len(), if all { 2 } else { 1 });
+        let retained = waves
+            .iter()
+            .find(|row| row["wave"]["id"] == other.id().to_string())
+            .unwrap();
+        assert_eq!(retained["tasks"]["items"][0]["task"]["id"], "other-task");
+        assert_eq!(retained["tasks"]["items"][0]["task"]["completed"], true);
+    }
+}

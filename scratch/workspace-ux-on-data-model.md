@@ -4,7 +4,8 @@ LOO-303 · Product · 2026-09-26
 
 Status: approved in interactive review on 2026-09-26 with the Project-template /
 Task-invocation presentation correction below. The current participant's name
-is unresolved. No implementation or installed acceptance claimed.
+is unresolved. Navigation is implemented with local proof and a
+[slice review](workspace-navigation-review.md); installed acceptance remains owed.
 Source inspected at `c832aaede633a8996bf694dfb7ae2579dbabce3a`.
 The supplied placement stacks this Task on LOO-298 / PR #1296. That is placement
 evidence, not evidence that its owner conversion is complete or merged.
@@ -497,6 +498,14 @@ or Task/PR disposition is selected by this implementation step.
 
 ## Slice ledger
 
+- 2026-09-26 navigation review: repaired exact Task lookup escaping a registered
+  repository without Git metadata; the two-repository collision/completed-Task
+  CLI regression and existing no-start inspection proof pass. Removed palette
+  actions whose existing destination is unavailable. Eight focused Swift checks
+  pass, including retained native input and Flow-inspection dismissal. The
+  [review matrix](workspace-navigation-review.md) owns final checks, inherited
+  architecture gap and remaining installed/multi-window acceptance. No publication
+  or Flow navigation decision.
 - 2026-09-26 navigation implementation: checkpointed the approved review notes
   through `lf commit` before edits. Added one exact Task filter to the roadmap
   reader, typed palette destinations, per-window Task-link delivery with cold

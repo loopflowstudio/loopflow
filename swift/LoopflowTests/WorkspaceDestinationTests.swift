@@ -99,6 +99,22 @@ struct WorkspaceDestinationTests {
         #expect(!model.showsTaskLink)
     }
 
+    @Test func historicalTaskWithoutPlanningHasNoDeadEndFlowAction() async throws {
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(fixture().utf8)) as? [String: Any])
+        var waves = try #require(snapshot["waves"] as? [[String: Any]])
+        var unavailable = try #require(waves[0]["unavailable_tasks"] as? [[String: Any]])
+        unavailable[0]["task_id"] = "issue-available"
+        waves[0]["unavailable_tasks"] = unavailable
+        snapshot["waves"] = waves
+        let data = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        let exact = try oneTask(data, taskId: "issue-available")
+        let model = PodiumModel(query: RegistryQuery { _, _ in exact })
+        await model.openTaskLink(try #require(URL(string: "loopflow://task/PRD-52")))
+        #expect(model.selection == .task(id: "issue-available"))
+        #expect(!model.paletteRows.contains { $0.id == .chooseFlow("issue-available") })
+        #expect(model.paletteRows.contains { $0.id == .monitor("issue-available") })
+    }
+
     @Test func ambiguousAndUnavailableLinksPreserveTheWorkspace() async throws {
         let data = try fixture()
         for response in [data, #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"#, "transport-error"] {

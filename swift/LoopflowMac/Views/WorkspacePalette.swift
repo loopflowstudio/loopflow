@@ -39,12 +39,18 @@ extension PodiumModel {
             rows.append(.init(id: .flow(flow.name), title: flow.name, detail: "Flow template", key: flow.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
-            rows.append(.init(id: .chooseFlow(selection.id), title: "Choose Flow for \(found.task.task.identifier)",
-                              detail: "Action · Review selection before starting", key: "Choose Flow"))
+            let flowIsVisible: Bool
+            if case .pinned = found.task.flow.record { flowIsVisible = true }
+            else { flowIsVisible = !found.wave.unavailableTasks.contains { $0.taskId == found.task.id } }
+            if flowIsVisible {
+                rows.append(.init(id: .chooseFlow(selection.id), title: "Choose Flow for \(found.task.task.identifier)",
+                                  detail: "Action · Review selection before starting", key: "Choose Flow"))
+            }
             rows.append(.init(id: .monitor(selection.id), title: "Monitor \(found.task.task.identifier)",
                               detail: "Action · Inspect Runs", key: "Monitor"))
         }
-        if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }) {
+        if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }),
+           session.titleSource != .unavailable {
             rows.append(.init(id: .rename(id), title: "Rename \(session.title)", detail: "Action · Edit name", key: "Rename"))
         }
         return rows

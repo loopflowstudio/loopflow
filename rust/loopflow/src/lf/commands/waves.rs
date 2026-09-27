@@ -650,7 +650,18 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
                     .list_waves(None)
                     .await
                     .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-                scope_waves_to_repo(waves, all)?
+                if task.is_some() && !all {
+                    // Exact destinations carry a repository even when only its
+                    // cached registration survives, without Git metadata.
+                    let scope =
+                        crate::repository::CanonicalRepo::discover(&std::env::current_dir()?)?;
+                    waves
+                        .into_iter()
+                        .filter(|wave| scope.contains(Path::new(wave.repo())))
+                        .collect()
+                } else {
+                    scope_waves_to_repo(waves, all)?
+                }
             }
             Err(other) => return Err(anyhow!(other)),
         };

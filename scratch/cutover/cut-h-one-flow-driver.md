@@ -580,3 +580,93 @@ for H3 beyond the decide/route fallback: `cwd` lives on `tasks.worktree` for a
 Task invocation and on the row for a saved one (`decode_flow` refuses `cwd IS
 NULL`); `RunFlowStep.task_id` doubles as the "stored at claim" flag in
 `record_row`. Verdict: proceed to H3.
+
+### 2026-09-27 · Rebase onto main 90a232aaf
+
+Reconciliation pass after rebasing the 62 commits onto `origin/main`
+(`90a232aaf`, #1301 "Keep Task agent choices and make stalled work visible",
+plus #1297 and the v0.12.22 release). Conflicts were resolved by keeping our
+side per hunk; the 19 dropped main hunks (controller/task, human_session,
+lf/commands/flow, flow_session) were then re-implemented on the row model. No
+Legacy/New branch; `prepare_flow_run` does not return.
+
+**Main's behaviors, where they live now.**
+
+| #1301 behavior | On main | Here |
+| --- | --- | --- |
+| Task keeps `-m` (`tasks.agent`) and it overrides each step's frontmatter | `resolve_task_agent`, `select_task_agent`, `prepare_task_flow_step`, `drive_task` | merged clean; unchanged |
+| The review Run takes the Task's agent | `prepare_flow_run` writing a prepared manifest | `human_session::select_review_agent`: resolves the agent and writes `provider`/`model` onto the review's reserved Run (`runs.published=0`) through `Store::retarget_unpublished_run`; called by `prepare` before `launch_flow`, and by `serve_flow_locked` after `reserve_review_run`, which launches `lf --tui --model <agent>`. `publish_review_run` still records what launched |
+| A changed Task agent re-targets an unstarted review | `retarget_prepared_task_review`: new prepared Run, `carry_session_name`, manifest read | `retarget_prepared_task_review` = `select_review_agent` on the Task's human position; the same Run row changes in place, a published Run keeps its provider. No manifest, no Session rename |
+| A decision Run without a verdict blocks with its Run and opens a keyed unblock Ask | `task_unblock` writing an `AskSessionRecord` file keyed `task:<task>:<inv>:<boundary>` | `task_unblock` stores an Ask Session row (`store_ask`, shared with `reserve_ask`) whose Run names the Task, its Wave, the worktree, `skill=unblock`, the Task's agent and `caller_run_id` = the failed Run; keyed `ask_once_<sha256(flow:<invocation>:<node>:<iterations>)>` — the H2 `flow_blocker_key`, now `QueuedInvocation::blocker_key` / `FlowPosition::blocker_key`, used by `lf flow blocked` on both paths and by the store's `flow_blocker_key`. `launch_keyed_ask` is the one reuse-or-store-then-launch path for `ask_once` and `task_unblock`; `launch_ask` takes the caller from the Run row |
+| Blocked shown while the decision Run waits on its Ask | `task_waiting_unblock` reading the record file | `task_waiting_unblock(store, position)` reads the keyed Session row: open and `caller_run_id` = the claimed worker Run |
+| `TaskFlowBlocker.run_id` | `block_task_flow_in` fills it | merged; `TaskFlowBlocker::now` carries `run_id: None` and the saved Flow's `settle_attempt_in` fills the failed attempt's Run |
+| Stalled (5 min without event or CPU progress) | `run_record/activity.rs`, worker `activity_tick`, `task_execution` | merged clean; unchanged |
+| `ensure_flow_position` reopens the unblock Ask of a blocked decision | hunk dropped | restored |
+| DTO fixtures `task_execution_stalled`, `task_flow_stalled`; Swift `stalled` | | merged clean |
+
+**Commands and results.** Ambient `LF_*`/`LOOPFLOW_*` cleared; `-j 4`;
+`nice -n 10`; `scripts/resource_envelope.py` PASS (77.8 GiB free / 64.0 GiB
+floor).
+
+| Command | Result |
+| --- | --- |
+| `cargo check -p loopflow --all-targets` before | 24 errors (`task_unblock`, `task_unblock_key`, `task_waiting_unblock`, `retarget_prepared_task_review`, `prepare_flow_run`, fixtures, `RunSpec.work`, `TaskFlowBlocker.run_id`) |
+| `cargo check -p loopflow --all-targets` after | pass |
+| `cargo nextest run … --test session_cutover_tests --test session_cli_tests --test dto_fixtures --test flow_tests --test status_tests --test task_github_cache_tests --test task_initialization_tests` first pass | 61 run: 60 passed, **1 failed** — `session_cli_tests::boundary_names_follow_run_ids_and_replacement_runs` read the fixture provider's evidence file between the shell creating it and writing the id (passes alone); the test now waits for the id |
+| Same, second pass | **61 passed, 0 failed** (1 slow) |
+| `cargo nextest run … --lib -E 'test(ops::) \| test(run_record) \| test(store::) \| test(controller::task) \| test(lf::commands)'` first pass | 628 run: 627 passed, **1 failed** — `task_decision_driver_failures_open_one_unblock_and_reassess_feedback` expected main's "review evidence cannot be empty"; the H2 shared writer said "decision requires evidence or direction". One message now, main's |
+| Same, second pass | **628 passed, 0 failed** |
+| `cargo fmt --all --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| `uv run python scripts/check_migrations.py` | 53 shipped migrations unchanged since v0.12.22; main's `task_agent` draft joins ours with no chain change |
+| `uv run python scripts/check_architecture.py` | only the known `wave_chapters` miss |
+
+The oauth contention test did not fail in this pass.
+
+**Tests kept, adapted, deleted.** Main's controller tests all kept:
+`task_decision_recovery_requires_the_original_successful_run`,
+`task_decision_live_unblock_returns_feedback_without_navigation`,
+`task_decision_driver_failures_open_one_unblock_and_reassess_feedback`,
+`task_decision_public_resume_preserves_feedback_after_adoption_refusal`,
+`task_agent_driver_runs_fresh_slice_turns_until_the_flow_finishes` run
+unchanged on rows (their `RunSpec` gains our `work: None`; the fixture is
+`human_task_fixture_at(database)` with our `_with_database` wrapper).
+`task_agent_changed_during_worker_applies_to_next_review` asserts the review
+Run row's provider/model instead of a prepared manifest.
+`task_agent_survives_refresh_and_selects_autonomous_and_human_steps` drives
+`select_review_agent` and `retarget_prepared_task_review` on the row: same Run
+id, `published=0`, provider changes; a published Run keeps its provider.
+`task_initialization_tests::task_live_unblock_status_and_desktop_share_exact_
+boundary_and_recovery` writes Ask Session rows (stale caller → running;
+`replace_session_run` onto the deciding Run → blocked in `lf task status` and
+`roadmap`; ready+complete → running; other boundaries → running) instead of
+`human-sessions/*.json`. Nothing deleted: main's
+`ordinary_flow_parks_at_the_same_durable_review_after_recovery` and the
+`flow_session` `WaitingExecutor` tests were already replaced by H2's row tests
+in the rebase itself (they drove `flow_run::{create,read,update}` and
+`position.json`).
+
+**Production lines** (before the first test module, against `f74dac0d8`):
+`ops/human_session.rs` 1,883 → 2,064 (+181); `engine/invocation.rs` 182 → 198
+(+16); `store/sqlite/sessions.rs` 564 → 580 (+16); `store/sessions.rs` 157 →
+172 (+15); `controller/task/mod.rs` 1,129 → 1,137 (+8); `durable.rs` 209 → 214
+(+5); `ops/task_execution.rs` 185 → 182 (−3); `lf/commands/flow.rs` 753 → 748
+(−5); `store/sqlite/flows.rs` 597 → 591 (−6). **Net +227**, the Task unblock
+Session and the review agent selection. No Swift, DTO fixture or migration
+change beyond what main brought.
+
+**Decisions made here** (also in `../questions.md`):
+
+1. A Task decision's unblock Ask is keyed by the H2 `flow:` key, not main's
+   `task:` key, so `lf flow blocked` from inside the Run and the driver's
+   recovery open one Session.
+2. `launch_ask` takes the asking Run from the Ask Run's `caller_run_id`, not
+   from the launching process's `LF_RUN_ID`; the Run directory is passed only
+   when it resolves.
+3. The review agent is chosen where the review Run is reserved and read back
+   at launch (`--model`); a published Run is never re-targeted.
+4. `settle_attempt_in` fills `failure.run_id` for a saved Flow too; a saved
+   Flow's failed decision does not open an unblock Ask (not in #1301 either).
+
+**Not proven.** A Task review launched through the real `lf session serve-flow`
+with `--model`; the unblock Ask through tmux (the unit stub records launches).

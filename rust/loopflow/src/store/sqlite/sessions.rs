@@ -3,6 +3,8 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::{FlowPosition, RunId};
+use crate::engine::invocation::QueuedInvocation;
+use crate::engine::ExecutionCursor;
 use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
@@ -134,6 +136,8 @@ impl SqliteStore {
         session_id: &str,
         run_id: &RunId,
         version: u64,
+        provider: &str,
+        model: Option<&str>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -144,7 +148,10 @@ impl SqliteStore {
             params![session_id, run_id.as_str(), i64::try_from(version).map_err(invalid)?])? != 1 {
             return Err(StoreError::InvalidAuthority("review Run reservation is stale".into()));
         }
-        tx.execute("UPDATE runs SET published=1 WHERE id=?1", [run_id.as_str()])?;
+        tx.execute(
+            "UPDATE runs SET published=1, provider=?2, model=?3 WHERE id=?1",
+            params![run_id.as_str(), provider, model],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -165,18 +172,47 @@ impl SqliteStore {
         .transpose()
     }
 
-    /// Reserve a conversation and its first Run together. A keyed Ask names
-    /// its Session by its key, so reserving it again returns the first one.
-    pub fn create_session(&self, session: Session, run: Run) -> StoreResult<(Session, Run)> {
+    /// Reserve a Session and its first Run together; reserving an id again
+    /// returns the first one. `review` is the saved Flow a review waits in:
+    /// its invocation has no Task and is stored at the cursor of this review.
+    pub fn create_session(
+        &self,
+        session: Session,
+        run: Run,
+        review: Option<(&QueuedInvocation, &ExecutionCursor)>,
+    ) -> StoreResult<(Session, Run)> {
         if run.session_id.as_deref() != Some(session.id.as_str())
             || run.id != session.current_run_id
+            || review.is_some() != (session.kind == SessionKind::FlowReview)
+            || review.map(|(invocation, _)| &invocation.id) != run.invocation_id.as_ref()
         {
-            return Err(invalid("a Session's first Run is its current Run"));
+            return Err(invalid(
+                "a Session is reserved with its first Run, a review with its invocation",
+            ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
             return Ok(existing);
+        }
+        if let Some((invocation, cursor)) = review {
+            tx.execute(
+                "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
+                    position_version,worker_generation,updated_at,review_json,state)
+                 VALUES(?1,?2,?3,?4,1,0,?5,?6,'current')
+                 ON CONFLICT(id) DO UPDATE SET step_index=excluded.step_index,
+                    iteration=excluded.iteration, review_json=excluded.review_json,
+                    updated_at=excluded.updated_at, position_version=position_version+1,
+                    pending_session_id=NULL, current_run_id=NULL",
+                params![
+                    invocation.id,
+                    serde_json::to_string(invocation)?,
+                    i64::try_from(cursor.index).map_err(invalid)?,
+                    i64::from(cursor.iteration),
+                    session.created_at,
+                    serde_json::to_string(cursor)?
+                ],
+            )?;
         }
         tx.execute(
             "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at)
@@ -187,8 +223,7 @@ impl SqliteStore {
                 match session.kind {
                     SessionKind::Interactive => "interactive",
                     SessionKind::Ask => "ask",
-                    SessionKind::FlowReview =>
-                        return Err(invalid("a review is reserved by its invocation")),
+                    SessionKind::FlowReview => "flow_review",
                 },
                 session.title,
                 title_source(session.title_source),
@@ -196,13 +231,18 @@ impl SqliteStore {
                 session.created_at
             ],
         )?;
-        super::runs::insert_run_in(&tx, run)?;
+        let run = super::runs::insert_run_in(&tx, run)?;
+        tx.execute(
+            "UPDATE flow_invocations SET pending_session_id=?2, current_run_id=?3 WHERE id=?1",
+            params![run.invocation_id, session.id, run.id.as_str()],
+        )?;
         let created = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(created)
     }
 
-    /// Append an attempt to a conversation. Title and feedback stay on the Session.
+    /// Append an attempt to a Session. Title and feedback stay on the Session.
+    /// A Task review appends its attempts through `reserve_review_run`.
     pub fn replace_session_run(&self, expected_run: &RunId, run: Run) -> StoreResult<Run> {
         let id = run
             .session_id
@@ -213,7 +253,8 @@ impl SqliteStore {
         let run = super::runs::insert_run_in(&tx, run)?;
         if tx.execute(
             "UPDATE sessions SET current_run_id=?3 WHERE id=?1 AND current_run_id=?2
-             AND kind!='flow_review' AND completed_at IS NULL",
+             AND completed_at IS NULL AND NOT EXISTS(SELECT 1 FROM runs r
+                 WHERE r.id=?2 AND r.invocation_id IS NOT NULL AND r.task_id IS NOT NULL)",
             params![id, expected_run.as_str(), run.id.as_str()],
         )? != 1
         {
@@ -221,29 +262,65 @@ impl SqliteStore {
                 "Session changed before its Run was replaced".into(),
             ));
         }
+        tx.execute(
+            "UPDATE flow_invocations SET current_run_id=?2
+             WHERE pending_session_id=?1 AND state='current'",
+            params![id, run.id.as_str()],
+        )?;
         tx.commit()?;
         Ok(run)
     }
 
-    /// Open interactive and Ask Sessions. Reviews list through their invocation.
-    pub fn open_conversations(&self) -> StoreResult<Vec<(Session, Run)>> {
+    /// Every open Session. A review is open while its invocation waits on it.
+    pub fn open_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND s.kind IN ('interactive','ask')
-             ORDER BY s.created_at, s.id"
+            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND (s.kind!='flow_review' OR EXISTS(
+                SELECT 1 FROM flow_invocations f WHERE f.pending_session_id=s.id AND f.state='current'))
+             ORDER BY s.title, s.id"
         ))?;
         let rows = query.query_map([], read_session)?;
         rows.map(|row| row?).collect()
     }
 
-    /// Completion closes the conversation; its Runs and provider history remain.
-    /// An Ask closes only with the answer its caller is waiting for.
+    /// The Flow and cursor node of the saved Flow waiting on this review.
+    pub fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT json_extract(invocation_json,'$.flow'), review_json FROM flow_invocations
+             WHERE pending_session_id=?1 AND state='current' AND task_id IS NULL",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+        .map(|(flow, cursor)| {
+            let cursor: ExecutionCursor = serde_json::from_str(&cursor)?;
+            Ok((flow, cursor.node_key()))
+        })
+        .transpose()
+    }
+
+    /// A saved Flow ended; its reviews stay as history.
+    pub fn end_flow(&self, invocation: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE flow_invocations SET state='completed', ended_at=?2
+             WHERE id=?1 AND task_id IS NULL AND state='current'",
+            params![invocation, crate::store::rows::now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// Completion closes the Session; its Runs and provider history remain.
+    /// An Ask or review closes only with the feedback its caller waits for.
+    /// A Task review closes inside its invocation's transaction instead.
     pub fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
             "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
-             AND completed_at IS NULL
-             AND (kind='interactive' OR (kind='ask' AND ready_summary IS NOT NULL))",
+             AND completed_at IS NULL AND (kind='interactive' OR ready_summary IS NOT NULL)
+             AND NOT EXISTS(SELECT 1 FROM runs r
+                 WHERE r.id=?2 AND r.invocation_id IS NOT NULL AND r.task_id IS NOT NULL)",
             params![id, expected_run.as_str(), crate::store::rows::now_unix()],
         )? != 1
         {
@@ -252,17 +329,6 @@ impl SqliteStore {
             ));
         }
         Ok(())
-    }
-
-    pub fn open_review_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND s.kind='flow_review' AND EXISTS(
-                SELECT 1 FROM flow_invocations f WHERE f.pending_session_id=s.id AND f.state='current')
-             ORDER BY s.created_at, s.id"
-        ))?;
-        let rows = query.query_map([], read_session)?;
-        rows.map(|row| row?).collect()
     }
 
     pub fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {

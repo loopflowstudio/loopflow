@@ -264,6 +264,10 @@ fn drive_saved(id: &str, cli: &Cli) -> Result<FlowOutcome> {
                 run.active = None;
                 Ok(())
             })?;
+            // A Flow that never waited at a review has no invocation row.
+            if let Some(store) = runtime.block_on(crate::store::open_existing_store()) {
+                runtime.block_on(store.end_flow(id))?;
+            }
             Ok(FlowOutcome::Completed)
         }
         Ok(FlowOutcome::Waiting) => Ok(FlowOutcome::Waiting),
@@ -414,9 +418,23 @@ impl SkillExecutor for CliFlowExecutor<'_> {
     ) -> Result<SkillOutcome> {
         if skill.policy.human {
             let id = &self.invocation;
-            let (token, completed) = flow_run::begin_boundary(id)?;
-            if completed {
-                return flow_run::finish_boundary(&token, None);
+            let (token, _) = flow_run::begin_boundary(id)?;
+            let review = async {
+                let config = crate::store::storage_config_from_env()?;
+                let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
+                crate::ops::flow_session::reserve(&store, &token).await
+            };
+            match review.await {
+                Ok(Some(feedback)) => {
+                    flow_run::finish_boundary(&token, None)?;
+                    return Ok(SkillOutcome::Completed {
+                        feedback: Some(feedback),
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!(
+                    "warning: this review's Session is not recorded and will not list: {error:#}"
+                ),
             }
             eprintln!(
                 "Flow {id} is waiting at {}. Open its Flow Session with lf session.",
@@ -575,8 +593,7 @@ pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::render_pipeline_lines;
-    use crate::engine::{ConcreteSkill, ConcreteStep, Flow, Skill};
-    use crate::lf::Cli;
+    use crate::engine::{ConcreteStep, Flow};
     use std::fs;
     use tempfile::tempdir;
 
@@ -681,89 +698,5 @@ mod tests {
             .unwrap()
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));
-    }
-
-    #[test]
-    fn ordinary_flow_parks_at_the_same_durable_review_after_recovery() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let home = tempdir().unwrap();
-        let _home = super::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let _binary =
-            super::EnvVarGuard::set("LF_BIN", std::env::current_exe().unwrap().to_str().unwrap());
-        let cli = Cli {
-            batch: true,
-            ..Cli::default()
-        };
-        let steps = vec![ConcreteStep::Skill(ConcreteSkill {
-            skill: Skill::named("concept-review"),
-            policy: crate::engine::OccurrencePolicy {
-                id: Some("review".into()),
-                human: true,
-                repeat: None,
-            },
-            flow_parents: vec![],
-        })];
-        let run = crate::ops::flow_run::create("proof", &steps, home.path(), None, &cli).unwrap();
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Waiting
-        );
-        let before = crate::ops::flow_run::read(&run.id).unwrap();
-        let token = before.active.as_ref().unwrap().id.clone();
-        assert!(before.failure.is_none());
-        assert_eq!(crate::ops::flow_session::list().unwrap().len(), 1);
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Waiting
-        );
-        let after = crate::ops::flow_run::read(&run.id).unwrap();
-        assert_eq!(after.active.unwrap().id, token);
-        assert_eq!(after.cursor, before.cursor);
-        assert!(!after.finished);
-
-        let boundary = crate::ops::flow_run::StepToken {
-            invocation: run.id.clone(),
-            boundary: token,
-        };
-        let review = crate::durable::RunId::new();
-        crate::ops::flow_run::update(&run.id, |saved| {
-            saved.active.as_mut().unwrap().run_id = Some(review.clone());
-            Ok(())
-        })
-        .unwrap();
-        crate::ops::flow_session::mark_ready(
-            &boundary,
-            &review,
-            "Design clarified; review finished",
-        )
-        .unwrap();
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Waiting
-        );
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(crate::ops::flow_session::complete(&boundary))
-            .unwrap();
-        let completed = crate::ops::flow_run::read(&run.id).unwrap();
-        assert_eq!(completed.cursor, before.cursor);
-        assert!(completed.cursor.progress.verdict.is_none());
-        assert!(completed.active.unwrap().completed);
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Completed
-        );
-        let finished = crate::ops::flow_run::read(&run.id).unwrap();
-        assert!(finished.finished);
-        assert_eq!(
-            finished.cursor.progress.direction.as_deref(),
-            Some("Design clarified; review finished")
-        );
-        assert!(finished.active.is_none());
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Completed
-        );
     }
 }

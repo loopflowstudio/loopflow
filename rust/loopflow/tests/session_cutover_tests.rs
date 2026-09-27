@@ -1,4 +1,4 @@
-//! Interactive and Ask Sessions are `sessions` and `runs` rows from launch to completion.
+//! Every Session is a `sessions` row and its `runs` rows from launch to completion.
 //! The real `lf` binary runs in a private Home; a script stands in for the provider.
 #![cfg(unix)]
 
@@ -648,88 +648,308 @@ fn launch_proceeds_when_the_store_cannot_be_written() {
     let mut launch = fixture.command(&LAUNCH);
     store.select(&mut launch);
     let output = launch.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "bookkeeping refused the launch: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "bookkeeping refused the launch: {stderr}"
+    );
+    let warnings: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("Session is not recorded"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "one warning line: {stderr}");
+    assert!(
+        warnings[0].contains("unable to open database file"),
+        "the warning names the store error: {stderr}"
     );
     let run_id = fixture.launches()[0].clone();
 
-    drop(store.unlock());
+    // Nothing waits beside the Run and nothing records the Session later.
+    let rows = store.unlock();
     let mut list = fixture.command(&["session", "list", "--all", "--json"]);
     store.select(&mut list);
     let listed: Vec<Value> = serde_json::from_slice(&list.output().unwrap().stdout).unwrap();
-    assert_eq!(
-        listed,
-        Vec::<Value>::new(),
-        "an unrecorded Session does not list"
-    );
-
-    // The next operation that touches the Run records its Session.
+    assert_eq!(listed, Vec::<Value>::new());
     let mut rename = fixture.command(&["session", "rename", &run_id, "Parser review", "--json"]);
     store.select(&mut rename);
     let renamed = rename.output().unwrap();
-    assert!(renamed.status.success(), "{renamed:?}");
-    let renamed: Value = serde_json::from_slice(&renamed.stdout).unwrap();
-    assert_eq!(renamed["run_id"], run_id.as_str());
-    assert_eq!(renamed["kind"], "interactive");
-    assert_eq!(renamed["title"], "Parser review");
-    let mut list = fixture.command(&["session", "list", "--all", "--json"]);
-    store.select(&mut list);
-    let listed: Vec<Value> = serde_json::from_slice(&list.output().unwrap().stdout).unwrap();
-    assert_eq!(listed.len(), 1, "{listed:?}");
-    assert_eq!(listed[0]["id"], renamed["id"]);
-    let rows: (i64, i64) = store
-        .unlock()
+    assert!(!renamed.status.success(), "{renamed:?}");
+    assert!(
+        String::from_utf8_lossy(&renamed.stderr).contains("does not belong to a Session"),
+        "{renamed:?}"
+    );
+    let stored: (i64, i64) = rows
         .query_row(
             "SELECT (SELECT count(*) FROM sessions), (SELECT count(*) FROM runs)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(rows, (1, 1));
+    assert_eq!(stored, (0, 0));
+    assert!(!fixture
+        .run_dir(&run_id)
+        .join("unrecorded-session.json")
+        .exists());
 }
 
+/// An Ask's answer returns through its row, so an Ask that cannot be stored
+/// opens no conversation.
 #[test]
-fn ask_proceeds_when_the_store_cannot_be_written() {
+fn ask_needs_its_row_to_return_an_answer() {
     let fixture = Fixture::new(true);
     let (caller, caller_run) = fixture.attach(&LAUNCH);
     let store = LockedStore::new(&fixture);
     let mut ask = fixture.ask(&caller_run, "Which release target?");
     store.select(&mut ask);
     let mut asking = ask.spawn().unwrap();
-    let run_id = wait_for("the conversation launcher", || {
-        if let Some(status) = asking.try_wait().unwrap() {
-            panic!("bookkeeping refused the Ask: {status}");
-        }
-        let requests = fixture.launcher_requests();
-        let served = requests.split("serve-ask").nth(1)?;
-        let start = served.find("run_")?;
-        Some(served[start..start + 36].to_string())
-    });
+    wait_for("the Ask to be refused", || asking.try_wait().unwrap());
+    let refused = asking.wait_with_output().unwrap();
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("unable to open database file"),
+        "{refused:?}"
+    );
+    assert!(!fixture.launcher_requests().contains("serve-ask"));
+    fixture.release(caller);
+}
 
-    let rows = store.unlock();
-    let mut rename = fixture.command(&["session", "rename", &run_id, "Launch notes", "--json"]);
-    store.select(&mut rename);
-    let renamed = rename.output().unwrap();
-    assert!(renamed.status.success(), "{renamed:?}");
-    let renamed: Value = serde_json::from_slice(&renamed.stdout).unwrap();
-    assert_eq!(renamed["kind"], "ask");
-    assert_eq!(renamed["run_id"], run_id.as_str());
-    assert_eq!(renamed["title"], "Launch notes");
-    let recorded: (String, String) = rows
+const REVIEW_FLOW: [&str; 6] = [
+    "--model",
+    "opencode",
+    "flow",
+    "review-first",
+    "-b",
+    "--no-loopflow",
+];
+
+impl Fixture {
+    /// A saved Flow whose only step is a human review, run until it waits.
+    /// Returns (Session id, invocation id, first Run id).
+    fn waiting_review(&self) -> (String, String, String) {
+        let lf = self.repo.path().join(".lf");
+        std::fs::create_dir_all(lf.join("skills")).unwrap();
+        std::fs::create_dir_all(lf.join("flows")).unwrap();
+        std::fs::write(lf.join("skills/review-proof.md"), "Review the fixture.").unwrap();
+        std::fs::write(
+            lf.join("flows/review-first.yaml"),
+            "- step:\n    id: review\n    name: review-proof\n    human: true\n",
+        )
+        .unwrap();
+        let waiting = self.run(&REVIEW_FLOW);
+        assert!(
+            String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
+            "{waiting:?}"
+        );
+        self.db()
+            .query_row(
+                "SELECT s.id, r.invocation_id, r.id FROM sessions s
+                 JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id
+                 WHERE s.kind='flow_review'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap_or_else(|error| panic!("the waiting review has no rows: {error}"))
+    }
+
+    /// (title, title_source, ready_summary, current Run, completed) of a Session.
+    fn feedback(&self, id: &str) -> (String, String, Option<String>, String, bool) {
+        self.db()
+            .query_row(
+                "SELECT title, title_source, ready_summary, current_run_id,
+                    completed_at IS NOT NULL FROM sessions WHERE id=?1",
+                [id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap()
+    }
+}
+
+#[test]
+fn taskless_flow_review_is_rows_from_request_to_completion() {
+    let fixture = Fixture::new(true);
+    let (id, invocation, first_run) = fixture.waiting_review();
+    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (1, 1));
+    let parents: (Option<String>, Option<String>, String, String) = fixture
+        .db()
         .query_row(
-            "SELECT s.kind, s.request FROM sessions s WHERE s.current_run_id=?1",
-            [&run_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            "SELECT r.task_id, f.task_id, f.pending_session_id, f.state
+             FROM runs r JOIN flow_invocations f ON f.id=r.invocation_id WHERE r.id=?1",
+            [&first_run],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .unwrap();
     assert_eq!(
-        recorded,
-        ("ask".to_string(), "Which release target?".to_string())
+        parents,
+        (None, None, id.clone(), "current".to_string()),
+        "the Run names its invocation and neither has a Task"
+    );
+    assert_eq!(
+        fixture.feedback(&id),
+        (
+            "review-proof".to_string(),
+            "generated".to_string(),
+            None,
+            first_run.clone(),
+            false
+        )
     );
 
-    asking.kill().unwrap();
-    asking.wait().unwrap();
-    fixture.release(caller);
+    let inside = |run_id: &str, args: &[&str]| -> Output {
+        let boundary = id.rsplit(':').next().unwrap();
+        fixture
+            .command(args)
+            .env("LF_RUN_ID", run_id)
+            .env(
+                "LF_HUMAN_SESSION",
+                serde_json::json!({"kind": "standalone_flow",
+                    "token": {"invocation": invocation, "boundary": boundary}})
+                .to_string(),
+            )
+            .output()
+            .unwrap()
+    };
+    let early = fixture.run(&["session", "complete", &id]);
+    assert!(
+        String::from_utf8_lossy(&early.stderr).contains("not marked this ready"),
+        "{early:?}"
+    );
+    // Driving the Flow again waits at the same review.
+    let waiting = fixture.run(&["flow", "resume", &invocation]);
+    assert!(
+        String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
+        "{waiting:?}"
+    );
+    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (1, 1));
+    let ready = inside(&first_run, &["session", "ready", "Ship the parser"]);
+    assert!(ready.status.success(), "{ready:?}");
+    let named = fixture.json(&["session", "rename", &id, "Parser review", "--json"]);
+    assert_eq!(named["title"], "Parser review");
+    assert_eq!(named["title_source"], "human");
+
+    // A consumed launch without provider history is replaced on the next open.
+    // Title and feedback belong to the Session, so both survive.
+    std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
+    let (opened, second_run) = fixture.attach(&["session", "open", &id]);
+    assert_ne!(second_run, first_run);
+    assert_eq!(
+        fixture.feedback(&id),
+        (
+            "Parser review".to_string(),
+            "human".to_string(),
+            Some("Ship the parser".to_string()),
+            second_run.clone(),
+            false
+        )
+    );
+    let history: Vec<(String, Option<String>, Option<String>)> = fixture
+        .db()
+        .prepare(
+            "SELECT id, invocation_id, task_id FROM runs WHERE session_id=?1
+             ORDER BY created_at, attempt",
+        )
+        .unwrap()
+        .query_map([&id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        history,
+        vec![
+            (first_run.clone(), Some(invocation.clone()), None),
+            (second_run.clone(), Some(invocation.clone()), None)
+        ],
+        "the replaced Run stays in the Session's history"
+    );
+    let current: String = fixture
+        .db()
+        .query_row(
+            "SELECT current_run_id FROM flow_invocations WHERE id=?1",
+            [&invocation],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        current, second_run,
+        "the invocation follows the replacement"
+    );
+    let stale = inside(&first_run, &["session", "ready", "Late feedback"]);
+    assert!(!stale.status.success(), "{stale:?}");
+    fixture.release(opened);
+
+    let completed = fixture.run(&["session", "complete", &id]);
+    assert!(completed.status.success(), "{completed:?}");
+    assert!(fixture.feedback(&id).4, "completion is a row update");
+    assert_eq!(fixture.sessions(), Vec::<Value>::new());
+    let again = fixture.run(&["session", "complete", &id]);
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("already complete"),
+        "{again:?}"
+    );
+
+    // The Flow reads the review's outcome from the row and finishes.
+    let resumed = fixture.run(&["flow", "resume", &invocation]);
+    assert!(resumed.status.success(), "{resumed:?}");
+    let state: String = fixture
+        .db()
+        .query_row(
+            "SELECT state FROM flow_invocations WHERE id=?1",
+            [&invocation],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "completed");
+    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (1, 2));
+    assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn session_list_reads_a_taskless_review_from_sql() {
+    let fixture = Fixture::new(false);
+    let (id, invocation, run_id) = fixture.waiting_review();
+    // The driver's saved position is not a Session source.
+    let flows = fixture.home.path().join("flows");
+    std::fs::rename(&flows, fixture.home.path().join("flows.away")).unwrap();
+
+    let listed = fixture.sessions();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0]["id"], id.as_str());
+    assert_eq!(listed[0]["kind"], "flow");
+    assert_eq!(listed[0]["run_id"], run_id.as_str());
+    assert_eq!(listed[0]["title"], "review-proof");
+    assert_eq!(listed[0]["title_source"], "generated");
+    assert_eq!(listed[0]["detail"], "review-proof");
+    assert_eq!(listed[0]["state"], "waiting");
+    assert_eq!(listed[0]["provider"], "opencode");
+    assert_eq!(listed[0]["work"], Value::Null);
+    assert_eq!(
+        listed[0]["flow_membership"],
+        serde_json::json!({
+            "kind": "step", "flow": "review-first", "invocation_id": invocation,
+            "step": "review-proof", "node": "0", "iterations": [[]],
+            "occurrence": "current"
+        })
+    );
+
+    // The review's agent names its Session by `$LF_RUN_ID`.
+    let suggested = fixture.json(&[
+        "session",
+        "rename",
+        &run_id,
+        "Parser",
+        "--suggest",
+        "--json",
+    ]);
+    assert_eq!(suggested["id"], id.as_str());
+    assert_eq!(suggested["title"], "Parser");
+    assert_eq!(fixture.sessions()[0]["title"], "Parser");
+    assert!(!flows.exists(), "reading a Session recreates no Flow file");
+    assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
 }

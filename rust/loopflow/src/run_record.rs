@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -90,27 +89,6 @@ impl RunFlowStep {
                 &run.cursor,
             )),
         })
-    }
-
-    /// Where this occurrence sits relative to the Task's current Flow position.
-    pub(crate) fn occurrence(
-        &self,
-        position: Option<&crate::durable::FlowPosition>,
-    ) -> crate::ops::human_session::SessionFlowOccurrence {
-        use crate::ops::human_session::SessionFlowOccurrence;
-        match position {
-            Some(position)
-                if Some(&position.task_id) == self.task_id.as_ref()
-                    && position.invocation.id == self.invocation_id =>
-            {
-                if position.cursor.boundary_key() == self.boundary_key {
-                    SessionFlowOccurrence::Current
-                } else {
-                    SessionFlowOccurrence::Earlier
-                }
-            }
-            _ => SessionFlowOccurrence::Past,
-        }
     }
 }
 
@@ -972,19 +950,6 @@ pub enum SessionTitleSource {
     Unavailable,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionName {
-    pub title: String,
-    pub source: SessionTitleSource,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SessionNameRecord {
-    schema_version: u32,
-    title: String,
-    source: SessionTitleSource,
-}
-
 const SESSION_TITLE_MAX_CHARS: usize = 80;
 
 /// One trimmed, non-empty line of at most `SESSION_TITLE_MAX_CHARS` characters.
@@ -1003,73 +968,6 @@ pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
         ));
     }
     Ok(title)
-}
-
-/// The stored Session name, or `None` while the Run still has its seed name.
-pub(crate) fn read_session_name(dir: &Path) -> std::io::Result<Option<SessionName>> {
-    let bytes = match fs::read(dir.join("session-name.json")) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let record: SessionNameRecord =
-        serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-    if record.schema_version != SCHEMA_VERSION {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "unsupported Session name schema",
-        ));
-    }
-    Ok(Some(SessionName {
-        title: record.title,
-        source: record.source,
-    }))
-}
-
-/// Store a Session name and return the name now in effect. A generated
-/// suggestion leaves an existing human name unchanged, including when the two
-/// writes race: both read and replace under one lock.
-pub(crate) fn write_session_name(
-    dir: &Path,
-    title: &str,
-    source: SessionTitleSource,
-) -> std::io::Result<SessionName> {
-    if source == SessionTitleSource::Unavailable {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "a Session name is either generated or human-assigned",
-        ));
-    }
-    let title = validate_session_title(title)?;
-    read_manifest(dir)?;
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(dir.join(".session-name.lock"))?;
-    lock.lock_exclusive()?;
-    if let Some(current) = read_session_name(dir)? {
-        if source == SessionTitleSource::Generated && current.source == SessionTitleSource::Human {
-            return Ok(current);
-        }
-    }
-    let staging = dir.join(format!(".session-name-{}.staging", Uuid::new_v4()));
-    write_private_exclusive(
-        &staging,
-        &serde_json::to_vec_pretty(&SessionNameRecord {
-            schema_version: SCHEMA_VERSION,
-            title: title.to_string(),
-            source,
-        })
-        .map_err(std::io::Error::other)?,
-    )?;
-    fs::rename(staging, dir.join("session-name.json"))?;
-    sync_dir(dir)?;
-    Ok(SessionName {
-        title: title.to_string(),
-        source,
-    })
 }
 
 fn context_ref_is_valid(dir: &Path, context: Option<&RunContextRef>) -> bool {
@@ -2509,65 +2407,6 @@ mod tests {
             subjects: Vec::new(),
             flow: crate::run_record::RunFlowMembership::Independent,
         }
-    }
-
-    #[test]
-    fn human_session_names_survive_generated_suggestions() {
-        use super::{read_session_name, write_session_name, SessionTitleSource};
-        let home = tempfile::tempdir().unwrap();
-        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
-        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
-        assert_eq!(read_session_name(&dir).unwrap(), None);
-
-        let suggested =
-            write_session_name(&dir, " Release outcomes ", SessionTitleSource::Generated).unwrap();
-        assert_eq!(suggested.title, "Release outcomes");
-        let human = write_session_name(&dir, "Launch notes", SessionTitleSource::Human).unwrap();
-        assert_eq!(human.source, SessionTitleSource::Human);
-        let kept = write_session_name(&dir, "Better guess", SessionTitleSource::Generated).unwrap();
-        assert_eq!(kept, human);
-        assert_eq!(read_session_name(&dir).unwrap(), Some(human));
-
-        for invalid in ["   ", "two\nlines", "x".repeat(81).as_str()] {
-            let error = write_session_name(&dir, invalid, SessionTitleSource::Human).unwrap_err();
-            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-        }
-        assert_eq!(
-            read_session_name(&dir).unwrap().unwrap().title,
-            "Launch notes"
-        );
-    }
-
-    #[test]
-    fn racing_suggestions_never_replace_a_human_name() {
-        use super::{read_session_name, write_session_name, SessionTitleSource};
-        let home = tempfile::tempdir().unwrap();
-        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
-        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(9));
-        let writers = (0..9)
-            .map(|index| {
-                let dir = dir.clone();
-                let barrier = barrier.clone();
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    let (title, source) = if index == 4 {
-                        ("Human name".to_string(), SessionTitleSource::Human)
-                    } else {
-                        (format!("suggestion {index}"), SessionTitleSource::Generated)
-                    };
-                    for _ in 0..20 {
-                        write_session_name(&dir, &title, source).unwrap();
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        for writer in writers {
-            writer.join().unwrap();
-        }
-        let name = read_session_name(&dir).unwrap().unwrap();
-        assert_eq!(name.title, "Human name");
-        assert_eq!(name.source, SessionTitleSource::Human);
     }
 
     #[test]

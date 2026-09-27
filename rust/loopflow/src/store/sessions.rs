@@ -1,4 +1,6 @@
 use crate::durable::{FlowPosition, RunId};
+use crate::engine::invocation::QueuedInvocation;
+use crate::engine::ExecutionCursor;
 use crate::session::{Run, Session, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -43,9 +45,17 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.run(&id)).await
     }
 
-    pub async fn create_session(&self, session: Session, run: Run) -> StoreResult<(Session, Run)> {
+    pub async fn create_session(
+        &self,
+        session: Session,
+        run: Run,
+        review: Option<(QueuedInvocation, ExecutionCursor)>,
+    ) -> StoreResult<(Session, Run)> {
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, run)
+            let review = review
+                .as_ref()
+                .map(|(invocation, cursor)| (invocation, cursor));
+            store.create_session(session, run, review)
         })
         .await
     }
@@ -58,8 +68,18 @@ impl Store {
         .await
     }
 
-    pub async fn open_conversations(&self) -> StoreResult<Vec<(Session, Run)>> {
-        run_sqlite(&self.sqlite, |store| store.open_conversations()).await
+    pub async fn open_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
+        run_sqlite(&self.sqlite, |store| store.open_sessions()).await
+    }
+
+    pub async fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
+        let session_id = session_id.to_string();
+        run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
+    }
+
+    pub async fn end_flow(&self, invocation: &str) -> StoreResult<()> {
+        let invocation = invocation.to_string();
+        run_sqlite(&self.sqlite, move |store| store.end_flow(&invocation)).await
     }
 
     pub async fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
@@ -69,10 +89,6 @@ impl Store {
             store.complete_session(&id, &expected_run)
         })
         .await
-    }
-
-    pub async fn open_review_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
-        run_sqlite(&self.sqlite, |store| store.open_review_sessions()).await
     }
 
     pub async fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {

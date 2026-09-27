@@ -1,4 +1,5 @@
-//! One-time import of the Session files old Homes kept beside their Runs.
+//! One-time import of the Session files old Homes kept beside their Runs,
+//! and of the Runs themselves, which had no rows.
 //!
 //! A person runs `lf session import` once per Home, offline. No other command
 //! reads these files, and this module is the only place that knows their
@@ -32,6 +33,8 @@ pub struct ImportReport {
     pub flow_review: usize,
     /// Task reviews the schema migration stored, given their name and provider.
     pub task_review: usize,
+    /// Runs outside any Session.
+    pub run: usize,
     pub unchanged: usize,
     /// Tasks whose first stored Run is an imported one: `started_at` is the
     /// time of this import, not of the conversation.
@@ -115,6 +118,7 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
             ask: 0,
             flow_review: 0,
             task_review: 0,
+            run: 0,
             unchanged: 0,
             tasks_started: Vec::new(),
             failed: Vec::new(),
@@ -145,6 +149,7 @@ enum Stored {
     Ask,
     FlowReview,
     TaskReview,
+    Run,
     Unchanged,
 }
 
@@ -196,6 +201,7 @@ impl Import<'_> {
             Ok(Some(Stored::Ask)) => report.ask += 1,
             Ok(Some(Stored::FlowReview)) => report.flow_review += 1,
             Ok(Some(Stored::TaskReview)) => report.task_review += 1,
+            Ok(Some(Stored::Run)) => report.run += 1,
             Ok(Some(Stored::Unchanged)) => report.unchanged += 1,
             Ok(None) => {}
             Err(error) => report.failed.push(ImportFailure {
@@ -219,20 +225,60 @@ impl Import<'_> {
         if self.store.run(&run.id).await?.is_some() {
             bail!("Run {} is already stored outside this Session", run.id);
         }
-        if let Some(task) = &run.task_id {
-            if self.store.get_task(task).await?.is_none() {
-                bail!("Task {task} is not registered");
-            }
-            if self.store.task_runs(task).await?.is_empty()
-                && !self.report.tasks_started.contains(task)
-            {
-                self.report.tasks_started.push(task.clone());
-            }
-        }
+        self.start(&run).await?;
         if !self.report.dry_run {
             self.store.create_session(session, run, review).await?;
         }
         Ok(Some(kind))
+    }
+
+    /// Report the Task this Run starts, if it is the Task's first.
+    async fn start(&mut self, run: &Run) -> Result<()> {
+        let Some(task) = &run.task_id else {
+            return Ok(());
+        };
+        if self.store.get_task(task).await?.is_none() {
+            bail!("Task {task} is not registered");
+        }
+        let runs = self.store.runs(None, None, Some(task.as_str()), None, 0);
+        if runs.await?.is_empty() && !self.report.tasks_started.contains(task) {
+            self.report.tasks_started.push(task.clone());
+        }
+        Ok(())
+    }
+
+    /// A Run outside any Session. A Flow step's Run keeps its Task and Wave;
+    /// the invocation's cursor has moved on, so the row names no invocation.
+    async fn headless(&mut self, dir: &Path, manifest: RunManifest) -> Result<Option<Stored>> {
+        let (task_id, wave_id, work_source) = self.work(&manifest).await?;
+        let evidence = crate::run_record::read_run_snapshot(dir)?;
+        let run = Run {
+            id: manifest.run_id,
+            session_id: None,
+            invocation_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id,
+            wave_id,
+            work_source,
+            created_at: manifest.created_at.unix_timestamp(),
+            published: true,
+            cwd: manifest.cwd,
+            skill: manifest.skill,
+            provider: Some(manifest.harness),
+            model: manifest.model,
+            caller_run_id: manifest.parent_run_id,
+            ended: evidence
+                .outcome
+                .zip(evidence.ended)
+                .map(|(outcome, at)| crate::session::RunEnd { outcome, at }),
+        };
+        self.start(&run).await?;
+        if !self.report.dry_run {
+            self.store.create_run(run).await?;
+        }
+        Ok(Some(Stored::Run))
     }
 
     fn run_dir(&self, run: &RunId) -> Result<PathBuf> {
@@ -290,6 +336,7 @@ impl Import<'_> {
             provider: Some(provider),
             model,
             caller_run_id: Some(file.parent_run_id),
+            ended: None,
         };
         let session = Session {
             id: file.id,
@@ -368,6 +415,7 @@ impl Import<'_> {
             provider: Some(manifest.harness),
             model: manifest.model,
             caller_run_id: None,
+            ended: None,
         };
         let session = Session {
             id,
@@ -407,15 +455,13 @@ impl Import<'_> {
         }
         let conversation =
             manifest.surface == "tui" || dir.join("provider-clients").try_exists()?;
-        if !conversation || crate::run_record::read_provider_session(dir)?.is_none() {
-            return Ok(None);
-        }
-        if let Some(RunFlowMembership::Step(step)) = &manifest.flow {
-            bail!(
-                "a Run of the {} step in Flow {} with no stored Session; a Flow kept only its current review",
-                step.step,
-                step.invocation_id
-            );
+        // A Flow kept only its current review, so an earlier review's Run and
+        // every headless Run are Runs with no Session.
+        if !conversation
+            || crate::run_record::read_provider_session(dir)?.is_none()
+            || matches!(manifest.flow, Some(RunFlowMembership::Step(_)))
+        {
+            return self.headless(dir, manifest).await;
         }
         let (task_id, wave_id, work_source) = self.work(&manifest).await?;
         let seed = manifest
@@ -453,6 +499,7 @@ impl Import<'_> {
             provider: Some(manifest.harness),
             model: manifest.model,
             caller_run_id: None,
+            ended: None,
         };
         let session = Session {
             id,

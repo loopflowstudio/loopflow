@@ -4,12 +4,22 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 
 use crate::durable::{RunId, TaskId};
 use crate::id::WaveId;
-use crate::session::{Run, WorkSource};
+use crate::session::{Run, RunEnd, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 /// Column order read by `read_run`.
 pub(super) const RUN_COLUMNS: &str = "id,session_id,invocation_id,task_id,wave_id,work_source,
-    created_at,published,cwd,skill,node,iterations,attempt,provider,model,caller_run_id";
+    created_at,published,cwd,skill,node,iterations,attempt,provider,model,caller_run_id,
+    outcome,ended_at";
+
+/// A Run with the names of its Work, as a listing returns it.
+#[derive(Debug, Clone)]
+pub struct ListedRun {
+    pub run: Run,
+    pub wave: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
+}
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -35,6 +45,8 @@ pub(super) fn read_run(
     let provider = row.get(offset + 13)?;
     let model = row.get(offset + 14)?;
     let caller: Option<String> = row.get(offset + 15)?;
+    let outcome: Option<String> = row.get(offset + 16)?;
+    let ended_at: Option<i64> = row.get(offset + 17)?;
     Ok((|| {
         Ok(Run {
             id: RunId::parse(&id).map_err(invalid)?,
@@ -73,6 +85,9 @@ pub(super) fn read_run(
                 .map(|id| RunId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
+            ended: outcome
+                .zip(ended_at)
+                .map(|(outcome, at)| RunEnd { outcome, at }),
         })
     })())
 }
@@ -88,14 +103,14 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
             )
             .optional()?
             .ok_or_else(|| invalid(format!("Invocation {invocation} does not exist")))?;
-        let task = task
-            .map(|id| TaskId::parse(&id))
-            .transpose()
-            .map_err(invalid)?;
-        if run.task_id.is_some() && run.task_id != task {
-            return Err(invalid("Run and Invocation nullable Tasks disagree"));
+        // A Flow launched directly for a Task names no Task; its Runs may.
+        if let Some(task) = task {
+            let task = TaskId::parse(&task).map_err(invalid)?;
+            if run.task_id.as_ref().is_some_and(|named| *named != task) {
+                return Err(invalid("Run and Invocation Tasks disagree"));
+            }
+            run.task_id = Some(task);
         }
-        run.task_id = task;
         let (node, iterations) = location_in(conn, invocation)?;
         if run.node.is_some_and(|supplied| supplied != node)
             || run
@@ -146,7 +161,7 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
     conn.execute(
         &format!(
             "INSERT INTO runs({RUN_COLUMNS})
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"
         ),
         params![
             run.id.as_str(),
@@ -164,7 +179,9 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
             run.attempt,
             run.provider,
             run.model,
-            run.caller_run_id.as_ref().map(RunId::as_str)
+            run.caller_run_id.as_ref().map(RunId::as_str),
+            run.ended.as_ref().map(|end| &end.outcome),
+            run.ended.as_ref().map(|end| end.at)
         ],
     )?;
     Ok(run)
@@ -303,24 +320,89 @@ impl super::SqliteStore {
         .transpose()
     }
 
-    /// A Run that belongs to no Session: a headless launch.
-    pub fn create_run(&self, run: Run) -> StoreResult<Run> {
+    /// A Run that belongs to no Session. One that names no Work takes its
+    /// caller's; one that runs a Flow step is the step's current attempt.
+    pub fn create_run(&self, mut run: Run) -> StoreResult<Run> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let (None, None, Some(caller)) = (&run.task_id, &run.wave_id, &run.caller_run_id) {
+            let inherited: Option<(Option<String>, Option<String>)> = tx
+                .query_row(
+                    "SELECT task_id, wave_id FROM runs WHERE id=?1",
+                    [caller.as_str()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            if let Some((task, Some(wave))) = inherited {
+                run.task_id = task
+                    .map(|id| TaskId::parse(&id))
+                    .transpose()
+                    .map_err(invalid)?;
+                run.wave_id = Some(WaveId::parse(&wave).map_err(invalid)?);
+                run.work_source = Some(WorkSource::Inherited);
+            }
+        }
         let run = insert_run_in(&tx, run)?;
+        tx.execute(
+            "UPDATE flow_invocations SET current_run_id=?2
+             WHERE id=?1 AND state='current' AND pending_session_id IS NULL",
+            params![run.invocation_id, run.id.as_str()],
+        )?;
         tx.commit()?;
         Ok(run)
     }
 
-    /// Every launched Run of a Task, newest first, however it got its Task.
-    pub fn task_runs(&self, task: &TaskId) -> StoreResult<Vec<Run>> {
+    /// A Run settles once.
+    pub fn end_run(&self, id: &RunId, end: &RunEnd) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE runs SET outcome=?2, ended_at=?3 WHERE id=?1 AND outcome IS NULL",
+            params![id.as_str(), end.outcome, end.at],
+        )?;
+        Ok(())
+    }
+
+    /// Launched Runs that started or ended since `since`, newest first. Work
+    /// is named by id, name or provider id; `caller` is a Run id.
+    pub fn runs(
+        &self,
+        wave: Option<&str>,
+        project: Option<&str>,
+        task: Option<&str>,
+        caller: Option<&str>,
+        since: i64,
+    ) -> StoreResult<Vec<ListedRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT {RUN_COLUMNS} FROM runs WHERE task_id=?1 AND published=1
-             ORDER BY created_at DESC, id"
+            "SELECT {RUN_COLUMNS},
+                (SELECT name FROM waves WHERE id=runs.wave_id),
+                (SELECT p.project_slug FROM tasks t JOIN projects p ON p.id=t.project_id
+                    WHERE t.id=runs.task_id),
+                (SELECT issue_identifier FROM tasks WHERE id=runs.task_id)
+             FROM runs WHERE published=1
+             AND (?1 IS NULL OR wave_id IN (SELECT id FROM waves WHERE id=?1 OR name=?1))
+             AND (?2 IS NULL OR task_id IN (SELECT t.id FROM tasks t
+                JOIN projects p ON p.id=t.project_id
+                WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2))
+             AND (?3 IS NULL OR task_id IN (SELECT id FROM tasks
+                WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3))
+             AND (?4 IS NULL OR caller_run_id=?4)
+             AND (created_at>=?5 OR ended_at>=?5)
+             ORDER BY created_at DESC, id DESC"
         ))?;
-        let rows = query.query_map([task.as_str()], |row| read_run(row, 0))?;
-        rows.map(|row| row?).collect()
+        let rows = query.query_map(params![wave, project, task, caller, since], |row| {
+            Ok(read_run(row, 0)?.map(|run| (run, row.get(18), row.get(19), row.get(20))))
+        })?;
+        rows.map(|row| {
+            let (run, wave, project, task) = row??;
+            Ok(ListedRun {
+                run,
+                wave: wave?,
+                project: project?,
+                task: task?,
+            })
+        })
+        .collect()
     }
 
     pub fn position_runs(

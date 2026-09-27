@@ -54,6 +54,22 @@ pub struct Run {
     pub model: Option<String>,
     /// The Run that asked for this one. Causality, never membership.
     pub caller_run_id: Option<RunId>,
+    /// Absent until the Run settles.
+    pub ended: Option<RunEnd>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunEnd {
+    pub outcome: String,
+    pub at: i64,
+}
+
+/// The Work a launch names. The Run constructor fills a Task's Wave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunWork {
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<WaveId>,
+    pub source: WorkSource,
 }
 
 /// How this attempt received its work attribution; absent for unrecorded history.

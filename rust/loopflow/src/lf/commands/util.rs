@@ -1326,6 +1326,7 @@ mod tests {
                 skill: None,
                 subjects: Vec::new(),
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
             },
         )
         .unwrap();
@@ -1401,6 +1402,7 @@ mod tests {
                 skill: None,
                 subjects: Vec::new(),
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
             },
         )
         .unwrap();
@@ -1614,6 +1616,7 @@ mod tests {
                 skill: None,
                 subjects: Vec::new(),
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
             },
         )
         .unwrap();
@@ -1724,6 +1727,7 @@ mod tests {
                 skill: None,
                 subjects: Vec::new(),
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
             },
         )
         .unwrap();

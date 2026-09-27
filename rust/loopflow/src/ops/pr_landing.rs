@@ -274,6 +274,11 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
             skill: Some("ci-fix".to_string()),
             subjects: Vec::new(),
             flow: crate::run_record::RunFlowMembership::Independent,
+            work: landing.task_id.clone().map(|task| crate::session::RunWork {
+                task_id: Some(task),
+                wave_id: None,
+                source: crate::session::WorkSource::Declared,
+            }),
         },
         crate::run_record::RunLaunchRequest::from_prepared(&launch, &capabilities),
     )
@@ -926,7 +931,7 @@ async fn wait_for_landing(
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message(format!("landing {landing_id} disappeared")))?;
         if landing.state.is_terminal() || std::time::Instant::now() >= report_at {
-            match repair_conclusions(&home, &landing, &mut shown) {
+            match repair_conclusions(store, &home, &landing, &mut shown).await {
                 Ok(conclusions) => {
                     for conclusion in conclusions {
                         eprintln!("ci-fix: {conclusion}");
@@ -975,23 +980,35 @@ async fn wait_for_landing(
     }
 }
 
-fn repair_conclusions(
+async fn repair_conclusions(
+    store: &SharedStore,
     home: &Path,
     landing: &PrLanding,
     shown: &mut HashSet<String>,
-) -> std::io::Result<Vec<String>> {
-    let runs = crate::run_record::scan_runs_since(home, landing.created_at.unix_timestamp())?;
+) -> OpsResult<Vec<String>> {
+    let error = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
+    let runs = store
+        .runs(None, None, None, None, landing.created_at.unix_timestamp())
+        .await
+        .map_err(|source| error(&source))?;
     let mut conclusions = Vec::new();
-    for run in runs.into_iter().rev().filter(|run| {
-        run.skill.as_deref() == Some("ci-fix")
-            && run.worktree.as_deref().map(Path::new) == Some(landing.worktree.as_path())
-            && run.ended.is_some()
-    }) {
-        if shown.contains(&run.id) {
+    for run in runs
+        .into_iter()
+        .rev()
+        .map(|listed| listed.run)
+        .filter(|run| {
+            run.skill.as_deref() == Some("ci-fix")
+                && run.cwd == landing.worktree
+                && run.ended.is_some()
+        })
+    {
+        if shown.contains(run.id.as_str()) {
             continue;
         }
-        let (dir, _) = crate::run_record::resolve_manifest(home, &run.id)?;
-        let conclusion = crate::run_record::read_final_answer(&dir)?
+        let dir = crate::run_record::record_dir(home, &run.id)
+            .ok_or_else(|| error(&format!("Run {} has an invalid id", run.id)))?;
+        let conclusion = crate::run_record::read_final_answer(&dir)
+            .map_err(|source| error(&source))?
             .map(|answer| {
                 parse_repair_conclusion(&answer.text)
                     .map(|conclusion| conclusion.summary().to_string())
@@ -1004,7 +1021,7 @@ fn repair_conclusions(
                 )
             });
         conclusions.push(conclusion);
-        shown.insert(run.id);
+        shown.insert(run.id.to_string());
     }
     Ok(conclusions)
 }
@@ -1178,7 +1195,7 @@ mod tests {
 
     async fn store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("registry.db");
+        let path = directory.path().join("loopflow.db");
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(path))
                 .await
@@ -1368,6 +1385,7 @@ mod tests {
                     skill: Some(skill.into()),
                     subjects: Vec::new(),
                     flow: crate::run_record::RunFlowMembership::Independent,
+                    work: None,
                 },
             )
             .unwrap();
@@ -1390,12 +1408,17 @@ mod tests {
             }
         }
         assert_eq!(
-            super::repair_conclusions(home.path(), &landing, &mut shown).unwrap(),
+            super::repair_conclusions(&store, home.path(), &landing, &mut shown)
+                .await
+                .unwrap(),
             ["GitHub credential revoked; reconnect it before retrying."]
         );
-        assert!(super::repair_conclusions(home.path(), &landing, &mut shown)
-            .unwrap()
-            .is_empty());
+        assert!(
+            super::repair_conclusions(&store, home.path(), &landing, &mut shown)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

@@ -2162,6 +2162,7 @@ fn launch_skill_agent(
             skill: Some(skill_name.to_string()),
             subjects: Vec::new(),
             flow: crate::run_record::RunFlowMembership::Independent,
+            work: None,
         },
         &context,
     )?;

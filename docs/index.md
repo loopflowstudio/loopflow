@@ -26,11 +26,14 @@ text files you can open and change.
 | **Flow** | Steps in order. One that can go back and try again is a loopflow | `.lf/flows/*.yaml` |
 | **Task** | One piece of work with a finish line, done in its own copy of your project | Linear, Git, and GitHub |
 | **Wave** | A goal Loopflow keeps working on, with its own memory and schedule | `wave/<name>/` |
-| **Project** | The current plan for a Wave, with results you can check | Linear |
+| **Project** | The internal record of a Wave’s current chapter plan, with results to check | Linear |
 | **Run** | A record of one time the AI coding tool was started | `$LF_HOME/runs/` on the computer that ran it |
 
-Each piece keeps one kind of fact, so you always know where to look. New
-terms are in the [Glossary](glossary.md).
+A [repository](glossary.md#borrowed-from-software-engineering) is a project
+folder tracked by Git. Git saves changes as commits, and a branch keeps one
+line of work separate until it can be merged into the shared version. Linear
+stores the Tasks; GitHub hosts their pull requests for review before merge.
+The [Glossary](glossary.md) defines these and the other terms used below.
 
 The Mac app shows all of this in one window: your goals, their tasks, and
 the conversations that need you. It reads the same information the commands
@@ -63,18 +66,18 @@ A skill is a markdown file that tells the coding agent what to do:
 ```markdown
 # .lf/skills/audit.md
 
-Audit auth changes on this branch.
+Audit sign-in changes on this branch.
 Check for missing validation, confusing errors, gaps in tests.
 Fix any issues you find.
 ```
 
 ```bash
 lf audit                      # run the skill
-lf audit: focus on auth       # pass arguments
+lf audit: focus on sign-in    # add instructions after the colon
 lf : "fix the typo in README" # or skip the file entirely
 ```
 
-A flow chains skills with commits between them:
+A Flow chains skills with commits between them, saving a checkpoint after each step:
 
 ```yaml
 # .lf/flows/ship-api.yaml
@@ -94,20 +97,22 @@ adds flow and goal structure only where it earns its place.
 
 ## Context
 
-Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md`), `LOOPFLOW.md`,
-`scratch/`, and `wave/`. Nothing else is auto-injected — pull in more
-explicitly:
+[Context](glossary.md#loopflows-words) is the information given to the AI with
+its instructions. Every skill sees your agent guide (`AGENTS.md` / `CLAUDE.md`),
+`LOOPFLOW.md`, `scratch/`, and `wave/`. Extra files are opt-in, leaving input
+space for the task. Add what the work needs:
 
 ```bash
 lf gate --docs VISUAL_DESIGN.md      # one doc
-lf gate --docs 'docs/*.md'           # a glob
+lf gate --docs 'docs/*.md'           # a glob: every matching Markdown file
 lf gate --diff-files                 # bodies of files changed on the branch
 lf debug -c                          # the clipboard
 lf token-compress --docs RELEASE_NOTES.md: fit this history into 2,000 tokens
 ```
 
-Compression preserves decisions and evidence from the whole source.
-Do not take the first N commits and call that the history.
+Tokens are the text units counted by the AI. When shortening context to fit
+a token budget, preserve decisions and evidence across the whole source;
+taking only its first few entries loses later changes.
 
 ## Where files live
 
@@ -119,15 +124,16 @@ Do not take the first N commits and call that the history.
 scratch/                  # PR scratchpad (cleared on merge)
 wave/                     # Wave goals and memory (persists)
 ~/.lf/                    # Global config, skills, and the local store
-  runs/                   # Home-local append-only launch evidence
+  runs/                   # launch records on this computer; new entries preserve history
 ```
 
-`scratch/` dies with the PR; `wave/` lives forever. Design docs go in
-`scratch/`, forward-looking plans in `wave/`.
+Delivery preparation clears `scratch/`. Keep designs and temporary feedback
+there; keep the Wave’s continuing objective and lessons under `wave/`. Its
+current chapter’s Tasks and targets live in Linear.
 
 ## For agents
 
-Every documentation URL serves HTML. The reviewed Markdown source remains
+Every documentation URL serves HTML, the format rendered as a web page. The reviewed Markdown source remains
 available to agents: append `.md` to the URL (`/docs/waves.md`) or request the
 canonical URL with `Accept: text/markdown`. The curated index is
 [/llms.txt](/llms.txt); the complete corpus in one file is

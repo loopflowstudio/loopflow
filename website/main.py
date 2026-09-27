@@ -249,20 +249,20 @@ DOCS_AREAS = (
         "reference",
         "Look up exact words, commands, settings, and fixes.",
         (
-            DocPage("Glossary", "glossary", "Every term, in one plain sentence"),
+            DocPage("Glossary", "glossary", "Look up product concepts and engineering terms"),
             DocPage("lf command reference", "lf", "Commands, flags, and builtins"),
-            DocPage("Configuration", "config", "Context, models, profiles, and launch behavior"),
+            DocPage("Configuration", "config", "Choose defaults for one run, a repository, or all work"),
             DocPage(
                 "Subscriptions",
                 "subscriptions",
-                "Provider identities, routes, health, and remote selection",
+                "Choose coding-tool accounts and their fallback order",
             ),
             DocPage(
                 "Security",
                 "security",
-                "Execution, credential, storage, and network trust boundaries",
+                "Understand access to files, accounts, and other machines",
             ),
-            DocPage("Troubleshooting", "troubleshooting", "Exact failure, cause, and fix"),
+            DocPage("Troubleshooting", "troubleshooting", "Inspect stopped or failed work and choose a recovery"),
         ),
     ),
 )
@@ -342,17 +342,15 @@ def generate_llms_txt() -> str:
         if doc_path(slug)
     )
     return f"""# Loopflow
-> A software instrument that runs on your machine: durable Work, replaceable agents. lf is the CLI for daily work and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Home-local evidence.
+> A software instrument. It doesn't make the software for you. You make the software through it.
 
-Loopflow runs one Skill through a provider and records that launch in an
-immutable Home-local Run record. Stable Wave, Project, and Task Work preserves
-purpose across provider processes. Authored behavior lives in the repository;
-bounded planning state lives on its Home; shared planning and delivery truth
-lives in Linear and GitHub. Reach another Home explicitly with `lf ssh`.
-Install: `curl -fsSL
-https://loopflow.studio/install.sh | sh && lf init`. Every docs page below is
-raw markdown at its `.md` URL (or request the canonical URL with `Accept:
-text/markdown`); the complete corpus is at {BASE_URL}/llms-full.txt.
+These docs explain how to use Loopflow from the Mac app and the `lf` commands
+alongside it: plan work, run steps, review changes, and inspect what happened.
+Start with the overview or open the reference page for the current task.
+Every linked page is raw Markdown at its `.md` URL. The same source is
+available from the canonical page with `Accept: text/markdown`.
+The complete public docs are at {BASE_URL}/llms-full.txt.
+
 
 ## Docs
 

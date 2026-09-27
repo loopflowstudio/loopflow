@@ -5,7 +5,18 @@ title: Subscription Management
 
 # Subscription Management
 
-Connect Claude and Codex logins once, then route each repository through them:
+Use this page when work should use a particular Claude or Codex subscription,
+or fall back to another account when one is unavailable. These choices apply
+to work started from the Mac app too; connect accounts and edit routes with
+the commands below.
+
+An [account](glossary.md#loopflows-words) is an existing coding-tool login.
+An account route is the ordered list of logins to try for a repository.
+An access profile says which browser profile to open for sign-in; it does not
+choose which subscription pays for a run. Replace the example email addresses
+with the logins to connect.
+
+Connect the logins, then set the repository's routes:
 
 ```bash
 lf auth connect claude personal@example.com --chrome-profile personal@example.com
@@ -34,7 +45,9 @@ lf auth import claude --email personal@example.com  # adopt the ambient Claude l
 lf auth disconnect claude --email personal@
 ```
 
-Connect creates a **local managed identity**, not a new Claude or Codex account:
+A managed identity is Loopflow's local record of that login. A
+[credential](glossary.md#borrowed-from-software-engineering) is the secret
+that proves access to the account. Connecting records and verifies it:
 
 1. Loopflow derives a stable, path-safe account ID from the requested login.
    The ID is a storage key, not another username or credential.
@@ -71,11 +84,13 @@ lf profile create --chrome-profile personal@example.com --as personal
 lf auth access set claude personal@ --profile personal
 ```
 
-The profile is an authentication venue, not the identity that spends provider
-usage. It is never a run-time account selector.
+This profile opens the browser session used to authenticate—prove who is
+signing in. Select a spending account with a route or launch flag instead.
 
-At launch, Loopflow points the provider child at the selected account home with
-`CLAUDE_CONFIG_DIR` or `CODEX_HOME`. The provider CLI reads and refreshes its own
+At launch, Loopflow tells the coding tool's process where that account lives
+using [environment variables](glossary.md#borrowed-from-software-engineering),
+settings passed to a launched program:
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`. The coding tool reads and refreshes its own
 credential there. Loopflow records health and session ownership against the
 same account ID so fallback and resume do not silently change identities.
 
@@ -87,14 +102,15 @@ lf auth accounts claude          # cached subscription state
 lf auth accounts --verify        # compare every credential with its provider
 ```
 
-`auth accounts --verify` records a revoked credential as missing and prints
+A cooling account is waiting before another attempt; a limited account has
+used its available allowance. `auth accounts --verify` records a revoked
+credential as missing and prints
 the exact `lf auth connect` recovery command. Provider routes skip missing,
 disabled, cooling, and limited accounts and continue to the next candidate.
 
 An active usage window at 95% or above demotes that account behind candidates
-below the threshold. Declared route order decides ties. A provider session stays
-pinned to the account that created it so a resume does not silently switch
-identities.
+below the threshold. Declared route order decides ties. A coding-tool conversation stays pinned to its original account: resuming
+uses that login, even if the normal route would now prefer another one.
 
 Control automatic routing per account:
 
@@ -124,8 +140,9 @@ no credential. Repository routes live in the local Loopflow database.
 
 A managed launch tries the repository route, then the default provider route.
 Without either route, every automatically eligible managed identity is a
-candidate. With no managed candidate, the provider CLI can use its ambient
-default login.
+candidate. With no managed candidate, the coding tool can use its existing default
+login. This fallback lets an ordinary installation work before accounts have
+been registered with Loopflow.
 
 ## Select accounts for one launch
 
@@ -136,7 +153,8 @@ lf --account codex=work@ implement
 lf --account claude=personal@ --account codex=work@ review
 ```
 
-Restrict the process tree to exact accounts:
+Use `--only-account` when fallback must stay within a specific set. It applies
+to the launch and the programs it starts (its process tree):
 
 ```bash
 lf --only-account claude=personal@ review
@@ -149,7 +167,9 @@ A provider omitted from `--only-account` is unavailable to that process tree.
 
 ## Use subscriptions over SSH
 
-`lf ssh` runs the target machine's `lf`. The target name is the argument
+[SSH](glossary.md#borrowed-from-software-engineering) runs commands on another
+computer. The origin is the computer issuing the command; the target is the
+computer receiving it. `lf ssh` runs the target's `lf`. The target name is the argument
 boundary: selectors before it are resolved on the origin; everything after it
 is ordinary syntax for the target `lf`.
 
@@ -187,11 +207,13 @@ catalog.
 
 An origin-side `--only-account` is resolved against origin identities before
 SSH connects. The target can narrow that grant but cannot widen it. Account
-inspection shows `local` or `forwarded` provenance. Forwarded identities are
+inspection shows `local` or `forwarded`: whether the login belongs to this
+machine or was offered by the origin. Forwarded identities are
 read-only: connect, disconnect, and edit their routes on the machine that owns
 them.
 
-Launch selectors govern foreground work. A Wave resident that survives the SSH
+Launch selectors govern foreground work, which lasts only while the SSH
+command stays connected. A Wave resident that survives the SSH
 command sheds forwarded state before detaching and selects from routes stored
 on its own machine. Configure the target repository route for durable account
 choice:
@@ -201,7 +223,7 @@ lf ssh my-company route set codex work@
 lf ssh my-company start shipper
 ```
 
-The origin does not copy account homes or refresh credentials. It advertises
+The origin does not copy account homes or long-lived refresh credentials. It advertises
 the catalog first and serves one access token only after the target selects a
 forwarded identity. See [Security](/docs/security#what-crosses-ssh-for-a-subscription-account)
 for the broker, process-lifetime, and remote trust boundary.

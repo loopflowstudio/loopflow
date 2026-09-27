@@ -90,9 +90,9 @@ if a heading must change, update all referring links in the same change.
 | Authoring | Change what an AI step does or which steps run. Start with files behind the app's work; keep the working skill example, then flows and goals. | Source resolution; scratch between steps; `human: true`; Complete returns feedback; a deciding step owns backward edges; captured definitions on resume; explicit delivery authority. |
 | Agent API | Ask an AI coding tool to operate Loopflow. Relate it to the commands behind the app, then teach the caller's authority and examples. | External versus internal callers; Work versus Run; delegation boundaries; Linear steering; JSON observations; publish/submit/arm/land distinctions. Remove stale Project-operator and miscellaneous `.lf/` learning guidance. |
 | `lf` reference | Look up an exact command or flag used alongside the app. Replace the three-audiences opening with a reader action; explain the advanced prose around the existing tables. | All valid command/flag tables, examples, defaults, and section anchors. Explain code identifiers in prose; do not rename CLI tokens for tone. |
-| Configuration | Change behavior for one run, a repository, or all work. Introduce that scope choice before the long name-resolution discussion; retain name behavior in its own section. | Precedence, additive lists, personal-only settings, launch modes, account/model selection, and Task-specific sandbox exceptions. Preserve reference tables. |
+| Configuration | Change behavior for one run, a repository, or all work. Introduce that scope choice before the long name-resolution discussion; retain name behavior in its own section. | Precedence, additive lists, personal-only settings, launch modes, account/model selection, and Task-specific delivery permissions. Preserve reference tables. |
 | Subscriptions | Choose which existing coding-tool account work uses. Explain account, route, profile, and fallback before the detailed machinery. | Connect does not create an account; account versus browser profile; local versus forwarded credentials; `--account` versus `--only-account`; session identity. No invented account-management screen. |
-| Security | Understand what files, accounts, and machines an agent can reach when started from the app or terminal. Explain boundaries before operational detail. | A worktree is not OS containment; permission prompts differ from isolation; general launch policy versus durable Task write scope; secret forwarding and persistence guarantees. No stronger safety claim from simpler wording. |
+| Security | Understand what files, accounts, and machines an agent can reach when started from the app or terminal. Explain boundaries before operational detail. | A worktree is not OS containment; permission prompts differ from isolation; general launch policy versus the managed Task delivery setup; secret forwarding and persistence guarantees. No stronger safety claim from simpler wording. |
 | Troubleshooting | The app shows stopped, waiting, or failed work. Explain which state to read before choosing recovery; command examples remain concrete. | Do not restart an active worker; ready does not mean running; Run-history limits; account exhaustion behavior; safe worktree cleanup. Remove the nonexistent `project run` recovery path. |
 | Glossary | Look up the words used by the pages above. Extend definitions as each page lands. | One meaning per concept; distinguish overloaded words explicitly; no implementation identifier dump. |
 | Overview and agent index | Check the existing front door and make `/llms.txt` agree with it. | README/index opening equality; existing Markdown negotiation, routes, and public/developer corpus split. |
@@ -164,7 +164,7 @@ exercise was performed.
 | Are review controls current? | `docs/conducting.md` says Approve/Iterate. `session_actions()` in `rust/loopflow/src/ops/human_session.rs` exposes Complete; Flow help says it returns feedback to the next step. `SessionsView.swift` renders that action. `lf session --help` lists open/complete/ready. | Replace the obsolete review paragraph; explain readiness, completion, and subsequent decision separately. Code evidence verifies semantics, not an observed app interaction. |
 | Is Project a user-operated tier? | `docs/agent-api.md` describes Project operation; Troubleshooting recommends `project run`. `Commands` in `rust/loopflow/src/lf/mod.rs` has no Project command, and `ops/project.rs` resolves the internal chapter plan. `lf project --help` prints generic help and exits 0. | Exit success is not command-existence proof. Use Wave → Task; remove obsolete Project-operation directions and preserve Project only as the internal chapter plan. |
 | Is the Agent API's learning contract accurate? | Its last contract bullet directs learnings into `.lf/`. Builtin `LOOPFLOW.md` assigns conventions, configuration, skill instructions, and Wave memory to their respective owners and forbids miscellaneous handoff notes. | Correct the summary in place; do not copy the entire operating contract. |
-| Is a generic sandbox explanation sufficient? | Configuration already documents stronger write restrictions for durable Task turns; Security's opening policy does not explain that exception. | Reconcile descriptions against `engine/agent.rs` before rewriting them. Preserve scope differences; do not promise isolation from all tools or credentials. |
+| Is a generic sandbox explanation sufficient? | Initial inspection found Configuration claiming stronger Task write restrictions. Implementation inspection disproved that claim for the managed delivery path; see the ledger below. | Reconcile descriptions against `engine/agent.rs` before rewriting them. Preserve scope differences; do not promise isolation from all tools or credentials. |
 | Can a new glossary link point at any term? | Terms are bold table cells; renderer enables Markdown `toc` on headings. | Link the existing sections, then verify rendered fragments. No custom anchor system needed. |
 | Which pages are public? | `DOCS_AREAS` contains 12 slugs; developer architecture has a separate inventory and routes. `llms-full.txt` reads `DOCS_NAV`. | Scope comes from the existing inventory, not every file under `docs/`. Keep architecture excluded. |
 | Can testing read a stale docs copy? | `doc_path()` prefers `website/docs/` over root `docs/`; `dev.py sync-docs` refreshes it. | Sync before HTTP or rendering checks. Generated copies are not authored changes. |
@@ -339,9 +339,108 @@ publish, or mark the Task finished.
   Conducting-only implementation boundary and page-by-page PR plan. The full
   Task is the implementation scope. This confirms delivery scope, not approval
   of new copy or every other design detail. See [review notes](docs-voice-review.md).
-- Implementation, website tests, app demonstration, and reader study remain
+- At design review, implementation, website tests, app demonstration, and reader study were
   unperformed. No quantitative chapter target or comprehension baseline exists.
 - 2026-09-26 — After the agent reported no other blocking design questions,
   Jack requested “ok Complete”. The corrected design is ready to drive
   implementation; remaining editorial choices follow the recorded audience
   and writing rules. No Flow navigation decision is recorded by this review.
+
+- 2026-09-26 — Counterexample resolved before continuing security edits:
+  `controller/task/mod.rs:752` sets Worktree scope **and** an execution boundary
+  with `skip_permissions = true`. `ops/task.rs:830–932` checks linked Git and
+  control-store writability and requires a managed Codex/Claude account.
+  `engine/agent.rs:479`, `:720`, and `:831` bypass vendor isolation on this
+  trusted delivery path; `managed_task_scope_carries_exact_delivery_capabilities`
+  verifies those settings. The previous Configuration hard-write-boundary
+  claim and the design's assumption of stronger managed Task sandboxing were
+  wrong. Configuration and Security now describe the actual launch permissions
+  and distinguish required-access probes from containment. No runtime change.
+
+## Implementation ledger — 2026-09-26
+
+The full current scope is implemented as one branch. Canonical public docs,
+page descriptions, and the agent index changed; no runtime code, public routes,
+architecture pages, first-task walkthrough, or live planning state changed.
+Get started was read for vocabulary coverage and left with LOO-306.
+The accepted README/index opening remains identical.
+
+### Editorial and vocabulary coverage
+
+Each row records the full-page pass, including headings, example comments,
+and retained reference-table terminology. Definitions live in the glossary's
+existing two tables; new links target those two real section fragments.
+This is an editorial inventory, not an automated comprehension score.
+
+| Page | Retained vocabulary covered in the glossary and explanations | Behavior/defaults retained or clarified |
+| --- | --- | --- |
+| Conducting | Wave, Task, Work, Run, Session, Home, context, roadmap, metrics, telemetry, manifest, receipt, bundle, replay, JSON, process/PID, SSH, tokens, CI, Ask | Local reads, history versus running processes, missing usage versus zero, replay as a new child Run, message delivery versus compliance, ready versus Complete versus subsequent Flow decision |
+| Waves | Chapter, internal Project, KR, targets/window/freshness, metric instrument, frontmatter, cron/heartbeat, listener/keeper, memory, placement, UUID, chord, Linear Initiative/Team/issue, Discord/bot/Gateway, Doppler, HTTP/API, NAT | App orientation before commands, chapter retry/conflict rules, no silent abandonment, measurement history, chat ownership and secrets, placement versus connection, Task completion explicitly requested |
+| Authoring | Skill, Markdown/YAML, auth, TTY/headless, scratch/context, Work/Run, Session/Ask, op, commit/checkpoint, XOR/router, backward edge, invocation/occurrence/pass, goal/frontmatter, KR, PM | Source precedence linked, notes between steps, review completion separate from navigation, captured definitions on resume, delivery authority explicit, objective belongs to Wave |
+| Agent API | API/SDK, harness/provider, context, caller authority, Work/Run, worktree/branch/PR/main, stdin/pipe, steering receipt, Flow position, account/credentials, CI/auto-merge, JSON | External versus internal callers, attribution grants no control authority, independent delegation, no idle Task auto-start from comments, four delivery verbs, Home-local observations, durable knowledge owners |
+| lf reference | Product vocabulary above; flags/argv, namespace, JSON/DTO, TUI/IDE/TTY/PTY, glob/diff, OS/process/PID, cron, Git refs/stash/rerere/lease, account route, cache/snapshot, SQL/migration, UTF-8/symlink, release/manifest/tag/publisher/hash/DMG | Existing commands, flags, defaults, advanced recovery, exact IDs and fields remain; explanations added across launch, Flow, history, Git, scheduling, planning, and release sections |
+| Configuration | Scope/precedence, scalar/additive values, environment variables, context/tokens, glob/diff, models/harnesses, TUI/TTY/IDE, release hooks/workflow, semantic versions, sandbox, account/access profile, external skills/cache | One-run versus saved defaults, additive lists, personal-only name, default context cost, installed tool selection, review steps, actual managed Task delivery permissions |
+| Subscriptions | Account/subscription, route/selector, access/browser profiles, identity/credential, session pin, environment variables, cooling/limits/fallback, SSH origin/target/local/forwarded, broker/access token | Connect does not create accounts, profile is not spending selection, 95% preference rule, exact-account restriction versus preference, foreground versus resident credentials |
+| Security | OS/user/container/VM, containment, process tree, hooks/plugins/MCP, permissions, authentication/authorization, tokens/OAuth, broker/socket, credential storage, Unix modes, webhook/signature, loopback/firewall/proxy | Worktree is not general containment; actual Task bypass path; subscription versus singleton forwarding; no credential persistence claim strengthened; network and daemon-secret limits retained |
+| Troubleshooting | Work status/condition/execution, Run/Session, rate limit/backoff/quota, account fallback, worktree/prune, rebase, context/token/glob | Inspect active work before restart, seven-day/50-Run history limits, ready is unfinished, no Project operator recovery, cleanup exclusions, additive docs are not an exclusion filter |
+| Overview | Product pieces, repository/Git/commit/branch/PR, context, glob, token, scratch, HTML/Markdown | Accepted opening untouched; internal chapter Project terminology and durable knowledge locations clarified |
+| Get started (audit only) | Install/package tools, terminal/CLI/flags, context, immutable manifest, append-only evidence, OAuth, worktree, Flow/subflow/op/backward edge, headless, resident/heartbeat/cron, SSH, auth | Walkthrough unchanged; glossary covers retained vocabulary, including advanced install/remote sections |
+| Glossary | Expanded existing product/engineering tables, including overloaded terminal, token, provider, instrument, ready, and boundary meanings | Corrected the implication that a worktree prevents same-checkout contributors from overwriting files, and that Git records unsaved changes |
+
+### Accuracy and review findings
+
+- Fixed obsolete Approve/Iterate review instructions using
+  `ops/human_session.rs::session_actions`; Complete returns feedback, and a
+  later deciding step chooses navigation. No Mac app interaction was claimed.
+- Removed nonexistent `project run` recovery and separate Project operator
+  prose. Chapter Projects remain internal; `wave/operate` is a finite Run.
+- Replaced Agent API advice to store miscellaneous learnings in `.lf/` with
+  the owners in builtin `LOOPFLOW.md`.
+- Corrected managed Task sandbox claims using the call path recorded above.
+  This is the material security correction found during implementation.
+- Removed the Waves page's approximate 1,000-line PR prescription in line with
+  Jack's full-scope, unbounded-PR review direction. Corrected its claim that
+  each merged PR automatically completes the Task; `lf pr land -c` requests
+  completion, while bare land leaves it open.
+- Reconciled Troubleshooting's outdated rebase explanation with the existing
+  command reference. It now directs readers to inspect `lf rebase --plan`
+  before applying an operation that may publish changes.
+- The reference-table comparison found exactly one changed row: the
+  `concept-review` link pointed at a non-public slug. `PUBLIC_DOC_SLUGS` and
+  `/docs/{slug}` exclude that page, so it now points to Authoring's skill
+  explanation. All other reference rows and flag spellings are unchanged.
+- Simulated review checked source ownership, operational failure cases, and
+  drift. It led to the sandbox correction, explicit merge/completion wording,
+  removal of the dead public link, and clearer distinction between an empty
+  XOR path and terminating an entire nested Flow. No additional abstraction,
+  content store, vocabulary schema, or runtime dependency was introduced.
+
+### Verification
+
+- `uv run python dev.py sync-docs` in `website/`: succeeded. Generated copies
+  are untracked/ignored outputs, not authored changes.
+- Final focused proof in `website/`:
+  `uv run --extra test pytest tests/e2e/test_docs.py tests/e2e/test_agent_readers.py tests/test_readme_index_sync.py -q`
+  — **22 passed in 7.30s** using the existing local server and Playwright
+  Chromium fixture. It covers all 12 public slugs, visible HTML, local public
+  links and fragments, Markdown endpoints and negotiation, canonical source
+  agreement, README/index opening equality, agent indexes, and architecture
+  exclusion. The source comparison accounts for the existing installer URL
+  rewrite in `dev.py`; it does not change the sync mechanism.
+- The first run passed 19 tests and found one stale phrase assertion. The next
+  full run found that the new source comparison had omitted the existing
+  installer URL rewrite; the comparison was corrected, then its focused test
+  and the final 22-test command passed. Neither failure was hidden or retried
+  unchanged.
+- `uv run ruff check website/tests/e2e/test_docs.py website/tests/e2e/test_agent_readers.py`
+  and `git diff --check`: passed. Changed test files were formatted.
+- No non-engineer read-aloud, clean-machine install, or running Mac app
+  walkthrough occurred. Browser tests prove website behavior, not reader
+  comprehension or the desktop path. No new click-by-click path was authored.
+
+### Remaining lifecycle work
+
+Implementation proof is complete. The selected implement step leaves broader
+gate checks (`scripts/check_architecture.py` and the full website suite),
+publication, and Task completion to their authored later steps. Reader evidence
+remains a growth-program follow-up; it is not claimed by this branch.

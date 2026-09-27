@@ -1,79 +1,86 @@
 # Waves
 
-A wave is a named agent with a goal. Start one, steer it, and inspect the work
-it chose:
+Use a [Wave](glossary.md#loopflows-words) when an objective will take several
+Tasks and needs attention over time. A Wave keeps its objective, memory,
+conversation, schedule, and measurements as its plans change.
+
+In the Mac app, select a Wave in a repository to see its conversation beside
+its work. A [repository](glossary.md#borrowed-from-software-engineering) is a
+project folder tracked by Git. The commands below control the same Wave.
+Replace `shipper` or `<wave>` with its name.
 
 ```bash
-lf start shipper
+lf start shipper                       # start the Wave on this machine
 lf --wave <wave> wave/operate "invoices first"
-lf status shipper
+lf status shipper                      # current chapter and Tasks
+lf pause shipper                       # queue messages without starting new turns
+lf resume shipper                      # allow queued and future turns
+lf stop shipper                        # stop this Wave; other Waves keep running
 ```
 
-The Wave remembers what it learns, works the next blocker, spins off durable
-Tasks when parallelism earns it, and stays steerable. It is planning and
-coordination, not a central process owner: the Home running each harness keeps
-that launch's evidence locally.
+A [Task](glossary.md#loopflows-words) is one piece of work with a finish line.
+The Wave chooses useful work and keeps what it learns. Each computer running
+Loopflow, called a [Home](glossary.md#loopflows-words), keeps its own launch
+records; the Wave does not gather every machine's records into one place.
 
-Three reviewed surfaces author a wave:
+The Wave's instructions are ordinary files reviewed with the repository's code:
 
 | Path | Holds |
 |------|-------|
-| **`wave/<name>/GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
-| **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — curated through reviewed file edits |
-| **`wave/<name>/metrics/*.md`** | Wave-owned live metric contracts — meaning, window, and freshness |
+| **`wave/<name>/GOAL.md`** | The objective and instructions for each turn |
+| **`wave/<name>/MEMORY.md`** | Decisions and lessons worth keeping between turns |
+| **`wave/<name>/metrics/*.md`** | Definitions of measurements, including their time windows and how old a reading may be |
 
-Waves live in **Loopflow** (macOS): open the repository and select the Wave to
-put its conversation beside its work map. The same controls exist from the
-CLI:
-
-```bash
-lf start shipper                       # explicitly start the Wave on this machine
-lf --wave <wave> wave/operate "invoices first"
-lf status shipper                      # its current chapter and Tasks
-lf pause shipper                       # refuse new turns; keep listening and queueing
-lf resume shipper                      # start the next queued turn
-lf stop shipper                        # stop this Wave; sibling Waves keep running
-```
-
-(`lf wave serve shipper` runs one Wave listener in the foreground until Ctrl-C. Use
-it while developing a goal; `lf start` normally asks the Home's shared keeper
-to serve the Wave.)
+For terminal development, `lf wave serve shipper` keeps the Wave listener in
+the foreground until Ctrl-C. A listener receives messages and starts turns.
+`lf start` normally asks the Home's shared background service to do this, so
+the Wave can keep listening after the command returns.
 
 ## The planning model
 
-Open a Wave to see its enduring objective and current KRs, targets, and Tasks directly. Waves are
-durable responsibilities with memory, cadence, chat, and metrics. Each has one
-current chapter plan, stored in an internal Linear Project.
+Open a Wave to see its objective and current [chapter](glossary.md#loopflows-words):
+a plan containing Tasks, measurement targets, and key results (KRs). A
+[KR](glossary.md#loopflows-words) states an outcome and the evidence that would
+prove it over a stated period. One internal Linear Project holds that plan;
+ordinary navigation is Wave → Task.
 
-At a chapter boundary that Project is replaced. Its metric targets, KRs, and Flow
-recommendation start fresh. Started unfinished Tasks move with the same issue,
-worktree, PR, and Flow. Untouched backlog is canceled; completed Tasks stay in
-history. Missing evidence never authorizes abandonment.
+Starting a chapter replaces the current plan. KRs, targets, and the recommended
+[Flow](glossary.md#loopflows-words)—the sequence of steps for Tasks—start fresh.
+Started unfinished Tasks keep the same issue, worktree, pull request, and Flow.
+A [worktree](glossary.md#borrowed-from-software-engineering) is a separate
+checkout for a Task's edits; a pull request (PR) proposes those edits for merge.
+Untouched backlog is canceled, completed Tasks remain in history, and missing
+evidence never justifies abandoning work.
 
-Retry an interrupted rotation with the same chapter ID. Before activation,
-preview rereads predecessor plans and Tasks, including newly filed work,
-without changing the saved receipt. After activation, the recorded boundary
-stays fixed and retries reconcile its pending operations. Refreshed completion
-remains historical even after local backlog retirement; conflicting start
-evidence leaves the transition unresolved instead of canceling the Task again.
-Retry previews include pending recovery of moves and cancellations whose
-provider responses were lost, using the same dispositions as application.
-If someone reassigns a Task outside the recorded chapter transition, preview
-and retry report a membership conflict. Reconcile its parent before retrying;
-rotation leaves that Task's provider state unchanged.
-If a known Task is missing from the provider's list, rotation reads it by issue
-identity. Unavailable evidence stops cutover; it never silently drops the Task.
-If the current chapter itself is missing from the portfolio list, PM reads
-recover its content and Tasks using the recorded chapter identity. An unreadable
-chapter stops rotation before provider changes; historical chapters stay closed.
-Rotation archives each recorded predecessor by identity. A missing portfolio
-row is not proof of archival; retries recognize an archive that succeeded
-before its response was lost.
+Use `lf wave new-chapter --wave <wave> --chapter <id> --plan plan.json` to
+start a chapter. Choose a new chapter identifier for `<id>` and prepare the
+plan as described under [Chapter plans and KRs](#chapter-plans-and-krs).
+Retry an interrupted transition with the **same chapter ID** so Loopflow can
+finish the recorded operation:
+
+- Before activation, the preview rereads the old plan and Tasks, including
+  newly filed work, without changing the saved transition record.
+- After activation, the boundary stays fixed. Retries finish pending moves
+  and cancellations, including requests whose replies were lost. The preview
+  shows the same planned outcomes that applying the transition uses.
+- A Task subsequently found completed remains historical, even if it was
+  previously retired locally. Conflicting evidence that it started leaves
+  the transition unresolved rather than canceling it again.
+- If someone moved a Task outside this transition, preview and retry report
+  a membership conflict and leave its Linear state alone. Reconcile which
+  chapter owns it before retrying.
+- If a Task or current chapter is absent from a list, Loopflow reads its
+  recorded identifier directly. Unavailable evidence stops the transition;
+  historical chapters stay closed.
+- Each old chapter is archived by identifier. A missing list entry does not
+  prove archival; a retry recognizes an archive that succeeded before its
+  reply was lost.
 
 ## The Goal
 
-`GOAL.md` is the loop surface: frontmatter carries machine config, the body is
-the prompt the wave runs each loop.
+Edit `GOAL.md` to change the Wave's instructions. Its
+[frontmatter](glossary.md#borrowed-from-software-engineering), the YAML block
+between `---` lines, holds settings. The body is the prompt used on each turn.
 
 ```markdown
 ---
@@ -90,10 +97,13 @@ memory.
 
 ## Process
 
-Make mechanical changes directly; write a scratch design first when the blast
-radius crosses storage, auth, or public APIs.
+Make routine changes directly; write a scratch design first when a change
+affects storage, account access, or interfaces other programs use.
 ```
 
+The [operating system (OS)](glossary.md#borrowed-from-software-engineering)
+manages users and running programs. A hostname or IP address locates a machine
+on a network; a HomeId identifies it even when that address changes.
 `owner` and `home` are independent, optional automatic-start filters. `owner`
 names the OS user that should run the Wave. `home` accepts this machine's
 HomeId, hostname, or IP address. Omit either field to leave that dimension
@@ -111,11 +121,15 @@ lf resume shipper
 
 Pause writes `paused: true` into the canonical `GOAL.md` frontmatter; resume
 removes it because enabled turns are the default. Messages continue to queue,
-and heartbeat and cron turn starts wait. For a Wave served from another Home,
+and scheduled turn starts wait. A
+[heartbeat](glossary.md#loopflows-words) is a periodic check for work;
+[cron](glossary.md#borrowed-from-software-engineering) specifies scheduled times. For a Wave served from another Home,
 run the same command there: `lf ssh <home-id> pause shipper`.
 
-Builtin goals resolve by name, so the five Viable System Model charters ship
-as `s1`…`s5`:
+Built-in goals can be selected by name. The
+[Viable System Model](glossary.md#loopflows-words) groups responsibility into
+operations, coordination, control, intelligence, and identity. Its five goal
+templates are `s1`…`s5`:
 
 ```bash
 lf wave serve s3            # the s3 (control) charter
@@ -125,6 +139,11 @@ Writing a goal well — the weight of each section, frontmatter fields, KR
 craft — is covered in [Authoring → Goals](authoring.md#goals).
 
 ### Live metrics
+
+Use a [metric](glossary.md#loopflows-words) to measure progress repeatedly.
+Its contract defines what is counted, over which window, and how fresh a reading
+must be. A target says what result this chapter needs. Keeping them separate
+lets the measurement's history survive a new target or chapter.
 
 ```markdown
 ---
@@ -147,11 +166,14 @@ manual Git repair inside the Task fails the metric.
 
 Save this as `wave/<name>/metrics/task-loop-trust.md`. The filename and `id`
 must match. The enclosing Wave owns the metric across chapter boundaries.
-Contracts define no command, query, schedule, secret, or KR copy. Product code
-registered as the named instrument pushes pre-aggregated, revision-bound
-observations into the local store.
+The contract does not run commands or queries, schedule collection, store
+secrets, or repeat a KR. Its `instrument` names the product code that collects
+and totals observations for that contract revision. Writing a contract alone
+does not implement a new collector.
 
-Set targets in the chapter plan, not the instrument contract:
+The example below uses [JSON](glossary.md#borrowed-from-software-engineering),
+a structured data format. `at_least` means the measured value must reach the
+stated minimum. Set targets in the chapter plan, not the metric contract:
 
 ```json
 {"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"flows":{"recommended":null},"krs":[]}
@@ -168,8 +190,8 @@ stays in `GOAL.md`; chapter plans have no second objective.
 
 ```bash
 lf status <wave>            # owner, value, target, window, freshness, reason
-lf status <wave> --json     # the shared metric_portfolio DTO
-lf roadmap --json           # the same DTO on every Wave row
+lf status <wave> --json     # structured measurements in the metric_portfolio field
+lf roadmap --json           # the same measurements on every Wave row
 ```
 
 `installed` metrics appear under Instrumenting. Promote a contract to
@@ -190,8 +212,10 @@ chat:
   provider: local
 ```
 
-Bind one existing guild text channel to replace the local backing for future
-messages:
+Choose [Discord](glossary.md#borrowed-from-software-engineering) when the
+conversation should live in an existing server's text channel. Discord calls
+a server a *guild*. Its bot is the account Loopflow uses to read and send messages.
+Configure that channel for future messages:
 
 ```yaml
 # wave/product/GOAL.md
@@ -204,8 +228,11 @@ chat:
 ---
 ```
 
-Store the bot token in the Home daemon repository's Doppler config, reload the
-service, then start the Wave:
+The bot's token is a secret credential. Store it with
+[Doppler](glossary.md#borrowed-from-software-engineering), the secret manager,
+in the Home service repository's configuration. A
+[daemon](glossary.md#borrowed-from-software-engineering) is a background service;
+`lfd` is Loopflow's. Reload it, then start the Wave:
 
 ```bash
 doppler secrets set LF_DISCORD_TOKEN > /dev/null
@@ -225,29 +252,28 @@ doppler run -- lf wave serve product
 
 The bot needs **View Channel**, **Read Message History**, **Send Messages**, and
 **Add Reactions**, with Message Content enabled in the Discord developer portal.
-A backing change takes effect when the listener restarts and starts one durable
-conversation segment. Earlier local segments stay selectable and read-only; the
-API and `--epoch` flag retain their exact segment ids.
+Changing the chat provider takes effect when the listener restarts and starts
+one saved conversation segment. Earlier local segments stay selectable and
+read-only; the API (the interface programs call) and `--epoch` use their exact
+segment IDs.
 
-Discord is the transcript authority while its segment is active. The Gateway
-pushes new messages to Loopflow; every reconnect first catches up over REST from
-the journal's committed cursor. Each external message is journaled before the
-cursor advances. The Wave reads that durable channel tail, including its own
-replies, so restart recovery needs no consumed-message queue.
+While the Discord segment is active, Discord holds the conversation. Its
+Gateway connection delivers new messages. After a reconnect, Loopflow first
+fetches missed messages through Discord's web API using HTTP requests and its last saved
+position. Each message is saved in the local journal before that position
+advances. The Wave reads this saved history, including its own replies.
 
-The Mac composer and `lf chat "text"` post through the bot, visibly prefix the
-message with the Wave name, and preserve message or bare interrupt intent
-when the provider echo reaches the listener. The Open in Discord action stays
-beside the native composer. A provider failure never falls through to a hidden
-local message. A message appears only after Discord returns its provider message
-id, whether it came from a user or an agent. Deterministic send intents, cursors,
-source links, and direct provider receipts remain durable; harness conversation and usage
-evidence belongs to Home-local Run records.
+The Mac composer and `lf chat "text"` post through the bot and prefix messages
+with the Wave name. When Discord sends the message back, Loopflow preserves
+whether it was a message or an interrupt. **Open in Discord** is beside the
+composer. A failed Discord send does not quietly become a local message;
+it appears only after Discord returns its message ID. Send records, saved
+positions, source links, and Discord replies survive restarts. The coding
+tool's conversation and usage stay in the executing Home's Run records.
 
-`home_id` is the portable binding owner (`lf home id`) and must match the Wave's
-durable placement. Another Home fails before contacting Discord, while an
-OS-held lease prevents another checkout on the owner Home from observing the
-same channel.
+`home_id` comes from `lf home id` and must match the Wave's recorded placement.
+Another Home refuses before contacting Discord. An OS-held lock also prevents
+a second checkout on the owner Home from listening to the same channel.
 
 Read the current conversation segment or an earlier one explicitly:
 
@@ -266,19 +292,18 @@ reviewed repository file:
 $EDITOR wave/shipper/MEMORY.md
 ```
 
-The file is the whole memory surface — read and edit it directly, running Wave
-or not. `update-wave` owns
-deliberate end-of-work curation: merge durable context into the existing
-structure, correct stale entries, and drop transient Run detail. When a task ships,
-its context folds forward into memory and the remaining Linear tasks — fold,
-don't drop.
+Read and edit the file whether or not the Wave is running. The `update-wave`
+skill curates it at the end of work: retain useful decisions, correct stale
+entries, and remove details that only mattered during one Run. Keep unfinished
+work in Linear Tasks so clearing a Task's scratch notes does not lose it.
 
 ### Home
 
-A **Home** is a stable machine identity. Work records its execution placement;
-the Home records its currently observed route and keeps its own process,
-journal, and Run evidence. Changing a hostname or SSH route does not change
-that identity, and the record never opens SSH by itself.
+A **Home** identifies one machine even when its network address changes.
+[Work](glossary.md#loopflows-words), the saved planning record, names its
+assigned Home. Each Home keeps its own running-process observations, journal
+of events, and Run records. SSH is the connection for running commands on
+another machine; recording a Home's address does not open that connection.
 
 ```bash
 lf home id                    # this machine's stable HomeId
@@ -306,7 +331,7 @@ lf work place wave <wave-id> <home-id>
 Placement is planning state. Run records do not own it or prove that a process
 can be signaled; only an exact runtime owner may stop its process.
 
-A Wave name is local to its canonical repository. Its UUID remains stable when
+A Wave name is local to its repository. Its unique identifier (UUID) stays the same when
 the name or repository changes, so relocation is separate from Home placement:
 
 ```bash
@@ -314,25 +339,22 @@ lf work relocate wave <wave-id> --name platform
 lf work relocate wave <wave-id> --repo ../moved-repository
 ```
 
-Stop the Wave and its descendants first. Relocation preserves its Linear
-Initiative projection, Work state, journal, authored files, and Home placement.
-It does not copy or rewrite Home-local Run records. A repository move carries
-the complete Wave chord, and renaming a Wave carries descendants whose authored
-paths are nested below it. Configured source and target PM Teams must match;
-use `lf pm reteam` for an intentional provider ownership change. Divergent
-target files fail closed instead of being merged, and retry finishes cleanup
-if the locator committed before a crash.
+Stop the Wave and its child Waves and Tasks first. Relocation preserves the
+Linear planning connection, Work state, journal, goal and memory files, and
+Home placement. Run records stay on the Home that wrote them.
 
-`lfd` is the one keeper process per Home. Its in-process `WaveHost` starts every
-eligible Wave known to the local store across repositories, then reconciles
-every 30 seconds. Starting or stopping one Wave does not kill `lfd` or disturb
-sibling Waves.
+Moving a repository carries its whole group of Waves (the chord). Renaming a
+Wave carries children whose files are nested below it. The old and new
+repositories must use the same Linear Team; use `lf pm reteam` to change that
+ownership deliberately. Conflicting destination files stop the move. If the
+new location was saved before a crash, retry finishes the remaining cleanup.
 
-`WaveHost` is server machinery, not an agent: it makes no model calls and
-chooses no work. Each hosted Wave body is the agent with a goal, memory, and
-conversation.
+`lfd` is the Home's shared background service. Its `WaveHost` component starts
+eligible Waves across known repositories, then checks again every 30 seconds.
+Starting or stopping one Wave leaves the others running. This hosting code
+makes no AI calls and chooses no work; each Wave's agent makes those decisions.
 
-`lf stop <wave>` records `enabled = false` in this Home's SQLite registry. A new
+`lf stop <wave>` saves `enabled = false` in this Home's local database. A new
 `lfd` process reads the same control and leaves the Wave off. `lf start <wave>`
 enables it again. Change `owner`, `home`, or placement to move ownership; use
 `lf work enable|disable` to control otherwise assigned Work without producing a
@@ -343,7 +365,8 @@ machine. Loopflow also matches its stable HomeId, hostname and short hostname,
 and local interface addresses, including a directly assigned public address.
 An `lf ssh <host> ...` invocation additionally treats the SSH destination as
 this machine for that foreground command. Prefer the HomeId for machines behind
-NAT or with changing public addresses.
+[NAT](glossary.md#borrowed-from-software-engineering), where several machines
+share one public network address, or whose public address changes.
 
 Register a remote Home by asking that machine for its own identity, then record
 the route locally and start the Wave there:
@@ -355,7 +378,7 @@ lf work place wave <wave-id> <home-id>    # record origin-side planning state
 lf ssh <home-id> start shipper
 ```
 
-After bootstrap, address the authority rather than its current hostname. Every
+After this setup, use the Home ID so a changed hostname does not change which machine is selected. Every
 HomeId-addressed hop makes the target prove its identity:
 
 ```bash
@@ -388,11 +411,18 @@ lf wave update-plan --wave infra --plan plan.json
 {"metric_targets":[],"flows":{"recommended":"task-design"},"krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
 ```
 
-The Wave objective names who benefits and what improves. Chapter KRs prove observable outcomes
+`holds` records whether a KR is supported by the evidence. Empty target or KR
+lists mean that chapter has none. The Wave objective names who benefits and
+what improves. Chapter KRs prove observable outcomes
 across a stated window. Update the current plan explicitly; a new chapter never
 copies the previous content or checked KRs.
 
 ## Linear
+
+[Linear](glossary.md#borrowed-from-software-engineering) stores the shared plan.
+An Initiative groups a Wave's chapter Projects; a Team owns the issues, which
+are Linear's Task records. The issue key is a label such as `INF-123`.
+PM means planning management in commands such as `lf pm`.
 
 Tasks live in Linear; there are no local task lists. A wave maps to an
 Initiative, each chapter to an internal Linear Project, each task to an Issue. Connect
@@ -452,8 +482,8 @@ lf pr land -c                    # merge this PR, then complete the Task
 lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 ```
 
-Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
-PRs, but it still needs one concrete finish line.
+Keep each PR understandable as one change. A Task may need several PRs in
+sequence, but it still needs one concrete finish line.
 
 ## Independent evidence
 
@@ -484,7 +514,8 @@ Cleanup            → Remove old billing code
 
 The Wave reads its chapter and Tasks with `lf pm show --no-sync`, judges the
 KR evidence, and starts Task Work for every independent
-file-writing change. Each shipped PR folds into memory and closes its task.
+file-writing change. Keep useful conclusions in memory. A merged PR closes its Task only when
+completion was requested; bare `lf pr land` leaves the Task open.
 
 ## Next
 

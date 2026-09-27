@@ -1,7 +1,14 @@
 # Troubleshooting
 
-Each section: symptom, cause, fix. Commands are complete and runnable as
-written.
+Read this when the Mac app shows work as stopped, waiting, or failed. Check
+its current state before restarting it: unfinished work may already have an
+active worker or be waiting for a review.
+
+The commands below run in a shell. Replace `<wave>` with a Wave name,
+`INF-123` with a Linear Task identifier, and `<session-id>` with an identifier
+from `lf session list`. A [Wave](glossary.md#loopflows-words) keeps an objective;
+a Task is one piece of work, a Run records one launch, and a Session is an open
+conversation. These have separate states.
 
 ## A Wave is not running
 
@@ -30,11 +37,10 @@ lf runs --task INF-123 --json
 lf session list
 ```
 
-`ready` means the Task is nonterminal. Status reports `execution` separately:
+`ready` means the Task is unfinished; it does not mean a worker is running. Status reports `execution` separately:
 starting, running, waiting for review, blocked, idle, or unknown. Read its
 reason and worker Run before recovery. Wave status and roadmap use that same
-execution evidence for their recommendations. Dirty files under a live worker
-are ongoing progress.
+execution evidence for their recommendations. Uncommitted files under a live worker may be ongoing progress; do not restart it to clean them up.
 
 Task Run history includes independent helpers, whether recorded with the public
 issue identifier or internal Task ID. An idle Task Flow does not prove those
@@ -73,23 +79,26 @@ path and branch to restore before resuming.
 
 **Symptom:** Tasks fail with rate limit errors.
 
-One-shot headless runs retry transient capacity, rate-limit, availability, and
-transport failures four times. Codex and Claude continue the same provider
+A [rate limit](glossary.md#borrowed-from-software-engineering) restricts how
+many requests or how much usage an account can make. One-shot headless Runs
+retry temporary capacity, rate-limit, availability, and connection failures
+four times. Codex and Claude continue the same provider
 session, preserving partial work; the backoff ladder tops out at 30 seconds.
 
 Managed-account subscription exhaustion takes a different path: Loopflow marks
 the account unavailable until its reported reset and immediately tries the next
-account in the grant. `--account` retains the normal route as fallback;
+permitted account. `--account` retains the normal route as fallback;
 `--only-account` stays inside the accounts it names.
 
-After repairing provider access, retry the Task or Project operation:
+After repairing access to the coding tool, resume the Task:
 
 ```bash
 lf task resume INF-123 --reason "provider credentials repaired"
 ```
 
-Project operations are finite Runs, so recovery is a fresh `project run`, not a
-resume of Project process state.
+For a stopped planning pass, rerun `lf --wave <wave> wave/operate` after
+inspecting its previous Run. This starts a new planning pass; it does not
+resume or replace a Task worker.
 
 Other options:
 
@@ -98,6 +107,10 @@ Other options:
 - Switch a one-shot flow to a different model: `lf gate -m codex`
 
 ## Worktree issues
+
+A [worktree](glossary.md#borrowed-from-software-engineering) is a separate
+checkout for edits on a branch. Keeping Task work apart lets several Tasks
+change files without sharing the same working copy.
 
 **Symptom:** Git worktree commands fail or show stale data.
 
@@ -113,15 +126,16 @@ Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
 `lf wt remove NAME --force` only when intentionally discarding a worktree.
 
-Feature-worktree integration fetches and pins `origin/<default>` without
-moving the default-branch checkout:
+To fit a branch onto its current base, inspect the rebase plan and apply it:
 
 ```bash
+lf rebase --plan
 lf rebase
 ```
 
-The feature branch uses the current remote base even when the sibling default
-checkout has not moved.
+[Rebase](glossary.md#borrowed-from-software-engineering) replays a branch's
+changes on its base. The plan is read-only; applying it may publish the updated
+branch. See [`lf rebase`](lf.md#lf-rebase) for conflict recovery.
 
 ## Status says `ready`, but the Task is waiting
 
@@ -131,8 +145,7 @@ waiting on a child, review FlowStep, CI, or merge.
 Work status is deliberately small: `ready`, `done`, or `abandoned`. Task
 condition summarizes process liveness, review FlowStep, child progress, CI, and
 merge evidence; unresolved conversations appear under Sessions.
-Inspect the focused projection instead of inferring a control state from one
-field:
+Read the explanation alongside the status instead of deciding from one field:
 
 ```bash
 lf status <wave> --json
@@ -146,14 +159,21 @@ resume the provider. There is no Run slot or PR-limit counter to clear.
 
 **Symptom:** Task fails with context/token limit errors.
 
-The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+[Context](glossary.md#loopflows-words) is the information supplied to the AI.
+The model has an input limit measured in tokens, units of text. By default,
+Loopflow includes the agent guide (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`,
+`scratch/`, and `wave/`. Large working notes can still exceed the limit.
+Remove unneeded additions or shorten notes while keeping decisions and evidence:
 
 ```bash
 lf qa --no-loopflow         # skip LOOPFLOW.md
 lf qa --docs src/small/     # limit --docs to a narrower path or glob
 ```
 
-`--docs` only adds what you pass—drop paths or narrow globs to shrink it further.
+`--docs` adds files; it does not exclude default context or clear configured
+lists. A [glob](glossary.md#borrowed-from-software-engineering) is a filename
+pattern. Narrow patterns and remove unneeded `docs:` entries from repository
+and personal config to reduce those additions.
 
 For persistent docs, set `docs:` in `.lf/config.yaml`.
 

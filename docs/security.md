@@ -5,13 +5,23 @@ title: Security
 
 # Security
 
-Run trusted personal work directly:
+Read this before running work that should have limited access to files,
+accounts, or other machines. Work started from the Mac app uses the same
+permissions as work started with `lf`.
+
+An [execution boundary](glossary.md#borrowed-from-software-engineering) limits
+what a program can reach. A permission prompt asks before an action; it does
+not create that boundary. Run trusted personal work directly:
 
 ```bash
 lf implement
 ```
 
-Put unattended or untrusted work behind an OS boundary you control:
+For work needing stronger isolation, use an operating-system (OS) boundary
+such as a separate user, container, or virtual machine (VM). A
+[container](glossary.md#borrowed-from-software-engineering) isolates selected
+parts of the host system; a VM runs a separate operating system. `build-vm`
+below is an example SSH hostname; replace it with an existing machine:
 
 ```bash
 lf ssh build-vm implement
@@ -28,11 +38,16 @@ of the user running `lf`. The useful boundary is therefore a laptop account, a
 dedicated Unix user, a container, or a VM. Apply filesystem mounts, network
 rules, process limits, and credential access at that boundary.
 
-A Git worktree separates changes but is not a security sandbox. Claude and
-Codex worktree sessions also receive write access to the main repository's Git
-metadata so normal Git operations work.
+A [Git worktree](glossary.md#borrowed-from-software-engineering) gives edits
+a separate checkout; it is not a security sandbox. Ordinary Claude and Codex
+worktree sessions also receive write access to the main repository's Git
+metadata so Git operations work. Managed Task turns are an exception,
+described below.
 
-The same boundary covers subprocesses, repository hooks, MCP servers, plugins,
+The same boundary covers subprocesses (programs started by another program),
+repository hooks (commands triggered by Git events),
+[MCP servers](glossary.md#borrowed-from-software-engineering) (tools exposed to
+the AI through a common protocol), plugins,
 skills, browser tools, and commands an agent launches. Run repository
 instructions and extensions as code from sources you trust.
 
@@ -49,7 +64,8 @@ legible; they do not contain hostile code.
 
 ## Know the effective action policy
 
-Loopflow chooses an automation floor for headless work:
+For ordinary headless work, which runs without someone answering prompts,
+Loopflow supplies these minimum permissions:
 
 - Codex gets `workspace-write`; non-interactive runs also get approval policy
   `never`.
@@ -63,6 +79,14 @@ possible. `yolo: true` selects the vendor's full bypass mode; for Codex that
 also disables its sandbox. See [Configuration](/docs/config#yolo) for the exact
 vendor flags.
 
+Managed Task turns use a trusted delivery setup. Loopflow checks that linked
+Git metadata and its control store are writable and that a managed Claude or
+Codex account is available. Codex then bypasses vendor approvals and its
+sandbox; Claude skips permission prompts. The assigned worktree is the working
+directory, not a hard containment boundary. `yolo: false` does not restore
+those vendor prompts for managed Tasks. The required-root checks prove access
+needed for delivery; they do not restrict all other access.
+
 These modes govern vendor tool behavior. They do not narrow the OS user,
 network, browser, MCP, or credential boundary around the whole process tree.
 
@@ -74,6 +98,11 @@ whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.
 
 ## Understand account authority over SSH
+
+[SSH](glossary.md#borrowed-from-software-engineering) connects to another
+computer. An account identifies a login; a credential proves access to it.
+A short-lived access token allows requests; a longer-lived refresh credential
+can obtain a replacement token. Treat both as secrets.
 
 ### Do I have to be logged in on the remote machine?
 
@@ -133,16 +162,18 @@ normal `~/.claude` or `~/.codex` home; credentials and session state remain
 isolated by account.
 
 `~/.lf/loopflow.db` stores non-secret account metadata: verified login,
-routing and credential state, health signals, repository routes,
-access-profile bindings, and provider-session pins. These files and rows stay
+routing and credential state, health signals, repository routes (the order
+of logins to try), access profiles (browser profiles for sign-in), and session
+pins (which login owns each conversation). These files and rows stay
 on the machine that owns the identity. Loopflow has no central subscription
 account service.
 
 ### What crosses SSH for a subscription account
 
 `lf ssh` does not copy an account home, refresh credential, browser profile,
-or database row. The origin runs a short-lived broker for the foreground SSH
-process:
+or database row. The origin runs a short-lived
+[broker](glossary.md#borrowed-from-software-engineering), a process that provides
+a credential only when the connected command requests it:
 
 1. The broker advertises account identities, health facts, route preferences,
    and explicit outer selections. Advertising the catalog refreshes no OAuth
@@ -175,12 +206,13 @@ resident starts.
 
 ### What crosses SSH for other credentials
 
-GitHub, Linear, and OpenCode Zen each have one effective credential for an
-launch rather than a routable catalog. `lf ssh` forwards the origin
+GitHub, Linear, and OpenCode Zen each have one effective credential for a
+launch rather than a list of accounts to choose from. `lf ssh` forwards the origin
 credential automatically when one is available. If the origin does not provide
 one, the target can use its native credential.
 
-These singleton credentials are process-environment capabilities. Same-user
+These single credentials are passed through the process environment, the
+settings programs inherit at launch. Same-user
 code on the target can read or retain them while present; they do not have the
 subscription broker's lazy, per-account boundary. Loopflow-managed singleton
 tokens in `~/.lf/loopflow.db` are encrypted at rest. The encryption key uses
@@ -204,6 +236,10 @@ crosses SSH. The Doppler master credential never does.
 
 ## Account for stored and transmitted data
 
+A [Run](glossary.md#loopflows-words) is the saved record of one coding-tool
+launch. Its manifest stores launch settings; later events add conversation and
+usage evidence. A Home is the computer keeping those records.
+
 Prompts, selected repository context, tool results, and conversation data go to
 the configured model provider as part of an agent run. Browser tools, MCP
 servers, GitHub, Linear, and other integrations receive the data sent to them
@@ -211,7 +247,9 @@ by their commands.
 
 Loopflow keeps Home-local Run records with prompt, conversation, and raw
 provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
-(`0700`) and artifact files are `0600`. Provider or tool output can contain
+(`0700`) and artifact files are `0600`. These
+[Unix permission modes](glossary.md#borrowed-from-software-engineering) allow
+only the owner to access the directory or read and write the files. Provider or tool output can contain
 sensitive material, so treat the Run store as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
 Home. Reading another Home with `lf ssh <home-id> runs` executes the read on
@@ -219,10 +257,12 @@ that machine.
 
 ## Keep network services inside their intended boundary
 
-`lfd` listens on `127.0.0.1` by default. It is not a remote multi-user identity
+`lfd`, Loopflow's background service, listens on `127.0.0.1` by default.
+That loopback address accepts connections from this machine only. It is not a remote multi-user identity
 system; use SSH for remote operation. A non-loopback bind requires
-`LF_LFD_ALLOW_NON_LOOPBACK=1`. Linear and GitHub webhook routes verify their
-provider signatures. `/health` and `/status` are public on the bound interface,
+`LF_LFD_ALLOW_NON_LOOPBACK=1`. [Webhooks](glossary.md#borrowed-from-software-engineering) are requests a
+service sends when something changes. Linear and GitHub webhook routes check
+signatures to verify who sent them. `/health` and `/status` are public on the bound interface,
 so a non-loopback listener must sit behind a firewall or authenticating proxy.
 Wave start and stop require a random per-process control capability stored in
 the local endpoint record with owner-only permissions; the capability is never
@@ -236,8 +276,7 @@ durable webhook ingress.
 `lfd` keeps webhook secrets inside the Home server process. Its in-process
 `WaveHost` listeners are trusted Loopflow control code, not agents. When they
 spawn Wave bodies and provider processes, the durable boundary removes daemon
-secrets along with forwarded SSH credentials. Agents do not inherit ingress
-authority.
+secrets along with forwarded SSH credentials. Agents do not inherit the secrets used to verify incoming service requests.
 
 Repository instructions, skills, plugins, MCP servers, browser connections,
 hooks, and installers can all extend what an agent can reach. Review their

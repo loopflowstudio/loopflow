@@ -49,7 +49,10 @@ def test_llms_txt_is_spec_shaped(page: Page, base_url: str):
     body = page.request.get(f"{base_url}/llms.txt").text()
     lines = body.splitlines()
     assert lines[0] == "# Loopflow"
-    assert lines[1].startswith("> ")
+    assert lines[1] == (
+        "> A software instrument. It doesn't make the software for you. "
+        "You make the software through it."
+    )
     assert "## Docs" in body
     assert "/docs/agent-api.md)" in body
     assert "/docs/architecture" not in body
@@ -65,9 +68,7 @@ def test_llms_full_txt(page: Page, base_url: str):
     assert "# Architecture" not in body
 
 
-def test_internal_architecture_markdown_is_not_in_public_docs(
-    page: Page, base_url: str
-):
+def test_internal_architecture_markdown_is_not_in_public_docs(page: Page, base_url: str):
     public = page.request.get(f"{base_url}/docs/architecture.md")
     assert public.status == 404
 

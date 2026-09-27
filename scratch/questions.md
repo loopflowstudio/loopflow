@@ -23,3 +23,12 @@
 - **No coordination change needed:** The Wave's pause-state discrepancy does not
   prevent this assigned local docs design. Do not alter its schedule or planning
   state as a prerequisite.
+
+- **Resolved accuracy gap:** Managed Task delivery uses vendor bypass settings
+  after required-access checks; it does not enforce the worktree-only sandbox
+  previously claimed by Configuration. Source evidence is in the design ledger.
+  The docs correction stays within the authorized accuracy scope.
+- **Updated test availability:** The supplied run has no displayed UI, but its
+  installed Playwright Chromium supports unattended browser tests. The first
+  focused run reached all tests (19 passed, one stale wording assertion).
+  This is website rendering evidence only, not a Mac app walkthrough.

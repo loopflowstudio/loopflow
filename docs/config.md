@@ -1,5 +1,37 @@
 # Configuration
 
+Read this when a run needs different instructions, files, or a coding tool.
+The Mac app uses these settings too. Make persistent changes in configuration
+files; use a command's flags for an experiment that should affect only one run.
+A [flag](glossary.md#borrowed-from-software-engineering) is an option such as
+`--docs`. A [repository](glossary.md#borrowed-from-software-engineering) is the
+project folder tracked by Git.
+
+Start with a one-run override; keep it in repo config only when the choice
+should apply to everyone:
+
+```bash
+lf gate -m codex --docs docs/api.md
+```
+
+```yaml
+# .lf/config.yaml
+agent: codex
+docs: [docs/api.md]
+```
+
+CLI flags override repo config (`.lf/config.yaml`), which overrides global
+config (`~/.lf/config.yaml`). Additive lists such as `docs` combine across
+config files.
+
+Scalar settings, such as `agent`, use the most specific value. Additive lists
+keep entries from both files, so a repository can add context without losing
+personal defaults. Personal settings live under `$LF_HOME` when that
+[environment variable](glossary.md#borrowed-from-software-engineering) is set;
+otherwise the directory is `~/.lf/`, under the current user's home folder.
+
+## Your name
+
 ```bash
 lf user name          # show the resolved display name
 lf user name --json   # name as a JSON string, or null when unavailable
@@ -26,12 +58,13 @@ older request. Unattributed background Task and Wave work remains unattributed.
 Persisted artifacts use the person's name; session replies use “you.” Stored
 transcripts retain their conversational wording.
 
-Opening, moving, or resuming a native session preserves the conversation without
+Opening, moving, or resuming a coding-tool Session preserves the conversation without
 submitting a prompt or resetting its participant. Agents can use a name they
 already know or the configured name; no reconciliation is required. Opening a
 session does not approve a review.
 
-`lf user name --json` resolves the name without provider or PM access.
+`lf user name --json` resolves the name without contacting a coding-tool
+provider or the planning system (PM).
 The Mac chat composer uses this local query when sending a message; CLI chat
 captures the caller's name before posting to a listener. The name travels with
 the message and survives replay. Old messages without names stay anonymous.
@@ -39,24 +72,13 @@ Bare interrupts do not load a name, so a preference-read failure cannot block th
 Discord and Linear retain their provider author IDs alongside display names;
 a shared publisher account never substitutes for an explicitly named requester.
 
-Start with a one-run override; keep it in repo config only when the choice
-should apply to everyone:
-
-```bash
-lf gate -m codex --docs docs/api.md
-```
-
-```yaml
-# .lf/config.yaml
-agent: codex
-docs: [docs/api.md]
-```
-
-CLI flags override repo config (`.lf/config.yaml`), which overrides global
-config (`~/.lf/config.yaml`). Additive lists such as `docs` combine across
-config files.
-
 ## Quick Reference
+
+A TUI is an interface inside a terminal; TTY means a terminal connection.
+A diff shows changed lines, while branch files include their full contents.
+A model is the AI used by the selected coding tool. `FlowStep` means a step
+inside a Flow. `LF_EXTERNAL_TERMINAL` is an environment variable for choosing
+an external terminal app, such as Ghostty, for a review conversation.
 
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
@@ -75,7 +97,10 @@ config files.
 
 ## Context Assembly
 
-Every skill gets context assembled automatically. Run any command to see the breakdown:
+[Context](glossary.md#loopflows-words) is the information given to the AI
+alongside the skill's instructions. Loopflow prints a breakdown before launch.
+[Tokens](glossary.md#borrowed-from-software-engineering) are the text units
+counted by the model; more context uses more of its input limit:
 
 ```
 Tokens: 12,847
@@ -99,7 +124,12 @@ The token breakdown shows what's included:
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
 
-Defaults work well for most repos. Summaries require configuration.
+The defaults give the AI operating instructions and working notes. Other
+files are opt-in so every run does not pay the input cost of the entire
+repository. Add the source needed for the task with `--docs`; a
+[glob](glossary.md#borrowed-from-software-engineering) such as `'docs/*.md'`
+selects matching filenames. A diff contains changed lines; `--diff-files`
+includes whole changed files. Summaries require configuration.
 
 ## Config Files
 
@@ -142,7 +172,8 @@ exclude:
 
 ## Flows
 
-Flows are YAML files in `.lf/flows/`:
+A [Flow](glossary.md#loopflows-words) lists the steps to run. Edit its
+[YAML](glossary.md#borrowed-from-software-engineering) file under `.lf/flows/`:
 
 ```yaml
 # .lf/flows/ship-api.yaml
@@ -155,8 +186,11 @@ Flows are YAML files in `.lf/flows/`:
 
 ## Releases
 
-Keep the lifecycle in Loopflow and the repository-specific work in commands the
-repository owns:
+Configure a [release](glossary.md#borrowed-from-software-engineering) when
+a tested version needs to be packaged and published. Loopflow runs the release
+sequence; repository commands perform its particular checks and packaging.
+A target is one deliverable, such as the CLI. A manifest is a package file
+containing its version; a Git tag names the commit for a release.
 
 ```yaml
 release:
@@ -177,8 +211,9 @@ release:
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
-`manifests` use Loopflow's built-in semantic-version adapters; omit them to
-auto-detect supported manifests.
+`manifests` use Loopflow's support for
+[semantic versions](glossary.md#borrowed-from-software-engineering), such as
+`1.2.3`; omit the list to detect supported package files automatically.
 
 `verify` runs during `lf release run`, after Loopflow resolves the version and
 exact change range but before it prepares release changes. `lf release check`
@@ -190,6 +225,10 @@ compilation, packaging, migration checks, and smoke tests. A configured
 publisher owns host signing and candidate preparation before the tag, then
 registry upload, deployment, and finalization after it. Keep those details in
 repo-owned commands—not in built-in release policy.
+
+The workflow is a GitHub job that verifies the candidate before tagging.
+Hooks are repository commands run at a stated point. A publisher is the
+configured command with permission to sign or upload the release.
 
 Completion is explicit:
 
@@ -208,7 +247,9 @@ previous target tag.
 
 ### Loopflow Guidance
 
-Ambient operating guidance for inline execution and mechanical git/PR operations. Injected by default; tier skills add scoped delegation.
+`LOOPFLOW.md` tells the AI how to use Loopflow for local work, Git, and pull
+requests. It is included by default so a run knows the operating rules.
+Individual skills can add instructions for delegation.
 
 | | |
 |---|---|
@@ -219,7 +260,7 @@ Use `--no-loopflow` when you want a leaner prompt without loopflow-specific proc
 
 ### Docs
 
-Prefetch specific files, globs, or directories into context. Not included by default.
+Include selected files before the AI starts. Extra docs are omitted by default to leave input space for the work itself.
 
 | | |
 |---|---|
@@ -246,7 +287,10 @@ Use `--diff-files` when the agent needs complete file bodies, not just line chan
 
 ### Clipboard
 
-Paste content (errors, stack traces, context) into the prompt.
+Paste clipboard text into the prompt. A
+[stack trace](glossary.md#borrowed-from-software-engineering) lists the calls
+leading to an error; including it helps locate the failure. Clipboard access
+is opt-in so unrelated copied text is not sent automatically.
 
 | | |
 |---|---|
@@ -289,7 +333,9 @@ Glob patterns to exclude from file listings.
 
 ### Agent
 
-Set the default harness, with an optional model.
+Choose the default [harness](glossary.md#loopflows-words), the AI coding tool,
+and optionally its model. Leaving it unset lets Loopflow use an installed tool
+without requiring configuration.
 
 | | |
 |---|---|
@@ -338,17 +384,20 @@ This list is additive across global and repo config.
 
 ### Run Mode
 
-Direct named invocations use an interactive session when stdin or stdout is a
-TTY. Automated flow nodes and `--batch` invocations run headlessly. Skill
-frontmatter never changes scheduling.
+Direct commands open an interactive conversation when their input or output
+is a terminal (TTY). [Standard input and output](glossary.md#borrowed-from-software-engineering)
+are the text a command receives and prints. Automated Flow steps and `--batch`
+run headlessly, without someone typing replies. Skill frontmatter—the settings
+at the top of a skill file—does not change how turns are scheduled.
 
 | | |
 |---|---|
 | **CLI** | `-i` (interactive), `-b` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
-Flows declare a required User gate on the exact skill occurrence with a stable
-`id` and `human: true`; see [Authoring](authoring.md#flows).
+When unattended work needs a review, mark that exact Flow step with a stable
+`id` and `human: true`. It opens a Session and waits for explicit completion;
+see [Authoring](authoring.md#flows).
 
 ### Chrome
 
@@ -364,14 +413,17 @@ Requires the [Chrome extension](https://chromewebstore.google.com/detail/claude-
 
 ### Yolo
 
-Skip vendor permission prompts and sandboxes.
+Change which coding-tool actions can run without asking. A
+[sandbox](glossary.md#borrowed-from-software-engineering) restricts access;
+a permission prompt asks before an action. These are different controls.
+`yolo` requests bypassing both where the tool supports it.
 
 | | |
 |---|---|
 | **Config** | `yolo: true` |
 | **Default** | `false` |
 
-Loopflow's normal floor is conservative automation: Codex gets
+For ordinary launches, Loopflow supplies a minimum level of access: Codex gets
 `workspace-write` and non-interactive Codex runs get `approval_policy = "never"`;
 non-interactive Claude runs skip permission prompts. User and repo-level vendor
 configs that are already more permissive are not downgraded. For example, Codex
@@ -384,24 +436,31 @@ If vendor config is less permissive, Loopflow warns and supplies its default.
 `--dangerously-bypass-approvals-and-sandbox`, and OpenCode uses
 `permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
 
-Durable Task provider turns are the exception. Their assigned worktree is a
-hard write boundary, so `yolo` and a more permissive vendor config cannot widen
-it. Codex runs with `workspace-write`, Claude uses its strict fail-closed Bash
-sandbox, and OpenCode denies external-directory tools.
+Managed Task turns use a separate trusted delivery setup. Before starting,
+Loopflow checks write access to linked Git metadata and its control store,
+and requires an eligible managed Claude or Codex account. The Task runs in its
+assigned worktree, but that directory is **not a hard sandbox**: managed Codex
+turns bypass approvals and the vendor sandbox, and managed Claude turns skip
+permission prompts. These permissions let the agent use Loopflow's Git and
+delivery commands. They do not limit access to only the checked roots.
+`yolo: false` does not restore vendor prompts for managed Task turns.
 
 ### Worktree Sandboxes
 
-Claude and Codex CLI/TUI sessions launched from a Git worktree automatically add
-the main repo as an extra writable directory. This keeps normal agent
-permissions, but lets Git write the linked worktree index under
-`<main>/.git/worktrees/<worktree>/` when the agent stages, commits, rebases, or
-runs mechanical `lf` commands. Durable Task provider turns do not add the main
-repo. Loopflow owns their Git mutations after the provider edits and tests the
-assigned files.
+Ordinary Claude and Codex CLI/TUI sessions launched from a Git worktree add the
+main repository as an extra writable directory. Git needs its metadata under
+`<main>/.git/worktrees/<worktree>/` to stage, commit, or rebase.
+
+Managed Task turns use the delivery setup above instead of those extra-directory
+flags. Loopflow's checks establish required access, not OS containment. Use a
+separate OS user, container, or VM when broader access needs restricting; see
+[Security](security.md).
 
 ### Session Launch
 
-Pick where directly invoked interactive skills open.
+Choose where directly invoked interactive skills open. The default, `tui`,
+keeps the conversation in the current terminal. `ide` asks the coding tool's
+app to open it; it does not mean the Loopflow Mac app.
 
 ```yaml
 session:
@@ -415,7 +474,9 @@ this default.
 
 ### Summaries
 
-Pre-generated codebase overviews for large repos.
+Include pre-generated overviews when the codebase is too large to send in
+full. `summary_tokens` sets the overall text budget; a path's `tokens` sets
+its own allowance.
 
 ```yaml
 summary_tokens: 25000
@@ -428,8 +489,9 @@ summaries:
 
 ### Accounts and Profiles
 
-Account state and repository routes are managed through CLI commands rather
-than `config.yaml`:
+An [account route](glossary.md#loopflows-words) lists coding-tool logins to
+try. An access profile selects the browser profile used to sign in. Manage
+these through commands rather than `config.yaml`:
 
 ```bash
 lf auth connect claude primary@example.com --chrome-profile primary@example.com
@@ -437,15 +499,16 @@ lf route set claude primary@ engineering@
 lf --account primary@ implement
 ```
 
-See [Subscription Management](/docs/subscriptions) for identity storage,
-access profiles, routing, health, selectors, and remote development. See
+See [Subscription Management](/docs/subscriptions) for account storage, browser profiles, fallback order, and using accounts on another machine. See
 [Security](/docs/security) for credential forwarding and trust boundaries.
 
 ### External Skills
 
-Loopflow has one external skill channel plus one compatibility shim. No config needed.
+Run a skill from another repository with `npx/`; no config entry is needed.
+`npx` downloads and runs a JavaScript package. A cached skill is a locally
+saved copy. The older `rams/rams` alias reads an installed local file.
 
-- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
+- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. Use it for third-party Claude Skill packages.
 - **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
 
 ```bash

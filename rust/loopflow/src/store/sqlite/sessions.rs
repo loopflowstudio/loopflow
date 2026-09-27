@@ -14,7 +14,7 @@ const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_so
     s.ready_summary, s.completed_at, s.created_at, s.kind, s.request,
     r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
     r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt,
-    r.provider, r.model, r.caller_run_id
+    r.provider, r.model, r.caller_run_id, r.outcome, r.ended_at
     FROM sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Session, Run)>> {
@@ -196,23 +196,7 @@ impl SqliteStore {
             return Ok(existing);
         }
         if let Some((invocation, cursor)) = review {
-            tx.execute(
-                "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
-                    position_version,worker_generation,updated_at,review_json,state)
-                 VALUES(?1,?2,?3,?4,1,0,?5,?6,'current')
-                 ON CONFLICT(id) DO UPDATE SET step_index=excluded.step_index,
-                    iteration=excluded.iteration, review_json=excluded.review_json,
-                    updated_at=excluded.updated_at, position_version=position_version+1,
-                    pending_session_id=NULL, current_run_id=NULL",
-                params![
-                    invocation.id,
-                    serde_json::to_string(invocation)?,
-                    i64::try_from(cursor.index).map_err(invalid)?,
-                    i64::from(cursor.iteration),
-                    session.created_at,
-                    serde_json::to_string(cursor)?
-                ],
-            )?;
+            save_flow_in(&tx, invocation, cursor)?;
         }
         tx.execute(
             "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at,
@@ -242,6 +226,17 @@ impl SqliteStore {
         let created = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(created)
+    }
+
+    /// A saved Flow's invocation at the step it is about to run. It has no
+    /// Task; the Runs of the step name it.
+    pub fn save_flow(
+        &self,
+        invocation: &QueuedInvocation,
+        cursor: &ExecutionCursor,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        save_flow_in(&conn, invocation, cursor)
     }
 
     /// Append an attempt to a Session. Title and feedback stay on the Session.
@@ -425,6 +420,31 @@ impl SqliteStore {
     }
 }
 
+fn save_flow_in(
+    conn: &Connection,
+    invocation: &QueuedInvocation,
+    cursor: &ExecutionCursor,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
+            position_version,worker_generation,updated_at,review_json,state)
+         VALUES(?1,?2,?3,?4,1,0,?5,?6,'current')
+         ON CONFLICT(id) DO UPDATE SET step_index=excluded.step_index,
+            iteration=excluded.iteration, review_json=excluded.review_json,
+            updated_at=excluded.updated_at, position_version=position_version+1,
+            pending_session_id=NULL, current_run_id=NULL",
+        params![
+            invocation.id,
+            serde_json::to_string(invocation)?,
+            i64::try_from(cursor.index).map_err(invalid)?,
+            i64::from(cursor.iteration),
+            crate::store::rows::now_unix(),
+            serde_json::to_string(cursor)?
+        ],
+    )?;
+    Ok(())
+}
+
 pub(super) fn review_id(position: &FlowPosition) -> StoreResult<String> {
     let step = position
         .current_checked()
@@ -546,6 +566,7 @@ fn insert_review_run_in(
             provider: None,
             model: None,
             caller_run_id: None,
+            ended: None,
         },
     )?;
     Ok(())

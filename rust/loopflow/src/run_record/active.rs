@@ -226,12 +226,17 @@ async fn project(
                 continue;
             }
         };
-        let work = crate::run_record::attributed_work(store, &manifest).await;
-        if work.is_none() && !manifest.subjects.is_empty() {
-            snapshot
-                .gaps
-                .push(format!("Run {id}: Work attribution unavailable"));
-        }
+        let work = match store.run(&manifest.run_id).await {
+            Ok(Some(run)) => match (run.task_id, run.wave_id) {
+                (Some(task), _) => Some(WorkRef::Task(task)),
+                (None, wave) => wave.map(WorkRef::Wave),
+            },
+            Ok(None) => None,
+            Err(error) => {
+                snapshot.gaps.push(format!("Run {id}: {error}"));
+                None
+            }
+        };
         if snapshot
             .task
             .as_ref()
@@ -303,6 +308,7 @@ mod tests {
                 skill: None,
                 subjects: Vec::new(),
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
             },
             None,
         )
@@ -348,6 +354,20 @@ mod tests {
         );
         let task = TaskId::new();
         let other_task = TaskId::new();
+        // A Run's row names a registered Task.
+        let wave = crate::id::WaveId::new();
+        {
+            let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            conn.execute_batch(&format!(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES('{wave}','live','/repo',1);
+                 INSERT INTO projects(id,wave_id,external_project_id,created_at)
+                 VALUES('project','{wave}','project',1);
+                 INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                 VALUES('{task}','project','{task}','{task}','/repo.one',1),
+                       ('{other_task}','project','{other_task}','{other_task}','/repo.two',1);"
+            ))
+            .unwrap();
+        }
         let mut captures = Vec::new();
         let mut clients = Vec::new();
         for subject in [&task, &other_task] {
@@ -363,6 +383,11 @@ mod tests {
                     skill: None,
                     subjects: vec![SubjectAttribution::declared(format!("task:{subject}"))],
                     flow: crate::run_record::RunFlowMembership::Independent,
+                    work: Some(crate::session::RunWork {
+                        task_id: Some(subject.clone()),
+                        wave_id: None,
+                        source: crate::session::WorkSource::Declared,
+                    }),
                 },
             )
             .unwrap();

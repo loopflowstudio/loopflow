@@ -353,7 +353,11 @@ async fn reserve_ask(
     if let Some(skill) = skill {
         crate::engine::load_skill(skill, &cwd).context("load Ask skill")?;
     }
-    let (task_id, wave_id) = caller_work(store, &caller).await;
+    // An unrecorded caller has no Work to give.
+    let (task_id, wave_id) = match store.run(&caller.run_id).await? {
+        Some(run) => (run.task_id, run.wave_id),
+        None => (None, None),
+    };
     let run = prepare_run(
         Run {
             id: caller.run_id.clone(),
@@ -372,6 +376,7 @@ async fn reserve_ask(
             provider: Some(caller.harness),
             model: caller.model,
             caller_run_id: Some(caller.run_id),
+            ended: None,
         },
         // An Ask is a human boundary requested by a Run, never a Flow step.
         crate::run_record::RunFlowMembership::Independent,
@@ -388,28 +393,6 @@ async fn reserve_ask(
         created_at: run.created_at,
     };
     Ok(store.create_session(session, run, None).await?)
-}
-
-/// The asking Run's Task and Wave. A headless caller has no row yet, so its
-/// launch attribution is its manifest.
-async fn caller_work(
-    store: &SharedStore,
-    caller: &RunManifest,
-) -> (Option<TaskId>, Option<crate::id::WaveId>) {
-    if let Ok(Some(run)) = store.run(&caller.run_id).await {
-        return (run.task_id, run.wave_id);
-    }
-    match crate::run_record::attributed_work(store, caller).await {
-        Some(WorkRef::Task(id)) => match store.get_task(&id).await {
-            Ok(Some(task)) => (Some(id), Some(task.wave_id)),
-            _ => (None, None),
-        },
-        Some(WorkRef::Wave(id)) => match store.get_wave(&id).await {
-            Ok(Some(_)) => (None, Some(id)),
-            _ => (None, None),
-        },
-        _ => (None, None),
-    }
 }
 
 /// Prepare an attempt of a waiting Session; `run` supplies everything but
@@ -429,6 +412,7 @@ pub(crate) fn prepare_run(run: Run, flow: crate::run_record::RunFlowMembership) 
                 .into_iter()
                 .collect(),
             flow,
+            work: None,
         },
         run.caller_run_id.clone(),
     )?;
@@ -1942,9 +1926,7 @@ mod tests {
     use crate::durable::{FlowPosition, RunId};
     use crate::engine::{prepare_launch_prompt, Config, LaunchPromptInput, Surface};
     use crate::lf::{Cli, Commands};
-    use crate::run_record::{
-        preferred_work_selector, AttributionSource, RunManifest, SubjectAttribution,
-    };
+    use crate::run_record::RunManifest;
     use crate::session::{Run, Session, SessionKind};
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
@@ -2480,6 +2462,7 @@ mod tests {
             provider: None,
             model: None,
             caller_run_id: None,
+            ended: None,
         };
         assert_eq!(
             super::session_work_path(&store, &run(None))
@@ -2488,52 +2471,6 @@ mod tests {
                 .as_deref(),
             Some("product")
         );
-        let now = time::OffsetDateTime::now_utc();
-        let project = crate::work::project::Project {
-            id: crate::durable::ProjectId::new(),
-            plan: crate::planning::ProjectPlan {
-                id: crate::planning::LinearProjectId::new("historical-project").unwrap(),
-                slug: "previous-chapter".to_string(),
-                name: "Obsolete public tier".to_string(),
-                prompt_context: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            iteration: 0,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_project(&project).await.unwrap();
-        let subject = crate::durable::WorkRef::Project(project.id.clone());
-        let mut manifest = RunManifest {
-            schema_version: 1,
-            run_id: crate::durable::RunId::new(),
-            parent_run_id: None,
-            created_at: now,
-            harness: "fixture".to_string(),
-            model: None,
-            surface: "tui".to_string(),
-            cwd: directory.path().to_path_buf(),
-            repo: None,
-            worktree: None,
-            skill: None,
-            subjects: Vec::new(),
-            launch: None,
-            context: None,
-            runtime_path: None,
-            runtime_digest: None,
-            host: "fixture".to_string(),
-            boot_id: None,
-            flow: None,
-        };
-        for selector in [&project.plan.slug, project.plan.id.as_str()] {
-            manifest.subjects = vec![SubjectAttribution::declared(format!("project:{selector}"))];
-            assert_eq!(
-                crate::run_record::attributed_work(&store, &manifest).await,
-                Some(subject.clone())
-            );
-        }
         let unbound = Run {
             wave_id: None,
             ..run(None)
@@ -2752,6 +2689,7 @@ mod tests {
             provider: Some("claude".to_string()),
             model: Some("opus".to_string()),
             caller_run_id: Some(RunId::new()),
+            ended: None,
         };
         let session = Session {
             id: "ask_skill_proof".to_string(),
@@ -2825,44 +2763,6 @@ mod tests {
 
         assert_eq!(&argv[argv.len() - 3..], ["session", "open", "ask_123"]);
         assert!(!argv.iter().any(|argument| argument == "tmux"));
-    }
-
-    #[test]
-    fn task_is_the_most_specific_parent_run_subject() {
-        let manifest = RunManifest {
-            schema_version: 1,
-            run_id: crate::durable::RunId::new(),
-            parent_run_id: None,
-            created_at: time::OffsetDateTime::now_utc(),
-            harness: "codex".to_string(),
-            model: None,
-            surface: "headless".to_string(),
-            cwd: "/tmp/worktree".into(),
-            repo: None,
-            worktree: None,
-            skill: Some("implement".to_string()),
-            subjects: vec![
-                SubjectAttribution {
-                    selector: "wave:product".to_string(),
-                    source: AttributionSource::Declared,
-                },
-                SubjectAttribution {
-                    selector: "task:task_123".to_string(),
-                    source: AttributionSource::Declared,
-                },
-            ],
-            launch: None,
-            context: None,
-            runtime_path: None,
-            runtime_digest: None,
-            host: "test".to_string(),
-            boot_id: None,
-            flow: None,
-        };
-        assert_eq!(
-            preferred_work_selector(&manifest).as_deref(),
-            Some("task:task_123")
-        );
     }
 
     #[test]

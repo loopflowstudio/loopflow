@@ -528,6 +528,7 @@ mod tests {
                 skill: Some("loop-decide".into()),
                 subjects: vec![],
                 flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
             }
         }
         fn capture(&self) -> CaptureHandle {

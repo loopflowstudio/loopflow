@@ -236,6 +236,7 @@ fn task_run_spec(
             )),
         ],
         flow: crate::run_record::RunFlowMembership::Step(flow),
+        work: None,
     }
 }
 
@@ -300,6 +301,14 @@ async fn run_task_with(
         )
         .await
         .inspect_err(|_| finish_capture(capture.as_ref(), "failed"))?;
+    // The claim stored this Run's row; its provider is known only here.
+    store
+        .fill_run_provider(
+            &capture.as_ref().expect("capture was created").run_id(),
+            &prepared.turn.harness,
+            prepared.turn.model.as_deref(),
+        )
+        .await?;
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)
         .inspect_err(|_| {
@@ -552,6 +561,9 @@ async fn run_task_op_boundary(
         .ok_or_else(|| anyhow!("Task operation requires a registered Loopflow process identity"))?;
     let bound_claim = store
         .bind_task_worker_run(&task.id, &launch_claim, &capture.run_id(), &owner)
+        .await?;
+    store
+        .fill_run_provider(&capture.run_id(), "loopflow", None)
         .await?;
     let outcome = run_task_flow_op(&task, &mut flow).await;
     let flow_completed = match outcome {
@@ -1546,6 +1558,7 @@ mod planning_tests {
                             skill: Some("loop-decide".into()),
                             subjects: vec![],
                             flow: crate::run_record::RunFlowMembership::Independent,
+                            work: None,
                         },
                     )
                     .unwrap();
@@ -1711,6 +1724,7 @@ mod planning_tests {
                         cwd: task.worktree.clone(), repo: None, worktree: None,
                         skill: Some("loop-decide".into()), subjects: vec![],
                         flow: crate::run_record::RunFlowMembership::Independent,
+                        work: None,
                     },
                 ).unwrap();
                 let run = capture.run_id();
@@ -3241,6 +3255,7 @@ mod planning_tests {
                         flow: crate::run_record::RunFlowMembership::Step(
                             crate::run_record::RunFlowStep::of(&position),
                         ),
+                        work: None,
                     },
                     first.id.clone(),
                     &crate::trace::PreparedTurnContext::from_prompts("system", "review"),
@@ -3578,6 +3593,7 @@ mod planning_tests {
             flow: crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
                 &reserved,
             )),
+            work: None,
         };
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let interrupted = crate::run_record::CaptureHandle::begin_reserved_with_context(

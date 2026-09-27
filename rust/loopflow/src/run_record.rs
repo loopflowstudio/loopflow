@@ -71,6 +71,7 @@ pub(crate) struct RunSpec {
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
     pub flow: RunFlowMembership,
+    pub work: Option<crate::session::RunWork>,
 }
 
 /// The exact managed Task or standalone Flow occurrence a Run executes.
@@ -527,48 +528,55 @@ impl RunRecorder {
     }
 }
 
-/// Scan Home-local Run records without opening planning or journal SQLite.
-///
-/// A corrupt selected record is omitted with a warning so one damaged
-/// record cannot make unrelated execution history unavailable. Partial JSONL
-/// evidence remains visible through `evidence_gaps` on the owning Run.
-pub fn scan_runs_since(lf_home: &Path, since: i64) -> std::io::Result<Vec<RunSnapshot>> {
-    scan_runs_matching(lf_home, since, |_| true)
-}
-
-pub(crate) fn scan_runs_matching(
+/// Listed Runs as snapshots: identity, parentage, Work, state and times from
+/// each row, usage and launch evidence from its record. A Run launched on
+/// another Home keeps its record there and is left out.
+pub(crate) fn run_snapshots(
     lf_home: &Path,
-    since: i64,
-    include: impl Fn(&RunManifest) -> bool,
-) -> std::io::Result<Vec<RunSnapshot>> {
-    let records = record_dirs(lf_home)?;
-    let mut runs = Vec::new();
-    for record in records {
-        let snapshot = read_manifest(&record).and_then(|manifest| {
-            validate_manifest_path(&record, &manifest)?;
-            if manifest.created_at.unix_timestamp() >= since && include(&manifest) {
-                project_run(&record, manifest).map(Some)
-            } else {
-                Ok(None)
-            }
-        });
-        match snapshot {
-            Ok(Some(run)) => runs.push(run),
-            Ok(None) => {}
-            Err(error) => tracing::warn!(
-                %error,
-                record = %record.display(),
-                "invalid Run record omitted"
-            ),
-        }
+    runs: Vec<crate::store::sqlite::ListedRun>,
+) -> std::io::Result<Vec<(crate::session::Run, RunSnapshot)>> {
+    let mut snapshots = Vec::new();
+    for listed in runs {
+        let run = listed.run;
+        let dir = record_dir(lf_home, &run.id)
+            .ok_or_else(|| std::io::Error::other(format!("Run {} has an invalid id", run.id)))?;
+        let evidence = match read_run_snapshot(&dir) {
+            Ok(evidence) => evidence,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let source = match run.work_source {
+            Some(crate::session::WorkSource::Inherited) => AttributionSource::Inherited,
+            _ => AttributionSource::Declared,
+        };
+        let subjects = [
+            ("wave", listed.wave),
+            ("project", listed.project),
+            ("task", listed.task),
+        ]
+        .into_iter()
+        .filter_map(|(kind, name)| {
+            Some(SubjectAttribution {
+                selector: format!("{kind}:{}", name?),
+                source,
+            })
+        })
+        .collect();
+        let snapshot = RunSnapshot {
+            id: run.id.to_string(),
+            parent_run_id: run.caller_run_id.as_ref().map(ToString::to_string),
+            subjects,
+            skill: run.skill.clone(),
+            outcome: run.ended.as_ref().map(|end| end.outcome.clone()),
+            started: run.created_at,
+            ended: run.ended.as_ref().map(|end| end.at),
+            harness: run.provider.clone().unwrap_or(evidence.harness),
+            model: run.model.clone(),
+            ..evidence
+        };
+        snapshots.push((run, snapshot));
     }
-    runs.sort_by(|left, right| {
-        right
-            .started
-            .cmp(&left.started)
-            .then_with(|| right.id.cmp(&left.id))
-    });
-    Ok(runs)
+    Ok(snapshots)
 }
 
 pub(crate) fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -1586,8 +1594,10 @@ impl CaptureHandle {
         launch: Option<RunLaunchRequest>,
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
+        let work = spec.work.clone();
         let capture = RunCapture::begin(lf_home, spec, run_id, parent_run_id, launch, context)
             .map_err(record_error)?;
+        capture.record_row(work);
         Ok(Self(Arc::new(Mutex::new(capture))))
     }
 
@@ -1766,6 +1776,40 @@ impl RunCapture {
             prepare_manifest(spec, run_id, parent_run_id, launch, context)?;
         let dir = publish_manifest(lf_home, &manifest, context_bytes.as_deref())?;
         Ok(Self::from_manifest(manifest, dir))
+    }
+
+    /// Every Run is a row. A Task step's row is stored with its worker claim
+    /// and a Session's with its reservation; every other launch stores it
+    /// here. Bookkeeping never refuses the launch.
+    fn record_row(&self, work: Option<crate::session::RunWork>) {
+        let manifest = &self.manifest;
+        let invocation_id = match &manifest.flow {
+            Some(RunFlowMembership::Step(step)) if step.task_id.is_some() => return,
+            Some(RunFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
+            Some(RunFlowMembership::Independent) | None => None,
+        };
+        let run = crate::session::Run {
+            id: manifest.run_id.clone(),
+            session_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id: work.as_ref().and_then(|work| work.task_id.clone()),
+            wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
+            work_source: work.as_ref().map(|work| work.source),
+            invocation_id,
+            created_at: manifest.created_at.unix_timestamp(),
+            published: true,
+            cwd: manifest.cwd.clone(),
+            skill: manifest.skill.clone(),
+            provider: Some(manifest.harness.clone()),
+            model: manifest.model.clone(),
+            caller_run_id: manifest.parent_run_id.clone(),
+            ended: None,
+        };
+        if let Err(error) = row_store(&self.dir).and_then(|store| store.create_run(run)) {
+            eprintln!("warning: this Run is not recorded and will not list: {error}");
+        }
     }
 
     fn from_manifest(manifest: RunManifest, dir: PathBuf) -> Self {
@@ -1973,6 +2017,15 @@ impl RunCapture {
         )?;
         self.settled_outcome = Some(outcome.to_string());
         self.binding = None;
+        let end = crate::session::RunEnd {
+            outcome: outcome.to_string(),
+            at: OffsetDateTime::now_utc().unix_timestamp(),
+        };
+        if let Err(error) =
+            row_store(&self.dir).and_then(|store| store.end_run(&self.manifest.run_id, &end))
+        {
+            tracing::warn!(%error, run_id = %self.manifest.run_id, "Run end is not recorded");
+        }
         if self.attempt_started {
             if let Err(error) = self.append_event(RunEvent::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),
@@ -2017,7 +2070,22 @@ impl RunCapture {
     }
 }
 
-fn inherited_parent() -> Option<RunId> {
+/// The store that holds the row of the Run recorded at `dir`.
+fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
+    #[cfg(test)]
+    let path = std::env::var_os("LF_DB_PATH")
+        .map(PathBuf::from)
+        .or_else(|| Some(dir.ancestors().nth(3)?.join("loopflow.db")))
+        .ok_or_else(|| record_error(std::io::Error::other("Run record has no Home")))?;
+    #[cfg(not(test))]
+    let path = {
+        let _ = dir;
+        crate::store::database_path_from_env().map_err(record_error)?
+    };
+    crate::store::sqlite::SqliteStore::new(&path)
+}
+
+pub(crate) fn inherited_parent() -> Option<RunId> {
     let run_id = std::env::var(RUN_ID_ENV).ok()?;
     let run_dir = PathBuf::from(std::env::var_os(RUN_DIR_ENV)?);
     let manifest = fs::read(run_dir.join("manifest.json")).ok()?;
@@ -2346,84 +2414,6 @@ fn record_error(error: std::io::Error) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
-pub(crate) async fn attributed_work(
-    store: &crate::store::SharedStore,
-    manifest: &RunManifest,
-) -> Option<crate::durable::WorkRef> {
-    let selector = preferred_work_selector(manifest)?;
-    let (kind, id) = selector.split_once(':')?;
-    let exact = match kind {
-        "task" => crate::work::task::TaskId::parse(id)
-            .ok()
-            .map(crate::durable::WorkRef::Task),
-        "project" => crate::durable::ProjectId::parse(id)
-            .ok()
-            .map(crate::durable::WorkRef::Project),
-        "wave" => crate::id::WaveId::parse(id)
-            .ok()
-            .map(crate::durable::WorkRef::Wave),
-        _ => None,
-    };
-    if exact.is_some() {
-        return exact;
-    }
-    // Attribution is historical identity, independent of launch eligibility and
-    // the presence of an active PR or checkout.
-    if kind == "task" {
-        return match store.get_task_by_issue(id).await {
-            Ok(Some(task)) => Some(crate::durable::WorkRef::Task(task.id)),
-            Ok(None) => {
-                tracing::warn!(%selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
-                None
-            }
-            Err(error) => {
-                tracing::warn!(%error, %selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
-                None
-            }
-        };
-    }
-    if kind == "project" {
-        return match store.get_project_by_project(id).await {
-            Ok(Some(project)) => Some(crate::durable::WorkRef::Project(project.id)),
-            Ok(None) => {
-                tracing::warn!(%selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
-                None
-            }
-            Err(error) => {
-                tracing::warn!(%error, %selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
-                None
-            }
-        };
-    }
-    match crate::ops::resolve_work_binding(store, &manifest.cwd, &selector).await {
-        Ok(binding) => Some(binding.work),
-        Err(error) => {
-            tracing::warn!(%error, %selector, run_id = %manifest.run_id, "Run subject unavailable");
-            None
-        }
-    }
-}
-
-pub(crate) fn preferred_work_selector(manifest: &RunManifest) -> Option<String> {
-    manifest
-        .subjects
-        .iter()
-        .filter_map(|subject| {
-            let rank = if subject.selector.starts_with("task:") {
-                3
-            } else if subject.selector.starts_with("project:") {
-                2
-            } else if subject.selector.starts_with("wave:") {
-                1
-            } else {
-                return None;
-            };
-            Some((rank, subject.selector.clone()))
-        })
-        .max_by_key(|(rank, _)| *rank)
-        .map(|(_, selector)| selector)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -2432,8 +2422,8 @@ mod tests {
 
     use super::{
         observed_run_ids_at, read_final_answer, read_provider_clients, read_provider_session,
-        read_run_snapshot, remove_provider_client, scan_runs_since, write_provider_client,
-        CaptureHandle, RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
+        read_run_snapshot, remove_provider_client, write_provider_client, CaptureHandle,
+        RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
@@ -2529,6 +2519,7 @@ mod tests {
             skill: Some("implement".to_string()),
             subjects: Vec::new(),
             flow: crate::run_record::RunFlowMembership::Independent,
+            work: None,
         }
     }
 
@@ -3323,57 +3314,9 @@ mod tests {
     }
 
     #[test]
-    fn scanner_window_keeps_boundary_usage_and_incomplete_evidence() {
+    fn reader_reduces_each_cumulative_stream_once_and_keeps_provider_finality() {
         let home = tempfile::tempdir().unwrap();
-        let since = 1_790_000_000;
-        for started in [since - 1, since, since + 1] {
-            let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-            capture.record_stream_event(&StreamEvent::Usage {
-                input_tokens: Some(12),
-                output_tokens: Some(3),
-                cache_read_tokens: None,
-            });
-            capture.finish("completed").unwrap();
-            let dir = capture.artifact_dir();
-            let mut manifest = super::read_manifest(&dir).unwrap();
-            manifest.created_at = time::OffsetDateTime::from_unix_timestamp(started).unwrap();
-            fs::write(
-                dir.join("manifest.json"),
-                serde_json::to_vec(&manifest).unwrap(),
-            )
-            .unwrap();
-            if started == since {
-                OpenOptions::new()
-                    .append(true)
-                    .open(dir.join("events.jsonl"))
-                    .unwrap()
-                    .write_all(b"{")
-                    .unwrap();
-            }
-        }
-
-        let all = scan_runs_since(home.path(), 0).unwrap();
-        let selected = scan_runs_since(home.path(), since).unwrap();
-        assert_eq!(all.len(), 3);
-        assert_eq!(selected.len(), 2);
-        assert_eq!(selected[0].started, since + 1);
-        assert_eq!(selected[1].started, since);
-        assert_eq!(selected[1].usage.input_tokens, Some(12));
-        assert_eq!(selected[1].evidence_gaps, 1);
-        assert_eq!(
-            selected,
-            all.into_iter()
-                .filter(|run| run.started >= since)
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn scanner_reduces_each_cumulative_stream_once_and_keeps_provider_finality() {
-        let home = tempfile::tempdir().unwrap();
-        let mut run_spec = spec(home.path());
-        run_spec.subjects = vec![SubjectAttribution::declared("task:LOO-265".to_string())];
-        let capture = CaptureHandle::begin_at(home.path(), run_spec).unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
 
         capture.record_stream_event(&StreamEvent::Usage {
             input_tokens: Some(10),
@@ -3398,10 +3341,7 @@ mod tests {
         });
         capture.finish("completed").unwrap();
 
-        let runs = scan_runs_since(home.path(), 0).unwrap();
-        assert_eq!(runs.len(), 1);
-        let run = &runs[0];
-        assert_eq!(run.subject("task"), Some("LOO-265"));
+        let run = read_run_snapshot(&capture.artifact_dir()).unwrap();
         assert_eq!(run.outcome.as_deref(), Some("completed"));
         assert_eq!(run.usage.streams, 2);
         assert_eq!(run.usage.final_streams, 1);

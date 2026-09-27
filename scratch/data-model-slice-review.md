@@ -1,6 +1,155 @@
 # Data model storage slice review
 
-## Current review: Run construction and executed proof debt
+## Current review: first assignment and chapter eligibility
+
+2026-09-26 · LOO-298 · review-slice · **Not ready to publish**
+
+Reviewed `a891fde1c` against active base `4cd64be3d`, including the retained
+owner, replacement and publication changes. Preserved the supplied compression
+note unchanged with `lf commit` at `4b8836113`. The amended
+[design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md),
+[Session decision](session-runs-and-current-run.md) and Jack's final dated
+[bind/Started decisions](questions.md) govern over the old Task title and Wave
+memory. This review fixes one missed Started consumer and adds a CLI proof.
+It does not choose a Flow edge.
+
+### Reproduced and repaired: reserved work rejected after chapter activation
+
+**P1, fixed locally.** `store/sqlite/durable.rs::require_current_task_chapter`
+still excluded only **published** Runs from historical untouched backlog.
+The new Started reader and retirement transaction already counted reserved
+Runs. Consequently, a Task could display Started and resist retirement while
+its next cursor write failed during the interval between successor activation
+and Task transfer.
+
+Extended `task_started_tracks_reserved_review_and_retained_history` through
+that interval: reserve an unpublished review Run, activate a successor Chapter
+while the Task still belongs to its predecessor Project, checkpoint the same
+captured position, then publish and complete its review. Before repair it
+failed at the checkpoint with `InvalidAuthority("this Task belongs to chapter
+history; resume the chapter transition before starting work")`. This is an
+executed counterexample, not a hypothetical timing claim.
+
+The eligibility query now checks `t.started_at IS NULL`, matching the existing
+assignment/retirement boundary. Retained historical event and worker evidence
+until general launches and import supply SQL Runs. The repaired fixture passes
+and verifies that the reserved Run is unchanged before publication. It also
+retains its existing retirement and completed-history assertions. No new guard,
+store, API or migration was needed; execution identity and claim predicates
+remain unchanged.
+
+### Evidence matrix
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+| --- | --- | --- | --- | --- |
+| First assignment | Set once at launch/bind time; presence iff Task Runs exist | Run INSERT/null-to-Task UPDATE triggers; write-once assignment and retained last Run | Assignment matrix/race in the 18-test durable suite; prior populated canonical import receipt | Pass for SQL-owned Runs; general writer/import conversion remains |
+| Reservation and continuation | Unpublished Run starts Task without implying provider success; started work survives activation | Started/retirement readers plus repaired chapter eligibility query use the column | Red-to-green reservation lifecycle; canonical repeat | Pass locally; full repository rotation still absent |
+| CLI Started | Status and roadmap expose the reservation without PR evidence | Both reach the updated Store reader | Actual compiled CLI before/after one unpublished SQL Run, no Task PR or Run artifacts | Pass on isolated canonical fixture; no provider launched |
+| Full 1: ancestry/structure | Nullable parents, node/tuple/runtime children, stable Session history | Constructor and Task-review transactions implemented; structural model unfinished | Durable suite, SQL constraints and source | Partial |
+| Full 2: common readers/bind | All launch, Session, Run, usage and sidebar paths agree; exact-target confirmation | Assignment constraints implemented; no general bind or shared reader cutover | Negative source inventory below | Gap |
+| Full 3: execution | Common Task/taskless driver; preserved capture, claims, feedback and runtime nesting | Task SQL history; taskless file driver remains | Durable suite and earlier controller receipts, with original limits | Gap |
+| Full 4: Chapter | Repository-wide clock and frozen all-Wave transfer/retry | Per-Wave activation remains; reservation eligibility repaired | Chapter source and new regression | Gap |
+| Full 5: import | Populated SQL/files, idempotence and interrupted conversion | Prior SQL preservation tests pass; filesystem importer absent | Retained canonical import logs; migration bytes unchanged | Gap |
+| Full 6: DTO/desktop | Stable pane/current Run/history, typed grouping and cached projection | Existing Work/path DTO and uncached regrouping remain | Rust/Swift source inventory | Gap |
+| Full 7: configured acceptance | Backed-up real Homes, matching CLI/app and retained draft | Isolated CLI fixture only | No real Home/provider/app conversion attempted | Gap |
+| Full 8: deletion/consistency | All alternate owners removed; docs match final implementation | Existing alternate owners remain live | Negative inventory; architecture 32/33 | Gap |
+
+### Executed proof and reuse limits
+
+Resource preflight passed: **102.6 GiB free**, this checkout **3.1 GiB / 12 GiB**.
+All test commands removed inherited LF authority, used a temporary Home, four
+low-priority Cargo workers, serial tests and a 900-second process-group timeout.
+No timeout fired. Logs and exact commands are under
+`.lf/tmp/loo298-assignment-review/`.
+
+- Before repair: reservation regression **failed**, 34.1 s command; exact error
+  above retained in `reservation-before.log`.
+- After repair: `cargo test -p loopflow --lib
+  store::sqlite::durable::durable_store_tests -- --test-threads=1`:
+  **18 passed**, 72.5 s command / 40.1 s test execution. Includes assignment
+  race, constructor/ancestry race, repeated Session replacement, stale claims,
+  retained captures, completion and the repaired reservation lifecycle.
+- Actual CLI: `cargo test -p loopflow --test status_tests
+  reserved_run_starts_task -- --test-threads=1`: **1 passed**, 30.6 s command.
+  `status product --json` and `roadmap --wave product --json` each report
+  Started=false before assignment and true afterward. The seeded Task has no
+  PR publication or Run directory; PM and tmux inputs are fixtures. This proves
+  public read behavior, not general launch, confirmation, provider success or
+  installed acceptance.
+
+The CLI proof uses the previous disposable canonical source copy at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-first-assignment-materialized-ev5nnf8i`,
+updated only with this review's two changed Rust files. Verified 371
+non-migration Rust input paths against this checkout; the registry differs
+only by its generated `0.12.23.001_release` entry. An initial comparison flagged
+that expected registry difference; inspection verified the exact generated
+entry before running the canonical proof. Source hashes are in `inputs.json`.
+No migration was rewritten or rematerialized in this checkout.
+
+The retained `.lf/tmp/loo298-first-assignment/results.txt` and logs record six
+distinct source-library passes, populated canonical import/assignment/retirement
+proofs and two CLI merge-request/status proofs. Of their 435 recorded Rust/Cargo
+inputs, only the two review files changed. Those receipts retain their named
+scope; the changed eligibility behavior receives fresh evidence above. Earlier
+58-test receipts are historical supporting evidence, not a fresh full-suite pass.
+
+The repaired reservation lifecycle also passes on that canonical copy:
+`cargo test -p loopflow --lib
+task_started_tracks_reserved_review_and_retained_history -- --test-threads=1`,
+**1 passed**, 35.4 s command / 1.3 s execution. This repeats one of the 18
+source tests across the materialized schema, not an additional distinct test.
+
+`cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`
+(18.6 s) and working-diff whitespace pass. The architecture check retains its
+known `wave_chapters` gap below. No broad gate or configured-provider proof
+was run.
+
+### Negative architectural proof and next action
+
+Paths below are relative to `rust/loopflow/src/` unless marked Swift:
+
+- `ops/human_session.rs:575` still combines four sources; `:1204,1208` clears
+  Ask feedback and copies names on replacement. These are live dependencies.
+- `ops/flow_run.rs:108,136` still owns taskless `position.json` reads/writes.
+- `lf/commands/runs.rs:77,101` scans manifests; Runs and usage still use
+  `WorkCatalog`. `lf/commands/run.rs:604,666,832` still writes Started events.
+- `lf/commands/waves.rs:1090` adds PR publication/merge to displayed Started;
+  the new CLI proof deliberately removes that independent source.
+  `ops/chapter.rs::disposition` still reads manifest ancestry for begun evidence.
+- `store/sqlite/chapters.rs:44` activates by Wave. No current Rust query names
+  retired `task_flow_positions` outside migration history/tests. Remaining
+  `r.published=1` in `FLOW_POSITION_SELECT` gates an actionable review identity,
+  not Started; preserve that publication requirement.
+- Swift `WorkspaceProjection.swift:75,107` groups by roadmap visibility and
+  reverse-searches ownership; `PodiumModel.swift:88` rebuilds the projection.
+  `SessionRecord` still lacks the final current-Run/history wire contract.
+
+This slice advances the accepted storage model and its demonstrated behavior,
+but the branch remains an incomplete conversion and cannot be published.
+Do not replace the remaining owners with empty table readers or delete evidence
+before import. Continue the common Task/taskless invocation owner and driver,
+runtime nesting, general Runs, all Session kinds and all consumers. Prove the
+actual taskless CLI review after template removal, two replacements preserving
+Session/title/feedback/history, stale-action rejection and exactly one feedback
+completion. Bind must retain the selected Run and exact confirmed target through
+the transaction, including replacement during confirmation; SQL UPDATE tests
+cannot supply that proof. Preserve nullable invocation equality and current-Run-only
+binding without rewriting historical attribution.
+
+All eight design obligations remain. Retain repository Chapter implementation,
+filesystem import and inferred timestamp provenance, real-Home maintenance,
+DTO/desktop acceptance, comparable measurements and deletion research. The
+prepared-Run paragraph in `docs/lf.md` still needs final all-kind reconciliation;
+the old resource-blocked Measure paragraph was already corrected. Architecture
+still misses `wave_chapters` (**32/33**, seven other inventories pass), and
+branch-range whitespace still flags the unchanged draft header and copied patch.
+PR #1296 publication recording, existing-Task stacking and cancellation/refused-
+start cleanup remain unreproduced scope. No PM mutation, PR publication, Task
+disposition or Flow navigation occurred.
+
+---
+
+## Earlier review: Run construction and executed proof debt
 
 2026-09-26 · LOO-298 · review-slice · **Not ready to publish**
 

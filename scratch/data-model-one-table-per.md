@@ -543,8 +543,18 @@ All eight complete-design Done When obligations still govern publication.
 
 ## Slice ledger
 
-- 2026-09-26 Session cutover attempt: preserved the supplied concept review
-  unchanged in `ca1be1116d` through `lf commit`. Resource preflight passed
+- 2026-09-26 Session cutover review: the actual isolated CLI lists and renames
+  an interactive Session while `sessions` and `runs` both remain empty; rename
+  writes `session-name.json`. The requested cutover fails. Executable bytes
+  remain identical to `eeb609881`; this pass adds/removes zero executable lines.
+  Resource preflight and current CLI build pass. Restored notes were checkpointed
+  in `cd7215b9a` before correcting this ledger. See
+  [the current cutover review](session-cutover-review.md) for receipts, all eight
+  acceptance obligations and exact conversion dependencies. No publication.
+- 2026-09-26 Session cutover attempt: the supplied concept review was preserved
+  unchanged in `021d24f7b`; `ca1be1116d` subsequently deleted that note and the
+  slice review. Compression restored both from committed history. This corrects
+  the attempt's inaccurate preservation attribution. Resource preflight passed
   (96.5 GiB free; this checkout 4.0/12 GiB). The attempted Session-kind,
   reservation and lookup extension did not convert the launch/Ask/taskless
   writers or supply the importer. Withdrew every executable and schema edit;

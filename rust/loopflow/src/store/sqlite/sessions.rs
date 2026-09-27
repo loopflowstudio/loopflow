@@ -11,7 +11,7 @@ use super::SqliteStore;
 const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_source,
     s.ready_summary, s.completed_at, s.created_at,
     r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
-    r.created_at, r.published, r.cwd, r.skill
+    r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt
     FROM sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Session, Run)>> {
@@ -85,6 +85,9 @@ impl SqliteStore {
                 &tx,
                 Run {
                     id: replacement.clone(),
+                    node: None,
+                    iterations: None,
+                    attempt: None,
                     cwd: cwd.into(),
                     published: false,
                     created_at: crate::store::rows::now_unix(),
@@ -104,6 +107,7 @@ impl SqliteStore {
         let position = super::durable::flow_position_in(&tx, &expected.task_id)?
             .ok_or(StoreError::NotFound)?;
         let (_, run) = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
+        super::runs::select_attempt_in(&tx, &position.invocation.id, position.version, &run.id)?;
         tx.commit()?;
         Ok((position, run))
     }
@@ -167,7 +171,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT id, session_id, invocation_id, task_id, wave_id, work_source,
-             created_at, published, cwd, skill
+             created_at, published, cwd, skill, node, iterations, attempt
              FROM runs WHERE session_id=?1 ORDER BY created_at, id",
         )?;
         let rows = query.query_map([id], |row| super::runs::read_run(row, 0))?;
@@ -256,6 +260,21 @@ pub(super) fn save_review_in(conn: &Transaction<'_>, position: &FlowPosition) ->
             "UPDATE flow_invocations SET pending_session_id=NULL WHERE id=?1",
             [&position.invocation.id],
         )?;
+        conn.execute(
+            "UPDATE flow_invocations SET current_run_id=NULL WHERE id=?1 AND NOT EXISTS(
+                SELECT 1 FROM runs r WHERE r.id=current_run_id AND r.node=?2 AND r.iterations=?3)",
+            params![
+                position.invocation.id,
+                position
+                    .invocation
+                    .node_id(&position.cursor)
+                    .map_err(invalid)?,
+                serde_json::to_string(&crate::engine::flow_graph::flow_iterations(
+                    &position.invocation.steps,
+                    &position.cursor
+                ))?
+            ],
+        )?;
         return Ok(());
     }
     let id = review_id(position)?;
@@ -295,6 +314,18 @@ pub(super) fn save_review_in(conn: &Transaction<'_>, position: &FlowPosition) ->
         "UPDATE flow_invocations SET pending_session_id=?2 WHERE id=?1",
         params![position.invocation.id, id],
     )?;
+    let (_, run) = session_in(conn, &id)?.ok_or(StoreError::NotFound)?;
+    let version: i64 = conn.query_row(
+        "SELECT position_version FROM flow_invocations WHERE id=?1",
+        [&position.invocation.id],
+        |row| row.get(0),
+    )?;
+    super::runs::select_attempt_in(
+        conn,
+        &position.invocation.id,
+        u64::try_from(version).map_err(invalid)?,
+        &run.id,
+    )?;
     Ok(())
 }
 
@@ -316,6 +347,9 @@ fn insert_review_run_in(
             id: id.clone(),
             session_id: Some(session_id.to_owned()),
             invocation_id: Some(position.invocation.id.clone()),
+            node: None,
+            iterations: None,
+            attempt: None,
             task_id: Some(position.task_id.clone()),
             wave_id: None,
             work_source: Some(WorkSource::Inherited),
@@ -339,6 +373,7 @@ pub(super) fn complete_review_in(conn: &Connection, expected: &FlowPosition) -> 
         .session_run_id
         .as_ref()
         .ok_or_else(|| StoreError::InvalidAuthority("review has no published Run".into()))?;
+    super::runs::require_attempt_in(conn, &expected.invocation.id, run_id)?;
     if conn.execute(
         "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
         AND completed_at IS NULL AND ready_summary IS ?4",

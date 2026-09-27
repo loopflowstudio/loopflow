@@ -389,22 +389,6 @@ impl SqliteStore {
         Ok(bound)
     }
 
-    pub fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(&format!(
-            "{FLOW_POSITION_SELECT} WHERE state='current' AND task_id IS NOT NULL ORDER BY updated_at, task_id"
-        ))?;
-        let rows = statement.query_map([], read_flow_position_row)?;
-        let mut positions = Vec::new();
-        for row in rows {
-            let position = decode_flow_position(row?)?;
-            if position.is_human() {
-                positions.push(position);
-            }
-        }
-        Ok(positions)
-    }
-
     pub fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
         let reason = reason.trim();
         if reason.is_empty() {
@@ -883,7 +867,8 @@ pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) ->
          JOIN wave_chapters c ON c.wave_id=p.wave_id AND c.current=1
          WHERE t.id=?1 AND c.project_id != p.external_project_id
          AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=t.id AND json_extract(kind_json,'$.kind')='started')
-         AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=t.id AND worker_generation>0))",
+         AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=t.id AND worker_generation>0)
+         AND NOT EXISTS(SELECT 1 FROM runs WHERE task_id=t.id AND published=1))",
         [task.as_str()], |row| row.get(0),
     )?;
     if expired {
@@ -900,7 +885,10 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
     }
 }
 
-const FLOW_POSITION_SELECT: &str = "SELECT task_id, invocation_json, session_run_id, ready_summary,
+const FLOW_POSITION_SELECT: &str = "SELECT task_id, invocation_json,
+            (SELECT CASE WHEN r.published=1 THEN r.id END FROM sessions s
+                JOIN runs r ON r.id=s.current_run_id WHERE s.id=flow_invocations.pending_session_id),
+            (SELECT ready_summary FROM sessions WHERE id=flow_invocations.pending_session_id),
             step_index, iteration, position_version, worker_generation,
             claim_json, failure_json, updated_at, review_json
      FROM flow_invocations";
@@ -948,7 +936,14 @@ pub(super) fn flow_position_in(
             read_flow_position_row,
         )
         .optional()?;
-    row.map(decode_flow_position).transpose()
+    row.map(|row| {
+        decode_flow_position(row).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "Task {task_id} saved Invocation is unreadable; its bytes are unchanged: {error}"
+            ))
+        })
+    })
+    .transpose()
 }
 
 pub(super) fn set_flow_position_in(
@@ -972,18 +967,16 @@ pub(super) fn set_flow_position_in(
     let changed = if position.version == 0 {
         conn.execute(
             "INSERT INTO flow_invocations (
-                id, task_id, invocation_json, session_run_id, ready_summary,
+                id, task_id, invocation_json,
                 step_index, iteration, position_version, worker_generation,
                 claim_json, failure_json, updated_at, review_json, state
              ) VALUES (
-                ?10, ?1, ?2, ?3, ?4, ?5, ?6, 1, 0, NULL, ?7, ?8, ?9, 'current'
+                ?8, ?1, ?2, ?3, ?4, 1, 0, NULL, ?5, ?6, ?7, 'current'
              )
              ON CONFLICT DO NOTHING",
             params![
                 task_id.as_str(),
                 serde_json::to_string(&position.invocation)?,
-                position.session_run_id.as_ref().map(RunId::as_str),
-                position.ready_summary,
                 i64::try_from(position.cursor.index).map_err(invalid_durable)?,
                 i64::from(position.cursor.iteration),
                 failure_json,
@@ -995,16 +988,14 @@ pub(super) fn set_flow_position_in(
     } else {
         conn.execute(
             "UPDATE flow_invocations
-             SET invocation_json=?2, session_run_id=?3, ready_summary=?4,
-                 step_index=?5, iteration=?6, position_version=position_version + 1,
-                 worker_generation=0, claim_json=NULL, failure_json=?7,
-                 updated_at=?8, review_json=?10
-             WHERE state='current' AND task_id=?1 AND position_version=?9 AND claim_json IS NULL AND id=?11",
+             SET invocation_json=?2,
+                 step_index=?3, iteration=?4, position_version=position_version + 1,
+                 worker_generation=0, claim_json=NULL, failure_json=?5,
+                 updated_at=?6, review_json=?8
+             WHERE state='current' AND task_id=?1 AND position_version=?7 AND claim_json IS NULL AND id=?9",
             params![
                 task_id.as_str(),
                 serde_json::to_string(&position.invocation)?,
-                position.session_run_id.as_ref().map(RunId::as_str),
-                position.ready_summary,
                 i64::try_from(position.cursor.index).map_err(invalid_durable)?,
                 i64::from(position.cursor.iteration),
                 failure_json,
@@ -1020,6 +1011,7 @@ pub(super) fn set_flow_position_in(
             "Flow position for Task {task_id} changed or is actively claimed"
         )));
     }
+    super::sessions::save_review_in(conn, position)?;
     flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
 }
 
@@ -1106,16 +1098,14 @@ pub(super) fn settle_task_worker_in(
     let expected_json = serde_json::to_string(expected)?;
     if conn.execute(
         "UPDATE flow_invocations
-         SET invocation_json=?2, session_run_id=?3, ready_summary=?4,
-             step_index=?5, iteration=?6, position_version=position_version + 1,
+         SET invocation_json=?2,
+             step_index=?3, iteration=?4, position_version=position_version + 1,
              worker_generation=0, claim_json=NULL, failure_json=NULL,
-             updated_at=?7, review_json=?10
-         WHERE state='current' AND task_id=?1 AND position_version=?8 AND claim_json=?9",
+             updated_at=?5, review_json=?8
+         WHERE state='current' AND task_id=?1 AND position_version=?6 AND claim_json=?7",
         params![
             task_id.as_str(),
             serde_json::to_string(&next.invocation)?,
-            next.session_run_id.as_ref().map(RunId::as_str),
-            next.ready_summary,
             i64::try_from(next.cursor.index).map_err(invalid_durable)?,
             i64::from(next.cursor.iteration),
             next.updated_at.unix_timestamp(),
@@ -1127,6 +1117,7 @@ pub(super) fn settle_task_worker_in(
     {
         return Err(stale_task_worker(task_id));
     }
+    super::sessions::save_review_in(conn, next)?;
     flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
 }
 
@@ -1599,6 +1590,126 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut initial = autonomous_position(&task_id);
+        initial.invocation = crate::durable::test_flow_invocation(
+            "review",
+            0,
+            "review-design",
+            Some("review"),
+            true,
+        );
+        let first_run = RunId::new();
+        initial.session_run_id = Some(first_run.clone());
+        let mut position = store.set_flow_position(&task_id, &initial).unwrap();
+        let session_id = crate::ops::human_session::flow_id(&position).unwrap();
+        store
+            .rename_session(
+                &session_id,
+                "Parser review",
+                crate::session::TitleSource::Human,
+            )
+            .unwrap();
+        store
+            .ready_session(&session_id, &first_run, "Keep the reviewed parser behavior")
+            .unwrap();
+        position = store.flow_position(&task_id).unwrap().unwrap();
+        let mut runs = vec![first_run];
+        for _ in 0..2 {
+            let stale = position.clone();
+            let (reserved, run) = store.reserve_review_run(&position).unwrap();
+            assert!(!run.published);
+            assert!(store.reserve_review_run(&stale).is_err());
+            assert!(store
+                .ready_session(&session_id, runs.last().unwrap(), "late feedback")
+                .is_err());
+            assert!(store
+                .finish_human_task_boundary(&task, &stale, "late completion")
+                .is_err());
+            assert!(store
+                .publish_review_run(&session_id, runs.last().unwrap(), reserved.version)
+                .is_err());
+            store
+                .publish_review_run(&session_id, &run.id, reserved.version)
+                .unwrap();
+            assert!(store
+                .publish_review_run(&session_id, &run.id, reserved.version)
+                .is_err());
+            runs.push(run.id);
+            position = store.flow_position(&task_id).unwrap().unwrap();
+            assert_eq!(
+                position.ready_summary.as_deref(),
+                Some("Keep the reviewed parser behavior")
+            );
+        }
+        store
+            .rename_session(
+                &session_id,
+                "generated suggestion",
+                crate::session::TitleSource::Generated,
+            )
+            .unwrap();
+        let (session, current) = store.session(&session_id).unwrap().unwrap();
+        assert_eq!(session.title, "Parser review");
+        assert_eq!(current.id, *runs.last().unwrap());
+        let history = store.session_runs(&session_id).unwrap();
+        assert_eq!(history.len(), 3);
+        for run in &runs {
+            assert!(history.iter().any(|saved| &saved.id == run));
+        }
+
+        // An unrelated malformed autonomous capture remains an identified error,
+        // while direct Session discovery does not deserialize that invocation.
+        let broken = TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                SELECT ?1,project_id,?1,?1,'/repo.broken',1 FROM tasks WHERE id=?2",
+                rusqlite::params![broken.as_str(), task_id.as_str()]).unwrap();
+            conn.execute("INSERT INTO flow_invocations(id,task_id,invocation_json,step_index,iteration,
+                position_version,worker_generation,updated_at,state)
+                VALUES('broken',?1,'{\"id\":\"broken\",\"flow\":\"broken\",\"steps\":\"unreadable\"}',0,0,1,0,1,'current')",
+                [broken.as_str()]).unwrap();
+        }
+        assert_eq!(
+            store.open_review_sessions().unwrap(),
+            vec![(session.clone(), current)]
+        );
+        assert!(store
+            .flow_position(&broken)
+            .unwrap_err()
+            .to_string()
+            .contains(broken.as_str()));
+        let summary = position.ready_summary.as_deref().unwrap();
+        store
+            .finish_human_task_boundary(&task, &position, summary)
+            .unwrap();
+        assert!(store
+            .finish_human_task_boundary(&task, &position, summary)
+            .is_err());
+        assert!(store
+            .ready_session(&session_id, runs.last().unwrap(), "after completion")
+            .is_err());
+        let (completed, _) = store.session(&session_id).unwrap().unwrap();
+        assert!(completed.completed_at.is_some());
+        assert_eq!(completed.ready_summary, session.ready_summary);
+        assert_eq!(store.session_runs(&session_id).unwrap(), history);
+        assert!(store.open_review_sessions().unwrap().is_empty());
+        let known_runs = store.session_run_ids().unwrap();
+        assert!(runs.iter().all(|id| known_runs.contains(id)));
+        let events = store.task_events_after(&task_id, 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn restart_retains_review_and_rejects_stale_writes_at_the_same_version() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
@@ -1619,7 +1730,7 @@ mod durable_store_tests {
 
         store.restart_task_flow(&task, "checkpoint").unwrap();
         assert!(store.flow_position(&task_id).unwrap().is_none());
-        assert!(store.human_task_flow_positions().unwrap().is_empty());
+        assert!(store.open_review_sessions().unwrap().is_empty());
         assert_eq!(
             retained_invocation(&store, &original.invocation.id),
             (original.clone(), "replaced".into())
@@ -1663,7 +1774,7 @@ mod durable_store_tests {
             .unwrap();
 
         assert!(store.flow_position(&task_id).unwrap().is_none());
-        assert!(store.human_task_flow_positions().unwrap().is_empty());
+        assert!(store.open_review_sessions().unwrap().is_empty());
         assert_eq!(
             retained_invocation(&store, &position.invocation.id),
             (position.clone(), "completed".into())
@@ -1879,7 +1990,7 @@ mod durable_store_tests {
     fn review_discovery_follows_the_captured_nested_step() {
         let (_dir, store, task_id) = store_with_task();
         let mut position = autonomous_position(&task_id);
-        assert!(store.human_task_flow_positions().unwrap().is_empty());
+        assert!(store.open_review_sessions().unwrap().is_empty());
         let review = crate::durable::test_flow_invocation(
             "captured",
             0,
@@ -1910,10 +2021,10 @@ mod durable_store_tests {
         position.session_run_id = Some(RunId::new());
         position.ready_summary = Some("retain the reviewed scope".into());
         let mut saved = store.set_flow_position(&task_id, &position).unwrap();
-        assert_eq!(
-            store.human_task_flow_positions().unwrap(),
-            vec![saved.clone()]
-        );
+        let sessions = store.open_review_sessions().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].0.ready_summary, saved.ready_summary);
+        assert_eq!(Some(&sessions[0].1.id), saved.session_run_id.as_ref());
         assert_eq!(saved.current().step, "review-design");
         assert_eq!(saved.current().policy.id.as_deref(), Some("review"));
         assert_eq!(store.flow_position(&task_id).unwrap(), Some(saved.clone()));
@@ -1924,7 +2035,7 @@ mod durable_store_tests {
         saved.ready_summary = None;
         let saved = store.set_flow_position(&task_id, &saved).unwrap();
         assert_eq!(saved.current().step, "implement");
-        assert!(store.human_task_flow_positions().unwrap().is_empty());
+        assert!(store.open_review_sessions().unwrap().is_empty());
         assert!(store.set_flow_position(&task_id, &position).is_err());
         assert_eq!(store.flow_position(&task_id).unwrap(), Some(saved));
     }

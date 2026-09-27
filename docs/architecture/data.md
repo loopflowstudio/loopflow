@@ -18,7 +18,7 @@ different evidence for different questions.
 
 ```text
 repository files + Git        authored goals, memory, Skills, Flows, code
-planning SQLite               local durable planning and delivery facts
+planning SQLite               local planning, delivery and Task review Sessions
 Flow position files           ordinary invocation definitions and continuation
 human Ask files               waiting conversations and completion summaries
 Wave journal JSONL            conversation and resident event history
@@ -49,9 +49,11 @@ authority between them.
 
 The durable store keeps facts needed to resume planning, delivery, placement,
 credentials, and provider observations. Task invocations retain their captured
-execution and settlement history. Run,
-Session and ordinary Flow ownership are covered by the model cutover in the
-architecture reference; the current file paths below remain implementation facts.
+execution and settlement history. Task review Sessions own their title, feedback,
+completion and current Run in SQLite; earlier Runs stay in indexed history.
+Interactive, Ask and ordinary Flow ownership still await the complete model
+cutover in the architecture reference. The file paths below remain current
+implementation facts; this intermediate branch is not ready for installation.
 
 The current application tables group by owner:
 
@@ -59,6 +61,7 @@ The current application tables group by owner:
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
 | Project and Task progression | `projects`, `tasks`, `flow_invocations` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
+| Task review conversations | `sessions`, `runs` | stable conversation identity, current Run, retained Run history, title and saved feedback |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
 | Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current human Ask Sessions use files |
@@ -85,10 +88,13 @@ Flow settlement only touches the Task timestamp.
 
 The current Task invocation stores the shared `ExecutionCursor` tree in `review_json`;
 the current Flow name, step, node and human policy come from its captured graph.
-Review discovery and exact Task reads share that decoder. Completion and
-restart close the invocation without deleting its capture, cursor, exact claim
-or saved feedback. A partial unique index selects one current invocation per
-Task. Session writes compare invocation identity as well as version; chapter
+Session discovery joins `sessions` to its current `runs` row without decoding
+unrelated invocations. Exact Task execution reads still validate the selected
+capture. Completion and restart close the invocation without deleting its
+capture, cursor or exact claim. Session completion and boundary settlement share
+a transaction; Run replacement preserves the Session title and saved feedback. A partial unique index selects one current invocation per
+Task. Run reservation and publication compare invocation identity, version and
+current Run; Ready rejects a superseded Run. Chapter
 retirement retains evidence from earlier invocations, while only the current
 invocation can hold an active worker claim. SQL `step_index` and
 `iteration` remain root projections while historical flat progress is
@@ -96,6 +102,13 @@ decoded without replacing its captured definition. Ordinary Flow invocations
 use the same cursor and navigation rules, with file ownership instead of a
 Task claim or transaction. A direct Flow attributed to a Task owns its own
 invocation and cannot advance that Task's managed position.
+
+The Session draft converts captured Task reviews, including selected XOR
+children, without reading templates. Old pending Run and feedback columns are
+retained under historical names solely for offline import evidence; current
+readers and writers use Session rows. Unmapped historical captures and the other
+conversation kinds still require the full Home importer. The draft must not be
+promoted as a complete Home conversion.
 
 Store open uses a short OS migration lock around backup plus schema
 application. A current schema does not take the database write lock merely to

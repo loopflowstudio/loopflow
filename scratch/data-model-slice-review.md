@@ -1,6 +1,166 @@
 # Data model storage slice review
 
-## Current review: publication recovery and retained Run lookup
+## Current review: selected-attempt propagation
+
+2026-09-26 · LOO-298 · review-slice
+
+**Not ready to publish.** Reviewed implementation `830e9af7b` against active
+base `4cd64be3d`, including the complete branch change and the narrower
+selected-attempt diff since `cb4ee961f`. Preserved the supplied uncommitted
+compression review in `3b86c9b6b` before editing. This review also covers the
+bounded Task-start reader correction below. The
+[amended design](data-model-one-table-per.md), [review feedback](data-model-review-feedback.md)
+and [Session decision](session-runs-and-current-run.md) govern: taskless
+Invocations, Session owning Runs plus its current Run, and Flow as template.
+Current-Run-only bind remains an assumption; no historical reassignment was
+approved. All eight Done When obligations remain.
+
+The prior selected-attempt P1 is repaired at source level. Complete carries the
+lookup's original position into settlement; Open and rename retain the supplied
+Run selector across lock waits. The new deterministic race matrix addresses the
+reported interleavings. It has compiled but has not executed. This review found
+and corrected a separate reachable query against the deleted Task table.
+
+### Corrected here: Task detail still queried the deleted table
+
+**P1 — Task status/roadmap could fail after schema migration.**
+`rust/loopflow/src/lf/commands/waves.rs:1090` calls `store.task_started` while
+building a registered Task's detail. Its SQL in
+`rust/loopflow/src/store/sqlite/chapters.rs:97` still referenced
+`task_flow_positions`, which the `retain_flow_invocations` draft drops.
+SQLite must prepare the whole query even when another EXISTS arm could be true.
+This is a source-established missing-table failure, not an executed CLI result.
+The preceding review's negative inventory missed this reader.
+
+Changed that query to retained `flow_invocations`, without a current-only filter,
+and included published Run rows as the chapter evidence reader already does.
+Kept historical Started/progress/completion events; reservations alone remain
+insufficient. No compatibility view, new writer or schema edit was added.
+`task_started_tracks_published_review_history_not_reservation` exercises a fresh
+ephemeral migrated store, unstarted Task, unpublished reservation, publication,
+and completed review with no current invocation. It asserts the displayed fact
+through the production reader. The fixture is compiled, unexecuted.
+
+### Selected-attempt repair: source findings and proof limits
+
+Paths in this section are relative to `rust/loopflow/src/`.
+
+- Complete (`ops/human_session.rs:724`) holds the Session launch lock through
+  settlement, continuation request and teardown. Controller completion
+  (`controller/task/mod.rs:764`) accepts the original expected position instead
+  of reloading a newer one. Existing immediate transactions in
+  `store/sqlite/children.rs` compare the full position and Session current Run
+  before writing feedback, cursor and events. Teardown receives that same
+  selected position. Continuation remains requested before provider teardown.
+- Open (`human_session.rs:1035`) re-resolves the original exact/prefix selector
+  under exclusion and compares the opening snapshot. Native history lookup
+  precedes transfer; transfer and client receipt publication share the lock.
+  `lf/commands/util.rs:616` releases it before waiting for provider exit, so
+  Ready/Complete can proceed during the conversation. Replacement returns the
+  Run it launched rather than rereading a newer current pointer after exit.
+- Rename (`human_session.rs:1505`) preserves the original selector and passes
+  an expected Run for exact/prefix requests into the immediate SQL transaction
+  (`store/sqlite/sessions.rs:214`). Stable Session-ID rename remains a
+  conversation operation and can name its newer current Run.
+- Public CLI dispatch in `lf/commands/session.rs` passes the original ID
+  through Open and Complete. Completion's separate worktree lookup selects
+  journal scope; it does not rewrite the action's selector. JSON Open prepares
+  an action and does not demonstrate native resume.
+
+`review_actions_preserve_selected_attempt_across_replacement`
+(`controller/task/mod.rs:2338`) pauses all three actions after lookup, publishes
+B with retained A feedback, then resumes. It covers exact IDs, prefixes and
+Session IDs with real lookup/SQLite transactions. Rejections preserve B,
+cursor, feedback and simulated clients; stable Session rename is the deliberate
+exception. Subsequent Open/Complete of B leaves A's client intact, stops B and
+records the answer once. Notify barriers synchronize the race, not sleeps.
+The native handoff fixture `intentional_session_move_exits_cleanly` separately
+uses the real launch lock and an owned shell stand-in to observe publication
+before stopping that client. Both fixtures are unexecuted here. Simulated native
+effects in the action matrix are not configured provider or actual CLI proof.
+
+### Evidence matrix
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+| --- | --- | --- | --- | --- |
+| Slice: selected attempt | Replacement cannot redirect Complete/Open/Run rename | Original expectation reaches CAS and native exclusion; stable Session rename stays conversational | Source trace above; deterministic action matrix | source repaired; behavioral gap |
+| Slice: Task started reader | Task detail survives schema change and retains execution history | Query uses invocations and published Runs plus old event evidence | Bounded correction and new lifecycle fixture | compiled; behavioral gap |
+| Done 1: ancestry/history | Nullable parent and structural constraints; stable replacement history | Task review parent/current-Run fences present; general Run/node/tuple/runtime-parent model incomplete | SQL drafts, Session transactions, retained replacement fixtures | gap |
+| Done 2: one CLI reader/bind | Session/Run/usage/sidebar agree through typed parents | Task review naming uses SQL; general bind and reader conversion unfinished | CLI dispatch and negative inventory below | gap |
+| Done 3: execution | One Task/taskless driver, captured recovery, exact settlement | Task capture and selected-attempt fences retained; taskless driver remains file-backed | Controller/Open source and authored recovery/race fixtures | gap |
+| Done 4: Chapter | One repository clock, frozen history and active transfer | Current activation still scoped by Wave; stale Task-start query repaired | `store/sqlite/chapters.rs` | gap |
+| Done 5: import | Populated SQL/files, idempotence, interruption, canonical rehearsal | Task-review draft preserves conversion inputs; complete offline importer absent | Three migration drafts and preservation fixtures | gap; no materialized rehearsal |
+| Done 6: desktop | Stable Session panes/history and cached typed grouping | Existing DTO still exposes old projection; current-Run/history contract unconverted | Rust/Swift Session model and branch diff | gap |
+| Done 7: configured acceptance | Backed-up actual Homes, CLI/app demo, retained drafts and measurements | No conversion, configured provider/app demo or new latency sample | No live acceptance attempted | gap |
+| Done 8: deletion/consistency | Alternate authorities gone; final docs/checks agree | Old Task table reader now gone; other Session/Run/Flow owners still reachable | Negative search and static checks below | gap |
+
+### Verification and negative architectural proof
+
+Fresh resource preflight and safe `--recover` both failed: active
+`main-view-task` **15.3 GiB / 12 GiB**, this checkout **332.9 MiB**, free disk
+**97.2 GiB**. Recovery preserved the foreign active build. TESTING.md stops
+product tests under unresolved pressure. No behavioral tests, isolated actual
+CLI demo or materialized migration rehearsal ran; an older installed CLI would
+not prove these bytes. Source tracing is the available evidence, not a demo.
+
+After the bounded correction, formatting, working-diff whitespace and isolated
+`cargo clippy --all-targets -- -D warnings` pass; Clippy took **48.11 s** and
+compiled the new fixture. Migration validation passes: three ordered drafts,
+52 shipped migrations unchanged. Architecture still fails only SQLite owner
+coverage, **32/33**, missing `wave_chapters`; seven other inventories pass.
+Generated architecture HTML consistency passes from the website environment.
+The initial root-environment HTML command failed on missing `fasthtml`; rerunning
+the documented website command resolved that invocation error.
+
+Whole-branch whitespace still flags the unchanged blank draft dependency header
+and copied historical patch context. Neither applied migration bytes nor copied
+evidence was rewritten for cosmetics. The local diff pass clears neither.
+
+After this correction, searching current Rust outside migration history finds
+no `task_flow_positions` reference. No replacement compatibility view exists.
+The remaining forbidden end-state paths are still reachable: four-source Session
+list (`human_session.rs:575`), Ask feedback reset/name copy (`:1204,1208`),
+taskless `position.json` reads/writes (`ops/flow_run.rs:108,136`), Run manifest
+scan/WorkCatalog (`lf/commands/runs.rs:77,91`), explicit Started writers, and
+name/resolution/native-client sidecars. Swift's Session DTO still lacks the
+target current-Run/history contract. Repository Chapter activation is still
+Wave-scoped. These are unfinished cutover dependencies, not accepted alternate
+implementations. The slice advances the common owner model but cannot ship as
+the promised all-caller cutover.
+
+### Next action and proof
+
+When resource preflight permits, execute the new reader fixture and the existing
+selected-attempt/native-handoff matrix first, under TESTING.md's isolated Home
+and executable rules:
+
+```sh
+cargo test -p loopflow --lib task_started_tracks_published_review_history_not_reservation
+cargo test -p loopflow --lib review_actions_preserve_selected_attempt_across_replacement
+cargo test -p loopflow --lib intentional_session_move_exits_cleanly
+cargo test -p loopflow --lib reopening_ask_cannot_overwrite_a_concurrent_completion
+cargo test -p loopflow --lib ops::flow_run::tests
+```
+
+Keep the previously owed publication, historical selector, stale-provider/Ready,
+corrupt-neighbor, repeated replacement, schema, populated migration, controller
+and durable-store proofs; repeat populated preservation after canonical
+materialization in a disposable source copy. Add an isolated actual CLI
+status/roadmap read with a registered Task to demonstrate the corrected consumer.
+
+Continue the shared taskless driver, general Run facts, all Session kinds,
+launch/read/bind cutover, DTO/Swift pane identity and caches, repository Chapter
+operation, offline import, exact-writer real-Home maintenance, configured proof,
+measurements and deletion research followed by deletion. Reconcile the prepared
+Run paragraph in `docs/lf.md:562` and specialist docs with final behavior. Retain
+the supplied #1296 publication-record and existing-Task stacking reports as
+unreproduced scope. No new product decision is required for these steps.
+
+This review changed the Task-start reader, its regression fixture and this note,
+and checkpointed the supplied compression note. No provider, Home, migration,
+PR, Task disposition or Flow navigation changed. No intermediate publication.
+
+## Previous review: publication recovery and retained Run lookup
 
 2026-09-26 · LOO-298 · review-slice
 

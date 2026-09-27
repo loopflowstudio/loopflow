@@ -217,7 +217,8 @@ SQLite owns each product record; files carry authored definitions and large
 evidence artifacts. Sessions, Runs, and Flow invocations each have one reader.
 A Session has a stable ID, owns its Runs, and points to its current Run.
 Its Task, Wave, provider, and execution membership come from the current Run.
-Renaming updates the Session; binding updates its current Run's nullable Task and Wave.
+Renaming updates the Session. Binding fills its current Run's missing ancestry
+once, after confirming the exact target; it never changes or clears a Task.
 Replacing a Run retains the Session and its name, and preserves every prior Run.
 Landing a PR never erases those links.
 

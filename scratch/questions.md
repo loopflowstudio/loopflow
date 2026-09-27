@@ -25,10 +25,11 @@ implementation assumptions are distinguished from explicit confirmation.
    change the pointer with the exact pending attempt atomically.
    Cross-Run bind scope was not explicitly decided: the working assumption is
    current Run ancestry, inherited by replacement, with no bulk history rewrite.
-5. **Operational consequences.** Every launch now requires a writable local Run
-   store; bind of an invocation Run cannot change Task; moving the last Run away
-   can change displayed Started but never authorize retirement by itself. These
-   follow the chosen owners, and the doc spec states them explicitly.
+5. **Operational consequences — amended by Jack below.** Every launch requires
+   a writable local Run store. Bind fills missing ancestry once; no Run can move
+   or clear its Task. Started is any Task Run, with a set-once timestamp at first
+   assignment. Nullable invocation equality and separate retirement evidence
+   still apply. The final dated decisions below supersede reversible binding.
 
 Implementation assumptions: preserve manifest/context/terminal evidence and
 provider-native history; “every sidecar goes” concerns mutable product and
@@ -175,3 +176,52 @@ Resource preflight and safe recovery again fail on active `main-view-task` at
 15.3/12 GiB with 97.3 GiB free; no behavioral test or materialized rehearsal ran.
 Ordinary implementation continued. The complete eight-part acceptance and the
 supplied delivery/stacking reports remain unfinished; no new Ask is needed.
+
+## Started correction (2026-09-26)
+
+Jack's final correction in Linear comment
+`ba9ec6d3-2bd4-463f-91e0-2bb7045fe72f` supersedes the two intervening
+Started steers: Started is one fact, any Run with `task = X`. Keep one indexed
+existence reader. No worker-claim bit or worktree test defines Started. The
+architecture-reference sentence and its separate Chapter-retirement caveat
+remain the accepted contract. Remove `record_task_start` and the Started event
+only when the derived query serves every reader; retained historical evidence
+must still protect retirement. The current partial query includes events,
+worker generations and published review Runs; its passing test will establish
+that transitional behavior, not the final any-Run contract.
+
+The current review executes the accumulated proof debt before another owner
+conversion, following comment `1d8e2427-2338-466e-92c7-f2bc27526712`. Fresh
+resource preflight passes (107.3 GiB free, main-view-task 546.8 MiB). The first
+counterexample was a corrupt-neighbor fixture inserting null required Task
+planning fields, failing before its intended corrupt capture. The fixture now
+copies planning fields from the valid Task; production's required-title
+contract is unchanged. Actual rerun results belong in the slice review.
+
+## Write-once bind (2026-09-26)
+
+Jack selected null-to-Task binding in comment
+`7f5c129f-d90f-489d-ac88-f68e13fb2788`. No Task move or clear, no unbind or
+`--repository` form. Parentless Runs may take a Wave or Task; Wave-only Runs
+may take a Task in that Wave. Every bind surface confirms the exact permanent
+target once. This supersedes reversible-binding proposals in the copied
+LOO-291 evidence and the earlier active docs. Started remains any attributed
+Run and becomes monotonic; usage/history never move between Tasks. Nullable
+invocation Task equality remains; cross-Wave Task moves remain a distinct
+operation. The current-Run-only scope assumption does not authorize rewriting
+prior Runs. Current implementation has no general bind operation; the next
+writer cut must enforce these rules transactionally and prove racing binds.
+
+## Started timestamp: final correction (2026-09-26)
+
+Jack's comment `2ecb585f-fc78-4b75-a356-aa3cc678b85c` supersedes the two
+MIN(created_at) steers. Definition remains any Run with this Task. The shared
+Run writer sets `tasks.started_at` once at the first assignment's time (launch
+or bind), only when null and in the same transaction. Later assignments never
+change it, including older Runs. Validator checks presence iff a Run exists,
+not timestamp equality. First bind uses bind time. Imported Tasks with Runs
+receive a timestamp, others remain null; historical timestamp provenance must
+be explicit in the import report rather than presented as observed launch time.
+Sidebar/roadmap read one column reader; remove the event writer after complete
+reader conversion. This is an accepted next implementation requirement, not a
+claim that the existing review-only Run writer already stores the column.

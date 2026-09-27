@@ -1,11 +1,12 @@
 # LOO-312 assumptions and outstanding evidence
 
-- The selected step is review-slice. Review of `fb6ce42dc` found four passing
-  lifecycle tests but a recovery completion gap: settlement can remove the active
-  reopen obligation before the window reopens. See `installer-slice-review.md`
-  for the evidence matrix and next proof. Copied-app activation is not accepted;
-  no publication or Flow navigation decision was made. The earlier
-  `compress-review.md` remains historical evidence.
+- The selected step is concept-review. Review of `f8260ba70` retains the accepted
+  setup interaction and existing owners; see `concept-review.md`. The prior
+  `installer-slice-review.md` evidence still applies: settlement can remove the
+  reopen obligation before the window reopens, and retained-helper survival
+  lacks boundary proof. No new product decision is needed for that repair.
+  Copied-app activation is not accepted; no publication or Flow navigation
+  decision was made. The earlier `compress-review.md` is historical evidence.
 - The no-rendering constraint prevents the live baseline required before UI
   edits. Continue with installer-owned work and isolated process fixtures;
   do not substitute those fixtures for the baseline or clean-account trial.

@@ -947,7 +947,7 @@ pub(super) fn flow_position_in(
 }
 
 pub(super) fn set_flow_position_in(
-    conn: &Connection,
+    conn: &rusqlite::Transaction<'_>,
     task_id: &TaskId,
     position: &FlowPosition,
 ) -> StoreResult<FlowPosition> {
@@ -1080,7 +1080,7 @@ pub(super) fn release_task_worker_in(
 }
 
 pub(super) fn settle_task_worker_in(
-    conn: &Connection,
+    conn: &rusqlite::Transaction<'_>,
     task_id: &TaskId,
     expected: &TaskWorkerClaim,
     next: &FlowPosition,
@@ -1435,6 +1435,7 @@ mod durable_store_tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
+    use super::super::runs::{insert_run_in, read_run};
     use crate::durable::{
         FlowPosition, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaimOutcome,
         TaskWorkerOwner,
@@ -1445,6 +1446,7 @@ mod durable_store_tests {
     use crate::engine::{ConcreteStep, ExecutionCursor, Skill};
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::session::{Run, WorkSource};
     use crate::store::sqlite::SqliteStore;
     use crate::work::project::Project;
     use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
@@ -1590,6 +1592,220 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn run_constructor_infers_ancestors_and_rejects_conflicts_atomically() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let position = store
+            .set_flow_position(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        let mut conn = store.conn.lock().unwrap();
+        let other_wave = WaveId::new();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'other','/repo',1)",
+            [other_wave.as_str()],
+        )
+        .unwrap();
+        let other_task = TaskId::new();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+            SELECT ?1,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
+            rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
+        let taskless = crate::engine::invocation::QueuedInvocation::new(
+            "taskless",
+            position.invocation.steps.clone(),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
+            position_version,worker_generation,updated_at,state)
+            VALUES(?1,?2,0,0,1,0,1,'current')",
+            rusqlite::params![taskless.id, serde_json::to_string(&taskless).unwrap()],
+        )
+        .unwrap();
+        let new_run = |invocation_id, task_id, wave_id| Run {
+            id: RunId::new(),
+            session_id: None,
+            invocation_id,
+            task_id,
+            wave_id,
+            work_source: Some(WorkSource::Declared),
+            created_at: 100,
+            published: false,
+            cwd: "/repo".into(),
+            skill: Some("implement".into()),
+        };
+        for (invocation, task_input, wave_input, expected_task, expected_wave) in [
+            (None, None, None, None, None),
+            (
+                None,
+                None,
+                Some(other_wave.clone()),
+                None,
+                Some(other_wave.clone()),
+            ),
+            (
+                None,
+                Some(task_id.clone()),
+                None,
+                Some(task_id.clone()),
+                Some(task.wave_id.clone()),
+            ),
+            (
+                Some(position.invocation.id.clone()),
+                None,
+                None,
+                Some(task_id.clone()),
+                Some(task.wave_id.clone()),
+            ),
+            (
+                Some(position.invocation.id.clone()),
+                Some(task_id.clone()),
+                Some(task.wave_id.clone()),
+                Some(task_id.clone()),
+                Some(task.wave_id.clone()),
+            ),
+            (Some(taskless.id.clone()), None, None, None, None),
+            (
+                Some(taskless.id.clone()),
+                None,
+                Some(other_wave.clone()),
+                None,
+                Some(other_wave.clone()),
+            ),
+        ] {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            let saved = insert_run_in(&tx, new_run(invocation, task_input, wave_input)).unwrap();
+            assert_eq!(saved.task_id, expected_task);
+            assert_eq!(saved.wave_id, expected_wave);
+            tx.commit().unwrap();
+            let read = conn
+                .query_row(
+                    "SELECT id,session_id,invocation_id,task_id,wave_id,work_source,
+                created_at,published,cwd,skill FROM runs WHERE id=?1",
+                    [saved.id.as_str()],
+                    |row| read_run(row, 0),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(read, saved);
+        }
+        let run_count: i64 = conn
+            .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
+            .unwrap();
+        for (invocation, task_input, wave_input) in [
+            (None, Some(task_id.clone()), Some(other_wave.clone())),
+            (Some(position.invocation.id.clone()), Some(other_task), None),
+            (Some(taskless.id.clone()), Some(task_id.clone()), None),
+            (Some("missing".into()), None, None),
+            (None, Some(TaskId::new()), None),
+            (None, None, Some(WaveId::new())),
+        ] {
+            let mut requested = new_run(invocation, task_input, wave_input);
+            requested.session_id = Some("failed-conversation".into());
+            {
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .unwrap();
+                tx.execute(
+                    "INSERT INTO sessions(id,current_run_id,title,title_source,created_at)
+                    VALUES('failed-conversation',?1,'Must roll back','generated',100)",
+                    [requested.id.as_str()],
+                )
+                .unwrap();
+                assert!(insert_run_in(&tx, requested).is_err());
+            }
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                run_count
+            );
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM sessions", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+        // Changing a parent cannot invalidate an already reserved child's ancestry.
+        assert!(conn
+            .execute(
+                "UPDATE flow_invocations SET task_id=NULL WHERE id=?1",
+                [&position.invocation.id]
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "UPDATE projects SET wave_id=?1 WHERE id=?2",
+                rusqlite::params![other_wave.as_str(), task.project_id.as_str()]
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn run_reservation_serializes_with_project_ancestry_changes() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let other_wave = WaveId::new();
+        let mut conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'other','/repo',1)",
+            [other_wave.as_str()],
+        )
+        .unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let writer_barrier = barrier.clone();
+        let project_id = task.project_id.clone();
+        let db = dir.path().join("loopflow.db");
+        let writer = thread::spawn(move || {
+            let conn = rusqlite::Connection::open(db).unwrap();
+            conn.busy_timeout(super::super::SQLITE_WRITE_BUSY_TIMEOUT)
+                .unwrap();
+            conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+            writer_barrier.wait();
+            conn.execute(
+                "UPDATE projects SET wave_id=?1 WHERE id=?2",
+                rusqlite::params![other_wave.as_str(), project_id.as_str()],
+            )
+        });
+        barrier.wait();
+        let saved = insert_run_in(
+            &tx,
+            Run {
+                id: RunId::new(),
+                session_id: None,
+                invocation_id: None,
+                task_id: Some(task_id),
+                wave_id: None,
+                work_source: Some(WorkSource::Checkout),
+                created_at: 100,
+                published: false,
+                cwd: "/repo".into(),
+                skill: None,
+            },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let error = writer.join().unwrap().unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Project would change Run ancestry"));
+        let (run_wave, project_wave): (String, String) = conn
+            .query_row(
+                "SELECT r.wave_id,p.wave_id FROM runs r JOIN tasks t ON t.id=r.task_id
+             JOIN projects p ON p.id=t.project_id WHERE r.id=?1",
+                [saved.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(run_wave, task.wave_id.as_str());
+        assert_eq!(run_wave, project_wave);
+    }
+
+    #[test]
     fn task_started_tracks_published_review_history_not_reservation() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
@@ -1650,11 +1866,25 @@ mod durable_store_tests {
             .ready_session(&session_id, &first_run, "Keep the reviewed parser behavior")
             .unwrap();
         position = store.flow_position(&task_id).unwrap().unwrap();
+        let first_attempt = store.session(&session_id).unwrap().unwrap().1;
+        assert_eq!(first_attempt.work_source, Some(WorkSource::Inherited));
         let mut runs = vec![first_run];
         for _ in 0..2 {
             let stale = position.clone();
             let (reserved, run) = store.reserve_review_run(&position).unwrap();
             assert!(!run.published);
+            assert_eq!(run.task_id, first_attempt.task_id);
+            assert_eq!(run.wave_id, first_attempt.wave_id);
+            assert_eq!(run.invocation_id, first_attempt.invocation_id);
+            assert_eq!(run.work_source, Some(WorkSource::Inherited));
+            assert_eq!(
+                store
+                    .session_runs(&session_id)
+                    .unwrap()
+                    .iter()
+                    .find(|run| run.id == first_attempt.id),
+                Some(&first_attempt)
+            );
             assert!(store.reserve_review_run(&stale).is_err());
             assert!(store
                 .ready_session(&session_id, runs.last().unwrap(), "late feedback")

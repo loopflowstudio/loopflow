@@ -80,15 +80,9 @@ pub(crate) struct FlowSessionToken {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum HumanSessionToken {
-    Flow {
-        token: Box<FlowSessionToken>,
-    },
-    Ask {
-        id: String,
-    },
-    StandaloneFlow {
-        token: crate::ops::flow_run::StepToken,
-    },
+    Flow { token: Box<FlowSessionToken> },
+    Ask { id: String },
+    StandaloneFlow { id: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -601,11 +595,8 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     }
     let run_id = active_run_id()?;
     let id = match active_session_token()? {
-        HumanSessionToken::StandaloneFlow { token } => {
-            format!("flow:{}:{}", token.invocation, token.boundary)
-        }
         HumanSessionToken::Flow { token } => flow_token_id(&token),
-        HumanSessionToken::Ask { id } => id,
+        HumanSessionToken::StandaloneFlow { id } | HumanSessionToken::Ask { id } => id,
     };
     // The store fences readiness on the Session's current Run.
     store.ready_session(&id, &run_id, summary).await?;
@@ -824,7 +815,7 @@ pub(crate) async fn serve_ask(store: &SharedStore, run_id: &RunId) -> Result<()>
 fn session_token(session: &Session) -> Result<HumanSessionToken> {
     Ok(match session.kind {
         crate::session::SessionKind::FlowReview => HumanSessionToken::StandaloneFlow {
-            token: crate::ops::flow_session::token(&session.id)?,
+            id: session.id.clone(),
         },
         _ => HumanSessionToken::Ask {
             id: session.id.clone(),
@@ -846,8 +837,8 @@ async fn serve_locked(
         .current_dir(&run.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
     match &token {
-        HumanSessionToken::StandaloneFlow { token } => {
-            crate::ops::flow_session::launch(&mut command, token)?
+        HumanSessionToken::StandaloneFlow { id } => {
+            crate::ops::flow_session::launch(store, &mut command, id).await?
         }
         _ => {
             command.args(ask_launch_args(store, session, run).await);
@@ -1113,8 +1104,8 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<RunId> {
             run
         } else {
             let flow = match &token {
-                HumanSessionToken::StandaloneFlow { token } => {
-                    crate::ops::flow_session::membership(token)?
+                HumanSessionToken::StandaloneFlow { id } => {
+                    crate::ops::flow_session::membership(store, id).await?
                 }
                 _ => crate::run_record::RunFlowMembership::Independent,
             };
@@ -1414,10 +1405,6 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
         Err(_) => store.get_task_by_issue(task).await?,
     }
     .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
-    eprintln!(
-        "Binding {} to {} ({}). Permanent.",
-        session.id, task.plan.identifier, task.plan.title
-    );
     let (session, run) = store
         .bind_session(&session.id, &task.id)
         .await
@@ -1425,6 +1412,10 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
             crate::store::StoreError::InvalidAuthority(reason) => anyhow!(reason),
             error => anyhow!(error),
         })?;
+    eprintln!(
+        "Binding {} to {} ({}). Permanent.",
+        session.id, task.plan.identifier, task.plan.title
+    );
     surface(store, &session, &run).await
 }
 
@@ -1911,8 +1902,8 @@ pub(crate) fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
     let token: HumanSessionToken =
         serde_json::from_str(&raw).context("active session token is invalid")?;
     match token {
-        HumanSessionToken::StandaloneFlow { token } => {
-            crate::ops::flow_session::pinned_skill(&token, requested).map(Some)
+        HumanSessionToken::StandaloneFlow { id } => {
+            crate::ops::flow_session::pinned_skill(&id, requested).map(Some)
         }
         HumanSessionToken::Flow { token } => {
             if token.skill.name != requested {

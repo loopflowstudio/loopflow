@@ -1,54 +1,28 @@
 //! Human review of a saved Flow. The review is a Session whose Runs name the
-//! Flow's invocation and the Flow's Work, Task included; the saved position
-//! keeps only the Flow's execution.
+//! Flow's invocation and the Flow's Work, Task included; the invocation row
+//! waits on it through `pending_session_id`.
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
+use crate::durable::FlowInvocation;
 use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
-use crate::ops::flow_run::{self, FlowRun, StepToken};
+use crate::ops::flow_run::{self, ActiveStep};
 use crate::ops::human_session;
 use crate::run_record::{RunFlowMembership, RunFlowStep};
-use crate::session::{Run, RunWork, Session, SessionKind, TitleSource, WorkSource};
+use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
-fn session_id(token: &StepToken) -> String {
-    format!("flow:{}:{}", token.invocation, token.boundary)
-}
-
-pub(crate) fn token(session_id: &str) -> Result<StepToken> {
-    let (invocation, boundary) = session_id
-        .strip_prefix("flow:")
-        .and_then(|rest| rest.split_once(':'))
-        .ok_or_else(|| anyhow!("Session {session_id} is not a saved Flow's review"))?;
-    Ok(StepToken {
-        invocation: invocation.to_string(),
-        boundary: boundary.to_string(),
-    })
-}
-
-/// The saved Flow, while it waits at this review.
-fn waiting(token: &StepToken) -> Result<FlowRun> {
-    let flow = flow_run::read(&token.invocation)?;
-    ensure!(
-        !flow.finished
-            && flow.is_human()?
-            && flow
-                .active
-                .as_ref()
-                .is_some_and(|boundary| boundary.id == token.boundary && !boundary.completed),
-        "Flow Session is stale or already decided"
-    );
-    Ok(flow)
-}
-
-fn current_skill(flow: &FlowRun) -> Result<&ConcreteSkill> {
-    match flow.current_step()? {
-        ConcreteStep::Skill(skill) => Ok(skill),
+fn current_skill(flow: &FlowInvocation) -> Result<&ConcreteSkill> {
+    match flow.current_step() {
+        Some(ConcreteStep::Skill(skill)) if skill.human => Ok(skill),
         _ => bail!("saved Flow position is not a human skill"),
     }
 }
 
-pub(crate) fn pinned_skill(token: &StepToken, requested: &str) -> Result<Skill> {
-    let flow = waiting(token)?;
+/// The Skill a review's agent runs: the one captured at the waiting step.
+pub(crate) fn pinned_skill(session_id: &str, requested: &str) -> Result<Skill> {
+    let store =
+        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let flow = store.waiting_review(session_id)?;
     let skill = &current_skill(&flow)?.skill;
     ensure!(
         skill.name == requested,
@@ -57,67 +31,51 @@ pub(crate) fn pinned_skill(token: &StepToken, requested: &str) -> Result<Skill> 
     Ok(skill.clone())
 }
 
-pub(crate) fn membership(token: &StepToken) -> Result<RunFlowMembership> {
-    Ok(RunFlowMembership::Step(RunFlowStep::of_flow(&waiting(
-        token,
-    )?)?))
-}
-
-/// The Work a saved Flow was launched with.
-pub(crate) async fn declared_work(store: &SharedStore, flow: &FlowRun) -> Option<RunWork> {
-    let selector = flow
-        .as_work
-        .clone()
-        .or(flow.task.as_ref().map(|id| format!("task:{id}")))
-        .or(flow.wave.as_ref().map(|id| format!("wave:{id}")))?;
-    let binding = crate::ops::resolve_work_binding(store, &flow.cwd, &selector).await;
-    let binding = binding.ok()?;
-    Some(RunWork {
-        task_id: match binding.work {
-            crate::durable::WorkRef::Task(id) => Some(id),
-            _ => None,
-        },
-        wave_id: Some(binding.wave_id),
-        source: WorkSource::Declared,
-    })
+pub(crate) async fn membership(store: &SharedStore, session_id: &str) -> Result<RunFlowMembership> {
+    Ok(RunFlowMembership::Step(RunFlowStep::of_flow(
+        &store.waiting_review(session_id).await?,
+    )?))
 }
 
 /// Store the review the Flow waits at, with its first Run prepared. Returns
 /// the feedback once the review is complete.
-pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Option<String>> {
-    let id = session_id(token);
-    let session = match store.session(&id).await? {
-        Some((session, _)) => session,
+pub(crate) async fn reserve(store: &SharedStore, flow: &FlowInvocation) -> Result<Option<String>> {
+    let session = match &flow.pending_session_id {
+        Some(id) => {
+            store
+                .session(id)
+                .await?
+                .ok_or_else(|| anyhow!("review Session {id} disappeared"))?
+                .0
+        }
         None => {
-            let flow = waiting(token)?;
-            let skill = current_skill(&flow)?.skill.name.clone();
+            let skill = current_skill(flow)?.skill.name.clone();
             let config = crate::engine::config::load_config(Some(&flow.cwd))?.unwrap_or_default();
             let (provider, model) =
                 crate::engine::config::parse_agent(flow.model.as_deref().unwrap_or(config.agent()));
-            // A Flow about a Task names it on its review without becoming
-            // the Task's Flow; the review still closes through its Session.
-            let work = declared_work(store, &flow).await;
+            let id = format!("session_{}", uuid::Uuid::new_v4().simple());
+            let work = flow.declared_work();
             let run = human_session::prepare_run(
                 Run {
                     id: crate::durable::RunId::new(),
                     session_id: Some(id.clone()),
-                    invocation_id: Some(flow.id.clone()),
+                    invocation_id: Some(flow.id().to_owned()),
                     node: None,
                     iterations: None,
                     attempt: None,
-                    task_id: work.as_ref().and_then(|work| work.task_id.clone()),
-                    work_source: work.as_ref().map(|_| WorkSource::Declared),
-                    wave_id: work.and_then(|work| work.wave_id),
+                    task_id: flow.task_id.clone(),
+                    work_source: work.map(|_| WorkSource::Declared),
+                    wave_id: flow.wave_id.clone(),
                     created_at: 0,
                     published: true,
                     cwd: flow.cwd.clone(),
                     skill: Some(skill.clone()),
-                    provider: Some(provider.to_string()),
+                    provider: Some(provider),
                     model,
                     caller_run_id: None,
                     ended: None,
                 },
-                RunFlowMembership::Step(RunFlowStep::of_flow(&flow)?),
+                RunFlowMembership::Step(RunFlowStep::of_flow(flow)?),
             )?;
             let session = Session {
                 id,
@@ -130,13 +88,8 @@ pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Op
                 completed_at: None,
                 created_at: run.created_at,
             };
-            let invocation = crate::engine::invocation::QueuedInvocation {
-                id: flow.id,
-                flow: flow.flow,
-                steps: flow.steps,
-            };
             store
-                .create_session(session, run, Some((invocation, flow.cursor)))
+                .create_session(session, run, Some(flow.clone()))
                 .await?
                 .0
         }
@@ -146,26 +99,25 @@ pub(crate) async fn reserve(store: &SharedStore, token: &StepToken) -> Result<Op
 
 /// Close the review and hand its feedback to the Flow's next step.
 pub(crate) async fn complete(store: &SharedStore, session: &Session, run: &Run) -> Result<()> {
-    let token = token(&session.id)?;
+    let flow = store.waiting_review(&session.id).await?;
     ensure!(
-        waiting(&token)?.failure.is_none(),
+        flow.failure.is_none(),
         "Flow is blocked; resolve its failure first"
     );
     store.complete_session(&session.id, &run.id).await?;
-    let launch = flow_run::launch_driver(&token.invocation).await;
+    let launch = flow_run::launch_driver(flow.id()).await;
     if let Err(error) = human_session::stop_run(&run.id) {
         tracing::warn!(run_id = %run.id, %error, "review completed but provider cleanup failed");
     }
     launch.with_context(|| {
         format!(
             "Review feedback saved; continue with `lf flow resume {}`",
-            token.invocation
+            flow.id()
         )
     })
 }
 
-fn review_message(flow: &FlowRun, token: &StepToken) -> String {
-    let id = session_id(token);
+fn review_message(flow: &FlowInvocation, session_id: &str) -> String {
     let mut message = flow.message.clone().unwrap_or_default();
     if let Some(direction) = &flow.cursor.leaf().progress.direction {
         message.push_str(&format!("\n\nPrevious direction:\n{direction}"));
@@ -173,31 +125,37 @@ fn review_message(flow: &FlowRun, token: &StepToken) -> String {
     message.push_str(&format!(
         "\n\nThis is the interactive review step of saved Flow {}. Work with the human on the experience and finish any design clarification before ending the review.\n\
          Save self-contained, topic-named notes in scratch/ with the human feedback, agreed design changes, unresolved questions, and next useful action. Link the current design and evidence. Put the exact note paths and a short takeaway in the ready summary, then run `lf session ready \"feedback, design changes, and remaining work\"`.\n\
-         The human completes this review with `lf session complete {id}`. Completion returns the saved feedback to the next Flow step; it does not choose Advance or Iterate. A following loop-decide step interprets the feedback and owns navigation.", flow.flow));
+         The human completes this review with `lf session complete {session_id}`. Completion returns the saved feedback to the next Flow step; it does not choose Advance or Iterate. A following loop-decide step interprets the feedback and owns navigation.", flow.invocation.flow));
     message
 }
 
-/// The review's launch: the Flow's own selectors, its pinned Skill and step.
-pub(crate) fn launch(command: &mut tokio::process::Command, token: &StepToken) -> Result<()> {
-    let flow = waiting(token)?;
+/// The review's launch: the Flow's Work, its pinned Skill and step.
+pub(crate) async fn launch(
+    store: &SharedStore,
+    command: &mut tokio::process::Command,
+    session_id: &str,
+) -> Result<()> {
+    let flow = store.waiting_review(session_id).await?;
+    let step = ActiveStep {
+        invocation: flow.id().to_owned(),
+        version: flow.version,
+    };
     command
         .arg("--tui")
-        .env(flow_run::FLOW_STEP_ENV, serde_json::to_string(token)?);
-    for (flag, value) in [
-        ("--model", &flow.model),
-        ("--wave", &flow.wave),
-        ("--task", &flow.task),
-        ("--as", &flow.as_work),
-    ] {
-        if let Some(value) = value {
-            command.args([flag, value]);
-        }
+        .env(flow_run::FLOW_STEP_ENV, serde_json::to_string(&step)?);
+    if let Some(model) = &flow.model {
+        command.args(["--model", model]);
     }
+    match (&flow.task_id, &flow.wave_id) {
+        (Some(task), _) => command.args(["--task", task.as_str()]),
+        (None, Some(wave)) => command.args(["--wave", wave.as_str()]),
+        (None, None) => command,
+    };
     command.args([
         "skill",
         "--",
         &current_skill(&flow)?.skill.name,
-        &review_message(&flow, token),
+        &review_message(&flow, session_id),
     ]);
     Ok(())
 }
@@ -206,19 +164,27 @@ pub(crate) fn launch(command: &mut tokio::process::Command, token: &StepToken) -
 mod tests {
     use std::collections::HashMap;
 
-    use super::{complete, pinned_skill, reserve, review_message, session_id, token};
-    use crate::durable::RunId;
+    use super::{complete, pinned_skill, reserve, review_message};
+    use crate::durable::{FlowInvocation, RunId};
     use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor};
+    use crate::engine::invocation::QueuedInvocation;
     use crate::engine::{ExecutionCursor, NestedCursor, Skill};
-    use crate::ops::flow_run;
     use crate::store::{open_ephemeral_store, StorageConfig};
 
     #[test]
     fn nested_review_is_one_session_and_returns_its_feedback() {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("LF_HOME");
+        let previous = [
+            ("LF_HOME", std::env::var_os("LF_HOME")),
+            ("LF_DB_PATH", std::env::var_os("LF_DB_PATH")),
+            ("LF_CONTROL_HOME", std::env::var_os("LF_CONTROL_HOME")),
+            ("LF_CONTROL_DB_PATH", std::env::var_os("LF_CONTROL_DB_PATH")),
+        ];
         std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_DB_PATH", home.path().join("registry.db"));
+        std::env::remove_var("LF_CONTROL_HOME");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         let mut demo = Skill::named("demo");
         demo.content = Some("Pinned demo instructions".into());
         let steps = vec![ConcreteStep::Xor(ConcreteXor {
@@ -238,46 +204,58 @@ mod tests {
             )]),
             flow_parents: Vec::new(),
         })];
-        let cli = crate::lf::Cli::default();
-        let flow = flow_run::create("review", &steps, home.path(), None, &cli).unwrap();
-        flow_run::update(&flow.id, |flow| {
-            flow.cursor.child = Some(Box::new(NestedCursor::Xor {
-                selected: "chosen".into(),
-                cursor: ExecutionCursor::default(),
-            }));
-            Ok(())
-        })
-        .unwrap();
-        let (step, _) = flow_run::begin_boundary(&flow.id).unwrap();
-        let id = session_id(&step);
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = std::sync::Arc::new(
                 open_ephemeral_store(&StorageConfig::sqlite(home.path().join("registry.db")))
                     .await
                     .unwrap(),
             );
-            assert_eq!(reserve(&store, &step).await.unwrap(), None);
-            assert_eq!(reserve(&store, &step).await.unwrap(), None);
+            let flow = store
+                .create_flow(FlowInvocation {
+                    invocation: QueuedInvocation::new("review", steps).unwrap(),
+                    cursor: ExecutionCursor {
+                        child: Some(Box::new(NestedCursor::Xor {
+                            selected: "chosen".into(),
+                            cursor: ExecutionCursor::default(),
+                        })),
+                        ..ExecutionCursor::default()
+                    },
+                    version: 0,
+                    task_id: None,
+                    wave_id: None,
+                    cwd: home.path().to_path_buf(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    failure: None,
+                    finished: false,
+                })
+                .await
+                .unwrap();
+            assert_eq!(reserve(&store, &flow).await.unwrap(), None);
+            let waiting = store.flow(flow.id()).await.unwrap().unwrap();
+            let id = waiting.pending_session_id.clone().unwrap();
+            assert!(id.starts_with("session_"));
+            assert_eq!(reserve(&store, &waiting).await.unwrap(), None);
             let (session, run) = store.session(&id).await.unwrap().unwrap();
-            assert_eq!(token(&session.id).unwrap(), step);
             assert_eq!(
                 store.session_runs(&id).await.unwrap(),
                 std::slice::from_ref(&run)
             );
             assert_eq!(
                 (run.invocation_id.as_deref(), &run.task_id),
-                (Some(flow.id.as_str()), &None)
+                (Some(flow.id()), &None)
             );
             assert_eq!(
                 store.waiting_flow(&id).await.unwrap(),
                 Some(("review".to_string(), "0/chosen/0".to_string()))
             );
             assert_eq!(
-                pinned_skill(&step, "demo").unwrap().content.as_deref(),
+                pinned_skill(&id, "demo").unwrap().content.as_deref(),
                 Some("Pinned demo instructions")
             );
-            let saved = flow_run::read(&flow.id).unwrap();
-            assert!(review_message(&saved, &step).contains(&format!("lf session complete {id}")));
+            assert!(review_message(&waiting, &id).contains(&format!("lf session complete {id}")));
 
             assert!(complete(&store, &session, &run).await.is_err());
             assert!(store
@@ -294,16 +272,19 @@ mod tests {
                 .ready_session(&id, &run.id, "late rewrite")
                 .await
                 .is_err());
+            let completed = store.flow(flow.id()).await.unwrap().unwrap();
             assert_eq!(
-                reserve(&store, &step).await.unwrap().as_deref(),
+                reserve(&store, &completed).await.unwrap().as_deref(),
                 Some("Use the revised design")
             );
             assert!(store.open_sessions().await.unwrap().is_empty());
-            assert_eq!(flow_run::read(&flow.id).unwrap().cursor, saved.cursor);
+            assert_eq!(completed.cursor, waiting.cursor);
         });
-        match previous {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
         }
     }
 }

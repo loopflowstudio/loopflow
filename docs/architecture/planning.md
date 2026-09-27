@@ -109,7 +109,7 @@ The persistence owners remain separate:
 | Invocation | Saved position | Settlement authority |
 | --- | --- | --- |
 | Managed Task Flow | `FlowPosition` holds the captured invocation and full cursor; SQLite `review_json` stores the cursor tree, with root `step_index`/`iteration` projections | Versioned Task claim and existing domain transactions |
-| Ordinary Flow, optionally attributed to Work | Current Home `flows/<UUID>/position.json` holds `FlowRun`: definition, cursor, selectors, active boundary and outcome | File locks for position updates and driver execution |
+| Saved Flow, optionally attributed to Work | The same `flow_invocations` row, read as `FlowInvocation`: definition, cursor, launch facts (`cwd`, `message`, `model`, `task_id`, `wave_id`), current attempt Run and failure | `position_version` fences the cursor, `current_run_id` the attempt; `flows/<UUID>/driver.lock` serializes drivers |
 
 Resume an ordinary invocation with `lf flow resume <UUID>`. A helper Flow
 attributed to a Task keeps its own position; attribution cannot move the managed
@@ -220,12 +220,13 @@ a decision from the user: it blocks the originating Run while a durable TUI agen
 its checkout. Agent readiness leaves the session visible. Complete closes that
 conversation and resumes the originating Run with the ready summary.
 
-A human FlowStep uses the position already owned by Task `FlowPosition` or
-ordinary [`FlowRun`](../../rust/loopflow/src/ops/flow_run.rs). Its Session opens
-the captured Skill and binds the provider Run to that exact boundary. Ordinary
-Session ids contain invocation and boundary UUIDs; Task tokens retain their
-Task/invocation/node/skill/iteration identity. An Ask instead persists a small
-Home-local record and its ordinary Run id while its caller waits.
+A human FlowStep uses the position already owned by Task `FlowPosition` or a
+saved Flow's `FlowInvocation` row. Its Session opens the captured Skill and
+binds the provider Run to that exact step. A saved Flow's review Session has an
+opaque `session_<uuid>` id and is linked through `pending_session_id` on the
+invocation row; Task tokens retain their Task/invocation/node/skill/iteration
+identity. An Ask persists its question and answer on its `sessions` row while
+its caller waits.
 
 ```bash
 lf session ready "Human feedback, revised design, remaining work"

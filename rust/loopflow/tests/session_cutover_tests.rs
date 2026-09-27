@@ -983,15 +983,12 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     );
 
     let inside = |run_id: &str, args: &[&str]| -> Output {
-        let boundary = id.rsplit(':').next().unwrap();
         fixture
             .command(args)
             .env("LF_RUN_ID", run_id)
             .env(
                 "LF_HUMAN_SESSION",
-                serde_json::json!({"kind": "standalone_flow",
-                    "token": {"invocation": invocation, "boundary": boundary}})
-                .to_string(),
+                serde_json::json!({"kind": "standalone_flow", "id": id}).to_string(),
             )
             .output()
             .unwrap()
@@ -1686,4 +1683,279 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     let sessions = fixture.sessions();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0]["run_id"], review.as_str());
+}
+
+/// A provider stand-in that fails its first launch when `fail-once` exists
+/// and records its decision inside a Flow step. A development `lf` resolves
+/// its own Home, so the stand-in names the fixture's Home for the nested call.
+fn saved_flow_stand_in(fixture: &Fixture) {
+    let provider = fixture.home.path().join("bin/opencode");
+    std::fs::write(
+        &provider,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
+             printf '%s\\n' \"message=created id=ses_$LF_RUN_ID\" >&2\n\
+             echo \"$LF_RUN_ID\" >> '{}'\n\
+             if [ -f \"$LF_CONTROL_HOME/fail-once\" ]; then rm -f \"$LF_CONTROL_HOME/fail-once\"; exit 7; fi\n\
+             if [ -n \"$LF_FLOW_STEP\" ]; then LF_HOME=\"$LF_CONTROL_HOME\" LF_DB_PATH=\"$LF_CONTROL_DB_PATH\" \
+             '{}' flow decide advance 'Proof observed' \
+             >> \"$LF_CONTROL_HOME/decide.log\" 2>&1 || true; fi\n",
+            fixture.launched.display(),
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let lf = fixture.repo.path().join(".lf");
+    std::fs::create_dir_all(lf.join("skills")).unwrap();
+    std::fs::create_dir_all(lf.join("flows")).unwrap();
+    std::fs::write(lf.join("skills/work-proof.md"), "Do the fixture work.").unwrap();
+    std::fs::write(lf.join("skills/review-proof.md"), "Review the fixture.").unwrap();
+    std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
+    std::fs::write(
+        lf.join("flows/work-then-review.yaml"),
+        "- work-proof\n- step:\n    id: review\n    name: review-proof\n    human: true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        lf.join("flows/work-then-decide.yaml"),
+        "- step:\n    id: work\n    name: work-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: work\n",
+    )
+    .unwrap();
+}
+
+/// (id, node, attempt, outcome, task) of one Run.
+type AttemptRow = (String, i64, i64, Option<String>, Option<String>);
+
+/// Every Run of one invocation, oldest attempt first.
+fn invocation_runs(fixture: &Fixture, invocation: &str) -> Vec<AttemptRow> {
+    fixture
+        .db()
+        .prepare(
+            "SELECT id, node, attempt, outcome, task_id FROM runs WHERE invocation_id=?1
+             ORDER BY created_at, attempt",
+        )
+        .unwrap()
+        .query_map([invocation], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+/// The invocation row is the only cursor owner of a saved Flow: a step whose
+/// provider dies is a failed attempt, `--retry` is the next attempt, the
+/// review lists under the Task, and no position file ever exists.
+#[test]
+fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "task-row-flow",
+        &fixture.repo.head_sha(),
+    );
+    let task_id = task.task.id.to_string();
+    std::fs::write(fixture.home.path().join("fail-once"), "").unwrap();
+    let blocked = fixture.run(&[
+        "--task",
+        "INF-123",
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-review",
+        "-b",
+        "--no-loopflow",
+    ]);
+    let stderr = String::from_utf8_lossy(&blocked.stderr);
+    assert!(!blocked.status.success(), "{blocked:?}");
+    let (invocation, failure, pointer): (String, Option<String>, Option<String>) = fixture
+        .db()
+        .query_row(
+            "SELECT f.id, f.failure_json, t.current_invocation_id FROM flow_invocations f
+             JOIN tasks t ON t.id=f.task_id WHERE f.task_id=?1",
+            [&task_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    let flow_dir = fixture.home.path().join("flows").join(&invocation);
+    let no_position_file = || {
+        assert!(
+            !flow_dir.join("position.json").exists(),
+            "the row is the only cursor owner"
+        );
+        assert!(!flow_dir.join("position.lock").exists());
+    };
+    no_position_file();
+    assert!(stderr.contains("blocked"), "{stderr}");
+    let failure = failure.unwrap();
+    assert!(failure.contains("work-proof Run failed"), "{failure}");
+    assert_eq!(pointer, None, "a Flow about the Task is not its Flow");
+    let failed = invocation_runs(&fixture, &invocation);
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert_eq!(
+        (failed[0].2, failed[0].3.as_deref(), failed[0].4.as_deref()),
+        (1, Some("failed"), Some(task_id.as_str()))
+    );
+
+    let waiting = fixture.run(&["flow", "resume", &invocation, "--retry"]);
+    assert!(
+        String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
+        "{waiting:?}"
+    );
+    no_position_file();
+    let runs = invocation_runs(&fixture, &invocation);
+    assert_eq!(runs.len(), 3, "{runs:?}");
+    assert_eq!(runs[0].0, failed[0].0);
+    assert_eq!(
+        (runs[1].1, runs[1].2, runs[1].3.as_deref()),
+        (runs[0].1, 2, Some("completed"))
+    );
+    assert_eq!((runs[2].2, runs[2].3.as_deref()), (1, None));
+    assert_ne!(runs[2].1, runs[1].1, "the review is its own node");
+    for run in &runs {
+        assert_eq!(run.4.as_deref(), Some(task_id.as_str()), "{run:?}");
+    }
+    let review = runs[2].0.clone();
+    let listed: Vec<Value> =
+        serde_json::from_value(fixture.json(&["runs", "--task", "INF-123", "--json"])).unwrap();
+    let mut listed: Vec<&str> = listed
+        .iter()
+        .map(|run| run["id"].as_str().unwrap())
+        .collect();
+    listed.sort();
+    let mut expected: Vec<&str> = runs.iter().map(|run| run.0.as_str()).collect();
+    expected.sort();
+    assert_eq!(listed, expected);
+
+    let sessions = fixture.sessions();
+    assert_eq!(sessions.len(), 1, "{sessions:?}");
+    let session = &sessions[0];
+    let id = session["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("session_"), "{id}");
+    assert_eq!(session["kind"], "flow");
+    assert_eq!(session["run_id"], review.as_str());
+    assert_eq!(
+        session["work"],
+        serde_json::json!({"kind": "task", "id": task_id})
+    );
+    assert_eq!(session["flow_membership"]["flow"], "work-then-review");
+    assert_eq!(session["flow_membership"]["node"], "1");
+
+    let ready = fixture
+        .command(&["session", "ready", "Ship the parser"])
+        .env("LF_RUN_ID", &review)
+        .env(
+            "LF_HUMAN_SESSION",
+            serde_json::json!({"kind": "standalone_flow", "id": id}).to_string(),
+        )
+        .output()
+        .unwrap();
+    assert!(ready.status.success(), "{ready:?}");
+    let completed = fixture.run(&["session", "complete", &id]);
+    assert!(completed.status.success(), "{completed:?}");
+    let resumed = fixture.run(&["flow", "resume", &invocation]);
+    assert!(resumed.status.success(), "{resumed:?}");
+    let state: String = fixture
+        .db()
+        .query_row(
+            "SELECT state FROM flow_invocations WHERE id=?1",
+            [&invocation],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "completed");
+    no_position_file();
+    assert_eq!(invocation_runs(&fixture, &invocation).len(), 3);
+}
+
+/// `lf flow decide` inside a taskless step writes the invocation row, and the
+/// Flow takes the recorded edge.
+#[test]
+fn a_taskless_step_records_its_decision_on_the_invocation() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    let output = fixture.run(&[
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-decide",
+        "-b",
+        "--no-loopflow",
+    ]);
+    let log = std::fs::read_to_string(fixture.home.path().join("decide.log")).unwrap_or_default();
+    assert!(
+        output.status.success(),
+        "{}\n--- decide.log ---\n{log}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        log.lines()
+            .filter(|line| line.contains("Decision recorded"))
+            .count(),
+        1,
+        "{log}"
+    );
+    assert!(
+        log.contains("does not own a decision"),
+        "the work step refuses a decision: {log}"
+    );
+    let (state, task, cursor): (String, Option<String>, String) = fixture
+        .db()
+        .query_row(
+            "SELECT state, task_id, review_json FROM flow_invocations",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((state.as_str(), task), ("completed", None));
+    let cursor: Value = serde_json::from_str(&cursor).unwrap();
+    assert_eq!(
+        cursor["index"], 2,
+        "the recorded Advance left the loop: {cursor}"
+    );
+    assert_eq!(fixture.launches().len(), 2, "work once, decide once");
+    assert!(std::fs::read_dir(fixture.home.path().join("flows"))
+        .map(|entries| entries.flatten().all(|entry| {
+            std::fs::read_dir(entry.path())
+                .unwrap()
+                .flatten()
+                .all(|file| file.file_name() == "driver.lock")
+        }))
+        .unwrap_or(true));
+}
+
+/// A Flow whose invocation row cannot be written does not start: the store
+/// error is the refusal and no provider runs.
+#[test]
+fn a_flow_refuses_to_start_without_its_row() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    let store = LockedStore::new(&fixture);
+    let mut launch = fixture.command(&[
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-decide",
+        "-b",
+        "--no-loopflow",
+    ]);
+    store.select(&mut launch);
+    let output = launch.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("unable to open database file"),
+        "the refusal names the store error: {stderr}"
+    );
+    assert_eq!(fixture.launches(), Vec::<String>::new());
+    assert!(!fixture.home.path().join("flows").exists());
 }

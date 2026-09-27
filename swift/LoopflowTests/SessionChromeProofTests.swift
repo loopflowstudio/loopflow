@@ -236,11 +236,21 @@ struct SessionChromeProofTests {
         let (roadmap, _) = try pinnedRoadmap()
         let record = try renameFixtureRecord("palette-session", title: "Retained conversation", source: "human",
                                              work: .task(id: "ts_review00000000000000000000000000"))
-        let sessions = String(decoding: try JSONEncoder().encode([record]), as: UTF8.self)
+        let companion = try renameFixtureRecord("palette-companion", title: "Companion conversation", source: "human",
+                                                work: .task(id: "ts_review00000000000000000000000000"))
+        let records = try [record, companion].enumerated().map { index, record in
+            var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+            value["state"] = "active"
+            value["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+            if case .shell(let pane) = terminals[index].terminal { value["terminal_ids"] = [pane] }
+            return value
+        }
+        let sessions = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
         let flows = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/flow_catalog.json"), encoding: .utf8)
+        let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
             if args.first == "roadmap" { return roadmap }
-            if args.first == "session" { return sessions }
+            if args.first == "session" { return try await inventory.read() }
             if args.first == "flow" { return flows }
             if args.first == "ls" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
@@ -302,6 +312,74 @@ struct SessionChromeProofTests {
         try await Task.sleep(for: .milliseconds(400))
         if case .wave(let id) = second { #expect(model.selection == .wave(id: id)) }
         else { Issue.record("The fixture's second palette destination should be its Wave") }
+
+        // Repeated Session activation focuses the exact retained shell each time.
+        for (visit, index) in [0, 1, 0].enumerated() {
+            let selected = [record, companion][index]
+            try press("k", keyCode: 40, modifiers: [.command], in: window)
+            try await settle(window)
+            let sessionSheet = try #require(window.attachedSheet)
+            try await settle(sessionSheet)
+            for char in selected.title { try press(String(char), keyCode: 0, modifiers: [], in: sessionSheet) }
+            try press("\r", keyCode: 36, modifiers: [], in: sessionSheet)
+            try await Task.sleep(for: .milliseconds(400))
+            #expect(model.navigation.selectedSessionId == selected.id)
+            #expect(window.firstResponder === terminals[index])
+            #expect(terminals[index].surface == surfaces[index])
+            let reply = "visit-\(visit)-reply"
+            reply.withCString { ghostty_surface_text(surfaces[index], $0, UInt(reply.utf8.count)) }
+            try await expectEcho(reply, on: surfaces[index])
+        }
+
+        // Removing a highlighted Session must give Return to a visible row.
+        model.navigation.content = .terminals
+        try await settle(window)
+        window.makeFirstResponder(terminals[1])
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        let changing = try #require(window.attachedSheet)
+        try await settle(changing)
+        let initialRows = model.searchDestinations("")
+        let sessionIndex = try #require(initialRows.firstIndex { $0.id == .session(record.id) })
+        for _ in 0..<sessionIndex { try press("\u{f701}", keyCode: 125, modifiers: [], in: changing) }
+        await inventory.replace("[]")
+        await model.refreshSessions()
+        try await settle(changing)
+        let remaining = try #require(model.searchDestinations("").first?.id)
+        try press("\r", keyCode: 36, modifiers: [], in: changing)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(model.navigation.palette == nil)
+        #expect(model.navigation.selectedSessionId == nil)
+        if case .wave(let id) = remaining { #expect(model.selection == .wave(id: id)) }
+        else if case .task(let id) = remaining { #expect(model.selection == .task(id: id)) }
+        else { Issue.record("Expected a planning destination") }
+
+        // Empty search results submit nothing; failure retains last-good rows.
+        await inventory.replace(sessions)
+        await model.refreshSessions()
+        model.navigation.content = .terminals
+        try await settle(window)
+        window.makeFirstResponder(terminals[1])
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        let empty = try #require(window.attachedSheet)
+        try await settle(empty)
+        for char in record.title { try press(String(char), keyCode: 0, modifiers: [], in: empty) }
+        await inventory.fail()
+        await model.refreshSessions()
+        try await settle(empty)
+        #expect(model.paletteIsStale)
+        #expect(model.searchDestinations(record.title).map(\.id) == [.session(record.id)])
+        await inventory.replace("[]")
+        await model.refreshSessions()
+        try await settle(empty)
+        try press("\r", keyCode: 36, modifiers: [], in: empty)
+        #expect(model.navigation.palette == .search)
+        #expect(model.searchDestinations(record.title).isEmpty)
+        try press("\u{1b}", keyCode: 53, modifiers: [], in: empty)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(window.firstResponder === terminals[1])
+        for surface in surfaces { #expect(!terminalText(surface).contains(record.title)) }
 
         // Flow inspection replaces search in the same sheet and dismisses once.
         model.navigation.content = .terminals
@@ -414,4 +492,16 @@ struct SessionChromeProofTests {
         return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
     }
 }
+private actor PaletteSessionInventory {
+    private var value: String
+    private var failed = false
+    init(_ value: String) { self.value = value }
+    func replace(_ value: String) { self.value = value; failed = false }
+    func fail() { failed = true }
+    func read() throws -> String {
+        if failed { throw RegistryQueryError("Session read unavailable") }
+        return value
+    }
+}
+
 #endif

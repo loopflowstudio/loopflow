@@ -10,6 +10,8 @@ public struct FlowGraph: Decodable, Sendable, Hashable {
     public let name: String
     public let steps: [FlowNode]
 
+    public init(name: String, steps: [FlowNode]) { self.name = name; self.steps = steps }
+
     /// Locate an exact structural occurrence, including nested XOR paths.
     public func node(_ key: String) -> FlowNode? {
         func find(_ nodes: [FlowNode]) -> FlowNode? {
@@ -149,6 +151,7 @@ public struct TaskFlowSnapshot: Decodable, Sendable, Hashable {
 public struct FlowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
     public let name: String
     public let graph: FlowGraph?
+    public let template: FlowTemplate?
     public let unavailable: String?
 
     public var id: String { name }
@@ -159,4 +162,90 @@ public func flowIterationLabel(_ levels: [[UInt32]]) -> String? {
     guard levels.contains(where: { !$0.isEmpty }) else { return nil }
     return levels.map { "(" + $0.map(String.init).joined(separator: ", ") + ")" }
         .joined(separator: " / ")
+}
+
+/// Template-local disclosure IDs never identify execution or an invocation.
+public struct FlowTemplate: Decodable, Sendable, Hashable {
+    public let revision: String
+    public let items: [FlowTemplateItem]
+
+    public init(revision: String, items: [FlowTemplateItem]) {
+        self.revision = revision
+        self.items = items
+    }
+}
+
+public indirect enum FlowTemplateItem: Decodable, Sendable, Hashable, Identifiable {
+    case node(key: String, paths: [String: [FlowTemplateItem]])
+    case group(id: String, name: String, items: [FlowTemplateItem])
+
+    public var id: String {
+        switch self {
+        case .node(let key, _): key
+        case .group(let id, _, _): id
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, key, paths, id, name, items }
+    private enum Kind: String, Decodable { case node, group }
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.container(keyedBy: CodingKeys.self)
+        switch try value.decode(Kind.self, forKey: .kind) {
+        case .node:
+            self = .node(key: try value.decode(String.self, forKey: .key),
+                         paths: try value.decode([String: [FlowTemplateItem]].self, forKey: .paths))
+        case .group:
+            self = .group(id: try value.decode(String.self, forKey: .id),
+                          name: try value.decode(String.self, forKey: .name),
+                          items: try value.decode([FlowTemplateItem].self, forKey: .items))
+        }
+    }
+
+    public var groupIDs: Set<String> {
+        switch self {
+        case .node(_, let paths): Set(paths.values.flatMap { $0.flatMap(\.groupIDs) })
+        case .group(let id, _, let items): Set(items.flatMap(\.groupIDs)).union([id])
+        }
+    }
+
+    public var nodeKeys: [String] {
+        switch self {
+        case .node(let key, let paths): [key] + paths.keys.sorted().flatMap { paths[$0]!.flatMap(\.nodeKeys) }
+        case .group(_, _, let items): items.flatMap(\.nodeKeys)
+        }
+    }
+}
+
+/// Presentation maps hidden endpoints onto their visible composition boundary.
+public struct FlowTemplateProjection {
+    public let graph: FlowGraph
+    public let visibleKeys: [String: String]
+}
+
+extension FlowTemplate {
+    public func project(_ graph: FlowGraph, expanded: Set<String>) -> FlowTemplateProjection {
+        var visible: [String: String] = [:]
+        func nodes(_ items: [FlowTemplateItem]) -> [FlowNode] {
+            items.flatMap { item -> [FlowNode] in
+                switch item {
+                case .group(let id, let name, let children):
+                    if expanded.contains(id) { return nodes(children) }
+                    for key in item.nodeKeys { visible[key] = id }
+                    return [FlowNode(key: id, id: nil, label: "▸ \(name) · \(item.nodeKeys.count)",
+                                     kind: .op, human: false, returnsTo: nil, parents: [], paths: [])]
+                case .node(let key, let paths):
+                    guard let node = graph.node(key) else { return [] }
+                    visible[key] = key
+                    return [FlowNode(key: key, id: node.id, label: node.label, kind: node.kind,
+                                     human: node.human, returnsTo: node.returnsTo, parents: node.parents,
+                                     paths: node.paths.map { path in
+                        FlowGraphPath(name: path.name, description: path.description,
+                                      steps: nodes(paths[path.name] ?? []))
+                    })]
+                }
+            }
+        }
+        let projected = FlowGraph(name: graph.name, steps: nodes(items))
+        return FlowTemplateProjection(graph: projected, visibleKeys: visible)
+    }
 }

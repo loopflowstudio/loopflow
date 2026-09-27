@@ -473,30 +473,51 @@ justified for this scratch-only design.
 
 ## This slice
 
-Slice 1 now has a first implementation: ⌘K over existing readings and exact Task
-links route into the current Podium workspace. Task entries open details even
-with one Session. `lf roadmap --task ISSUE [--all] --json` reads current cached
-planning and retained registered Tasks through the existing Task projector;
-no active PR is required. Historical selection uses the existing selected-Task
-evidence, without adding the Task to the current chapter plan. Read errors and
-ambiguous matches retain the current workspace and offer explicit choices/Retry.
+Navigation repairs and folded templates now implement the independent next cut.
+The palette derives visible and submitted selection from current rows, and keeps
+at most 20 repository-local recent descriptors. Historical Task activation uses
+the existing exact reader with stable identity validation; selectedTaskEvidence
+remains the sole selected-detail owner. Local proof now includes repeated Session
+activation, removed/empty/failed inventory, and two mounted windows with two
+links racing a click.
 
-Focused proof dispatches ⌘K, search, arrows, Escape and Return through AppKit over two
-owned cat PTYs. It proves isolated search, restored focus, retained surfaces and
-draft/child reply, and Task details rather than single-Session drill-down. Shared
-CLI proof covers a retained historical Task, an unstarted planning Task, missing
-identifier, no active PR and unchanged Run/event counts. Source-independent
-folded templates are the next independent implementation cut; room/bind and
-attempt presentation still require the parent contract checklist above.
+The shared Rust resolver retains composition before flattening execution. Catalog
+DTOs expose distinct repeated/empty group IDs, XOR children and a resolved content
+revision. Task previews, catalog inspection and the current Project's Flow on the
+Wave page share folded disclosure and preserve both return edges at group
+boundaries. The Wave summary uses the existing Task default resolver. Captured
+invocations still use their captured expanded graph; independent Runs leave the
+Flow template visible.
 
-The complete design and all eight Done When obligations remain authoritative.
-This is local implementation proof, not an installed `open`/cold-launch demo,
-Jack's acceptance, a performance measurement, or permission to publish. Extended
-cross-repository/duplicate-ID CLI cases, two racing links through mounted views,
-and the configured walkthrough remain review/acceptance work. No Flow navigation
-or Task/PR disposition is selected by this implementation step.
+The [current proof](workspace-template-proof.md) records focused Rust/Swift and
+mounted terminal results, counterexamples, source review and exact limits. These
+are local proofs, not installed Launch Services, configured provider, visual or
+Jack's acceptance. The complete eight Done When obligations remain authoritative.
+The next dependent cut requires the LOO-298 contract checklist; no room/bind or
+attempt authority is recreated here. No publication or Flow navigation decision
+is selected by this implementation step.
 
 ## Slice ledger
+
+- 2026-09-27 navigation repairs and template implementation: preserved the supplied
+  concept review through `lf commit`, reproduced both navigation defects, and
+  repaired current-result selection and bounded historical recents. Added repeated
+  Session activation and mounted two-window/two-link race proofs. Retained the
+  shared exact reader and single selected-detail owner.
+- 2026-09-27 folded templates: retained composition in the existing resolver,
+  added template-local IDs/revision to matching Rust/Swift catalog fixtures, and
+  replaced flat previews with shared disclosure on Task, Wave and catalog surfaces.
+  Both return edges survive folding; source changes invalidate disclosure. Fixed
+  the chapter summary to expose the same effective Project Flow as Task launch.
+  Captured execution and parent storage contracts are unchanged.
+- Focused evidence: 49 Rust resolver/graph tests, 10 DTO tests, one actual CLI
+  default-projection test and 16 Swift model/mounted tests pass; the final five
+  template checks pass again after interaction changes. All-target Clippy,
+  formatting, platform boundaries, whitespace and Xcode app/test-runner compilation
+  pass. The inherited architecture
+  owner-map gap remains 32/33. The [proof receipt](workspace-template-proof.md)
+  owns commands, failures, build evidence and configured acceptance limits.
+
 
 - 2026-09-26 navigation review: repaired exact Task lookup escaping a registered
   repository without Git metadata; the two-repository collision/completed-Task

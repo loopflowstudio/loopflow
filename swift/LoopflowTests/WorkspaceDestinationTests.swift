@@ -58,11 +58,81 @@ struct WorkspaceDestinationTests {
         #expect(model.selection == nil)
     }
 
+    @Test func historicalRecentSurvivesLeavingItsPageAndRefresh() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        // Keep the Wave, but remove the historical Task from the current plan.
+        let current = try oneTask(data, taskId: "absent")
+        let model = PodiumModel(query: RegistryQuery { args, _ in
+            if args.contains("--task") { return exact }
+            if args.first == "roadmap" { return current }
+            if args.first == "ls" || args.first == "session" { return "[]" }
+            throw RegistryQueryError("No mutation permitted")
+        }, repoPath: wave.wave.repo)
+        await model.openTaskLink(try #require(URL(string: "loopflow://task/\(task.task.identifier)")))
+        model.select(.wave(id: wave.wave.id))
+        await model.refresh()
+        #expect(model.navigation.selectedTaskEvidence == nil)
+        #expect(model.searchDestinations("").first?.id == .task(task.id))
+        #expect(model.visibleRoadmaps.flatMap { $0.tasks.items }.isEmpty)
+        model.setRepoPath("/another-repository")
+        #expect(!model.paletteRows.contains { $0.id == .task(task.id) })
+        model.setRepoPath(wave.wave.repo)
+        #expect(model.searchDestinations("").first?.id == .task(task.id))
+        await model.openPaletteTask(task.id)
+        #expect(model.selection == .task(id: task.id))
+        #expect(model.task(id: task.id)?.task.task.name == task.task.name)
+        #expect(model.visibleRoadmaps.flatMap { $0.tasks.items }.isEmpty)
+    }
+
+    @Test func recentTaskReadbackPreservesIdentityAndWorkspace() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let current = try oneTask(data, taskId: "absent")
+        // Successful lookup of another ID must not redirect a saved destination.
+        for response in ["failure", data, current] {
+            let model = PodiumModel(query: RegistryQuery { args, _ in
+                if args.contains("--task") {
+                    if response == "failure" { throw RegistryQueryError("Home unavailable") }
+                    return response
+                }
+                if args.first == "roadmap" { return current }
+                if args.first == "ls" || args.first == "session" { return "[]" }
+                throw RegistryQueryError("No mutation permitted")
+            }, repoPath: wave.wave.repo)
+            await model.refresh()
+            model.openTaskDestination(wave: wave, task: task)
+            model.select(.wave(id: wave.wave.id))
+            await model.refresh()
+            await model.openPaletteTask(task.id)
+            #expect(model.selection == .wave(id: wave.wave.id))
+            #expect(model.navigation.selectedTaskEvidence == nil)
+            #expect(model.showsTaskLink)
+            if response == current {
+                #expect(!model.paletteRows.contains { $0.id == .task(task.id) })
+            } else {
+                #expect(model.taskLinkReading.errorMessage != nil)
+                #expect(model.paletteRows.contains { $0.id == .task(task.id) })
+                await model.retryTaskLink()
+                #expect(model.selection == .wave(id: wave.wave.id))
+                #expect(model.taskLinkReading.errorMessage != nil)
+            }
+        }
+    }
+
     @Test func paletteSearchIncludesUnstartedTasksAndRanksExactIDs() async throws {
         let data = try fixture()
+        let records = try (0..<30).map { try renameFixtureRecord("\($0)", title: "Session \($0)") }
+        let sessions = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
         let model = PodiumModel(query: RegistryQuery { args, _ in
             if args.first == "roadmap" { return data }
-            if args.first == "ls" || args.first == "session" { return "[]" }
+            if args.first == "session" { return sessions }
+            if args.first == "ls" { return "[]" }
             throw RegistryQueryError("Unavailable")
         }, repoPath: "/src/loopflow")
         await model.refresh()
@@ -161,6 +231,66 @@ struct WorkspaceDestinationTests {
         #expect(otherReceived.isEmpty)
     }
 
+    @Test func mountedWindowsFenceTwoLinksAgainstNavigation() async throws {
+        _ = NSApplication.shared
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let tasks = snapshot.waves.flatMap { $0.tasks.items }
+        let first = try #require(tasks.first)
+        let second = try #require(tasks.last)
+        let responses = [first.task.identifier: try oneTask(data, taskId: first.id),
+                         second.task.identifier: try oneTask(data, taskId: second.id)]
+        let barrier = LinkedDestinationBarrier()
+        let query = RegistryQuery { args, _ in
+            if let index = args.firstIndex(of: "--task") {
+                let issue = args[index + 1]
+                await barrier.wait(issue)
+                return responses[issue]!
+            }
+            if args.first == "roadmap" { return data }
+            if args.first == "ls" || args.first == "session" { return "[]" }
+            throw RegistryQueryError("No mutation permitted")
+        }
+        let router = WorkspaceLinkRouter()
+        let models = (0..<2).map { _ in PodiumModel(query: query, repoPath: wave.wave.repo) }
+        var windows: [NSWindow] = []
+        var views: [SessionsView] = []
+        var deliveries: [Task<Void, Never>] = []
+        defer { for window in windows { window.orderOut(nil); window.contentView = nil } }
+        for model in models {
+            await model.refresh()
+            model.select(.wave(id: wave.wave.id))
+            let view = SessionsView(model: model, repoPath: wave.wave.repo,
+                                    workspaces: SessionsWorkspaceRegistry(), query: query)
+            let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 1100, height: 800),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+            window.contentView = NSHostingView(rootView: view.background {
+                WorkspaceLinkReceiver(router: router) { url in
+                    deliveries.append(Task { await model.openTaskLink(url) })
+                }
+            })
+            window.makeKeyAndOrderFront(nil)
+            windows.append(window)
+            views.append(view)
+        }
+        windows[0].makeKeyAndOrderFront(nil)
+        #expect(router.deliver(try #require(URL(string: "loopflow://task/\(first.task.identifier)"))))
+        while !(await barrier.contains(first.task.identifier)) { await Task.yield() }
+        #expect(router.deliver(try #require(URL(string: "loopflow://task/\(second.task.identifier)"))))
+        while !(await barrier.contains(second.task.identifier)) { await Task.yield() }
+        // Invoke the mounted production row's click action while both reads wait.
+        try views[0].inspect().find(viewWithAccessibilityIdentifier: "workspace-wave-\(wave.wave.id)").button().tap()
+        await barrier.release(second.task.identifier)
+        await barrier.release(first.task.identifier)
+        for delivery in deliveries { await delivery.value }
+        #expect(models[0].selection == .wave(id: wave.wave.id))
+        #expect(!models[0].showsTaskLink)
+        #expect(models[1].selection == .wave(id: wave.wave.id))
+        #expect(!models[1].showsTaskLink)
+        #expect(models[1].navigation.recentDestinations.isEmpty)
+    }
+
     private func fixture() throws -> String {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         return try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
@@ -191,4 +321,13 @@ private actor DestinationReadBarrier {
     }
     func release() { continuation?.resume(); continuation = nil }
 }
+private actor LinkedDestinationBarrier {
+    private var pending: [String: CheckedContinuation<Void, Never>] = [:]
+    func contains(_ key: String) -> Bool { pending[key] != nil }
+    func wait(_ key: String) async {
+        await withCheckedContinuation { pending[key] = $0 }
+    }
+    func release(_ key: String) { pending.removeValue(forKey: key)?.resume() }
+}
+
 #endif

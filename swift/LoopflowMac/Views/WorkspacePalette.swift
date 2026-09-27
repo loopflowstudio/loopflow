@@ -2,7 +2,7 @@ import AppKit
 import Loopflow
 import SwiftUI
 
-struct WorkspacePaletteRow: Identifiable {
+struct WorkspacePaletteRow: Identifiable, Equatable {
     let id: WorkspaceDestination
     let title: String
     let detail: String
@@ -29,6 +29,12 @@ extension PodiumModel {
             rows.append(.init(id: .task(linked.task.id), title: linked.task.task.name,
                               detail: "Task · \(linked.wave.wave.name) · \(linked.task.task.identifier)",
                               key: linked.task.task.identifier))
+        }
+        // Current-plan absence says nothing about retained historical Tasks.
+        for recent in navigation.recentDestinations {
+            if case .task = recent.id, !rows.contains(where: { $0.id == recent.id }) {
+                rows.append(recent)
+            }
         }
         for session in sessions.value ?? [] {
             rows.append(.init(id: .session(session.id), title: session.title,
@@ -68,8 +74,8 @@ extension PodiumModel {
         if query.isEmpty {
             let recent = navigation.recentDestinations
             return rows.enumerated().sorted { lhs, rhs in
-                let l = recent.firstIndex(of: lhs.element.id) ?? Int.max
-                let r = recent.firstIndex(of: rhs.element.id) ?? Int.max
+                let l = recent.firstIndex { $0.id == lhs.element.id } ?? Int.max
+                let r = recent.firstIndex { $0.id == rhs.element.id } ?? Int.max
                 return l == r ? lhs.offset < rhs.offset : l < r
             }.map(\.element)
         }
@@ -91,10 +97,14 @@ struct WorkspacePalette: View {
 
     private var rows: [WorkspacePaletteRow] { model.searchDestinations(search) }
 
+    private var effectiveSelection: WorkspaceDestination? {
+        rows.first(where: { $0.id == highlighted })?.id ?? rows.first?.id
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             PaletteSearchField(text: $search, move: move, submit: {
-                if let id = highlighted ?? rows.first?.id { activate(id) }
+                if let id = effectiveSelection { activate(id) }
             }, cancel: { model.navigation.palette = nil })
             .frame(height: 24)
             Divider()
@@ -112,13 +122,13 @@ struct WorkspacePalette: View {
                                     Text(row.detail).font(Typography.caption()).foregroundStyle(palette.textSecondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                                .background((highlighted ?? rows.first?.id) == row.id ? palette.surfaceMuted : .clear)
+                                .background(effectiveSelection == row.id ? palette.surfaceMuted : .clear)
                             }.buttonStyle(.plain).id(row.id)
                         }
                         if rows.isEmpty { Text("No matching destinations").font(Typography.caption()).padding() }
                     }
                 }
-                .onChange(of: highlighted) { _, id in if let id { proxy.scrollTo(id) } }
+                .onChange(of: effectiveSelection) { _, id in if let id { proxy.scrollTo(id) } }
             }
             Text("↑↓ Select    ↩ Open    Esc Cancel").font(Typography.caption()).foregroundStyle(palette.textSecondary)
         }
@@ -129,7 +139,7 @@ struct WorkspacePalette: View {
             await model.loadFlowCatalog()
             if !model.paletteIsStale && !model.roadmap.isLoading && !model.sessions.isLoading {
                 let available = Set(model.paletteRows.map(\.id))
-                model.navigation.recentDestinations.removeAll { !available.contains($0) }
+                model.navigation.recentDestinations.removeAll { !available.contains($0.id) }
             }
         }
         .accessibilityIdentifier("workspace-palette")
@@ -137,7 +147,7 @@ struct WorkspacePalette: View {
 
     private func move(_ offset: Int) {
         guard !rows.isEmpty else { return }
-        let index = rows.firstIndex { $0.id == highlighted } ?? 0
+        let index = rows.firstIndex { $0.id == effectiveSelection } ?? 0
         highlighted = rows[min(max(index + offset, 0), rows.count - 1)].id
     }
 
@@ -165,7 +175,7 @@ struct TaskLinkView: View {
             HStack {
                 Button("Cancel") { model.dismissTaskLink() }.keyboardShortcut(.cancelAction)
                 Button("Retry") {
-                    if let url = model.taskLinkURL { Task { await model.openTaskLink(url) } }
+                    Task { await model.retryTaskLink() }
                 }
             }
         }.padding(24).frame(width: 560).font(Typography.body())
@@ -217,13 +227,13 @@ struct WorkspacePaletteShortcut: NSViewRepresentable {
 
 struct FlowCatalogInspector: View {
     let entry: FlowCatalogEntry?
-    @State private var inspected: String?
+    @Bindable var navigation: WorkspaceNavigation
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(entry?.name ?? "Flow unavailable").font(Typography.sectionTitle(26))
-            if let graph = entry?.graph {
-                FlowDiagram(graph: graph, pinned: nil, inspected: $inspected)
+            if let graph = entry?.graph, let template = entry?.template {
+                FlowTemplateView(graph: graph, template: template, navigation: navigation)
             } else { Text(entry?.unavailable ?? "Refresh the Flow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

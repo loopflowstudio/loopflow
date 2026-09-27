@@ -50,6 +50,34 @@ struct TaskFlowTests {
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
     }
 
+    @Test("Template disclosure keeps repeated and empty groups, XOR paths and both returns")
+    @MainActor
+    func templateDisclosure() throws {
+        let entry = try JSONDecoder().decode(FlowCatalogEntry.self, from: fixture("flow_template.json"))
+        let template = try #require(entry.template)
+        let graph = try #require(entry.graph)
+        let folded = template.project(graph, expanded: [])
+        #expect(folded.graph.steps.map(\.key) == ["group-0", "group-1", "group-2", "2", "group-4"])
+        #expect(folded.graph.steps[0].label == folded.graph.steps[1].label)
+        #expect(folded.graph.steps[2].label.contains("0"))
+        let returns = FlowTemplateView.spans(graph, projection: folded)
+        #expect(returns.map(\.decider) == ["4", "6"])
+        #expect(returns.allSatisfy { $0.from == 4 && $0.to == 4 })
+        let partial = template.project(graph, expanded: ["group-0", "group-4"])
+        #expect(partial.graph.steps.map(\.key) == ["0", "group-1", "group-2", "2", "3", "4", "5", "6"])
+        let all = template.project(graph, expanded: Set((0...4).map { "group-\($0)" }))
+        #expect(all.graph == graph)
+        #expect(all.graph.node("2/fix/0")?.label == "implement")
+
+        var missing = try #require(JSONSerialization.jsonObject(with: fixture("flow_template.json")) as? [String: Any])
+        var body = try #require(missing["template"] as? [String: Any])
+        body.removeValue(forKey: "items")
+        missing["template"] = body
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(FlowCatalogEntry.self, from: JSONSerialization.data(withJSONObject: missing))
+        }
+    }
+
     @Test("Occurrence state keeps pass completions while iteration keeps each edge count")
     func occurrenceStates() throws {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
@@ -156,7 +184,34 @@ struct TaskFlowProofTests {
         #expect(try find("task-flow-loop-3").text().string() == "Loop 1")
         #expect(try find("task-flow-loop-5").text().string() == "Loop 2")
         #expect((try? find("task-flow-iteration")) == nil, "a preview has no iteration")
+        #expect((try? find("flow-node-4")) == nil, "composition starts folded")
+        try find("flow-node-group-0").button().tap()
+        try await settle(window)
         #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
+        try find("template-group-group-0").disclosureGroup().collapse()
+        try await settle(window)
+        #expect((try? find("flow-node-4")) == nil)
+        #expect(await source.controls.isEmpty, "disclosure never starts work")
+
+        // The Wave uses the current Project's template and shares disclosure state.
+        model.select(.wave(id: "wave-1"))
+        try await settle(window)
+        _ = try find("flow-template-feature")
+        #expect((try? find("task-flow-start")) == nil)
+        try find("template-group-group-0").disclosureGroup().expand()
+        try await settle(window)
+        model.select(.task(id: "issue-available"))
+        try await settle(window)
+        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
+
+
+        let oldRevision = try #require(model.flowCatalog.value?.first?.template?.revision)
+        try await source.reviseTemplate()
+        await model.loadFlowCatalog(force: true)
+        try await settle(window)
+        #expect(model.flowCatalog.value?.first?.template?.revision != oldRevision)
+        #expect((try? find("flow-node-4")) == nil, "a new source revision starts folded")
+        #expect(await source.controls.isEmpty)
 
         // Typeahead: Cancel keeps the recommendation; choosing previews only.
         try find("task-flow-name").button().tap()
@@ -278,7 +333,7 @@ struct TaskFlowProofTests {
 /// `task resume` count as controls; anything else unexpected fails loudly.
 private actor FlowSource {
     private var roadmap: [String: Any]
-    private let catalog: String
+    private var catalog: String
     private let session: String
     private(set) var controls: [[String]] = []
 
@@ -295,6 +350,14 @@ private actor FlowSource {
         entries.insert(build, at: 1)
         catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
         self.session = String(decoding: session, as: UTF8.self)
+    }
+
+    func reviseTemplate() throws {
+        var entries = try #require(JSONSerialization.jsonObject(with: Data(catalog.utf8)) as? [[String: Any]])
+        var template = try #require(entries[0]["template"] as? [String: Any])
+        template["revision"] = "changed-feature-definition"
+        entries[0]["template"] = template
+        catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
     }
 
     func respond(_ args: [String]) throws -> String {

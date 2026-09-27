@@ -473,7 +473,11 @@ async fn chapter_summary(store: &SharedStore, wave: &Wave) -> Result<Option<Chap
         source_work_id,
 
         metric_targets: content.metric_targets,
-        flows: content.flows,
+        flows: ProjectFlowPlan {
+            recommended: Some(
+                crate::ops::task::recommended_task_flow(Some(&content.flows)).to_string(),
+            ),
+        },
         krs: content
             .krs
             .into_iter()
@@ -1083,9 +1087,10 @@ async fn snapshot_tasks(
             team_id: String::new(),
             assignee: None,
         };
-        let recommended = current_plan
-            .map_or("feature", crate::ops::task::recommended_task_flow)
-            .to_string();
+        let recommended = crate::ops::task::recommended_task_flow(
+            current_plan.and_then(|project| project.flows.as_ref()),
+        )
+        .to_string();
         details.push(
             snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
         );
@@ -1122,11 +1127,11 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
 }
 
 fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> String {
-    projects
+    let flows = projects
         .iter()
         .find(|project| project.id == project_id)
-        .map_or("feature", crate::ops::task::recommended_task_flow)
-        .to_string()
+        .and_then(|project| project.flows.as_ref());
+    crate::ops::task::recommended_task_flow(flows).to_string()
 }
 
 async fn snapshot_task_detail(

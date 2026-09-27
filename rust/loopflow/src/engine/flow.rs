@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -208,6 +208,59 @@ pub enum ConcreteStep {
     Xor(ConcreteXor),
 }
 
+/// Resolved template composition. Flattening is the sole execution expansion.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) enum ResolvedFlowItem {
+    Skill(ConcreteSkill),
+    Op(ConcreteOp),
+    Group {
+        name: String,
+        items: Vec<ResolvedFlowItem>,
+    },
+    Xor {
+        router: Skill,
+        paths: BTreeMap<String, ResolvedFlowPath>,
+        flow_parents: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ResolvedFlowPath {
+    pub description: String,
+    pub items: Vec<ResolvedFlowItem>,
+}
+
+pub(crate) fn flatten_resolved(items: &[ResolvedFlowItem]) -> Vec<ConcreteStep> {
+    items
+        .iter()
+        .flat_map(|item| match item {
+            ResolvedFlowItem::Skill(skill) => vec![ConcreteStep::Skill(skill.clone())],
+            ResolvedFlowItem::Op(op) => vec![ConcreteStep::Op(op.clone())],
+            ResolvedFlowItem::Group { items, .. } => flatten_resolved(items),
+            ResolvedFlowItem::Xor {
+                router,
+                paths,
+                flow_parents,
+            } => vec![ConcreteStep::Xor(ConcreteXor {
+                router: router.clone(),
+                flow_parents: flow_parents.clone(),
+                paths: paths
+                    .iter()
+                    .map(|(name, path)| {
+                        (
+                            name.clone(),
+                            ConcretePath {
+                                description: path.description.clone(),
+                                steps: flatten_resolved(&path.items),
+                            },
+                        )
+                    })
+                    .collect(),
+            })],
+        })
+        .collect()
+}
+
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     load_flow_inner(name, repo, true)
 }
@@ -348,11 +401,16 @@ fn name_as_static_key(name: &str) -> Option<&'static str> {
 }
 
 pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
-    let items = expand_with_chain(flow, repo, vec![flow.name.clone()], 0)?;
+    Ok(flatten_resolved(&resolve_flow(flow, repo)?))
+}
+
+pub(crate) fn resolve_flow(flow: &Flow, repo: &Path) -> Result<Vec<ResolvedFlowItem>, LoadError> {
+    let resolved = expand_with_chain(flow, repo, vec![flow.name.clone()], 0)?;
+    let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
     validate_repeats(&items)?;
-    Ok(items)
+    Ok(resolved)
 }
 
 pub(crate) fn validate_repeats(items: &[ConcreteStep]) -> Result<(), LoadError> {
@@ -909,15 +967,18 @@ fn expand_xor_path(
     repo: &Path,
     chain: &[String],
     depth: usize,
-) -> Result<Vec<ConcreteStep>, LoadError> {
+) -> Result<Vec<ResolvedFlowItem>, LoadError> {
     if let Some(flow_name) = &path.flow {
         let flow = load_flow(flow_name, repo)?;
         check_flow_cycle(chain, &flow.name)?;
-        return expand_with_chain(&flow, repo, chain_with(chain, &flow.name), depth + 1);
+        return Ok(vec![ResolvedFlowItem::Group {
+            name: flow.name.clone(),
+            items: expand_with_chain(&flow, repo, chain_with(chain, &flow.name), depth + 1)?,
+        }]);
     }
 
     if let Some(skill_name) = &path.skill {
-        return Ok(vec![ConcreteStep::Skill(ConcreteSkill {
+        return Ok(vec![ResolvedFlowItem::Skill(ConcreteSkill {
             skill: load_skill(skill_name, repo)?,
             policy: OccurrencePolicy::default(),
             flow_parents: chain.to_vec(),
@@ -927,7 +988,7 @@ fn expand_xor_path(
     path.steps
         .iter()
         .map(|step| {
-            Ok(ConcreteStep::Skill(ConcreteSkill {
+            Ok(ResolvedFlowItem::Skill(ConcreteSkill {
                 skill: resolve_skill_reference(&step.skill, repo)?,
                 policy: step.policy.clone(),
                 flow_parents: chain.to_vec(),
@@ -941,7 +1002,7 @@ fn expand_branch_def(
     repo: &Path,
     chain: &[String],
     depth: usize,
-) -> Result<ConcreteXor, LoadError> {
+) -> Result<ResolvedFlowItem, LoadError> {
     let router = match &branch_def.router {
         Some(name) => load_skill(name, repo)?,
         None => Skill {
@@ -962,14 +1023,14 @@ fn expand_branch_def(
         .map(|(name, path)| {
             Ok((
                 name.clone(),
-                ConcretePath {
+                ResolvedFlowPath {
                     description: path.description.clone(),
-                    steps: expand_xor_path(path, repo, chain, depth)?,
+                    items: expand_xor_path(path, repo, chain, depth)?,
                 },
             ))
         })
         .collect::<Result<_, LoadError>>()?;
-    Ok(ConcreteXor {
+    Ok(ResolvedFlowItem::Xor {
         router,
         paths,
         flow_parents: chain.to_vec(),
@@ -1055,7 +1116,7 @@ fn expand_with_chain(
     repo: &Path,
     chain: Vec<String>,
     depth: usize,
-) -> Result<Vec<ConcreteStep>, LoadError> {
+) -> Result<Vec<ResolvedFlowItem>, LoadError> {
     const MAX_DEPTH: usize = 5;
     if depth > MAX_DEPTH {
         return Err(LoadError::InvalidFlow(format!(
@@ -1071,15 +1132,18 @@ fn expand_with_chain(
                 // actually be a sub-flow name. If the skill has no inline content,
                 // check if a flow with this name exists and expand it.
                 if let Some(nested) = try_load_multi_skill_flow(&step.skill, repo, &chain)? {
-                    items.extend(expand_with_chain(
-                        &nested,
-                        repo,
-                        chain_with(&chain, &step.skill.name),
-                        depth + 1,
-                    )?);
+                    items.push(ResolvedFlowItem::Group {
+                        name: nested.name.clone(),
+                        items: expand_with_chain(
+                            &nested,
+                            repo,
+                            chain_with(&chain, &step.skill.name),
+                            depth + 1,
+                        )?,
+                    });
                     continue;
                 }
-                items.push(ConcreteStep::Skill(ConcreteSkill {
+                items.push(ResolvedFlowItem::Skill(ConcreteSkill {
                     skill: resolve_skill_reference(&step.skill, repo)?,
                     policy: step.policy.clone(),
                     flow_parents: chain.clone(),
@@ -1088,23 +1152,24 @@ fn expand_with_chain(
             Step::FlowRef(name) => {
                 let nested = load_flow(name, repo)?;
                 check_flow_cycle(&chain, &nested.name)?;
-                items.extend(expand_with_chain(
-                    &nested,
-                    repo,
-                    chain_with(&chain, &nested.name),
-                    depth + 1,
-                )?);
+                items.push(ResolvedFlowItem::Group {
+                    name: nested.name.clone(),
+                    items: expand_with_chain(
+                        &nested,
+                        repo,
+                        chain_with(&chain, &nested.name),
+                        depth + 1,
+                    )?,
+                });
             }
             Step::Op(item) => {
-                items.push(ConcreteStep::Op(ConcreteOp {
+                items.push(ResolvedFlowItem::Op(ConcreteOp {
                     item: item.clone(),
                     flow_parents: chain.clone(),
                 }));
             }
             Step::Xor(branch_def) => {
-                items.push(ConcreteStep::Xor(expand_branch_def(
-                    branch_def, repo, &chain, depth,
-                )?));
+                items.push(expand_branch_def(branch_def, repo, &chain, depth)?);
             }
         }
     }
@@ -1947,6 +2012,9 @@ Design the feature.
             0,
         )
         .unwrap();
+        let ConcreteStep::Xor(branch) = super::flatten_resolved(&[branch]).remove(0) else {
+            panic!("expected resolved XOR");
+        };
         let suffix = build_xor_routing_suffix(&branch);
         assert!(suffix.find("**alpha**").unwrap() < suffix.find("**zeta**").unwrap());
         assert!(suffix.contains("lf flow route PATH"));

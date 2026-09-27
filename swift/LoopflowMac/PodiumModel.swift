@@ -75,19 +75,30 @@ final class PodiumModel {
     var showsTaskLink = false
     @ObservationIgnored private var destinationGeneration = 0
 
-    func openTaskLink(_ url: URL) async {
+    @ObservationIgnored private var taskLinkExpectedID: String?
+
+    func openTaskLink(_ url: URL, expectedTaskID: String? = nil) async {
         destinationGeneration &+= 1
         let generation = destinationGeneration
         taskLinkURL = url
+        taskLinkExpectedID = expectedTaskID
         taskLinkReading = .loading
         showsTaskLink = true
         do {
             let link = try TaskLink(url: url)
             let result = try await query.taskDestination(issue: link.issue, repo: link.repo)
             guard destinationGeneration == generation else { return }
-            taskLinkReading = .available(result)
             let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
             let unavailable = result.waves.contains { $0.tasks.unavailableReason != nil }
+            if let expectedTaskID {
+                guard matches.allSatisfy({ $0.1.id == expectedTaskID && $0.0.wave.repo.normalizedFilePath == link.repo?.normalizedFilePath }) else {
+                    throw RegistryQueryError("The recent Task no longer resolves to its recorded identity.")
+                }
+                if matches.isEmpty, !unavailable {
+                    navigation.recentDestinations.removeAll { $0.id == .task(expectedTaskID) }
+                }
+            }
+            taskLinkReading = .available(result)
             if matches.count == 1, !unavailable, let match = matches.first {
                 openTaskDestination(wave: match.0, task: match.1)
             }
@@ -110,9 +121,31 @@ final class PodiumModel {
     }
 
     func remember(_ destination: WorkspaceDestination) {
-        navigation.recentDestinations.removeAll { $0 == destination }
-        navigation.recentDestinations.insert(destination, at: 0)
+        guard let row = paletteRows.first(where: { $0.id == destination }) else { return }
+        navigation.recentDestinations.removeAll { $0.id == destination }
+        navigation.recentDestinations.insert(row, at: 0)
         navigation.recentDestinations = Array(navigation.recentDestinations.prefix(20))
+    }
+
+    func openPaletteTask(_ id: String) async {
+        if let found = task(id: id) {
+            openTaskDestination(wave: found.wave, task: found.task)
+            return
+        }
+        guard let recent = navigation.recentDestinations.first(where: { $0.id == .task(id) }),
+              let repoPath else { return }
+        var components = URLComponents()
+        components.scheme = "loopflow"
+        components.host = "task"
+        components.path = "/" + recent.key
+        components.queryItems = [URLQueryItem(name: "repo", value: repoPath)]
+        guard let url = components.url else { return }
+        await openTaskLink(url, expectedTaskID: id)
+    }
+
+    func retryTaskLink() async {
+        guard let taskLinkURL else { return }
+        await openTaskLink(taskLinkURL, expectedTaskID: taskLinkExpectedID)
     }
 
     var historyWave: WaveSnapshot?

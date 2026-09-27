@@ -729,6 +729,8 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         for view in [&status, wave] {
             assert!(view.get("projects").is_none());
             assert_eq!(view["chapter"]["source_project_slug"], "auditability");
+            assert_eq!(view["chapter"]["flows"]["recommended"], "feature");
+            assert_eq!(view["tasks"]["items"][0]["flow"]["recommended"], "feature");
             assert_eq!(view["tasks"]["state"], "ok");
             assert_eq!(view["tasks"]["items"].as_array().unwrap().len(), 1);
             assert_eq!(view["tasks"]["items"][0]["task"]["identifier"], "PRD-52");

@@ -148,6 +148,21 @@ struct WorkSurfaceView: View {
                     }
                 }
 
+                if let name = roadmap.chapter?.flows.recommended {
+                    section {
+                        WorkspaceSectionHeading("Flow · \(name)")
+                        if let entry = model.flowCatalog.value?.first(where: { $0.name == name }),
+                           let graph = entry.graph, let template = entry.template {
+                            FlowTemplateView(graph: graph, template: template, navigation: model.navigation)
+                        } else {
+                            Text(model.flowCatalog.value?.first(where: { $0.name == name })?.unavailable
+                                 ?? model.flowCatalog.errorMessage ?? "Flow template unavailable")
+                                .font(Typography.caption())
+                        }
+                    }
+                    .task { await model.loadFlowCatalog() }
+                }
+
                 switch roadmap.tasks {
                 case .unavailable(let reason):
                     section {

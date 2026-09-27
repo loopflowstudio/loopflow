@@ -130,11 +130,64 @@
         }
       ]
     },
-    "unavailable": null
+    "unavailable": null,
+    "template": {
+      "revision": "fixture-feature-composition",
+      "items": [
+        {
+          "kind": "node",
+          "key": "0",
+          "paths": {}
+        },
+        {
+          "kind": "group",
+          "id": "group-0",
+          "name": "pursue",
+          "items": [
+            {
+              "kind": "node",
+              "key": "1",
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": "2",
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": "3",
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": "4",
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": "5",
+              "paths": {}
+            }
+          ]
+        },
+        {
+          "kind": "node",
+          "key": "6",
+          "paths": {}
+        },
+        {
+          "kind": "node",
+          "key": "7",
+          "paths": {}
+        }
+      ]
+    }
   },
   {
     "name": "broken",
     "graph": null,
-    "unavailable": "failed to load skill \"missing\": not found"
+    "unavailable": "failed to load skill \"missing\": not found",
+    "template": null
   }
 ]

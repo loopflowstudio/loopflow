@@ -160,7 +160,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     assert!(!items.is_empty());
     assert_eq!(
         roadmap.waves[0].chapter.as_ref().unwrap().flows.recommended,
-        None
+        Some("feature".to_string())
     );
     assert_eq!(
         items[0].reference.workspace.as_ref().unwrap().local_exists,
@@ -277,4 +277,24 @@ fn chapter_history_keeps_dated_task_evidence() {
     .unwrap();
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].source_project_id, snapshot.source_project_id);
+}
+
+#[test]
+fn flow_templates_round_trip_distinct_compositions_and_required_children() {
+    use loopflow::engine::flow_graph::FlowCatalogEntry;
+    let json = include_str!("../../../tests/fixtures/dto/flow_template.json");
+    let entry: FlowCatalogEntry = serde_json::from_str(json).unwrap();
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(&entry).unwrap(), value);
+    let mut missing = value;
+    missing["template"]["items"][2]
+        .as_object_mut()
+        .unwrap()
+        .remove("items");
+    assert!(serde_json::from_value::<FlowCatalogEntry>(missing).is_err());
+    let catalog: Vec<FlowCatalogEntry> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/flow_catalog.json"
+    ))
+    .unwrap();
+    assert!(catalog[0].template.is_some() && catalog[1].template.is_none());
 }

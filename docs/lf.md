@@ -270,6 +270,10 @@ lf flow list --json                 # inspect available templates
 | `--tui` / `--ide` | Hand off Claude, Codex, or OpenCode to the terminal, or Claude/Codex to their app; overrides `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
+`lf flow list --json` includes the expanded graph and a resolved template tree
+with distinct composition-use IDs and a content revision. The desktop uses that
+tree for disclosure on Task previews and the current Project's Flow on Wave pages.
+Inspection never starts a Flow; captured invocations retain their own graph.
 
 A **Flow** is a template; a **Flow invocation** captures its fully expanded
 graph and execution state. A **loopflow** is a Flow with backward edges.

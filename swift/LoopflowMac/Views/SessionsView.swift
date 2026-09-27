@@ -427,7 +427,7 @@ struct SessionsView: View {
         )) {
             switch navigation.palette {
             case .flow(let name):
-                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name })
+                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation)
             case .search:
                 WorkspacePalette(model: model, activate: navigate)
             case nil:
@@ -474,8 +474,8 @@ struct SessionsView: View {
         switch destination {
         case .wave(let id): model.select(.wave(id: id))
         case .task(let id):
-            guard let found = model.task(id: id) else { return }
-            model.openTaskDestination(wave: found.wave, task: found.task)
+            Task { await model.openPaletteTask(id) }
+            return
         case .session(let id):
             guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
             openSession(record)

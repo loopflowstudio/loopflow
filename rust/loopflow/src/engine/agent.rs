@@ -117,7 +117,8 @@ pub struct AgentExecutionBoundary {
     pub writable_roots: Vec<PathBuf>,
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
+    crate::exec::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
     crate::durable::RUN_ID_ENV,

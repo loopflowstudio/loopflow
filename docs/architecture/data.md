@@ -59,6 +59,7 @@ The current application tables group by owner:
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
 | Project and Task progression | `projects`, `tasks`, `flow_invocations` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
 | Conversations and execution | `sessions`, `runs` | stable conversation identity, current Run, title and saved feedback; every Run's Session, invocation, Task, Wave, caller, provider, times and end |
+| CLI processes | `execs` | one actual lf process, immutable causal parent and agent provenance, command completion; the journal transaction maintains its indexed summary |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
 | Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current Ask Sessions use `sessions` |

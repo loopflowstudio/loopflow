@@ -206,10 +206,6 @@ impl FromStr for HomeRoute {
     }
 }
 
-/// A Home's observed liveness, with evidence living alongside in
-/// [`HomeRuntimeDto::reason`]. `Unreachable` and `Unknown` are different facts:
-/// the Home did not answer at all versus it answered but its state could not be
-/// read.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -50,7 +50,7 @@ pub struct WaveSnapshot {
     pub repo: String,
     /// Non-terminal Tasks owned by this Wave.
     pub active_tasks: u32,
-    /// Whether this Home is allowed to keep the Wave running.
+    /// Whether Wave work is enabled on this Home.
     pub enabled: bool,
     /// RFC3339 creation time, `null` when the row predates the column.
     pub created_at: Option<String>,

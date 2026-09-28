@@ -1,0 +1,89 @@
+[
+  {
+    "session": "task_1721d4a0d1494e5a98cb22a5d35933d1:2130ddb8-a53b-4df5-b801-47a3e1e6b2c0:task-design:review_kickoff:0",
+    "work_path": "intelligence / LOO-331",
+    "prior_run": "run_10afb60a023943dfa0fa45ee15fe6afa",
+    "restored_run": "run_e44c6e1f2acb4dc3986f0b6c6ffd5a2c",
+    "native_history": "/Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea/accounts/claude/primary/projects/-Users-jack-src-loopflow-audit-context-allocation-and-subwave/e44c6e1f-2acb-4dc3-986f-0b6c6ffd5a2c.jsonl",
+    "message_counts": {
+      "user": 6,
+      "assistant": 6
+    },
+    "position_changed_fields": [
+      "session_run_id",
+      "position_version"
+    ],
+    "review_ready": false,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "task_1721d4a0d1494e5a98cb22a5d35933d1:2130ddb8-a53b-4df5-b801-47a3e1e6b2c0:task-design:review_kickoff:0"
+    ],
+    "native_open_and_resume": "verified in actual PTY; /exit returned 0",
+    "old_run_files": {
+      "manifest.json": "c09fe74f6ce0053aa158f6cd7bed623232cb8cdc18af3a0975a4888e96f49ec3",
+      "events.jsonl": "a54b7a70b9664aa34c81f0e8d864e918c0c92961ed7e20c9986aa2a1ae5740dc",
+      "provider-session.json": "63dd472dd679331b69feb77ee31ebfbdd5b0ddfd79e79ba403664ea128d68c0d",
+      "terminal.json": "58757419a76bf1b38f8f90abc036bd203f66bb24ff957c83cf7a47a14194c0e3"
+    }
+  },
+  {
+    "session": "task_2f3286960488413297ab094dcd76fa89:3ddb83c2-734f-4151-af44-7e2c40967691:task-design:review_kickoff:0",
+    "work_path": "product / LOO-330",
+    "prior_run": "run_9927fb1aa16a464b88002c975f5ac3ac",
+    "restored_run": "run_9186b660fa304b208b1dfb946dd870f9",
+    "native_history": "/Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea/accounts/claude/primary/projects/-Users-jack-src-loopflow-design-subwaves-and-expressive-memory/9186b660-fa30-4b20-8b1d-fb946dd870f9.jsonl",
+    "message_counts": {
+      "user": 3,
+      "assistant": 2
+    },
+    "position_changed_fields": [
+      "session_run_id",
+      "position_version"
+    ],
+    "review_ready": false,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "task_2f3286960488413297ab094dcd76fa89:3ddb83c2-734f-4151-af44-7e2c40967691:task-design:review_kickoff:0"
+    ],
+    "native_open_and_resume": "verified in actual PTY; /exit returned 0",
+    "old_run_files": {
+      "manifest.json": "87a71a41f2f529e6de288d7c70e0082c0c1815e2900e96b4c02ef8316309d5b8",
+      "events.jsonl": "bf546512651738f95e4ce48da3846a7e37acbdd15b0e0b32b071de903eb4f046",
+      "provider-session.json": "746ebf2fbd255109682cecd66a5f3d2bc3b83d034ebf78c6d5e7c482d5e7376b",
+      "terminal.json": "a620d080508d8be36bd2420adef9beba75142f81e6e4ac8f1bbdff3b1b46280b"
+    }
+  },
+  {
+    "session": "task_f8a2b8980fb74eec9c66fad1b590a7bf:08972f20-efde-4113-bfc5-e14b649ea195:task-design:review_kickoff:0",
+    "work_path": "infrastructure / LOO-329",
+    "prior_run": "run_2e5cd1be2dfa4b9190c999d294cba971",
+    "restored_run": "run_7b98c4ea500f41ba8b6103111b93a7c3",
+    "native_history": "/Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea/accounts/claude/primary/projects/-Users-jack-src-loopflow-define-durable-subwave-identity-and/7b98c4ea-500f-41ba-8b61-03111b93a7c3.jsonl",
+    "message_counts": {
+      "user": 3,
+      "assistant": 2
+    },
+    "position_changed_fields": [
+      "session_run_id",
+      "position_version"
+    ],
+    "review_ready": false,
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "task_f8a2b8980fb74eec9c66fad1b590a7bf:08972f20-efde-4113-bfc5-e14b649ea195:task-design:review_kickoff:0"
+    ],
+    "native_open_and_resume": "verified in actual PTY; /exit returned 0",
+    "old_run_files": {
+      "manifest.json": "15b02cc7c58f6b3b9f9c05342599b5e3f3f26f46ba942ee304a7d8feedf66b01",
+      "events.jsonl": "473d81d25c9892e5e673031f193cc49c185f611caa5c869b2c1244cea535b6eb",
+      "provider-session.json": "de4204530131f425e2ce1abb826feaf91daceebc6105e1845eef7c02f70a1470",
+      "terminal.json": "95a4b20ff635e6de2a7db7f917095f9ee4c2b31222031dcb75fdb541c862f7d3"
+    }
+  }
+]

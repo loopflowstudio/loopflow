@@ -112,6 +112,10 @@ Kickoff draft under review: commit `0381a195f`.
 - "LOOPFLOW.md should probably just mention realign? Dont think we need
   record-learnigns either".
 
+- "I see so 1310 is on main but not 298 yet?" True when asked about; LOO-298
+  was rebased onto main during the session and this branch followed it to
+  `ce97003cf`.
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

@@ -2,7 +2,8 @@
 
 Shaped in review-design with Jack Heart on 2026-09-28. Stacked on
 [LOO-298](https://linear.app/loopflow/issue/LOO-298)
-([#1296](https://github.com/loopflowstudio/loopflow/pull/1296)).
+([#1296](https://github.com/loopflowstudio/loopflow/pull/1296)) at
+`ce97003cf`, which includes main through #1310.
 What Jack said, in order: [subwave-identity-review.md](subwave-identity-review.md).
 What is still open: [subwave-questions.md](subwave-questions.md).
 Companions: Product [LOO-330](https://linear.app/loopflow/issue/LOO-330),
@@ -16,8 +17,8 @@ release has learned, and nothing about auth or growth. A big memory splits
 into smaller ones as naturally as a big directory does. It works in any
 checkout, including a fresh clone.
 
-Today none of that is true. `wave/infrastructure/release/MEMORY.md` exists on
-main and reaches no prompt.
+Today none of that is true. `wave/infrastructure/release/MEMORY.md` exists
+and reaches no prompt.
 
 ## The model
 
@@ -124,10 +125,6 @@ leaves release's row alone.
   parent is, and they must agree. The kickoff audit found the field empty
   everywhere, which is why nesting did nothing. Step 2 makes discovery write
   it, so a moved directory is re-recorded and nothing has to refuse.
-- **This base is behind main.** LOO-298 branched before main gained release
-  memory and the `release-run` Flow file
-  ([#1311](https://github.com/loopflowstudio/loopflow/pull/1311)), and before
-  `realign` ([#1310](https://github.com/loopflowstudio/loopflow/pull/1310)).
 - **Cron logs.** The log path uses the Wave name as written, so
   `infrastructure/release` points into a directory nothing creates. Read from
   `ops/cron.rs`, not run.

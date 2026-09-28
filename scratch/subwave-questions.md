@@ -30,8 +30,7 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
   update-wave → gate. Whether gate stays was not said.
 - `LOOPFLOW.md` names only `realign` for curating Wave memory.
 
-This cannot be done on this branch: `realign` and the `refresh` Flow exist
-only on main. On main, `update-wave` is referenced in 10 source and doc files
+On main, `update-wave` is referenced in 10 source and doc files
 and 6 goldens; `record-learnings` in 5 files and 5 goldens, including the
 `ship` and `ship-demo` Flows. No Task has been filed.
 

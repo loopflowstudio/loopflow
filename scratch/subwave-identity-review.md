@@ -78,6 +78,14 @@ Kickoff draft under review: commit `0381a195f`.
   infra + release".
 - On LOO-298's scratch: "probably mostly remove".
 
+- On the drafted release Wave file: "this all seems mmaybe too formal or
+  trying too hard. The objective of release is to get new, updated loopflow
+  delivered to the public on regular intervals, with clear meaning, without
+  bugs, in a recoverable and smart rollout strategy etc".
+
+- "Let's dream to do a great job but not make it bureaucratic". The design
+  was cut from 24 KB to one page; the evidence stays in earlier commits.
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

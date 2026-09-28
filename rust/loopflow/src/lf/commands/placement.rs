@@ -40,10 +40,7 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     .ok_or_else(|| anyhow!("Wave {name} not found"))?;
                 let snapshot = crate::lf::commands::waves::snapshot_wave(&store, &wave).await?;
                 if snapshot.enabled {
-                    return Err(anyhow!(
-                        "stop and disable Wave {} before forgetting it",
-                        wave.name()
-                    ));
+                    return Err(anyhow!("disable Wave {} before forgetting it", wave.name()));
                 }
                 if Path::new(wave.repo())
                     .join("wave")

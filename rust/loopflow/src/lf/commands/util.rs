@@ -47,9 +47,6 @@ pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDate
         .ok_or_else(|| anyhow!("--since duration is too large"))
 }
 
-/// Message text from the args (joined) or stdin (heredoc-friendly). The
-/// Message commands take text arguments or read stdin when omitted.
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionCommand {
     pub(crate) program: String,

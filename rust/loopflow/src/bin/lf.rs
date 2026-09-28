@@ -2165,9 +2165,6 @@ mod tests {
         assert_eq!(result, vec!["lf", "-c", "debug"]);
     }
 
-    /// Serving a mind is its own command. Nothing about the ambient
-    /// environment can turn one of these into the other.
-
     #[test]
     fn ssh_help_prefers_home_identity() {
         let help = Cli::try_parse_from(["lf", "ssh", "--help"])

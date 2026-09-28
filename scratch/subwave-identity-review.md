@@ -73,6 +73,11 @@ Kickoff draft under review: commit `0381a195f`.
 - On cron Runs: "idk, research existing work exampels". Researched; see the
   design's Cron today section.
 
+- On the app's Wave page: "dont chagne the desktop UI for noe".
+- On release's objective: "just read whatever we have in exsiting copy for
+  infra + release".
+- On LOO-298's scratch: "probably mostly remove".
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

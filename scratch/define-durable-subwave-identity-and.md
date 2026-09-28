@@ -38,7 +38,7 @@ read at `632b67ec7`; the rows below were re-read on the new base.
 | `wave_id` appears 551 times in Rust | Same scale of migration. |
 | The memory chain still walks `parent_wave_id` in `work/wave/context.rs` | Slice 1 is unchanged. |
 | Cron jobs run in a recorded `working_directory`, the repository given at sync | Unchanged. |
-| LOO-298's `scratch/` holds about 705 KB of Markdown | Every Run on this branch now carries it, because `scratch/` is read recursively. |
+| LOO-298's `scratch/` holds about 705 KB of Markdown | Removed from this branch at Jack Heart's direction, except `data-model-one-table-per.md`, the base's design. The files remain on LOO-298's branch. |
 
 ## Problem
 
@@ -205,7 +205,57 @@ creates its row with name `release` and Infrastructure's id as parent. The
 
 The split writes to Linear and moves a live schedule, so it runs from the
 installed `lf` after the code lands. The branch proves the same steps in a
-disposable Home first. *Open:* release's objective text.
+disposable Home first.
+
+On this base `wave/infrastructure/release/` does not exist. LOO-298 branched
+before main gained release's memory and `.lf/flows/release-run.yaml` in
+[#1311](https://github.com/loopflowstudio/loopflow/pull/1311). The prototype
+needs LOO-298 caught up to main, or those two files carried over.
+
+**Release's Wave file, drafted from existing copy.** Jack Heart, 2026-09-28:
+"just read whatever we have in exsiting copy for infra + release". Every
+sentence below is taken from Infrastructure's `GOAL.md`, Infrastructure
+memory's Model section, or release memory, with only the subject changed. Not
+written to `wave/`.
+
+```markdown
+---
+crons:
+- flow: release-run
+  schedule: 0 0 10 * * *
+pm:
+  linear_initiative: <created by the split>
+---
+
+## Objective
+
+Loopflow delivers verified releases on the configured release schedule.
+Recovery preserves work, recorded decisions and history; failures are
+bounded, truthful, and actionable.
+
+## Bounds
+
+- Do not build a generic multi-product deploy platform before a second real
+  product proves the shape.
+- Release owns the automation spine, not release-content substance: each
+  product owns its own changelog and provider-specific agent credentials.
+
+## Cron
+
+- `release-run` -> attempt one patch release. No merged changes is a green
+  no-op; an incomplete tagged release resumes from its hosted build.
+
+## Process
+
+Keep the configured release schedule and required verification. An entry
+point must preserve recovery ownership. Cron must observe the operation's
+result: a successful report of failure is not successful release execution.
+```
+
+Infrastructure's Wave file would lose its `release-run` cron entry and its
+Cron line for it. Its objective keeps "delivers verified releases" unless Jack
+narrows it. One existing phrase no longer fits: `release-run` is described as
+running "after telemetry", an ordering between two Waves' schedules.
 
 ### Rename and reparent
 
@@ -290,7 +340,7 @@ name a checkout for them. None was re-read from source in this session.
 | Cron installation | schedules in the Wave file |
 | finite `wave/operate` Runs | Wave file and memory |
 | Linear connection | the Initiative id in frontmatter |
-| The app's Wave page | Wave file and memory |
+| The app's Wave page | Wave file and memory; the desktop UI is not changed for now (Jack Heart, 2026-09-28) |
 
 Wave chat left this list with LOO-298. From a terminal the invoking checkout
 answers it. Cron runs in the directory recorded at sync. The app has no

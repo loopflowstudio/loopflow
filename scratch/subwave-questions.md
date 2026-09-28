@@ -14,14 +14,15 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 5. **Cron Runs.** Researched; both jobs run in main and `release-run` works
    in generated worktrees. Whether scheduled reads should leave main is
    undecided.
-6. **The app's Wave page:** through Tasks only, or what has landed on the
-   default branch.
-7. **Release's objective text.**
 8. **Explicit reads of child memory** by `update-wave` or chapter review.
 9. **Wave file name:** `GOAL.md` or `<NAME>.md`.
 10. **The wording of the short note** that rides with Wave files.
-11. **LOO-298's scratch** in this branch's prompts, about 705 KB.
 12. **Repository key:** a per-machine path today.
+
+14. **Release files are missing on this base.** LOO-298 predates release
+    memory and the `release-run` Flow file on main.
+15. **Approve the drafted release Wave file**, and say whether
+    Infrastructure's objective keeps "delivers verified releases".
 
 ## Corrections owed to LOO-330 and LOO-331
 
@@ -47,6 +48,11 @@ Several were reached after a reversal; the review notes keep the order.
 
 - Two Homes sync Wave ids when nothing conflicts; conflict handling is later.
 - `lf wave relocate` is revisited after LOO-298 lands.
+
+- The desktop UI is not changed for now.
+- Release's Wave file is drafted from existing Infrastructure and release
+  copy.
+- LOO-298's scratch is removed from this branch except its design.
 
 ## Withdrawn in review
 

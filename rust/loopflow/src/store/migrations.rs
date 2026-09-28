@@ -5042,6 +5042,103 @@ mod tests {
     }
 
     #[test]
+    fn conversation_ancestry_upgrade_preserves_historical_attribution_and_started() {
+        let conn = open();
+        let name = "own_conversation_ancestry";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO waves(id,name,repo,created_at) VALUES('wave','infra','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','linear-project',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,work_state,work_terminal_at)
+                VALUES('task','project','issue','INF-1','/repo',1,'done',7);
+            INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,cwd,step_index,iteration,
+                position_version,worker_generation,updated_at,state)
+                VALUES('flow','task','wave','{"id":"flow","capture":"retained"}',NULL,0,1,1,0,1,'current');
+            BEGIN;
+            INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind)
+                VALUES('conversation','run_current','Stable name','human',1,'conversation');
+            INSERT INTO runs(id,session_id,created_at,published,cwd)
+                VALUES('run_prior','conversation',1,1,'/repo');
+            INSERT INTO runs(id,session_id,invocation_id,task_id,wave_id,work_source,created_at,published,cwd)
+                VALUES('run_current','conversation','flow','task','wave','inherited',2,1,'/repo');
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+                VALUES('conversation','native','old','usage','receipt',1,'{"input":19}');
+            COMMIT;
+        "#).unwrap();
+        let snapshot = || {
+            let mut query = conn
+                .prepare("SELECT id,task_id,wave_id,work_source FROM runs ORDER BY id")
+                .unwrap();
+            query
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let before = snapshot();
+        let started: i64 = conn
+            .query_row("SELECT started_at FROM tasks", [], |row| row.get(0))
+            .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        assert_eq!(snapshot(), before);
+        let owner: (String, String, String, String, Option<i64>) = conn
+            .query_row(
+                "SELECT task_id,wave_id,flow_session_id,work_source,bound_at FROM agent_sessions",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            owner,
+            (
+                "task".into(),
+                "wave".into(),
+                "flow".into(),
+                "inherited".into(),
+                None
+            )
+        );
+        let terminal: (i64, String, i64) = conn
+            .query_row(
+                "SELECT started_at,work_state,work_terminal_at FROM tasks",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(terminal, (started, "done".into(), 7));
+        let unknown: (Option<String>, String) = conn
+            .query_row("SELECT task_id,payload FROM session_events", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(unknown, (None, r#"{"input":19}"#.into()));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn native_human_session_schema_uses_flow_sessions() {
         let conn = open();
         apply_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())

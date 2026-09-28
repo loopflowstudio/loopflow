@@ -68,20 +68,90 @@ Exact failures: `completing_a_final_review_finishes_the_flow` and
 `.lf/tmp/cut-i/repair-checkpoint-rust-ci.log`. Relayed to main in Task comment
 `e24c013b-85d9-4fb5-8194-962d141e4116`; fixture executable selection must be
 isolated without weakening production launch behavior or outcome assertions.
-The initial five public rename checks pass Task Flow failure/retry/review and
-inventory scoping; two stale `count("sessions")` assertions and the shared
-stdio-only Codex stand-in fail. Main is reconciling these fixtures. The latter
-also serves landing, publication and release tests, so one shared fixture
-conversion is required. Supervisor found two additional unguarded review-helper
-callers (`restarting_a_human_node_reuses_the_same_task_position` and
-`stale_human_decisions_cannot_target_a_replacement_invocation`); their clean-PATH
-replay is due, not a new observed CI failure.
-Focused repair now passes all four review tests (`review-executable-pins.log`,
-1.572s). The shared Codex stand-in accepts Unix WebSocket transport; the four
-selected public checks pass their assertions (`renamed-owner-cli-repair.log`,
-15.932s), but the Started case is marked Nextest LEAK. Exact fixture cleanup is
-still unproven and remains with main. These local results do not change the
-published head's red Rust result or establish completed owner conversion.
+Local checkpoint **d8665a753799f69178a41e0bdc90ba10405432e0** now names the
+owners in place and repairs those fixtures; a conflict-free manual rebase leaves
+zero commits behind then-observed main `c512813b5`. It is not yet the published head.
+Fresh remote inspection later found main at `a2b59ed50666a433c97cb9002476e74351723759`,
+while the published branch remains `2958d289c`. Supervisor relayed the new drift
+and Jack's standing rebase/publication direction in verified Task comment
+`5324d830-0205-4fa8-a03f-412283525cf4`: checkpoint the coherent tested ancestry
+work, inspect and apply `lf rebase`, then publish the existing PR. Main remains
+the sole Git owner; this is neither a completed rebase nor a publication claim.
+The GitHub comparison confirms one upstream commit, PR #1319: retired memory
+skills consolidate into realign, and queue adds rebase/realign before gate.
+Its overlap includes `docs/lf.md`, Task controller expectations, catalog tests,
+Flow graph indexes and prompt goldens. Reconcile new catalog behavior while
+retaining the current Task's captured invocation; no captured graph refresh is
+authorized by this upstream change.
+All four affected review tests pass (`review-executable-pins.log`, 1.572s),
+including two additional unguarded callers found by the supervisor. Initial public
+rename checks passed Flow retry/review and inventory scoping but exposed two old
+table assertions and the shared stdio-only Codex stand-in. The repaired shared
+fixture accepts Unix WebSocket transport; its first replay retained a Nextest
+LEAK. After exact fixture teardown repair, both affected Flow tests pass without
+a leak (`provider-fixture-teardown.log`, 16.791s). All-target Clippy passes in
+16.59s (`owner-names-clippy.log`). Production engine survival is unchanged.
+These local results do not change the published head's red Rust result or
+establish completed owner conversion. Main is moving current Task/Wave attribution
+onto AgentSession while preserving historical work/usage and set-once Started.
+The current ancestry review identified child admission as part of that same cut:
+Ask inheritance reads the caller Run, and `create_run` has a separate caller-Run
+inheritance path. After prospective bind, new child work must use the admitted
+current AgentSession assignment while old outcomes/usage remain unchanged.
+This is source-derived proof scope, not a newly executed failure. Test read-only
+Exec admission against a separate untouched Task; an already-bound Task cannot
+prove that observation leaves Started null. Relayed in comment `df80df1a` with
+the method-name/fixture clarification retained in the following comment.
+The in-progress test `binding_is_prospective_and_only_future_work_starts_the_task`
+introduced a contract mismatch: it expects no Started timestamp after binding.
+`docs/architecture-reference.md` explicitly includes first bind, preserving Jack's
+first-assignment decision in `questions.md` (comment `2ecb585f`). Supervisor
+directed main to retain atomic first-bind Started while preserving old usage,
+and replace the obsolete Runs-only evidence validator without fabricating a Run.
+The working design now states that distinction explicitly; this clarifies the
+existing contract, not a new product choice. Main acknowledged the conflation
+and changed the draft to include AgentSession ownership in Started evidence,
+with set-once insertion/bind triggers. The renamed test now requires first-bind
+Started without historical reattribution. The corrected focused run now passes
+all three checks in `conversation-ancestry.log` (32.06s compilation, 16.340s
+execution): first-bind timestamp and retry preservation, unchanged prior work
+and usage, and post-bind child/Ask inheritance. Supervisor inspected the public
+CLI assertions: a done Task retains its terminal state, observation of a separate
+untouched Task leaves Started null, and replaced-provider provenance is rejected
+before another provider launch. Provider provenance and Ask launch are synthetic;
+this is not configured-provider acceptance or Run removal. The earlier green
+`prospective-bind-2.log` includes the withdrawn future-work-only expectation and
+does not establish the corrected contract. Direction: comment
+`e9112de8-ec07-421a-a83b-e7a2e0043f7a`.
+The broader ancestry batch is not green. `ancestry-migration-and-sessions.log`
+records 10 passes, six failures and 12 unrun: the populated seed supplies a
+Task Flow's own cwd (the schema requires NULL and resolves the Task worktree),
+and five Ask fixtures lose caller context during branch isolation. Main moved
+those fixture callers into the private Home's Run tree and scrubbed ambient
+authority. The next batch still fails the Flow seed before upgrade (three passes,
+one failure, 22 unrun); after correcting cwd, `ancestry-upgrade.log` reaches its
+next invalid seed value, `position_version=0`. After correcting that value,
+`ancestry-upgrade-and-remaining.log` completes all 23 selected checks: 21 pass,
+two fail, 44.036s execution after 30.71s compilation. The populated upgrade now
+passes with prior Run attribution, existing Started/Done timestamps and unknown
+usage attribution retained. All six Session CLI checks pass. Remaining failures
+are the older headless assertion that requires no Session, and an import-report
+path comparison of `/var` against canonical `/private/var`. Source inspection
+confirms these exact mismatches; their repairs and final replay remain pending.
+`ancestry-readers-repair.log` then passes the headless launch/reader check and
+reaches an additional stale import assertion: the expected kind is `interactive`
+but the DTO now says `conversation` with a separate interactive flag. The full
+import test's corrected replay now passes in `ancestry-import-repair.log`
+(8.343s; only canonical path and expected kind changed in that repair).
+Its existing historical headless
+expectations retain Run rows without Sessions and therefore cannot prove the
+final AgentSession import contract even after this fixture passes.
+Canonical-materialized replay now passes four checks in `canonical-ancestry.log`
+(27.24s compile, 2.053s execution, 1,539 library tests unselected). The disposable
+source packages all 21 drafts as `0.12.25.001_release`; owner/capture/native-history
+preservation, ancestry/Started upgrade, prospective bind history and empty-draft
+initialization pass. Source receipt: `canonical-ancestry-source.json`. This is
+neither published release bytes nor an installed-Home conversion.
 Scratch-clear failed because the required working evidence remains. The prior
 CI run **36482349277** failed canonical Rust initialization, installation,
 Python and website checks. Those failures remain history, not green results.
@@ -106,15 +176,29 @@ The resource inventory found only 74 MiB in the clean merged worktree selected b
 64.6 GiB, explicitly retaining a uv timeout. Free-space floor remains 64 GiB.
 Own incremental cache was empty; `swift/.build` was 2.0 GiB. These dated
 observations do not authorize deleting another active worktree's outputs.
-Latest cleanup observation: main removed 13.2 GiB of this checkout's rebuildable
-Loopflow package artifacts. Supervisor's fresh inventory passes at 75.48 GiB;
-inactive build roots are empty, uv cache is 12.95 GiB, and no further cleanup
-was launched. The dry-run now names agent-870a75c2, discord and dogfood;
-remote-gone/closed/stale labels alone do not authorize discarding authored work.
+Main removed 13.2 GiB of this checkout's rebuildable Loopflow package artifacts.
+Jack's subsequent cleanup question prompted a fresh inventory: 71.27 GiB free,
+51.97 GiB of active build roots, zero inactive build output and 12.95 GiB uv cache.
+The current `lf wt prune --dry-run` names only clean dogfood, 74 MiB. No worktree
+was removed. Supported `uv cache prune`, run outside an enclosing uv invocation,
+still timed out at 15 seconds; no forced eviction or cache-prune success follows.
+These observations supersede the earlier three-candidate list and 75.48 GiB sample.
 
 ## Retained execution evidence
 
-Public probes use actual Codex 0.157.1, synthetic local Responses, controlled
+An actual copied-CLI admission diagnostic uses a disposable Home and no provider:
+`command-observation-cpxkch7g/receipt.json` under `.lf/tmp/execution-model/`,
+CLI SHA `c1c213a271fb717fe5004e0e2374f5b030e94a4e50ff92bb5aee24fa5e9fe9b3`.
+Two `session list` commands each create one succeeded Exec/exit 0; rename of a
+missing Session creates one failed Exec/exit 1. Help/version exit 0 and rejected
+arguments exit 2 without an Exec. This confirms parsed-command recording and the
+early-parse admission gap. Help/version/error take 9–11ms; repeated empty listing
+takes 752ms in this single diagnostic sample, not a dense benchmark. No installation,
+screenshot, provider or real Home ran. Reproduction: `supervisor-command-observation.py`.
+The remaining every-process contract must reconcile fast parser paths and bootstrap
+authority; this probe neither resolves that implementation nor establishes acceptance.
+
+The provider probes below use actual Codex 0.157.1, synthetic local Responses, controlled
 protocol clients and private Homes. They are neither configured-provider nor
 rendered Desktop acceptance. Receipt directories below are under
 `.lf/tmp/execution-model/`. Earlier failed receipts remain intact.
@@ -200,13 +284,15 @@ that their recommendations or fixes have been implemented:
 
 ## Measurement and history
 
-Last fixed published production-prefix measurement, at `e13f29909` versus
-`c512813b5`: **+13,189 / -29,434 = -16,245** across Rust/Swift,
+Latest fixed production-prefix measurement, local checkpoint `d8665a753` versus
+`c512813b5`: **+13,240 / -29,446 = -16,206** across Rust/Swift,
 Python/shell and SQL. Tests/docs excluded, no rename detection, trailing test
-modules excluded with the known trailing production block retained.
-Receipt: `.lf/tmp/execution-model/status-counts-e13f29909.json`.
-Do not present it as a fresh count of later edits. Changing merge bases changes
-the comparison; moved files alone never count as removed code.
+modules excluded with the known trailing production block retained. Repeating
+the method reproduced the prior `e13f29909` receipt exactly before measuring the
+new checkpoint. Receipt: `.lf/tmp/execution-model/status-counts-d8665a753.json`.
+This excludes the ongoing ancestry edits and is not a new published-head count.
+Changing merge bases changes the comparison; moved files alone never count as
+removed code. Earlier published count remains in `status-counts-e13f29909.json`.
 
 The detailed previous supervision ledger, exact intermediate failures, old
 allocations and receipt paths are preserved in the

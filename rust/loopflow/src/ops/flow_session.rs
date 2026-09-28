@@ -78,6 +78,11 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<O
                 RunFlowMembership::Step(RunFlowStep::of(flow)?),
             )?;
             let session = AgentSession {
+                task_id: None,
+                wave_id: None,
+                flow_session_id: None,
+                work_source: None,
+                bound_at: None,
                 id,
                 current_run_id: run.id.clone(),
                 kind: SessionKind::FlowReview,

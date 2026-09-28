@@ -92,8 +92,83 @@ pub(super) fn read_run(
     })())
 }
 
+pub(super) fn inherit_agent_work_in(
+    conn: &Connection,
+    run: &mut Run,
+    caller_exec: Option<&crate::id::ExecId>,
+) -> StoreResult<()> {
+    if run.invocation_id.is_none()
+        && (run.work_source.is_none() || run.work_source == Some(WorkSource::Inherited))
+    {
+        if let Some(exec) = caller_exec {
+            if let Some(work) = super::execs::agent_work_in(conn, exec)? {
+                run.task_id = work.task_id;
+                run.wave_id = work.wave_id;
+                run.work_source = Some(work.source);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The caller holds an immediate transaction, including any Session reservation.
 pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult<Run> {
+    // Historical work keeps its own attribution. A new launch takes the
+    // conversation's present assignment, including a prospective bind.
+    let owner = run
+        .session_id
+        .as_deref()
+        .map(|id| {
+            conn.query_row(
+                "SELECT current_run_id,task_id,wave_id,flow_session_id,work_source
+             FROM agent_sessions WHERE id=?1",
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+        })
+        .transpose()?;
+    if let Some((current, task, wave, flow, source)) = &owner {
+        if current != run.id.as_str() {
+            if run
+                .task_id
+                .as_ref()
+                .is_some_and(|id| Some(id.as_str()) != task.as_deref())
+                || run
+                    .wave_id
+                    .as_ref()
+                    .is_some_and(|id| Some(id.as_str()) != wave.as_deref())
+                || run
+                    .invocation_id
+                    .as_ref()
+                    .is_some_and(|id| Some(id) != flow.as_ref())
+            {
+                return Err(invalid("new work and AgentSession ancestry disagree"));
+            }
+            run.task_id = task
+                .as_deref()
+                .map(TaskId::parse)
+                .transpose()
+                .map_err(invalid)?;
+            run.wave_id = wave
+                .as_deref()
+                .map(WaveId::parse)
+                .transpose()
+                .map_err(invalid)?;
+            run.invocation_id = flow.clone();
+            run.work_source = source
+                .as_ref()
+                .map(|source| serde_json::from_value(serde_json::Value::String(source.clone())))
+                .transpose()?;
+        }
+    }
     if let Some(invocation) = &run.invocation_id {
         let (task, wave): (Option<String>, Option<String>) = conn
             .query_row(
@@ -152,6 +227,27 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
         WorkSource::Inherited => "inherited",
         WorkSource::Bound => "bound",
     });
+    if let Some((current, task, wave, flow, _)) = &owner {
+        if current == run.id.as_str() {
+            if task
+                .as_deref()
+                .is_some_and(|id| Some(id) != run.task_id.as_ref().map(TaskId::as_str))
+                || wave
+                    .as_deref()
+                    .is_some_and(|id| Some(id) != run.wave_id.as_ref().map(WaveId::as_str))
+                || flow
+                    .as_ref()
+                    .is_some_and(|id| Some(id) != run.invocation_id.as_ref())
+            {
+                return Err(invalid("initial work and AgentSession ancestry disagree"));
+            }
+            conn.execute(
+                "UPDATE agent_sessions SET task_id=?2,wave_id=?3,flow_session_id=?4,work_source=?5 WHERE id=?1",
+                params![run.session_id, run.task_id.as_ref().map(TaskId::as_str),
+                    run.wave_id.as_ref().map(WaveId::as_str), run.invocation_id, source],
+            )?;
+        }
+    }
     let iterations = run
         .iterations
         .as_ref()
@@ -197,7 +293,7 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
     Ok(run)
 }
 
-fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<WaveId> {
+pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<WaveId> {
     let wave: String = conn
         .query_row(
             "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
@@ -207,51 +303,6 @@ fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<WaveId> {
         .optional()?
         .ok_or_else(|| invalid(format!("Task {task} does not exist")))?;
     WaveId::parse(&wave).map_err(invalid)
-}
-
-/// Bind is write-once: it fills the Task of the Session's Runs that have none
-/// and never moves or clears one. Binding the Task a Session already has
-/// changes nothing. The Task's Wave is filled upward.
-pub(super) fn bind_session_runs_in(
-    conn: &Transaction<'_>,
-    session: &str,
-    task: &TaskId,
-) -> StoreResult<()> {
-    let bound: Option<(String, String)> = conn
-        .query_row(
-            "SELECT t.id, t.issue_identifier FROM runs r JOIN tasks t ON t.id=r.task_id
-             WHERE r.session_id=?1 ORDER BY r.created_at, r.id LIMIT 1",
-            [session],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    if let Some((id, issue)) = bound {
-        if id == task.as_str() {
-            return Ok(());
-        }
-        return Err(StoreError::InvalidAuthority(format!(
-            "Session {session} already has Task {issue}; a Run's Task never changes"
-        )));
-    }
-    let wave = task_wave_in(conn, task)?;
-    let other: Option<String> = conn
-        .query_row(
-            "SELECT w.name FROM runs r JOIN waves w ON w.id=r.wave_id
-             WHERE r.session_id=?1 AND r.wave_id!=?2 LIMIT 1",
-            params![session, wave.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if let Some(other) = other {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Session {session} belongs to Wave {other}, which does not own this Task"
-        )));
-    }
-    conn.execute(
-        "UPDATE runs SET task_id=?2, wave_id=?3, work_source='bound' WHERE session_id=?1",
-        params![session, task.as_str(), wave.as_str()],
-    )?;
-    Ok(())
 }
 
 fn location_in(conn: &Connection, invocation: &str) -> StoreResult<(u32, Vec<Vec<u32>>)> {
@@ -314,7 +365,11 @@ impl super::SqliteStore {
 
     /// A Run that belongs to no Session. One that names no Work takes its
     /// caller's; one that runs a Flow step is the step's current attempt.
-    pub fn create_run(&self, mut run: Run) -> StoreResult<Run> {
+    pub fn create_run(
+        &self,
+        mut run: Run,
+        caller_exec: Option<&crate::id::ExecId>,
+    ) -> StoreResult<Run> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let (None, None, Some(caller)) = (&run.task_id, &run.wave_id, &run.caller_run_id) {
@@ -334,6 +389,7 @@ impl super::SqliteStore {
                 run.work_source = Some(WorkSource::Inherited);
             }
         }
+        inherit_agent_work_in(&tx, &mut run, caller_exec)?;
         let run = insert_run_in(&tx, run)?;
         tx.execute(
             "UPDATE flow_sessions SET current_run_id=?2

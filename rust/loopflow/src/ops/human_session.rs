@@ -270,7 +270,7 @@ impl SessionFlowMembership {
 enum SessionTarget {
     /// An interactive Session, an Ask, or a saved Flow's review.
     Row {
-        session: AgentSession,
+        session: Box<AgentSession>,
         run: Box<Run>,
     },
     /// A Task's review also settles its Task's invocation.
@@ -468,10 +468,18 @@ async fn reserve_ask(
     if let Some(skill) = skill {
         crate::engine::load_skill(skill, &cwd).context("load Ask skill")?;
     }
-    // An unrecorded caller has no Work to give.
-    let (task_id, wave_id) = match store.run(&caller.run_id).await? {
-        Some(run) => (run.task_id, run.wave_id),
-        None => (None, None),
+    let current_work = match crate::journal::current_exec_id() {
+        Some(exec) => store.agent_work(&exec).await?,
+        None => None,
+    };
+    // A continuing provider inherits its Session's present assignment. Old
+    // launch evidence alone still describes only its historical assignment.
+    let (task_id, wave_id) = match current_work {
+        Some(work) => (work.task_id, work.wave_id),
+        None => match store.run(&caller.run_id).await? {
+            Some(run) => (run.task_id, run.wave_id),
+            None => (None, None),
+        },
     };
     if let Some(task_id) = &task_id {
         let task = store
@@ -530,6 +538,11 @@ async fn store_ask(
     // An Ask is a human boundary requested by a Run, never a Flow step.
     let run = prepare_run(run, crate::run_record::RunFlowMembership::Independent)?;
     let session = AgentSession {
+        task_id: None,
+        wave_id: None,
+        flow_session_id: None,
+        work_source: None,
+        bound_at: None,
         id,
         current_run_id: run.id.clone(),
         kind: crate::session::SessionKind::Ask,
@@ -715,7 +728,7 @@ async fn owned_target(
             bail!("Session {} is no longer waiting", session.id);
         }
         return Ok(SessionTarget::Row {
-            session,
+            session: Box::new(session),
             run: Box::new(current),
         });
     };
@@ -1479,7 +1492,7 @@ async fn surface(store: &SharedStore, session: &AgentSession, run: &Run) -> Resu
         crate::session::SessionKind::Ask => SessionKind::Ask,
         crate::session::SessionKind::FlowReview => SessionKind::Flow,
     };
-    let work = match (&run.task_id, &run.wave_id) {
+    let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
@@ -1525,7 +1538,7 @@ async fn surface(store: &SharedStore, session: &AgentSession, run: &Run) -> Resu
         SessionState::Waiting
     };
     let mut actions = session_actions(kind, state);
-    let flow_membership = match (&run.invocation_id, managed) {
+    let flow_membership = match (&session.flow_session_id, managed) {
         (None, _) => SessionFlowMembership::Independent,
         (Some(_), Ok(Some((_, position))))
             if flow_id(&position).ok().as_deref() == Some(&session.id) =>
@@ -1560,8 +1573,8 @@ async fn surface(store: &SharedStore, session: &AgentSession, run: &Run) -> Resu
         run_id: run.id.clone(),
         kind,
         interactive: session.interactive,
-        wave_id: run.wave_id.clone(),
-        work_path: session_work_path(store, run).await?,
+        wave_id: session.wave_id.clone(),
+        work_path: session_work_path(store, session).await?,
         work,
         actions,
         title: session.title.clone(),
@@ -1596,15 +1609,15 @@ fn launch_model(run: &Run) -> String {
     }
 }
 
-async fn session_work_path(store: &SharedStore, run: &Run) -> Result<Option<String>> {
-    let Some(wave_id) = &run.wave_id else {
+async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Result<Option<String>> {
+    let Some(wave_id) = &session.wave_id else {
         return Ok(None);
     };
     let wave = match store.get_wave(wave_id).await? {
         Some(wave) => wave.name().to_string(),
         None => format!("Wave {wave_id} (unavailable)"),
     };
-    Ok(Some(match &run.task_id {
+    Ok(Some(match &session.task_id {
         None => wave,
         Some(id) => match store.get_task(id).await? {
             Some(task) => format!("{wave} / {}", task.plan.identifier),
@@ -1677,7 +1690,7 @@ pub(crate) async fn rename(
     session_surface(store, &target).await
 }
 
-/// Assign a Task to a Session's Runs that have none. The id is the Session's
+/// Assign a Task to future Session work. The id is the Session's
 /// or any of its Runs'; a closed Session binds like an open one.
 pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
     let owned = match RunId::parse(id) {
@@ -1691,7 +1704,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
     }
     .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
     let (session, run) = store
-        .bind_session(&session.id, &task.id)
+        .bind_session(&session.id, &session.current_run_id, &task.id)
         .await
         .map_err(|error| match error {
             crate::store::StoreError::InvalidAuthority(reason) => anyhow!(reason),
@@ -2764,35 +2777,34 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let run = |task_id: Option<crate::work::task::TaskId>| Run {
-            id: RunId::new(),
-            session_id: None,
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
+        let session = |task_id: Option<crate::work::task::TaskId>| AgentSession {
+            id: "conversation".into(),
+            current_run_id: RunId::new(),
             task_id,
             wave_id: Some(wave.id().clone()),
+            flow_session_id: None,
             work_source: None,
+            bound_at: None,
+            kind: crate::session::SessionKind::Conversation,
+            interactive: true,
+            repo: None,
+            title: "Conversation".into(),
+            title_source: crate::session::TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
             created_at: 1,
-            published: true,
-            cwd: directory.path().to_path_buf(),
-            skill: None,
-            provider: None,
-            model: None,
-            caller_run_id: None,
-            ended: None,
         };
         assert_eq!(
-            super::session_work_path(&store, &run(None))
+            super::session_work_path(&store, &session(None))
                 .await
                 .unwrap()
                 .as_deref(),
             Some("product")
         );
-        let unbound = Run {
+        let unbound = AgentSession {
             wave_id: None,
-            ..run(None)
+            ..session(None)
         };
         assert_eq!(
             super::session_work_path(&store, &unbound).await.unwrap(),
@@ -2800,7 +2812,7 @@ mod tests {
         );
         let missing = crate::work::task::TaskId::new();
         assert_eq!(
-            super::session_work_path(&store, &run(Some(missing.clone())))
+            super::session_work_path(&store, &session(Some(missing.clone())))
                 .await
                 .unwrap(),
             Some(format!("Task {missing} (unavailable)"))
@@ -3016,6 +3028,11 @@ mod tests {
             ended: None,
         };
         let session = AgentSession {
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
             id: "ask_skill_proof".to_string(),
             current_run_id: run.id.clone(),
             kind: SessionKind::Ask,

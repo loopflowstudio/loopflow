@@ -48,7 +48,8 @@ authority between them.
 The durable store keeps facts needed to resume planning, delivery, placement,
 credentials, and provider observations. Task invocations retain their captured
 execution and settlement history. Sessions of every kind own their title, feedback,
-completion and current Run in SQLite; earlier Runs stay in indexed history.
+completion, Task/Wave assignment, Flow membership and current Run in SQLite;
+earlier Runs stay in indexed history with their original attribution.
 Task and taskless Flows share the invocation owner and executor. Installed-Home
 cutover remains a separate acceptance obligation.
 
@@ -58,7 +59,7 @@ The current application tables group by owner:
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
 | Project and Task progression | `projects`, `tasks`, `flow_sessions` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
-| Conversations and execution | `agent_sessions`, `runs` | stable conversation identity, current Run, title and saved feedback; every Run's Session, invocation, Task, Wave, caller, provider, times and end |
+| Conversations and execution | `agent_sessions`, `runs` | conversation identity, current assignment, Flow membership, title and feedback; historical Run attribution, caller, provider, times and end |
 | CLI processes | `execs` | one actual lf process, immutable causal parent and agent provenance, command completion; the journal transaction maintains its indexed summary |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
@@ -87,7 +88,11 @@ Flow settlement only touches the Task timestamp.
 The current Task invocation stores the shared `ExecutionCursor` tree in `review_json`;
 the current Flow name, step, node and human policy come from its captured graph.
 Session discovery joins `agent_sessions` to its current `runs` row without decoding
-unrelated invocations. Exact Task execution reads still validate the selected
+unrelated invocations. Task filtering and breadcrumbs use the Session's assignment.
+First bind sets Task Started once, but never rewrites earlier Run or native-turn
+attribution. Subsequent child launches and Asks inherit the continuing provider's
+current Session assignment through its admitted Exec and provider generation.
+Exact Task execution reads still validate the selected
 capture. Completion and restart close the invocation without deleting its
 capture, cursor or exact claim. Session completion and boundary settlement share
 a transaction; Run replacement preserves the Session title and saved feedback.

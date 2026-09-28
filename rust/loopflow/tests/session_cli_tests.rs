@@ -2,6 +2,12 @@ use std::process::{Command, Output};
 
 fn command(home: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (name, _) in std::env::vars_os() {
+        let key = name.to_string_lossy();
+        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") {
+            command.env_remove(name);
+        }
+    }
     command
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -371,7 +377,7 @@ fn prepare_ask(
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
-    let caller = home.join("caller");
+    let caller = home.join("runs").join(&CALLER[4..6]).join(CALLER);
     std::fs::create_dir_all(&caller).unwrap();
     let manifest = serde_json::json!({
         "schema_version": 1, "run_id": CALLER, "parent_run_id": null,

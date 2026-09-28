@@ -733,7 +733,8 @@ Existing Wave ancestry must agree. Done/landed Tasks remain valid without being
 reopened. Flow membership cannot be changed to make an incompatible bind work.
 
 Binding affects subsequent work under the conservative attribution assumption;
-prior usage retains its recorded owner. First actual Task work sets Started once.
+prior usage retains its recorded owner. First assignment, including bind, sets
+Task Started once without rewriting earlier work or usage.
 Inspection commands are still visible in Exec history but do not start Tasks.
 Rename and bind retain the Session ID, pane, draft and membership. Human names
 survive generated suggestions. A bound Session absent from the visible roadmap

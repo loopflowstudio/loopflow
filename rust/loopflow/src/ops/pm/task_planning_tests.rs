@@ -21,34 +21,6 @@ use crate::work::task::{
     PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
     TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
-use crate::work::wave::Wave;
-
-impl Fixture {
-    async fn seed_current_chapter(&self, wave: &Wave) {
-        let now = now();
-        self.store
-            .save_chapter(
-                &crate::work::chapter::Chapter {
-                    id: crate::work::chapter::ChapterId::parse("fixture").unwrap(),
-                    wave_id: wave.id().clone(),
-                    wave: wave.name().into(),
-                    project_id: "project-1".into(),
-                    content: crate::ops::chapter::empty_plan(),
-                    predecessors: vec![],
-                    predecessor_metrics: vec![],
-                    tasks: vec![],
-                    phase: crate::work::chapter::ChapterPhase::Complete,
-                    created_at: now,
-                    activated_at: Some(now),
-                    completed_at: Some(now),
-                    error: None,
-                },
-                true,
-            )
-            .await
-            .unwrap();
-    }
-}
 
 async fn serve(
     state: Arc<tokio::sync::Mutex<PlanningState>>,
@@ -114,7 +86,7 @@ async fn planning_graphql(
         .current_project_id
         .clone()
         .unwrap_or_else(|| "project-1".into());
-    let project = json!({"id":project_id, "name":"Chapter", "description":"", "content":"",
+    let project = json!({"id":project_id, "name":"Chapter", "description":"", "content":"flow: feature", "status":{"type":"started"},
         "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
     let data =
         if query.contains("query ListTeams") {
@@ -241,8 +213,7 @@ async fn planning_graphql(
 async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provider_title() {
     let fixture = Fixture::new().await;
     fixture.seed(now() + 86_400).await;
-    let (repo, wave) = fixture.planning_repo().await;
-    fixture.seed_current_chapter(&wave).await;
+    let (repo, _wave) = fixture.planning_repo().await;
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = serve(state.clone()).await;
     PM_TEST_CONTEXT
@@ -376,11 +347,10 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
     std::env::set_var("LF_DB_PATH", &fixture.database);
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
     // Deliberately no commit, Project Work, agent route or execution credential.
     std::fs::write(repo.join("authored.txt"), "keep this unfinished work").unwrap();
     runtime.block_on(fixture.seed(now() + 86_400));
-    runtime.block_on(fixture.seed_current_chapter(&wave));
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
         fail_snapshot: true,
         ..Default::default()
@@ -539,7 +509,6 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
     std::env::set_var("LF_DB_PATH", &fixture.database);
     let (repo, wave) = runtime.block_on(fixture.planning_repo());
     runtime.block_on(fixture.seed(now() + 86_400));
-    runtime.block_on(fixture.seed_current_chapter(&wave));
     std::fs::write(repo.join("authored.txt"), "keep authored work").unwrap();
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
@@ -650,15 +619,6 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
                         .await
                         .unwrap();
 
-                    let mut successor = fixture
-                        .store
-                        .chapter(wave.id(), None)
-                        .await
-                        .unwrap()
-                        .unwrap();
-                    successor.id = crate::work::chapter::ChapterId::parse("successor").unwrap();
-                    successor.project_id = "project-2".into();
-                    fixture.store.save_chapter(&successor, true).await.unwrap();
                     state.lock().await.current_project_id = Some("project-2".into());
                     let snapshot = super::refresh_pm_snapshot(&repo, "product", &ctx)
                         .await
@@ -818,7 +778,6 @@ fi
     }
 
     runtime.block_on(fixture.seed(now() + 86_400));
-    runtime.block_on(fixture.seed_current_chapter(&wave));
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
@@ -856,6 +815,8 @@ fi
             let project = Project {
                 id: ProjectId::new(),
                 plan: ProjectPlan {
+                    flow: "feature".into(),
+                    status: crate::pm::ProjectStatus::Started,
                     id: LinearProjectId::new("project-1").unwrap(),
                     slug: "chapter".into(),
                     name: "Chapter".into(),

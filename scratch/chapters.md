@@ -115,3 +115,24 @@ released migrations; `check_architecture.py` reports no missing owner.
   prototype already uses. It needs no query change but hides past Projects by
   default in Linear and cannot express Planned. Status was chosen for the
   visibility Jack asked for.
+
+## Implementation review: partial rotation (2026-09-28)
+
+Supervisor finding, not an additional decision by Jack: the unconditional
+mixed-name refusal above conflicts with retry after a partial multi-Wave
+rotation. If Wave A has reached the requested name while Wave B still has the
+predecessor name, repeating the same command must be able to finish. Status
+writes within one Wave can also temporarily leave zero or two In Progress
+Projects, depending on write order. The existing implementation uses saved
+Chapter phases to recognize continuation; deleting those phases requires
+recognizing the allowed intermediate states from fresh provider evidence.
+
+Implement and prove the distinction before removing the old recovery path.
+A candidate rule uses the explicit requested name, stable Project identities,
+and one unambiguous predecessor group to distinguish convergence from unrelated
+conflicting plans. This is an implementation proposal to validate, not permission
+to select whichever Project has the newest name. Interrupt after each provider
+mutation, repeat the same command, and check both same-Home and second-Home
+recovery. Retain a counterexample with unrelated competing current Projects
+that remains unresolved. Do not add a Chapter table or packet to recover the
+discarded prototype's phases.

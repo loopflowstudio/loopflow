@@ -80,6 +80,8 @@ fn project(wave: &Wave) -> Project {
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new("project-alpha").unwrap(),
             slug: "architecture".to_string(),
             name: "Architecture".to_string(),

@@ -10,7 +10,7 @@ public enum SessionState: String, Codable, Sendable, Hashable {
 public enum SessionKind: String, Codable, Sendable, Hashable {
     case ask
     case flow
-    case interactive
+    case conversation
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
@@ -135,6 +135,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let runId: String
     public let kind: SessionKind
+    public let interactive: Bool
     public let work: WorkReference?
     public let waveId: String?
     public let workPath: String?
@@ -157,7 +158,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, work, title, detail, provider, cwd, state
+        case id, kind, interactive, work, title, detail, provider, cwd, state
         case waveId = "wave_id"
         case actions
         case runId = "run_id"

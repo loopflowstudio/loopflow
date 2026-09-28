@@ -42,7 +42,7 @@ struct WorkSurfaceView: View {
         }
         .background(palette.background)
         .sheet(item: $model.historyWave) { wave in
-            ChapterHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
+            ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
         .sheet(item: $editingTask) { selection in
             TaskDirectiveEditor(model: model, task: selection.task, wave: selection.wave)
@@ -126,7 +126,7 @@ struct WorkSurfaceView: View {
 
                 section {
                     WorkspaceSectionHeading(title: "Current KRs") {
-                        Button("Chapter history") {
+                        Button("Project history") {
                             model.historyReference = nil
                             model.historyWave = roadmap.wave
                         }
@@ -135,7 +135,7 @@ struct WorkSurfaceView: View {
                         .foregroundStyle(palette.textTertiary)
                         .accessibilityIdentifier("wave-chapter-history")
                     }
-                    if let chapter = roadmap.chapter {
+                    if let chapter = roadmap.currentProject {
                         WaveChapterView(chapter: chapter)
                     } else {
                         Text("No current chapter plan.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)

@@ -68,8 +68,10 @@ mechanics, Flow settlement or headless Session creation. Those remain required.
 
 ## Remaining work in this slice
 
-- Execute and repair the driver-handoff proof. Add failed/interrupted command
-  results, nested runtime scope and stale-driver write rejection evidence.
+- Wire the proven transport into public connect and the ordinary harness; the
+  native fence currently has an actual-engine fixture caller only. Session-row
+  actions still need the same driver fence. A provider-native name rejection
+  does not prove stale SQLite Session mutation is excluded.
 - Wire real agent admission to the existing Session owner and explicit caller
   environment; migrate the reconnectable harness and public connect operation.
   Prove A → B direct, A's agent → C, C's agent → D, with driver exit/handoff.
@@ -86,3 +88,67 @@ mechanics, Flow settlement or headless Session creation. Those remain required.
 
 No branch binary accessed the installed Home. No publication, promotion,
 installation or Task/Flow disposition was requested by these proofs.
+
+## Retained native client: counterexample and transport repair
+
+Jack required the original native client to remain connected across transfer.
+The direct native probe in `.lf/tmp/execution-model/retained-native-client/`
+confirmed that a second client's resume does **not** revoke the first client's
+ability to start another turn. The original and sibling both completed. This
+is actual Codex 0.157.1 with synthetic upstream, not a configured model result.
+
+The implementation choice is a conversation-scoped native connection in
+`harness/codex_connection.rs`. It relays to the existing Unix WebSocket engine,
+never launches or kills it, and has no separate durable owner. Passive
+subscription strips resume overrides. Every other RPC, including approval
+replies, compares the exact Session driver while holding the same SQLite write
+transaction that serializes transfer, through the bounded socket send. The
+comparison happens at dispatch rather than ahead of a queue. A send timeout
+remains an unknown outcome; there is no automatic retry. This deliberately
+holds the database writer during a local socket send (at most two seconds);
+measure contention before calling the final path fast.
+
+Focused actual-engine receipts:
+
+- `exec-native-fence.log`: retained old client rejected on start, steer,
+  interrupt and native name mutation; it still receives the active turn's
+  completion. A passive client gets no claim; the new driver steers and starts
+  another turn; the active sibling survives. One test passed in 13.99 seconds.
+- `exec-native-parent.log`: the same scenario issues real nested `lf` commands.
+  Initial command parent is the original Exec; subsequent commands from the
+  continuing provider name the replacement Exec. One test passed in 24.85
+  seconds. Sibling commands carry no original-conversation caller identity.
+- `exec-native-transfer.log`: final proof also allows the original client's
+  steer before transfer, then rejects its writes afterward. One test passed
+  in 25.19 seconds. `exec-native-clippy.log` records all-target Clippy passing
+  in 15.75 seconds; formatting, Ruff and working-diff whitespace pass.
+
+These use the production relay and store writer, with fixture-owned endpoints
+and real command processes. They do not exercise public connect, normal harness
+admission, native TUI startup, pending approvals, Session-row writes, or actual
+provider restart. The older driver-release/replaced-provider proof remains
+separate. The full lifecycle and code-complete review remain unfinished.
+
+This pass adds 166 production Rust lines and removes none against `03330279f`;
+the relay is 144 lines and the existing Session writer adds 20. The two module
+declaration lines are included. No Run owner or reader is newly deleted;
+`human_session.rs` remains at 2,081 non-test lines. The relay is a retained
+transport implementation for the next lifecycle cut, not an owner-only stage
+offered as completion.
+
+## Public headless baseline — 2026-09-28
+
+The actual CLI / installed Codex / synthetic localhost Responses fixture now
+checks headless launch, default visibility, explicit headless discovery and rename.
+`uv run tests/e2e/codex_connect.py --codex /Users/jack/.local/bin/codex --lf target/debug/lf --launch --output .lf/tmp/execution-model/public-headless-before-2`
+failed at the new-contract assertion: launch exited 0, the default inventory was
+empty, and `session list --all --interactive false --json` exited 2 with
+`unexpected argument 'false' found`. Copied CLI SHA-256:
+`011b4cdb6eab252f08bc1af28f645b0805351a2bf5da9fa148886c4838186b93`.
+No lifecycle production edit preceded this baseline. It does not prove discovery,
+rename, continuation or handoff through public commands.
+
+The first receipt (`public-headless-before`) failed in fixture setup: the copied
+binary path collided with its private LF_HOME. That observation remains retained;
+it is not a product launch failure. The fixture now copies to private `bin/lf`
+and gives its exact child CLI graceful termination before forced timeout cleanup.

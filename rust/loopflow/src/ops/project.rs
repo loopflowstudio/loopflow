@@ -29,23 +29,17 @@ pub(crate) async fn resolve_project_for_task(
         .await
         .map_err(|cause| project_error(cause.to_string()))?
         .ok_or_else(|| project_error("owning Wave is not initialized"))?;
-    let current = store
-        .chapter(wave.id(), None)
-        .await
-        .map_err(|cause| project_error(cause.to_string()))?
-        .ok_or_else(|| project_error("Wave has no chapter; run `lf wave new-chapter`"))?;
-    if current.project_id != project_id {
+    let current = crate::ops::chapter::current_project(&store, &wave).await?;
+    if current.id != project_id {
         return Err(project_error(
-            "this plan is chapter history; use the Wave's current chapter",
+            "new Tasks require the Wave's In Progress Project",
         ));
     }
     store
-        .get_project_by_project(&current.project_id)
+        .get_project_by_project(&current.id)
         .await
         .map_err(|cause| project_error(cause.to_string()))?
-        .ok_or_else(|| {
-            project_error("current chapter record is unavailable; resume its chapter transition")
-        })
+        .ok_or_else(|| project_error("current Project is unavailable; sync the Wave"))
 }
 
 pub(crate) fn project_plan(
@@ -59,5 +53,7 @@ pub(crate) fn project_plan(
         name: project.name.clone(),
         prompt_context: crate::ops::task::project_context(project),
         pm_snapshot_synced_at,
+        flow: project.flow.clone(),
+        status: project.status,
     })
 }

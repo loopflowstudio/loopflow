@@ -47,6 +47,7 @@
       "iterations": [
         []
       ]
-    }
+    },
+    "interactive": true
   }
 ]

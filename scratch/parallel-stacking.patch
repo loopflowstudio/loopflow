@@ -1,0 +1,653 @@
+--- a/rust/loopflow/src/ops/task.rs
++++ b/rust/loopflow/src/ops/task.rs
+@@ -408,37 +408,6 @@
+                     )));
+                 }
+             }
+-            if let Some(requested) = stack_on.as_deref() {
+-                let active = store
+-                    .active_task_pr(&task.id)
+-                    .await
+-                    .map_err(|error| task_error(error.to_string()))?
+-                    .ok_or_else(|| task_error("existing Task has no active PR"))?;
+-                let parent_id = active.parent_pr_id.as_ref().ok_or_else(|| {
+-                    task_error(format!(
+-                        "Task {} is rooted on main, not stacked on {requested}",
+-                        task.plan.identifier
+-                    ))
+-                })?;
+-                let parent = store
+-                    .get_task_pr(parent_id)
+-                    .await
+-                    .map_err(|error| task_error(error.to_string()))?
+-                    .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
+-                let parent_task = store
+-                    .get_task(&parent.task_id)
+-                    .await
+-                    .map_err(|error| task_error(error.to_string()))?
+-                    .ok_or_else(|| task_error("stack parent Task is missing"))?;
+-                if requested != parent_task.plan.identifier
+-                    && requested != parent_task.plan.id.as_str()
+-                {
+-                    return Err(task_error(format!(
+-                        "Task {} is stacked on {}, not {requested}",
+-                        task.plan.identifier, parent_task.plan.identifier
+-                    )));
+-                }
+-            }
+             if directive.is_some() {
+                 return Err(task_error(format!(
+                     "Task {} already exists; use `lf task comment {} <new-direction>`",
+@@ -449,6 +418,11 @@
+         Ok(existing)
+     })?;
+     if let Some(mut existing) = existing {
++        if let Some(parent) = stack_on.as_deref() {
++            block_on_task(async {
++                stack_existing_task(&task_store().await?, &existing, parent).await
++            })?;
++        }
+         if !launch {
+             return Ok(existing);
+         }
+@@ -483,6 +457,42 @@
+         launch,
+     ))?;
+     create_prepared_task(main_repo, resolved, prepared)
++}
++
++async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) -> OpsResult<()> {
++    let active = store
++        .active_task_pr(&task.id)
++        .await
++        .map_err(|error| task_error(error.to_string()))?
++        .ok_or_else(|| task_error("existing Task has no active PR"))?;
++    let parent_task = store
++        .get_task_by_issue(requested)
++        .await
++        .map_err(|error| task_error(error.to_string()))?
++        .ok_or_else(|| task_error(format!("stack parent {requested:?} has no Task")))?;
++    // A retry names the retained PR, even if its Task has since opened another PR.
++    let parent = match &active.parent_pr_id {
++        Some(id) => store.get_task_pr(id).await,
++        None => store.active_task_pr(&parent_task.id).await,
++    }
++    .map_err(|error| task_error(error.to_string()))?
++    .ok_or_else(|| task_error("stack parent PR is missing"))?;
++    if parent.task_id != parent_task.id {
++        return Err(task_error(format!(
++            "Task {} already selects parent PR {}; changing an existing dependency requires explicit reparenting",
++            task.plan.identifier, parent.id
++        )));
++    }
++    let _mutation = lock_task_pr_mutation(&task.worktree)?;
++    store
++        .stack_task_pr(&active, &parent.id)
++        .await
++        .map_err(|error| task_error(error.to_string()))?;
++    eprintln!(
++        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf rebase` in {} to integrate it.",
++        task.plan.identifier, parent.id, task.worktree.display()
++    );
++    Ok(())
+ }
+ 
+ #[derive(Debug)]
+@@ -5927,6 +5937,96 @@
+     }
+ 
+     #[tokio::test]
++    async fn stacking_preserves_claim_and_history_until_the_owner_releases() {
++        let _ledger = crate::journal::TestLedgerGuard::new();
++        let repo = loopflow_test_support::TestRepo::new();
++        let fixture = task_fixture_at("STACK-1", repo.path().canonicalize().unwrap()).await;
++        let store = &fixture.store;
++        let child = store
++            .active_task_pr(&fixture.task.id)
++            .await
++            .unwrap()
++            .unwrap();
++        let mut parent_task = fixture.task.clone();
++        parent_task.id = TaskId::new();
++        parent_task.plan.id = LinearIssueId::new("stack-parent-issue").unwrap();
++        parent_task.plan.identifier = "STACK-2".into();
++        parent_task.worktree = repo.path().join("parent");
++        parent_task.workspace_slug = "stack-parent".into();
++        let mut parent = child.clone();
++        parent.id = TaskPrId::new();
++        parent.task_id = parent_task.id.clone();
++        parent.branch = "test/stack-parent".into();
++        parent.slug = "stack-parent".into();
++        store.create_task(&parent_task, &parent).await.unwrap();
++        parent.publication = Some(PrPublication {
++            requested_at: parent.created_at,
++            presentation: None,
++            github: Some(GithubPr {
++                number: 42,
++                url: "https://github.com/fixture/repo/pull/42".into(),
++                head_sha: None,
++            }),
++            merge: None,
++        });
++        store.update_task_pr(&parent).await.unwrap();
++        let claimed = claim_stop_fixture(&fixture, std::process::id()).await;
++        let events = store.task_events_after(&fixture.task.id, 0).await.unwrap();
++        assert!(store
++            .stack_task_pr(&child, &parent.id)
++            .await
++            .unwrap_err()
++            .to_string()
++            .contains("worker claim released"));
++        assert_eq!(
++            store.active_task_pr(&fixture.task.id).await.unwrap(),
++            Some(child.clone())
++        );
++        assert_eq!(
++            store.task_flow(&fixture.task.id).await.unwrap(),
++            Some(claimed.clone())
++        );
++        assert_eq!(
++            store.task_events_after(&fixture.task.id, 0).await.unwrap(),
++            events
++        );
++        let released = store
++            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
++            .await
++            .unwrap();
++        store.stack_task_pr(&child, &parent.id).await.unwrap();
++        store.stack_task_pr(&child, &parent.id).await.unwrap();
++        assert_eq!(
++            store.task_flow(&fixture.task.id).await.unwrap(),
++            Some(released)
++        );
++        assert_eq!(
++            store.task_events_after(&fixture.task.id, 0).await.unwrap(),
++            events
++        );
++        // Both self-parenting and a reverse edge preserve the accepted dependency.
++        assert!(store.stack_task_pr(&parent, &parent.id).await.is_err());
++        let mut published_child = store
++            .active_task_pr(&fixture.task.id)
++            .await
++            .unwrap()
++            .unwrap();
++        published_child.publication = parent.publication.clone();
++        store.update_task_pr(&published_child).await.unwrap();
++        assert!(store
++            .stack_task_pr(&parent, &child.id)
++            .await
++            .unwrap_err()
++            .to_string()
++            .contains("cycle"));
++        assert_eq!(store.get_task_pr(&parent.id).await.unwrap(), Some(parent));
++        assert_eq!(
++            store.get_task_pr(&child.id).await.unwrap(),
++            Some(published_child)
++        );
++    }
++
++    #[tokio::test]
+     async fn task_preparation_rejects_invalid_inputs_before_allocating_placement() {
+         let repo = loopflow_test_support::TestRepo::new();
+         let project = preparation_project();
+--- a/rust/loopflow/src/store/children.rs
++++ b/rust/loopflow/src/store/children.rs
+@@ -129,6 +129,15 @@
+         .await
+     }
+ 
++    pub async fn stack_task_pr(&self, expected: &TaskPr, parent: &TaskPrId) -> StoreResult<()> {
++        let expected = expected.clone();
++        let parent = parent.clone();
++        run_sqlite(&self.sqlite, move |store| {
++            store.stack_task_pr(&expected, &parent)
++        })
++        .await
++    }
++
+     pub async fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
+         let pr = pr.clone();
+         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
+--- a/rust/loopflow/src/store/sqlite/children.rs
++++ b/rust/loopflow/src/store/sqlite/children.rs
+@@ -319,6 +319,89 @@
+             }
+         }
+         Ok(tasks)
++    }
++
++    /// Select a dependency without claiming that Git or GitHub has moved.
++    pub fn stack_task_pr(&self, expected: &TaskPr, parent_id: &TaskPrId) -> StoreResult<()> {
++        let mut conn = self.conn.lock().expect("store mutex poisoned");
++        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
++        let child = active_task_pr_on(&tx, &expected.task_id)?.ok_or(StoreError::NotFound)?;
++        if child.id != expected.id || child.base_commit != expected.base_commit {
++            return Err(StoreError::InvalidAuthority(
++                "Task PR changed; retry preparation".into(),
++            ));
++        }
++        if child.parent_pr_id.as_ref() == Some(parent_id) {
++            return Ok(());
++        }
++        if child.parent_pr_id.is_some() {
++            return Err(StoreError::InvalidAuthority(
++                "Task PR already has a parent; retain its dependency until explicit reparenting"
++                    .into(),
++            ));
++        }
++        if child
++            .publication
++            .as_ref()
++            .is_some_and(|publication| publication.merge.is_some())
++        {
++            return Err(StoreError::InvalidAuthority(
++                "Task PR has a merge request; cancel its delivery before selecting a parent".into(),
++            ));
++        }
++        let ready: bool = tx.query_row(
++            "SELECT work_state='ready' FROM tasks WHERE id=?1",
++            [child.task_id.as_str()],
++            |row| row.get(0),
++        )?;
++        let claimed: bool = tx.query_row(
++            "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND claim_json IS NOT NULL)",
++            [child.task_id.as_str()], |row| row.get(0),
++        )?;
++        if !ready || claimed {
++            return Err(StoreError::InvalidAuthority(
++                "Task must be ready with its worker claim released before selecting a parent; use the existing Task stop/recovery path".into(),
++            ));
++        }
++        let parent = task_pr_on(&tx, parent_id)?.ok_or(StoreError::NotFound)?;
++        if parent.is_settled() || parent.github().is_none() {
++            return Err(StoreError::InvalidAuthority(
++                "open the parent PR before stacking work on it".into(),
++            ));
++        }
++        let same_repo: bool = tx.query_row(
++            "SELECT cw.repo=pw.repo FROM tasks c
++             JOIN projects cp ON cp.id=c.project_id JOIN waves cw ON cw.id=cp.wave_id
++             JOIN tasks p ON p.id=?2
++             JOIN projects pp ON pp.id=p.project_id JOIN waves pw ON pw.id=pp.wave_id
++             WHERE c.id=?1",
++            params![child.task_id.as_str(), parent.task_id.as_str()],
++            |row| row.get(0),
++        )?;
++        if !same_repo {
++            return Err(StoreError::InvalidAuthority(
++                "stack parent belongs to another repository".into(),
++            ));
++        }
++        let mut ancestor = Some(parent);
++        let mut seen = std::collections::HashSet::new();
++        while let Some(pr) = ancestor {
++            if pr.task_id == child.task_id || !seen.insert(pr.id.clone()) {
++                return Err(StoreError::InvalidAuthority(
++                    "stack parent would create a dependency cycle".into(),
++                ));
++            }
++            ancestor = match pr.parent_pr_id {
++                Some(id) => Some(task_pr_on(&tx, &id)?.ok_or(StoreError::NotFound)?),
++                None => None,
++            };
++        }
++        tx.execute(
++            "UPDATE task_prs SET parent_pr_id=?2, updated_at=?3 WHERE id=?1",
++            params![child.id.as_str(), parent_id.as_str(), now_unix()],
++        )?;
++        tx.commit()?;
++        Ok(())
+     }
+ 
+     pub fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
+@@ -1199,12 +1281,12 @@
+             publication_requested_at=?7, after_merge=?8, next_slug=?9,
+             github_number=?10, github_url=?11, merge_commit=?12,
+             abandoned_at=?13, updated_at=?15, github_head_sha=?16,
+-            ci_observation=?17, parent_pr_id=?18, github_observation=?19,
++            ci_observation=?17, github_observation=?19,
+             linear_attachment_id=?20, linear_comment_id=?21, linear_link_error=?22,
+             merge_mode=?23, merge_requested_at=?24, merge_head_sha=?25,
+             pr_title=?26, pr_body=?27, pr_copy_head_sha=?28
+          WHERE id=?1 AND task_id=?2 AND sequence=?3 AND slug=?4
+-           AND branch=?5 AND base_commit=?6 AND created_at=?14",
++           AND branch=?5 AND base_commit=?6 AND created_at=?14 AND parent_pr_id IS ?18",
+         params![
+             pr.id.as_str(),
+             pr.task_id.as_str(),
+--- a/rust/loopflow/src/work/task/mod.rs
++++ b/rust/loopflow/src/work/task/mod.rs
+@@ -352,9 +352,10 @@
+     pub slug: String,
+     pub branch: String,
+     pub base_commit: String,
+-    /// Another Task's PR this worktree was placed on, or `None` when rooted on
+-    /// the default branch. `base_commit` is that parent's exact fork commit; the
+-    /// link clears after the parent merges and this PR collapses onto main.
++    /// Selected parent PR, or `None` when rooted on the default branch.
++    /// Selection does not move Git: `base_commit` remains the child's last
++    /// recorded fork until rebase succeeds. The link clears after the parent
++    /// merges and this PR collapses onto main.
+     pub parent_pr_id: Option<TaskPrId>,
+     pub publication: Option<PrPublication>,
+     pub merge_commit: Option<String>,
+--- a/rust/loopflow/tests/flow_tests.rs
++++ b/rust/loopflow/tests/flow_tests.rs
+@@ -86,6 +86,170 @@
+         command.env("PATH", path);
+     }
+     command
++}
++
++fn publish_stack_fixture_pr(
++    runtime: &tokio::runtime::Runtime,
++    store: &loopflow::store::Store,
++    task: &loopflow::work::task::TaskId,
++) -> loopflow::work::task::TaskPr {
++    let mut pr = runtime
++        .block_on(store.active_task_pr(task))
++        .unwrap()
++        .unwrap();
++    pr.publication = Some(loopflow::work::task::PrPublication {
++        requested_at: pr.created_at,
++        presentation: None,
++        github: Some(loopflow::work::task::GithubPr {
++            number: 41,
++            url: "https://github.com/fixture/repo/pull/41".into(),
++            head_sha: Some(pr.base_commit.clone()),
++        }),
++        merge: None,
++    });
++    runtime.block_on(store.update_task_pr(&pr)).unwrap();
++    pr
++}
++
++#[test]
++fn prepared_task_selects_parent_without_rewriting_work_or_publication() {
++    let repo = loopflow_test_support::TestRepo::new();
++    let home = TempDir::new().unwrap();
++    let child =
++        support::register_unrun_task(home.path(), repo.path(), "child-task", &repo.head_sha());
++    let parent_path = repo.create_named_worktree("parent-task");
++    let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
++    repo.create_branch("child-task");
++    let runtime = tokio::runtime::Runtime::new().unwrap();
++    let task_before = runtime
++        .block_on(child.store.get_task(&child.task.id))
++        .unwrap()
++        .unwrap();
++    let before = publish_stack_fixture_pr(&runtime, &child.store, &child.task.id);
++    let parent_pr = publish_stack_fixture_pr(&runtime, &child.store, &parent.id);
++    repo.create_file("committed.txt", "child-authored commit");
++    repo.stage_all();
++    repo.commit("Child work before selecting its parent");
++    repo.create_file("staged.txt", "staged bytes");
++    repo.stage_all();
++    repo.create_file("committed.txt", "unstaged bytes");
++    repo.create_file("untracked.txt", "untracked bytes");
++    let head = repo.head_sha();
++    let index = Command::new("git")
++        .args(["diff", "--cached", "--binary"])
++        .current_dir(repo.path())
++        .output()
++        .unwrap()
++        .stdout;
++    let events = runtime
++        .block_on(child.store.task_events_after(&child.task.id, 0))
++        .unwrap();
++    for _ in 0..2 {
++        let output = lf_command(
++            repo.path(),
++            home.path(),
++            &[
++                "task",
++                "prepare",
++                "INF-123",
++                "--stack-on",
++                "INF-124",
++                "--json",
++            ],
++            None,
++        )
++        .env_remove("LF_CONTROL_DB_PATH")
++        .env("LF_DB_PATH", home.path().join("loopflow.db"))
++        .output()
++        .unwrap();
++        assert!(
++            output.status.success(),
++            "{}",
++            String::from_utf8_lossy(&output.stderr)
++        );
++        let returned: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
++        assert!(returned.is_object());
++        let after = runtime
++            .block_on(child.store.active_task_pr(&child.task.id))
++            .unwrap()
++            .unwrap();
++        let mut expected = before.clone();
++        expected.parent_pr_id = Some(parent_pr.id.clone());
++        expected.updated_at = after.updated_at;
++        assert_eq!(after, expected);
++        assert_eq!(
++            runtime
++                .block_on(child.store.get_task(&child.task.id))
++                .unwrap()
++                .unwrap(),
++            task_before
++        );
++        assert_eq!(
++            runtime
++                .block_on(child.store.task_events_after(&child.task.id, 0))
++                .unwrap(),
++            events
++        );
++    }
++    let selected = runtime
++        .block_on(child.store.active_task_pr(&child.task.id))
++        .unwrap();
++    let failed = lf_command(
++        repo.path(),
++        home.path(),
++        &[
++            "task",
++            "prepare",
++            "INF-123",
++            "--stack-on",
++            "INF-404",
++            "--json",
++        ],
++        None,
++    )
++    .env("LF_DB_PATH", home.path().join("loopflow.db"))
++    .output()
++    .unwrap();
++    assert!(!failed.status.success());
++    assert_eq!(
++        runtime
++            .block_on(child.store.active_task_pr(&child.task.id))
++            .unwrap(),
++        selected
++    );
++    // A publication snapshot taken before selection cannot erase the dependency.
++    assert!(runtime
++        .block_on(child.store.update_task_pr(&before))
++        .is_err());
++    assert_eq!(repo.head_sha(), head);
++    assert_eq!(
++        fs::read_to_string(repo.path().join("committed.txt")).unwrap(),
++        "unstaged bytes"
++    );
++    assert_eq!(
++        fs::read_to_string(repo.path().join("staged.txt")).unwrap(),
++        "staged bytes"
++    );
++    assert_eq!(
++        fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
++        "untracked bytes"
++    );
++    assert_eq!(
++        Command::new("git")
++            .args(["diff", "--cached", "--binary"])
++            .current_dir(repo.path())
++            .output()
++            .unwrap()
++            .stdout,
++        index
++    );
++    assert_eq!(
++        runtime
++            .block_on(child.store.get_task_pr(&parent_pr.id))
++            .unwrap()
++            .unwrap(),
++        parent_pr
++    );
+ }
+ 
+ #[test]
+@@ -105,17 +269,10 @@
+             &["branch", "--set-upstream-to", &format!("origin/{upstream}")],
+         );
+         let runtime = tokio::runtime::Runtime::new().unwrap();
+-        let mut child_pr = child.pr.clone();
+         if upstream == "parent-task" {
+-            child_pr.parent_pr_id = Some(
+-                runtime
+-                    .block_on(child.store.active_task_pr(&parent.id))
+-                    .unwrap()
+-                    .unwrap()
+-                    .id,
+-            );
++            let parent_pr = publish_stack_fixture_pr(&runtime, &child.store, &parent.id);
+             runtime
+-                .block_on(child.store.update_task_pr(&child_pr))
++                .block_on(child.store.stack_task_pr(&child.pr, &parent_pr.id))
+                 .unwrap();
+         }
+         write_skill(repo.path(), "identity-proof", "Prove checkout identity.");
+--- a/docs/lf.md
++++ b/docs/lf.md
+@@ -623,9 +623,23 @@
+ without starting a provider. Listing fails with that recovery command until the
+ boundary is prepared; it never allocates a Run itself.
+ 
+-`--stack-on` places a new Task worktree on another Task's published PR. Its PR
+-targets that parent branch automatically, then collapses onto `main` after the
+-parent merges. The two Tasks keep separate identities, worktrees, and workers.
++```sh
++lf task prepare DES-124 --stack-on DES-123
++# In DES-124's existing checkout:
++lf rebase --plan
++lf rebase
++```
++
++`--stack-on` places a new Task worktree on another Task's published PR. For an
++already-prepared root Task, it selects that parent while preserving the checkout,
++branch, recorded fork commit, published PR and execution history. Selection does
++not rebase Git or retarget GitHub; `lf rebase` integrates the parent, and the next
++`lf pr publish` updates the existing PR's base. Same-parent retries keep the
++original parent PR identity even after its Task opens another PR. Stop an active
++Task worker through the existing Task recovery controls before changing its
++parent; cancel pending delivery first. Changing an existing parent is a separate
++reparenting decision and is refused here. After the parent merges, `lf rebase`
++collapses the child onto `main`. The Tasks keep separate identities and worktrees.
+ Tmux remains process containment, not product identity or advancement authority.
+ 
+ ## Sessions
+--- a/rust/loopflow/src/ops/pr.rs
++++ b/rust/loopflow/src/ops/pr.rs
+@@ -89,12 +89,16 @@
+ 
+     let main_repo = resolve_main_repo(repo);
+     let default_branch = get_default_branch(&main_repo)?;
+-    let stack = crate::ops::task::task_stack(repo)?;
+-    let base_branch = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
+-        Some(parent) => parent,
+-        None if stack.is_some() => default_branch.clone(),
+-        None => pr_target(repo, &main_repo, &default_branch)?,
++    let publication_base = || -> OpsResult<(bool, String)> {
++        let stack = crate::ops::task::task_stack(repo)?;
++        let base = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
++            Some(parent) => parent,
++            None if stack.is_some() => default_branch.clone(),
++            None => pr_target(repo, &main_repo, &default_branch)?,
++        };
++        Ok((stack.is_some(), base))
+     };
++    let (stacked, base_branch) = publication_base()?;
+ 
+     // Prove the Task PR range without healing integration metadata before the
+     // first remote side effect. No-op for non-Task worktrees.
+@@ -117,7 +121,7 @@
+     };
+     commit_workflow(repo, &commit_options, progress)?;
+     crate::ops::task::require_task_pr_range_nonempty_without_healing(repo)?;
+-    require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
++    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
+     let branch =
+         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+     let published_head = rev_parse(repo, "HEAD")?;
+@@ -135,6 +139,9 @@
+     // Keep publication and its durable GitHub projection atomic with respect
+     // to later Loopflow pushes and shipping requests in this worktree.
+     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
++    // Preparation may have selected a parent while copy generation was running.
++    let (stacked, base_branch) = publication_base()?;
++    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
+     let locked_branch = current_branch(repo)?;
+     let locked_head = rev_parse(repo, "HEAD")?;
+     if locked_branch.as_deref() != Some(branch.as_str()) || locked_head != published_head {
+--- a/rust/loopflow/tests/rebase_tests.rs
++++ b/rust/loopflow/tests/rebase_tests.rs
+@@ -531,6 +531,52 @@
+ }
+ 
+ #[test]
++fn existing_root_child_rebases_onto_parent_from_its_original_fork() {
++    let repo = TestRepo::new();
++    let original_fork = repo.head_sha();
++    repo.create_branch("child");
++    repo.create_file("child.txt", "authored before stacking");
++    repo.stage_all();
++    repo.commit("Child work before selecting a parent");
++    repo.checkout("main");
++    repo.create_branch("parent");
++    repo.create_file("parent.txt", "parent work");
++    repo.stage_all();
++    repo.commit("Parent work");
++    repo.push_new_branch("parent");
++    let parent_head = repo.head_sha();
++    repo.checkout("child");
++
++    let verification = rebase_with_recovery(
++        repo.path(),
++        &RebaseOptions {
++            onto: "origin/parent".into(),
++            push: false,
++            fork_base: Some(original_fork),
++        },
++        &NullProgress,
++    )
++    .expect("adopt the selected parent without losing child work");
++    assert_eq!(verification.target_sha, parent_head);
++    assert_eq!(
++        git(
++            repo.path(),
++            &["diff", "--name-only", "origin/parent...HEAD"]
++        ),
++        "child.txt"
++    );
++    assert_eq!(
++        std::fs::read_to_string(repo.path().join("child.txt")).unwrap(),
++        "authored before stacking"
++    );
++    assert_eq!(
++        std::fs::read_to_string(repo.path().join("parent.txt")).unwrap(),
++        "parent work"
++    );
++    assert_eq!(git(repo.path(), &["rev-parse", "parent"]), parent_head);
++}
++
++#[test]
+ fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
+     // A child stacked on a parent whose two commits both edit the same file:
+     // once squash-merged, `git cherry` cannot match the combined patch, so the

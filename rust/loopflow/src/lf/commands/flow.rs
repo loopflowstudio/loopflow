@@ -710,6 +710,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 work: flow.declared_work(),
             },
             attempt.run_id.clone(),
+            None,
             &crate::trace::PreparedTurnContext::from_prompts(
                 "Loopflow mechanical Flow boundary",
                 &name,

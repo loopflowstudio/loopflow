@@ -1,6 +1,8 @@
 pub mod claude;
 mod claude_mapping;
 pub mod codex;
+#[cfg(unix)]
+pub mod codex_connection;
 mod codex_mapping;
 mod common;
 #[cfg(test)]

@@ -10,6 +10,9 @@ pub struct Session {
     pub id: String,
     pub current_run_id: RunId,
     pub kind: SessionKind,
+    pub interactive: bool,
+    /// Canonical local repository at admission; absent when unknown or taskless outside Git.
+    pub repo: Option<String>,
     pub title: String,
     pub title_source: TitleSource,
     /// What an Ask's caller asked; absent for other kinds.
@@ -22,7 +25,7 @@ pub struct Session {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {
-    Interactive,
+    Conversation,
     FlowReview,
     Ask,
 }
@@ -80,4 +83,30 @@ pub enum WorkSource {
     Checkout,
     Inherited,
     Bound,
+}
+
+/// SQL selection for conversation inventory; mode and completion are independent.
+#[derive(Debug, Clone)]
+pub struct SessionFilter {
+    pub repo: Option<String>,
+    pub task: Option<String>,
+    pub search: Option<String>,
+    pub interactive: Option<bool>,
+    pub history: bool,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+impl Default for SessionFilter {
+    fn default() -> Self {
+        Self {
+            repo: None,
+            task: None,
+            search: None,
+            interactive: Some(true),
+            history: false,
+            limit: 100,
+            offset: 0,
+        }
+    }
 }

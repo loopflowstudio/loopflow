@@ -1,5 +1,3 @@
-#[path = "support/chapter.rs"]
-mod chapter;
 #[path = "support/installation.rs"]
 mod installation;
 mod support;
@@ -653,20 +651,6 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .unwrap()
-        .unwrap();
-    runtime
-        .block_on(task.store.save_chapter(
-            &chapter::current_chapter(
-                &task.task.wave_id,
-                "task-pr-tests",
-                project.plan.id.as_str(),
-            ),
-            true,
-        ))
-        .unwrap();
     loopflow::journal::with_runtime(repo.path(), &["live-unblock-proof".into()], || {
         let receipt: serde_json::Value = serde_json::from_slice(
             &std::fs::read(home.path().join(format!(
@@ -793,6 +777,8 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             id: run.session_id.clone().unwrap(),
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::Ask,
+            interactive: true,
+            repo: None,
             title: "Choose a consumer".to_string(),
             title_source: loopflow::session::TitleSource::Generated,
             request: Some("Choose a consumer".to_string()),
@@ -951,16 +937,6 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .block_on(task.store.get_project(&task.task.project_id))
         .expect("read owning Project")
         .expect("owning Project exists");
-    runtime
-        .block_on(task.store.save_chapter(
-            &chapter::current_chapter(
-                &task.task.wave_id,
-                "task-pr-tests",
-                project.plan.id.as_str(),
-            ),
-            true,
-        ))
-        .expect("bind current chapter");
     let payload = serde_json::json!({
         "projects": [{
             "id": project.plan.id.as_str(),
@@ -968,7 +944,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
             "name": project.plan.name,
             "summary": project.plan.prompt_context,
             "metric_targets": [],
-            "flows": {"recommended": null},
+            "flow": "feature", "status": "started",
             "krs": [],
             "initiative_ids": ["initialization-initiative"],
             "team_ids": ["initialization-team"]

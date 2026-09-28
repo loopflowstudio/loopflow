@@ -65,10 +65,7 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
         ["initiative-infrastructure"]
     );
     assert_eq!(snapshot.projects[0].name, "Gmail");
-    assert_eq!(
-        snapshot.projects[0].flows.as_ref().unwrap().recommended,
-        None
-    );
+    assert_eq!(snapshot.projects[0].flow, "feature");
     assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
     assert_eq!(snapshot.items[0].identifier, "LOO-2");
     assert_eq!(snapshot.items[0].project_id, "project-gmail");
@@ -105,24 +102,19 @@ fn wave_detail_preserves_flow_and_requires_enablement() {
         Some("pr_33333333333333333333333333333333")
     );
 
-    assert_eq!(
-        snapshot
-            .chapter
-            .as_ref()
-            .unwrap()
-            .flows
-            .recommended
-            .as_deref(),
-        Some("task-design")
-    );
+    let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
+        panic!("missing Projects")
+    };
+    assert_eq!(items[0].flow, "task-design");
+    assert_eq!(items[0].status, loopflow::pm::ProjectStatus::Started);
     assert!(snapshot.wave.enabled);
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
     assert!(decoded.wave.enabled);
     assert_eq!(
-        decoded.chapter.as_ref().unwrap().flows,
-        snapshot.chapter.as_ref().unwrap().flows
+        serde_json::to_value(&decoded.projects).unwrap(),
+        serde_json::to_value(&snapshot.projects).unwrap()
     );
 
     let mut missing_home: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
@@ -164,8 +156,8 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     };
     assert!(!items.is_empty());
     assert_eq!(
-        roadmap.waves[0].chapter.as_ref().unwrap().flows.recommended,
-        None
+        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]["flow"],
+        "feature"
     );
     assert_eq!(
         items[0].reference.workspace.as_ref().unwrap().local_exists,
@@ -256,50 +248,4 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
     let mut with_unknown_field: serde_json::Value = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
     with_unknown_field["metrics"][0]["future_field"] = serde_json::json!(true);
     serde_json::from_value::<MetricPortfolioDto>(with_unknown_field).unwrap();
-}
-
-#[test]
-fn chapter_history_keeps_dated_task_evidence() {
-    let snapshot: loopflow::work::chapter::ChapterSnapshot = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/chapter_snapshot.json"
-    ))
-    .unwrap();
-    assert_eq!(snapshot.closed_at, Some(snapshot.observed_at));
-    assert_eq!(snapshot.metrics_evaluated_at, 100);
-    assert_eq!(snapshot.content.metric_targets.len(), 1);
-    assert_eq!(
-        snapshot.content.metric_targets[0].target,
-        snapshot.metrics.metrics[0].target.clone().unwrap()
-    );
-    assert!(!snapshot.tasks[0].task.completed);
-    assert_eq!(
-        snapshot.tasks[0].disposition,
-        loopflow::work::chapter::TaskDisposition::Move
-    );
-    let history: Vec<loopflow::work::chapter::ChapterHistoryEntry> = serde_json::from_str(
-        include_str!("../../../tests/fixtures/dto/chapter_history.json"),
-    )
-    .unwrap();
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[0].source_project_id, snapshot.source_project_id);
-}
-
-#[test]
-fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct Files {
-        changes: loopflow::ops::task::TaskChangesSnapshot,
-        diff: loopflow::ops::task::TaskDiffSnapshot,
-        file: loopflow::ops::task::TaskFileSnapshot,
-        save: loopflow::ops::task::TaskFileSave,
-    }
-    let json = include_str!("../../../tests/fixtures/dto/task_files.json");
-    let files: Files = serde_json::from_str(json).unwrap();
-    assert_eq!(files.changes.base_commit, files.diff.base_commit);
-    assert_eq!(files.changes.files[0].old_path.as_deref(), Some("old.txt"));
-    assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
-    assert_eq!(
-        serde_json::to_value(files).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
 }

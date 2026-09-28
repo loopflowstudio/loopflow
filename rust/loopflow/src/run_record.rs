@@ -1448,14 +1448,6 @@ impl CaptureHandle {
         Self::begin_with_id_and_parent(spec, RunId::new(), None, true, Some(launch), Some(&context))
     }
 
-    pub(crate) fn begin_with_launch_and_context(
-        spec: RunSpec,
-        launch: RunLaunchRequest,
-        context: &crate::trace::PreparedTurnContext,
-    ) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, Some(launch), Some(context))
-    }
-
     pub(crate) fn begin_with_context(
         spec: RunSpec,
         context: &crate::trace::PreparedTurnContext,
@@ -1466,12 +1458,13 @@ impl CaptureHandle {
     pub(crate) fn begin_reserved_with_context(
         spec: RunSpec,
         run_id: RunId,
+        launch: Option<RunLaunchRequest>,
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&RunId) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::authority_home_dir();
         let parent = inherited_parent().and_then(|id| verified_parent(&home, id));
-        Self::begin_reserved_at(&home, spec, run_id, parent, context, publish)
+        Self::begin_reserved_at(&home, spec, run_id, parent, launch, context, publish)
     }
 
     fn begin_reserved_at(
@@ -1479,11 +1472,12 @@ impl CaptureHandle {
         spec: RunSpec,
         run_id: RunId,
         parent: Option<RunId>,
+        launch: Option<RunLaunchRequest>,
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&RunId) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let (manifest, context) =
-            prepare_manifest(spec, run_id, parent, None, Some(context)).map_err(record_error)?;
+            prepare_manifest(spec, run_id, parent, launch, Some(context)).map_err(record_error)?;
         let (manifest, dir) = reconcile_reserved_manifest(home, manifest, context.as_deref())
             .map_err(record_error)?;
         // Only the reservation transaction grants launch authority. A rejected
@@ -1596,6 +1590,36 @@ impl CaptureHandle {
             .clone()
     }
 
+    /// Claim an admitted conversation and retain the exact provider provenance
+    /// used by its tools. A later driver transfer never rewrites this launch.
+    pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
+        let Some(exec) = crate::journal::current_process_identity() else {
+            // Library callers outside an actual lf process have no Exec to name.
+            return Ok(());
+        };
+        let mut capture = self.0.lock().expect("Run capture mutex poisoned");
+        if capture.driver.is_some() {
+            return Ok(());
+        }
+        let store = row_store(&capture.dir)?;
+        let Some((session, _)) = store.session_for_run(&capture.manifest.run_id)? else {
+            return Ok(());
+        };
+        let expected = store.session_driver(&session.id)?;
+        if expected
+            .as_ref()
+            .is_some_and(|driver| driver.exec_id.is_some())
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Conversation already has a driver; connect to it".into(),
+            ));
+        }
+        let driver =
+            store.claim_session_driver(&session.id, expected.as_ref(), &exec.exec_id, true)?;
+        capture.driver = Some((session.id, driver));
+        Ok(())
+    }
+
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
         let capture = self.0.lock().expect("Run capture mutex poisoned");
         let mut environment = BTreeMap::from([
@@ -1604,6 +1628,13 @@ impl CaptureHandle {
         ]);
         if let Some(parent_run_id) = &capture.manifest.parent_run_id {
             environment.insert(PARENT_RUN_ID_ENV.to_string(), parent_run_id.to_string());
+        }
+        if let Some((session, driver)) = &capture.driver {
+            environment.insert(
+                crate::exec::AGENT_CALLER_ENV.into(),
+                serde_json::to_string(&driver.caller(session.clone()))
+                    .expect("caller provenance serializes"),
+            );
         }
         environment
     }
@@ -1721,6 +1752,7 @@ impl Drop for CaptureHandle {
 
 #[derive(Debug)]
 struct RunCapture {
+    driver: Option<(String, crate::exec::SessionDriver)>,
     binding: Option<active::RunBindingGuard>,
     manifest: RunManifest,
     dir: PathBuf,
@@ -1792,6 +1824,7 @@ impl RunCapture {
     fn from_manifest(manifest: RunManifest, dir: PathBuf) -> Self {
         let recorder = RunRecorder::start(&dir, &manifest.run_id);
         Self {
+            driver: None,
             binding: None,
             provider: manifest.harness.clone(),
             model: manifest.model.clone(),
@@ -2016,6 +2049,14 @@ impl RunCapture {
             }
         }
         self.recorder.drain_after_settlement();
+        if let Some((session, driver)) = self.driver.take() {
+            match row_store(&self.dir)
+                .and_then(|store| store.release_session_driver(&session, &driver))
+            {
+                Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
+                Err(error) => return Err(std::io::Error::other(error)),
+            }
+        }
         Ok(())
     }
 
@@ -2617,6 +2658,7 @@ mod tests {
                 spec(home.path()),
                 id.clone(),
                 None,
+                None,
                 &context,
                 |_| denied()
             )
@@ -2628,6 +2670,7 @@ mod tests {
                 home.path(),
                 spec(home.path()),
                 id.clone(),
+                None,
                 None,
                 &context,
                 |_| Ok(()),
@@ -2646,6 +2689,7 @@ mod tests {
                 spec(home.path()),
                 id.clone(),
                 None,
+                None,
                 &context,
                 |_| denied()
             )
@@ -2657,6 +2701,7 @@ mod tests {
                 home.path(),
                 spec(home.path()),
                 id,
+                None,
                 None,
                 &context,
                 |_| Ok(())
@@ -2682,6 +2727,7 @@ mod tests {
             spec(home.path()),
             id.clone(),
             None,
+            None,
             &changed,
             |_| Ok(()),
         )
@@ -2701,6 +2747,7 @@ mod tests {
             home.path(),
             spec(home.path()),
             id,
+            None,
             None,
             &context,
             |_| Ok(())

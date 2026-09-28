@@ -75,7 +75,7 @@ enum MockWaveFixture {
         var result: [String: WavePlan] = [:]
         for wave in waves {
             let key = PortfolioRepoState.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
-            result[key] = WavePlan(objective: objective(for: wave.name), chapter: wave.name == detailWaveName ? selectedWaveDetail()?.chapter : nil)
+            result[key] = WavePlan(objective: objective(for: wave.name), projects: wave.name == detailWaveName ? (selectedWaveDetail()?.projects ?? .unavailable(reason: "Fixture missing")) : .available(items: [], truncated: false))
         }
         return result
     }
@@ -287,22 +287,26 @@ enum MockWaveFixture {
               }
             ]
           },
-          "chapter": {
-            "id": "current",
-            "source_project_id": "project-1",
-          "source_project_slug": "release-feedback",
-            "metric_targets": [],
-            "flows": {
-              "recommended": "incident"
-            },
-            "krs": [
+          "projects": {
+            "state": "ok",
+            "items": [
               {
-                "text": "Every failed run has an owner",
-                "holds": false
+                "id": "project-1",
+                "work_id": null,
+                "slug": "release-feedback",
+                "name": "current",
+                "flow": "incident",
+                "status": "started",
+                "metric_targets": [],
+                "krs": [
+                  {
+                    "text": "Every failed run has an owner",
+                    "holds": false
+                  }
+                ]
               }
             ],
-            "phase": "complete",
-            "error": null
+            "truncated": false
           },
           "tasks": {
             "state": "ok",

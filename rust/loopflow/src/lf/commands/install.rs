@@ -3236,10 +3236,7 @@ pub fn promote(
 /// Activate retained immutable bytes only when that binary's own preflight
 /// recognizes the current store exactly. The exclusive lock keeps artifact and
 /// store selection serialized through the symlink commit.
-pub fn rollback(
-    cli_target: &Path,
-    candidate: &Path,
-) -> Result<()> {
+pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
     guard_task_origin()?;
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;

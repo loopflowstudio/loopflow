@@ -48,8 +48,6 @@ pub struct WaveSnapshot {
     pub repo: String,
     /// Non-terminal Tasks owned by this Wave.
     pub active_tasks: u32,
-    /// Whether Wave work is enabled on this Home.
-    pub enabled: bool,
     /// RFC3339 creation time, `null` when the row predates the column.
     pub created_at: Option<String>,
     /// Parent wave id in the chord tree, `null` for a root wave.
@@ -798,7 +796,6 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         },
         repo,
         active_tasks,
-        enabled: placement.enabled,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
         retired_at: wave.retired_at().and_then(format_time),
@@ -1525,23 +1522,21 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {tasks:>5}  {home:<16}{reset}",
+        "{bold}{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
         repo = "REPOSITORY",
         status = "STATUS",
-        enabled = "ENABLED",
         tasks = "TASKS",
         home = "HOME",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {tasks:>5}  {home:<16}",
+            "{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
             status = wave.status.label(),
-            enabled = if wave.enabled { "yes" } else { "no" },
             tasks = wave.active_tasks,
             home = truncate(&wave.home.route, 16),
         );
@@ -1585,7 +1580,6 @@ fn print_status(status: &WaveDetailSnapshot) {
         );
     }
     println!("  goal      {}", wave.goal);
-    println!("  enabled   {}", wave.enabled);
     println!("  home      {} ({})", wave.home.id, wave.home.route);
     print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);

@@ -16,18 +16,6 @@ struct WaveLensTests {
         #expect(active.reason == "2 active Tasks")
     }
 
-    @Test("black only when disabled")
-    func disabledIsBlack() {
-        let lens = WaveLens.forWave(
-            
-            enabled: false,
-            activeTasks: 0
-        )
-        #expect(lens.color == .black)
-        #expect(lens.reason == "Disabled on this Home")
-        #expect(!lens.color.isLit)
-    }
-
     @Test("retired Wave renders history rather than disabled current state")
     func retiredWaveIsHistorical() {
         let wave = Wave(

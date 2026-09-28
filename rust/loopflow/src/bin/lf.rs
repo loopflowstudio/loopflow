@@ -845,7 +845,9 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
-        WaveCommand::List { .. } | WaveCommand::Status { .. } => unreachable!("read commands dispatch separately"),
+        WaveCommand::List { .. } | WaveCommand::Status { .. } => {
+            unreachable!("read commands dispatch separately")
+        }
         WaveCommand::Connect {
             wave,
             wave_flag,
@@ -1519,17 +1521,17 @@ fn dispatch(
                         no_sync: _,
                     },
             }) => {
-                    let refreshed = if *sync {
-                        Some(loopflow::lf::commands::ops::refresh_status(
-                            wave.as_deref(),
-                        )?)
-                    } else {
-                        None
-                    };
-                    loopflow::lf::commands::waves::status(
-                        refreshed.as_deref().or(wave.as_deref()),
-                        *json,
-                    )
+                let refreshed = if *sync {
+                    Some(loopflow::lf::commands::ops::refresh_status(
+                        wave.as_deref(),
+                    )?)
+                } else {
+                    None
+                };
+                loopflow::lf::commands::waves::status(
+                    refreshed.as_deref().or(wave.as_deref()),
+                    *json,
+                )
             }
 
             Some(Commands::Wave {

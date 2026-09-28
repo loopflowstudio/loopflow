@@ -402,9 +402,72 @@ restart, normalized per-turn usage, Flow consumption or physical owner conversio
 Useful approval/pagination assertions remain to integrate into the maintained
 fixture after rebase. No source/build changes accompanied supervisor proofs.
 
-Jack corrected rebase to lf rebase --manual (local); bare rebase can push.
+Jack requested regular rebases; the supervisor corrected the spelling to
+lf rebase --manual (local), because bare rebase can push.
 Use the captured installed control binary/Home. Preserve the saved invocation:
 upstream catalog changes cannot grant this Run publication authority.
 Semantic integration review must retain upstream provider-account selection/
 missingness and clear inherited LF_AGENT_CALLER plus copied native driver/engine
 authority when changing Home, preserving history in two disposable stores.
+
+
+### Post-rebase checkpoint preparation, 2026-09-28
+
+Local rebase completed at ce97003cf, based on c512813b5 (78 ahead / 0 behind
+at observation). No publication occurred in that integration. Migration history
+now passes: 55 released migrations through 0.12.24, 19 drafts. The read-only
+projection audit was read in full; its Wave enablement finding matches the
+coordinated Rust/Swift/fixture repair. Remaining history/Run/Flow and off-roadmap
+Task breadcrumb work is still part of the physical owner conversion.
+
+`rebase-focused.log`: 20/21 PASS, compilation32.41s/tests9.675s. Passing checks
+cover copied history without driver/socket authority in two private stores,
+LF_AGENT_CALLER scrubbing, account-before-native-ID and Task event observations,
+retained captured Flow behavior, acknowledged publication/readiness failure,
+and restoration of Task checkout history. The DTO failure was its stale assertion
+that status has no Projects field; H7 now supplies Project history. The assertion
+is corrected to retain status/stranded Task and Project evidence, pending rerun.
+
+Jack's supervisor supplied a strict RED public busy-turn continuation proof on
+d6ef2745: B's turn/start returns A's same native turn, but origin reassignment
+fails before forwarding the reply. Direct native comparison confirms same-turn
+success. The repair correlates turn/start requests/replies with newly observed
+native turn/started, preserving an existing or unknown origin. Conflicting
+actual origin receipts still fail. Both message orders and input after an
+unowned start have an authored regression; behavioral execution remains due.
+
+Jack has authorized publication of the next coherent verified checkpoint before
+physical owner conversion. This supersedes the local-only publication hold for
+that checkpoint; it does not authorize landing, installation or real-Home
+conversion. Keep scratch and the saved Flow definitions. Main owns all executable
+changes, builds and Git; all bounded contributors/probes are terminal.
+
+
+Verification for this checkpoint: `rebase-dto-busy.log`10/10 PASS (31.60s
+compile,1.423s tests); `rebase-swift.log`47/47 PASS in four selected suites,
+including full101-Session inventory through rename/insertion/completion. This is
+inventory, not retained pane replacement acceptance. `rebase-clippy.log` all-target
+Clippy -D warnings PASS19.20s; formatting, diff whitespace, architecture coverage
+and released migration history pass. The earlier20 passing Rust checks remain
+valid for their unchanged behaviors; no full gate is claimed.
+
+The strict actual public busy-turn regression passed on copied SHA
+f2b9f5ab7113cf4c5b1a08017927c791ad79d7da51f09c0e584eda10187600b4,
+`supervisor-busy-start-regression-2/results.json`. It retains original origin,
+returns the same active turn to the new driver, and records one success plus usage.
+Real Codex/synthetic upstream/controlled client/private Homes. The focused unit
+proof additionally checks both fresh-start message orders, unknown prior origins,
+and rejection of contradictory actual origin evidence.
+
+Prepublication remote inspection: main c512813b5, branch d07e56933, GitHub#1296
+open with no auto-merge request. The pinned Task reader retains current implement
+Run and13-step saved invocation; no catalog recompilation. Existing top-level
+*-review.md reports moved into scratch/reviews/ with references updated because
+the captured publisher predates removal of that broad gate-artifact deletion.
+Evidence is retained; no source behavior changes accompany that relocation.
+
+Remaining: public restart, physical AgentSession/FlowSession owner conversion
+and Run removal, import preservation, exact Flow success consumption, normalized
+usage and Desktop history/off-roadmap ancestry/pane retention, final dense
+measurements and concept review. Configured provider/Desktop, real-Home migration
+and release are not established by this checkpoint.

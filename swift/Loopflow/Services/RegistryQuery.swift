@@ -329,7 +329,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let goal: String
     public let repo: String
     public let activeTasks: Int
-    public let enabled: Bool
     public let createdAt: String?
     public let parentWaveId: String?
     public let retiredAt: String?
@@ -338,7 +337,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, enabled, home
+        case id, name, status, goal, repo, home
         case activeTasks = "active_tasks"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
@@ -355,7 +354,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
             name: name,
             repo: repo,
             status: status,
-                    enabled: enabled,
             activeTasks: activeTasks,
             parentWaveId: parentWaveId,
             retiredAt: retiredAt,

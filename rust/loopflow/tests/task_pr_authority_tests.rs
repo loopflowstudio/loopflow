@@ -499,6 +499,7 @@ fn acknowledged_creation_survives_failed_read_and_retries_without_duplicate() {
         title: Some("acknowledged publication".to_string()),
         body: Some("publication preservation proof".to_string()),
         agent: None,
+        draft: false,
     };
 
     let error = create_or_update_pr(repo.path(), &options, &NullProgress).unwrap_err();
@@ -603,6 +604,7 @@ fn existing_pr_identity_survives_readiness_failure() {
             title: Some("known draft".to_string()),
             body: Some("readiness preservation proof".to_string()),
             agent: None,
+            draft: false,
         },
         &NullProgress,
     )

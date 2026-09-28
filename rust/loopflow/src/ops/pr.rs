@@ -196,7 +196,10 @@ pub fn create_or_update_pr(
             mark_pr_ready(repo, &mut pr)?;
             crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
         }
-        Ok(PrResult { url: info.url, created: false })
+        Ok(PrResult {
+            url: info.url,
+            created: false,
+        })
     } else {
         progress.status("Creating PR...");
         let url = create_pr(repo, title, body, &base_branch, draft)?;
@@ -338,7 +341,7 @@ fn _strip_managed_task_context(body: &str) -> String {
 
 fn pr_info(branch: &str, pr: &GhPr) -> PrInfo {
     PrInfo {
-        url: pr.url,
+        url: pr.url.clone(),
         number: pr.number,
         state: if pr.is_draft {
             "draft".to_string()
@@ -346,9 +349,9 @@ fn pr_info(branch: &str, pr: &GhPr) -> PrInfo {
             pr.state.to_ascii_lowercase()
         },
         branch: branch.to_string(),
-        merge_commit: pr.merge_commit.map(|commit| commit.oid),
+        merge_commit: pr.merge_commit.as_ref().map(|commit| commit.oid.clone()),
         merged_at: None,
-        head_sha: pr.head_ref_oid,
+        head_sha: pr.head_ref_oid.clone(),
         merge_state: None,
     }
 }

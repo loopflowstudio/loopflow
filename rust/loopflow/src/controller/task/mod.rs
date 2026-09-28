@@ -413,6 +413,7 @@ impl StepLauncher for TaskLauncher {
                         let _ = harness.stop().await;
                         return Err(fail("provider event stream closed", true));
                     };
+                    capture.observe_provider(harness.provider_session_id(), harness.provider_account_id());
                     capture.record_conversation(event.clone());
                     match event {
                         ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
@@ -1050,7 +1051,7 @@ mod planning_tests {
         }
         assert_eq!(position.current().step, "pr-publish");
         assert!(!position.is_human());
-        assert!(!super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap());
+        assert!(!finish(&mut position).unwrap());
         assert!(position.is_human());
         assert_eq!(position.current().step, "demo");
         assert_eq!(position.cursor.iteration, 9);
@@ -1304,10 +1305,10 @@ mod planning_tests {
         }
     }
 
-    fn pursue_decision(task: &Task) -> FlowPosition {
+    fn pursue_decision(task: &Task) -> FlowInvocation {
         let mut flow = super::start_task_flow(task, "pursue").unwrap();
         while !flow.is_decision() {
-            assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
+            assert!(!finish(&mut flow).unwrap());
         }
         assert_eq!(flow.current().step, "loop-decide");
         flow

@@ -250,7 +250,14 @@ pub fn control(command: &str, args: &[String], cli: &Cli) -> Result<()> {
                     let task = runtime
                         .block_on(store.get_task(task_id))?
                         .ok_or_else(|| anyhow!("Task {task_id} is missing"))?;
-                    crate::ops::task::task_resume(&task.plan.identifier, None, cli.model.clone())?;
+                    crate::ops::task::task_run(
+                        &task.worktree,
+                        &task.plan.identifier,
+                        crate::ops::task::TaskLaunchOptions {
+                            agent: cli.model.clone(),
+                            ..Default::default()
+                        },
+                    )?;
                     return Ok(());
                 }
             }

@@ -1,6 +1,6 @@
 # H7 repair — unapplied patch ready
 
-2026-09-28 · LOO-298 · Two findings from `parallel-h7-review.md` only.
+2026-09-28 · LOO-298 · Two findings from `scratch/reviews/parallel-h7-review.md` only.
 
 [parallel-h7-repair.patch](parallel-h7-repair.patch) changes four files on
 application. No implementation file was edited here; all construction and

@@ -46,6 +46,7 @@ impl CodexConnection {
                 json!({"method":"initialized"}).to_string().into(),
             ))
             .await?;
+        let mut history = super::codex_history::History::default();
         let mut cursor = Value::Null;
         loop {
             let result = read_rpc(
@@ -57,7 +58,7 @@ impl CodexConnection {
                 }),
             )
             .await?;
-            super::codex_history::record(
+            history.record(
                 &self.store,
                 &self.session_id,
                 None,
@@ -81,6 +82,7 @@ impl CodexConnection {
         let mut client = accept_async(client).await?;
         let (mut upstream, _) =
             client_async("ws://localhost", UnixStream::connect(engine).await?).await?;
+        let mut history = super::codex_history::History::default();
         loop {
             tokio::select! {
                 incoming = client.next() => {
@@ -107,6 +109,7 @@ impl CodexConnection {
                         }
                         _ => false,
                     };
+                    history.request(&rpc);
                     let message = Message::Text(serde_json::to_string(&rpc)?.into());
                     if passive {
                         upstream.send(message).await?;
@@ -128,7 +131,7 @@ impl CodexConnection {
                         Message::Close(_) => break,
                         Message::Text(text) => {
                             let rpc: Value = serde_json::from_str(&text)?;
-                            super::codex_history::record(&self.store, &self.session_id,
+                            history.record(&self.store, &self.session_id,
                                 self.driver.as_ref(), Some(&self.thread_id), &rpc)?;
                             client.send(Message::Text(text)).await?;
                         }

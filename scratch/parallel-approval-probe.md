@@ -14,7 +14,7 @@ alternative ordering where A disconnects before B connects.
 
 ## Inputs and isolation
 
-Read finding 2 in `scratch/parallel-handoff-history-review.md` and the transport
+Read finding 2 in `scratch/reviews/parallel-handoff-history-review.md` and the transport
 patterns in `tests/e2e/codex_connect.py`; neither file was edited. Used the
 installed executable's generated JSON schema for the approval response shape.
 An initial lookup used the wrong schema subdirectory; the root schema files

@@ -174,7 +174,7 @@ fn retain_installation_and_select_store(store: &std::path::Path) {
             .clone(),
         activation: ActivationTargets {
             cli: root.join("lf"),
-            daemon: root.join("lfd"),
+            daemon: None,
             app: None,
             legacy_app: None,
         },
@@ -364,14 +364,20 @@ fn task_review_completion_consumes_only_installed_readiness() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let position = loopflow::durable::FlowPosition {
-        task_id: task.task.id.clone(),
+    let position = loopflow::durable::FlowInvocation {
+        task_id: Some(task.task.id.clone()),
+        wave_id: Some(task.task.wave_id.clone()),
+        cwd: task.task.worktree.clone(),
+        message: None,
+        model: None,
+        current_attempt: None,
+        pending_session_id: None,
+        finished: false,
         invocation: loopflow::engine::invocation::QueuedInvocation::load(
             repo.path(),
             "task-design",
         )
         .unwrap(),
-        session_run_id: None,
         ready_summary: None,
         cursor: loopflow::engine::ExecutionCursor {
             index: 1,
@@ -384,7 +390,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
         updated_at: time::OffsetDateTime::now_utc(),
     };
     runtime
-        .block_on(task.store.set_flow_position(&task.task.id, position))
+        .block_on(task.store.start_task_flow(&task.task.id, position))
         .unwrap();
     let installation = installation::Installation::new(home.path());
     let command = |cli: &std::path::Path, selected_home: &std::path::Path, args: &[&str]| {
@@ -426,10 +432,10 @@ fn task_review_completion_consumes_only_installed_readiness() {
             .expect("branch reports its private copy"),
     );
     let position = runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
-    assert!(position.session_run_id.is_some());
+    assert!(position.session_run_id().is_some());
     let repeated = command(branch, home.path(), &["task", "run", "INF-123", "--json"])
         .output()
         .unwrap();
@@ -439,12 +445,12 @@ fn task_review_completion_consumes_only_installed_readiness() {
         String::from_utf8_lossy(&repeated.stderr)
     );
     let resumed = runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
     assert_eq!(resumed.invocation, position.invocation);
     assert_eq!(resumed.cursor, position.cursor);
-    assert_eq!(resumed.session_run_id, position.session_run_id);
+    assert_eq!(resumed.session_run_id(), position.session_run_id());
     for (cli, expected) in [
         (
             installation.cli.as_path(),
@@ -469,14 +475,22 @@ fn task_review_completion_consumes_only_installed_readiness() {
             &loopflow::store::StorageConfig::sqlite(branch_data.join("loopflow.db")),
         ))
         .unwrap();
-    let mut copied = runtime
-        .block_on(branch_store.flow_position(&task.task.id))
+    let copied = runtime
+        .block_on(branch_store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
-    copied.session_run_id = position.session_run_id.clone();
-    copied.ready_summary = Some("Branch-only feedback must stay private".into());
+    let session_id = position.pending_session_id.as_ref().unwrap();
+    let (mut session, run) = runtime
+        .block_on(task.store.session(session_id))
+        .unwrap()
+        .unwrap();
+    session.ready_summary = Some("Branch-only feedback must stay private".into());
+    runtime
+        .block_on(branch_store.create_session(session, run, Some(copied)))
+        .unwrap();
     let copied = runtime
-        .block_on(branch_store.set_flow_position(&task.task.id, copied))
+        .block_on(branch_store.task_flow(&task.task.id))
+        .unwrap()
         .unwrap();
     let branch_events = runtime
         .block_on(branch_store.task_events_after(&task.task.id, 0))
@@ -499,7 +513,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         resumed
@@ -521,14 +535,14 @@ fn task_review_completion_consumes_only_installed_readiness() {
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("has not marked this ready"));
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         position
     );
     assert_eq!(
         runtime
-            .block_on(branch_store.flow_position(&task.task.id))
+            .block_on(branch_store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         copied
@@ -548,10 +562,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
             home.path(),
             &["session", "ready", "Installed feedback"],
         )
-        .env(
-            "LF_RUN_ID",
-            position.session_run_id.as_ref().unwrap().as_str(),
-        )
+        .env("LF_RUN_ID", position.session_run_id().unwrap().as_str())
         .env("LF_HUMAN_SESSION", token.to_string())
         .output()
         .unwrap()
@@ -567,14 +578,14 @@ fn task_review_completion_consumes_only_installed_readiness() {
         String::from_utf8_lossy(&ready.stderr)
     );
     // Both public selectors must resolve the same installed review boundary.
-    let accepted = complete(position.session_run_id.as_ref().unwrap().as_str());
+    let accepted = complete(position.session_run_id().unwrap().as_str());
     assert!(
         accepted.status.success(),
         "{}",
         String::from_utf8_lossy(&accepted.stderr)
     );
     assert!(runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_none());
     let events = runtime
@@ -597,7 +608,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     assert_eq!(
         runtime
-            .block_on(branch_store.flow_position(&task.task.id))
+            .block_on(branch_store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         copied

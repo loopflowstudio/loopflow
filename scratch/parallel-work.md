@@ -1,5 +1,46 @@
 # LOO-298 parallel work
 
+## Publication priority and busy-turn repair — 2026-09-28
+
+Fixed rebased checkpoint measurement, excluding current uncommitted repair:
+`ce97003cf` against `c512813b5` reports Rust/Swift +12,423 / −29,314;
+Python/shell +19 / −48; SQL +626 / −0. Total **+13,068 / −29,362 =
+−16,294** production-prefix lines. Receipt:
+`.lf/tmp/execution-model/branch-counts-ce97003cf.json`. Same corrected method,
+tracked committed files only, no rename detection, tests/docs excluded. The
+base changed during rebase, so the difference from earlier counts is not a
+measurement of the integration repair or newly authored growth.
+
+Jack requested the rebased branch be pushed because dependent Tasks need its
+changes. The next coherent verified checkpoint is authorized for publication;
+do not wait for the remaining physical owner conversion. Landing, installation
+and real-Home conversion remain outside this checkpoint. Main retains Git/build
+ownership. Observed local head `ce97003cf` includes remote main `c512813b5`;
+remote branch still named `d07e56933` at this observation.
+
+The strict public busy-turn regression now passes on copied candidate SHA-256
+`f2b9f5ab7113cf4c5b1a08017927c791ad79d7da51f09c0e584eda10187600b4`.
+Receipt: `.lf/tmp/execution-model/supervisor-busy-start-regression-2/results.json`.
+After driver handoff, the current client's additional input receives the same
+active native turn, retains its original Exec and provider generation, and
+records one successful completion with usage present. The earlier RED receipt
+remains `supervisor-busy-start-regression-1`. This uses real Codex with synthetic
+Responses, a controlled protocol client and disposable Homes; it proves neither
+rendered UI nor Flow consumption. Handle 39003 completed with exit 0. No source
+edit or build accompanied this replay.
+
+The post-rebase focused suite completed 20 passes and one failure in
+`status_preserves_stranded_tasks_without_a_project_layer`: its assertion that
+Projects are absent contradicts the H7 Project history projection. Main owns
+reconciling that assertion while retaining the stranded-Task proof. This is a
+failing suite, not publication readiness.
+
+The targeted correction subsequently passed all ten checks in
+`.lf/tmp/cut-i/rebase-dto-busy.log` (compile 31.60s, tests 1.423s): nine DTO
+checks plus the busy-turn known/unknown-origin regression. The renamed status
+test retains stranded Tasks alongside Project history. This repairs the named
+failure; it does not establish a full gate or publication.
+
 ## Fixed-checkpoint measurement — 2026-09-28
 
 At `d07e569330c8dedceb5dd238ce9b22a7b6137006`, versus retained merge base
@@ -108,7 +149,7 @@ That qualifier is unresolved; four assertion passes do not establish clean
 process settlement. No additional build or behavioral rerun was requested.
 
 Handoff-history contributor `run_28487ba852f6426cba061d64e7ac6437` finished.
-Supervisor read `parallel-handoff-history-review.md` in full and passed its two
+Supervisor read `scratch/reviews/parallel-handoff-history-review.md` in full and passed its two
 findings to main: native turns after reconnect have no completion/usage recorder
 after the old receiver exits, and pending native approval replay is unproven.
 The report separates the source counterexample from uncertain provider behavior,
@@ -169,7 +210,7 @@ managed engine at driver teardown. The source now puts startup termination under
 the driver fence and omits the managed-engine signal hook. Actual race coverage,
 startup failure cleanup, and completion after driver departure still need proof.
 Read-only contributor `run_28487ba852f6426cba061d64e7ac6437` owns only
-`parallel-handoff-history-review.md`, reviewing completion, usage, approvals and
+`scratch/reviews/parallel-handoff-history-review.md`, reviewing completion, usage, approvals and
 Flow settlement across transfer. Main retains every executable file and the
 sole build slot; the contributor runs no provider or build.
 
@@ -249,9 +290,9 @@ not an established cause. The successful direct native fixture explicitly used
 a broader sandbox. Main must retain the public permission context while proving
 admission, rather than change the fixture's sandbox to make it pass.
 
-Both reviewers returned. Import mapping is in `parallel-import-review.md`;
+Both reviewers returned. Import mapping is in `scratch/reviews/parallel-import-review.md`;
 main retains physical conversion and import implementation. H7 review is in
-`parallel-h7-review.md`; the supervisor confirmed its two source counterexamples
+`scratch/reviews/parallel-h7-review.md`; the supervisor confirmed its two source counterexamples
 (name normalization replaces authored content; final observed cancellations are
 ignored before predecessor completion). A new bounded Codex contributor owns
 only `parallel-h7-repair.md` and `.patch`, preparing a repair and focused tests
@@ -272,8 +313,8 @@ and retained environment-removal behavior both need proof.
 
 All previous implementation contributors have returned; main owns all executable
 files and the sole build slot. Two new bounded Codex reviews run without builds
-or patches: `parallel-import-review.md` maps historical evidence to the accepted
-Exec/AgentSession/FlowSession model; `parallel-h7-review.md` checks the completed
+or patches: `scratch/reviews/parallel-import-review.md` maps historical evidence to the accepted
+Exec/AgentSession/FlowSession model; `scratch/reviews/parallel-h7-review.md` checks the completed
 Chapter/adoption source against retry and preservation counterexamples. Each
 reviewer owns only its named note. Neither may modify implementation, duplicate
 the schema work, invoke providers or inspect an installed Home.
@@ -679,3 +720,42 @@ says `--manual` keeps integration local; default rebase has a push path. Task
 comment ed2223c9 directs `lf rebase --plan`, `lf rebase --manual`, then owned
 `--continue` as needed. Regular rebases are authorized; publication is not.
 Main remains sole integration owner. No rebase was performed by supervisor.
+
+## 2026-09-28 — Busy turn/start after driver transfer is a continuation
+
+Actual counterexample, copied CLI d6ef2745 (full digest in each receipt):
+`.lf/tmp/execution-model/supervisor-busy-start-1/results.json` and
+`supervisor-busy-start-release-1/results.json` both record B's public-client
+reply timeout after A starts a held turn and B connects and sends turn/start.
+The second releases the synthetic response after0.5s; native work completes
+under the original turn ID while B never receives the reply. These diagnostic
+scripts exit0 after storing the failure; exit0 is NOT a passing behavior result.
+Handles74717 and51812 are terminal.
+
+Direct native comparison `supervisor-busy-start-native-1/results.json`
+(handle90223 terminal0) returns success with the exact original active turn ID,
+status inProgress, startedAt/completedAt/durationMs null. Therefore turn/start
+does not necessarily start another turn: it can add input to the active turn.
+Source `codex_history::record` interprets every result.turn as new origin and
+`record_session_turn_origin` rejects a different Exec. This explains the public
+relay failure; the main worker received the comparison and must repair/prove it.
+Retain A's origin, record B's input separately if needed, preserve unknown origin
+for a previously unobserved active turn, and keep one completion/usage history.
+Do not hide genuinely conflicting stored origins with a broad ignored error.
+All probes use real Codex0.157.1, synthetic Responses, controlled native UI and
+private Homes. No source/build/installed state changed; not rendered UI proof.
+
+Bounded post-rebase DTO/Desktop review run_5d6a0b6e0a944924adc1933909944d14
+(handle1569 terminal0) wrote `parallel-rebase-projection.md`. Reviewed in full:
+only the stale Wave enablement projection was established as a merge defect;
+main's dirty coordinated repair already addresses it, verification pending.
+No extra Session/history or pane identity mismatch found. Existing history UI,
+off-roadmap Task breadcrumb, physical owners and Run-removal gaps remain owed.
+
+Strict busy-turn regression: `supervisor-busy-start-regression.py` under
+`.lf/tmp/execution-model/` now exits1 on the same candidate (handle62602 terminal).
+`supervisor-busy-start-regression-1/results.json` and `.log` retain exact reply
+timeout. Model release is0.5s; secondary command is harmless printf. The assertion
+requires B's reply, same active turn ID, original Exec/generation, one successful
+completion and retained usage. Later assertions are unexecuted on this failing
+candidate. This is the repair replay target; diagnostic exit0 above stays history.

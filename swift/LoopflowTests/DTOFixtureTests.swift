@@ -126,7 +126,6 @@ struct DTOFixtureTests {
         #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
 
-        #expect(detail.wave.enabled)
         // The Home runtime evidence carries the state and the one contextual action.
 
 
@@ -175,14 +174,7 @@ struct DTOFixtureTests {
             try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingHomeData)
         }
 
-        var missingEnabled = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var waveWithoutEnabled = try #require(missingEnabled["wave"] as? [String: Any])
-        waveWithoutEnabled.removeValue(forKey: "enabled")
-        missingEnabled["wave"] = waveWithoutEnabled
-        let missingEnabledData = try JSONSerialization.data(withJSONObject: missingEnabled)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingEnabledData)
-        }
+
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")

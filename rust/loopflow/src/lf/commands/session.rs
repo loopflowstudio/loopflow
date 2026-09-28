@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
@@ -30,9 +29,35 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
-        SessionCommand::List { json, all } => {
+        SessionCommand::List {
+            json,
+            all,
+            interactive,
+            history,
+            limit,
+            offset,
+            task,
+            search,
+        } => {
             let store = open_shared_store().await?;
-            list(&store, *json, *all).await
+            list(
+                &store,
+                *json,
+                &crate::session::SessionFilter {
+                    repo: if *all {
+                        None
+                    } else {
+                        crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
+                    },
+                    task: task.clone(),
+                    search: search.clone(),
+                    interactive: Some(*interactive),
+                    history: *history,
+                    limit: *limit,
+                    offset: *offset,
+                },
+            )
+            .await
         }
         SessionCommand::Open {
             id,
@@ -130,9 +155,12 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     }
 }
 
-async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
-    let mut sessions = crate::ops::human_session::list(store).await?;
-    sessions = scope_to_repo(sessions, all)?;
+async fn list(
+    store: &Arc<Store>,
+    json: bool,
+    filter: &crate::session::SessionFilter,
+) -> anyhow::Result<()> {
+    let sessions = crate::ops::human_session::list(store, filter).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -176,7 +204,7 @@ async fn complete(id: &str) -> anyhow::Result<()> {
     let store = open_shared_store().await?;
     let session = crate::ops::human_session::complete(&store, id).await?;
     match session.kind {
-        SessionKind::Interactive => println!(
+        SessionKind::Conversation => println!(
             "Session {} completed; its provider history remains resumable.",
             session.id
         ),
@@ -213,19 +241,6 @@ async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow:
     Ok(())
 }
 
-fn scope_to_repo(sessions: Vec<SessionRecord>, all: bool) -> anyhow::Result<Vec<SessionRecord>> {
-    if all {
-        return Ok(sessions);
-    }
-    let Some(scope) = crate::repository::CanonicalRepo::current()? else {
-        return Ok(sessions);
-    };
-    Ok(sessions
-        .into_iter()
-        .filter(|session| scope.contains(Path::new(&session.cwd)))
-        .collect())
-}
-
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
@@ -241,14 +256,4 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
             .await
             .context("open the shared Loopflow store")?,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::scope_to_repo;
-
-    #[test]
-    fn an_empty_session_list_stays_empty() {
-        assert!(scope_to_repo(Vec::new(), true).unwrap().is_empty());
-    }
 }

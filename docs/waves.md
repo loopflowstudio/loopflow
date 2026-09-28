@@ -22,59 +22,64 @@ Session for a conversation, or invoke `wave/operate` for a bounded planning pass
 
 ```bash
 lf roadmap --json
-lf wave history --wave infrastructure --json
-lf status infrastructure --chapter 2026-09 --json
+lf repo new-chapter 2026-10 --dry-run
+lf repo new-chapter 2026-10
 ```
 
-Open a Wave for its objective, current Tasks, KRs and metric targets. Open
-chapter history to inspect its plan and dated evidence at an earlier boundary.
-A Wave's memory, cadence, budget, chat and metric instruments endure across
-those boundaries.
+A Wave's one In Progress Linear Project holds its current Tasks, KRs, metric
+targets and default Flow. Projects created together share a chapter name, such
+as `2026-10`. The chapter is that group of Projects; there is no chapter table,
+plan packet or local switch. Current navigation stays Wave → Task. Completed
+Projects retain previous plans and Tasks in Linear.
 
-A Chapter is a repository-wide planning clock. Every Wave shares the current
-Chapter. Each (Wave, Chapter) pair has exactly one Project holding that Wave's
-Tasks, KRs, targets and Flow template. A Wave with no work has an empty Project.
-Linear Projects hold the plans; the repository's Chapter links them together.
-Current workspace navigation is Wave → Task. History exposes the Project for
-a selected Wave and Chapter without making Project another operator.
+Create a Planned Project in Linear to prepare the next plan. Rotation reuses the
+Planned Project with the requested name in each Wave, or creates an empty one
+with the predecessor's `flow:`. It never copies checked KRs or metric targets.
+Every Wave participates, including Waves with no Tasks. A new Wave with no
+Projects starts with `flow: feature`, or uses its explicitly Planned successor.
 
-Rotate every Wave together:
+The preview lists every successor and Task disposition. Started unfinished Tasks
+keep identity, checkout, PR and captured execution when moved. Proven untouched
+backlog is canceled; its issues and local history remain. Completed Tasks stay
+with the predecessor. Missing checkout, provider or execution evidence remains
+unresolved and prevents automatic retirement.
 
-```bash
-lf wave new-chapter --chapter 2026-10 --plan chapter.json --dry-run --json
-lf wave new-chapter --chapter 2026-10 --plan chapter.json --json
+Retry the same command after interruption. Rotation reads fresh provider state,
+activates each successor, moves or cancels Tasks, then completes its predecessor.
+During that sequence both Projects can be In Progress. A mix of the requested
+name and one shared predecessor name is recoverable; competing predecessor
+names are reported for resolution in Linear. Nothing wins because its name is
+newer. A Wave without a current Project requires an unambiguous predecessor;
+the command never selects an arbitrary historical plan.
+
+There is no transaction across Linear mutations or across Homes. A second Home
+observes the same statuses on `lf wave sync --wave <wave>` or its next normal
+planning refresh. Lost responses are reconciled by stable Project and issue IDs.
+A successful preview does not authorize ignoring later external reassignments.
+
+Set the Project's default Flow in its content:
+
+```markdown
+flow: feature
+
+## KRs
+
+- [ ] A new contributor ships a change without an undocumented dependency.
 ```
 
-`chapter.json` contains a complete plan for every Wave, keyed by stable Wave ID:
+`lf task run <task>` uses that Flow unless `--flow` overrides it. Existing
+Projects observed before the status-model upgrade retain their identity and
+custom default Flow. The first explicit `lf wave sync` or chapter rotation
+converts their old `recommended:` line to `flow:` and marks the recorded current
+Project In Progress. Until then, planning reads project that same conversion
+without changing Linear. Deliberately Planned successors stay Planned; archived
+predecessors stay historical even if their old status says In Progress.
 
-```json
-{
-  "plans": {
-    "<infrastructure-wave-id>": {"flow":"feature","metric_targets":[],"krs":[]},
-    "<product-wave-id>": {"flow":"feature","metric_targets":[],"krs":[]}
-  }
-}
-```
-
-The preview lists all affected Waves and Task dispositions. Empty plans are
-explicit; omitting a Wave cannot silently retire its backlog. Each successor
-Project gets fresh KRs, targets and Flow selection. Started unfinished Tasks
-keep their identity, worktree, PR and captured invocation when transferred;
-untouched backlog is deleted from Linear and retired locally; completed Tasks remain historical.
-Local Task and PR history survive deletion.
-Unavailable evidence never counts as untouched work.
-
-Retry an interrupted operation with the same Chapter ID. Preparation refreshes
-provider membership and resolves missing listed Tasks by stable identity.
-Activation changes the repository's current Chapter once all Wave plans are
-prepared; it never exposes a successful half-rotated local plan. External Task
-moves and Project retirement can remain visibly pending after activation.
-Retries use the recorded boundary, settle lost responses against provider
-state, and preserve unexpected external reassignments for reconciliation.
-A lost deletion response requires acknowledgement or explicit provider trash
-evidence; absence from a list or an unreadable issue leaves it unresolved.
-Historical targets, KR judgments and dated readings stay frozen even when a
-transferred Task ships later.
+If no receipt identifies the old current Project, adoption requires a single
+unambiguous candidate. Resolve competing plans in Linear; names and dates never
+break the tie. A missing default stays missing: set `flow:` before rotation.
+Unobserved backlog on another Home is unresolved, so a missing local Task row
+never authorizes cancellation.
 
 ## The Goal
 
@@ -141,13 +146,13 @@ Set targets in the chapter plan, not the instrument contract:
 ```
 
 Apply this complete Wave plan with
-`lf wave update-plan --wave <wave> --plan plan.json`. For a new Chapter, include
-it in the repository-wide [chapter plan](#the-planning-model).
+`lf wave update-plan --wave <wave> --plan plan.json`. For the next chapter,
+edit the Planned Project in Linear.
 An omitted metric has no target in that chapter; its observations remain visible
 without a pass/fail verdict. Changing a target preserves instrument identity,
-revision, and measurement history. Rotation freezes the previous targets and
-dated readings for `lf status <wave> --chapter <id> --json`. The Wave objective
-stays in `GOAL.md`; chapter plans have no second objective.
+revision, and measurement history. Completed Projects retain their targets and KRs in Linear. Metric observations
+remain owned by the Wave; rotation does not freeze another copy of those readings.
+The Wave objective stays in `GOAL.md`; Project plans have no second objective.
 
 
 ```bash
@@ -250,14 +255,14 @@ lf wave update-plan --wave infra --plan plan.json
 ```
 
 The Wave objective names who benefits and what improves. Chapter KRs prove observable outcomes
-across a stated window. Update the current plan explicitly; a new chapter never
-copies the previous content or checked KRs.
+across a stated window. Update the current plan explicitly; a new chapter copies only
+the default Flow, retaining any explicitly prepared successor plan.
 
 ## Linear
 
 Tasks live in Linear; there are no local task lists. A Wave maps to an
 Initiative, its Project for each Chapter maps to a Linear Project, and each
-Task maps to an Issue. Chapter itself is the repository's clock. Connect
+Task maps to an Issue. The chapter name groups the current Projects. Connect
 once — `lf wave connect` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.

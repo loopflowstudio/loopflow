@@ -10,7 +10,7 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_source,
-    s.ready_summary, s.completed_at, s.created_at, s.kind, s.request,
+    s.ready_summary, s.completed_at, s.created_at, s.kind, s.request, s.interactive, s.repo,
     r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
     r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt,
     r.provider, r.model, r.caller_run_id, r.outcome, r.ended_at
@@ -26,7 +26,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
     let created_at = row.get(6)?;
     let kind: String = row.get(7)?;
     let request = row.get(8)?;
-    let run = super::runs::read_run(row, 9)?;
+    let run = super::runs::read_run(row, 11)?;
     Ok((|| {
         let run_id = RunId::parse(&run_id).map_err(invalid)?;
         Ok((
@@ -34,7 +34,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
                 id: id.clone(),
                 current_run_id: run_id.clone(),
                 kind: match kind.as_str() {
-                    "interactive" => SessionKind::Interactive,
+                    "conversation" => SessionKind::Conversation,
                     "flow_review" => SessionKind::FlowReview,
                     "ask" => SessionKind::Ask,
                     _ => return Err(invalid("unknown Session kind")),
@@ -45,6 +45,8 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
                     "generated" => TitleSource::Generated,
                     _ => return Err(invalid("unknown Session title provenance")),
                 },
+                interactive: row.get(9)?,
+                repo: row.get(10)?,
                 request,
                 ready_summary,
                 completed_at,
@@ -74,6 +76,57 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<(Ses
     )
     .optional()?
     .transpose()
+}
+
+fn inventory_query(
+    filter: &crate::session::SessionFilter,
+) -> StoreResult<(String, Vec<rusqlite::types::Value>)> {
+    use rusqlite::types::Value;
+    let mut sql = format!("{SESSION_SELECT} WHERE 1");
+    let mut values = Vec::new();
+    let mut bind = |value| {
+        values.push(value);
+        format!("?{}", values.len())
+    };
+    if let Some(interactive) = filter.interactive {
+        sql.push_str(&format!(
+            " AND s.interactive={}",
+            bind(Value::Integer(i64::from(interactive)))
+        ));
+    }
+    if !filter.history {
+        sql.push_str(" AND s.completed_at IS NULL AND (s.kind!='flow_review' OR EXISTS(
+            SELECT 1 FROM flow_invocations f WHERE f.pending_session_id=s.id AND f.state='current'))");
+    }
+    if let Some(repo) = &filter.repo {
+        sql.push_str(&format!(" AND s.repo={}", bind(Value::Text(repo.clone()))));
+    }
+    if let Some(task) = &filter.task {
+        let task = bind(Value::Text(task.clone()));
+        sql.push_str(&format!(
+            " AND r.task_id IN (SELECT id FROM tasks
+            WHERE id={task} OR issue_identifier={task} OR external_issue_id={task})"
+        ));
+    }
+    if let Some(search) = &filter.search {
+        let search = bind(Value::Text(search.clone()));
+        sql.push_str(&format!(
+            " AND (instr(lower(s.title),lower({search}))>0 OR instr(s.id,{search})>0)"
+        ));
+    }
+    let limit = if filter.limit == 0 {
+        -1
+    } else {
+        i64::try_from(filter.limit).map_err(invalid)?
+    };
+    let limit = bind(Value::Integer(limit));
+    let offset = bind(Value::Integer(
+        i64::try_from(filter.offset).map_err(invalid)?,
+    ));
+    sql.push_str(&format!(
+        " ORDER BY s.title, s.id LIMIT {limit} OFFSET {offset}"
+    ));
+    Ok((sql, values))
 }
 
 impl SqliteStore {
@@ -173,7 +226,7 @@ impl SqliteStore {
     /// the import stores a Flow it meets for the first time here.
     pub fn create_session(
         &self,
-        session: Session,
+        mut session: Session,
         run: Run,
         review: Option<&FlowInvocation>,
     ) -> StoreResult<(Session, Run)> {
@@ -186,6 +239,15 @@ impl SqliteStore {
                 "a Session is reserved with its first Run, a review with its invocation",
             ));
         }
+        if session.repo.is_none() && run.cwd.is_dir() {
+            session.repo = crate::repo::discover_repo_root(&run.cwd)
+                .map_err(invalid)?
+                .map(|root| {
+                    crate::repository::CanonicalRepo::discover(&root).map(|repo| repo.to_string())
+                })
+                .transpose()
+                .map_err(invalid)?;
+        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -196,13 +258,13 @@ impl SqliteStore {
         }
         tx.execute(
             "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at,
-                ready_summary,completed_at)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                ready_summary,completed_at,interactive,repo)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             params![
                 session.id,
                 run.id.as_str(),
                 match session.kind {
-                    SessionKind::Interactive => "interactive",
+                    SessionKind::Conversation => "conversation",
                     SessionKind::Ask => "ask",
                     SessionKind::FlowReview => "flow_review",
                 },
@@ -211,7 +273,9 @@ impl SqliteStore {
                 session.request,
                 session.created_at,
                 session.ready_summary,
-                session.completed_at
+                session.completed_at,
+                session.interactive,
+                session.repo
             ],
         )?;
         let run = super::runs::insert_run_in(&tx, run)?;
@@ -297,14 +361,14 @@ impl SqliteStore {
     }
 
     /// Every open Session. A review is open while its invocation waits on it.
-    pub fn open_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
+    pub fn sessions(
+        &self,
+        filter: &crate::session::SessionFilter,
+    ) -> StoreResult<Vec<(Session, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "{SESSION_SELECT} WHERE s.completed_at IS NULL AND (s.kind!='flow_review' OR EXISTS(
-                SELECT 1 FROM flow_invocations f WHERE f.pending_session_id=s.id AND f.state='current'))
-             ORDER BY s.title, s.id"
-        ))?;
-        let rows = query.query_map([], read_session)?;
+        let (sql, values) = inventory_query(filter)?;
+        let mut query = conn.prepare(&sql)?;
+        let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
         rows.map(|row| row?).collect()
     }
 
@@ -334,7 +398,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
             "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
-             AND completed_at IS NULL AND (kind='interactive' OR ready_summary IS NOT NULL)
+             AND completed_at IS NULL AND (kind='conversation' OR ready_summary IS NOT NULL)
              AND NOT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id
                  WHERE r.id=?2 AND t.current_invocation_id=r.invocation_id)",
             params![id, expected_run.as_str(), crate::store::rows::now_unix()],
@@ -457,9 +521,17 @@ pub(super) fn reserve_task_review_in(
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO sessions(id,current_run_id,kind,title,title_source,created_at)
-                VALUES(?1,?2,'flow_review',?3,'generated',?4)",
-                params![id, run_id.as_str(), title, crate::store::rows::now_unix()],
+                "INSERT INTO sessions(id,current_run_id,kind,title,title_source,created_at,repo)
+                VALUES(?1,?2,'flow_review',?3,'generated',?4,
+                    (SELECT w.repo FROM waves w JOIN projects p ON p.wave_id=w.id
+                        JOIN tasks t ON t.project_id=p.id WHERE t.id=?5))",
+                params![
+                    id,
+                    run_id.as_str(),
+                    title,
+                    crate::store::rows::now_unix(),
+                    flow.task_id.as_ref().map(TaskId::as_str)
+                ],
             )?;
             super::runs::insert_run_in(
                 conn,

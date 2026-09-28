@@ -352,9 +352,10 @@ pub struct TaskPr {
     pub slug: String,
     pub branch: String,
     pub base_commit: String,
-    /// Another Task's PR this worktree was placed on, or `None` when rooted on
-    /// the default branch. `base_commit` is that parent's exact fork commit; the
-    /// link clears after the parent merges and this PR collapses onto main.
+    /// Selected parent PR, or `None` when rooted on the default branch.
+    /// Selection does not move Git: `base_commit` remains the child's last
+    /// recorded fork until rebase succeeds. The link clears after the parent
+    /// merges and this PR collapses onto main.
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,

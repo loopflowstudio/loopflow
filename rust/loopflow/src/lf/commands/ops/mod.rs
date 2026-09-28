@@ -798,6 +798,31 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     let repo = crate::repo::working_directory()?;
     match cmd {
+        RepoCommand::NewChapter {
+            name,
+            dry_run,
+            json,
+        } => {
+            let rotation = crate::ops::chapter::new_chapter(&repo, name, *dry_run)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&rotation)?);
+            } else {
+                println!("Chapter {}", rotation.name);
+                for wave in rotation.waves {
+                    println!(
+                        "  {} → {} ({})",
+                        wave.wave, rotation.name, wave.successor_id
+                    );
+                    for task in wave.tasks {
+                        println!(
+                            "    {}  {:?}  {}",
+                            task.task.identifier, task.disposition, task.reason
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
         RepoCommand::Reteam { apply } => {
             let result = crate::ops::pm::pm_reteam(
                 &repo,

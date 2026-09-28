@@ -13,7 +13,7 @@ struct WaveDetailReading {
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
-        return WavePlan(objective: snapshot.workMap.objective, chapter: snapshot.workMap.chapter)
+        return WavePlan(objective: snapshot.workMap.objective, projects: snapshot.workMap.projects)
     }
 
     mutating func update(_ snapshot: WaveDetailSnapshot) {
@@ -48,7 +48,7 @@ struct WaveDetailPane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Button("Chapter history") { showHistory = true }.padding(.bottom, 8)
+            Button("Project history") { showHistory = true }.padding(.bottom, 8)
             Divider()
             HSplitView {
                 WavePlanView(
@@ -66,7 +66,7 @@ struct WaveDetailPane: View {
             }
         }
         .sheet(isPresented: $showHistory) {
-            ChapterHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
+            ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
         }
     }
 
@@ -204,7 +204,7 @@ private struct WavePlanView: View {
 
     private var chapterAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let chapter = displayedPlan.chapter { WaveChapterView(chapter: chapter) }
+            if let chapter = displayedPlan.currentProject { WaveChapterView(chapter: chapter) }
             Text("Tasks").font(Typography.sectionTitle(17))
             if isAwaitingDetail {
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
@@ -856,7 +856,7 @@ private struct PrLink: View {
 }
 
 struct WaveChapterView: View {
-    let chapter: ChapterSummary
+    let chapter: ProjectPlanningSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -877,10 +877,7 @@ struct WaveChapterView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(kr.holds ? "Holds" : "Open")
             }
-            if chapter.phase != "complete" {
-                Text("Chapter transition in progress").foregroundStyle(Color.statusWarning)
-            }
-            if let error = chapter.error { Text(error).foregroundStyle(Color.statusWarning).textSelection(.enabled) }
+
         }.accessibilityIdentifier("wave-chapter")
     }
 }

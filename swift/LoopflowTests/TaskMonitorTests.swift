@@ -111,7 +111,7 @@ struct TaskMonitorTests {
         let shells = store.layout.allPanes
         var session = try #require(JSONSerialization.jsonObject(with: fixture("session")) as? [String: Any])
         session["id"] = "monitor-session"
-        session["kind"] = "interactive"
+        session["kind"] = "conversation"
         session["work"] = ["kind": "task", "id": "ts_now00000000000000000000000000000"]
         session["cwd"] = repo
         session["state"] = "active"

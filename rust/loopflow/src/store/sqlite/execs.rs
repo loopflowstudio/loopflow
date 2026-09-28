@@ -39,6 +39,26 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
 }
 
 impl SqliteStore {
+    /// Serialize native dispatch with driver transfer. The bounded transport
+    /// write finishes before a replacement can acquire the same Session.
+    pub(crate) fn with_session_driver<T>(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        write: impl FnOnce() -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if expected.exec_id.is_none() || driver_in(&tx, session)?.as_ref() != Some(expected) {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        let result = write()?;
+        tx.commit()?;
+        Ok(result)
+    }
+
     pub fn session_driver(&self, session: &str) -> StoreResult<Option<SessionDriver>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         driver_in(&conn, session)

@@ -62,14 +62,28 @@ pub struct PmKr {
     pub holds: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectFlowPlan {
-    pub recommended: Option<String>,
+/// Linear's Project status category, independent of the team's display label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectStatus {
+    Backlog,
+    Planned,
+    Started,
+    Paused,
+    Completed,
+    Canceled,
 }
 
-impl ProjectFlowPlan {
-    pub fn empty() -> Self {
-        Self { recommended: None }
+impl ProjectStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Planned => "planned",
+            Self::Started => "started",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Canceled => "canceled",
+        }
     }
 }
 
@@ -83,7 +97,7 @@ pub struct ChapterMetricTarget {
 #[serde(deny_unknown_fields)]
 pub struct ProjectContent {
     pub metric_targets: Vec<ChapterMetricTarget>,
-    pub flows: ProjectFlowPlan,
+    pub flow: String,
     pub krs: Vec<PmKr>,
 }
 
@@ -94,9 +108,8 @@ pub struct PmProject {
     pub name: String,
     pub summary: String,
     pub metric_targets: Vec<ChapterMetricTarget>,
-    /// `None` means this provider snapshot predates Project flow configuration.
-    /// Fresh provider reads always resolve it to `Some`, including an empty plan.
-    pub flows: Option<ProjectFlowPlan>,
+    pub flow: String,
+    pub status: ProjectStatus,
     pub krs: Vec<PmKr>,
     pub initiative_ids: Vec<String>,
     /// Stable ids of the Linear teams this Project belongs to. A managed Project
@@ -378,11 +391,15 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
 
     let mut section = Section::None;
     let mut targets = Vec::new();
-    let mut flows = ProjectFlowPlan::empty();
+    let mut flow = String::new();
     let mut krs = Vec::new();
     let mut current_kr: Option<PmKr> = None;
     for line in content.lines() {
         let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("flow:") {
+            flow = value.trim().to_string();
+            continue;
+        }
         match trimmed {
             "## Metric targets" => {
                 if let Some(kr) = current_kr.take() {
@@ -426,12 +443,8 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
                 let Some((name, value)) = trimmed.split_once(':') else {
                     continue;
                 };
-                let value = match value.trim() {
-                    "" => None,
-                    value => Some(value.to_string()),
-                };
-                if name.trim() == "recommended" {
-                    flows.recommended = value;
+                if name.trim() == "flow" {
+                    flow = value.trim().to_string();
                 }
             }
             Section::Krs => {
@@ -477,7 +490,7 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
     };
     let content = ProjectContent {
         metric_targets,
-        flows,
+        flow,
         krs,
     };
     content.validate()?;
@@ -508,12 +521,7 @@ pub fn render_project_content(project: &ProjectContent) -> String {
         serde_json::to_string_pretty(&project.metric_targets)
             .expect("validated metric targets serialize")
     );
-    if project.flows != ProjectFlowPlan::empty() {
-        content.push_str("\n\n## Flows\n");
-        if let Some(flow) = &project.flows.recommended {
-            content.push_str(&format!("\nrecommended: {}", flow.trim()));
-        }
-    }
+    content.push_str(&format!("\n\nflow: {}", project.flow.trim()));
     content.push_str("\n\n## KRs");
     for kr in &project.krs {
         let marker = if kr.holds { "x" } else { " " };
@@ -711,22 +719,19 @@ mod tests {
     }
 
     #[test]
-    fn project_snapshot_without_flows_remains_readable() {
-        let project: PmProject = serde_json::from_str(
-            r#"{
-                "id":"project-1",
-                "slug":"incident-management",
-                "name":"Incident Management",
-                "summary":"Restore service and prevent recurrence.",
-                "metric_targets":[],
-                "krs":[],
-                "initiative_ids":["initiative-1"],
-                "team_ids":["team-1"]
-            }"#,
-        )
-        .expect("legacy project snapshot");
+    fn project_snapshot_requires_flow_and_status() {
+        let value = serde_json::json!({
+            "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
+            "metric_targets":[], "krs":[], "initiative_ids":[], "team_ids":[]
+        });
+        assert!(serde_json::from_value::<PmProject>(value).is_err());
+    }
 
-        assert_eq!(project.flows, None);
+    #[test]
+    fn missing_flow_is_visible_without_changing_existing_project_content() {
+        let content = parse_project_content("## KRs\n- [ ] Keep this proof\n").unwrap();
+        assert!(content.flow.is_empty());
+        assert_eq!(content.krs[0].text, "Keep this proof");
     }
 
     #[test]
@@ -747,9 +752,7 @@ mod tests {
                 target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
             }],
 
-            flows: ProjectFlowPlan {
-                recommended: Some("task-design".to_string()),
-            },
+            flow: "feature".to_string(),
             krs: krs.clone(),
         };
         let rendered = render_project_content(&project);
@@ -760,7 +763,7 @@ mod tests {
             parse_project_content(local).unwrap(),
             ProjectContent {
                 metric_targets: Vec::new(),
-                flows: ProjectFlowPlan::empty(),
+                flow: String::new(),
                 krs: vec![PmKr {
                     text: "One proof holds across wrapped lines.".to_string(),
                     holds: false,

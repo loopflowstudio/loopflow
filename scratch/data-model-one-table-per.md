@@ -331,10 +331,15 @@ implementation obligations; successful native attachment does not prove them.
    the complete user interaction and ownership graph. Present code-complete
    review here; record deployment gaps separately, without a passing claim.
 
-The supervisor owns the plan, proof interpretation and next instruction. Use one
-code writer in this checkout; independent reviews are bounded contributions.
-Use Codex only and `lf` for git/delegation. No automatic restart or delivery
-beyond the requested concept-review boundary.
+The supervisor owns the plan, proof interpretation and next instruction. Jack
+authorized maximum useful parallelism without reducing quality on 2026-09-28.
+Bounded contributors now have disjoint file ownership recorded in
+[the parallel work allocation](parallel-work.md); the existing managed worker
+owns execution-model integration and shared files. Contributors leave changes
+uncommitted and do not repair each other's in-progress files. Build/test access
+is coordinated, and final integrated proof stays serial. Use Codex only and
+`lf` for git/delegation. No automatic restart or delivery beyond the requested
+concept-review boundary.
 
 ## Completion evidence matrix
 

@@ -408,37 +408,6 @@ fn prepare_task(
                     )));
                 }
             }
-            if let Some(requested) = stack_on.as_deref() {
-                let active = store
-                    .active_task_pr(&task.id)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?
-                    .ok_or_else(|| task_error("existing Task has no active PR"))?;
-                let parent_id = active.parent_pr_id.as_ref().ok_or_else(|| {
-                    task_error(format!(
-                        "Task {} is rooted on main, not stacked on {requested}",
-                        task.plan.identifier
-                    ))
-                })?;
-                let parent = store
-                    .get_task_pr(parent_id)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?
-                    .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-                let parent_task = store
-                    .get_task(&parent.task_id)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?
-                    .ok_or_else(|| task_error("stack parent Task is missing"))?;
-                if requested != parent_task.plan.identifier
-                    && requested != parent_task.plan.id.as_str()
-                {
-                    return Err(task_error(format!(
-                        "Task {} is stacked on {}, not {requested}",
-                        task.plan.identifier, parent_task.plan.identifier
-                    )));
-                }
-            }
             if directive.is_some() {
                 return Err(task_error(format!(
                     "Task {} already exists; use `lf task comment {} <new-direction>`",
@@ -449,6 +418,11 @@ fn prepare_task(
         Ok(existing)
     })?;
     if let Some(mut existing) = existing {
+        if let Some(parent) = stack_on.as_deref() {
+            block_on_task(async {
+                stack_existing_task(&task_store().await?, &existing, parent).await
+            })?;
+        }
         if !launch {
             return Ok(existing);
         }
@@ -483,6 +457,42 @@ fn prepare_task(
         launch,
     ))?;
     create_prepared_task(main_repo, resolved, prepared)
+}
+
+async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) -> OpsResult<()> {
+    let active = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error("existing Task has no active PR"))?;
+    let parent_task = store
+        .get_task_by_issue(requested)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error(format!("stack parent {requested:?} has no Task")))?;
+    // A retry names the retained PR, even if its Task has since opened another PR.
+    let parent = match &active.parent_pr_id {
+        Some(id) => store.get_task_pr(id).await,
+        None => store.active_task_pr(&parent_task.id).await,
+    }
+    .map_err(|error| task_error(error.to_string()))?
+    .ok_or_else(|| task_error("stack parent PR is missing"))?;
+    if parent.task_id != parent_task.id {
+        return Err(task_error(format!(
+            "Task {} already selects parent PR {}; changing an existing dependency requires explicit reparenting",
+            task.plan.identifier, parent.id
+        )));
+    }
+    let _mutation = lock_task_pr_mutation(&task.worktree)?;
+    store
+        .stack_task_pr(&active, &parent.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    eprintln!(
+        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf rebase` in {} to integrate it.",
+        task.plan.identifier, parent.id, task.worktree.display()
+    );
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -769,16 +779,7 @@ pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
         "Chapter metric targets:\n{}",
         serde_json::to_string(&project.metric_targets).expect("metric targets serialize")
     );
-    if let Some(flows) = project
-        .flows
-        .as_ref()
-        .filter(|flows| **flows != crate::pm::ProjectFlowPlan::empty())
-    {
-        context.push_str("\n\nChapter Task flow:");
-        if let Some(recommended) = &flows.recommended {
-            context.push_str(&format!("\n- recommended: {recommended}"));
-        }
-    }
+    context.push_str(&format!("\n\nChapter Task flow: {}", project.flow));
     if !project.krs.is_empty() {
         context.push_str("\n\nKRs:");
         for kr in &project.krs {
@@ -1124,17 +1125,8 @@ fn select_task_worker_flow_from_project(
     project: &crate::pm::PmProject,
     requested: Option<&str>,
 ) -> OpsResult<String> {
-    let selected = requested.unwrap_or_else(|| recommended_task_flow(project));
+    let selected = requested.unwrap_or(&project.flow);
     load_task_flow(repo, selected).map(|(name, _)| name)
-}
-
-/// The Flow a Task starts without an explicit selection.
-pub(crate) fn recommended_task_flow(project: &crate::pm::PmProject) -> &str {
-    project
-        .flows
-        .as_ref()
-        .and_then(|flows| flows.recommended.as_deref())
-        .unwrap_or("feature")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4913,7 +4905,6 @@ mod tests {
     use crate::durable::{WorkRef, WorkStatus};
     use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::pm::ProjectFlowPlan;
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -5346,6 +5337,8 @@ mod tests {
         let project = Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                flow: "feature".into(),
+                status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new("task-recovery-project").unwrap(),
                 slug: "task-recovery".to_string(),
                 name: "Task recovery".to_string(),
@@ -5470,7 +5463,7 @@ mod tests {
         // A parked human boundary keeps its Session's reserved Run without
         // launching a provider; everything else about the position is untouched.
         let stored = store.task_flow(&task.id).await.unwrap().unwrap();
-        let sessions = store.open_sessions().await.unwrap();
+        let sessions = store.sessions(&crate::session::SessionFilter::default()).await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].1.task_id, Some(task.id.clone()));
         assert!(!sessions[0].1.published);
@@ -5935,13 +5928,102 @@ mod tests {
             name: "Runtime".into(),
             summary: String::new(),
             metric_targets: Vec::new(),
-            flows: Some(ProjectFlowPlan {
-                recommended: Some("task-design".into()),
-            }),
+            flow: "task-design".into(),
+            status: crate::pm::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".into()],
             team_ids: vec!["team-1".into()],
         }
+    }
+
+    #[tokio::test]
+    async fn stacking_preserves_claim_and_history_until_the_owner_releases() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("STACK-1", repo.path().canonicalize().unwrap()).await;
+        let store = &fixture.store;
+        let child = store
+            .active_task_pr(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut parent_task = fixture.task.clone();
+        parent_task.id = TaskId::new();
+        parent_task.plan.id = LinearIssueId::new("stack-parent-issue").unwrap();
+        parent_task.plan.identifier = "STACK-2".into();
+        parent_task.worktree = repo.path().join("parent");
+        parent_task.workspace_slug = "stack-parent".into();
+        let mut parent = child.clone();
+        parent.id = TaskPrId::new();
+        parent.task_id = parent_task.id.clone();
+        parent.branch = "test/stack-parent".into();
+        parent.slug = "stack-parent".into();
+        store.create_task(&parent_task, &parent).await.unwrap();
+        parent.publication = Some(PrPublication {
+            requested_at: parent.created_at,
+            presentation: None,
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/fixture/repo/pull/42".into(),
+                head_sha: None,
+            }),
+            merge: None,
+        });
+        store.update_task_pr(&parent).await.unwrap();
+        let claimed = claim_stop_fixture(&fixture, std::process::id()).await;
+        let events = store.task_events_after(&fixture.task.id, 0).await.unwrap();
+        assert!(store
+            .stack_task_pr(&child, &parent.id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("worker claim released"));
+        assert_eq!(
+            store.active_task_pr(&fixture.task.id).await.unwrap(),
+            Some(child.clone())
+        );
+        assert_eq!(
+            store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(claimed.clone())
+        );
+        assert_eq!(
+            store.task_events_after(&fixture.task.id, 0).await.unwrap(),
+            events
+        );
+        let released = store
+            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
+            .await
+            .unwrap();
+        store.stack_task_pr(&child, &parent.id).await.unwrap();
+        store.stack_task_pr(&child, &parent.id).await.unwrap();
+        assert_eq!(
+            store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(released)
+        );
+        assert_eq!(
+            store.task_events_after(&fixture.task.id, 0).await.unwrap(),
+            events
+        );
+        // Both self-parenting and a reverse edge preserve the accepted dependency.
+        assert!(store.stack_task_pr(&parent, &parent.id).await.is_err());
+        let mut published_child = store
+            .active_task_pr(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        published_child.publication = parent.publication.clone();
+        store.update_task_pr(&published_child).await.unwrap();
+        assert!(store
+            .stack_task_pr(&parent, &child.id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cycle"));
+        assert_eq!(store.get_task_pr(&parent.id).await.unwrap(), Some(parent));
+        assert_eq!(
+            store.get_task_pr(&child.id).await.unwrap(),
+            Some(published_child)
+        );
     }
 
     #[tokio::test]
@@ -6201,9 +6283,8 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flows: Some(ProjectFlowPlan {
-                recommended: Some("task-design".to_string()),
-            }),
+            flow: "task-design".to_string(),
+            status: crate::pm::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-1".to_string()],

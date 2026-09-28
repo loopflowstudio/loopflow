@@ -531,6 +531,52 @@ fn rebase_after_squash_merge_replays_only_unique_work() {
 }
 
 #[test]
+fn existing_root_child_rebases_onto_parent_from_its_original_fork() {
+    let repo = TestRepo::new();
+    let original_fork = repo.head_sha();
+    repo.create_branch("child");
+    repo.create_file("child.txt", "authored before stacking");
+    repo.stage_all();
+    repo.commit("Child work before selecting a parent");
+    repo.checkout("main");
+    repo.create_branch("parent");
+    repo.create_file("parent.txt", "parent work");
+    repo.stage_all();
+    repo.commit("Parent work");
+    repo.push_new_branch("parent");
+    let parent_head = repo.head_sha();
+    repo.checkout("child");
+
+    let verification = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/parent".into(),
+            push: false,
+            fork_base: Some(original_fork),
+        },
+        &NullProgress,
+    )
+    .expect("adopt the selected parent without losing child work");
+    assert_eq!(verification.target_sha, parent_head);
+    assert_eq!(
+        git(
+            repo.path(),
+            &["diff", "--name-only", "origin/parent...HEAD"]
+        ),
+        "child.txt"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("child.txt")).unwrap(),
+        "authored before stacking"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("parent.txt")).unwrap(),
+        "parent work"
+    );
+    assert_eq!(git(repo.path(), &["rev-parse", "parent"]), parent_head);
+}
+
+#[test]
 fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
     // A child stacked on a parent whose two commits both edit the same file:
     // once squash-merged, `git cherry` cannot match the combined patch, so the

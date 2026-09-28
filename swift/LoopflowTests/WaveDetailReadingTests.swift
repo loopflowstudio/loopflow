@@ -45,18 +45,18 @@ struct WaveDetailReadingTests {
     func missingCurrentChapterReplacesCachedPlan() throws {
         let data = try loadFixtureData("wave_detail.json")
         let cachedDetail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
-        let cached = WavePlan(objective: "Earlier objective", chapter: cachedDetail.workMap.chapter)
-        #expect(cached.chapter?.krs.isEmpty == false)
+        let cached = WavePlan(objective: "Earlier objective", projects: cachedDetail.workMap.projects)
+        #expect(cached.currentProject?.krs.isEmpty == false)
 
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        wire["chapter"] = NSNull()
+        wire["projects"] = ["state": "unavailable", "reason": "Provider unavailable"]
         let current = try JSONDecoder().decode(
             WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: wire)
         )
         var reading = WaveDetailReading()
         reading.update(current)
 
-        #expect(reading.plan(cached: cached).chapter == nil)
+        #expect(reading.plan(cached: cached).currentProject == nil)
         #expect(reading.plan(cached: cached).objective == current.workMap.objective)
 
         reading.recordFailure(RegistryQueryError("registry unavailable"))
@@ -158,9 +158,9 @@ struct WaveDetailReadingTests {
 
         // The Wave objective leads the pane; chapter KRs and Tasks share its scope.
         #expect(!workMap.objective.trimmingCharacters(in: .whitespaces).isEmpty)
-        #expect(workMap.chapter != nil)
+        #expect(workMap.currentProject != nil)
 
-        let chapter = try #require(workMap.chapter)
+        let chapter = try #require(workMap.currentProject)
         let tasks = workMap.tasks.items
 
         // KR list is a Project's strongest quality — it must be present.

@@ -466,9 +466,6 @@ pub enum Commands {
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
-        /// Read a dated chapter snapshot instead of current execution
-        #[arg(long)]
-        chapter: Option<String>,
         /// Emit the status snapshot as JSON
         #[arg(long)]
         json: bool,
@@ -670,6 +667,21 @@ pub enum SessionCommand {
         /// Include waiting steps from every repository on this machine
         #[arg(long)]
         all: bool,
+        /// Select interactive or headless conversations
+        #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+        interactive: bool,
+        /// Include completed conversations and historical reviews
+        #[arg(long)]
+        history: bool,
+        /// Maximum conversations; 0 reads the complete matching inventory
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        search: Option<String>,
     },
     /// Open or resume one session in this terminal
     Open {
@@ -840,27 +852,6 @@ pub enum WaveCommand {
         json: bool,
     },
 
-    /// Replace the plan, carry started Tasks, and retire unopened backlog
-    NewChapter {
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-        #[arg(long)]
-        chapter: String,
-        /// Fresh chapter content as JSON: metric_targets, flows, and krs
-        #[arg(long)]
-        plan: Option<std::path::PathBuf>,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// List chapter boundary receipts
-    History {
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
     /// Replace the current chapter's KRs, targets, and Flow recommendation
     UpdatePlan {
         #[arg(short = 'w', long)]
@@ -1328,6 +1319,14 @@ pub enum CronCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Advance every Wave to the named Project plan
+    NewChapter {
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Reconcile linked Waves to the repository's Linear Team
     Reteam {
         #[arg(long)]
@@ -1749,22 +1748,13 @@ mod tests {
 
     #[test]
     fn chapter_and_task_commands_require_no_project_selector() {
-        let preview = Cli::try_parse_from([
-            "lf",
-            "wave",
-            "new-chapter",
-            "--wave",
-            "product",
-            "--chapter",
-            "two",
-            "--dry-run",
-            "--json",
-        ])
-        .unwrap();
+        let preview =
+            Cli::try_parse_from(["lf", "repo", "new-chapter", "two", "--dry-run", "--json"])
+                .unwrap();
         assert!(matches!(
             preview.command,
-            Some(Commands::Wave {
-                cmd: WaveCommand::NewChapter { dry_run: true, .. }
+            Some(Commands::Repo {
+                cmd: RepoCommand::NewChapter { dry_run: true, .. }
             })
         ));
         let task = Cli::try_parse_from([

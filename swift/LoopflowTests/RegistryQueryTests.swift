@@ -7,6 +7,38 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Session inventory is complete across rename, insertion and completion")
+    func sessionsReadCompleteInventory() async throws {
+        let fixture = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: sessionFixtureURL())) as? [String: Any])
+        var rows: [[String: Any]] = (0..<101).map { index in
+            var row = fixture
+            row["id"] = "session-\(index)"
+            row["title"] = "Title \(index)"
+            return row
+        }
+        let first = String(data: try JSONSerialization.data(withJSONObject: rows), encoding: .utf8)!
+        rows.removeFirst()
+        rows[99]["title"] = "AAA renamed"
+        var added = fixture
+        added["id"] = "new-session"
+        rows.insert(added, at: 0)
+        let changed = String(data: try JSONSerialization.data(withJSONObject: rows), encoding: .utf8)!
+        let count = CallCounter()
+        let query = RegistryQuery { args, _ in
+            // A bounded response would drop the final conversation here.
+            guard args.suffix(2) == ["--limit", "0"] else { return "[]" }
+            await count.increment()
+            return await count.value == 1 ? first : changed
+        }
+        let original = try await query.sessions(cwd: "/tmp/repo")
+        let refreshed = try await query.sessions(cwd: "/tmp/repo")
+        #expect(original.count == 101)
+        #expect(Set(refreshed.map(\.id)).count == 101)
+        #expect(refreshed.contains { $0.id == "session-100" && $0.title == "AAA renamed" })
+        #expect(!refreshed.contains { $0.id == "session-0" })
+        #expect(refreshed.contains { $0.id == "new-session" })
+    }
+
     @Test("lf ls decodes and scopes to the repo")
     func wavesDecodeAndScope() async throws {
         let json = """
@@ -182,22 +214,26 @@ struct RegistryQueryTests {
             "metrics": [],
             "contract_issues": []
           },
-          "chapter": {
-            "id": "current",
-            "source_project_id": "project-1",
-          "source_project_slug": "release-feedback",
-            "metric_targets": [],
-            "flows": {
-              "recommended": "task-design"
-            },
-            "krs": [
+          "projects": {
+            "state": "ok",
+            "items": [
               {
-                "text": "Fast loops",
-                "holds": false
+                "id": "project-1",
+                "work_id": null,
+                "slug": "release-feedback",
+                "name": "current",
+                "flow": "task-design",
+                "status": "started",
+                "metric_targets": [],
+                "krs": [
+                  {
+                    "text": "Fast loops",
+                    "holds": false
+                  }
+                ]
               }
             ],
-            "phase": "complete",
-            "error": null
+            "truncated": false
           },
           "tasks": {
             "state": "ok",
@@ -271,7 +307,7 @@ struct RegistryQueryTests {
 
 
 
-        #expect(result.workMap.chapter?.flows.recommended == "task-design")
+        #expect(result.workMap.currentProject?.flow == "task-design")
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
         #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")
@@ -360,7 +396,10 @@ struct RegistryQueryTests {
             "metrics": [],
             "contract_issues": []
           },
-          "chapter": null,
+          "projects": {
+            "state": "unavailable",
+            "reason": "Project planning unavailable"
+          },
           "tasks": {
             "state": "ok",
             "items": [],
@@ -433,7 +472,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["session", "list", "--json"]:
+            case ["session", "list", "--json", "--limit", "0"]:
                 return sessionsJSON
             case ["session", "open", session.id, "--json"]:
                 return sessionJSON
@@ -584,7 +623,7 @@ struct RegistryQueryTests {
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Ship it.", cwd: "/tmp/repo", sync: true)
         #expect(plan.objective == "Ship it.")
-        #expect(plan.chapter?.krs.count == 1)
+        #expect(plan.currentProject?.krs.count == 1)
     }
 
     @Test("a failed lf query surfaces as an error")

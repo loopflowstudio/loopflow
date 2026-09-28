@@ -263,7 +263,7 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     assert_ne!(id, first_run, "a Session is not its Run");
     assert_eq!(
         (kind.as_str(), source.as_str(), completed),
-        ("interactive", "generated", false)
+        ("conversation", "generated", false)
     );
     let (magical, musical) = title.split_once('-').expect("magical-musical pair");
     assert!(!magical.is_empty() && !musical.is_empty() && !musical.contains('-'));
@@ -273,7 +273,7 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     assert_eq!(listed.len(), 1, "{listed:?}");
     assert_eq!(listed[0]["id"], id.as_str());
     assert_eq!(listed[0]["run_id"], first_run.as_str());
-    assert_eq!(listed[0]["kind"], "interactive");
+    assert_eq!(listed[0]["kind"], "conversation");
     assert_eq!(listed[0]["title"], title.as_str());
     assert_eq!(listed[0]["title_source"], "generated");
     assert_eq!(listed[0]["state"], "active");
@@ -415,6 +415,115 @@ fn interactive_run_records_checkout_and_declared_work() {
     ]);
     assert_eq!(fixture.run_parents(&declared), parents("declared"));
     assert_eq!(fixture.count("sessions"), 3);
+}
+
+#[test]
+fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "inventory",
+        &fixture.repo.head_sha(),
+    );
+    let foreign = TestRepo::new();
+    let worktree = fixture.repo.create_named_worktree("inventory-sibling");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    for index in 0..113 {
+        let id = format!("inventory-{index:03}");
+        let foreign_row = index < 110;
+        let run = loopflow::session::Run {
+            id: loopflow::durable::RunId::new(),
+            session_id: Some(id.clone()),
+            invocation_id: None,
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id: (index == 112).then(|| task.task.id.clone()),
+            wave_id: None,
+            work_source: (index == 112).then_some(loopflow::session::WorkSource::Declared),
+            created_at: 1,
+            published: true,
+            cwd: if foreign_row {
+                foreign.path().to_path_buf()
+            } else {
+                worktree.clone()
+            },
+            skill: None,
+            provider: Some("opencode".into()),
+            model: None,
+            caller_run_id: None,
+            ended: None,
+        };
+        let session = loopflow::session::Session {
+            id: id.clone(),
+            current_run_id: run.id.clone(),
+            kind: loopflow::session::SessionKind::Conversation,
+            interactive: true,
+            repo: None,
+            title: format!(
+                "{}-{index:03}",
+                if foreign_row {
+                    "AAA foreign"
+                } else {
+                    "ZZZ local"
+                }
+            ),
+            title_source: loopflow::session::TitleSource::Human,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        };
+        if foreign_row {
+            let dir = fixture.run_dir(run.id.as_str());
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("provider-session.json"),
+                "broken payload outside selected repo",
+            )
+            .unwrap();
+        }
+        runtime
+            .block_on(task.store.create_session(session, run, None))
+            .unwrap();
+    }
+    let list = ["session", "list", "--json", "--limit", "2"];
+    let page = fixture.json(&list);
+    assert_eq!(
+        page.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["inventory-110", "inventory-111"]
+    );
+    let output = fixture
+        .command(&list)
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        page
+    );
+    let filtered = fixture.json(&[
+        "session",
+        "list",
+        "--json",
+        "--limit",
+        "1",
+        "--search",
+        "local-112",
+        "--task",
+        &task.task.plan.identifier,
+    ]);
+    assert_eq!(filtered.as_array().unwrap().len(), 1);
+    assert_eq!(filtered[0]["id"], "inventory-112");
+    let end = fixture.json(&["session", "list", "--json", "--limit", "2", "--offset", "2"]);
+    assert_eq!(end.as_array().unwrap().len(), 1);
+    assert_eq!(end[0]["id"], "inventory-112");
 }
 
 #[test]
@@ -800,63 +909,34 @@ impl LockedStore {
 }
 
 #[test]
-fn launch_proceeds_when_the_store_cannot_be_written() {
+fn agent_admission_requires_the_store_before_provider_launch() {
     let fixture = Fixture::new(false);
     let store = LockedStore::new(&fixture);
-    let mut launch = fixture.command(&LAUNCH);
-    store.select(&mut launch);
-    let output = launch.output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "bookkeeping refused the launch: {stderr}"
-    );
-    let warnings: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.contains("Session is not recorded"))
-        .collect();
-    assert_eq!(warnings.len(), 1, "one warning line: {stderr}");
-    assert!(
-        warnings[0].contains("unable to open database file"),
-        "the warning names the store error: {stderr}"
-    );
-    let run_id = fixture.launches()[0].clone();
-
-    // A headless Run launches the same way, and settles, without its row.
-    let mut headless = fixture.command(&["-b", "--model", "opencode", ":", "Tidy the parser"]);
-    store.select(&mut headless);
-    let output = headless.output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "bookkeeping refused the launch: {stderr}"
-    );
-    let warnings: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.contains("warning:"))
-        .collect();
-    assert_eq!(warnings.len(), 1, "one warning line: {stderr}");
-    assert!(
-        warnings[0].contains("Run is not recorded")
-            && warnings[0].contains("unable to open database file"),
-        "the warning names the store error: {stderr}"
-    );
-    let unrecorded = fixture.launches()[1].clone();
-    assert!(fixture.run_dir(&unrecorded).join("terminal.json").is_file());
-
-    // Nothing waits beside the Run and nothing records the Session later.
+    for args in [
+        LAUNCH.as_slice(),
+        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+    ] {
+        let mut launch = fixture.command(args);
+        store.select(&mut launch);
+        let output = launch.output().unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("unable to open database file"),
+            "{output:?}"
+        );
+        assert!(
+            fixture.launches().is_empty(),
+            "no provider starts without its conversation"
+        );
+    }
     let rows = store.unlock();
-    let mut list = fixture.command(&["session", "list", "--all", "--json"]);
-    store.select(&mut list);
-    let listed: Vec<Value> = serde_json::from_slice(&list.output().unwrap().stdout).unwrap();
-    assert_eq!(listed, Vec::<Value>::new());
-    let mut rename = fixture.command(&["session", "rename", &run_id, "Parser review", "--json"]);
-    store.select(&mut rename);
-    let renamed = rename.output().unwrap();
-    assert!(!renamed.status.success(), "{renamed:?}");
-    assert!(
-        String::from_utf8_lossy(&renamed.stderr).contains("does not belong to a Session"),
-        "{renamed:?}"
+    let mut inventory = fixture.command(&["session", "list", "--all", "--json"]);
+    store.select(&mut inventory);
+    let output = inventory.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        serde_json::json!([])
     );
     let stored: (i64, i64) = rows
         .query_row(
@@ -866,10 +946,6 @@ fn launch_proceeds_when_the_store_cannot_be_written() {
         )
         .unwrap();
     assert_eq!(stored, (0, 0));
-    assert!(!fixture
-        .run_dir(&run_id)
-        .join("unrecorded-session.json")
-        .exists());
 }
 
 /// An Ask's answer returns through its row, so an Ask that cannot be stored
@@ -1287,6 +1363,8 @@ fn import_stores_each_old_session_once_with_its_name() {
             id: review_id,
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::FlowReview,
+            interactive: true,
+            repo: None,
             title: task.task.plan.title.clone(),
             title_source: loopflow::session::TitleSource::Generated,
             request: None,

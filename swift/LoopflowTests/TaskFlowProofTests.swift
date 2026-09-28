@@ -131,7 +131,7 @@ struct TaskFlowProofTests {
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        session["actions"] = sessionActionFixture(kind: "conversation", state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try FlowSource(session: JSONSerialization.data(withJSONObject: [session]))

@@ -435,7 +435,7 @@ struct WorkspaceNavigationTests {
         model.select(.wave(id: task.wave.wave.id))
         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.wave.goal) }
         #expect(throws: Never.self) { try view.inspect().find(text: "Current KRs") }
-        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.currentProject!.krs[0].text) }
         #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-issue-available") }
     }
 
@@ -620,9 +620,9 @@ struct WorkspaceNavigationTests {
         let workData = try JSONEncoder().encode(work)
         let workJSON = String(decoding: workData, as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
-        {"id":"\(id)", "run_id": "\(id)","kind":"interactive","work":\(workJSON),"title":"\(id)",
+        {"id":"\(id)", "run_id": "\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(id)",
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
-         "wave_id":\(id == "project" ? "\"wave-1\"" : "null"),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: state.rawValue)),
+         "wave_id":\(id == "project" ? "\"wave-1\"" : "null"),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: state.rawValue)),
          "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
         """.utf8))
     }

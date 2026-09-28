@@ -111,8 +111,12 @@ impl Store {
         .await
     }
 
-    pub async fn open_sessions(&self) -> StoreResult<Vec<(Session, Run)>> {
-        run_sqlite(&self.sqlite, |store| store.open_sessions()).await
+    pub async fn sessions(
+        &self,
+        filter: &crate::session::SessionFilter,
+    ) -> StoreResult<Vec<(Session, Run)>> {
+        let filter = filter.clone();
+        run_sqlite(&self.sqlite, move |store| store.sessions(&filter)).await
     }
 
     pub async fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {

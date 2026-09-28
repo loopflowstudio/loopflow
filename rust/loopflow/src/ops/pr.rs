@@ -89,12 +89,16 @@ pub fn create_or_update_pr(
 
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let stack = crate::ops::task::task_stack(repo)?;
-    let base_branch = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
-        Some(parent) => parent,
-        None if stack.is_some() => default_branch.clone(),
-        None => pr_target(repo, &main_repo, &default_branch)?,
+    let publication_base = || -> OpsResult<(bool, String)> {
+        let stack = crate::ops::task::task_stack(repo)?;
+        let base = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
+            Some(parent) => parent,
+            None if stack.is_some() => default_branch.clone(),
+            None => pr_target(repo, &main_repo, &default_branch)?,
+        };
+        Ok((stack.is_some(), base))
     };
+    let (stacked, base_branch) = publication_base()?;
 
     // Prove the Task PR range without healing integration metadata before the
     // first remote side effect. No-op for non-Task worktrees.
@@ -117,7 +121,7 @@ pub fn create_or_update_pr(
     };
     commit_workflow(repo, &commit_options, progress)?;
     crate::ops::task::require_task_pr_range_nonempty_without_healing(repo)?;
-    require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
+    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let published_head = rev_parse(repo, "HEAD")?;
@@ -135,6 +139,9 @@ pub fn create_or_update_pr(
     // Keep publication and its durable GitHub projection atomic with respect
     // to later Loopflow pushes and shipping requests in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    // Preparation may have selected a parent while copy generation was running.
+    let (stacked, base_branch) = publication_base()?;
+    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
     let locked_branch = current_branch(repo)?;
     let locked_head = rev_parse(repo, "HEAD")?;
     if locked_branch.as_deref() != Some(branch.as_str()) || locked_head != published_head {

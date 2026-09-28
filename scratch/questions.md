@@ -796,3 +796,15 @@ The working design now requires a failed-then-successful continuation proof with
 one stable AgentSession, both historical outcomes, and one fenced Flow advance.
 This settles the history owner; it does not settle pre-bind usage attribution or
 prove the reconnect transport.
+# Retained-client transport choice — 2026-09-28
+
+Jack's retained-client requirement exposed a measured native boundary: resuming
+on a second Codex client leaves the first able to send turns. Use a narrow
+conversation-scoped relay for Loopflow-owned clients, fenced at socket dispatch
+by the existing Session driver transaction. This is an implementation choice
+under the accepted bridge allowance, not a new product object or approval from
+Jack. Raw provider endpoints remain internal operational evidence. The relay
+does not own the engine or claim a Session for passive display. Public launch,
+connect and Session-row mutation consumers are still pending; the actual-engine
+fixture alone does not complete that cutover. Evidence is in
+`scratch/cutover/exec-ownership.md`.

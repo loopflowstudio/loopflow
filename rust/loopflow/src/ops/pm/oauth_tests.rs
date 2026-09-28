@@ -116,6 +116,8 @@ async fn pm_read_linear_oauth_recovers() {
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: crate::pm::ProjectStatus::Started,
             id: LinearProjectId::new("project-1").unwrap(),
             slug: "reliability".into(),
             name: "Reliability".into(),

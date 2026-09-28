@@ -2,8 +2,6 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
-#[path = "support/chapter.rs"]
-mod chapter;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -47,6 +45,8 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(format!("linear-{slug}")).expect("Linear Project id"),
             slug: slug.to_string(),
             name: slug.replace('-', " "),
@@ -61,13 +61,15 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     }
 }
 
-fn bind_chapter(store: &SqliteStore, wave: &Wave, project_id: &str) {
-    store
-        .save_chapter(
-            &chapter::current_chapter(wave.id(), wave.name(), project_id),
-            true,
-        )
-        .unwrap();
+fn select_project(store: &SqliteStore, wave: &Wave, project_id: &str) {
+    for mut project in store.list_projects(Some(wave.id())).unwrap() {
+        project.plan.status = if project.plan.id.as_str() == project_id {
+            loopflow::pm::ProjectStatus::Started
+        } else {
+            loopflow::pm::ProjectStatus::Completed
+        };
+        store.update_project(&project).unwrap();
+    }
 }
 
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
@@ -78,7 +80,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "name": project.plan.name,
             "summary": "Keep status truthful.",
             "metric_targets": [],
-            "flows": {"recommended": null},
+            "flow": "feature", "status": "started",
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
@@ -86,7 +88,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         "items": []
     });
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
-    bind_chapter(&store, wave, project.plan.id.as_str());
+    select_project(&store, wave, project.plan.id.as_str());
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: wave.id().clone(),
@@ -214,6 +216,8 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
             slug: "technical-architecture".to_string(),
             name: "Technical Architecture".to_string(),
@@ -284,6 +288,8 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let current = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
                 .expect("current PM Project id"),
             slug: "auditability".to_string(),
@@ -300,7 +306,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     store
         .insert_project(&current)
         .expect("seed current Project");
-    bind_chapter(&store, &wave, current.plan.id.as_str());
+    select_project(&store, &wave, current.plan.id.as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -317,7 +323,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
                 "metric_targets": [],
-                "flows": {"recommended": null},
+                "flow": "feature", "status": "started",
                 "krs": [{"text": "Every visible state carries its reason", "holds": false}],
                 "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
@@ -415,7 +421,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         PrMergeMode::User
     );
     let wave = store.list_waves(None).unwrap().pop().unwrap();
-    bind_chapter(&store, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
+    select_project(&store, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
@@ -607,7 +613,7 @@ Count dispatched Task loops that settle without rescue.
             "name": "Loopflow API",
             "summary": "One product contract.",
             "metric_targets": [{"metric_id": "task-loop-trust", "target": {"kind": "at_least", "value": 1.0}}],
-            "flows": {"recommended": null},
+            "flow": "feature", "status": "started",
             "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
             "initiative_ids": ["initiative-product"],
             "team_ids": ["team-product"]
@@ -625,7 +631,7 @@ Count dispatched Task loops that settle without rescue.
             payload: serde_json::to_string(&project_payload).expect("serialize PM snapshot"),
         })
         .expect("seed PM snapshot");
-    bind_chapter(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
+    select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
     drop(sqlite);
 
     let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");

@@ -761,3 +761,38 @@ as a replacement Wave inbox. See the existing Cut I ledger for current evidence.
 Retained pre-cutover installation artifacts keep historical daemon digest data,
 but new installation and current runtime have no daemon lifecycle. Source
 verification uses private fixtures only; no branch command touches installed Home.
+
+## Plan ownership and reconciliation (2026-09-28)
+
+Jack requested that the supervisor directly clarify and validate the plan.
+The bounded review contributor was interrupted before edits; its terminal handle
+exited 130. No contributor changes were present. The supervisor owns the current
+[working design](data-model-one-table-per.md), which supersedes the old H4–H6
+instructions and retains H7's accepted status-based Project design.
+
+Source validation found two boundaries that a rename cannot implement: a single
+Exec contains multiple mechanical/agent step outcomes, and Codex's current stdio
+engine cannot accept a second client through native resume while its first writer
+holds the conversation. The plan requires correlated step/turn events and an
+actual transport/handoff proof before the remaining writer/reader cutover.
+
+Historical pre-bind usage attribution remains unresolved rather than implicitly
+rewritten. Current `bind_session_runs_in` updates every Session Run, whereas the
+earlier note assumed current-Run-only binding. Preserve that counterexample;
+do not treat current code as Jack's approval of retroactive attribution.
+The selected code-complete concept review is distinct from release and configured
+Home acceptance. No installed Home, service, PR or provider account changed.
+
+## Agent outcomes belong to AgentSession history (2026-09-28)
+
+Jack confirmed: “AgentSession history sounds good. Prefer fewer objects.”
+AgentSession retains failed and successful continuations, outcome and usage;
+FlowSession references the exact successful completion that satisfied its step.
+Exec remains an lf process lifetime. AgentExec, SkillExec and a replacement
+generic attempt object are not selected. A mechanical Flow step has no agent
+conversation and retains its result directly in FlowSession history.
+
+The working design now requires a failed-then-successful continuation proof with
+one stable AgentSession, both historical outcomes, and one fenced Flow advance.
+This settles the history owner; it does not settle pre-bind usage attribution or
+prove the reconnect transport.

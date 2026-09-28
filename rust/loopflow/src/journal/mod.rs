@@ -5,13 +5,15 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
 use crate::engine::worktrees::main_repo_root;
+use crate::exec::{AgentCaller, AGENT_CALLER_ENV};
 use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
 use crate::store::RunEventRow;
@@ -117,6 +119,7 @@ struct RunContext {
     run_id: TraceId,
     process_id: ExecId,
     parent_process_id: Option<ExecId>,
+    agent_caller: Option<AgentCaller>,
     started_at: i64,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
@@ -125,7 +128,8 @@ struct RunContext {
     run_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
-    seq: i64,
+    seq: Arc<AtomicI64>,
+    finished: Arc<AtomicBool>,
     /// True when this process minted the run id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the run ends.
     minted_run_id: bool,
@@ -219,6 +223,11 @@ pub fn with_runtime<T>(
     command: &[String],
     run: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
+    // Session completion and Flow recovery may enter this wrapper in-process.
+    // Only the outer command owns the actual lf process's lifecycle.
+    if current_context().is_some() {
+        return run();
+    }
     let attribution = crate::work::wave::context::run_attribution(Some(repo_root));
     if let Some(failure) = attribution.failure.as_deref() {
         warn!(
@@ -304,6 +313,15 @@ fn try_emit(
         return Ok(());
     };
 
+    let terminal = matches!(node, LfNode::Run)
+        && matches!(
+            event,
+            LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
+        );
+    if terminal && context.finished.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+
     let event = LfEvent {
         run_id: context.run_id.clone(),
         ts: OffsetDateTime::now_utc(),
@@ -374,7 +392,18 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
 
     match open_ledger() {
         Ok(store) => {
-            if let Err(err) = store.insert_run_event(&row) {
+            let exit_code = match (event.node, event.event) {
+                (LfNode::Run, LfEventType::Completed) => Some(0),
+                (LfNode::Run, LfEventType::Errored) => Some(1),
+                (LfNode::Run, LfEventType::Escalated) => Some(130),
+                _ => None,
+            };
+            if let Err(err) = store.insert_run_event(
+                &row,
+                context.agent_caller.as_ref(),
+                event.signal.as_deref(),
+                exit_code,
+            ) {
                 if first_ledger_failure() {
                     warn!(error = %err, run_id = %row.run_id, "ledger insert failed — this run is not being recorded");
                 } else {
@@ -466,7 +495,31 @@ fn ensure_run_context(
         );
     }
 
-    let (run_id, minted_run_id) = match configured_run_id(repo_root) {
+    let agent_caller = std::env::var(AGENT_CALLER_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<AgentCaller>(&value))
+        .transpose()
+        .map_err(std::io::Error::other)?;
+    // A direct child of this lf process must inherit this Exec, not the agent
+    // edge that admitted it. Provider launches install their own fresh caller.
+    std::env::remove_var(AGENT_CALLER_ENV);
+    let agent_parent = agent_caller.as_ref().and_then(|caller| {
+        match open_ledger().and_then(|store| store.agent_parent(caller)) {
+            Ok(parent) => parent,
+            Err(error) => {
+                warn!(%error, "agent caller could not be resolved");
+                None
+            }
+        }
+    });
+    let inherited_trace = if agent_caller.is_some() {
+        agent_parent
+            .as_ref()
+            .and_then(|(_, trace)| TraceId::parse(trace).ok())
+    } else {
+        configured_run_id(repo_root)
+    };
+    let (run_id, minted_run_id) = match inherited_trace {
         Some(run_id) => (run_id, false),
         None => {
             // Mint and export the run id so prompt logs and child processes
@@ -485,14 +538,19 @@ fn ensure_run_context(
     // that resolves to nothing. Drop it so the violation is unspellable at
     // write time; the run id stays, so the trace still groups. A legitimate
     // parent records its own start row before it can spawn anything.
-    let parent_process_id = (!minted_run_id)
-        .then(|| {
-            std::env::var(LF_PROCESS_ID_ENV)
-                .ok()
-                .and_then(|value| ExecId::parse(&value).ok())
-        })
-        .flatten()
-        .filter(parent_is_recorded);
+    let parent_process_id = if agent_caller.is_some() {
+        agent_parent.map(|(parent, _)| parent)
+    } else {
+        (!minted_run_id)
+            .then(|| {
+                std::env::var(LF_PROCESS_ID_ENV)
+                    .ok()
+                    .and_then(|value| ExecId::parse(&value).ok())
+            })
+            .flatten()
+            .filter(parent_is_recorded)
+    };
+    std::env::set_var(LF_TRACE_ID_ENV, run_id.as_str());
     let process_id = ExecId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
@@ -525,6 +583,7 @@ fn ensure_run_context(
         run_id,
         process_id,
         parent_process_id,
+        agent_caller,
         started_at: process_started_at(std::process::id())?
             .ok_or_else(|| std::io::Error::other("current process start time is unavailable"))?,
         command: fields
@@ -534,10 +593,40 @@ fn ensure_run_context(
         run_dir,
         repo: Some(repo),
         wave: wave_name.clone(),
-        seq: 0,
+        seq: Arc::new(AtomicI64::new(0)),
+        finished: Arc::new(AtomicBool::new(false)),
         minted_run_id,
     };
     set_context(context.clone());
+    let interrupted = context.clone();
+    let directory = repo_root.to_path_buf();
+    crate::engine::agent::register_interrupt_cleanup(move || {
+        if interrupted.finished.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let event = LfEvent {
+            run_id: interrupted.run_id.clone(),
+            ts: OffsetDateTime::now_utc(),
+            node: LfNode::Run,
+            event: LfEventType::Escalated,
+            wave_name: interrupted.wave.clone(),
+            worktree: Some(directory.display().to_string()),
+            command: None,
+            flow: None,
+            skill: None,
+            index: None,
+            error: None,
+            signal: None,
+        };
+        // ctrlc's termination hook does not identify which signal arrived.
+        // Keep that unknown while recording the observed interrupted exit.
+        ledger_insert(
+            &interrupted,
+            &event,
+            interrupted.seq.fetch_add(1, Ordering::Relaxed),
+            &directory,
+        );
+    });
     if let Err(error) = write_exec_process_receipt(&context) {
         debug!(error = %error, exec_id = %context.process_id, "live Exec receipt unavailable");
     } else {
@@ -593,17 +682,7 @@ fn parent_is_recorded(parent: &ExecId) -> bool {
 }
 
 fn next_seq() -> i64 {
-    RUN_CONTEXT.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        match borrow.as_mut() {
-            Some(context) => {
-                let seq = context.seq;
-                context.seq += 1;
-                seq
-            }
-            None => 0,
-        }
-    })
+    current_context().map_or(0, |context| context.seq.fetch_add(1, Ordering::Relaxed))
 }
 
 fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
@@ -1636,6 +1715,36 @@ mod tests {
         );
 
         assert!(is_clean(&worktree).expect("worktree should stay clean"));
+    }
+
+    #[test]
+    fn nested_runtime_keeps_the_outer_exec_open_until_its_result() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let argv = vec!["lf".into(), "flow".into(), "resume".into()];
+        let result: anyhow::Result<()> = super::with_runtime(repo.path(), &argv, || {
+            let outer = super::current_context().unwrap().process_id;
+            super::with_runtime(repo.path(), &argv, || Ok(()))?;
+            assert_eq!(super::current_context().unwrap().process_id, outer);
+            let rows = super::open_ledger()
+                .unwrap()
+                .run_events_matching_exec(outer.as_str())
+                .unwrap();
+            assert_eq!(
+                rows.len(),
+                1,
+                "inner return must not finish the outer command"
+            );
+            anyhow::bail!("outer command failed after inner success")
+        });
+        assert!(result.is_err());
+        let rows = super::open_ledger()
+            .unwrap()
+            .list_run_events_since(0)
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].process_id, rows[1].process_id);
+        assert_eq!(rows[1].event, "errored");
     }
 
     #[test]

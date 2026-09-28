@@ -4,6 +4,7 @@ pub mod child;
 pub mod controller;
 pub mod durable;
 pub mod engine;
+pub mod exec;
 pub mod harness;
 pub mod id;
 pub mod journal;

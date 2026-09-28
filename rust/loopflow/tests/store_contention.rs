@@ -65,7 +65,12 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
             for seq in 0..EVENTS_PER_WRITER {
                 // Open per event, exactly as `journal::open_ledger()` does.
                 let recorded = SqliteStore::new(Path::new(&path)).and_then(|store| {
-                    store.insert_run_event(&run_event(&format!("run_{writer}"), seq as i64))
+                    store.insert_run_event(
+                        &run_event(&format!("run_{writer}"), seq as i64),
+                        None,
+                        None,
+                        None,
+                    )
                 });
                 if let Err(error) = recorded {
                     lost.fetch_add(1, Ordering::Relaxed);

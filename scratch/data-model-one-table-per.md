@@ -363,6 +363,13 @@ perform forbidden installed-Home changes to close a checklist.
 
 ## Open decisions and next action
 
+### This slice
+
+Exec admission, native-engine provenance and driver handoff are in progress.
+[The working ledger](cutover/exec-ownership.md) records actual failures/passes,
+retained executable edits and the next dependent proof. This is not completion
+of the connect/ownership exit or acceptance of an owner-only cutover.
+
 The accepted object names and Exec-tree requirements are settled. Transport
 feasibility is an engineering proof, not a request for Jack to choose a protocol.
 Prospective bind attribution is the explicit implementation assumption above;

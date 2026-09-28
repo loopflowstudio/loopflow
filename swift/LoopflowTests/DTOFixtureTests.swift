@@ -124,6 +124,7 @@ struct DTOFixtureTests {
         #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
 
+        #expect(detail.wave.enabled)
         // The Home runtime evidence carries the state and the one contextual action.
         #expect(detail.chapter?.flows.recommended == "task-design")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")

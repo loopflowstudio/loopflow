@@ -1,13 +1,12 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
-use crate::child::ObservationRecipient;
 use crate::id::WaveId;
 use crate::work::project::{
-    ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
+    Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
     LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 
@@ -160,16 +159,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_prs(&task_id)).await
     }
 
-    pub async fn started_task_observations(
-        &self,
-        wave: &WaveId,
-    ) -> StoreResult<Vec<TaskObservation>> {
-        let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.started_task_observations(&wave)
-        })
-        .await
-    }
 
     pub async fn latest_task_event_at(
         &self,
@@ -424,32 +413,6 @@ impl Store {
         .await
     }
 
-    pub async fn pending_observations(
-        &self,
-        recipient: &ObservationRecipient,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let recipient = recipient.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_observations(&recipient)
-        })
-        .await
-    }
 
-    pub async fn pending_project_observations(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_project_observations(&project_id)
-        })
-        .await
-    }
 
-    pub async fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_observation_delivered(id)
-        })
-        .await
-    }
 }

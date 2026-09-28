@@ -12,19 +12,19 @@ use std::path::PathBuf;
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
+use crate::child::AbandonIntent;
 use crate::durable::Author;
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::{
-    ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
+    Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearObservationApply, LinearObservationOutcome,
     PmWritebackState, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
     TaskPrRepairKind,
 };
 
@@ -624,26 +624,6 @@ impl SqliteStore {
     /// its event log past the stall deadline is stalled, not working. `None` means
     /// no events yet (the status change is the only progress the caller can use).
     /// Project first assignment into chat without storing a second Started fact.
-    pub fn started_task_observations(&self, wave: &WaveId) -> StoreResult<Vec<TaskObservation>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT t.id, t.issue_identifier,
-                COALESCE((SELECT MIN(e.id) FROM task_events e WHERE e.task_id=t.id
-                    AND json_extract(e.kind_json,'$.kind')='started'), 0)
-             FROM tasks t JOIN projects p ON p.id=t.project_id
-             WHERE p.wave_id=?1 AND t.started_at IS NOT NULL
-             ORDER BY t.started_at, t.id",
-        )?;
-        let rows = statement.query_map([wave.as_str()], |row| {
-            Ok(TaskObservation {
-                task_id: TaskId::from_raw(row.get::<_, String>(0)?),
-                issue_identifier: row.get(1)?,
-                event_id: row.get(2)?,
-                event: TaskEventKind::Started,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
 
     pub fn latest_task_event_at(&self, task_id: &TaskId) -> StoreResult<Option<OffsetDateTime>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -851,58 +831,8 @@ impl SqliteStore {
             .and_then(crate::work::project::HistoricalFailure::from_event))
     }
 
-    pub fn pending_observations(
-        &self,
-        recipient: &ObservationRecipient,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let (kind, id) = recipient_columns(recipient);
-        let mut statement = conn.prepare(
-            "SELECT id, recipient_kind, recipient_id, source_kind, source_id,
-                    event_id, payload_json, delivered_at
-             FROM observation_outbox
-             WHERE recipient_kind=?1 AND recipient_id=?2 AND delivered_at IS NULL
-             ORDER BY id",
-        )?;
-        let rows = statement.query_map(params![kind, id], map_observation_row)?;
-        let mut observations = Vec::new();
-        for row in rows {
-            observations.push(row?);
-        }
-        Ok(observations)
-    }
 
-    pub fn pending_project_observations(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT id, recipient_kind, recipient_id, source_kind, source_id,
-                    event_id, payload_json, delivered_at
-             FROM observation_outbox
-             WHERE recipient_kind='project'
-               AND recipient_id=?1
-               AND delivered_at IS NULL
-             ORDER BY id",
-        )?;
-        let rows = statement.query_map(params![project_id.as_str()], map_observation_row)?;
-        let mut observations = Vec::new();
-        for row in rows {
-            observations.push(row?);
-        }
-        Ok(observations)
-    }
 
-    pub fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE observation_outbox SET delivered_at=?1
-             WHERE id=?2 AND delivered_at IS NULL",
-            params![now_unix(), id],
-        )?;
-        Ok(())
-    }
 }
 
 fn validate_task(task: &Task) -> StoreResult<()> {
@@ -1826,21 +1756,7 @@ fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEve
     })
 }
 
-fn recipient_columns(recipient: &ObservationRecipient) -> (&'static str, String) {
-    match recipient {
-        ObservationRecipient::Wave { wave_id } => ("wave", wave_id.as_str().to_string()),
-        ObservationRecipient::Project { project_id } => {
-            ("project", project_id.as_str().to_string())
-        }
-    }
-}
 
-fn child_columns(source: &ChildRef) -> (&'static str, String) {
-    match source {
-        ChildRef::Project(project_id) => ("project", project_id.as_str().to_string()),
-        ChildRef::Task(task_id) => ("task", task_id.as_str().to_string()),
-    }
-}
 
 pub(super) fn insert_task_event_in(
     conn: &Connection,
@@ -1853,20 +1769,6 @@ pub(super) fn insert_task_event_in(
         params![task.id.as_str(), serde_json::to_string(kind)?, created_at],
     )?;
     let event_id = conn.last_insert_rowid();
-    if kind.is_wave_observable() {
-        insert_observation(
-            conn,
-            &ObservationRecipient::Wave {
-                wave_id: task.wave_id.clone(),
-            },
-            &ChildRef::Task(task.id.clone()),
-            event_id,
-            &ChildEventPayload::Task {
-                event: kind.clone(),
-            },
-            created_at,
-        )?;
-    }
     Ok(TaskEvent {
         id: event_id,
         task_id: task.id.clone(),
@@ -1891,20 +1793,6 @@ pub(super) fn insert_project_event_in(
         ],
     )?;
     let event_id = conn.last_insert_rowid();
-    if kind.is_wave_observable() {
-        insert_observation(
-            conn,
-            &ObservationRecipient::Wave {
-                wave_id: project.wave_id.clone(),
-            },
-            &ChildRef::Project(project.id.clone()),
-            event_id,
-            &ChildEventPayload::Project {
-                event: kind.clone(),
-            },
-            created_at,
-        )?;
-    }
     Ok(ProjectEvent {
         id: event_id,
         project_id: project.id.clone(),
@@ -1913,85 +1801,4 @@ pub(super) fn insert_project_event_in(
     })
 }
 
-fn insert_observation(
-    conn: &Connection,
-    recipient: &ObservationRecipient,
-    source: &ChildRef,
-    event_id: i64,
-    payload: &ChildEventPayload,
-    created_at: i64,
-) -> StoreResult<()> {
-    let (recipient_kind, recipient_id) = recipient_columns(recipient);
-    let (source_kind, source_id) = child_columns(source);
-    conn.execute(
-        "INSERT OR IGNORE INTO observation_outbox (
-            recipient_kind, recipient_id, source_kind, source_id,
-            event_id, payload_json, created_at, delivered_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
-        params![
-            recipient_kind,
-            recipient_id,
-            source_kind,
-            source_id,
-            event_id,
-            serde_json::to_string(payload)?,
-            created_at,
-        ],
-    )?;
-    Ok(())
-}
 
-fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationOutboxRow> {
-    let recipient_kind: String = row.get(1)?;
-    let recipient_id: String = row.get(2)?;
-    let recipient = match recipient_kind.as_str() {
-        "wave" => ObservationRecipient::Wave {
-            wave_id: WaveId::parse(&recipient_id).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    2,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })?,
-        },
-        "project" => ObservationRecipient::Project {
-            project_id: ProjectId::from_raw(recipient_id),
-        },
-        value => {
-            return Err(invalid_column(
-                1,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("unknown observation recipient {value:?}"),
-                ),
-            ))
-        }
-    };
-    let source_kind: String = row.get(3)?;
-    let source_id: String = row.get(4)?;
-    let source = match source_kind.as_str() {
-        "project" => ChildRef::Project(ProjectId::from_raw(source_id)),
-        "task" => ChildRef::Task(TaskId::from_raw(source_id)),
-        value => {
-            return Err(invalid_column(
-                3,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("unknown observation source {value:?}"),
-                ),
-            ))
-        }
-    };
-    let payload: ChildEventPayload = serde_json::from_str(&row.get::<_, String>(6)?)
-        .map_err(|error| invalid_column(6, error))?;
-    Ok(ObservationOutboxRow {
-        id: row.get(0)?,
-        recipient,
-        source,
-        event_id: row.get(5)?,
-        payload,
-        delivered_at: row
-            .get::<_, Option<i64>>(7)?
-            .map(crate::store::rows::unix_to_datetime),
-    })
-}

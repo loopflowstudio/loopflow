@@ -332,6 +332,11 @@ pub enum Commands {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
+    /// Bridge new Discord messages to finite Wave Runs
+    Discord {
+        #[command(subcommand)]
+        cmd: DiscordCommand,
+    },
     /// Local launchd jobs that run lf commands on a schedule
     Cron {
         #[command(subcommand)]
@@ -1377,6 +1382,7 @@ pub enum HomeCommand {
         #[arg(long)]
         json: bool,
     },
+
 }
 
 #[derive(Debug, Subcommand)]
@@ -2882,4 +2888,10 @@ mod tests {
         assert_eq!(title, None);
         assert_eq!(body, None);
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DiscordCommand {
+    /// Poll a configured channel and post each Run's final answer
+    Serve { wave: String },
 }

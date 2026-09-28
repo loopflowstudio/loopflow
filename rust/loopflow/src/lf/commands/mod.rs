@@ -4,6 +4,7 @@ pub mod auth;
 pub mod ci;
 pub mod desktop;
 pub mod doctor;
+pub mod discord;
 pub mod flow;
 pub mod home;
 pub mod install;

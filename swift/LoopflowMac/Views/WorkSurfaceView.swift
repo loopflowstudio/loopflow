@@ -468,10 +468,6 @@ struct WorkSurfaceView: View {
         }
     }
 
-    private func pausedChip(_ waveId: String) -> some View {
-        WorkspaceChip(text: "paused", tone: .neutral)
-            .accessibilityIdentifier("wave-paused-\(waveId)")
-    }
 
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {

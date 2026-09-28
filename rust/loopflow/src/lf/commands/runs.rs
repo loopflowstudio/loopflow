@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 
-use crate::controller::wave::journal::short_id;
+use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
 pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot, DiscoveryState};

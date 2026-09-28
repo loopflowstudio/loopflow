@@ -6,11 +6,7 @@ use anyhow::anyhow;
 pub fn run(cmd: &HomeCommand) -> anyhow::Result<()> {
     match cmd {
         HomeCommand::Id { json } => id_cmd(*json),
-        HomeCommand::Observe {
-            home_id,
-            route,
-            json,
-        } => observe_cmd(home_id, route, *json),
+        HomeCommand::Observe { home_id, route, json } => observe_cmd(home_id, route, *json),
     }
 }
 

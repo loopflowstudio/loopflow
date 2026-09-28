@@ -20,7 +20,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child::ChildRef;
-use crate::controller::wave::metrics::{
+use crate::work::wave::metrics::{
     MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
     MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
 };
@@ -2131,7 +2131,7 @@ mod tests {
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
         TaskConditionState, TaskRuntimeSnapshot,
     };
-    use crate::controller::wave::metrics::{
+    use crate::work::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
         MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
     };
@@ -2304,7 +2304,7 @@ mod tests {
         assert!(missing.metrics.is_empty());
         assert!(matches!(
             &missing.contract_issues[..],
-            [crate::controller::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
         ));
         store.put_pm_snapshot(crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
@@ -2347,7 +2347,7 @@ mod tests {
                 .unwrap();
         assert!(matches!(
             &missing.contract_issues[..],
-            [crate::controller::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
         ));
     }
 

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::controller::wave::relocate::relocate_wave;
+use loopflow::work::wave::relocate::relocate_wave;
 use loopflow::durable::{HomeId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{empty_plan, read_chapter, rotate, NewChapterRequest};
-use crate::controller::wave::metrics::{
+use crate::work::wave::metrics::{
     load_metric_contract, MetricContractIssueDto, MetricEvidenceDto, MetricObservation,
     MetricTarget,
 };

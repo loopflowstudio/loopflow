@@ -32,6 +32,35 @@ struct WaveLensTests {
         #expect(lens.reason == "Retired at 2026-08-20T12:00:00Z · superseded by wave_current")
     }
 
+    @Test("default-on without a listener is red")
+    func runningWithoutListenerIsRed() {
+        let lens = WaveLens.forWave(
+            
+            activeTasks: 0
+        )
+        #expect(lens.color == .red)
+        #expect(lens.reason == "Expected live · Wave listener did not answer")
+    }
+
+    @Test("paused turn intent is blue while listener evidence stays explicit")
+    func pausedIsBlueWithListenerEvidence() {
+        let serving = WaveLens.forWave(
+            
+            
+            activeTasks: 1
+        )
+        #expect(serving.color == .blue)
+        #expect(serving.reason == "Paused · listener is serving and queueing input")
+
+        let stopped = WaveLens.forWave(
+            
+            
+            activeTasks: 0
+        )
+        #expect(stopped.color == .blue)
+        #expect(stopped.reason == "Paused · listener is stopped")
+    }
+
     // MARK: - Task conditions map 1:1, and unknown is lit (never off/black)
 
     @Test("Task conditions map to lens colors one-to-one")

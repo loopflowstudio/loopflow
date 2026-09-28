@@ -1813,6 +1813,7 @@ fn execute_command(
             ),
         },
         Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
+        Some(Commands::Discord { cmd: loopflow::lf::DiscordCommand::Serve { wave } }) => in_repo_runtime(&args, |repo| loopflow::lf::commands::discord::serve(repo, wave)),
         Some(Commands::Install { .. }) => {
             unreachable!("install dispatches before home routing")
         }

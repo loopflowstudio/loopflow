@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use rusqlite::{params, types::Type, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::HomeId;
 use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, PrLanding, PrLandingId, PrLandingState,
 };
@@ -34,19 +33,6 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
     let placement = match row.get::<_, Option<String>>(13)?.as_deref() {
         None => None,
         Some("local") => Some(LandingPlacement::Local),
-        Some("home") => {
-            let home = row.get::<_, Option<String>>(14)?.ok_or_else(|| {
-                invalid_column(
-                    14,
-                    crate::durable::DurableDataError::InvalidId(
-                        "home supervisor has no Home id".to_string(),
-                    ),
-                )
-            })?;
-            Some(LandingPlacement::Home {
-                home_id: HomeId::parse(&home).map_err(|error| invalid_column(14, error))?,
-            })
-        }
         Some(value) => {
             return Err(invalid_column(
                 13,
@@ -234,21 +220,6 @@ impl super::SqliteStore {
         .map_err(StoreError::from)
     }
 
-    pub fn recoverable_pr_landings(
-        &self,
-        stale_before: OffsetDateTime,
-    ) -> StoreResult<Vec<PrLanding>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(&format!(
-            "SELECT {LANDING_COLUMNS} FROM pr_landings
-             WHERE state IN ('watching', 'repairing')
-               AND (supervisor_process_id IS NULL OR supervisor_heartbeat_at <= ?1)
-             ORDER BY created_at"
-        ))?;
-        let rows = statement.query_map([timestamp(stale_before)], map_landing)?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
-    }
 
     pub fn claim_pr_landing(
         &self,
@@ -304,7 +275,7 @@ impl super::SqliteStore {
                 landing_id.as_str(),
                 generation as i64,
                 claim.placement.storage_str(),
-                claim.placement.home_id().map(HomeId::as_str),
+                Option::<String>::None,
                 i64::from(claim.process_id),
                 timestamp(now),
                 expected_generation as i64,

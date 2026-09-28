@@ -10,11 +10,8 @@ use tracing_subscriber::EnvFilter;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{Cli, Commands, InstallCommand, TaskCommand, WaveCommand};
 
-use loopflow::ops::chapter::{
-    chapter_history, empty_plan, new_chapter, update_plan, NewChapterRequest,
-};
+use loopflow::ops::chapter::update_plan;
 use loopflow::ops::task_execution::TaskExecutionState;
-use loopflow::work::chapter::{ChapterId, ChapterPhase};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -847,13 +844,8 @@ fn print_task_control(
 }
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
-    let (receipt, json, dry_run) = match command {
-        WaveCommand::List { .. } | WaveCommand::Status { .. } => {
-            unreachable!("read commands dispatch without runtime capture")
-        }
-        WaveCommand::Probe { wave, json } => {
-            return loopflow::lf::commands::home::probe_cmd(wave.as_deref(), *json, Some(repo));
-        }
+    match command {
+        WaveCommand::List { .. } | WaveCommand::Status { .. } => unreachable!("read commands dispatch separately"),
         WaveCommand::Connect {
             wave,
             wave_flag,
@@ -891,64 +883,12 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         | WaveCommand::Retire { .. } => {
             return loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::NewChapter {
-            wave,
-            chapter,
-            plan,
-            dry_run,
-            json,
-        } => {
-            let content = match plan {
-                Some(path) => serde_json::from_slice(&std::fs::read(path)?)?,
-                None => empty_plan(),
-            };
-            let request = NewChapterRequest {
-                wave: wave.clone(),
-                chapter: ChapterId::parse(chapter).map_err(anyhow::Error::msg)?,
-                content,
-            };
-            (new_chapter(repo, &request, *dry_run)?, *json, *dry_run)
-        }
-        WaveCommand::History { wave, json } => {
-            let history = chapter_history(repo, wave.as_deref())?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&history)?);
-            } else {
-                for chapter in history {
-                    println!("{}  {:?}", chapter.id.as_str(), chapter.phase);
-                }
-            }
-            return Ok(());
-        }
         WaveCommand::UpdatePlan { wave, plan } => {
             let content = serde_json::from_slice(&std::fs::read(plan)?)?;
             update_plan(repo, wave.as_deref(), &content)?;
             return Ok(());
         }
-    };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&receipt)?);
-    } else {
-        println!(
-            "{} · chapter {} · {:?}",
-            receipt.wave,
-            receipt.id.as_str(),
-            receipt.phase
-        );
-        for task in &receipt.tasks {
-            println!(
-                "  {}  {:?}  {}",
-                task.task.identifier, task.disposition, task.reason
-            );
-        }
-        if let Some(error) = &receipt.error {
-            println!("  pending: {error}");
-        }
     }
-    if !dry_run && receipt.phase != ChapterPhase::Complete {
-        anyhow::bail!("chapter transition is incomplete; retry the same chapter id");
-    }
-    Ok(())
 }
 
 fn read_task_draft() -> anyhow::Result<String> {
@@ -1580,47 +1520,11 @@ fn dispatch(
                 cmd:
                     WaveCommand::Status {
                         wave,
-                        chapter,
                         json,
                         sync,
                         no_sync: _,
                     },
             }) => {
-                if let Some(chapter) = chapter {
-                    let id = loopflow::work::chapter::ChapterId::parse(chapter)
-                        .map_err(anyhow::Error::msg)?;
-                    let repo = loopflow::repo::find_repo_root()?;
-                    let snapshot = loopflow::ops::chapter::chapter_snapshot(
-                        &repo,
-                        wave.as_deref(),
-                        Some(&id),
-                    )?;
-                    if *json {
-                        println!("{}", serde_json::to_string_pretty(&snapshot)?);
-                    } else {
-                        println!(
-                            "{} · chapter {} · observed {}",
-                            snapshot.wave,
-                            snapshot.id.as_str(),
-                            snapshot.observed_at
-                        );
-                        for kr in &snapshot.content.krs {
-                            println!("[{}] {}", if kr.holds { "x" } else { " " }, kr.text);
-                        }
-                        println!("Metrics evaluated at {}", snapshot.metrics_evaluated_at);
-                        print!(
-                            "{}",
-                            loopflow::lf::commands::waves::metric_portfolio_text(&snapshot.metrics)
-                        );
-                        for task in snapshot.tasks {
-                            println!(
-                                "{}  {:?}  {}",
-                                task.task.identifier, task.disposition, task.reason
-                            );
-                        }
-                    }
-                    Ok(())
-                } else {
                     let refreshed = if *sync {
                         Some(loopflow::lf::commands::ops::refresh_status(
                             wave.as_deref(),
@@ -1632,8 +1536,8 @@ fn dispatch(
                         refreshed.as_deref().or(wave.as_deref()),
                         *json,
                     )
-                }
             }
+
             Some(Commands::Wave {
                 cmd:
                     cmd @ (WaveCommand::Connect { .. }

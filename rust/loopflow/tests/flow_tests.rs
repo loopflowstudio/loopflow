@@ -1,5 +1,3 @@
-#[path = "support/chapter.rs"]
-mod chapter;
 mod support;
 
 use std::fs;
@@ -83,6 +81,176 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
     command
 }
 
+fn publish_stack_fixture_pr(
+    runtime: &tokio::runtime::Runtime,
+    store: &loopflow::store::Store,
+    task: &loopflow::work::task::TaskId,
+) -> loopflow::work::task::TaskPr {
+    let mut pr = runtime
+        .block_on(store.active_task_pr(task))
+        .unwrap()
+        .unwrap();
+    pr.publication = Some(loopflow::work::task::PrPublication {
+        requested_at: pr.created_at,
+        presentation: None,
+        github: Some(loopflow::work::task::GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime.block_on(store.update_task_pr(&pr)).unwrap();
+    pr
+}
+
+#[test]
+fn prepared_task_selects_parent_without_rewriting_work_or_publication() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let child =
+        support::register_unrun_task(home.path(), repo.path(), "child-task", &repo.head_sha());
+    let parent_path = repo.create_named_worktree("parent-task");
+    let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
+    repo.create_branch("child-task");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let task_before = runtime
+        .block_on(child.store.get_task(&child.task.id))
+        .unwrap()
+        .unwrap();
+    let before = publish_stack_fixture_pr(&runtime, &child.store, &child.task.id);
+    let parent_pr = publish_stack_fixture_pr(&runtime, &child.store, &parent.id);
+    repo.create_file("committed.txt", "child-authored commit");
+    repo.stage_all();
+    repo.commit("Child work before selecting its parent");
+    repo.create_file("staged.txt", "staged bytes");
+    repo.stage_all();
+    repo.create_file("committed.txt", "unstaged bytes");
+    repo.create_file("untracked.txt", "untracked bytes");
+    let head = repo.head_sha();
+    let index = Command::new("git")
+        .args(["diff", "--cached", "--binary"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap()
+        .stdout;
+    let events = runtime
+        .block_on(child.store.task_events_after(&child.task.id, 0))
+        .unwrap();
+    for _ in 0..2 {
+        let output = lf_command(
+            repo.path(),
+            home.path(),
+            &[
+                "task",
+                "prepare",
+                "INF-123",
+                "--stack-on",
+                "INF-124",
+                "--json",
+            ],
+            None,
+        )
+        .env_remove("LF_CONTROL_DB_PATH")
+        .env("LF_DB_PATH", home.path().join("loopflow.db"))
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let returned: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(returned.is_object());
+        let after = runtime
+            .block_on(child.store.active_task_pr(&child.task.id))
+            .unwrap()
+            .unwrap();
+        let mut expected = before.clone();
+        expected.parent_pr_id = Some(parent_pr.id.clone());
+        expected.updated_at = after.updated_at;
+        assert_eq!(after, expected);
+        assert_eq!(
+            runtime
+                .block_on(child.store.get_task(&child.task.id))
+                .unwrap()
+                .unwrap(),
+            task_before
+        );
+        assert_eq!(
+            runtime
+                .block_on(child.store.task_events_after(&child.task.id, 0))
+                .unwrap(),
+            events
+        );
+    }
+    let selected = runtime
+        .block_on(child.store.active_task_pr(&child.task.id))
+        .unwrap();
+    let failed = lf_command(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "prepare",
+            "INF-123",
+            "--stack-on",
+            "INF-404",
+            "--json",
+        ],
+        None,
+    )
+    .env("LF_DB_PATH", home.path().join("loopflow.db"))
+    .output()
+    .unwrap();
+    assert!(!failed.status.success());
+    assert_eq!(
+        runtime
+            .block_on(child.store.active_task_pr(&child.task.id))
+            .unwrap(),
+        selected
+    );
+    // A successful publication observed from an older snapshot must survive,
+    // while the dedicated parent writer retains the newer dependency.
+    let mut publication = before.clone();
+    publication.publication.as_mut().unwrap().github.as_mut().unwrap().head_sha = Some("published-after-selection".into());
+    publication.linear_attachment_id = Some("linked-after-selection".into());
+    runtime.block_on(child.store.update_task_pr(&publication)).unwrap();
+    let recorded = runtime.block_on(child.store.get_task_pr(&before.id)).unwrap().unwrap();
+    assert_eq!(recorded.parent_pr_id, selected.as_ref().unwrap().parent_pr_id);
+    assert_eq!(recorded.publication, publication.publication);
+    assert_eq!(recorded.linear_attachment_id, publication.linear_attachment_id);
+    assert_eq!(repo.head_sha(), head);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("committed.txt")).unwrap(),
+        "unstaged bytes"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("staged.txt")).unwrap(),
+        "staged bytes"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+        "untracked bytes"
+    );
+    assert_eq!(
+        Command::new("git")
+            .args(["diff", "--cached", "--binary"])
+            .current_dir(repo.path())
+            .output()
+            .unwrap()
+            .stdout,
+        index
+    );
+    assert_eq!(
+        runtime
+            .block_on(child.store.get_task_pr(&parent_pr.id))
+            .unwrap()
+            .unwrap(),
+        parent_pr
+    );
+}
+
 #[test]
 fn checkout_task_identity_ignores_main_and_parent_upstreams() {
     for upstream in ["main", "parent-task"] {
@@ -100,17 +268,10 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             &["branch", "--set-upstream-to", &format!("origin/{upstream}")],
         );
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let mut child_pr = child.pr.clone();
         if upstream == "parent-task" {
-            child_pr.parent_pr_id = Some(
-                runtime
-                    .block_on(child.store.active_task_pr(&parent.id))
-                    .unwrap()
-                    .unwrap()
-                    .id,
-            );
+            let parent_pr = publish_stack_fixture_pr(&runtime, &child.store, &parent.id);
             runtime
-                .block_on(child.store.update_task_pr(&child_pr))
+                .block_on(child.store.stack_task_pr(&child.pr, &parent_pr.id))
                 .unwrap();
         }
         write_skill(repo.path(), "identity-proof", "Prove checkout identity.");
@@ -783,20 +944,6 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
         support::register_unrun_task(home.path(), repo.path(), "task-claim", &repo.head_sha());
     write_flow(repo.path(), "claim-proof", "- op: rebase --plan\n");
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .unwrap()
-        .unwrap();
-    runtime
-        .block_on(task.store.save_chapter(
-            &chapter::current_chapter(
-                &task.task.wave_id,
-                "task-pr-tests",
-                project.plan.id.as_str(),
-            ),
-            true,
-        ))
-        .unwrap();
     let flow = runtime
         .block_on(task.store.start_task_flow(
             &task.task.id,
@@ -1444,20 +1591,6 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
         support::register_unrun_task(home.path(), repo.path(), "task-flow-read", &repo.head_sha());
     run_git(repo.path(), &["branch", "task-flow-read"]);
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .unwrap()
-        .unwrap();
-    runtime
-        .block_on(task.store.save_chapter(
-            &chapter::current_chapter(
-                &task.task.wave_id,
-                "task-pr-tests",
-                project.plan.id.as_str(),
-            ),
-            true,
-        ))
-        .unwrap();
     for skill in [
         "design-proof",
         "implement-proof",

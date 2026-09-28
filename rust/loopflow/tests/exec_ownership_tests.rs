@@ -6,6 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow::durable::RunId;
+use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
 use loopflow::session::{Run, Session, SessionKind, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
@@ -208,43 +209,8 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     let original_id = original.id.clone();
     let replacement = Driver::start(home.path(), repo.path(), "replacement");
     let restart = Driver::start(home.path(), repo.path(), "restart");
-    let run_id = RunId::new();
     let session_id = "engine-ownership-fixture";
-    store
-        .create_session(
-            Session {
-                id: session_id.into(),
-                current_run_id: run_id.clone(),
-                kind: SessionKind::Interactive,
-                title: "Engine ownership".into(),
-                title_source: TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            Run {
-                id: run_id,
-                session_id: Some(session_id.into()),
-                invocation_id: None,
-                node: None,
-                iterations: None,
-                attempt: None,
-                task_id: None,
-                wave_id: None,
-                work_source: None,
-                created_at: 1,
-                published: false,
-                cwd: repo.path().into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                caller_run_id: None,
-                ended: None,
-            },
-            None,
-        )
-        .unwrap();
+    reserve_session(&store, session_id, repo.path());
     let first = store
         .claim_session_driver(session_id, None, &original.id, false)
         .unwrap();
@@ -327,4 +293,170 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         )
         .unwrap();
     assert_eq!(direct_children, 1);
+}
+
+fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
+    let run_id = RunId::new();
+    store
+        .create_session(
+            Session {
+                id: session_id.into(),
+                current_run_id: run_id.clone(),
+                kind: SessionKind::Conversation,
+                interactive: true,
+                repo: None,
+                title: "Engine ownership".into(),
+                title_source: TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            },
+            Run {
+                id: run_id,
+                session_id: Some(session_id.into()),
+                invocation_id: None,
+                node: None,
+                iterations: None,
+                attempt: None,
+                task_id: None,
+                wave_id: None,
+                work_source: None,
+                created_at: 1,
+                published: false,
+                cwd: repo.into(),
+                skill: None,
+                provider: Some("codex".into()),
+                model: None,
+                caller_run_id: None,
+                ended: None,
+            },
+            None,
+        )
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires actual Codex and uv; private Homes and synthetic Responses only"]
+async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let store = SqliteStore::new(&database).unwrap();
+    write_scorecard(repo.path());
+    let original = Driver::start(home.path(), repo.path(), "original");
+    let replacement = Driver::start(home.path(), repo.path(), "replacement");
+    let session = "native-client-transfer";
+    reserve_session(&store, session, repo.path());
+    let first = store
+        .claim_session_driver(session, None, &original.id, false)
+        .unwrap();
+    let control = home.path().join("gate");
+    std::fs::create_dir(&control).unwrap();
+    std::fs::write(
+        control.join("caller.json"),
+        serde_json::to_vec(&first.caller(session.into())).unwrap(),
+    )
+    .unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut probe = Command::new("uv")
+        .current_dir(root)
+        .args(["run", "tests/e2e/codex_connect.py", "--gated", "--codex"])
+        .arg(std::env::var("CODEX_TEST_BIN").expect("set CODEX_TEST_BIN"))
+        .arg("--output")
+        .arg(control.join("evidence"))
+        .arg("--control")
+        .arg(&control)
+        .arg("--lf")
+        .arg(env!("CARGO_BIN_EXE_lf"))
+        .arg("--lf-home")
+        .arg(home.path())
+        .spawn()
+        .unwrap();
+    wait_file(&control.join("native.done"), &mut probe);
+    let engine: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(control.join("engine.json")).unwrap()).unwrap();
+    let connection = CodexConnection {
+        store: store.clone(),
+        session_id: session.into(),
+        thread_id: engine["thread"].as_str().unwrap().into(),
+        driver: Some(first.clone()),
+    };
+    let endpoint = Path::new(engine["endpoint"].as_str().unwrap());
+    let old = serve_gate(&control.join("old.sock"), endpoint, connection.clone());
+    let mut passive = connection.clone();
+    passive.driver = None;
+    let observer = serve_gate(&control.join("observer.sock"), endpoint, passive);
+    std::fs::write(control.join("sockets.go"), "").unwrap();
+    wait_file(&control.join("attached.done"), &mut probe);
+    assert_eq!(
+        store.session_driver(session).unwrap(),
+        Some(first.clone()),
+        "passive display must not claim the conversation"
+    );
+    let second = store
+        .claim_session_driver(session, Some(&first), &replacement.id, false)
+        .unwrap();
+    let mut current = connection;
+    current.driver = Some(second.clone());
+    let current = serve_gate(&control.join("current.sock"), endpoint, current);
+    std::fs::write(control.join("transfer.go"), "").unwrap();
+    assert!(probe.wait().unwrap().success());
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(control.join("evidence/results.json")).unwrap())
+            .unwrap();
+    assert_eq!(result["old_client_still_receives_completion"], true);
+    assert_eq!(result["current_driver_continued"], true);
+    assert_eq!(result["engine_alive"], true);
+    assert_eq!(
+        result["rejected_old_client_writes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(store.session_driver(session).unwrap(), Some(second));
+    let conn = rusqlite::Connection::open(database).unwrap();
+    let parents: Vec<String> = conn.prepare(
+        "SELECT parent_exec_id FROM execs WHERE caller_session_id=?1 AND via_agent=1 ORDER BY rowid"
+    ).unwrap().query_map([session], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+    assert_eq!(parents.first(), Some(&original.id.to_string()));
+    assert!(
+        parents.len() >= 3,
+        "initial, continuing and subsequent turns must invoke lf"
+    );
+    assert!(
+        parents[1..]
+            .iter()
+            .all(|parent| *parent == replacement.id.to_string()),
+        "{parents:?}"
+    );
+    for task in [old, observer, current] {
+        task.abort();
+    }
+}
+
+fn serve_gate(
+    socket: &Path,
+    engine: &Path,
+    connection: CodexConnection,
+) -> tokio::task::JoinHandle<()> {
+    let listener = tokio::net::UnixListener::bind(socket).unwrap();
+    let engine = engine.to_path_buf();
+    tokio::spawn(async move {
+        let mut clients = tokio::task::JoinSet::new();
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            let connection = connection.clone();
+            let engine = engine.clone();
+            clients.spawn(async move {
+                if let Err(error) = connection.serve(socket, &engine).await {
+                    eprintln!("native fixture client closed: {error}");
+                }
+            });
+        }
+    })
 }

@@ -908,6 +908,7 @@ async fn store_pm_snapshot_with_store(
     let registered = crate::work::wave::ensure_wave_row(store, repo, wave)
         .await
         .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
+    super::chapter::sync_projects(store, &registered, snapshot).await?;
     store
         .put_pm_snapshot(PmSnapshotRow {
             wave_id: registered.id().clone(),
@@ -1035,34 +1036,11 @@ async fn pm_init_async(
     }
 
     let store = pm_store().await?;
-    let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
+    crate::work::wave::ensure_wave_row(&store, repo, &wave)
         .await
         .map_err(|cause| OpsError::Message(cause.to_string()))?;
-    if store
-        .chapter(registered.id(), None)
-        .await
-        .map_err(|cause| OpsError::Message(cause.to_string()))?
-        .is_none()
-    {
-        let ctx = resolve_context(repo, &wave).await?;
-        if !checked_projects(repo, &ctx, &wave).await?.is_empty() {
-            return Err(OpsError::Message(format!("Wave {wave} has an existing plan; preview its migration with `lf wave new-chapter --wave {wave} --chapter <id> --dry-run`")));
-        }
-        let receipt = super::chapter::rotate(
-            repo,
-            &super::chapter::NewChapterRequest {
-                wave: Some(wave.clone()),
-                chapter: crate::work::chapter::ChapterId::parse("initial")
-                    .map_err(OpsError::Message)?,
-                content: super::chapter::empty_plan(),
-            },
-            false,
-        )
-        .await?;
-        if let Some(error) = receipt.error {
-            return Err(OpsError::Message(error));
-        }
-    }
+    let ctx = resolve_context(repo, &wave).await?;
+    refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(PmInitResult {
         wave,
         initiative_id,
@@ -2127,12 +2105,6 @@ async fn apply_or_plan_repository_reteam(
                     .map_err(pm_to_ops)?;
             }
             if state.project.name != state.target_name {
-                let flows = state.project.flows.clone().ok_or_else(|| {
-                    OpsError::Message(format!(
-                        "Project {} has no flow payload; refresh before reteam",
-                        state.project.id
-                    ))
-                })?;
                 resolved
                     .repository
                     .client
@@ -2141,7 +2113,7 @@ async fn apply_or_plan_repository_reteam(
                         &state.target_name,
                         &ProjectContent {
                             metric_targets: state.project.metric_targets.clone(),
-                            flows,
+                            flow: state.project.flow.clone(),
                             krs: state.project.krs.clone(),
                         },
                     )
@@ -2384,19 +2356,10 @@ async fn pm_sync_async(
             }
             let expected_project_name = format!("{title_path} — {canonical_name}");
             if project.name != expected_project_name {
-                if project.flows.is_none() {
-                    let message = format!(
-                        "Linear Project `{}` ({}) has no flow payload, so its title cannot be repaired safely",
-                        project.name, project.id
-                    );
-                    diagnostics.push(message.clone());
-                    blocking.push(message);
-                } else {
-                    actions.push(format!(
-                        "rename Linear Project `{}` ({}) to `{expected_project_name}`",
-                        project.name, project.id
-                    ));
-                }
+                actions.push(format!(
+                    "rename Linear Project `{}` ({}) to `{expected_project_name}`",
+                    project.name, project.id
+                ));
             }
 
             let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
@@ -2451,6 +2414,17 @@ async fn pm_sync_async(
                     .await
                     .map_err(pm_to_ops)?;
             }
+            let ctx = PmContext {
+                repository: RepositoryPmContext {
+                    client: client.clone(),
+                    provider,
+                    repo_id: repo_id.clone(),
+                    team_id: team_id.clone(),
+                },
+                initiative: initiative.clone(),
+            };
+            let store = pm_store().await?;
+            super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, true).await?;
             let title_path = canonical_wave_title_path_async(repo, wave).await?;
             for project in client.list_projects(&initiative).await.map_err(pm_to_ops)? {
                 let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
@@ -2462,7 +2436,7 @@ async fn pm_sync_async(
                             &expected_name,
                             &ProjectContent {
                                 metric_targets: project.metric_targets.clone(),
-                                flows: project.flows.clone().expect("preflight required flows"),
+                                flow: project.flow.clone(),
                                 krs: project.krs.clone(),
                             },
                         )
@@ -2470,15 +2444,6 @@ async fn pm_sync_async(
                         .map_err(pm_to_ops)?;
                 }
             }
-            let ctx = PmContext {
-                repository: RepositoryPmContext {
-                    client: client.clone(),
-                    provider,
-                    repo_id: repo_id.clone(),
-                    team_id: team_id.clone(),
-                },
-                initiative,
-            };
             let snapshot = fetch_pm_snapshot(repo, wave, &ctx).await?;
             store_pm_snapshot(repo, wave, &ctx, &snapshot).await?;
         }
@@ -2775,31 +2740,33 @@ async fn checked_projects_with_store(
         .await
         .map_err(|error| OpsError::Message(format!("failed to read Wave registry: {error}")))?
     {
-        if let Some(chapter) = store
-            .chapter(registered.id(), None)
+        for known in store
+            .list_projects(Some(registered.id()))
             .await
             .map_err(|error| {
-                OpsError::Message(format!("failed to read current chapter: {error}"))
+                OpsError::Message(format!("failed to read retained Projects: {error}"))
             })?
         {
             if !projects
                 .iter()
-                .any(|project| project.id == chapter.project_id)
+                .any(|project| project.id == known.plan.id.as_str())
             {
-                // The binding owns identity; a portfolio omission cannot erase its content.
+                // An omitted membership cannot erase retained Project/Task history.
                 projects.push(
                     ctx.client
-                        .project_ownership(&chapter.project_id)
+                        .project_ownership(known.plan.id.as_str())
                         .await
-                        .map_err(|error| {
-                            OpsError::Message(format!(
-                                "current chapter {} ({}) evidence unavailable: {error}",
-                                chapter.id.as_str(),
-                                chapter.project_id
-                            ))
-                        })?,
+                        .map_err(pm_to_ops)?,
                 );
             }
+        }
+    }
+
+    for adopted in super::chapter::adopt_legacy_projects(repo, store, wave, ctx, false).await? {
+        if let Some(project) = projects.iter_mut().find(|project| project.id == adopted.id) {
+            *project = adopted;
+        } else {
+            projects.push(adopted);
         }
     }
     for project in &mut projects {
@@ -2961,7 +2928,6 @@ mod tests {
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
-    use crate::pm::ProjectFlowPlan;
     use crate::work::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
@@ -3494,7 +3460,8 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flows: Some(ProjectFlowPlan::empty()),
+            flow: "feature".into(),
+            status: crate::pm::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-loo".to_string()],

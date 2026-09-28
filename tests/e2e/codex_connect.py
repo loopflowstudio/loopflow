@@ -5,11 +5,14 @@
 """Exercise a real Codex engine with credential-free local Responses and private Homes."""
 
 import argparse
+import hashlib
 import json
 import os
 import queue
 import shlex
+import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -110,7 +113,7 @@ class Client:
         except ConnectionClosed:
             pass
 
-    def call(self, method: str, params: dict) -> dict:
+    def call(self, method: str, params: dict, *, rejected: bool = False) -> dict:
         self.next_id += 1
         ident = self.next_id
         self.socket.send(json.dumps({"id": ident, "method": method, "params": params}))
@@ -118,6 +121,9 @@ class Client:
         while time.monotonic() < deadline:
             event = self.pending.get(timeout=max(0.1, deadline - time.monotonic()))
             if event.get("id") == ident:
+                if rejected:
+                    assert event.get("error", {}).get("code") == -32001, event
+                    return event["error"]
                 assert "error" not in event, event
                 return event["result"]
         raise TimeoutError(method)
@@ -147,16 +153,20 @@ class Client:
 
 
 def main() -> None:
+    signal.signal(signal.SIGTERM, _terminate)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--codex", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--lf", type=Path)
     parser.add_argument("--lf-home", type=Path)
     parser.add_argument("--control", type=Path)
+    parser.add_argument("--retained-client", action="store_true")
+    parser.add_argument("--gated", action="store_true")
+    parser.add_argument("--launch", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     server = Responses()
-    if args.lf:
+    if args.lf and not args.launch:
         assert args.lf_home and args.control, (
             "lf ownership proof needs a private Home and control directory"
         )
@@ -190,6 +200,22 @@ enabled = false
             # Never inherit credentials, execution authority, or the real provider Home.
             env = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
             env.update(HOME=str(root), CODEX_HOME=str(home), LF_HOME=str(root / "lf"))
+            if args.launch:
+                assert args.lf
+                # Pin bytes: another contributor may build the source path while
+                # this private-Home proof is running.
+                binary = root / "bin" / "lf"
+                binary.parent.mkdir()
+                shutil.copy2(args.lf, binary)
+                env.update(
+                    LF_BIN=str(binary),
+                    LF_DB_PATH=str(root / "lf" / "loopflow.db"),
+                    PATH=f"{binary.parent}:{args.codex.parent}:{env['PATH']}",
+                )
+                results["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+                server.command = shlex.join([str(binary), "session", "list", "--all", "--json"])
+                _launch_contract(binary, work, env, results)
+                return
             endpoint = root / "engine.sock"
             with (args.output / "engine.log").open("w") as log:
                 engine = subprocess.Popen(
@@ -234,6 +260,13 @@ enabled = false
                         )
                     thread = first.call("thread/start", params)["thread"]["id"]
                     first.wait_turn(first.start_turn(thread))
+                    if args.gated:
+                        assert args.control
+                        results.update(
+                            _gated(args.control, endpoint, first, thread, params, server, clients)
+                        )
+                        results["engine_alive"] = engine.poll() is None
+                        return
                     if args.control:
                         _boundary(args.control, "before", "handoff")
                     active_turn = first.start_turn(thread, "Run the held fixture command.")
@@ -242,7 +275,8 @@ enabled = false
                     clients.append(second)
                     resumed = second.call("thread/resume", {"threadId": thread})
                     assert resumed["thread"]["status"]["type"] == "active", resumed
-                    first.close()
+                    if not args.retained_client:
+                        first.close()
                     server.release.set()
                     second.wait_turn(active_turn)
                     if args.control:
@@ -259,6 +293,11 @@ enabled = false
                     sibling = second.call("thread/start", params)["thread"]["id"]
                     second.wait_turn(second.start_turn(sibling))
                     second.wait_turn(second.start_turn(thread))
+                    if args.retained_client:
+                        # Native attachment does not transfer Loopflow authority.
+                        # Keep this counterexample separate from the gated proof.
+                        first.wait_turn(first.start_turn(thread))
+                        results["old_native_client_can_still_start_turns"] = True
                     outputs = [
                         item["output"]
                         for request in server.requests
@@ -271,11 +310,13 @@ enabled = false
                         "conversation-b generation=7",
                         "conversation-a generation=1",
                     ]
+                    if args.retained_client:
+                        expected.append("conversation-a generation=1")
                     assert len(outputs) == len(expected), outputs
                     for output, caller in zip(outputs, expected):
                         assert f"caller={caller}" in output, output
                     results["command_provenance"] = expected
-                    results["active_turn_survived_disconnect"] = active_turn
+                    results["active_turn_survived_attachment"] = active_turn
                     results.update(thread=thread, engine_alive=engine.poll() is None)
                 finally:
                     for client in clients:
@@ -294,7 +335,120 @@ enabled = false
         (args.output / "requests.json").write_text(json.dumps(server.requests, indent=2))
         (args.output / "events.json").write_text(json.dumps([c.events for c in clients], indent=2))
         (args.output / "results.json").write_text(json.dumps(results, indent=2))
-    print(json.dumps(results))
+        print(json.dumps(results), flush=True)
+
+
+def _terminate(signum: int, _frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+def _command(args: list[str], work: Path, env: dict[str, str], timeout: int):
+    with subprocess.Popen(
+        args, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ) as child:
+        try:
+            stdout, stderr = child.communicate(timeout=timeout)
+        except BaseException:
+            # Give this exact fixture CLI a chance to stop its provider before
+            # force-stopping it. Never signal a process found by name or ancestry.
+            child.terminate()
+            try:
+                child.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate()
+            raise
+        return subprocess.CompletedProcess(args, child.returncode, stdout, stderr)
+
+
+def _launch_contract(binary: Path, work: Path, env: dict[str, str], results: dict) -> None:
+    subprocess.run(["git", "init", "--quiet", str(work)], env=env, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--allow-empty",
+            "--quiet",
+            "-m",
+            "fixture",
+        ],
+        cwd=work,
+        env=env,
+        check=True,
+    )
+    launch = _command(
+        [str(binary), "-b", "--model", "codex", ":", "Run the fixture command."],
+        work=work,
+        env=env,
+        timeout=60,
+    )
+    results["launch_exit"] = launch.returncode
+    assert launch.returncode == 0, launch.stderr
+    default = _command(
+        [str(binary), "session", "list", "--all", "--json"],
+        work=work,
+        env=env,
+        timeout=30,
+    )
+    assert default.returncode == 0, default.stderr
+    assert json.loads(default.stdout) == [], (
+        "headless work must not enter the default interactive view"
+    )
+    headless = _command(
+        [str(binary), "session", "list", "--all", "--interactive", "false", "--json"],
+        work=work,
+        env=env,
+        timeout=30,
+    )
+    results["headless_list_exit"] = headless.returncode
+    assert headless.returncode == 0, headless.stderr
+    sessions = json.loads(headless.stdout)
+    assert len(sessions) == 1, sessions
+    assert sessions[0]["interactive"] is False, sessions
+    results["session_id"] = sessions[0]["id"]
+    with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        children = database.execute(
+            "SELECT id,parent_exec_id,caller_session_id,caller_provider_generation "
+            "FROM execs WHERE via_agent=1"
+        ).fetchall()
+        assert len(children) == 1, children
+        child, parent, session, generation = children[0]
+        assert session == results["session_id"] and generation == 1, children
+        creator = database.execute(
+            "SELECT provider_exec_id,driver_exec_id FROM sessions WHERE id=?", (session,)
+        ).fetchone()
+        assert creator == (parent, None), (creator, children)
+        assert database.execute("SELECT outcome FROM execs WHERE id=?", (parent,)).fetchone() == (
+            "succeeded",
+        )
+        results["nested_agent_exec"] = {
+            "child": child,
+            "parent": parent,
+            "session": session,
+            "provider_generation": generation,
+        }
+    rename = _command(
+        [
+            str(binary),
+            "session",
+            "rename",
+            sessions[0]["id"],
+            "Retained headless conversation",
+            "--json",
+        ],
+        work=work,
+        env=env,
+        timeout=30,
+    )
+    assert rename.returncode == 0, rename.stderr
+    renamed = json.loads(rename.stdout)
+    assert renamed["id"] == sessions[0]["id"]
+    assert renamed["title"] == "Retained headless conversation"
+    results["renamed_without_replacing_conversation"] = True
 
 
 def _boundary(control: Path, completed: str, next_action: str) -> None:
@@ -304,6 +458,93 @@ def _boundary(control: Path, completed: str, next_action: str) -> None:
         if time.monotonic() > deadline:
             raise TimeoutError(next_action)
         time.sleep(0.05)
+
+
+def _gated(
+    control: Path,
+    endpoint: Path,
+    fixture: Client,
+    thread: str,
+    params: dict,
+    server: Responses,
+    clients: list[Client],
+) -> dict:
+    sibling_params = json.loads(json.dumps(params))
+    sibling_params["config"]["shell_environment_policy.set"].pop("LF_AGENT_CALLER", None)
+    sibling = fixture.call("thread/start", sibling_params)["thread"]["id"]
+    active = fixture.start_turn(thread, "Run the held fixture command.")
+    sibling_turn = fixture.start_turn(sibling, "Run the held sibling command.")
+    assert server.held.wait(10)
+    (control / "engine.json").write_text(json.dumps({"endpoint": str(endpoint), "thread": thread}))
+    _boundary(control, "native", "sockets")
+    old = Client(control / "old.sock")
+    observer = Client(control / "observer.sock")
+    clients.extend([old, observer])
+    for client in (old, observer):
+        assert (
+            client.call("thread/resume", {"threadId": thread})["thread"]["status"]["type"]
+            == "active"
+        )
+    observer.call("turn/interrupt", {"threadId": thread, "turnId": active}, rejected=True)
+    old.call(
+        "turn/steer",
+        {
+            "threadId": thread,
+            "expectedTurnId": active,
+            "input": [{"type": "text", "text": "Continue original driver.", "text_elements": []}],
+        },
+    )
+    _boundary(control, "attached", "transfer")
+    current = Client(control / "current.sock")
+    clients.append(current)
+    current.call("thread/resume", {"threadId": thread})
+    writes = [
+        (
+            "turn/start",
+            {"threadId": thread, "input": [{"type": "text", "text": "stale", "text_elements": []}]},
+        ),
+        (
+            "turn/steer",
+            {
+                "threadId": thread,
+                "expectedTurnId": active,
+                "input": [{"type": "text", "text": "stale", "text_elements": []}],
+            },
+        ),
+        ("turn/interrupt", {"threadId": thread, "turnId": active}),
+        ("thread/name/set", {"threadId": thread, "name": "stale name"}),
+    ]
+    for method, arguments in writes:
+        old.call(method, arguments, rejected=True)
+    current.call(
+        "turn/steer",
+        {
+            "threadId": thread,
+            "expectedTurnId": active,
+            "input": [{"type": "text", "text": "Continue the fixture.", "text_elements": []}],
+        },
+    )
+    # The transferred conversation and its sibling have not been interrupted.
+    for target in (thread, sibling):
+        assert (
+            fixture.call("thread/read", {"threadId": target})["thread"]["status"]["type"]
+            == "active"
+        )
+    server.release.set()
+    current.wait_turn(active)
+    fixture.wait_turn(sibling_turn)
+    old.wait_turn(active)
+    current.wait_turn(current.start_turn(thread))
+    assert not any("stale" in json.dumps(request) for request in server.requests)
+    return {
+        "old_client_wrote_before_transfer": True,
+        "rejected_old_client_writes": [method for method, _ in writes],
+        "passive_client_rejected": True,
+        "old_client_still_receives_completion": True,
+        "current_driver_continued": True,
+        "active_turn": active,
+        "sibling_turn": sibling_turn,
+    }
 
 
 if __name__ == "__main__":

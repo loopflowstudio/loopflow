@@ -1,7 +1,5 @@
 //! PRD-43: one repository Team, stable Project ownership, and a fail-closed migration.
 
-#[path = "support/chapter.rs"]
-mod chapter;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -59,7 +57,7 @@ fn snapshot(
             "name": project_name,
             "summary": "Fixture project",
             "metric_targets": [],
-            "flows": { "recommended": null },
+            "flow": "feature", "status": "started",
             "krs": [{ "text": "Ownership is deterministic", "holds": true }],
             "initiative_ids": [initiative],
             "team_ids": ["team-loo"]
@@ -86,17 +84,6 @@ fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, 
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
-    let snapshot: serde_json::Value = serde_json::from_str(&payload).unwrap();
-    if let Some(project_id) = snapshot["projects"][0]["id"].as_str() {
-        if store.chapter(registered.id(), None).unwrap().is_none() {
-            store
-                .save_chapter(
-                    &chapter::current_chapter(registered.id(), wave, project_id),
-                    true,
-                )
-                .unwrap();
-        }
-    }
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: registered.id().clone(),

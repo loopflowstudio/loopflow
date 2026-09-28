@@ -829,6 +829,7 @@ fn begin_run_capture(
         crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec,
             run_id,
+            None,
             &built.context,
             |run_id| {
                 let path = crate::store::observability_database_path()
@@ -852,6 +853,7 @@ fn begin_run_capture(
         crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec,
             run_id,
+            None,
             &built.context,
             |run_id| {
                 crate::ops::human_session::publish_run_binding(run_id, &provider, model.as_deref())
@@ -865,33 +867,27 @@ fn begin_run_capture(
             spec,
             &built.context,
         )
-    } else if surface == "tui" && spec.flow == crate::run_record::RunFlowMembership::Independent {
+    } else {
+        let interactive = surface != "headless";
+        let launch = (!interactive).then(|| {
+            crate::run_record::RunLaunchRequest::from_prepared(prepared_config, &built.capabilities)
+        });
         let run = launch_run(built, &spec);
         crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec,
             run.id.clone(),
-            &built.context,
-            |_| reserve_interactive_session(run),
-        )
-    } else if surface == "headless" {
-        let launch = crate::run_record::RunLaunchRequest::from_prepared(
-            prepared_config,
-            &built.capabilities,
-        );
-        crate::run_record::CaptureHandle::begin_with_launch_and_context(
-            spec,
             launch,
             &built.context,
+            |_| reserve_conversation(run, interactive),
         )
-    } else {
-        crate::run_record::CaptureHandle::begin_with_context(spec, &built.context)
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
+    capture.claim_conversation_driver()?;
     capture.record_input("initial", &built.context.task.text);
     Ok(capture)
 }
 
-/// The first Run of an interactive Session.
+/// The first captured contribution to an independent agent conversation.
 fn launch_run(built: &PromptBuild, spec: &crate::run_record::RunSpec) -> crate::session::Run {
     let work = built.work.as_ref();
     crate::session::Run {
@@ -915,14 +911,17 @@ fn launch_run(built: &PromptBuild, spec: &crate::run_record::RunSpec) -> crate::
     }
 }
 
-/// An interactive launch is a conversation: its Session and first Run are
-/// stored together before the provider starts. Bookkeeping never refuses the
-/// launch: when the store cannot take the rows, the Session is not recorded.
-fn reserve_interactive_session(run: crate::session::Run) -> crate::store::StoreResult<()> {
+/// Admission stores the conversation before any provider starts.
+fn reserve_conversation(
+    run: crate::session::Run,
+    interactive: bool,
+) -> crate::store::StoreResult<()> {
     let session = crate::session::Session {
         id: run.session_id.clone().unwrap_or_default(),
         current_run_id: run.id.clone(),
-        kind: crate::session::SessionKind::Interactive,
+        kind: crate::session::SessionKind::Conversation,
+        interactive,
+        repo: None,
         title: run
             .skill
             .clone()
@@ -933,13 +932,9 @@ fn reserve_interactive_session(run: crate::session::Run) -> crate::store::StoreR
         completed_at: None,
         created_at: run.created_at,
     };
-    let stored = crate::store::database_path_from_env()
-        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-        .and_then(|path| crate::store::sqlite::SqliteStore::new(&path))
-        .and_then(|store| store.create_session(session, run, None));
-    if let Err(error) = stored {
-        eprintln!("warning: this Session is not recorded and will not list: {error}");
-    }
+    let path = crate::store::observability_database_path()
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+    crate::store::sqlite::SqliteStore::new(&path)?.create_session(session, run, None)?;
     Ok(())
 }
 
@@ -1780,6 +1775,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.commit("bound basis");
         let cli = Cli {
             interactive: true,
+            repo: None,
             ..Cli::default()
         };
 

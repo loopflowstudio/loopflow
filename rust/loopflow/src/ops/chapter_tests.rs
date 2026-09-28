@@ -1,41 +1,241 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use super::{empty_plan, read_chapter, rotate, NewChapterRequest};
+use super::{
+    classify_task, plan_rotation, rotate, successor_id, TaskDisposition, TaskStartEvidence,
+};
+use crate::durable::FlowInvocation;
+use crate::engine::invocation::QueuedInvocation;
+use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
 use crate::id::WaveId;
 use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
 use crate::planning::{LinearIssueId, TaskPlan};
-use crate::pm::ChapterMetricTarget;
-use crate::pm::{PmKr, ProjectContent};
+use crate::pm::{PmItem, PmProject, ProjectStatus};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
-use crate::work::chapter::{ChapterId, ChapterPhase, TaskDisposition};
 use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
-use crate::work::wave::metrics::{
-    load_metric_contract, MetricContractIssueDto, MetricEvidenceDto, MetricObservation,
-    MetricTarget,
-};
 use crate::work::wave::Wave;
-use time::{Duration, OffsetDateTime};
+use crate::work::wave::WaveLocator;
+use time::OffsetDateTime;
+
+fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
+    PmProject {
+        id: id.into(),
+        name: name.into(),
+        slug: name.into(),
+        summary: String::new(),
+        flow: "feature".into(),
+        status,
+        metric_targets: Vec::new(),
+        krs: Vec::new(),
+        initiative_ids: vec!["initiative".into()],
+        team_ids: vec!["team-1".into()],
+    }
+}
+
+#[test]
+fn partial_status_flips_converge_without_selecting_a_newest_name() {
+    use ProjectStatus::{Completed, Planned, Started};
+    for (old_status, next_status) in [
+        (Started, Planned),
+        (Started, Started),
+        (Completed, Planned),
+        (Completed, Started),
+    ] {
+        let inventory = vec![
+            (
+                "a".into(),
+                "initiative-a".into(),
+                vec![project("a-old", "2026-09", Started)],
+            ),
+            (
+                "b".into(),
+                "initiative-b".into(),
+                vec![
+                    project("b-old", "2026-09", old_status),
+                    project("b-new", "2026-10", next_status),
+                ],
+            ),
+        ];
+        let plan = plan_rotation("2026-10", &inventory).unwrap();
+        assert_eq!(plan.waves[1].successor_id, "b-new");
+        assert_eq!(plan.waves[0].predecessor.as_ref().unwrap().id, "a-old");
+    }
+    let conflicted = vec![
+        (
+            "a".into(),
+            "initiative-a".into(),
+            vec![project("one", "2026-09", Started)],
+        ),
+        (
+            "b".into(),
+            "initiative-b".into(),
+            vec![project("two", "2027-01", Started)],
+        ),
+    ];
+    assert!(plan_rotation("2026-10", &conflicted)
+        .unwrap_err()
+        .to_string()
+        .contains("competing"));
+}
+
+#[test]
+fn a_new_wave_can_join_with_an_empty_project_or_its_authored_plan() {
+    let empty = vec![("new".into(), "initiative".into(), Vec::new())];
+    let plan = plan_rotation("next", &empty).unwrap();
+    assert!(plan.waves[0].predecessor.is_none());
+    let planned = vec![(
+        "new".into(),
+        "initiative".into(),
+        vec![project("authored", "next", ProjectStatus::Planned)],
+    )];
+    assert_eq!(
+        plan_rotation("next", &planned).unwrap().waves[0].successor_id,
+        "authored"
+    );
+}
+
+#[test]
+fn zero_current_without_shared_predecessor_evidence_stays_unresolved() {
+    let inventory = vec![(
+        "a".into(),
+        "initiative-a".into(),
+        vec![
+            project("historic", "2026-01", ProjectStatus::Completed),
+            project("next", "2026-10", ProjectStatus::Planned),
+        ],
+    )];
+    assert!(plan_rotation("2026-10", &inventory)
+        .unwrap_err()
+        .to_string()
+        .contains("unambiguous"));
+}
+
+#[test]
+fn lost_creation_has_one_identity_on_every_home() {
+    let parsed = uuid::Uuid::parse_str(&successor_id("initiative", "next")).unwrap();
+    assert_eq!(parsed.get_version_num(), 4);
+    assert_eq!(parsed.get_variant(), uuid::Variant::RFC4122);
+    assert_eq!(
+        successor_id("initiative-a", "next"),
+        successor_id("initiative-a", "next")
+    );
+    assert_ne!(
+        successor_id("initiative-a", "next"),
+        successor_id("initiative-b", "next")
+    );
+    let duplicate = vec![(
+        "a".into(),
+        "initiative-a".into(),
+        vec![
+            project("one", "next", ProjectStatus::Planned),
+            project("two", "next", ProjectStatus::Started),
+        ],
+    )];
+    assert!(plan_rotation("next", &duplicate).is_err());
+}
+
+fn task(state: &str) -> PmItem {
+    PmItem {
+        id: "issue".into(),
+        identifier: "FIX-1".into(),
+        url: None,
+        name: "Work".into(),
+        description: String::new(),
+        rank: 0,
+        completed: state == "completed",
+        state: Some(state.into()),
+        project_id: "old".into(),
+        project: "old".into(),
+        team_id: "team-1".into(),
+        assignee: None,
+    }
+}
+
+#[test]
+fn only_proven_untouched_backlog_expires() {
+    let mut evidence = TaskStartEvidence {
+        begun: false,
+        worker_claimed: false,
+        authored: Some(false),
+        published: false,
+        abandoned: false,
+        completed: false,
+    };
+    assert_eq!(
+        classify_task(&task("unstarted"), &evidence).0,
+        TaskDisposition::Abandon
+    );
+    for started in ["started", "completed"] {
+        assert_ne!(
+            classify_task(&task(started), &evidence).0,
+            TaskDisposition::Abandon
+        );
+    }
+    evidence.authored = None;
+    assert_eq!(
+        classify_task(&task("backlog"), &evidence).0,
+        TaskDisposition::Unresolved
+    );
+    evidence.begun = true;
+    assert_eq!(
+        classify_task(&task("backlog"), &evidence).0,
+        TaskDisposition::Move
+    );
+    evidence.worker_claimed = true;
+    assert_eq!(
+        classify_task(&task("canceled"), &evidence).0,
+        TaskDisposition::Unresolved
+    );
+}
+
+#[test]
+fn interrupted_retirement_finishes_without_reopening_local_work() {
+    let mut evidence = TaskStartEvidence {
+        begun: false,
+        worker_claimed: false,
+        authored: Some(false),
+        published: false,
+        abandoned: true,
+        completed: false,
+    };
+    assert_eq!(
+        classify_task(&task("unstarted"), &evidence).0,
+        TaskDisposition::Abandon
+    );
+    assert_eq!(
+        classify_task(&task("canceled"), &evidence).0,
+        TaskDisposition::Historical
+    );
+    evidence.worker_claimed = true;
+    assert_eq!(
+        classify_task(&task("unstarted"), &evidence).0,
+        TaskDisposition::Unresolved
+    );
+    evidence.worker_claimed = false;
+    evidence.authored = Some(true);
+    assert_eq!(
+        classify_task(&task("unstarted"), &evidence).0,
+        TaskDisposition::Unresolved
+    );
+    evidence.abandoned = false;
+    evidence.completed = true;
+    assert_eq!(
+        classify_task(&task("unstarted"), &evidence).0,
+        TaskDisposition::Unresolved
+    );
+}
 
 #[derive(Default)]
 struct Provider {
     projects: BTreeMap<String, Value>,
     issues: BTreeMap<String, Value>,
-    archived: BTreeSet<String>,
     mutations: usize,
-    lose_create: bool,
-    lose_move: bool,
-    lose_archive: bool,
-    fail_delete: BTreeSet<String>,
-    lose_delete: BTreeSet<String>,
-    unlisted: BTreeSet<String>,
-    unreadable: BTreeSet<String>,
-    fail_snapshot: bool,
-    stale_lists: bool,
+    interrupt_after: Option<usize>,
+    unavailable: bool,
 }
 
 fn page(nodes: Vec<Value>) -> Value {
@@ -50,114 +250,306 @@ async fn graphql(
     let vars = &request["variables"];
     let id = vars["id"].as_str().unwrap_or("");
     let mut provider = state.lock().await;
-    if query.starts_with("mutation") {
-        provider.mutations += 1;
+    if provider.unavailable {
+        return Json(json!({"errors":[{"message":"fixture interrupted connection"}]}));
     }
     let data = if query.contains("query ListTeams") {
-        json!({"teams": page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
+        json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ListInitiativeProjects") {
-        if provider.fail_snapshot {
-            return Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
-        }
-        json!({"initiative": {"projects": page(provider.projects.iter().filter(|(id, _)| !provider.archived.contains(*id) && !provider.unlisted.contains(*id)).map(|(_, project)| project.clone()).collect())}})
+        let initiative = &vars["initiativeId"];
+        json!({"initiative":{"projects":page(provider.projects.values().filter(|project|
+            project["archivedAt"].is_null() && project["initiatives"]["nodes"].as_array().unwrap().iter().any(|node| &node["id"] == initiative)).cloned().collect())}})
     } else if query.contains("query ListProjectIssues") {
-        json!({"project": {"issues": page(provider.issues.iter().filter(|(id, issue)| !provider.unlisted.contains(*id) && ((issue["trashed"] != true && issue["project"]["id"] == vars["projectId"]) || (provider.stale_lists && issue["trashed"] == true))).map(|(_, issue)| issue.clone()).collect())}})
+        json!({"project":{"issues":page(provider.issues.values().filter(|issue| issue["project"]["id"] == vars["projectId"]).cloned().collect())}})
+    } else if query.contains("query FindProject") {
+        json!({"projects":page(provider.projects.get(id).cloned().into_iter().collect())})
     } else if query.contains("query ProjectOwnership") {
-        if provider.unreadable.contains(id) {
-            return Json(json!({"data":{"project":null}}));
-        }
-        json!({"project": provider.projects.get(id)})
-    } else if query.contains("query IssueDeletion") {
-        if provider.unreadable.contains(id) {
-            return Json(json!({"data":{"issue":null}}));
-        }
-        json!({"issue": provider.issues.get(id)})
+        json!({"project":provider.projects.get(id)})
     } else if query.contains("query IssueOwnership") {
-        if provider.unreadable.contains(id) {
-            return Json(json!({"data":{"issue":null}}));
-        }
         let mut issue = provider.issues[id].clone();
-        if issue["trashed"] == true {
-            return Json(json!({"errors":[{"message":"trashed issue ownership unavailable"}]}));
-        }
-        let project = issue["project"]["id"].as_str().unwrap();
-        issue["project"] = provider.projects[project].clone();
-        json!({"issue": issue})
+        issue["project"] = provider.projects[issue["project"]["id"].as_str().unwrap()].clone();
+        json!({"issue":issue})
     } else if query.contains("query IssueTeam") {
-        json!({"issue": {"team": {"id":"team-1"}}})
-    } else if query.contains("query UnstartedWorkflowStates") {
-        json!({"workflowStates":{"nodes":[{"id":"unstarted","position":1.0}]}})
-    } else if query.contains("mutation CreateIssue") {
-        let project_id = vars["projectId"].as_str().unwrap();
-        let name = provider.projects[project_id]["name"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let mut item = issue("filed", "unstarted", project_id, &name);
-        item["description"] = vars["description"].clone();
-        provider.issues.insert("filed".into(), item);
-        json!({"issueCreate":{"issue":{"id":"filed"}}})
+        json!({"issue":{"team":{"id":"team-1"}}})
+    } else if query.contains("query ProjectStatuses") {
+        json!({"projectStatuses":page(["planned", "started", "completed"].into_iter().map(|kind|
+            json!({"id":kind,"type":kind,"teamId":null,"position":0.0})).collect())})
+    } else if query.contains("query CanceledWorkflowStates") {
+        json!({"workflowStates":{"nodes":[{"id":"cancel-state","position":0.0}]}})
     } else if query.contains("mutation CreateProject") {
-        let project = json!({"id": id, "name":vars["name"], "description":vars["description"], "content":vars["content"], "initiatives":{"nodes":[]}, "teams":{"nodes":[{"id":"team-1"}]}});
-        assert!(
-            provider.projects.insert(id.into(), project).is_none(),
-            "retry duplicated successor"
-        );
-        if provider.lose_create {
-            provider.lose_create = false;
-            return Json(json!({"errors":[{"message":"lost create response"}]}));
+        let supplied = uuid::Uuid::parse_str(id).unwrap();
+        if supplied.get_version_num() != 4 || supplied.get_variant() != uuid::Variant::RFC4122 {
+            return Json(json!({"errors":[{"message":"supplied Project id must be UUID v4"}]}));
         }
+        provider.projects.insert(id.into(), json!({"id":id,"name":vars["name"],"description":"", "archivedAt":null,
+            "content":vars["content"],"status":{"type":vars["statusId"]},"teams":{"nodes":[{"id":"team-1"}]},"initiatives":{"nodes":[]}}));
         json!({"projectCreate":{"project":{"id":id}}})
     } else if query.contains("mutation AttachProject") {
-        let project = vars["projectId"].as_str().unwrap();
-        provider.projects.get_mut(project).unwrap()["initiatives"] =
-            json!({"nodes":[{"id":"initiative-1"}]});
+        provider
+            .projects
+            .get_mut(vars["projectId"].as_str().unwrap())
+            .unwrap()["initiatives"]["nodes"] = json!([{"id":vars["initiativeId"]}]);
         json!({"initiativeToProjectCreate":{"initiativeToProject":{"id":"link"}}})
+    } else if query.contains("mutation AdoptProject") {
+        let project = provider.projects.get_mut(id).unwrap();
+        project["content"] = vars["input"]["content"].clone();
+        if let Some(status) = vars["input"].get("statusId") {
+            project["status"]["type"] = status.clone();
+        }
+        json!({"projectUpdate":{"success":true}})
+    } else if query.contains("mutation SetProjectStatus") {
+        provider.projects.get_mut(id).unwrap()["status"]["type"] = vars["statusId"].clone();
+        json!({"projectUpdate":{"success":true}})
     } else if query.contains("mutation MoveIssueToProject") {
-        let project = provider.projects[vars["projectId"].as_str().unwrap()].clone();
-        provider.issues.get_mut(id).unwrap()["project"] =
-            json!({"id":project["id"],"name":project["name"]});
-        if provider.lose_move {
-            provider.lose_move = false;
-            return Json(json!({"errors":[{"message":"lost move response"}]}));
-        }
+        let target = vars["projectId"].as_str().unwrap();
+        let name = provider.projects[target]["name"].clone();
+        provider.issues.get_mut(id).unwrap()["project"] = json!({"id":target,"name":name});
         json!({"issueUpdate":{"issue":{"id":id}}})
-    } else if query.contains("mutation DeleteIssue") {
-        if provider.fail_delete.remove(id) {
-            return Json(json!({"errors":[{"message":"deletion unavailable"}]}));
-        }
-        provider.issues.get_mut(id).unwrap()["trashed"] = json!(true);
-        if provider.lose_delete.remove(id) {
-            provider.unreadable.insert(id.into());
-            return Json(json!({"errors":[{"message":"lost delete response"}]}));
-        }
-        json!({"issueDelete":{"success":true}})
-    } else if query.contains("mutation ArchiveProject") {
-        provider.archived.insert(id.into());
-        provider.projects.get_mut(id).unwrap()["archivedAt"] = json!("2026-09-24T12:00:00Z");
-        if provider.lose_archive {
-            provider.lose_archive = false;
-            return Json(json!({"errors":[{"message":"lost archive response"}]}));
-        }
-        json!({"projectArchive":{"success":true}})
+    } else if query.contains("mutation SetIssueState") {
+        provider.issues.get_mut(id).unwrap()["state"]["type"] = json!("canceled");
+        json!({"issueUpdate":{"issue":{"id":id}}})
     } else {
         panic!("unexpected fixture operation: {query}")
     };
+    if query.starts_with("mutation") {
+        provider.mutations += 1;
+        if provider.interrupt_after == Some(provider.mutations) {
+            provider.unavailable = true;
+            return Json(json!({"errors":[{"message":"fixture lost mutation response"}]}));
+        }
+    }
     Json(json!({"data":data}))
 }
 
-fn issue(id: &str, state: &str, project: &str, project_name: &str) -> Value {
-    json!({"id":id,"identifier":format!("FIX-{id}"),"url":null,"title":id,"description":"",
-        "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,"state":{"type":state},
-        "project":{"id":project,"name":project_name},"team":{"id":"team-1"}})
+fn provider_fixture() -> Provider {
+    let mut provider = Provider::default();
+    for (wave, title) in [("a", "A"), ("b", "B")] {
+        let id = format!("{wave}-old");
+        let name = format!("{title} — previous");
+        provider.projects.insert(id.clone(), json!({"id":id,"name":name,"description":"", "archivedAt":null,
+            "content":"flow: feature\n\n## KRs\n- [ ] Retain proof", "status":{"type":"started"},
+            "teams":{"nodes":[{"id":"team-1"}]},"initiatives":{"nodes":[{"id":format!("initiative-{wave}")} ]}}));
+        for (suffix, state) in [
+            ("started", "started"),
+            ("backlog", "unstarted"),
+            ("done", "completed"),
+        ] {
+            let issue = format!("{wave}-{suffix}");
+            provider.issues.insert(issue.clone(), json!({"id":issue,"identifier":format!("FIX-{issue}"),"url":null,
+                "title":issue,"description":"","prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
+                "state":{"type":state},"project":{"id":id,"name":name},"team":{"id":"team-1"}}));
+        }
+    }
+    provider
 }
 
-#[tokio::test]
-async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
-    let directory = tempfile::tempdir().unwrap();
-    let repo = directory.path().join("repo");
+async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+    let store = Arc::new(
+        open_ephemeral_store(&StorageConfig::sqlite(path.into()))
+            .await
+            .unwrap(),
+    );
+    for name in ["a", "b"] {
+        store
+            .create_wave(&Wave::new(
+                WaveId::new(),
+                name.into(),
+                repo.display().to_string(),
+            ))
+            .await
+            .unwrap();
+    }
+    store
+        .upsert_provider_token(&ProviderToken {
+            provider: "linear".into(),
+            access_token: "fixture".into(),
+            refresh_token: None,
+            oauth_client_id: None,
+            expires_at: None,
+            login: None,
+            updated_at: 1,
+            credential_type: CredentialType::ApiKey,
+        })
+        .await
+        .unwrap();
+    PmTestContext {
+        path: path.into(),
+        store,
+        graphql_url: url.into(),
+    }
+}
+
+async fn local_task(
+    context: &PmTestContext,
+    repo: &std::path::Path,
+    wave_name: &str,
+    issue: &str,
+    worktree: &std::path::Path,
+    base: &str,
+) -> (Task, TaskPr) {
+    let wave = context
+        .store
+        .get_wave_at(&WaveLocator::discover(repo, wave_name).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let parent = super::record_project(
+        &context.store,
+        &wave,
+        &project(
+            &format!("{wave_name}-old"),
+            "previous",
+            ProjectStatus::Started,
+        ),
+    )
+    .await
+    .unwrap();
+    let now = OffsetDateTime::now_utc();
+    let task = Task {
+        id: TaskId::new(),
+        plan: TaskPlan {
+            id: LinearIssueId::new(issue).unwrap(),
+            identifier: format!("FIX-{issue}"),
+            title: "Retain execution".into(),
+            description: String::new(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
+        },
+        pm_writeback: PmWritebackState::Current,
+        wave_id: wave.id().clone(),
+        project_id: parent.id,
+        worktree: worktree.into(),
+        workspace_slug: issue.into(),
+        agent: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+        observation: Observation::default(),
+    };
+    let pr = TaskPr {
+        id: TaskPrId::new(),
+        task_id: task.id.clone(),
+        sequence: 1,
+        slug: "retain".into(),
+        branch: issue.into(),
+        base_commit: base.into(),
+        parent_pr_id: None,
+        publication: None,
+        merge_commit: None,
+        abandoned_at: None,
+        ci_observation: None,
+        github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
+        created_at: now,
+        updated_at: now,
+    };
+    context.store.create_task(&task, &pr).await.unwrap();
+    (task, pr)
+}
+
+async fn local_started_task(
+    context: &PmTestContext,
+    repo: &std::path::Path,
+) -> (Task, TaskPr, FlowInvocation) {
+    let (task, _) = local_task(
+        context,
+        repo,
+        "a",
+        "a-started",
+        repo,
+        "0000000000000000000000000000000000000000",
+    )
+    .await;
+    let now = OffsetDateTime::now_utc();
+    let flow = context
+        .store
+        .start_task_flow(
+            &task.id,
+            FlowInvocation {
+                invocation: QueuedInvocation::new(
+                    "captured",
+                    vec![ConcreteStep::Skill(ConcreteSkill {
+                        skill: Skill::named("implement"),
+                        flow_parents: Vec::new(),
+                        policy: OccurrencePolicy {
+                            id: Some("implement".into()),
+                            human: false,
+                            repeat: None,
+                        },
+                    })],
+                )
+                .unwrap(),
+                cursor: ExecutionCursor::default(),
+                version: 0,
+                task_id: Some(task.id.clone()),
+                wave_id: Some(task.wave_id.clone()),
+                cwd: repo.into(),
+                message: Some("original input".into()),
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                finished: false,
+                updated_at: now,
+            },
+        )
+        .await
+        .unwrap();
+    let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);
+    (task, pr, flow)
+}
+
+fn clean_checkout(checkout: &std::path::Path) -> String {
+    std::fs::create_dir_all(checkout).unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "initial",
+        ],
+    ] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(checkout)
+            .status()
+            .unwrap()
+            .success());
+    }
+    crate::engine::git::rev_parse(checkout, "HEAD").unwrap()
+}
+
+async fn local_backlog_tasks(context: &PmTestContext, repo: &std::path::Path) {
+    for wave in ["a", "b"] {
+        let checkout = context.path.with_extension(format!("{wave}-checkout"));
+        let base = clean_checkout(&checkout);
+        local_task(
+            context,
+            repo,
+            wave,
+            &format!("{wave}-backlog"),
+            &checkout,
+            &base,
+        )
+        .await;
+    }
+}
+
+fn fixture_repo(root: &std::path::Path) -> std::path::PathBuf {
+    let repo = root.join("repo");
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
-    // Disposable local history; neither the installed Home nor real Linear is used.
     for args in [
         vec!["init", "-q"],
         vec![
@@ -179,680 +571,499 @@ async fn chapter_rotation_previews_retries_and_preserves_dated_history() {
         "pm:\n  provider: linear\n  linear_team: team-1\n",
     )
     .unwrap();
-    std::fs::create_dir_all(repo.join("wave/product")).unwrap();
-    std::fs::write(
-        repo.join("wave/product/GOAL.md"),
-        "---\npm:\n  linear_initiative: initiative-1\n---\nDurable mandate.\n",
-    )
-    .unwrap();
-    let repo = std::fs::canonicalize(repo).unwrap();
-    let metric_path = repo.join("wave/product/metrics/throughput.md");
-    std::fs::create_dir_all(metric_path.parent().unwrap()).unwrap();
-    std::fs::write(&metric_path, "---\nschema: 1\nid: throughput\nstage: installed\ninstrument: fixture\nunit: ratio\nwindow: 7d\nfreshness: 6h\n---\n# Throughput\nDelivered work.\n").unwrap();
-    let goal = std::fs::read_to_string(repo.join("wave/product/GOAL.md")).unwrap();
-    let task_checkout = directory.path().join("task");
-    std::fs::create_dir(&task_checkout).unwrap();
-    for args in [
-        vec!["init", "-q"],
-        vec![
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.com",
-            "commit",
-            "--allow-empty",
-            "-qm",
-            "Prepared baseline",
-        ],
-    ] {
-        assert!(std::process::Command::new("git")
-            .args(args)
-            .current_dir(&task_checkout)
-            .status()
-            .unwrap()
-            .success());
+    for wave in ["a", "b"] {
+        std::fs::create_dir_all(repo.join(format!("wave/{wave}"))).unwrap();
+        std::fs::write(
+            repo.join(format!("wave/{wave}/GOAL.md")),
+            format!("---\npm:\n  linear_initiative: initiative-{wave}\n---\nDurable mandate.\n"),
+        )
+        .unwrap();
     }
-    let database = directory.path().join("registry.db");
-    let store = Arc::new(
-        open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap(),
-    );
-    let wave = Wave::new(WaveId::new(), "product".into(), repo.display().to_string());
-    store.create_wave(&wave).await.unwrap();
-    store
-        .apply_migration_for_test("project_metric_observations")
-        .unwrap();
-    let contract = load_metric_contract(&metric_path, wave.id().as_str()).unwrap();
-    let measured_at = OffsetDateTime::now_utc();
-    store
-        .register_metric_instrument(&contract.identity, &contract.instrument, measured_at)
-        .await
-        .unwrap();
-    let mut observation = MetricObservation::Observed {
-        identity: contract.identity.clone(),
-        contract_revision: contract.contract_revision.clone(),
-        instrument: contract.instrument.clone(),
-        observation_id: String::new(),
-        value: 0.95,
-        source_window_start: measured_at - Duration::days(7),
-        source_window_end: measured_at,
-        complete: true,
-    };
-    let id = observation.expected_observation_id().unwrap();
-    if let MetricObservation::Observed { observation_id, .. } = &mut observation {
-        *observation_id = id;
-    }
-    store
-        .accept_metric_observation(&contract, observation.clone(), measured_at)
-        .await
-        .unwrap();
-    store
-        .upsert_provider_token(&ProviderToken {
-            provider: "linear".into(),
-            access_token: "fixture".into(),
-            refresh_token: None,
-            oauth_client_id: None,
-            expires_at: None,
-            login: None,
-            updated_at: 1,
-            credential_type: CredentialType::ApiKey,
-        })
-        .await
-        .unwrap();
-    let provider = Arc::new(Mutex::new(Provider::default()));
+    std::fs::canonicalize(repo).unwrap()
+}
+
+async fn serve_fixture(provider: Arc<Mutex<Provider>>) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new().route("/", post(graphql)).with_state(provider);
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (url, server)
+}
+
+#[tokio::test]
+async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let app = Router::new()
         .route("/", post(graphql))
         .with_state(provider.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let context = PmTestContext {
-        path: database.clone(),
-        store: store.clone(),
-        graphql_url: url,
-    };
-    PM_TEST_CONTEXT
-        .scope(context, async {
-            let first = NewChapterRequest {
-                wave: Some("product".into()),
-                chapter: ChapterId::parse("one").unwrap(),
-                content: ProjectContent {
-                    metric_targets: vec![ChapterMetricTarget {
-                        metric_id: "throughput".into(),
-                        target: MetricTarget::AtLeast { value: 0.9 },
-                    }],
-                    krs: vec![PmKr {
-                        text: "First proof".into(),
-                        holds: false,
-                    }],
-                    ..empty_plan()
-                },
-            };
-            let preview = rotate(&repo, &first, true).await.unwrap();
-            assert_eq!(preview.phase, ChapterPhase::Preview);
-            assert_eq!(provider.lock().await.mutations, 0);
-            assert!(store.chapters(wave.id()).await.unwrap().is_empty());
-            provider.lock().await.lose_create = true;
-            let initial = rotate(&repo, &first, false).await.unwrap();
-            assert_eq!(initial.error, None);
-            assert_eq!(initial.phase, ChapterPhase::Complete);
-            assert_eq!(provider.lock().await.projects.len(), 1);
-            let (filed, ()) = crate::ops::pm::pm_create_task_idempotent(
+    // Six effects per Wave: create, attach, activate, move, cancel, complete.
+    for stop in 1..=12 {
+        for second_home in [false, true] {
+            *provider.lock().await = provider_fixture();
+            provider.lock().await.interrupt_after = Some(stop);
+            let first = context(
+                &directory
+                    .path()
+                    .join(format!("first-{stop}-{second_home}.db")),
                 &repo,
-                "product",
-                "Untouched work",
-                "",
-                "<!-- loopflow-task-start:chapter-fixture -->",
-                |_, _| async { Ok(()) },
+                &url,
             )
-            .await
-            .unwrap();
-            assert_eq!(
-                provider.lock().await.issues[&filed]["project"]["id"],
-                initial.project_id
-            );
-            let name = provider.lock().await.projects[&initial.project_id]["name"]
-                .as_str()
-                .unwrap()
-                .to_string();
+            .await;
+            local_backlog_tasks(&first, &repo).await;
+            let retained = if stop == 4 {
+                Some(local_started_task(&first, &repo).await)
+            } else {
+                None
+            };
+            let original = PmTestContext {
+                path: first.path.clone(),
+                store: first.store.clone(),
+                graphql_url: first.graphql_url.clone(),
+            };
+            PM_TEST_CONTEXT
+                .scope(
+                    PmTestContext {
+                        path: first.path.clone(),
+                        store: first.store.clone(),
+                        graphql_url: first.graphql_url.clone(),
+                    },
+                    async {
+                        let preview = rotate(&repo, "next", true).await.unwrap();
+                        assert_eq!(preview.waves.len(), 2);
+                        assert_eq!(provider.lock().await.mutations, 0);
+                        assert!(rotate(&repo, "next", false).await.is_err());
+                    },
+                )
+                .await;
             {
-                let mut provider = provider.lock().await;
-                provider.issues.insert(
-                    "active".into(),
-                    issue("active", "started", &initial.project_id, &name),
-                );
-                provider.issues.insert(
-                    "backlog".into(),
-                    issue("backlog", "unstarted", &initial.project_id, &name),
-                );
-                provider.issues.insert(
-                    "done".into(),
-                    issue("done", "completed", &initial.project_id, &name),
-                );
-                provider.issues.insert(
-                    "racing".into(),
-                    issue("racing", "unstarted", &initial.project_id, &name),
-                );
-                provider.lose_move = true;
-                provider.fail_delete.insert("backlog".into());
-                provider.lose_delete.insert("filed".into());
+                let mut state = provider.lock().await;
+                state.unavailable = false;
+                state.interrupt_after = None;
             }
-            let second = NewChapterRequest {
-                wave: Some("product".into()),
-                chapter: ChapterId::parse("two").unwrap(),
-                content: ProjectContent {
-                    metric_targets: vec![ChapterMetricTarget {
-                        metric_id: "throughput".into(),
-                        target: MetricTarget::AtLeast { value: 0.99 },
-                    }],
-                    ..empty_plan()
-                },
+            let resumed = if second_home {
+                context(
+                    &directory.path().join(format!("second-{stop}.db")),
+                    &repo,
+                    &url,
+                )
+                .await
+            } else {
+                first
             };
-            let project = store.get_project_by_project(&initial.project_id).await.unwrap().unwrap();
-            let now = OffsetDateTime::now_utc();
-            let backlog = Task {
-                id: TaskId::new(),
-                plan: TaskPlan {
-                    id: LinearIssueId::new("backlog").unwrap(),
-                    identifier: "FIX-backlog".into(),
-                    title: "Untouched backlog".into(),
-                    description: String::new(),
-                    pm_snapshot_synced_at: now.unix_timestamp(),
-                },
-                pm_writeback: PmWritebackState::Current,
-                wave_id: wave.id().clone(),
-                project_id: project.id,
-                worktree: task_checkout.clone(),
-                workspace_slug: "backlog".into(),
-                agent: None,
-                abandon_intent: None,
-                created_at: now,
-                updated_at: now,
-                observation: Observation::default(),
-            };
-            let pr = TaskPr {
-                id: TaskPrId::new(),
-                task_id: backlog.id.clone(),
-                sequence: 1,
-                slug: "backlog".into(),
-                branch: "backlog".into(),
-                base_commit: crate::engine::git::rev_parse(&task_checkout, "HEAD").unwrap(),
-                parent_pr_id: None,
-                publication: None,
-                merge_commit: None,
-                abandoned_at: None,
-                ci_observation: None,
-                github_observation: None,
-                linear_attachment_id: None,
-                linear_comment_id: None,
-                linear_link_error: None,
-                created_at: now,
-                updated_at: now,
-            };
-            store.create_task(&backlog, &pr).await.unwrap();
-            // The current binding survives omission of its whole provider Project.
-            provider.lock().await.unlisted.insert(initial.project_id.clone());
-            let original_content = provider.lock().await.projects[&initial.project_id]["content"].clone();
-            provider.lock().await.projects.get_mut(&initial.project_id).unwrap()["content"] =
-                json!(original_content.as_str().unwrap().replace("First proof", "Edited provider proof"));
-            let mutations = provider.lock().await.mutations;
-            let recovered = rotate(&repo, &second, true).await.unwrap();
-            assert_eq!(recovered.predecessors.len(), 1);
-            assert_eq!(recovered.predecessors[0].id, initial.project_id);
-            assert_eq!(recovered.predecessors[0].metric_targets, first.content.metric_targets);
-            assert_eq!(recovered.predecessors[0].krs[0].text, "Edited provider proof");
-            assert_eq!(recovered.predecessors[0].slug, "chapter-one");
-            assert!(recovered.tasks.iter().any(|task| task.task.id == "active"));
-            assert!(recovered.tasks.iter().any(|task| task.task.id == "backlog"));
-            assert_eq!(provider.lock().await.mutations, mutations);
-            provider.lock().await.unreadable.insert(initial.project_id.clone());
-            let unavailable = rotate(&repo, &second, true).await.unwrap_err();
-            assert!(unavailable.to_string().contains(&initial.project_id));
-            assert!(rotate(&repo, &second, false).await.is_err());
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), None).await.unwrap().unwrap().id, initial.id);
-            assert!(store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().is_none());
-            provider.lock().await.unreadable.clear();
-            provider.lock().await.projects.get_mut(&initial.project_id).unwrap()["content"] = original_content;
-            // Direct recovery keeps the same ownership rules as the portfolio list.
-            provider.lock().await.projects.get_mut(&initial.project_id).unwrap()["initiatives"] =
-                json!({"nodes":[{"id":"elsewhere"}]});
-            let conflict = rotate(&repo, &second, false).await.unwrap_err();
-            assert!(conflict.to_string().contains("elsewhere"));
-            assert_eq!(provider.lock().await.mutations, mutations);
-            provider.lock().await.projects.get_mut(&initial.project_id).unwrap()["initiatives"] =
-                json!({"nodes":[{"id":"initiative-1"}]});
-            // A provider list omission must not erase a prepared durable Task.
-            provider.lock().await.unlisted.insert("backlog".into());
-            let omitted = rotate(&repo, &second, true).await.unwrap();
-            assert!(omitted.tasks.iter().any(|task| task.task.id == "backlog"));
-            provider.lock().await.unreadable.insert("backlog".into());
-            let mutations = provider.lock().await.mutations;
-            assert!(rotate(&repo, &second, true).await.is_err());
-            assert!(rotate(&repo, &second, false).await.is_err());
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), None).await.unwrap().unwrap().id, initial.id);
-            provider.lock().await.unreadable.clear();
-            let mut invalid = second.clone();
-            invalid.content.metric_targets[0].metric_id = "missing".into();
-            let before = provider.lock().await.mutations;
-            assert!(rotate(&repo, &invalid, false).await.is_err());
-            assert_eq!(provider.lock().await.mutations, before);
-            let preview = rotate(&repo, &second, true).await.unwrap();
+            if second_home {
+                local_backlog_tasks(&resumed, &repo).await;
+            }
+            PM_TEST_CONTEXT
+                .scope(resumed, async {
+                    rotate(&repo, "next", false).await.unwrap();
+                    let mutations = provider.lock().await.mutations;
+                    rotate(&repo, "next", false).await.unwrap();
+                    assert_eq!(provider.lock().await.mutations, mutations);
+                })
+                .await;
+            if let Some((task, pr, flow)) = retained {
+                PM_TEST_CONTEXT
+                    .scope(original, async {
+                        rotate(&repo, "next", false).await.unwrap();
+                        let store = super::pm_store().await.unwrap();
+                        let moved = store.get_task(&task.id).await.unwrap().unwrap();
+                        assert_ne!(moved.project_id, task.project_id);
+                        assert_eq!(moved.id, task.id);
+                        assert_eq!(moved.worktree, task.worktree);
+                        assert_eq!(moved.plan, task.plan);
+                        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+                        assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+                    })
+                    .await;
+            }
+            let state = provider.lock().await;
+            assert_eq!(state.projects.len(), 4);
+            assert_eq!(state.issues.len(), 6);
+            for wave in ["a", "b"] {
+                let successor = successor_id(&format!("initiative-{wave}"), "next");
+                assert_eq!(state.projects[&successor]["status"]["type"], "started");
+                assert_eq!(
+                    state.projects[&format!("{wave}-old")]["status"]["type"],
+                    "completed"
+                );
+                assert_eq!(
+                    state.issues[&format!("{wave}-started")]["project"]["id"],
+                    successor
+                );
+                assert_eq!(
+                    state.issues[&format!("{wave}-backlog")]["state"]["type"],
+                    "canceled"
+                );
+                assert_eq!(
+                    state.issues[&format!("{wave}-done")]["project"]["id"],
+                    format!("{wave}-old")
+                );
+            }
+        }
+    }
+    // An authored successor keeps its identity, Flow and KR content.
+    *provider.lock().await = provider_fixture();
+    let content = "flow: custom\n\n## KRs\n- [ ] Authored next proof";
+    provider.lock().await.projects.insert(
+        "authored-next".into(),
+        json!({
+            "id":"authored-next", "name":"B — next", "description":"", "archivedAt":null,
+            "content":content, "status":{"type":"planned"},
+            "teams":{"nodes":[{"id":"team-1"}]}, "initiatives":{"nodes":[{"id":"initiative-b"}]}
+        }),
+    );
+    let authored = context(&directory.path().join("authored.db"), &repo, &url).await;
+    local_backlog_tasks(&authored, &repo).await;
+    PM_TEST_CONTEXT
+        .scope(authored, async {
+            provider.lock().await.issues.get_mut("a-backlog").unwrap()["state"]["type"] =
+                json!("unknown");
+            assert!(rotate(&repo, "next", false)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("unavailable"));
+            assert_eq!(provider.lock().await.mutations, 0);
+            provider.lock().await.issues.get_mut("a-backlog").unwrap()["state"]["type"] =
+                json!("unstarted");
+            let preview = rotate(&repo, "next", true).await.unwrap();
             assert_eq!(
                 preview
-                    .tasks
+                    .waves
                     .iter()
-                    .find(|t| t.task.id == "active")
+                    .find(|wave| wave.wave == "b")
                     .unwrap()
-                    .disposition,
-                TaskDisposition::Move
+                    .successor_id,
+                "authored-next"
+            );
+            rotate(&repo, "next", false).await.unwrap();
+        })
+        .await;
+    assert_eq!(
+        provider.lock().await.projects["authored-next"]["content"],
+        content
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_second_home_cannot_expire_backlog_with_unobserved_work() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    provider.lock().await.issues.get_mut("a-started").unwrap()["state"]["type"] =
+        json!("unstarted");
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let first = context(&directory.path().join("owner.db"), &repo, &url).await;
+    let checkout = directory.path().join("working-checkout");
+    let base = clean_checkout(&checkout);
+    let (work, _) = local_task(&first, &repo, "a", "a-started", &checkout, &base).await;
+    std::fs::write(
+        checkout.join("unfinished.txt"),
+        "work exists only on the owning Home",
+    )
+    .unwrap();
+    let second = context(&directory.path().join("observer.db"), &repo, &url).await;
+    PM_TEST_CONTEXT
+        .scope(first, async {
+            let plan = rotate(&repo, "next", true).await.unwrap();
+            let task = plan.waves[0]
+                .tasks
+                .iter()
+                .find(|task| task.task.id == "a-started")
+                .unwrap();
+            assert_eq!(task.disposition, TaskDisposition::Move);
+        })
+        .await;
+    PM_TEST_CONTEXT
+        .scope(second, async {
+            let plan = rotate(&repo, "next", true).await.unwrap();
+            let task = plan.waves[0]
+                .tasks
+                .iter()
+                .find(|task| task.task.id == "a-started")
+                .unwrap();
+            assert_eq!(task.disposition, TaskDisposition::Unresolved);
+            assert!(rotate(&repo, "next", false).await.is_err());
+            let store = super::pm_store().await.unwrap();
+            assert!(store.get_task(&work.id).await.unwrap().is_none());
+        })
+        .await;
+    let state = provider.lock().await;
+    assert_eq!(state.mutations, 0);
+    assert_eq!(state.issues["a-started"]["state"]["type"], "unstarted");
+    assert_eq!(state.issues["a-started"]["project"]["id"], "a-old");
+    server.abort();
+}
+
+#[tokio::test]
+async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    {
+        let mut state = provider.lock().await;
+        let mut current = state.projects["a-old"].clone();
+        current["id"] = json!("a-current");
+        current["name"] = json!("A — current");
+        state.projects.insert("a-current".into(), current);
+        state.projects.get_mut("a-old").unwrap()["archivedAt"] = json!("2026-09-01T00:00:00Z");
+    }
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = context(&directory.path().join("archive.db"), &repo, &url).await;
+    let (task, pr, flow) = local_started_task(&home, &repo).await;
+    PM_TEST_CONTEXT
+        .scope(home, async {
+            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let snapshot = super::refresh_pm_snapshot(&repo, "a", &ctx).await.unwrap();
+            assert_eq!(
+                super::select_current("a", &snapshot.projects).unwrap().id,
+                "a-current"
             );
             assert_eq!(
-                preview
-                    .tasks
+                snapshot
+                    .projects
                     .iter()
-                    .find(|t| t.task.id == "backlog")
+                    .find(|project| project.id == "a-old")
                     .unwrap()
-                    .disposition,
-                TaskDisposition::Abandon
+                    .status,
+                ProjectStatus::Completed
             );
-            provider.lock().await.issues.insert(
-                "uncertain".into(),
-                issue("uncertain", "unknown", &initial.project_id, &name),
-            );
-            let unresolved = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(unresolved.phase, ChapterPhase::Preparing);
-            assert!(unresolved.error.as_ref().unwrap().contains("uncertain"));
-            assert_eq!(provider.lock().await.projects.len(), 1);
-            assert!(unresolved.tasks.iter().any(|task| task.task.id == "backlog"));
-            // A preparing retry previews fresh membership without changing its receipt.
-            provider.lock().await.issues.insert(
-                "late".into(),
-                issue("late", "unstarted", &initial.project_id, &name),
-            );
-            let late_checkout = directory.path().join("late");
-            assert!(std::process::Command::new("git")
-                .args(["clone", "-q"])
-                .arg(&task_checkout)
-                .arg(&late_checkout)
-                .status().unwrap().success());
-            assert!(std::process::Command::new("git")
-                .args(["checkout", "-qb", "late"])
-                .current_dir(&late_checkout)
-                .status().unwrap().success());
-            let mut late = backlog.clone();
-            late.id = TaskId::new();
-            late.plan.id = LinearIssueId::new("late").unwrap();
-            late.plan.identifier = "FIX-late".into();
-            late.worktree = late_checkout.clone();
-            late.workspace_slug = "late".into();
-            let mut late_pr = pr.clone();
-            late_pr.id = TaskPrId::new();
-            late_pr.task_id = late.id.clone();
-            late_pr.slug = "late".into();
-            late_pr.branch = "late".into();
-            store.create_task(&late, &late_pr).await.unwrap();
-            let late = store.get_task(&late.id).await.unwrap().unwrap();
-            let late_prs = store.task_prs(&late.id).await.unwrap();
-            let original_content = provider.lock().await.projects[&initial.project_id]["content"].clone();
-            provider.lock().await.projects.get_mut(&initial.project_id).unwrap()["content"] =
-                json!(original_content.as_str().unwrap().replace("First proof", "Revised while preparing"));
-            let mutations = provider.lock().await.mutations;
-            let refreshed = rotate(&repo, &second, true).await.unwrap();
-            assert!(refreshed.tasks.iter().any(|task| task.task.id == "late" && task.disposition == TaskDisposition::Abandon));
-            assert_eq!(refreshed.predecessors[0].krs[0].text, "Revised while preparing");
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().unwrap(), unresolved);
-            provider.lock().await.unreadable.insert(initial.project_id.clone());
-            let mutations = provider.lock().await.mutations;
-            let unavailable = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(unavailable.phase, ChapterPhase::Preparing);
-            assert!(unavailable.error.as_ref().unwrap().contains(&initial.project_id));
-            assert_eq!(unavailable.predecessors, unresolved.predecessors);
-            assert_eq!(unavailable.tasks, unresolved.tasks);
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), None).await.unwrap().unwrap().id, initial.id);
-            provider.lock().await.unreadable.clear();
-            provider.lock().await.unreadable.insert("backlog".into());
-            let mutations = provider.lock().await.mutations;
-            assert!(rotate(&repo, &second, true).await.is_err());
-            let unavailable = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(unavailable.phase, ChapterPhase::Preparing);
-            assert!(unavailable.error.as_ref().unwrap().contains("FIX-backlog"));
-            assert_eq!(unavailable.predecessors, unresolved.predecessors);
-            assert_eq!(unavailable.tasks, unresolved.tasks);
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), None).await.unwrap().unwrap().id, initial.id);
-            provider.lock().await.unreadable.clear();
-            provider.lock().await.projects.get_mut(&initial.project_id).unwrap()["content"] = original_content;
-            provider.lock().await.unlisted.remove("backlog");
-            provider.lock().await.issues.get_mut("uncertain").unwrap()["state"] =
-                json!({"type":"canceled"});
-            // Work begun after preview must carry, never follow the stale retirement.
-            provider.lock().await.issues.get_mut("racing").unwrap()["state"] =
-                json!({"type":"started"});
-            // The first two applications lose responses after the remote side effect.
-            let partial = rotate(&repo, &second, false).await.unwrap();
-            assert!(partial.error.is_some());
-            // External reassignment is neither a lost move nor permission to cancel.
-            for id in ["active", "backlog"] {
-                let original = provider.lock().await.issues[id]["project"].clone();
+            assert!(snapshot
+                .items
+                .iter()
+                .any(|item| item.id == "a-started" && item.project_id == "a-old"));
+            let store = super::pm_store().await.unwrap();
+            assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+        })
+        .await;
+    assert_eq!(provider.lock().await.mutations, 0);
+    server.abort();
+}
+
+async fn legacy_home(path: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+    let home = context(path, repo, url).await;
+    local_started_task(&home, repo).await;
+    local_backlog_tasks(&home, repo).await;
+    let wave = home
+        .store
+        .get_wave_at(&WaveLocator::discover(repo, "a").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    for (id, name) in [("a-next", "next"), ("a-archived", "archive")] {
+        super::record_project(
+            &home.store,
+            &wave,
+            &project(id, name, ProjectStatus::Planned),
+        )
+        .await
+        .unwrap();
+    }
+    // These are the migration's retained receipt identities, not provider status.
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute("UPDATE projects SET legacy_current=CASE external_project_id WHEN 'a-old' THEN 1 ELSE 0 END WHERE wave_id=?1",
+        [wave.id().as_str()]).unwrap();
+    home
+}
+
+#[tokio::test]
+async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let original =
+        "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n";
+    for status in ["backlog", "planned"] {
+        for stop in 1..=3 {
+            for second_home in [false, true] {
                 {
                     let mut state = provider.lock().await;
-                    let mut outside = state.projects[&initial.project_id].clone();
-                    outside["id"] = json!("outside");
-                    outside["name"] = json!("Other work");
-                    state.projects.insert("outside".into(), outside);
-                    state.unlisted.insert("outside".into());
-                    state.issues.get_mut(id).unwrap()["project"] =
-                        json!({"id":"outside", "name":"Other work"});
+                    *state = provider_fixture();
+                    let old = state.projects.get_mut("a-old").unwrap();
+                    old["status"]["type"] = json!(status);
+                    old["content"] = json!(original);
+                    for (id, name, archived, flow) in [
+                        ("a-next", "next", false, "future-custom"),
+                        ("a-archived", "archive", true, "historical-custom"),
+                    ] {
+                        let mut project = state.projects["a-old"].clone();
+                        project["id"] = json!(id);
+                        project["name"] = json!(format!("A — {name}"));
+                        project["status"]["type"] =
+                            json!(if archived { "started" } else { "planned" });
+                        project["content"] = json!(original.replace("custom", flow));
+                        project["archivedAt"] = if archived {
+                            json!("2026-09-01T00:00:00Z")
+                        } else {
+                            Value::Null
+                        };
+                        state.projects.insert(id.into(), project);
+                    }
+                    state.interrupt_after = Some(stop);
                 }
-                let mutations = provider.lock().await.mutations;
-                let preview = rotate(&repo, &second, true).await.unwrap();
-                assert_eq!(preview.tasks.iter().find(|task| task.task.id == id).unwrap().disposition, TaskDisposition::Unresolved);
-                let conflict = rotate(&repo, &second, false).await.unwrap();
-                assert_eq!(conflict.phase, ChapterPhase::Transferring);
-                assert!(conflict.error.as_ref().unwrap().contains("membership"));
-                assert_eq!(conflict.project_id, partial.project_id);
-                let task = conflict.tasks.iter().find(|task| task.task.id == id).unwrap();
-                assert_eq!(task.disposition, TaskDisposition::Unresolved);
-                assert!(!task.applied);
-                assert!(task.at_boundary);
-                assert_eq!(task.task.project_id, initial.project_id);
-                assert!(!store.chapter_task_evidence(&backlog.id).await.unwrap().abandoned);
-                assert_eq!(store.get_task(&backlog.id).await.unwrap().unwrap().project_id, backlog.project_id);
-                let mut state = provider.lock().await;
-                assert_eq!(state.mutations, mutations);
-                assert_eq!(state.issues[id]["project"]["id"], "outside");
-                assert!(!state.archived.contains(&initial.project_id));
-                state.issues.get_mut(id).unwrap()["project"] = original;
-                state.projects.remove("outside");
-                state.unlisted.remove("outside");
+                let first = legacy_home(
+                    &directory
+                        .path()
+                        .join(format!("legacy-{status}-{stop}-{second_home}.db")),
+                    &repo,
+                    &url,
+                )
+                .await;
+                PM_TEST_CONTEXT
+                    .scope(
+                        PmTestContext {
+                            path: first.path.clone(),
+                            store: first.store.clone(),
+                            graphql_url: first.graphql_url.clone(),
+                        },
+                        async {
+                            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+                            let plans = super::checked_projects(&repo, &ctx, "a").await.unwrap();
+                            let current = super::select_current("a", &plans).unwrap();
+                            assert_eq!((&*current.id, &*current.flow), ("a-old", "custom"));
+                            assert_eq!(
+                                plans.iter().find(|p| p.id == "a-next").unwrap().status,
+                                ProjectStatus::Planned
+                            );
+                            assert_eq!(provider.lock().await.mutations, 0);
+                            assert!(super::adopt_legacy_projects(
+                                &repo,
+                                &first.store,
+                                "a",
+                                &ctx,
+                                true
+                            )
+                            .await
+                            .is_err());
+                        },
+                    )
+                    .await;
+                {
+                    let mut state = provider.lock().await;
+                    state.unavailable = false;
+                    state.interrupt_after = None;
+                }
+                let resumed = if second_home {
+                    legacy_home(
+                        &directory.path().join(format!("resume-{status}-{stop}.db")),
+                        &repo,
+                        &url,
+                    )
+                    .await
+                } else {
+                    first
+                };
+                PM_TEST_CONTEXT
+                    .scope(resumed, async {
+                        let store = super::pm_store().await.unwrap();
+                        let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
+                        let prs = store.task_prs(&task.id).await.unwrap();
+                        let flow = store.task_flow(&task.id).await.unwrap();
+                        let ctx = super::resolve_context(&repo, "a").await.unwrap();
+                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
+                            .await
+                            .unwrap();
+                        assert!(store
+                            .projects_pending_adoption(&task.wave_id)
+                            .await
+                            .unwrap()
+                            .is_empty());
+                        let mutations = provider.lock().await.mutations;
+                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
+                            .await
+                            .unwrap();
+                        assert_eq!(provider.lock().await.mutations, mutations);
+                        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+                        assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
+                        assert_eq!(store.task_flow(&task.id).await.unwrap(), flow);
+                        {
+                            let state = provider.lock().await;
+                            assert_eq!(state.projects.len(), 4);
+                            assert_eq!(state.issues.len(), 6);
+                            assert_eq!(
+                                state.projects["a-old"]["content"],
+                                original.replace("recommended:", "flow:")
+                            );
+                            assert_eq!(state.projects["a-old"]["status"]["type"], "started");
+                            assert_eq!(state.projects["a-next"]["status"]["type"], "planned");
+                            assert_eq!(state.issues["a-started"]["project"]["id"], "a-old");
+                        }
+                        rotate(&repo, "next", false).await.unwrap();
+                        let moved = store.get_task(&task.id).await.unwrap().unwrap();
+                        assert_ne!(moved.project_id, task.project_id);
+                        assert_eq!(moved.worktree, task.worktree);
+                        assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
+                        assert_eq!(store.task_flow(&task.id).await.unwrap(), flow);
+                    })
+                    .await;
             }
-            let instrument_file = std::fs::read_to_string(&metric_path).unwrap();
-            std::fs::write(&metric_path, "instrument changed during transfer").unwrap();
-            let again = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(again.project_id, partial.project_id);
-            assert!(again.error.is_some());
-            assert!(store.chapter_task_evidence(&backlog.id).await.unwrap().abandoned);
-            let mutations = provider.lock().await.mutations;
-            let preview = rotate(&repo, &second, true).await.unwrap();
-            assert_eq!(preview.tasks.iter().find(|task| task.task.id == "backlog").unwrap().disposition, TaskDisposition::Abandon);
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().unwrap(), again);
-            provider.lock().await.issues.get_mut("backlog").unwrap()["state"] =
-                json!({"type":"started"});
-            let mutations = provider.lock().await.mutations;
-            let conflict = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(conflict.phase, ChapterPhase::Transferring);
-            assert!(conflict.error.as_ref().unwrap().contains("start evidence"));
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(conflict.tasks.iter().find(|task| task.task.id == "backlog").unwrap().disposition, TaskDisposition::Unresolved);
-            // Completion after a refused deletion must remain historical.
-            provider.lock().await.issues.get_mut("backlog").unwrap()["state"] =
-                json!({"type":"completed"});
-            let unconfirmed = rotate(&repo, &second, false).await.unwrap();
-            assert!(unconfirmed.error.as_ref().unwrap().contains("lost delete response"));
-            assert!(unconfirmed.error.as_ref().unwrap().contains("absence does not confirm deletion"));
-            assert!(unconfirmed.error.as_ref().unwrap().contains("lf wave new-chapter --wave product --chapter two"));
-            assert!(!unconfirmed.tasks.iter().find(|task| task.task.id == "filed").unwrap().applied);
-            assert_eq!(provider.lock().await.issues["backlog"]["state"]["type"], "completed");
-            assert_eq!(provider.lock().await.issues["filed"]["trashed"], true);
-            // A restarted operation cannot turn list absence into confirmation.
-            let unavailable = rotate(&repo, &second, false).await.unwrap();
-            assert!(unavailable.error.as_ref().unwrap().contains("absence does not confirm deletion"));
-            assert!(!unavailable.tasks.iter().find(|task| task.task.id == "filed").unwrap().applied);
-            assert!(!store.deleted_task_issues(wave.id()).await.unwrap().contains("filed"));
-            provider.lock().await.unreadable.remove("filed");
-            let mutations = provider.lock().await.mutations;
-            let preview = rotate(&repo, &second, true).await.unwrap();
-            assert_eq!(preview.tasks.iter().find(|task| task.task.id == "filed").unwrap().disposition, TaskDisposition::Abandon);
-            assert_eq!(preview.tasks.iter().find(|task| task.task.id == "backlog").unwrap().disposition, TaskDisposition::Historical);
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().unwrap(), unavailable);
-            // Provider success followed by a failed local receipt must keep the
-            // original registered Task/PR and reconcile without live ownership.
-            let connection = rusqlite::Connection::open(&database).unwrap();
-            connection.execute_batch("CREATE TRIGGER fail_deletion_receipt
-                BEFORE UPDATE OF receipt ON wave_chapters
-                WHEN NEW.chapter_id='two' AND EXISTS (
-                    SELECT 1 FROM json_each(NEW.receipt, '$.tasks')
-                    WHERE json_extract(value, '$.task.id')='late'
-                      AND json_extract(value, '$.applied')=1)
-                BEGIN SELECT RAISE(ABORT, 'fixture deletion receipt failure'); END;")
+        }
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    {
+        let mut state = provider.lock().await;
+        state.projects.get_mut("a-old").unwrap()["status"]["type"] = json!("backlog");
+        state.projects.get_mut("a-old").unwrap()["content"] =
+            json!("## Flows\nrecommended: custom");
+    }
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = context(&directory.path().join("unrecorded.db"), &repo, &url).await;
+    local_started_task(&home, &repo).await;
+    rusqlite::Connection::open(&home.path)
+        .unwrap()
+        .execute(
+            "UPDATE projects SET legacy_current=-1 WHERE external_project_id='a-old'",
+            [],
+        )
+        .unwrap();
+    PM_TEST_CONTEXT
+        .scope(home, async {
+            let store = super::pm_store().await.unwrap();
+            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let projects = super::adopt_legacy_projects(&repo, &store, "a", &ctx, false)
+                .await
                 .unwrap();
-            let failure = rotate(&repo, &second, false).await.unwrap();
-            let error = failure.error.as_ref().unwrap();
-            assert!(error.contains("fixture deletion receipt failure"));
-            assert!(!failure.tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
-            assert!(error.contains("lf wave new-chapter --wave product --chapter two"));
-            assert!(!store.deleted_task_issues(wave.id()).await.unwrap().contains("late"));
-            assert!(store.list_tasks(Some(wave.id())).await.unwrap().iter().any(|task| task.id == late.id));
-            assert_eq!(provider.lock().await.issues["late"]["trashed"], true);
-            assert!(store.chapter_task_evidence(&late.id).await.unwrap().abandoned);
-            assert_eq!(store.get_task(&late.id).await.unwrap().unwrap(), late);
-            assert_eq!(store.task_prs(&late.id).await.unwrap(), late_prs);
-            assert!(late_checkout.exists());
-            assert!(!store.chapter(wave.id(), Some(&second.chapter)).await.unwrap().unwrap()
-                .tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
-            connection.execute_batch("DROP TRIGGER fail_deletion_receipt").unwrap();
-            // Missing local evidence cannot settle an unapplied deletion receipt.
-            let unavailable_checkout = directory.path().join("late-unavailable");
-            std::fs::rename(&late_checkout, &unavailable_checkout).unwrap();
-            let mutations = provider.lock().await.mutations;
-            let unavailable = rotate(&repo, &second, false).await.unwrap();
-            assert!(unavailable.error.as_ref().is_some_and(|error| error.contains("evidence")),
-                "missing checkout must remain unresolved: phase={:?}, error={:?}", unavailable.phase, unavailable.error);
-            assert!(!unavailable.tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
-            assert_eq!(provider.lock().await.mutations, mutations);
-            std::fs::rename(&unavailable_checkout, &late_checkout).unwrap();
-            let authored = late_checkout.join("late-work.txt");
-            std::fs::write(&authored, "Work appeared after retirement").unwrap();
-            let mutations = provider.lock().await.mutations;
-            let conflict = rotate(&repo, &second, false).await.unwrap();
-            assert!(conflict.error.as_ref().unwrap().contains("start evidence"));
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert!(!conflict.tasks.iter().find(|task| task.task.id == "late").unwrap().applied);
-            assert!(authored.exists());
-            std::fs::remove_file(authored).unwrap();
-            provider.lock().await.lose_archive = true;
-            let archived = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(archived.phase, ChapterPhase::Transferring);
-            assert!(archived.error.as_ref().unwrap().contains("lost archive response"));
-            assert!(provider.lock().await.archived.contains(&initial.project_id));
+            assert_eq!(projects[0].status, ProjectStatus::Started);
+            assert_eq!(projects[0].flow, "custom");
             {
                 let mut state = provider.lock().await;
-                state.unreadable.insert("late".into());
-                state.fail_snapshot = true;
+                let mut future = state.projects["a-old"].clone();
+                future["id"] = json!("a-future");
+                future["name"] = json!("A — future");
+                future["status"]["type"] = json!("planned");
+                future["content"] = json!("flow: future-custom");
+                state.projects.insert("a-future".into(), future);
             }
-            let mutations = provider.lock().await.mutations;
-            let stale = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(stale.phase, ChapterPhase::Transferring);
-            assert!(stale.error.as_ref().unwrap().contains("snapshot unavailable"));
-            assert!(stale.tasks.iter().all(|task| task.applied));
-            let removed = store.deleted_task_issues(wave.id()).await.unwrap();
-            assert!(removed.contains("late"));
-            assert!(removed.contains("filed"));
-            assert!(!removed.contains("backlog"));
-            assert!(!removed.contains("done"));
-            assert!(!store.list_tasks(Some(wave.id())).await.unwrap().iter().any(|task| task.id == late.id));
-            // Last-good planning must not restore removed issues during an outage.
-            let cached: crate::pm::PmSnapshot = serde_json::from_str(
-                &store.pm_snapshot(wave.id()).await.unwrap().unwrap().payload).unwrap();
-            assert!(!cached.items.iter().any(|item| removed.contains(&item.id)));
-
-            assert_eq!(provider.lock().await.mutations, mutations);
-            provider.lock().await.fail_snapshot = false;
-            let complete = rotate(&repo, &second, false).await.unwrap();
-            assert_eq!(provider.lock().await.mutations, mutations);
-            assert_eq!(
-                complete.phase,
-                ChapterPhase::Complete,
-                "{:?}",
-                complete.error
-            );
-            assert!(complete.tasks.iter().all(|task| task.applied));
-            assert_eq!(store.get_task(&late.id).await.unwrap().unwrap(), late);
-            assert_eq!(store.task_prs(&late.id).await.unwrap(), late_prs);
-            std::fs::write(&metric_path, instrument_file).unwrap();
-            let mutations = provider.lock().await.mutations;
-            assert_eq!(rotate(&repo, &second, false).await.unwrap(), complete);
-            assert_eq!(provider.lock().await.mutations, mutations);
-            let state = provider.lock().await;
-            assert_eq!(state.projects.len(), 2);
-            assert!(state.archived.contains(&initial.project_id));
-            assert_eq!(state.issues["active"]["project"]["id"], complete.project_id);
-            assert_eq!(state.issues["backlog"]["state"]["type"], "completed");
-            assert_eq!(state.issues["filed"]["trashed"], true);
-            assert_eq!(state.issues["filed"]["state"]["type"], "unstarted");
-            assert_eq!(state.issues["late"]["trashed"], true);
-            assert_eq!(state.issues["late"]["state"]["type"], "unstarted");
-            assert_eq!(complete.tasks.iter().find(|task| task.task.id == "backlog").unwrap().disposition, TaskDisposition::Historical);
-            assert_eq!(state.issues["done"]["project"]["id"], initial.project_id);
-            assert_eq!(state.issues["racing"]["project"]["id"], complete.project_id);
-            drop(state);
-            provider.lock().await.issues.get_mut("active").unwrap()["state"] =
-                json!({"type":"completed"});
-            let ctx = crate::ops::pm::resolve_context(&repo, "product")
+            assert!(super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("ambiguous"));
+            assert_eq!(provider.lock().await.mutations, 0);
+            provider.lock().await.projects.get_mut("a-future").unwrap()["status"]["type"] =
+                json!("started");
+            super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
                 .await
                 .unwrap();
-            provider.lock().await.stale_lists = true;
-            let refreshed = crate::ops::pm::refresh_pm_snapshot(&repo, "product", &ctx)
-                .await
-                .unwrap();
-            assert!(!refreshed.items.iter().any(|item| item.id == "late" || item.id == "filed"));
-            provider.lock().await.stale_lists = false;
-            // A delayed refresh can publish the old payload after deletion.
-            let current_snapshot = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-            let stale_snapshot = crate::store::PmSnapshotRow {
-                wave_id: wave.id().clone(), provider: "linear".into(),
-                initiative: "initiative-1".into(), synced_at: 1,
-                payload: serde_json::to_string(&crate::pm::PmSnapshot {
-                    projects: complete.predecessors.clone(),
-                    items: complete.tasks.iter().map(|task| task.task.clone()).collect(),
-                }).unwrap(),
-            };
-            store.put_pm_snapshot(stale_snapshot).await.unwrap();
-            let reopened = open_ephemeral_store(&StorageConfig::sqlite(database.clone())).await.unwrap();
-            let visible: crate::pm::PmSnapshot = serde_json::from_str(
-                &reopened.pm_snapshot(wave.id()).await.unwrap().unwrap().payload).unwrap();
-            assert!(!visible.items.iter().any(|item| item.id == "late" || item.id == "filed"));
-            assert!(visible.items.iter().any(|item| item.id == "done"));
-            assert!(visible.items.iter().any(|item| item.id == "backlog"));
-            assert!(!reopened.list_tasks(None).await.unwrap().iter().any(|task| task.id == late.id));
-            assert_eq!(reopened.get_task(&late.id).await.unwrap().unwrap(), late);
-            assert_eq!(reopened.task_prs(&late.id).await.unwrap(), late_prs);
-            assert!(reopened.chapter_task_evidence(&late.id).await.unwrap().abandoned);
-            let mut resurrected = backlog.clone();
-            resurrected.id = TaskId::new();
-            resurrected.project_id = reopened.get_project_by_project(&complete.project_id).await.unwrap().unwrap().id;
-            resurrected.plan.id = LinearIssueId::new("filed").unwrap();
-            resurrected.plan.identifier = "FIX-filed".into();
-            let mut resurrected_pr = pr.clone();
-            resurrected_pr.id = TaskPrId::new();
-            resurrected_pr.task_id = resurrected.id.clone();
-            resurrected_pr.branch = "resurrected".into();
-            let refusal = reopened.create_task(&resurrected, &resurrected_pr).await.unwrap_err();
-            assert!(refusal.to_string().contains("was deleted"));
-            assert!(reopened.get_task_by_issue("filed").await.unwrap().is_none());
-            store.put_pm_snapshot(current_snapshot).await.unwrap();
-            let historical = read_chapter(&store, &wave, Some(&initial.id))
-                .await
-                .unwrap();
-            assert_eq!(historical.content, first.content);
-            assert!(historical.closed_at.is_some());
-            let retired = historical.tasks.iter().find(|task| task.task.id == "backlog").unwrap();
-            assert!(!retired.task.completed);
-            assert_eq!(retired.task.state.as_deref(), Some("unstarted"));
-            assert!(
-                !historical
-                    .tasks
-                    .iter()
-                    .find(|task| task.task.id == "active")
-                    .unwrap()
-                    .task
-                    .completed
-            );
-            let current = read_chapter(&store, &wave, None).await.unwrap();
-            assert_eq!(current.content, second.content);
-            assert!(matches!(
-                historical.metrics.metrics[0].evidence,
-                MetricEvidenceDto::Met { value: 0.95, .. }
-            ));
-            assert!(matches!(
-                current.metrics.metrics[0].evidence,
-                MetricEvidenceDto::Missed { value: 0.95, .. }
-            ));
             assert_eq!(
-                historical.metrics.metrics[0].contract_revision,
-                current.metrics.metrics[0].contract_revision
-            );
-            assert_eq!(
-                historical.metrics.metrics[0].identity,
-                current.metrics.metrics[0].identity
-            );
-            assert!(historical.metrics_evaluated_at <= current.metrics_evaluated_at);
-            assert_eq!(current.tasks.len(), 2);
-            assert!(
-                current
-                    .tasks
-                    .iter()
-                    .find(|task| task.task.id == "active")
-                    .unwrap()
-                    .task
-                    .completed
-            );
-            let third = NewChapterRequest {
-                wave: Some("product".into()),
-                chapter: ChapterId::parse("three").unwrap(),
-                content: empty_plan(),
-            };
-            // Historical durable Tasks are outside the next boundary's membership.
-            provider.lock().await.unreadable.insert("backlog".into());
-            provider.lock().await.unreadable.insert(initial.project_id.clone());
-            let instrument_file = std::fs::read_to_string(&metric_path).unwrap();
-            std::fs::remove_file(&metric_path).unwrap();
-            let last = rotate(&repo, &third, false).await.unwrap();
-            std::fs::write(&metric_path, instrument_file).unwrap();
-            assert_eq!(last.phase, ChapterPhase::Complete, "{:?}", last.error);
-            let untargeted = read_chapter(&store, &wave, None).await.unwrap();
-            assert_eq!(untargeted.metrics.metrics[0].target, None);
-            assert!(matches!(
-                untargeted.metrics.metrics[0].evidence,
-                MetricEvidenceDto::Untargeted { value: 0.95, .. }
-            ));
-            assert_eq!(untargeted.metrics.metrics[0].identity, contract.identity);
-            assert_eq!(
-                untargeted.metrics.metrics[0].contract_revision,
-                contract.contract_revision
-            );
-            assert_eq!(untargeted.tasks[0].task.id, "racing");
-            assert_eq!(
-                provider.lock().await.issues["racing"]["project"]["id"],
-                last.project_id
-            );
-            let old = read_chapter(&store, &wave, Some(&second.chapter))
-                .await
-                .unwrap();
-            assert_eq!(old.content, second.content);
-            assert!(old.metrics.metrics.is_empty());
-            assert!(matches!(&old.metrics.contract_issues[..],
-                [MetricContractIssueDto::UnresolvedTarget { metric_id, .. }] if metric_id == "throughput"));
-            // Later instrument changes cannot rewrite the closed chapter's dated verdict.
-            std::fs::write(&metric_path, "broken contract after the boundary").unwrap();
-            let unchanged = read_chapter(&store, &wave, Some(&first.chapter))
-                .await
-                .unwrap();
-            assert_eq!(unchanged.metrics, historical.metrics);
-            assert_eq!(
-                unchanged.metrics_evaluated_at,
-                historical.metrics_evaluated_at
-            );
-            assert_eq!(
-                std::fs::read_to_string(repo.join("wave/product/GOAL.md")).unwrap(),
-                goal
+                provider.lock().await.projects["a-old"]["status"]["type"],
+                "backlog"
             );
         })
         .await;

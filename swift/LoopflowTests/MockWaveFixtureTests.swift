@@ -38,7 +38,7 @@ struct MockWaveFixtureTests {
         let workMap = detail.workMap
 
         #expect(workMap.objective == "Make releases boring.")
-        let chapter = try #require(workMap.chapter)
+        let chapter = try #require(workMap.currentProject)
         let tasks = workMap.tasks.items
         #expect(chapter.krs.count == 1)
         #expect(tasks.filter { !$0.task.completed }.count == 2)

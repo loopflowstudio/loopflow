@@ -677,65 +677,84 @@ For an older boundary without a Run, `lf session open <id> --json` prepares it
 without starting a provider. Listing fails with that recovery command until the
 boundary is prepared; it never allocates a Run itself.
 
-`--stack-on` places a new Task worktree on another Task's published PR. Its PR
-targets that parent branch automatically, then collapses onto `main` after the
-parent merges. The two Tasks keep separate identities, worktrees, and workers.
+```sh
+lf task prepare DES-124 --stack-on DES-123
+# In DES-124's existing checkout:
+lf rebase --plan
+lf rebase
+```
+
+`--stack-on` places a new Task worktree on another Task's published PR. For an
+already-prepared root Task, it selects that parent while preserving the checkout,
+branch, recorded fork commit, published PR and execution history. Selection does
+not rebase Git or retarget GitHub; `lf rebase` integrates the parent, and the next
+`lf pr publish` updates the existing PR's base. Same-parent retries keep the
+original parent PR identity even after its Task opens another PR. Stop an active
+Task worker through the existing Task recovery controls before changing its
+parent; cancel pending delivery first. Changing an existing parent is a separate
+reparenting decision and is refused here. After the parent merges, `lf rebase`
+collapses the child onto `main`. The Tasks keep separate identities and worktrees.
 Tmux remains process containment, not product identity or advancement authority.
 
 ## Sessions
 
-```bash
-# Start in a checkout without a registered Task.
-lf --interactive : "Review the change"
-lf session rename <session-id> "Parser review"
-lf session bind <session-id> --task INF-123 --json  # permanent
-lf runs --task INF-123 --json
-```
-
-Session has its own stable ID, a history of Runs, and a current Run. A Run
-belongs to at most one Session; headless Runs need none. Interactive
-conversations, Flow reviews and Asks use the same Session record. Title,
-title provenance, readiness and completion stay on Session; Task, Wave,
-provider and membership come from its current Run. Replacing that Run keeps
-the Session ID and name, and preserves earlier Runs in its history.
-
-Explicit `--task`, `--wave` or `--as` selects ancestry at launch. Without an
-explicit selector, a registered Task checkout supplies the Task. Otherwise the
-Run can remain unbound. This changes ancestry only; a companion terminal does
-not inherit its neighboring Session's Flow membership.
-
-Bind assigns a Task once to the Session's Runs that have none, and the Task's
-Wave with it. A Session that already has a Task is refused with that Task's
-name: a Task is never changed or cleared, and there is no unbind. A Session in
-another Wave is refused, and so is a Flow review, whose Runs keep their Flow's
-Work. Binding to a completed Task or a landed PR works without reopening Work.
-The first Run to name a Task starts it, by launch or by bind; `started_at` is
-that moment and never changes. `lf runs --task` lists every Run that names the
-Task, bound or launched; usage and history never move between Tasks.
-
-Rename keeps the Session ID, provider, terminal, draft and Flow membership.
-A human name survives generated suggestions. Bind keeps the same properties
-and the name. Orphan sessions have no Task, including Wave-only conversations;
-absence from the visible Task plan does not turn a bound Session into an orphan.
+The execution cutover is implementing this lifecycle; public connect, headless
+filters and AgentSession history are not yet complete in the current source.
 
 ```bash
-lf session import --dry-run   # what an older Home's files would store
-lf session import             # store them; run once per Home
+lf -b implement
+lf session list --interactive false --task INF-123 --json
+lf session connect SESSION
+lf session connect SESSION --restart
+lf session rename SESSION "Migration review"
+lf session bind SESSION --task INF-123
+lf session ready "Ready for review"
+lf session complete SESSION
 ```
 
-A Home that ran a release older than the Session tables kept its
-conversations in files: interactive Run records, Asks under `human-sessions/`,
-saved Flow reviews in `flows/<id>/position.json`, and names in
-`session-name.json`. `import` stores each as a Session with its Runs, stores
-every other Run record as a Run, and reports every file it could not store
-with the reason. The files stay in place and no
-other command reads them. Running it again stores nothing new.
+Every agent conversation has an AgentSession, including headless skills, inline
+prompts, helpers, Asks and reviews. Default lists show interactive conversations;
+explicit filters expose headless and completed history. `--all` retains its
+all-repositories meaning. Interactive mode does not decide Flow membership,
+completion or permission to advance a review.
 
-`open` resumes provider-native history. `ready` saves feedback without closing
-anything. `complete` closes the Session and retains its history; default lists
-show open Sessions. A Flow review passes its feedback onward, while an Ask
-returns it to the waiting caller. Closing a pane or exiting the provider is
-neither completion nor permission to advance the Flow.
+Connect uses the live engine where possible and retains conversation identity,
+name, feedback and native history. The new driver receives write authority; the
+old client can remain a passive display. Restart explicitly replaces the exact
+conversation owner. It preserves recorded history and does not kill a shared
+engine or its other conversations. Unsubmitted editor text requires its own
+surface-preservation proof.
+
+Explicit `--task`, `--wave` or `--as` selects ancestry at launch; a registered
+Task checkout supplies it when no explicit selector is present. A conversation
+can remain unbound. Bind states and confirms the target before permanent
+assignment. Same-target bind is a no-op; there is no reassignment or unbind.
+Existing Wave ancestry must agree. Done/landed Tasks remain valid without being
+reopened. Flow membership cannot be changed to make an incompatible bind work.
+
+Binding affects subsequent work under the conservative attribution assumption;
+prior usage retains its recorded owner. First actual Task work sets Started once.
+Inspection commands are still visible in Exec history but do not start Tasks.
+Rename and bind retain the Session ID, pane, draft and membership. Human names
+survive generated suggestions. A bound Session absent from the visible roadmap
+remains bound.
+
+Ready saves feedback without closing the Session. Complete persists the result
+before teardown; keyed Ask retries return the same answer. Flow reviews pass
+feedback to the following decision, which owns navigation. Closing a pane,
+exiting a provider, or marking ready never completes that review implicitly.
+
+```bash
+lf session import --dry-run
+lf session import
+```
+
+One-time import preserves old interactive/Ask/review conversations, headless
+history, captures, outcomes, usage and unknown evidence. Original identities and
+repeated attempts survive; unrelated conversations never merge by title or path.
+Ordinary reads use SQLite and neither import nor fall back to files. Import
+reports conflicts and unresolved evidence, supports interruption/retry, and does
+not infer an actual lf process from an old provider-launch record alone.
 
 ## Placing Work and Reaching Homes
 

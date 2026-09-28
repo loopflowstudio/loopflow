@@ -106,7 +106,7 @@ pub enum SessionState {
 pub enum SessionKind {
     Ask,
     Flow,
-    Interactive,
+    Conversation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,7 +127,7 @@ pub struct SessionAction {
 
 pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<SessionAction> {
     use SessionActionKind::{Complete, MoveHere, Open};
-    let active_client = kind == SessionKind::Interactive && state == SessionState::Active;
+    let active_client = kind == SessionKind::Conversation && state == SessionState::Active;
     let not_ready =
         (state != SessionState::Ready).then_some("The session agent has not marked this ready");
     let mut actions = vec![(
@@ -138,7 +138,7 @@ pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<Ses
             .then_some("This Session is active in another terminal; use Move here to transfer it"),
     )];
     match kind {
-        SessionKind::Interactive => {
+        SessionKind::Conversation => {
             if active_client {
                 actions.push((
                     MoveHere,
@@ -198,6 +198,7 @@ pub struct SessionRecord {
     pub id: String,
     pub run_id: RunId,
     pub kind: SessionKind,
+    pub interactive: bool,
     pub work: Option<WorkRef>,
     pub wave_id: Option<crate::id::WaveId>,
     pub work_path: Option<String>,
@@ -529,6 +530,8 @@ async fn store_ask(
         id,
         current_run_id: run.id.clone(),
         kind: crate::session::SessionKind::Ask,
+        interactive: true,
+        repo: None,
         title,
         title_source: crate::session::TitleSource::Generated,
         request: Some(request),
@@ -646,9 +649,12 @@ async fn managed_review(
         .map(|position| (task_id.clone(), position)))
 }
 
-pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
+pub(crate) async fn list(
+    store: &SharedStore,
+    filter: &crate::session::SessionFilter,
+) -> Result<Vec<SessionRecord>> {
     let mut sessions = Vec::new();
-    for (session, run) in store.open_sessions().await? {
+    for (session, run) in store.sessions(filter).await? {
         sessions.push(surface(store, &session, &run).await?);
     }
     Ok(sessions)
@@ -1121,7 +1127,7 @@ pub(crate) async fn open(
         .ok_or_else(|| session_not_found(session_id))?;
     match &target {
         SessionTarget::Row { session, run }
-            if session.kind == crate::session::SessionKind::Interactive =>
+            if session.kind == crate::session::SessionKind::Conversation =>
         {
             let native = NativeRun::of(session, run)?;
             let provider_session = native.history(session)?;
@@ -1131,7 +1137,7 @@ pub(crate) async fn open(
             match mode {
                 OpenMode::Refuse if !native.clients()?.is_empty() => {
                     require_session_action(
-                        SessionKind::Interactive,
+                        SessionKind::Conversation,
                         SessionState::Active,
                         SessionActionKind::Open,
                     )?;
@@ -1225,7 +1231,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
     match &target {
         SessionTarget::Row { session, run }
-            if session.kind == crate::session::SessionKind::Interactive =>
+            if session.kind == crate::session::SessionKind::Conversation =>
         {
             let native = NativeRun::of(session, run)?;
             crate::lf::commands::util::stop_provider_session(&native.dir, &native.provider)?;
@@ -1375,7 +1381,7 @@ pub(crate) fn stop_run(run_id: &RunId) -> Result<()> {
 /// A Session as its row and its current Run describe it.
 async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<SessionRecord> {
     let kind = match session.kind {
-        crate::session::SessionKind::Interactive => SessionKind::Interactive,
+        crate::session::SessionKind::Conversation => SessionKind::Conversation,
         crate::session::SessionKind::Ask => SessionKind::Ask,
         crate::session::SessionKind::FlowReview => SessionKind::Flow,
     };
@@ -1459,6 +1465,7 @@ async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<Se
         id: session.id.clone(),
         run_id: run.id.clone(),
         kind,
+        interactive: session.interactive,
         wave_id: run.wave_id.clone(),
         work_path: session_work_path(store, run).await?,
         work,
@@ -1470,7 +1477,7 @@ async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<Se
         },
         flow_membership,
         detail: match (kind, &run.skill) {
-            (SessionKind::Interactive, _) => launch_model(run),
+            (SessionKind::Conversation, _) => launch_model(run),
             (_, Some(skill)) => skill.clone(),
             (_, None) => "Request for input".to_string(),
         },
@@ -2230,7 +2237,10 @@ mod tests {
     }
 
     async fn open_asks(store: &SharedStore) -> Vec<(Session, Run)> {
-        let mut open = store.open_sessions().await.unwrap();
+        let mut open = store
+            .sessions(&crate::session::SessionFilter::default())
+            .await
+            .unwrap();
         open.retain(|(session, _)| session.kind == SessionKind::Ask);
         open
     }
@@ -2628,7 +2638,7 @@ mod tests {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("../../../../tests/fixtures/dto/session.json"))
                 .unwrap();
-        for kind in ["interactive", "ask", "flow"] {
+        for kind in ["conversation", "ask", "flow"] {
             let mut value = fixture.clone();
             value["kind"] = kind.into();
             let session: super::SessionRecord = serde_json::from_value(value.clone()).unwrap();
@@ -2914,6 +2924,8 @@ mod tests {
             id: "ask_skill_proof".to_string(),
             current_run_id: run.id.clone(),
             kind: SessionKind::Ask,
+            interactive: true,
+            repo: None,
             title: "Choose the delivery policy".to_string(),
             title_source: crate::session::TitleSource::Generated,
             request: Some("Choose the delivery policy".to_string()),

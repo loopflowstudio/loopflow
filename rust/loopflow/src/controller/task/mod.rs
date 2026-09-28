@@ -319,6 +319,7 @@ impl StepLauncher for TaskLauncher {
                 prepared.task_pr_id.clone(),
             )?,
             attempt.run_id.clone(),
+            None,
             &prepared.turn.context,
             publish,
         )?;
@@ -1381,6 +1382,7 @@ mod planning_tests {
                             work: None,
                         },
                         run.clone(),
+                        None,
                         &crate::trace::PreparedTurnContext::from_prompts("system", "decide"),
                         publish,
                     )
@@ -1640,7 +1642,7 @@ mod planning_tests {
                 assert_eq!(replacement_claim.position_version, claim.position_version);
                 assert_eq!(replacement_claim.generation, claim.generation);
                 assert_ne!(replacement_claim.invocation_id, claim.invocation_id);
-                assert!(crate::ops::human_session::list(&store).await.unwrap().is_empty(),
+                assert!(crate::ops::human_session::list(&store, &crate::session::SessionFilter::default()).await.unwrap().is_empty(),
                     "a rejected late decision failure cannot open an unblock Session");
                 Ok(())
             })
@@ -1703,6 +1705,7 @@ mod planning_tests {
                         work: None,
                     },
                     run.clone(),
+                    None,
                     &crate::trace::PreparedTurnContext::from_prompts("system", "decide"),
                     publish,
                 )
@@ -1721,7 +1724,12 @@ mod planning_tests {
                 let human = async {
                     let session = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                         loop {
-                            let sessions = crate::ops::human_session::list(&store).await.unwrap();
+                            let sessions = crate::ops::human_session::list(
+                                &store,
+                                &crate::session::SessionFilter::default(),
+                            )
+                            .await
+                            .unwrap();
                             if let Some(session) = sessions
                                 .into_iter()
                                 .find(|s| s.kind == crate::ops::human_session::SessionKind::Ask)
@@ -1856,7 +1864,7 @@ mod planning_tests {
                 let crate::ops::task_flow::TaskFlowRecord::Pinned(graph) = graph else { panic!("pinned Flow") };
                 assert_eq!(graph.execution, execution.state);
                 assert_eq!(graph.reason, execution.reason);
-                let sessions = crate::ops::human_session::list(&store).await.unwrap();
+                let sessions = crate::ops::human_session::list(&store, &crate::session::SessionFilter::default()).await.unwrap();
                 let sessions = sessions.iter().filter(|s| s.work.as_ref() == Some(&WorkRef::Task(task.id.clone()))).collect::<Vec<_>>();
                 assert_eq!(sessions.len(), 1, "the driver must open unblock before any retry");
                 let (session, feedback) = crate::ops::human_session::task_unblock(&store, &task, &blocked).await.unwrap();
@@ -1954,7 +1962,7 @@ mod planning_tests {
                 let crate::ops::task_flow::TaskFlowRecord::Pinned(graph) = graph else { panic!("pinned Flow") };
                 assert_eq!(graph.execution, execution.state);
                 assert_eq!(graph.reason, execution.reason);
-                let sessions = crate::ops::human_session::list(&store).await.unwrap();
+                let sessions = crate::ops::human_session::list(&store, &crate::session::SessionFilter::default()).await.unwrap();
                 let sessions = sessions.iter().filter(|s| s.work.as_ref() == Some(&WorkRef::Task(task.id.clone()))).collect::<Vec<_>>();
                 assert_eq!(sessions.len(), 1, "the driver must open unblock before any retry");
                 let (session, feedback) = crate::ops::human_session::task_unblock(&store, &task, &blocked).await.unwrap();
@@ -2208,7 +2216,7 @@ mod planning_tests {
                     Box::new(crate::harness::default_create_harness)));
                 let observe = async {
                     loop {
-                        let sessions = crate::ops::human_session::list(&store).await.unwrap();
+                        let sessions = crate::ops::human_session::list(&store, &crate::session::SessionFilter::default()).await.unwrap();
                         let sessions = sessions.into_iter().filter(|s| s.work.as_ref() == Some(&WorkRef::Task(task.id.clone()))).collect::<Vec<_>>();
                         if let Some(session) = sessions.first() {
                             assert_eq!(sessions.len(), 1);
@@ -2378,6 +2386,8 @@ mod planning_tests {
         let project = Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                flow: "feature".into(),
+                status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new("human-task-project").unwrap(),
                 slug: "human-task-proof".to_string(),
                 name: "Review Task proof".to_string(),
@@ -3189,7 +3199,14 @@ mod planning_tests {
         let recovered = park_human_task(&store, &task, &restarted_flow).await;
 
         assert_eq!(recovered, original);
-        assert_eq!(store.open_sessions().await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .sessions(&crate::session::SessionFilter::default())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
         let recovered = store.task_flow(&task.id).await.unwrap().unwrap();
         assert_eq!(recovered.session_run_id(), Some(&run_id));
         assert_eq!(recovered.ready_summary.as_deref(), Some("ready"));
@@ -3222,6 +3239,7 @@ mod planning_tests {
                         work: None,
                     },
                     first.id.clone(),
+                    None,
                     &crate::trace::PreparedTurnContext::from_prompts("system", "review"),
                     |run| {
                         store
@@ -3436,7 +3454,7 @@ mod planning_tests {
         assert_eq!(retained.title_source, SessionTitleSource::Human);
         assert_eq!(retained.flow_membership, named.flow_membership);
         assert_eq!(retained.ready_summary.as_deref(), Some("Keep this answer"));
-        let listed = human_session::list(&store)
+        let listed = human_session::list(&store, &crate::session::SessionFilter::default())
             .await
             .unwrap()
             .into_iter()
@@ -3560,6 +3578,7 @@ mod planning_tests {
         let interrupted = crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec.clone(),
             run.id.clone(),
+            None,
             &context,
             |_| {
                 Err(crate::store::StoreError::InvalidAuthority(
@@ -3578,6 +3597,7 @@ mod planning_tests {
         let capture = crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec.clone(),
             run.id.clone(),
+            None,
             &context,
             |id| {
                 store
@@ -3602,6 +3622,7 @@ mod planning_tests {
             crate::run_record::CaptureHandle::begin_reserved_with_context(
                 spec,
                 run.id.clone(),
+                None,
                 &context,
                 |id| store
                     .sqlite
@@ -3685,7 +3706,9 @@ mod planning_tests {
                 rusqlite::params![broken_id.as_str(), corrupt],
             )
             .unwrap();
-            let records = human_session::list(&store).await.unwrap();
+            let records = human_session::list(&store, &crate::session::SessionFilter::default())
+                .await
+                .unwrap();
             assert!(records.iter().any(|record| record.id == id));
             let opened = human_session::open(&store, &id, human_session::OpenMode::Refuse, false)
                 .await
@@ -3796,7 +3819,14 @@ mod planning_tests {
         super::park_at_review(&store, &task, &settled)
             .await
             .unwrap();
-        assert_eq!(store.open_sessions().await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .sessions(&crate::session::SessionFilter::default())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
         let events = store.task_events_after(&task.id, 0).await.unwrap();
         assert!(events.iter().any(|event| matches!(
             &event.kind, TaskEventKind::Progress { summary } if summary == "design ready"
@@ -4058,6 +4088,8 @@ mod planning_tests {
             updated_at: now,
         };
         let project = ProjectPlan {
+            flow: "feature".into(),
+            status: crate::pm::ProjectStatus::Started,
             id: LinearProjectId::new("project-1").unwrap(),
             slug: "runtime".to_string(),
             name: "Current project name".to_string(),

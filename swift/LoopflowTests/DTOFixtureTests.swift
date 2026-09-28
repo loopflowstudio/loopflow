@@ -51,19 +51,8 @@ struct DTOFixtureTests {
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
-        #expect(plan.chapter?.flows.recommended == "task-design")
-        #expect(plan.chapter?.krs.count == 1)
-    }
-
-    @Test("Chapter history retains dated evidence for a moved Task")
-    func chapterHistoryRetainsBoundaryEvidence() throws {
-        let snapshot = try JSONDecoder().decode(ChapterSnapshot.self, from: loadFixtureData("chapter_snapshot.json"))
-        let history = try JSONDecoder().decode([ChapterHistoryEntry].self, from: loadFixtureData("chapter_history.json"))
-        #expect(snapshot.closedAt == snapshot.observedAt)
-        #expect(snapshot.tasks[0].disposition == "move")
-        #expect(!snapshot.tasks[0].task.completed)
-        #expect(history[0].id == snapshot.id)
-        #expect(history[1].closedAt == nil)
+        #expect(plan.currentProject?.flow == "task-design")
+        #expect(plan.currentProject?.krs.count == 1)
     }
 
     @Test("Activity fixture preserves exact OS-live process state")
@@ -128,7 +117,7 @@ struct DTOFixtureTests {
         // The Home runtime evidence carries the state and the one contextual action.
 
 
-        #expect(detail.chapter?.flows.recommended == "task-design")
+        #expect(detail.currentProject?.flow == "task-design")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
         #expect(detail.unavailableTasks[0].owner == .wave)
@@ -192,7 +181,7 @@ struct DTOFixtureTests {
         #expect(roadmap.waves.count == 2)
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
-        #expect(product.chapter?.flows.recommended == nil)
+        #expect(product.currentProject?.flow == "feature")
 
         #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
 
@@ -317,7 +306,7 @@ struct DTOFixtureTests {
     @Test("Every Session kind has a required Run reference independent of its boundary ID")
     func sessionRequiresRun() throws {
         let data = try loadFixtureData("session.json")
-        for kind in ["interactive", "ask", "flow"] {
+        for kind in ["conversation", "ask", "flow"] {
             var value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
             value["kind"] = kind
             let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))

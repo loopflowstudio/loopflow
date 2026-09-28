@@ -332,25 +332,22 @@ pub(crate) fn stop_provider_session(dir: &Path, harness: &str) -> Result<()> {
     let _launch = lock_provider_clients(dir)?;
     let clients = active_provider_clients(dir, harness)?;
     replace_provider_clients_locked(dir, harness, &clients, ProviderClientStopReason::Completed)?;
-    // Startup history can arrive after the client exits (for example, buffered
-    // OpenCode logs). Record resolution even before that history is published.
-    crate::run_record::resolve_provider_session(dir)?;
     Ok(())
 }
 
 pub(crate) fn require_provider_session_launch(dir: &Path) -> Result<()> {
     let manifest = crate::run_record::read_manifest(dir)?;
-    let Some(selector) = crate::run_record::preferred_work_selector(&manifest) else {
-        return Ok(());
-    };
-    let Some(issue) = selector.strip_prefix("task:") else {
-        return Ok(());
-    };
     let store =
         SqliteStore::open_run_ledger_read_only(&crate::store::observability_database_path()?)?;
+    let run = store
+        .run(&manifest.run_id)?
+        .ok_or_else(|| anyhow!("Run {} is not recorded on this Home", manifest.run_id))?;
+    let Some(task_id) = run.task_id else {
+        return Ok(());
+    };
     let task = store
-        .task_by_issue(issue)?
-        .ok_or_else(|| anyhow!("Task {issue:?} is not registered"))?;
+        .task_by_issue(task_id.as_str())?
+        .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?;
     if store
         .task_deletion(&task.wave_id, task.plan.id.as_str())?
         .is_some()
@@ -999,6 +996,7 @@ mod tests {
                     worktree: None,
                     skill: None,
                     subjects: Vec::new(),
+                    work: None,
                     flow: crate::run_record::RunFlowMembership::Independent,
                 },
             )
@@ -1171,7 +1169,9 @@ mod tests {
         fixture.mock_ps("echo unreadable fake-provider");
         assert!(crate::ops::human_session::stop_run(&run).is_err());
         assert!(fixture.child.try_wait().unwrap().is_none());
-        assert!(!crate::run_record::provider_session_is_resolved(&dir).unwrap());
+        assert!(!crate::run_record::read_provider_clients(&dir)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             crate::run_record::read_provider_clients(&dir)
                 .unwrap()
@@ -1188,7 +1188,9 @@ mod tests {
         ));
         assert!(crate::ops::human_session::stop_run(&run).is_err());
         assert!(fixture.child.try_wait().unwrap().is_none());
-        assert!(!crate::run_record::provider_session_is_resolved(&dir).unwrap());
+        assert!(!crate::run_record::read_provider_clients(&dir)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             crate::run_record::read_provider_clients(&dir)
                 .unwrap()
@@ -1199,7 +1201,9 @@ mod tests {
         std::env::set_var("PATH", original_path);
         crate::ops::human_session::stop_run(&run).unwrap();
         assert!(!fixture.child.wait().unwrap().success());
-        assert!(crate::run_record::provider_session_is_resolved(&dir).unwrap());
+        assert!(crate::run_record::read_provider_clients(&dir)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             crate::run_record::read_provider_session(&dir)
                 .unwrap()
@@ -1246,7 +1250,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn session_stop_resolves_history_published_after_client_exit() {
+    fn session_stop_retains_history_published_after_client_exit() {
         let _environment = crate::journal::test_env_lock();
         let mut fixture = NativeClient::new();
         let dir = fixture.capture.artifact_dir();
@@ -1270,12 +1274,10 @@ mod tests {
                 .provider_session_id,
             "ses_delayed"
         );
-        assert!(crate::run_record::provider_session_is_resolved(&dir).unwrap());
-        assert!(
-            crate::run_record::scan_unresolved_provider_runs(fixture.temp.path())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(crate::run_record::read_provider_clients(&dir)
+            .unwrap()
+            .is_empty());
+        assert!(!dir.join("session-resolution.json").exists());
     }
 
     #[cfg(unix)]
@@ -1283,6 +1285,16 @@ mod tests {
     fn session_stop_waits_for_native_client_publication() {
         let _environment = crate::journal::test_env_lock();
         let mut fixture = NativeClient::new();
+        let _env = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+        ]);
+        std::env::set_var("LF_HOME", fixture.temp.path());
+        std::env::set_var("LF_DB_PATH", fixture.temp.path().join("loopflow.db"));
+        std::env::remove_var("LF_CONTROL_HOME");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         let dir = fixture.capture.artifact_dir();
         crate::run_record::write_provider_session(&dir, "retained-history", None).unwrap();
         let launch = lock_provider_clients(&dir).unwrap();
@@ -1315,7 +1327,9 @@ mod tests {
         assert!(active_provider_clients(&dir, "fake-provider")
             .unwrap()
             .is_empty());
-        assert!(crate::run_record::provider_session_is_resolved(&dir).unwrap());
+        assert!(crate::run_record::read_provider_clients(&dir)
+            .unwrap()
+            .is_empty());
         let history = crate::run_record::read_provider_session(&dir)
             .unwrap()
             .unwrap();
@@ -1332,6 +1346,7 @@ mod tests {
             &fixture.capture.environment(),
             Some(&history.provider_session_id),
             None,
+            None,
         )
         .unwrap();
         assert!(fixture.temp.path().join("resumed").exists());
@@ -1340,7 +1355,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn intentional_session_move_exits_cleanly() {
+        let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
+        std::env::remove_var("LF_CONTROL_HOME");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         let provider = fake_provider(&temp, "trap 'exit 143' TERM\ni=0; while [ \"$i\" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done");
         let capture = crate::run_record::CaptureHandle::begin_at(
             temp.path(),
@@ -1416,7 +1442,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn provider_sigterm_without_stop_intent_remains_an_error() {
+        let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
+        std::env::remove_var("LF_CONTROL_HOME");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         let provider = fake_provider(&temp, "kill -TERM $$");
         let capture = crate::run_record::CaptureHandle::begin_at(
             temp.path(),
@@ -1721,6 +1758,16 @@ mod tests {
     async fn opencode_tui_records_its_native_session_without_wrapping_stdout() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
+        std::env::remove_var("LF_CONTROL_HOME");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         let _restore = EnvRestore::capture(&["PATH"]);
         let bin = temp.path().join("bin");
         std::fs::create_dir(&bin).unwrap();

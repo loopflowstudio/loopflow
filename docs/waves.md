@@ -113,7 +113,8 @@ The preview lists all affected Waves and Task dispositions. Empty plans are
 explicit; omitting a Wave cannot silently retire its backlog. Each successor
 Project gets fresh KRs, targets and Flow selection. Started unfinished Tasks
 keep their identity, worktree, PR and captured invocation when transferred;
-untouched backlog is abandoned and completed Tasks remain historical.
+untouched backlog is deleted from Linear and retired locally; completed Tasks remain historical.
+Local Task and PR history survive deletion.
 Unavailable evidence never counts as untouched work.
 
 Retry an interrupted operation with the same Chapter ID. Preparation refreshes
@@ -123,6 +124,8 @@ prepared; it never exposes a successful half-rotated local plan. External Task
 moves and Project retirement can remain visibly pending after activation.
 Retries use the recorded boundary, settle lost responses against provider
 state, and preserve unexpected external reassignments for reconciliation.
+A lost deletion response requires acknowledgement or explicit provider trash
+evidence; absence from a list or an unreadable issue leaves it unresolved.
 Historical targets, KR judgments and dated readings stay frozen even when a
 transferred Task ships later.
 
@@ -415,7 +418,7 @@ copies the previous content or checked KRs.
 Tasks live in Linear; there are no local task lists. A Wave maps to an
 Initiative, its Project for each Chapter maps to a Linear Project, and each
 Task maps to an Issue. Chapter itself is the repository's clock. Connect
-once — `lf pm init` links or creates the Wave Initiative and establishes one
+once — `lf wave connect` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
@@ -482,6 +485,13 @@ lf pr land --next parser-proof   # merge this PR, then rotate to the next
 lf pr land -c                    # merge this PR, then complete the Task
 lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 ```
+
+`task complete` also finishes planning-only Tasks without creating a checkout.
+It records the summary once in Linear; repeating the command preserves it.
+Placed Tasks still require a clean checkout and settled PRs. If their local
+completion reports pending PM writeback, repeat the same command to reconcile
+Linear without changing the original completion. Canceled and duplicate issues
+cannot be changed to completed through this command.
 
 `task complete` also finishes planning-only Tasks without creating a checkout.
 It records the summary once in Linear; repeating the command preserves it.

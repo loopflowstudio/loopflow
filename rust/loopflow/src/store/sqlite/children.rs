@@ -22,9 +22,9 @@ use crate::work::project::{
     ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
-    PmWritebackState, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
-    LinearObservationOutcome, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
-    TaskEvent, TaskEventKind, TaskId, TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
+    CiObservation, GithubObservation, GithubPr, LinearObservationApply, LinearObservationOutcome,
+    PmWritebackState, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
     TaskPrRepairKind,
 };
 

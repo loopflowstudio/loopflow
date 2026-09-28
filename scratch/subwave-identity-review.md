@@ -108,6 +108,10 @@ Kickoff draft under review: commit `0381a195f`.
 - "update-wave is deprecated, i think, now we just have realign?" The design
   now names `realign`. `update-wave` still exists on main.
 
+- "queue should be compress -> refresh. update-wave should go away".
+- "LOOPFLOW.md should probably just mention realign? Dont think we need
+  record-learnigns either".
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

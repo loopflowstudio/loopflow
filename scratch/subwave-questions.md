@@ -20,12 +20,20 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
   added when a read needs it, with LOO-298's check.
 - A Wave's parent is the Wave whose directory it sits in.
 
-## Found, not decided
+## Requested by Jack Heart, outside this Task
 
-- Jack Heart understands `update-wave` to be deprecated in favor of
-  `realign`. On main both exist: `update-wave` is still a step in the `queue`
-  Flow and is named in `LOOPFLOW.md` beside `realign` and
-  `record-learnings`. Removing it is outside this Task.
+2026-09-28, in this review:
+
+- `update-wave` goes away.
+- `record-learnings` probably goes away too.
+- The `queue` Flow becomes compress → refresh. Today it is compress →
+  update-wave → gate. Whether gate stays was not said.
+- `LOOPFLOW.md` names only `realign` for curating Wave memory.
+
+This cannot be done on this branch: `realign` and the `refresh` Flow exist
+only on main. On main, `update-wave` is referenced in 10 source and doc files
+and 6 goldens; `record-learnings` in 5 files and 5 goldens, including the
+`ship` and `ship-demo` Flows. No Task has been filed.
 
 ## Owed to LOO-330 and LOO-331
 

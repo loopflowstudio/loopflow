@@ -20,19 +20,21 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
   added when a read needs it, with LOO-298's check.
 - A Wave's parent is the Wave whose directory it sits in.
 
-## Requested by Jack Heart, outside this Task
+## Skills cleanup, delivered separately
 
-2026-09-28, in this review:
+Jack Heart requested on 2026-09-28: remove `update-wave` and
+`record-learnings`; `queue` becomes compress → refresh → gate; `LOOPFLOW.md`
+names only `realign`. He authorized a new worktree and landing without his
+review, through the queue.
 
-- `update-wave` goes away.
-- `record-learnings` probably goes away too.
-- The `queue` Flow becomes compress → refresh. Today it is compress →
-  update-wave → gate. Whether gate stays was not said.
-- `LOOPFLOW.md` names only `realign` for curating Wave memory.
+The change is on branch `jack-heart/retire-update-wave`, worktree
+`/Users/jack/src/loopflow.retire-update-wave`, based on main at `c512813b5`.
+It is not part of LOO-329.
 
-On main, `update-wave` is referenced in 10 source and doc files
-and 6 goldens; `record-learnings` in 5 files and 5 goldens, including the
-`ship` and `ship-demo` Flows. No Task has been filed.
+No Task was filed. `lf task create --wave infrastructure` failed with "Wave
+infrastructure has no chapter", and the `lf` on this session's PATH (0.12.24)
+also reports "no Task exists" for LOO-329, LOO-330 and LOO-331. The store
+that owns this session's Task was not found from this shell.
 
 ## Owed to LOO-330 and LOO-331
 

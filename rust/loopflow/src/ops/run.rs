@@ -572,6 +572,8 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains("was deleted"));
+            let previous_db = std::env::var_os("LF_DB_PATH");
+            std::env::set_var("LF_DB_PATH", directory.path().join("registry.db"));
             let capture = crate::run_record::CaptureHandle::begin_at(
                 directory.path(),
                 crate::run_record::RunSpec {
@@ -586,13 +588,17 @@ mod tests {
                         "task:{selector}"
                     ))],
                     flow: crate::run_record::RunFlowMembership::Independent,
+                    work: Some(crate::session::RunWork {
+                        task_id: Some(task.id.clone()),
+                        wave_id: Some(wave.id().clone()),
+                        source: crate::session::WorkSource::Declared,
+                    }),
                 },
             )
             .unwrap();
-            let manifest = crate::run_record::read_manifest(&capture.artifact_dir()).unwrap();
             assert_eq!(
-                crate::run_record::attributed_work(&store, &manifest).await,
-                Some(work.clone())
+                store.run(&capture.run_id()).await.unwrap().unwrap().task_id,
+                Some(task.id.clone())
             );
             let previous = [
                 "LF_CONTROL_DB_PATH",
@@ -635,6 +641,10 @@ mod tests {
                     None => std::env::remove_var(name),
                 }
             }
+            match previous_db {
+                Some(value) => std::env::set_var("LF_DB_PATH", value),
+                None => std::env::remove_var("LF_DB_PATH"),
+            }
             assert!(resumed.unwrap_err().to_string().contains("was deleted"));
             assert!(asked
                 .expect("Ask must refuse before waiting")
@@ -647,7 +657,9 @@ mod tests {
                     .is_empty()
             );
             assert!(
-                !crate::run_record::provider_session_is_resolved(&capture.artifact_dir()).unwrap()
+                crate::run_record::read_provider_session(&capture.artifact_dir())
+                    .unwrap()
+                    .is_some()
             );
         }
         assert!(super::resolve_checkout_binding(&store, repo.path())

@@ -467,6 +467,22 @@ async fn reserve_ask(
         Some(run) => (run.task_id, run.wave_id),
         None => (None, None),
     };
+    if let Some(task_id) = &task_id {
+        let task = store
+            .get_task(task_id)
+            .await?
+            .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?;
+        if store
+            .task_deletion(&task.wave_id, task.plan.id.as_str())
+            .await?
+            .is_some()
+        {
+            bail!(
+                "Task {} was deleted and cannot ask for new execution",
+                task.plan.identifier
+            );
+        }
+    }
     let run = Run {
         id: caller.run_id.clone(),
         session_id: Some(id.clone()),

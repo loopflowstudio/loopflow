@@ -333,6 +333,7 @@ lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --flow incident
 lf -m claude task run DES-126    # retain this agent for every Flow step
+lf task status                 # Task on the checked-out branch
 lf task status DES-123
 lf task advance DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
@@ -350,12 +351,11 @@ lf task resume DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
 lf task restart DES-123 --flow build                 # replace the pinned Flow; rejected before any checkpoint if unusable
 lf flow list --json                                  # every Flow with the topology it would pin
-lf work status task task_... --json                  # stable Work projection
-lf work interrupt task task_...                      # refuses without exact process ownership
-lf work place wave wave_... home_...                 # move idle Wave Work to a Home
-lf work relocate wave wave_... --name platform       # rename a stopped Wave
-lf work relocate wave wave_... --repo ../moved-repo  # repair or move its repository
-lf work enable task task_...                         # restore Task eligibility
+lf task status task_... --json                  # stable Work projection
+lf wave place wave_... home_...                 # move idle Wave Work to a Home
+lf wave relocate wave_... --name platform       # rename a stopped Wave
+lf wave relocate wave_... --repo ../moved-repo  # repair or move its repository
+lf task enable task_...                         # restore Task eligibility
 lf --wave designer : "scan the runtime"             # independent Wave Run
 ```
 
@@ -374,6 +374,27 @@ PR state, Flow invocation, and Run evidence stay separate. `task prepare` ensure
 Project and Task Work records, one stable Task worktree, and its first serial PR
 identity without starting execution. `task run` uses that same substrate,
 selects a Flow when none is active, and starts its mechanical driver.
+`task restart` waits for its captured worker to exit before replacing the Flow.
+Unknown process identity, a worker that remains live, or a concurrent replacement
+leaves the Flow intact and reports the unresolved execution. Retry after resolving
+the reported worker; restart never discards a new claim acquired while stopping.
+`task edit` changes title/notes in Linear and refreshes planning facts locally.
+It works before placement; replacing notes preserves the original creation retry
+marker. `task comment ISSUE` reads the thread; adding text publishes direction
+without starting execution. Both accept the issue ID or a registered Task ID and
+resolve the owning Wave from the issue. An optional `--wave` checks that ownership.
+
+`task create` files planning backlog in Linear and refreshes the local snapshot.
+It leaves the checkout alone and needs no agent execution credentials. Use
+`--notes` for its description, or pipe a report; `--title` overrides the report's
+first line. Repeating the same title and report reuses the issue's creation marker.
+`task create --run` validates the Flow, workspace name, stack parent, base,
+and execution credentials before creating a Linear issue. Retrying the same
+report reuses its marked issue and any registered Task placement. If a later
+filesystem or snapshot operation fails, the error names the retained issue and
+its recovery command. Placement uses the validated base commit even if a later
+fetch advances the remote branch. An unconfirmed creation reports the uncertainty
+and directs a retry of the same command to look up its marker.
 `task restart` waits for its captured worker to exit before replacing the Flow.
 Unknown process identity, a worker that remains live, or a concurrent replacement
 leaves the Flow intact and reports the unresolved execution. Retry after resolving
@@ -808,13 +829,22 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
+Session replacement and native client stopping require readable process evidence.
+If inspection fails, retry after it is available; the command leaves termination
+unconfirmed and preserves native history. Saved Ask or Flow feedback survives a
+cleanup failure, which is reported separately from completing the review.
+Native client publication and stopping serialize on the Run, so stopping waits
+for an in-flight launcher to publish its client before inspecting it. A Task
+with confirmed deletion cannot start an Ask or resume a native Session. Exact
+`runs --active --task ISSUE` still inspects its retained process evidence.
+
 `lf ls` reads the local Wave registry. `--current` excludes abandoned and retired
 registrations. `lf roadmap --all` spans repositories without inheriting the
 launching process's Wave; an explicit `--wave` still scopes the query.
 
 ```bash
-lf work forget wave <wave-id> --dry-run --json
-lf work forget wave <wave-id> --json
+lf wave forget <wave-id> --dry-run --json
+lf wave forget <wave-id> --json
 ```
 
 Forget an abandoned, disabled, empty registration after removing its authored
@@ -1029,7 +1059,9 @@ skills. Automated flow nodes and `--batch` remain headless.
 
 Inside a Task's worktree, a launch without `--task`/`--wave`/`--as` belongs to
 that Task: its Session lists the Task as Work and `lf runs --task` finds it.
-An explicit selection still wins, and a branch no Task tracks stays unbound.
+The checked-out branch identifies the Task; tracking `origin/main` or a stack
+parent does not change ownership. An explicit selection still wins, and an
+unregistered branch stays unbound.
 
 ### External skills
 
@@ -1370,7 +1402,7 @@ remains visibly stale. Logs stay under
 configured path. `history` defaults to 35 days so nightly, weekly, credential,
 and host-drift observation windows share one evidence surface.
 
-## lf pm
+## Planning commands
 
 Read and edit a Wave's Linear planning state. Each Wave maps to an Initiative;
 its Project in each repository Chapter maps to a Linear Project; Tasks are
@@ -1378,25 +1410,24 @@ Issues. `sync` refreshes the local planning projection. Chapter identity and
 execution records retain their own SQLite authority.
 
 ```bash
-lf pm status                                # linked waves and task counts
-lf pm init --wave designer --team-key DSG   # connect Wave; establish repo Team once
-lf pm sync --wave designer                  # refresh SQLite from Linear
-lf pm sync --plan                           # report drift without writing
-lf pm show --wave designer                  # read; refresh when stale
-lf pm show --wave designer --no-sync        # cache-only agent/app read
+lf ls                                # linked waves and task counts
+lf wave connect --wave designer --team-key DSG   # connect Wave; establish repo Team once
+lf wave sync --wave designer                  # refresh SQLite from Linear
+lf doctor --planning                           # report drift without writing
+lf status designer                  # read shared planning
+lf status designer --no-sync        # cache-only agent/app read
 lf wave update-plan --wave designer --plan plan.json
 lf wave new-chapter --chapter 2026-09 --plan chapter.json --dry-run --json
 lf wave new-chapter --chapter 2026-09 --plan chapter.json --json
 lf wave history --wave designer --json
 lf status designer --chapter 2026-08 --json
-lf pm task create --wave designer --title "Dark mode"
-lf pm task update --id 1207... --title "Refine dark mode"
-lf pm task comments --id 1207... --json       # read the complete comment thread
-lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
-lf pm rename --wave designer --title "Designer"   # rename the Initiative
-lf pm reteam                            # dry-run the repository-wide Team migration
-lf pm reteam --apply                    # migrate when no Task Run can write old ids
-lf pm doctor                            # flag ownership and title drift
+lf task create --wave designer --title "Dark mode"
+lf task edit 1207... --title "Refine dark mode"
+lf task comment 1207... --json       # read the complete comment thread
+lf task complete 1207... --summary "Dark mode delivered"
+lf wave rename designer --title "Designer"   # rename the Initiative
+lf repo reteam                            # dry-run the repository-wide Team migration
+lf repo reteam --apply                    # migrate when no Task Run can write old ids
 ```
 
 `update-plan` replaces one Wave's current Project content. `new-chapter`
@@ -1405,12 +1436,30 @@ all Wave plans. See [Waves](waves.md#the-planning-model) for the envelope,
 preview, transfer and retry rules. `history --wave` filters a repository's
 chapter history to one Wave; it does not define an independent clock.
 
-Connect Linear first with `doppler run -- lf auth linear`. `lf pm init` pins the Initiative
+`lf task delete ISSUE` deletes registered or planning-only Tasks from Linear and
+reconciles their local record. Completed work keeps its outcome and terminal time;
+unfinished work is retired without recording success. Authored files and retained
+PRs survive. If an effect is incomplete, the error gives the same command to retry.
+Deletion does not certify process termination. Confirmed removals leave Task lists
+and shared planning views; historical accounting remains available.
+
+For retained Tasks whose removal is confirmed, `lf task status ISSUE` reads saved
+history without reconciling PRs or completion. Checkout-default status requires an
+explicit identifier for that history. Deleted Tasks cannot be selected for new
+execution; recorded Runs keep their original Task attribution.
+
+Task completion refuses an issue already canceled or marked duplicate in Linear.
+Registered Tasks must also pass the delivery gate. If a provider request or refresh
+fails, registered completion retains pending writeback; repeat the command to
+reconcile it without changing the original completion time. A later provider
+conflict preserves recorded Done history and reports the pending conflict.
+
+Connect Linear first with `doppler run -- lf auth linear`. `lf wave connect` pins the Initiative
 into `GOAL.md` and the repository Team into `.lf/config.yaml`. Every Wave in
 that repository reuses the Team and Task prefix (`LOO-1`, `LOO-2`); Initiatives
-and Project membership decide which Wave owns a Task. `pm init --all` discovers
+and Project membership decide which Wave owns a Task. `wave connect --all` discovers
 nested `GOAL.md` files recursively and initializes them against the same Team.
-When no Initiative is pinned, init links one exact title match, creates one
+When no Initiative is pinned, connect links one exact title match, creates one
 when absent, and fails on duplicates. Creation fails closed unless the
 repository Team and its Git-origin claim both validate.
 
@@ -1425,22 +1474,20 @@ Linear's Projects view is flat, so provider titles use
 `<canonical Wave path> — <Project>`; nested Waves remain legible as
 `Survival / Infrastructure — Gmail`. Loopflow resolves ownership from stable
 Initiative and Project ids, then strips that presentation prefix and keeps the
-canonical slug. `show` serves
-snapshots younger than an hour without a network request, tries a
-five-second refresh for older ones, and refuses to silently serve a snapshot
-older than a week. Use `--no-sync` in agents and UI paths so rendering never
-waits on Linear.
+canonical slug. `lf status WAVE` reads cached planning without contacting Linear.
+Use `lf status WAVE --sync` to refresh before reading; the refresh has a
+five-second deadline and reports failure when fresh planning is unavailable.
 
 Fresh PM operations renew expiring Linear credentials automatically and store
 the rotated access/refresh pair together. Temporary endpoint failures get one
 retry within the read deadline; `--sync` reports failure if it cannot obtain a
-fresh snapshot. Retry a temporary failure with `lf pm sync --wave <wave>`.
+fresh snapshot. Retry a temporary failure with `lf wave sync --wave <wave>`.
 Reconnect with `doppler run -- lf auth linear` only when the error identifies a
 missing credential or unusable refresh grant/client configuration. A timeout
 during persistence can leave its outcome pending; the next read checks the
 stored credential before attempting another exchange.
 
-`lf pm reteam` migrates every linked Wave onto the repository Team. It
+`lf repo reteam` migrates every linked Wave onto the repository Team. It
 **defaults to a dry run** and only mutates with `--apply`; it defers an issue
 while a Task Run can still write its old identifier. Completed issues move too.
 Loopflow first attaches the destination Team to every Project, comments and

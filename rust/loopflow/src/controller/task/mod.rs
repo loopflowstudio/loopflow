@@ -1169,7 +1169,7 @@ mod planning_tests {
                 let task = super::load_task(&self.store, &self.task_id).await?;
                 let stopped = self
                     .store
-                    .release_task_worker(&self.task_id, position.claim.as_ref().unwrap())
+                    .release_flow(position.id(), position.version, position.claim.as_ref())
                     .await?;
                 self.store
                     .restart_task_flow(&task, Some(&stopped), "fixture-checkpoint")
@@ -2700,7 +2700,11 @@ mod planning_tests {
         };
 
         let stopped = store
-            .release_task_worker(&task.id, &stale_claim)
+            .release_flow(
+                &stale_claim.invocation_id,
+                stale_claim.position_version,
+                Some(&stale_claim),
+            )
             .await
             .unwrap();
         store
@@ -3704,7 +3708,11 @@ mod planning_tests {
             true,
         );
         store
-            .restart_task_flow(&task, "fixture-checkpoint")
+            .restart_task_flow(
+                &task,
+                store.task_flow(&task.id).await.unwrap().as_ref(),
+                "fixture-checkpoint",
+            )
             .await
             .unwrap();
         replacement.version = 0;

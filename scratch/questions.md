@@ -732,3 +732,20 @@ rebase; the hypothetical canonical test batch is not that released file. The
 known `wave_chapters` architecture gap remains H7, whose accepted design is
 [chapters.md](chapters.md). No install, publication, Cut I or H4 is authorized by
 this H3 checkpoint.
+
+## H3 integration onto released main (2026-09-27)
+
+Jack Heart requested local integration before a separate review-slice. The
+manual rebase targets `5bdcef6b65419d5db2583ee791cede2f1a95b3df` (v0.12.23).
+[The integration receipt](h3-upstream-integration.md) records conflicts,
+semantic repairs, exact focused proof and limits. Main's Task deletion and
+command consolidation now use the branch's Run and invocation owners; no
+subject-based history resolver, resolution sidecar, Work reopen, or second
+executor was restored. Main's stop-to-restart comparison remains transactional.
+
+The actual v0.12.23 migration batch supersedes H3's hypothetical rehearsal.
+The remaining 13 drafts stay on the branch; source proofs use private Homes.
+The accepted Linear-status Chapter design in `chapters.md` and Cut I remain
+later work. Existing Chapter-spec documentation still needs that later pass;
+this integration does not claim it implements the accepted H7 design. No new
+product decision or installed-Home permission was needed or obtained.

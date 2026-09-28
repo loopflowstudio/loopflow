@@ -4,6 +4,54 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dep
 
 Release-specific findings live in [release memory](release/MEMORY.md).
 
+## Subwave identity and context (accepted design, 2026-09-28)
+
+Jack Heart settled the model for
+[Subwaves · LOO-329](https://linear.app/loopflow/issue/LOO-329), building on
+[One SQLite owner per product object · LOO-298](https://linear.app/loopflow/issue/LOO-298).
+The [accepted design](https://github.com/loopflowstudio/loopflow/blob/a612c1592e73c3e567d365b8cdb77a31cc2d5877/scratch/define-durable-subwave-identity-and.md)
+and [review history](https://github.com/loopflowstudio/loopflow/blob/a612c1592e73c3e567d365b8cdb77a31cc2d5877/scratch/subwave-identity-review.md)
+retain the decisions; that checkpoint exists locally, with remote availability
+unchecked. These are implementation requirements, not shipped behavior.
+
+- **A subwave is a Wave.** It owns an objective, plan, Tasks and schedule.
+  Keep stable ids, a one-segment name and a parent id. Derive addresses such as
+  `infrastructure/release`; do not store the path. Renaming Infrastructure to
+  `infra` changes its row without changing release's row. This supersedes the
+  earlier name-as-identity, memory-only scope and address-ledger proposals.
+- **Directories express parentage.** Discovery records the enclosing Wave as
+  parent and reconciles directory moves. Adapt the stored parent instead of
+  refusing a mismatch. Task → Project → Wave remains linked by id; a projected
+  Task Wave must agree with its Project.
+- **Context follows the selected Wave in the executing checkout.** Read all
+  top-level Markdown in each ancestor and the selected directory, root first.
+  Include memory through that same gatherer, without a separate registry walk.
+  Exclude children, siblings and unrelated Waves. Task-derived selection and
+  explicit `--wave` use the same rule for scheduled and ad hoc execution.
+  `scratch/` remains recursive. Memory edits are ordinary branch changes;
+  no canonical-main checkout is required. A short ownership hint belongs with
+  the files; curation guidance belongs in `realign`.
+- **Parent objectives may include child goals.** KRs and Tasks mainly about a
+  child's work belong in the child's plan. Mentioning a child is fine; this is
+  planning guidance, not an enforcement mechanism.
+
+Release is the selected prototype. Creating its Initiative and moving
+release-focused KRs/Tasks and the existing schedule use installed `lf` after
+the code lands.
+Infrastructure retains “delivers verified releases” in its objective. The
+required disposable-Home proof must show parent-before-child prompt context
+and unchanged child identity after a parent directory rename. Discovery and
+the nested cron log path still need behavioral proof; this curation ran none.
+Rename/reparent commands, conflict resolution between machines, desktop changes
+and historical Run migration remain deferred.
+
+The short hint's wording, Wave filename and explicit child reading during
+parent `realign` remain open in the
+[retained questions](https://github.com/loopflowstudio/loopflow/blob/a612c1592e73c3e567d365b8cdb77a31cc2d5877/scratch/subwave-questions.md).
+The [Product companion · LOO-330](https://linear.app/loopflow/issue/LOO-330) and
+[Intelligence companion · LOO-331](https://linear.app/loopflow/issue/LOO-331) still
+need their drafts reconciled with this model; no worker notification is recorded.
+
 ## Branch data and command ownership (LOO-321, branch evidence 2026-09-28)
 
 [Branch data isolation · LOO-321](https://linear.app/loopflow/issue/LOO-321)

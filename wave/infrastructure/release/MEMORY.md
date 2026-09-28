@@ -1,8 +1,12 @@
 # Release memory
 
-Release is a subarea of infrastructure. Jack Heart selected this scope for
-release-specific durable findings; product support for subwaves is being
-explored separately before changing live Wave ownership.
+Release currently holds release-specific findings under Infrastructure.
+Jack Heart selected it as the first real subwave in the
+[accepted subwave design](../MEMORY.md#subwave-identity-and-context-accepted-design-2026-09-28).
+Its intended objective is to deliver new and updated Loopflow to the public at
+regular intervals, with accessible guidance, without bugs, through a smart and
+recoverable rollout. Implementation and the live ownership/schedule transfer
+remain pending; this memory directory alone does not establish a connected Wave.
 
 ## Scheduled release failure boundaries (2026-09-28)
 

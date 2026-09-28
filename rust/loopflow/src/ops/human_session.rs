@@ -9,7 +9,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::{FlowPosition, RunId, WorkRef};
+use crate::durable::{FlowInvocation, RunId, WorkRef};
 use crate::engine::Skill;
 use crate::run_record::{ProviderSessionRef, RunManifest, SessionTitleSource, RUN_DIR_ENV};
 use crate::session::{Run, Session, WorkSource};
@@ -45,7 +45,7 @@ pub(crate) fn reserved_run() -> Result<Option<(RunId, crate::run_record::RunFlow
         .as_ref()
         .ok_or_else(|| anyhow!("review reservation has no Task"))?;
     let position = store
-        .flow_position(task_id)?
+        .task_flow(task_id)?
         .ok_or_else(|| anyhow!("review invocation is no longer current"))?;
     if session.current_run_id != reservation.run_id
         || session.completed_at.is_some()
@@ -55,12 +55,11 @@ pub(crate) fn reserved_run() -> Result<Option<(RunId, crate::run_record::RunFlow
     {
         bail!("review Run reservation is stale");
     }
-    let task_pr_id = store.active_task_pr(task_id)?.map(|pr| pr.id);
+    let mut membership = crate::run_record::RunFlowStep::of(&position)?;
+    membership.task_pr_id = store.active_task_pr(task_id)?.map(|pr| pr.id);
     Ok(Some((
         reservation.run_id,
-        crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
-            &position, task_pr_id,
-        )),
+        crate::run_record::RunFlowMembership::Step(membership),
     )))
 }
 
@@ -251,16 +250,16 @@ pub enum SessionFlowOccurrence {
 }
 
 impl SessionFlowMembership {
-    fn of_position(position: &FlowPosition) -> Self {
-        let step = crate::run_record::RunFlowStep::of(position, None);
-        Self::Step {
+    fn of_position(position: &FlowInvocation) -> Result<Self> {
+        let step = crate::run_record::RunFlowStep::of(position)?;
+        Ok(Self::Step {
             flow: step.flow,
             invocation_id: step.invocation_id,
             step: step.step,
             node: step.node,
             iterations: step.iterations,
             occurrence: SessionFlowOccurrence::Current,
-        }
+        })
     }
 }
 
@@ -269,11 +268,11 @@ impl SessionFlowMembership {
 #[derive(Debug)]
 enum SessionTarget {
     /// An interactive Session, an Ask, or a saved Flow's review.
-    Row { session: Session, run: Run },
+    Row { session: Session, run: Box<Run> },
     /// A Task's review also settles its Task's invocation.
     Flow {
         task: Box<Task>,
-        position: FlowPosition,
+        position: Box<FlowInvocation>,
         run_id: RunId,
     },
 }
@@ -356,7 +355,7 @@ fn keyed_ask_id(key: &str) -> Result<String> {
 pub(crate) async fn task_unblock(
     store: &SharedStore,
     task: &Task,
-    position: &FlowPosition,
+    position: &FlowInvocation,
 ) -> Result<(String, Option<String>)> {
     let failure = position
         .failure
@@ -368,7 +367,7 @@ pub(crate) async fn task_unblock(
         .ok_or_else(|| anyhow!("Task blocker has no Run"))?;
     // A replacement invocation must not acquire an obsolete unblock Session.
     anyhow::ensure!(
-        store.flow_position(&task.id).await?.as_ref() == Some(position),
+        store.task_flow(&task.id).await?.as_ref() == Some(position),
         "Task failure changed before opening unblock"
     );
     let id = keyed_ask_id(&task_unblock_key(position)?)?;
@@ -409,14 +408,14 @@ pub(crate) async fn task_unblock(
     Ok((session.id, feedback))
 }
 
-pub(crate) fn task_unblock_key(position: &FlowPosition) -> Result<String> {
+pub(crate) fn task_unblock_key(position: &FlowInvocation) -> Result<String> {
     position.blocker_key()
 }
 
 /// The unblock Session the current decision Run waits on, if one is open.
 pub(crate) async fn task_waiting_unblock(
     store: &SharedStore,
-    position: &FlowPosition,
+    position: &FlowInvocation,
 ) -> Result<Option<String>> {
     if !position.is_decision() {
         return Ok(None);
@@ -424,7 +423,7 @@ pub(crate) async fn task_waiting_unblock(
     let Some(run) = position
         .claim
         .as_ref()
-        .and_then(|claim| claim.worker_run_id.as_ref())
+        .and_then(|_| position.session_run_id())
     else {
         return Ok(None);
     };
@@ -556,10 +555,10 @@ pub(crate) fn prepare_run(run: Run, flow: crate::run_record::RunFlowMembership) 
 pub(crate) async fn prepare(
     store: &SharedStore,
     task: &Task,
-    position: &FlowPosition,
+    position: &FlowInvocation,
 ) -> Result<SessionRecord> {
     validate_task_position(task, position)?;
-    let placement = store.placement(&position.work()).await?;
+    let placement = store.placement(&WorkRef::Task(task.id.clone())).await?;
     let home = store
         .home_by_id(&placement.home_id)
         .await?
@@ -567,7 +566,7 @@ pub(crate) async fn prepare(
     if home.route != "local" {
         bail!("session starts on its placed Home; resume the Task there");
     }
-    if position.session_run_id.is_none() {
+    if position.session_run_id().is_none() {
         select_review_agent(store, task, position).await?;
         launch_flow(task, position).await?;
     }
@@ -580,7 +579,7 @@ pub(crate) async fn prepare(
 pub(crate) async fn select_review_agent(
     store: &SharedStore,
     task: &Task,
-    position: &FlowPosition,
+    position: &FlowInvocation,
 ) -> Result<String> {
     let task = store.get_task(&task.id).await?.ok_or_else(|| {
         anyhow!(
@@ -606,9 +605,9 @@ pub(crate) async fn select_review_agent(
 /// A changed Task choice applies to a review that has not launched.
 pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Task) -> Result<()> {
     if let Some(position) = store
-        .flow_position(&task.id)
+        .task_flow(&task.id)
         .await?
-        .filter(FlowPosition::is_human)
+        .filter(FlowInvocation::is_human)
     {
         select_review_agent(store, task, &position).await?;
     }
@@ -620,12 +619,12 @@ pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Ta
 async fn managed_review(
     store: &SharedStore,
     run: &Run,
-) -> crate::store::StoreResult<Option<(crate::durable::TaskId, FlowPosition)>> {
+) -> crate::store::StoreResult<Option<(crate::durable::TaskId, FlowInvocation)>> {
     let (Some(task_id), Some(invocation)) = (&run.task_id, &run.invocation_id) else {
         return Ok(None);
     };
     Ok(store
-        .flow_position(task_id)
+        .task_flow(task_id)
         .await?
         .filter(|position| position.invocation.id == *invocation)
         .map(|position| (task_id.clone(), position)))
@@ -692,7 +691,7 @@ async fn owned_target(
         }
         return Ok(SessionTarget::Row {
             session,
-            run: current,
+            run: Box::new(current),
         });
     };
     if flow_id(&position)? != session.id {
@@ -707,7 +706,7 @@ async fn owned_target(
         .await?
         .ok_or_else(|| session_not_found(&session.id))?;
     if latest.current_run_id != current.id
-        || (current.published && position.session_run_id.as_ref() != Some(&current.id))
+        || (current.published && position.session_run_id() != Some(&current.id))
     {
         bail!(
             "Session {} changed its current Run during lookup; open the Session again",
@@ -716,7 +715,7 @@ async fn owned_target(
     }
     Ok(SessionTarget::Flow {
         task: Box::new(task),
-        position,
+        position: Box::new(position),
         run_id: current.id.clone(),
     })
 }
@@ -780,7 +779,7 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     Ok(())
 }
 
-async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition) -> Result<()> {
+async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowInvocation) -> Result<()> {
     let token = flow_token(task, position)?;
     let lock_id = flow_id(position)?;
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
@@ -789,7 +788,7 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition
         .get_task(&token.task_id)
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared after review completion", token.task_id))?;
-    let launch = if store.flow_position(&task.id).await?.is_some() {
+    let launch = if store.task_flow(&task.id).await?.is_some() {
         crate::ops::task::launch_task_process(store, &mut task, None)
             .await
             .map_err(|error| anyhow!(error.to_string()))
@@ -808,16 +807,14 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition
 
 pub(crate) async fn require_current_review_actor(
     store: &SharedStore,
-    position: &FlowPosition,
+    position: &FlowInvocation,
 ) -> Result<()> {
     let Ok(active) = active_run_id() else {
         return Ok(());
     };
     let id = flow_id(position)?;
     let history = store.session_runs(&id).await?;
-    if history.iter().any(|run| run.id == active)
-        && position.session_run_id.as_ref() != Some(&active)
-    {
+    if history.iter().any(|run| run.id == active) && position.session_run_id() != Some(&active) {
         bail!("superseded review Run cannot complete this Session");
     }
     Ok(())
@@ -838,12 +835,12 @@ pub(crate) async fn completion_worktree(
     }
 }
 
-async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowPosition) {
-    let Some(run_id) = position.session_run_id.clone() else {
+async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowInvocation) {
+    let Some(run_id) = position.session_run_id().cloned() else {
         return;
     };
     let result = async {
-        let placement = store.placement(&position.work()).await?;
+        let placement = store.placement(&WorkRef::Task(task.id.clone())).await?;
         let home = store
             .home_by_id(&placement.home_id)
             .await?
@@ -887,7 +884,7 @@ pub(crate) async fn serve_flow(
         .await?
         .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
     let position = store
-        .flow_position(&task_id)
+        .task_flow(&task_id)
         .await?
         .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
     let token = flow_token(&task, &position)?;
@@ -901,10 +898,10 @@ pub(crate) async fn serve_flow(
     }
     let launch_lock = lock_session_launch(&flow_token_id(&token))?;
     let current = store
-        .flow_position(&task_id)
+        .task_flow(&task_id)
         .await?
         .ok_or_else(|| anyhow!("review is no longer waiting"))?;
-    if current.session_run_id.is_some() {
+    if current.session_run_id().is_some() {
         return Ok(());
     }
     serve_flow_locked(store, token, &current, launch_lock)
@@ -915,7 +912,7 @@ pub(crate) async fn serve_flow(
 async fn serve_flow_locked(
     store: SharedStore,
     token: FlowSessionToken,
-    position: &FlowPosition,
+    position: &FlowInvocation,
     launch_lock: File,
 ) -> Result<RunId> {
     let task = store
@@ -1299,10 +1296,10 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<RunId> {
 async fn open_flow_locked(
     store: &SharedStore,
     task: &Task,
-    position: &FlowPosition,
+    position: &FlowInvocation,
     launch_lock: File,
 ) -> Result<RunId> {
-    let previous = position.session_run_id.clone();
+    let previous = position.session_run_id().cloned();
     let token = flow_token(task, position)?;
     let mut launch_lock = Some(launch_lock);
     if let Some(run_id) = &previous {
@@ -1417,7 +1414,7 @@ async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<Se
         (Some(_), Ok(Some((_, position))))
             if flow_id(&position).ok().as_deref() == Some(&session.id) =>
         {
-            SessionFlowMembership::of_position(&position)
+            SessionFlowMembership::of_position(&position)?
         }
         (Some(_), Ok(Some(_))) => SessionFlowMembership::Unknown {
             reason: "Run membership evidence is unavailable".into(),
@@ -1713,7 +1710,7 @@ pub(crate) async fn token_is_current(
     token: &FlowSessionToken,
 ) -> Result<bool> {
     Ok(store
-        .flow_position(&token.task_id)
+        .task_flow(&token.task_id)
         .await?
         .as_ref()
         .is_some_and(|position| token_matches(token, position)))
@@ -1722,7 +1719,7 @@ pub(crate) async fn token_is_current(
 async fn flow_surface(
     store: &SharedStore,
     task: &Task,
-    position: &FlowPosition,
+    position: &FlowInvocation,
 ) -> Result<SessionRecord> {
     validate_task_position(task, position)?;
     let id = flow_id(position)?;
@@ -1762,8 +1759,8 @@ pub(crate) fn human_open_argv(
     Ok(argv)
 }
 
-fn validate_task_position(task: &Task, position: &FlowPosition) -> Result<()> {
-    if position.task_id != task.id || !position.is_human() {
+fn validate_task_position(task: &Task, position: &FlowInvocation) -> Result<()> {
+    if position.task_id.as_ref() != Some(&task.id) || !position.is_human() {
         return Err(anyhow!("session does not belong to Task {}", task.id));
     }
     let step = position.current();
@@ -1785,7 +1782,7 @@ async fn validate_token(store: &SharedStore, token: &FlowSessionToken) -> Result
     }
 }
 
-fn flow_token(task: &Task, position: &FlowPosition) -> Result<FlowSessionToken> {
+fn flow_token(task: &Task, position: &FlowInvocation) -> Result<FlowSessionToken> {
     validate_task_position(task, position)?;
     let step = position.current();
     let crate::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
@@ -1801,9 +1798,9 @@ fn flow_token(task: &Task, position: &FlowPosition) -> Result<FlowSessionToken> 
     })
 }
 
-fn token_matches(token: &FlowSessionToken, position: &FlowPosition) -> bool {
+fn token_matches(token: &FlowSessionToken, position: &FlowInvocation) -> bool {
     let step = position.current();
-    position.task_id == token.task_id
+    position.task_id.as_ref() == Some(&token.task_id)
         && position.invocation.id == token.invocation_id
         && step.human
         && step.flow == token.flow
@@ -1827,7 +1824,7 @@ fn ask_message(request: &str) -> String {
     )
 }
 
-async fn launch_flow(task: &Task, position: &FlowPosition) -> Result<()> {
+async fn launch_flow(task: &Task, position: &FlowInvocation) -> Result<()> {
     let step = position.current();
     let node_id = step
         .id
@@ -1934,15 +1931,19 @@ async fn start_durable_session(
     Ok(())
 }
 
-pub(crate) fn flow_id(position: &FlowPosition) -> Result<String> {
+pub(crate) fn flow_id(position: &FlowInvocation) -> Result<String> {
     let step = position.current();
     let node_id = step
         .id
         .as_deref()
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
+    let task = position
+        .task_id
+        .as_ref()
+        .ok_or_else(|| anyhow!("review flow position belongs to no Task"))?;
     Ok(format!(
         "{}:{}:{}:{}:{}",
-        position.task_id, position.invocation.id, step.flow, node_id, position.cursor.iteration
+        task, position.invocation.id, step.flow, node_id, position.cursor.iteration
     ))
 }
 
@@ -1969,10 +1970,13 @@ pub(crate) fn lock_session_launch(id: &str) -> Result<File> {
     Ok(file)
 }
 
-fn flow_background_name(position: &FlowPosition) -> Result<String> {
+fn flow_background_name(position: &FlowInvocation) -> Result<String> {
     let step = position.current();
     Ok(flow_token_background_name(&FlowSessionToken {
-        task_id: position.task_id.clone(),
+        task_id: position
+            .task_id
+            .clone()
+            .ok_or_else(|| anyhow!("review flow position belongs to no Task"))?,
         invocation_id: position.invocation.id.clone(),
         flow: step.flow,
         node_id: step
@@ -2110,7 +2114,7 @@ mod tests {
         serve_ask, session_run_is_resumable, token_matches, wait_for_ask, FlowSessionToken,
         HumanSessionToken, HUMAN_SESSION_ENV,
     };
-    use crate::durable::{FlowPosition, RunId};
+    use crate::durable::{FlowInvocation, RunId};
     use crate::engine::{prepare_launch_prompt, Config, LaunchPromptInput, Surface};
     use crate::lf::{Cli, Commands};
     use crate::run_record::RunManifest;
@@ -2675,9 +2679,8 @@ mod tests {
         );
     }
 
-    fn position() -> FlowPosition {
-        FlowPosition {
-            task_id: TaskId::new(),
+    fn position() -> FlowInvocation {
+        FlowInvocation {
             invocation: crate::durable::test_flow_invocation(
                 "review",
                 1,
@@ -2685,18 +2688,24 @@ mod tests {
                 Some("review_kickoff"),
                 true,
             ),
-            session_run_id: None,
-            ready_summary: None,
             cursor: crate::engine::ExecutionCursor {
                 index: 1,
                 iteration: 3,
                 ..Default::default()
             },
             version: 0,
+            task_id: Some(TaskId::new()),
+            wave_id: None,
+            cwd: "/repo".into(),
+            message: None,
+            model: None,
+            current_attempt: None,
+            pending_session_id: None,
+            ready_summary: None,
             worker_generation: 0,
             claim: None,
             failure: None,
-
+            finished: false,
             updated_at: time::OffsetDateTime::now_utc(),
         }
     }
@@ -2755,13 +2764,13 @@ mod tests {
         assert_eq!(expected, "1/fix/1");
         let super::SessionFlowMembership::Step {
             node, iterations, ..
-        } = super::SessionFlowMembership::of_position(&position)
+        } = super::SessionFlowMembership::of_position(&position).unwrap()
         else {
             panic!("step")
         };
         assert_eq!(node.as_ref(), Some(expected));
         assert_eq!(iterations, Some(vec![vec![5], vec![2]]));
-        let captured = RunFlowStep::of(&position, None);
+        let captured = RunFlowStep::of(&position).unwrap();
         assert_eq!(captured.node.as_ref(), Some(expected));
         assert_eq!(captured.iterations, iterations);
 
@@ -2783,7 +2792,7 @@ mod tests {
         let position = position();
         let step = position.current();
         let token = FlowSessionToken {
-            task_id: position.task_id.clone(),
+            task_id: position.task_id.clone().unwrap(),
             invocation_id: position.invocation.id.clone(),
             flow: step.flow,
             node_id: step.id.unwrap(),
@@ -2816,7 +2825,7 @@ mod tests {
         let planned_skill = planned.skill.clone();
         let step = position.current();
         let token = FlowSessionToken {
-            task_id: position.task_id.clone(),
+            task_id: position.task_id.clone().unwrap(),
             invocation_id: position.invocation.id.clone(),
             flow: step.flow,
             node_id: step.id.unwrap(),

@@ -790,6 +790,7 @@ fn begin_run_capture(
         .cloned()
         .map(crate::run_record::SubjectAttribution::declared)
         .collect::<Vec<_>>();
+    let step = crate::ops::flow_run::capture_membership()?;
     let spec = crate::run_record::RunSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
@@ -799,10 +800,30 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
-        flow: crate::ops::flow_run::capture_membership()?,
+        flow: step.membership,
         work: built.work.clone(),
     };
-    let capture = if let Some((run_id, membership)) = crate::ops::human_session::reserved_run()? {
+    let capture = if let Some((token, run_id)) = step.reserved {
+        // The Flow driver reserved this step's Run; the launch publishes it.
+        let (provider, model) = (spec.harness.clone(), spec.model.clone());
+        crate::run_record::CaptureHandle::begin_reserved_with_context(
+            spec,
+            run_id,
+            &built.context,
+            |run_id| {
+                let path = crate::store::observability_database_path()
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+                crate::store::sqlite::SqliteStore::new(&path)?.publish_attempt(
+                    &token.invocation,
+                    token.version,
+                    run_id,
+                    None,
+                    &provider,
+                    model.as_deref(),
+                )
+            },
+        )
+    } else if let Some((run_id, membership)) = crate::ops::human_session::reserved_run()? {
         let spec = crate::run_record::RunSpec {
             flow: membership,
             ..spec

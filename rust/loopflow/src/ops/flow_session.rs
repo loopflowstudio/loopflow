@@ -32,7 +32,7 @@ pub(crate) fn pinned_skill(session_id: &str, requested: &str) -> Result<Skill> {
 }
 
 pub(crate) async fn membership(store: &SharedStore, session_id: &str) -> Result<RunFlowMembership> {
-    Ok(RunFlowMembership::Step(RunFlowStep::of_flow(
+    Ok(RunFlowMembership::Step(RunFlowStep::of(
         &store.waiting_review(session_id).await?,
     )?))
 }
@@ -75,7 +75,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowInvocation) -> Resul
                     caller_run_id: None,
                     ended: None,
                 },
-                RunFlowMembership::Step(RunFlowStep::of_flow(flow)?),
+                RunFlowMembership::Step(RunFlowStep::of(flow)?),
             )?;
             let session = Session {
                 id,
@@ -228,8 +228,12 @@ mod tests {
                     model: None,
                     current_attempt: None,
                     pending_session_id: None,
+                    ready_summary: None,
+                    worker_generation: 0,
+                    claim: None,
                     failure: None,
                     finished: false,
+                    updated_at: time::OffsetDateTime::now_utc(),
                 })
                 .await
                 .unwrap();

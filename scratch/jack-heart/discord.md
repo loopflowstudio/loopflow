@@ -13,11 +13,12 @@ changed by this analysis or branch preparation. The accepted product designs
 remain archived in `../discord.md`, `../task-automation.md`, and
 `../recursive-vsm.md`; their destination worktrees own implementation.
 
-## Branch scope and implementation design
+## Historical branch scope and implementation design
 
-This worktree (`loopflow.discord`, branch `jack-heart/discord`) now owns reliable
-access to existing reviews across installation changes and diagnosable Session
-startup. Keep the existing branch and checkout; their names need not change.
+Before the transfer above, this worktree (`loopflow.discord`, branch
+`jack-heart/discord`) was assigned reliable access to existing reviews across
+installation changes and diagnosable Session startup. The design below records
+that assignment; implementation now belongs to `loopflow.session-launch-hardening`.
 LOO-332 retains scheduled Task delivery; LOO-333 retains recursive Wave/VSM
 operation. LOO-298 retains the Session/Run/Exec data model. No new Task was filed.
 

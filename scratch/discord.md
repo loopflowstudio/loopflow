@@ -1,16 +1,18 @@
 # Scheduled Task, Wave and repository operation
 
-Source provenance only: LOO-332 and LOO-333 own the transferred product work.
-Jack has since assigned this checkout to review-launch and installation
-continuity hardening. Its current branch design and RCA are in
-[jack-heart/discord.md](jack-heart/discord.md).
+Archived source: LOO-332 and LOO-333 own the transferred product work in
+`loopflow.scheduled-task-operation` and `loopflow.recursive-vsm-operation`.
+Review-launch and installation continuity hardening subsequently moved to
+`loopflow.session-launch-hardening`; [the retained RCA](jack-heart/discord.md)
+records that transfer. This checkout preserves decisions and provenance; the
+destination designs own implementation.
 
 2026-09-28. Accepted product direction from the design conversation with Jack
 Heart; implementation choices remain marked as proposals. Jack invoked
 launch-plan, selected Product ownership, and requested a base on LOO-298.
 LOO-298 retains ownership of its data-model and daemon deletion work.
 
-## Execution decision
+## Recorded execution decision
 
 This is an additive series. The single-threaded core is defined fully in
 [Task automation through verified landing](task-automation.md): finite Task
@@ -540,7 +542,7 @@ from no new input. No continuous polling bridge is required for this path.
 ## Remaining implementation decisions
 
 The two selected designs resolve execution scope and defaults for their workers.
-`questions.md` distinguishes those choices from deferred chat details. Reuse
+`operation-questions.md` distinguishes those choices from deferred chat details. Reuse
 LOO-298's final execution records and claims. The launch-plan invocation
 authorizes Task filing/preparation and execution through the selected Flows;
 it does not install jobs or provision Discord in this conversation.

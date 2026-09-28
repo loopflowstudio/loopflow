@@ -1,5 +1,10 @@
 # Open design questions
 
+> Archived source discussion. Current assumptions and decisions belong to
+> `scratch/operation-questions.md` in `loopflow.scheduled-task-operation` (LOO-332)
+> and `loopflow.recursive-vsm-operation` (LOO-333). These notes do not assign work
+> back to this checkout.
+
 2026-09-28 — Scheduled Task, Wave and repository operation, discussed with Jack Heart.
 
 Launch-plan decision: Product owns the core, per Jack. Core defaults and proof

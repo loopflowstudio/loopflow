@@ -1,5 +1,9 @@
 # Task automation through verified landing
 
+> Archived launch design for LOO-332. Implementation and current evidence belong
+> to `/Users/jack/src/loopflow.scheduled-task-operation/scratch/task-automation.md`.
+> The execution instructions below record the original handoff.
+
 2026-09-28 · Jack Heart · Product · Launch-plan core
 
 ## What to build

@@ -1,5 +1,9 @@
 # Recursive Wave operation and repository VSM
 
+> Archived launch design for LOO-333. Implementation and current evidence belong
+> to `/Users/jack/src/loopflow.recursive-vsm-operation/scratch/recursive-vsm.md`.
+> The execution instructions below record the original handoff.
+
 2026-09-28 · Jack Heart · Product · Independent launch-plan outcome
 
 ## What to build

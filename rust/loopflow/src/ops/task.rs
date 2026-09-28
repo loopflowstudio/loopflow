@@ -5329,14 +5329,20 @@ mod tests {
         task_fixture_at(identifier, repository).await
     }
 
-    async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowPosition {
+    async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowInvocation {
         let started_at = time::OffsetDateTime::now_utc().unix_timestamp();
         let position = fixture
             .store
-            .set_flow_position(
+            .start_task_flow(
                 &fixture.task.id,
-                crate::durable::FlowPosition {
-                    task_id: fixture.task.id.clone(),
+                crate::durable::FlowInvocation {
+                    task_id: Some(fixture.task.id.clone()),
+                    wave_id: Some(fixture.task.wave_id.clone()),
+                    cwd: fixture.task.worktree.clone(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    finished: false,
                     invocation: crate::durable::test_flow_invocation(
                         "code",
                         0,
@@ -5344,7 +5350,7 @@ mod tests {
                         None,
                         false,
                     ),
-                    session_run_id: None,
+                    pending_session_id: None,
                     ready_summary: None,
                     cursor: Default::default(),
                     version: 0,
@@ -5375,7 +5381,7 @@ mod tests {
             .unwrap();
         let claimed = fixture
             .store
-            .flow_position(&fixture.task.id)
+            .task_flow(&fixture.task.id)
             .await
             .unwrap()
             .unwrap();
@@ -5383,7 +5389,7 @@ mod tests {
         claimed
     }
 
-    fn record_stop_process(home: &std::path::Path, position: &crate::durable::FlowPosition) {
+    fn record_stop_process(home: &std::path::Path, position: &crate::durable::FlowInvocation) {
         let owner = &position.claim.as_ref().unwrap().owner;
         let root = home.join(crate::journal::EXEC_PROCESS_ROOT);
         std::fs::create_dir_all(&root).unwrap();
@@ -5428,7 +5434,7 @@ mod tests {
             .await
             .is_err());
         assert_eq!(
-            fixture.store.flow_position(&fixture.task.id).await.unwrap(),
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
             Some(position)
         );
         assert_eq!(
@@ -5476,7 +5482,7 @@ mod tests {
             .unwrap();
         assert!(fixture
             .store
-            .flow_position(&fixture.task.id)
+            .task_flow(&fixture.task.id)
             .await
             .unwrap()
             .is_none());
@@ -5521,7 +5527,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             fixture
                 .store
-                .release_task_worker(&fixture.task.id, position.claim.as_ref().unwrap())
+                .release_flow(position.id(), position.version, position.claim.as_ref())
                 .await
                 .unwrap()
         };
@@ -5534,7 +5540,7 @@ mod tests {
         assert!(child.try_wait().unwrap().is_none());
         child.kill().await.unwrap();
         assert_eq!(
-            fixture.store.flow_position(&fixture.task.id).await.unwrap(),
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
             Some(released)
         );
     }
@@ -5554,7 +5560,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             let released = fixture
                 .store
-                .release_task_worker(&fixture.task.id, position.claim.as_ref().unwrap())
+                .release_flow(position.id(), position.version, position.claim.as_ref())
                 .await
                 .unwrap();
             let mut owner = position.claim.as_ref().unwrap().owner.clone();
@@ -5572,7 +5578,7 @@ mod tests {
                 .unwrap();
             fixture
                 .store
-                .flow_position(&fixture.task.id)
+                .task_flow(&fixture.task.id)
                 .await
                 .unwrap()
                 .unwrap()
@@ -5585,7 +5591,7 @@ mod tests {
         assert!(child.try_wait().unwrap().is_none());
         child.kill().await.unwrap();
         assert_eq!(
-            fixture.store.flow_position(&fixture.task.id).await.unwrap(),
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
             Some(replacement)
         );
     }
@@ -5597,7 +5603,7 @@ mod tests {
         let position = claim_stop_fixture(&fixture, std::process::id()).await;
         let released = fixture
             .store
-            .release_task_worker(&fixture.task.id, position.claim.as_ref().unwrap())
+            .release_flow(position.id(), position.version, position.claim.as_ref())
             .await
             .unwrap();
         let stopped = super::stop_task_worker(&fixture.store, &fixture.task)
@@ -5608,7 +5614,7 @@ mod tests {
         replacement.invocation.id = "replacement-invocation".into();
         let replacement = fixture
             .store
-            .set_flow_position(&fixture.task.id, replacement)
+            .start_task_flow(&fixture.task.id, replacement)
             .await
             .unwrap();
         let events = fixture
@@ -5622,7 +5628,7 @@ mod tests {
             .await
             .is_err());
         assert_eq!(
-            fixture.store.flow_position(&fixture.task.id).await.unwrap(),
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
             Some(replacement.clone())
         );
         assert_eq!(
@@ -5648,7 +5654,7 @@ mod tests {
             WorkStatus::Abandoned
         );
         assert_eq!(
-            fixture.store.flow_position(&fixture.task.id).await.unwrap(),
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
             Some(replacement)
         );
     }

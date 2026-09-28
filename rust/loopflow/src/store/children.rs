@@ -6,8 +6,8 @@ use crate::work::project::{
     ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
-    PmWritebackState, LinearObservationApply, LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
+    LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 

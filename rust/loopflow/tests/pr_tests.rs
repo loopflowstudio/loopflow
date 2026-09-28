@@ -6,7 +6,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::durable::{FlowPosition, WorkStatus};
+use loopflow::durable::{FlowInvocation, WorkStatus};
 use loopflow::engine::flow::Op;
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
@@ -1179,27 +1179,38 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let position = FlowPosition {
-        task_id: task.task.id.clone(),
+    let position = FlowInvocation {
         invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
-        session_run_id: None,
-        ready_summary: None,
         cursor: loopflow::engine::ExecutionCursor {
             index: 1,
             iteration: 0,
             ..Default::default()
         },
         version: 0,
+        task_id: Some(task.task.id.clone()),
+        wave_id: Some(task.task.wave_id.clone()),
+        cwd: task.task.worktree.clone(),
+        message: None,
+        model: None,
+        current_attempt: None,
+        pending_session_id: None,
+        ready_summary: None,
         worker_generation: 0,
         claim: None,
         failure: None,
-
+        finished: false,
         updated_at: now,
     };
     assert!(position.is_human());
     let position = runtime
-        .block_on(task.store.set_flow_position(&task.task.id, position))
+        .block_on(task.store.start_task_flow(&task.task.id, position))
         .expect("persist review boundary");
+    let position = runtime
+        .block_on(
+            task.store
+                .reserve_task_review(position.id(), position.version),
+        )
+        .expect("reserve the review Session");
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
@@ -1220,13 +1231,13 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let result: loopflow::ops::task::TaskSnapshot = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result.task_id, task.task.id.to_string());
     let resumed = runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .expect("review boundary remains available");
     assert_eq!(resumed.invocation, position.invocation);
     assert_eq!(resumed.cursor, position.cursor);
     assert!(resumed.is_human());
-    assert!(resumed.session_run_id.is_some());
+    assert!(resumed.pending_session_id.is_some());
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))

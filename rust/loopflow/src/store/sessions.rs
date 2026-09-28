@@ -1,4 +1,4 @@
-use crate::durable::{FlowInvocation, FlowPosition, RunId, TaskId};
+use crate::durable::{FlowInvocation, RunId, TaskId};
 use crate::session::{Run, Session, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -6,8 +6,8 @@ use super::{run_sqlite, Store, StoreResult};
 impl Store {
     pub async fn reserve_review_run(
         &self,
-        expected: &FlowPosition,
-    ) -> StoreResult<(FlowPosition, Run)> {
+        expected: &FlowInvocation,
+    ) -> StoreResult<(FlowInvocation, Run)> {
         let expected = expected.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_review_run(&expected)
@@ -118,11 +118,6 @@ impl Store {
     pub async fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
         let session_id = session_id.to_string();
         run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
-    }
-
-    pub async fn end_flow(&self, invocation: &str) -> StoreResult<()> {
-        let invocation = invocation.to_string();
-        run_sqlite(&self.sqlite, move |store| store.end_flow(&invocation)).await
     }
 
     pub async fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {

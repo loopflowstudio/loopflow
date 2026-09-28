@@ -1106,7 +1106,7 @@ pub(crate) async fn task_launch_refusal(
     store: &SharedStore,
     task: &Task,
 ) -> crate::store::StoreResult<Option<String>> {
-    let position = store.flow_position(&task.id).await?;
+    let position = store.task_flow(&task.id).await?;
     let skill = position.as_ref().and_then(|position| {
         crate::engine::current_skill(&position.invocation.steps, &position.cursor)
     });
@@ -2419,7 +2419,10 @@ pub(crate) fn abandon_task_pr(
 }
 
 async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {
-    let position = store.flow_position(&task.id).await.map_err(task_error)?;
+    let position = store
+        .task_flow(&task.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     Ok(position
         .and_then(|position| position.claim)
         .is_some_and(|claim| {
@@ -2431,8 +2434,11 @@ async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {
 async fn stop_task_worker(
     store: &SharedStore,
     task: &Task,
-) -> OpsResult<Option<crate::durable::FlowPosition>> {
-    let position = store.flow_position(&task.id).await.map_err(task_error)?;
+) -> OpsResult<Option<crate::durable::FlowInvocation>> {
+    let position = store
+        .task_flow(&task.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     let Some(claim) = position
         .as_ref()
         .and_then(|position| position.claim.as_ref())
@@ -2450,7 +2456,10 @@ async fn stop_task_worker(
     let termination_deadline = graceful_deadline + Duration::from_secs(3);
     let mut signaled = false;
     loop {
-        let current = store.flow_position(&task.id).await.map_err(task_error)?;
+        let current = store
+            .task_flow(&task.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
         if current.as_ref().is_some_and(|current| {
             current.invocation.id != claim.invocation_id
                 || current.claim.as_ref().is_some_and(|active| active != claim)
@@ -2475,7 +2484,7 @@ async fn stop_task_worker(
                     .is_some_and(|current| current.claim.is_some())
                 {
                     store
-                        .release_task_worker(&task.id, claim)
+                        .release_flow(&claim.invocation_id, claim.position_version, Some(claim))
                         .await
                         .map(Some)
                         .map_err(task_error)
@@ -2545,7 +2554,7 @@ pub(crate) async fn launch_task_process(
     })?;
     let claim = match store
         .claim_task_worker(
-            &position.task_id,
+            &task.id,
             &position.invocation.id,
             position.version,
             &owner,
@@ -2562,33 +2571,11 @@ pub(crate) async fn launch_task_process(
                     return Ok(());
                 }
                 crate::journal::ProcessIdentityEvidence::Dead => {
-                    // A saved candidate still belongs to the old Run. Settle its
-                    // successful receipt before replacing that binding.
-                    let current = store
-                        .flow_position(&task.id)
-                        .await
-                        .map_err(task_error)?
-                        .ok_or_else(|| task_error("Task Flow disappeared during recovery"))?;
-                    if current.claim.as_ref() != Some(&claim) {
-                        return Err(task_error("Task worker changed during recovery; retry"));
-                    }
-                    if current.has_pending_decision() {
-                        crate::controller::task::recover_task_decision(store, task, &current)
-                            .await
-                            .map_err(task_error)?;
-                        if store
-                            .flow_position(&task.id)
-                            .await
-                            .map_err(task_error)?
-                            .is_none()
-                        {
-                            return Ok(());
-                        }
-                        return Box::pin(launch_task_process(store, task, None)).await;
-                    }
+                    // The dead worker's unfinished attempt ends; a decision it
+                    // recorded stays for the new worker to settle.
                     store
                         .reclaim_task_worker(
-                            &position.task_id,
+                            &task.id,
                             &claim,
                             &owner,
                             time::OffsetDateTime::now_utc(),
@@ -2622,7 +2609,12 @@ pub(crate) async fn launch_task_process(
                     observed_at: time::OffsetDateTime::now_utc(),
                 };
                 store
-                    .block_task_flow(&task.id, &claim, &failure)
+                    .fail_flow(
+                        &position.invocation.id,
+                        position.version,
+                        Some(&claim),
+                        &failure,
+                    )
                     .await
                     .map_err(task_error)?;
                 return Err(task_error(reason));
@@ -2652,13 +2644,15 @@ pub(crate) async fn launch_task_process(
     .await
     {
         store
-            .release_task_worker(&task.id, &claim)
+            .release_flow(&position.invocation.id, position.version, Some(&claim))
             .await
             .map_err(task_error)?;
         return Err(task_error(error));
     }
     if let Err(error) = wait_until_running(store, &task.id).await {
-        let _ = store.release_task_worker(&task.id, &claim).await;
+        let _ = store
+            .release_flow(&position.invocation.id, position.version, Some(&claim))
+            .await;
         return Err(error);
     }
     Ok(())
@@ -2686,17 +2680,14 @@ async fn wait_until_running(
             .map_err(|error| task_error(format!("failed to observe task startup: {error}")))?
             .ok_or_else(|| task_error("task disappeared during startup"))?;
         let position = store
-            .flow_position(&task.id)
+            .task_flow(&task.id)
             .await
             .map_err(|error| task_error(format!("failed to observe task startup: {error}")))?;
         // A finite Flow may finish and remove its position before the first poll.
         if position.is_none()
             || position.as_ref().is_some_and(|position| {
                 position.is_human()
-                    || position
-                        .claim
-                        .as_ref()
-                        .is_some_and(|claim| claim.worker_run_id.is_some())
+                    || (position.claim.is_some() && position.session_run_id().is_some())
             })
         {
             return Ok(task);
@@ -4233,7 +4224,10 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .work_status(&work)
             .await
             .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-        let position = store.flow_position(&task.id).await.map_err(task_error)?;
+        let position = store
+            .task_flow(&task.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
         let skill = position.as_ref().and_then(|position| {
             crate::engine::current_skill(&position.invocation.steps, &position.cursor)
         });
@@ -4940,7 +4934,7 @@ pub(crate) async fn continue_task_async(
             )));
         }
         store
-            .retry_task_flow(&task.id, &position, feedback.as_deref())
+            .retry_flow(&position.invocation.id, feedback.as_deref())
             .await
             .map_err(|error| task_error(format!("failed to retry Task advancement: {error}")))?;
     }
@@ -5510,10 +5504,9 @@ mod tests {
             .await
             .unwrap();
         let position = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                crate::durable::FlowPosition {
-                    task_id: task.id.clone(),
+                crate::durable::FlowInvocation {
                     invocation: crate::durable::test_flow_invocation(
                         "task-design",
                         1,
@@ -5521,21 +5514,31 @@ mod tests {
                         Some("review_kickoff"),
                         true,
                     ),
-                    session_run_id: None,
-                    ready_summary: Some("Ready for review".to_string()),
                     cursor: crate::engine::ExecutionCursor {
                         index: 1,
                         iteration: 0,
                         ..Default::default()
                     },
                     version: 0,
+                    task_id: Some(task.id.clone()),
+                    wave_id: Some(task.wave_id.clone()),
+                    cwd: task.worktree.clone(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    ready_summary: None,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
-
+                    finished: false,
                     updated_at: time::OffsetDateTime::now_utc(),
                 },
             )
+            .await
+            .unwrap();
+        let position = store
+            .reserve_task_review(position.id(), position.version)
             .await
             .unwrap();
         let event_count = store.task_events_after(&task.id, 0).await.unwrap().len();
@@ -5544,36 +5547,41 @@ mod tests {
 
         // A parked human boundary keeps its Session's reserved Run without
         // launching a provider; everything else about the position is untouched.
-        let stored = store.flow_position(&task.id).await.unwrap().unwrap();
+        let stored = store.task_flow(&task.id).await.unwrap().unwrap();
         let sessions = store.open_sessions().await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].1.task_id, Some(task.id.clone()));
         assert!(!sessions[0].1.published);
-        assert_eq!(stored.session_run_id, None);
-        assert_eq!(stored.invocation, position.invocation);
-        assert_eq!(stored.cursor, position.cursor);
-        assert_eq!(stored.ready_summary, position.ready_summary);
-        assert!(stored.failure.is_none());
+        assert_eq!(stored.session_run_id(), None);
+        assert_eq!(stored, position);
         assert_eq!(
             store.task_events_after(&task.id, 0).await.unwrap().len(),
             event_count
         );
 
-        let mut blocked = stored;
-        blocked.failure = Some(crate::durable::TaskFlowBlocker {
-            run_id: None,
-            reason: "Saved instructions are unavailable; explicitly restart this Task".to_string(),
-            restart_required: true,
-            observed_at: time::OffsetDateTime::now_utc(),
-        });
-        let blocked = store.set_flow_position(&task.id, blocked).await.unwrap();
+        let blocked = store
+            .fail_flow(
+                stored.id(),
+                stored.version,
+                None,
+                &crate::durable::TaskFlowBlocker {
+                    run_id: None,
+                    reason: "Saved instructions are unavailable; explicitly restart this Task"
+                        .to_string(),
+                    restart_required: true,
+                    observed_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let event_count = store.task_events_after(&task.id, 0).await.unwrap().len();
 
         let error = launch_task_process(&store, &mut task, None)
             .await
             .unwrap_err();
 
         assert!(error.to_string().contains("explicitly restart this Task"));
-        assert_eq!(store.flow_position(&task.id).await.unwrap(), Some(blocked));
+        assert_eq!(store.task_flow(&task.id).await.unwrap(), Some(blocked));
         assert_eq!(
             store.task_events_after(&task.id, 0).await.unwrap().len(),
             event_count
@@ -5599,7 +5607,7 @@ mod tests {
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(stored_task.id, task.id);
-        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
         assert_eq!(
             store.active_task_pr(&task.id).await.unwrap().unwrap().id,
             prior_pr.id
@@ -6465,7 +6473,7 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
     }
 
     #[tokio::test]

@@ -670,3 +670,156 @@ change beyond what main brought.
 
 **Not proven.** A Task review launched through the real `lf session serve-flow`
 with `--model`; the unblock Ask through tmux (the unit stub records launches).
+
+## 2026-09-27 · H3 · one Task/saved Flow executor
+
+H3 is implemented locally for the supervisor's rebase, then review-slice. Jack
+requested Codex take over the stopped Claude worker and finish only H3. No
+publication, rebase, installation, installed-Home access by a branch binary,
+Cut I or H4 was performed. H7 remains governed by `../chapters.md`.
+
+Before editing, Codex saved all 30 stopped-worker paths, their hashes and the
+binary diff in ignored `.lf/tmp/h3-codex-recovery/` (`stopped-worker.tar.gz`,
+`source-hashes.json`, `working.patch`). H3's base is `097fc32a99a284eb2ef3f9efc7343df101424709`.
+The original worker's transcript and logs remain unchanged at the supplied
+`9cfe1e56-e5e1-4bde-957b-2f6476ba61e1` session / `agent-af8f21e89d66e5c3c` paths.
+
+### Owners and behavior
+
+- `CliFlowExecutor` is the one production `SkillExecutor`. The Task launcher
+  supplies its harness, selected agent/account, steer polling, attachment,
+  stall observation and review checkpoint policy. The saved launcher supplies
+  ordinary CLI launches. `StepLauncher` has these two production implementations;
+  neither owns a cursor or settlement fence. It is launch policy, not an adapter
+  retaining the former Task driver.
+- `FlowInvocation` replaces `FlowPosition`; one SELECT and decoder read both
+  kinds. Cursor writes, failure/retry, current-attempt authority and operation
+  Runs use `store/sqlite/flows.rs`, with the Task claim as an optional predicate.
+  The shared driver verifies its claim before outcome recovery can write.
+- Claiming a Task reserves its unpublished Run in the same transaction. The
+  launcher publishes that exact Run. `current_run_id` replaces the claim's
+  duplicate `worker_run_id`. Outcomes recover from Run rows.
+- A Task invocation stores NULL cwd; the SELECT joins `tasks.worktree` and a
+  trigger rejects a competing stored cwd. Invocation-addressed resume of the
+  Task's managed Flow uses Task resume, preserving agent and unblock policy.
+  `--retry` cannot bypass a restart-only Task failure or required feedback.
+- Choosing a different Flow replaces the unclaimed managed invocation and
+  changes the Task pointer atomically. Choosing the same name resumes its
+  capture. A held worker claim requires stopping the worker first. Other Flows
+  attributed to that Task stay intact. There is no runtime-child invocation
+  tree yet; this cut replaces the extant root, not an unimplemented tree.
+- Started reads `tasks.started_at`, including a reservation. Wave chat projects
+  the column through its existing renderer, keeping historical event IDs (zero
+  identifies a new column-derived observation). Rendering is idempotent and
+  does not queue governance work, live or after replay. The Started trigger is
+  gone. Historical Started events remain retirement evidence only; no Run is
+  invented for them and they cannot turn the current Started column on.
+
+### Deletions checked against H3's base
+
+All 15 names below existed in the base and have zero references in current
+Rust source. No production file was deleted; moving code is counted on both
+sides of the line measurement.
+
+| Removed | Surviving operation |
+| --- | --- |
+| `FlowPosition`, `read_flow_position_row`, `flow_position_in` | `FlowInvocation`, one Flow SELECT/decoder |
+| `set_flow_position_in` | `insert_flow_in`, `write_cursor_in` |
+| `settle_task_worker_in`, `block_task_flow_in`, `release_task_worker_in` | shared checkpoint, failure and release transactions |
+| `claimed_position_in` | shared version/claim/current-attempt checks |
+| `record_flow_verdict`, `record_flow_route` | invocation-keyed decision/path writes |
+| `bind_task_worker_run` | claim reservation plus `publish_attempt` |
+| `recover_task_decision` | `settle_attempt_in`, reading Run outcome |
+| `run_task_op_boundary`, `run_task_flow_op` | shared executor `run_op` |
+| `finish_task_flow_turn` | engine traversal and shared driver |
+
+Also removed: the controller's production `cursor.finish` traversal, the
+None-token Task fallbacks for decide/route/blocked, the claim's Run copy, the
+`RunFlowStep.task_id` "stored at claim" flag behavior, and the Started event
+trigger. Historical Started decoding remains. `record_task_start` had already
+been removed before H3 and is not counted as this cut's deletion.
+
+Measurement uses the retained `review-lines.py` method: Rust/Swift non-test
+prefixes, excluding test files and trailing test modules, retaining inline test
+helpers. Against H3's base: **+2,151 / −2,714 = −563**, 25 production files.
+The new SQL draft adds **21 lines** (net −542 including SQL). `human_session.rs`
+has **2,068** lines before its trailing test module. Whole branch against
+`90a232aaf`: **+6,461 / −5,068 = +1,393**, 47 production files. These are not
+whole-file or semantic-path counts. Exact file counts are retained in ignored
+`line-counts.json` beside the backup.
+
+### Counterexamples and repairs
+
+The prior transcript records 24/25 store tests passing with the replacement
+case failing, then 24/34 Task tests passing with ten failures; later retries
+show seven failing review/launch cases and three failing decision/agent cases.
+Those failures preceded its final green receipts; they have not been erased or
+claimed as fresh Codex runs. The original final Clippy failed on a large
+SessionTarget variant, an eight-argument cursor writer, and two `Ok(...).unwrap()`
+assertions. Codex boxed the large enum payloads, grouped the existing id/version
+fence as a tuple, and simplified the assertions without lint suppressions.
+
+Codex's new populated migration regression failed with `claim_json = NULL`:
+the stopped draft unconditionally released existing claims. It now removes only
+`worker_run_id` from their JSON; process identity, generation, version, claim
+time and current attempt survive. The regression compares the serialized claim
+exactly, because compare-and-set uses those bytes.
+
+The new CLI proof first queried the wrong field and then exposed the existing
+published-only `runs` inventory. It now checks Task Started through `roadmap`
+before launch, and lists the Run after publication. Its next setup failures
+were a missing Chapter and a registered but nonexistent branch; the fixture
+now creates both. Production inventory was not broadened to make the test pass.
+The initial disposable-source copy also stopped at the Ghostty Gitlink; it was
+recreated completely, with that non-Rust submodule represented by its directory.
+None of these failed setups counts as proof. The documentation check then
+found stale generated architecture HTML. A first generation attempt used the
+root Python environment and failed on missing `fasthtml`; generation under
+`uv run --project website` succeeded, and both documentation checks passed.
+
+Review caught that the new Started projection initially used the observation
+wake path. Live delivery and replay now render it without pending work; a
+focused test proves the distinction. Review also caught internal Task IDs being
+passed to the issue-selector resume API; the invocation route now resolves the
+Task's issue identifier and the real CLI regression proves restart policy holds.
+
+### Proof and boundaries
+
+Resource preflight passed before verification (74.7 GiB free initially, 75.0
+GiB at the later preflight; 64 GiB floor). Every build/test clears inherited
+`LF_*` and `LOOPFLOW_*`, runs at nice +10 with four workers and a 900-second
+phase bound. All fixtures use disposable Homes.
+
+| Evidence | Result and scope |
+| --- | --- |
+| Prior worker `lib.log` | 637 passed, 1,054 skipped; retained receipt, not rerun. Covers selected ops/Run/store/Task/CLI/chat library tests. `cargo.sh` inspected: clears Loopflow authority; command used `-j 4`. |
+| Prior worker `integration.log` | 87 passed, zero skipped across Session cutover/CLI, DTO, Flow, status, Task GitHub/initialization and PR tests. Same retained-receipt boundary. |
+| Fresh focused library/CLI proofs | 40 distinct tests passed across the recorded runs: all 34 existing Task-controller tests; migration preservation; new Flow selection; historical retirement; real CLI claim/worker/resume; existing Task-observation replay; new Started replay. Earlier failed fixture runs remain logged. |
+| Real CLI Task proof | Claim reserves `published=0`; roadmap shows Started; `task __worker` executes the captured operation after the template is removed, publishes and completes the same Run; `runs --task` returns it. A later invocation's restart-only failure survives `flow resume --retry`. The operation is `rebase --plan` in a disposable repo: no real provider or remote mutation is claimed. |
+| Canonical materialization | Disposable source snapshot of 2,079 inputs; 14 drafts materialized as a hypothetical 0.12.23 batch. Populated claim preservation and the two-operation Task consumer both pass (two repeats). This is neither a release frontier nor installed migration acceptance. The later chat-only correction and Task resume selector fix do not alter that migration/operation proof. |
+| Formatting / Clippy | `cargo fmt --all`; `cargo clippy --all-targets -j 4 -- -D warnings` pass. |
+| Documentation | Portable architecture and README/index synchronization: two passed. Generated `docs/architecture.html` refreshed. |
+| Whitespace | `git diff --check` passes. |
+| Architecture | Seven inventories pass; SQLite remains 32/33 with the known `wave_chapters` gap. H7 owns it. |
+| Migration history checker | Fails because `0.12.23.001_release.sql` exists on `origin/main` but not this branch. No release file was copied or rewritten to bypass the required rebase. |
+
+Logs, runner, canonical source snapshot and counts are under ignored
+`.lf/tmp/h3-codex-recovery/`. The 40-test set is incremental proof, not a new
+all-green 637/87 run on the final tree. Task providers, PM and process failures
+in library proofs are simulated. Real configured provider recovery, a real
+five-minute stall, installed Home migration, desktop agreement and the full
+LOO-298 acceptance remain unproven.
+
+### Next review
+
+The supervisor owns `lf rebase`, then review-slice. Reconcile the actual released
+migration frontier before any new migration claim; inspect retained claims,
+late-result/current-attempt fences, managed resume policy and the explicit
+worker-stop requirement for replacing a Flow. The root-only replacement still
+carries the full design's outstanding runtime-child invocation obligation.
+Review the small Started projection with Cut I's pending deletion in mind; H3
+does not begin that deletion. H4 still owns refusal of every unrecorded launch,
+manifest-prefix lookup and prepared-marker removal; H5/H6 own the remaining
+Session/DTO reductions. H7's old Chapter-table proposal is superseded by
+`../chapters.md` (Linear In Progress Projects). No Flow edge or Task completion
+is selected by this checkpoint.

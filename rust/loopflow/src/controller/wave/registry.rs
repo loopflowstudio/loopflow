@@ -282,6 +282,16 @@ impl StoreObserver {
     }
 
     async fn poll_child_observations(&self) {
+        // The journal deduplicates by Task/event identity. New Starts use zero;
+        // imported Starts retain their original event id, without another writer.
+        match self.store.started_task_observations(&self.wave_id).await {
+            Ok(observations) => {
+                for observation in observations {
+                    self.runtime.deliver_task_observation(observation);
+                }
+            }
+            Err(error) => tracing::debug!(%error, "wave observer Task starts read failed"),
+        }
         let recipient = crate::child::ObservationRecipient::Wave {
             wave_id: self.wave_id.clone(),
         };

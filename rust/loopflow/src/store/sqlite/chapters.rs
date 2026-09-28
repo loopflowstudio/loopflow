@@ -106,13 +106,12 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// A Task is started by its first Run, including an unpublished
-    /// reservation, or by a worker claim that has not launched one yet.
+    /// A Task is started by its first Run, the worker claim's unpublished
+    /// reservation included.
     pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND worker_generation>0)
-             OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
             [task.as_str()],
             |row| row.get(0),
         )?)
@@ -121,8 +120,11 @@ impl SqliteStore {
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let begun: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND worker_generation>0)
-             OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
+            // Legacy Starts have not all been imported as Runs. They remain
+            // retirement evidence, never a second definition of current Started.
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
+                 OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
+                    AND json_extract(kind_json,'$.kind')='started')",
             [task.as_str()],
             |row| row.get(0),
         )?;
@@ -130,7 +132,7 @@ impl SqliteStore {
             &format!(
                 "SELECT EXISTS(SELECT 1 FROM flow_invocations
                  WHERE {} AND claim_json IS NOT NULL)",
-                super::durable::TASK_INVOCATION
+                super::flows::TASK_INVOCATION
             ),
             [task.as_str()],
             |row| row.get(0),
@@ -157,9 +159,14 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
-            "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
-             AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND (worker_generation>0 OR claim_json IS NOT NULL))
-             AND started_at IS NULL",
+            &format!(
+                "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
+                 AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE {} AND claim_json IS NOT NULL)
+                 AND started_at IS NULL
+                 AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
+                    AND json_extract(kind_json,'$.kind')='started')",
+                super::flows::TASK_INVOCATION
+            ),
             params![task.as_str(), super::super::rows::now_unix()],
         )?;
         let retired = tx.query_row(

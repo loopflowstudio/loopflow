@@ -1,44 +1,40 @@
-//! A saved Flow's driver transactions: keyed by invocation id, fenced by
-//! `position_version` for the cursor and `current_run_id` for the attempt
-//! allowed to act. A Task's own invocation is written through its Task
-//! transactions in `durable.rs`; both paths share one row and one verdict
-//! writer.
+//! Every Flow invocation's driver transactions: keyed by invocation id, fenced
+//! by `position_version` for the cursor, `claim_json` for the one live Task
+//! worker, and `current_run_id` for the attempt allowed to act. A Task's own
+//! invocation is the same row, read through `tasks.current_invocation_id`;
+//! its writes carry the worker claim as one more predicate.
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use time::OffsetDateTime;
 
-use crate::durable::{FlowAttempt, FlowInvocation, RunId, TaskFlowBlocker, TaskId};
+use crate::durable::{
+    FlowAttempt, FlowInvocation, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
+    TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
+};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::transitions::FlowVerdict;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
+use crate::session::Run;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
+use crate::work::task::{Task, TaskEventKind};
 
 use super::SqliteStore;
 
-const FLOW_SELECT: &str = "SELECT invocation_json, review_json, step_index, iteration, updated_at,
-    position_version, task_id, wave_id, cwd, message, model, current_run_id,
-    (SELECT outcome FROM runs WHERE id=flow_invocations.current_run_id),
-    pending_session_id, failure_json, state FROM flow_invocations";
+/// The invocation a Task points at: the one its worker advances. Every other
+/// invocation naming the Task is a Flow about it. `?1` is the Task id.
+pub(super) const TASK_INVOCATION: &str = "id=(SELECT current_invocation_id FROM tasks WHERE id=?1)";
 
-type FlowRow = (
-    String,
-    Option<String>,
-    i64,
-    i64,
-    i64,
-    i64,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    String,
-);
+const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index, f.iteration,
+    f.updated_at, f.position_version, f.task_id, f.wave_id, COALESCE(f.cwd, t.worktree),
+    f.message, f.model, f.current_run_id,
+    (SELECT published FROM runs WHERE id=f.current_run_id),
+    (SELECT outcome FROM runs WHERE id=f.current_run_id),
+    f.pending_session_id,
+    (SELECT ready_summary FROM sessions WHERE id=f.pending_session_id),
+    f.worker_generation, f.claim_json, f.failure_json, f.state
+    FROM flow_invocations f LEFT JOIN tasks t ON t.id=f.task_id";
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -49,98 +45,111 @@ fn stale(id: &str) -> StoreError {
 }
 
 fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowInvocation>> {
-    let row: FlowRow = (
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-        row.get(6)?,
-        row.get(7)?,
-        row.get(8)?,
-        row.get(9)?,
-        row.get(10)?,
-        row.get(11)?,
-        row.get(12)?,
-        row.get(13)?,
-        row.get(14)?,
-        row.get(15)?,
-    );
-    Ok(decode_flow(row))
-}
-
-fn decode_flow(
-    (
-        invocation_json,
-        review_json,
-        step_index,
-        iteration,
-        updated_at,
-        version,
-        task_id,
-        wave_id,
-        cwd,
-        message,
-        model,
-        current_run_id,
-        outcome,
-        pending_session_id,
-        failure_json,
-        state,
-    ): FlowRow,
-) -> StoreResult<FlowInvocation> {
-    let invocation: QueuedInvocation = serde_json::from_str(&invocation_json)?;
-    let updated_at = time::OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?;
-    let mut failure = failure_json
-        .map(|failure| serde_json::from_str::<TaskFlowBlocker>(&failure))
-        .transpose()?;
-    let cursor = super::durable::decode_flow_cursor(
-        review_json.as_deref(),
-        step_index,
-        iteration,
-        &mut failure,
-        updated_at,
-    )?;
-    let cwd = cwd.ok_or_else(|| {
-        invalid(format!(
-            "Flow {} has no launch record on its row; a Task's own Flow runs through `lf task run`",
-            invocation.id
-        ))
-    })?;
-    Ok(FlowInvocation {
-        cursor,
-        version: u64::try_from(version).map_err(invalid)?,
-        task_id: task_id
-            .map(|id| TaskId::parse(&id))
-            .transpose()
-            .map_err(invalid)?,
-        wave_id: wave_id
-            .map(|id| WaveId::parse(&id))
-            .transpose()
-            .map_err(invalid)?,
-        cwd: cwd.into(),
-        message,
-        model,
-        current_attempt: current_run_id
-            .map(|run_id| {
-                Ok::<_, StoreError>(FlowAttempt {
-                    run_id: RunId::parse(&run_id).map_err(invalid)?,
-                    outcome,
+    let invocation_json: String = row.get(0)?;
+    let review_json: Option<String> = row.get(1)?;
+    let step_index: i64 = row.get(2)?;
+    let iteration: i64 = row.get(3)?;
+    let updated_at: i64 = row.get(4)?;
+    let version: i64 = row.get(5)?;
+    let task_id: Option<String> = row.get(6)?;
+    let wave_id: Option<String> = row.get(7)?;
+    let cwd: Option<String> = row.get(8)?;
+    let message: Option<String> = row.get(9)?;
+    let model: Option<String> = row.get(10)?;
+    let current_run_id: Option<String> = row.get(11)?;
+    let published: Option<bool> = row.get(12)?;
+    let outcome: Option<String> = row.get(13)?;
+    let pending_session_id: Option<String> = row.get(14)?;
+    let ready_summary: Option<String> = row.get(15)?;
+    let worker_generation: i64 = row.get(16)?;
+    let claim_json: Option<String> = row.get(17)?;
+    let failure_json: Option<String> = row.get(18)?;
+    let state: String = row.get(19)?;
+    let decode = || -> StoreResult<FlowInvocation> {
+        let invocation: QueuedInvocation = serde_json::from_str(&invocation_json)?;
+        let updated_at = OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?;
+        let mut failure = failure_json
+            .map(|failure| serde_json::from_str::<TaskFlowBlocker>(&failure))
+            .transpose()?;
+        let cursor = decode_flow_cursor(
+            review_json.as_deref(),
+            step_index,
+            iteration,
+            &mut failure,
+            updated_at,
+        )?;
+        let cwd = cwd.ok_or_else(|| {
+            invalid(format!(
+                "Flow {} has no launch record on its row",
+                invocation.id
+            ))
+        })?;
+        Ok(FlowInvocation {
+            cursor,
+            version: u64::try_from(version).map_err(invalid)?,
+            task_id: task_id
+                .map(|id| TaskId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            wave_id: wave_id
+                .map(|id| WaveId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            cwd: cwd.into(),
+            message,
+            model,
+            current_attempt: current_run_id
+                .map(|run_id| {
+                    Ok::<_, StoreError>(FlowAttempt {
+                        run_id: RunId::parse(&run_id).map_err(invalid)?,
+                        published: published.unwrap_or(false),
+                        outcome,
+                    })
                 })
-            })
-            .transpose()?,
-        pending_session_id,
-        failure,
-        finished: state != "current",
-        invocation,
-    })
+                .transpose()?,
+            pending_session_id,
+            ready_summary,
+            worker_generation: u64::try_from(worker_generation).map_err(invalid)?,
+            claim: claim_json
+                .map(|claim| serde_json::from_str::<TaskWorkerClaim>(&claim))
+                .transpose()?,
+            failure,
+            finished: state != "current",
+            updated_at,
+            invocation,
+        })
+    };
+    Ok(decode().map_err(|error| {
+        StoreError::InvalidData(format!(
+            "saved Invocation is unreadable; its bytes are unchanged: {error}"
+        ))
+    }))
 }
 
 pub(super) fn flow_in(conn: &Connection, id: &str) -> StoreResult<Option<FlowInvocation>> {
-    conn.query_row(&format!("{FLOW_SELECT} WHERE id=?1"), [id], read_flow)
+    conn.query_row(&format!("{FLOW_SELECT} WHERE f.id=?1"), [id], read_flow)
         .optional()?
         .transpose()
+}
+
+/// The invocation a Task points at, if any.
+pub(super) fn task_flow_in(
+    conn: &Connection,
+    task_id: &TaskId,
+) -> StoreResult<Option<FlowInvocation>> {
+    conn.query_row(
+        &format!("{FLOW_SELECT} WHERE f.{TASK_INVOCATION}"),
+        [task_id.as_str()],
+        read_flow,
+    )
+    .optional()?
+    .transpose()
+    .map_err(|error| match error {
+        StoreError::InvalidData(detail) => {
+            StoreError::InvalidData(format!("Task {task_id} {detail}"))
+        }
+        other => other,
+    })
 }
 
 fn current_flow_in(conn: &Connection, id: &str) -> StoreResult<FlowInvocation> {
@@ -151,6 +160,29 @@ fn current_flow_in(conn: &Connection, id: &str) -> StoreResult<FlowInvocation> {
         )));
     }
     Ok(flow)
+}
+
+/// The Task whose own Flow this invocation is, if a Task points at it.
+fn pointed_task_in(conn: &Connection, id: &str) -> StoreResult<Option<Task>> {
+    let task: Option<String> = conn
+        .query_row(
+            "SELECT id FROM tasks WHERE current_invocation_id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match task {
+        Some(task) => super::children::task_on(conn, &TaskId::parse(&task).map_err(invalid)?),
+        None => Ok(None),
+    }
+}
+
+/// A Task's own Flow reports its progress, failures and completion to the Task.
+fn report_to_task_in(conn: &Connection, id: &str, kind: &TaskEventKind) -> StoreResult<()> {
+    if let Some(task) = pointed_task_in(conn, id)? {
+        super::children::insert_task_event_in(conn, &task, kind)?;
+    }
+    Ok(())
 }
 
 /// The captured graph and cursor of any invocation, a Task's included.
@@ -174,24 +206,46 @@ pub(super) fn capture_in(
             },
         )?;
     let capture: QueuedInvocation = serde_json::from_str(&capture)?;
-    let cursor = super::durable::decode_flow_cursor(
+    let cursor = decode_flow_cursor(
         cursor.as_deref(),
         index,
         iteration,
         &mut None,
-        time::OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?,
+        OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?,
     )?;
     Ok((capture, cursor))
 }
 
-/// Store a launched Flow at its first step. The import re-registers a Flow
-/// it already stored; the row it finds wins.
+fn validate_flow(flow: &FlowInvocation) -> StoreResult<()> {
+    crate::engine::flow::validate_repeats(&flow.invocation.steps).map_err(invalid)?;
+    let step = flow
+        .current_checked()
+        .ok_or_else(|| invalid("Flow position has no current step"))?;
+    if step.flow.trim().is_empty() || step.step.trim().is_empty() {
+        return Err(invalid("flow and step cannot be empty"));
+    }
+    if step.policy.human && step.policy.id.is_none() {
+        return Err(invalid("review flow positions require a stable node id"));
+    }
+    if flow.claim.is_some() {
+        return Err(StoreError::InvalidAuthority(
+            "a Flow starts without an advancement claim".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Store a launched Flow at its first step. A Task invocation runs in the
+/// Task worktree and stores no cwd of its own; its Wave is the Task's. The
+/// import re-registers a Flow it already stored; the row it finds wins.
 pub(super) fn insert_flow_in(conn: &Connection, flow: &FlowInvocation) -> StoreResult<()> {
+    validate_flow(flow)?;
     conn.execute(
         "INSERT INTO flow_invocations(id, task_id, wave_id, cwd, message, model, invocation_json,
             step_index, iteration, position_version, worker_generation, failure_json,
             updated_at, review_json, state)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current')
+         VALUES(?1,?2,COALESCE(?3,(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id
+            WHERE t.id=?2)),CASE WHEN ?2 IS NULL THEN ?4 END,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current')
          ON CONFLICT(id) DO NOTHING",
         params![
             flow.invocation.id,
@@ -207,27 +261,32 @@ pub(super) fn insert_flow_in(conn: &Connection, flow: &FlowInvocation) -> StoreR
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()?,
-            now_unix(),
+            flow.updated_at.unix_timestamp(),
             serde_json::to_string(&flow.cursor)?,
         ],
     )?;
     Ok(())
 }
 
+/// The one cursor write, fenced by the version and the driver's claim. It
+/// advances the version, clears the attempt and pending review when the
+/// position moved, and releases the claim when the driver stops here.
 fn write_cursor_in(
     conn: &Connection,
-    id: &str,
-    version: u64,
+    (id, version): (&str, u64),
     cursor: &ExecutionCursor,
     failure: Option<&TaskFlowBlocker>,
     clear_attempt: bool,
+    claim: Option<&TaskWorkerClaim>,
+    release_claim: bool,
 ) -> StoreResult<u64> {
     let changed = conn.execute(
         "UPDATE flow_invocations SET review_json=?3, step_index=?4, iteration=?5,
             failure_json=?6, updated_at=?7, position_version=position_version+1,
+            claim_json=CASE WHEN ?10 THEN NULL ELSE claim_json END,
             current_run_id=CASE WHEN ?8 THEN NULL ELSE current_run_id END,
             pending_session_id=CASE WHEN ?8 THEN NULL ELSE pending_session_id END
-         WHERE id=?1 AND position_version=?2 AND state='current'",
+         WHERE id=?1 AND position_version=?2 AND state='current' AND claim_json IS ?9",
         params![
             id,
             i64::try_from(version).map_err(invalid)?,
@@ -237,6 +296,8 @@ fn write_cursor_in(
             failure.map(serde_json::to_string).transpose()?,
             now_unix(),
             clear_attempt,
+            claim.map(serde_json::to_string).transpose()?,
+            release_claim,
         ],
     )?;
     if changed != 1 {
@@ -248,9 +309,7 @@ fn write_cursor_in(
 /// The cursor without the decision or route recorded on its leaf.
 fn position_of(cursor: &ExecutionCursor) -> ExecutionCursor {
     let mut position = cursor.clone();
-    let leaf = position.leaf_mut();
-    leaf.progress.verdict = None;
-    leaf.route = None;
+    clear_candidate(&mut position);
     position
 }
 
@@ -260,6 +319,137 @@ fn clear_candidate(cursor: &mut ExecutionCursor) {
     leaf.route = None;
 }
 
+/// Block the Flow at its position with `failure`; the failed attempt's Run is
+/// named on it. A Task's own Flow records the failure on the Task.
+fn fail_flow_in(
+    tx: &Transaction<'_>,
+    flow: &FlowInvocation,
+    version: u64,
+    claim: Option<&TaskWorkerClaim>,
+    failure: &TaskFlowBlocker,
+) -> StoreResult<()> {
+    let mut failure = failure.clone();
+    if failure.run_id.is_none() {
+        failure.run_id = flow
+            .current_attempt
+            .as_ref()
+            .filter(|attempt| attempt.published)
+            .map(|attempt| attempt.run_id.clone());
+    }
+    let mut cursor = flow.cursor.clone();
+    clear_candidate(&mut cursor);
+    write_cursor_in(
+        tx,
+        (flow.id(), version),
+        &cursor,
+        Some(&failure),
+        false,
+        claim,
+        true,
+    )?;
+    report_to_task_in(
+        tx,
+        flow.id(),
+        &TaskEventKind::Failed {
+            error: failure.reason.clone(),
+            resumable: !failure.restart_required,
+        },
+    )
+}
+
+/// Release the position: the attempt and any failure go, the recorded
+/// candidate is discarded, and the step runs again as a new attempt.
+fn release_in(
+    tx: &Transaction<'_>,
+    flow: &FlowInvocation,
+    version: u64,
+    claim: Option<&TaskWorkerClaim>,
+    direction: Option<&str>,
+) -> StoreResult<()> {
+    let mut cursor = flow.cursor.clone();
+    clear_candidate(&mut cursor);
+    if let Some(direction) = direction {
+        cursor.leaf_mut().progress.direction = Some(direction.to_string());
+    }
+    write_cursor_in(tx, (flow.id(), version), &cursor, None, true, claim, true)?;
+    Ok(())
+}
+
+/// End the Flow. A Task's own Flow releases the Task's pointer and records
+/// `FlowFinished` with the last step's summary.
+fn end_flow_in(
+    tx: &Transaction<'_>,
+    id: &str,
+    claim: Option<&TaskWorkerClaim>,
+    summary: &str,
+) -> StoreResult<()> {
+    let flow = current_flow_in(tx, id)?;
+    if tx.execute(
+        "UPDATE flow_invocations SET state='completed', ended_at=?2, claim_json=NULL
+         WHERE id=?1 AND state='current' AND claim_json IS ?3",
+        params![
+            id,
+            now_unix(),
+            claim.map(serde_json::to_string).transpose()?
+        ],
+    )? != 1
+    {
+        return Err(stale(id));
+    }
+    report_to_task_in(
+        tx,
+        id,
+        &TaskEventKind::FlowFinished {
+            invocation_id: flow.invocation.id.clone(),
+            flow: flow.invocation.flow.clone(),
+            summary: summary.to_string(),
+        },
+    )?;
+    tx.execute(
+        "UPDATE tasks SET current_invocation_id=NULL WHERE current_invocation_id=?1",
+        [id],
+    )?;
+    Ok(())
+}
+
+/// Store the step's Run before anything launches it. An attempt already at
+/// this position is kept: a reservation the launcher has not published, or a
+/// completed candidate the driver is about to settle.
+fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowInvocation) -> StoreResult<()> {
+    if flow.current_attempt.is_some() {
+        return Ok(());
+    }
+    let step = flow
+        .current_checked()
+        .ok_or_else(|| invalid("Flow position has no current step"))?;
+    let run = super::runs::insert_run_in(
+        tx,
+        Run {
+            id: RunId::new(),
+            session_id: None,
+            invocation_id: Some(flow.id().to_owned()),
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id: flow.task_id.clone(),
+            wave_id: flow.wave_id.clone(),
+            work_source: flow.declared_work().map(|work| work.source),
+            created_at: now_unix(),
+            published: false,
+            cwd: flow.cwd.clone(),
+            skill: (step.kind != crate::engine::invocation::StepKind::Op).then_some(step.step),
+            provider: None,
+            model: None,
+            caller_run_id: None,
+            ended: None,
+        },
+    )?;
+    super::runs::select_attempt_in(tx, flow.id(), flow.version, &run.id)
+}
+
+/// Settle the current attempt from its Run's row: a failed or interrupted
+/// Run blocks the Flow, a live Run keeps it waiting, a completed Run is the
+/// step's completion, and a reservation nothing launched is the next launch.
 fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowInvocation) -> StoreResult<FlowInvocation> {
     let id = flow.invocation.id.clone();
     if flow.finished || flow.failure.is_some() || flow.is_human() {
@@ -268,6 +458,9 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowInvocation) -> StoreResult<
     let Some(attempt) = &flow.current_attempt else {
         return Ok(flow);
     };
+    if !attempt.published {
+        return Ok(flow);
+    }
     let outcome = match attempt.outcome.as_deref() {
         Some(outcome) => outcome.to_owned(),
         // An operation runs inside the driver that recorded it, and the caller
@@ -290,14 +483,12 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowInvocation) -> StoreResult<
     if outcome == "completed" {
         return Ok(flow);
     }
-    let mut cursor = flow.cursor.clone();
-    clear_candidate(&mut cursor);
     let mut failure = TaskFlowBlocker::now(format!(
         "{} Run {outcome}",
         flow.step_name().unwrap_or_default()
     ));
     failure.run_id = Some(attempt.run_id.clone());
-    write_cursor_in(tx, &id, flow.version, &cursor, Some(&failure), false)?;
+    fail_flow_in(tx, &flow, flow.version, flow.claim.as_ref(), &failure)?;
     current_flow_in(tx, &id)
 }
 
@@ -400,6 +591,98 @@ pub(super) fn record_route_in(
     Ok(())
 }
 
+fn stale_task_worker(task_id: &TaskId) -> StoreError {
+    StoreError::InvalidAuthority(format!("Task worker for {task_id} is stale"))
+}
+
+/// Take the Task's position for one worker, which holds it until it parks,
+/// finishes, fails or releases. `replacing` names the claim of a worker
+/// proven dead; its unfinished attempt ends as interrupted, a completed
+/// candidate is kept for the new worker to settle.
+fn claim_task_worker_in(
+    tx: &Transaction<'_>,
+    task_id: &TaskId,
+    expected_invocation: &str,
+    expected_version: u64,
+    owner: &TaskWorkerOwner,
+    claimed_at: OffsetDateTime,
+    replacing: Option<&TaskWorkerClaim>,
+) -> StoreResult<TaskWorkerClaimOutcome> {
+    let work = WorkRef::Task(task_id.clone());
+    super::durable::require_task_worker_eligible(tx, &work)?;
+    let flow = task_flow_in(tx, task_id)?.ok_or(StoreError::NotFound)?;
+    if flow.is_human() {
+        return Err(StoreError::InvalidAuthority(
+            "Review Flow positions wait for their Session to complete".to_string(),
+        ));
+    }
+    if flow.invocation.id != expected_invocation
+        || (replacing.is_none() && flow.version != expected_version)
+    {
+        return Ok(TaskWorkerClaimOutcome::Stale {
+            actual_version: flow.version,
+        });
+    }
+    if flow.claim.as_ref() != replacing {
+        return match (flow.claim, replacing) {
+            (Some(claim), None) => Ok(TaskWorkerClaimOutcome::Busy(claim)),
+            _ => Err(stale_task_worker(task_id)),
+        };
+    }
+    let generation = flow
+        .worker_generation
+        .checked_add(1)
+        .ok_or_else(|| StoreError::InvalidData("Task worker generation overflow".to_string()))?;
+    let claim = TaskWorkerClaim {
+        invocation_id: flow.invocation.id.clone(),
+        generation,
+        position_version: flow.version,
+        owner: owner.clone(),
+        claimed_at,
+    };
+    // The claim also clears a blocker the cursor's legacy verdict shape
+    // carried, by writing the cursor as it decoded.
+    let changed = tx.execute(
+        "UPDATE flow_invocations SET worker_generation=?2, claim_json=?3, failure_json=NULL,
+            updated_at=?4, review_json=?7
+         WHERE id=?1 AND position_version=?5 AND claim_json IS ?6",
+        params![
+            flow.invocation.id,
+            i64::try_from(generation).map_err(invalid)?,
+            serde_json::to_string(&claim)?,
+            claimed_at.unix_timestamp(),
+            i64::try_from(flow.version).map_err(invalid)?,
+            replacing.map(serde_json::to_string).transpose()?,
+            serde_json::to_string(&flow.cursor)?,
+        ],
+    )?;
+    if changed != 1 {
+        return Err(stale_task_worker(task_id));
+    }
+    if replacing.is_some() {
+        match &flow.current_attempt {
+            // A reservation the dead worker never launched is nobody's Run.
+            Some(attempt) if !attempt.published => {
+                tx.execute(
+                    "UPDATE flow_invocations SET current_run_id=NULL WHERE id=?1",
+                    [&flow.invocation.id],
+                )?;
+            }
+            // Its launched Run has no process left; the new worker settles it.
+            Some(attempt) if attempt.outcome.is_none() => {
+                tx.execute(
+                    "UPDATE runs SET outcome='interrupted', ended_at=?2 WHERE id=?1",
+                    params![attempt.run_id.as_str(), now_unix()],
+                )?;
+            }
+            _ => {}
+        }
+    }
+    let flow = task_flow_in(tx, task_id)?.ok_or(StoreError::NotFound)?;
+    reserve_attempt_in(tx, &flow)?;
+    Ok(TaskWorkerClaimOutcome::Claimed(claim))
+}
+
 impl SqliteStore {
     pub fn create_flow(&self, flow: &FlowInvocation) -> StoreResult<FlowInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -410,9 +693,59 @@ impl SqliteStore {
         Ok(stored)
     }
 
+    /// Make `flow` the Task's Flow. A current Flow the Task points at closes
+    /// as `replaced` unless a worker holds it.
+    pub fn start_task_flow(
+        &self,
+        task_id: &TaskId,
+        flow: &FlowInvocation,
+    ) -> StoreResult<FlowInvocation> {
+        if flow.task_id.as_ref() != Some(task_id) {
+            return Err(StoreError::InvalidAuthority(
+                "Flow position does not belong to this Task".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = WorkRef::Task(task_id.clone());
+        super::durable::require_ready_work(&tx, &work)?;
+        super::durable::require_current_task_chapter(&tx, &work)?;
+        if flow_in(&tx, flow.id())?.is_some() {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Flow invocation {} already exists",
+                flow.id()
+            )));
+        }
+        if let Some(current) = task_flow_in(&tx, task_id)? {
+            if current.claim.is_some() {
+                return Err(StoreError::InvalidAuthority(format!(
+                    "Task {task_id} worker holds its current Flow; stop it before selecting another"
+                )));
+            }
+            tx.execute(
+                "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE id=?1",
+                params![current.invocation.id, now_unix()],
+            )?;
+        }
+        insert_flow_in(&tx, flow)?;
+        tx.execute(
+            "UPDATE tasks SET current_invocation_id=?2 WHERE id=?1",
+            params![task_id.as_str(), flow.invocation.id],
+        )?;
+        let stored = task_flow_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(stored)
+    }
+
     pub fn flow(&self, id: &str) -> StoreResult<Option<FlowInvocation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         flow_in(&conn, id)
+    }
+
+    /// The Flow a Task points at.
+    pub fn task_flow(&self, task_id: &TaskId) -> StoreResult<Option<FlowInvocation>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_flow_in(&conn, task_id)
     }
 
     /// Settle the current attempt from its Run's row: a failed or interrupted
@@ -429,14 +762,71 @@ impl SqliteStore {
         Ok(flow)
     }
 
-    /// Clear a recorded failure so the step runs again as a new attempt.
-    pub fn retry_flow(&self, id: &str) -> StoreResult<FlowInvocation> {
+    /// Store the step's Run for the driver about to launch it.
+    pub fn reserve_attempt(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowInvocation> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        if flow.version != version || flow.claim.as_ref() != claim {
+            return Err(stale(id));
+        }
+        reserve_attempt_in(&tx, &flow)?;
+        let flow = current_flow_in(&tx, id)?;
+        tx.commit()?;
+        Ok(flow)
+    }
+
+    /// The launch publishes the reserved attempt with the provider it starts.
+    pub fn publish_attempt(
+        &self,
+        id: &str,
+        version: u64,
+        run: &RunId,
+        claim: Option<&TaskWorkerClaim>,
+        provider: &str,
+        model: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute(
+            "UPDATE runs SET published=1, provider=?5, model=?6 WHERE id=?2 AND published=0
+             AND EXISTS(SELECT 1 FROM flow_invocations WHERE id=?1 AND current_run_id=?2
+                AND position_version=?3 AND state='current' AND claim_json IS ?4)",
+            params![
+                id,
+                run.as_str(),
+                i64::try_from(version).map_err(invalid)?,
+                claim.map(serde_json::to_string).transpose()?,
+                provider,
+                model,
+            ],
+        )? != 1
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Flow {id} step launch is stale"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Clear a recorded failure so the step runs again as a new attempt, with
+    /// `direction` for the next attempt when the human supplied one.
+    pub fn retry_flow(&self, id: &str, direction: Option<&str>) -> StoreResult<FlowInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = settle_attempt_in(&tx, current_flow_in(&tx, id)?)?;
-        if flow.failure.is_none() {
+        let Some(failure) = &flow.failure else {
             return Err(StoreError::InvalidAuthority(
                 "Flow has no recorded failure to retry".into(),
+            ));
+        };
+        if failure.restart_required {
+            return Err(StoreError::InvalidAuthority(
+                "Task failure requires an explicit Flow restart".into(),
             ));
         }
         if flow.is_human() {
@@ -444,9 +834,23 @@ impl SqliteStore {
                 "reopen the human Session to complete this review".into(),
             ));
         }
-        let mut cursor = flow.cursor.clone();
-        clear_candidate(&mut cursor);
-        write_cursor_in(&tx, id, flow.version, &cursor, None, true)?;
+        release_in(&tx, &flow, flow.version, flow.claim.as_ref(), direction)?;
+        let flow = current_flow_in(&tx, id)?;
+        tx.commit()?;
+        Ok(flow)
+    }
+
+    /// Give the position back after a step ended without a result.
+    pub fn release_flow(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowInvocation> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        release_in(&tx, &flow, version, claim, None)?;
         let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)
@@ -455,11 +859,14 @@ impl SqliteStore {
     /// Persist the driver's cursor. A decision or route recorded on the saved
     /// position by its Run outlives a checkpoint of the same position; a
     /// checkpoint that moves the position releases the attempt and the review.
+    /// `progress` is the finished step's summary, reported to the Task.
     pub fn checkpoint_flow(
         &self,
         id: &str,
         version: u64,
         cursor: &ExecutionCursor,
+        claim: Option<&TaskWorkerClaim>,
+        progress: Option<&str>,
     ) -> StoreResult<u64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -496,28 +903,185 @@ impl SqliteStore {
         if next == saved.cursor {
             return Ok(version);
         }
-        let version = write_cursor_in(&tx, id, version, &next, saved.failure.as_ref(), moved)?;
+        // A driver parks at a review; the claim goes with the same write.
+        let parks = FlowInvocation {
+            cursor: next.clone(),
+            ..saved.clone()
+        }
+        .is_human();
+        let version = write_cursor_in(
+            &tx,
+            (id, version),
+            &next,
+            saved.failure.as_ref(),
+            moved,
+            claim,
+            parks,
+        )?;
+        if let Some(summary) = progress.filter(|summary| !summary.trim().is_empty()) {
+            report_to_task_in(
+                &tx,
+                id,
+                &TaskEventKind::Progress {
+                    summary: summary.to_string(),
+                },
+            )?;
+        }
         tx.commit()?;
         Ok(version)
     }
 
-    /// Block the Flow at its position; `lf flow resume --retry` clears it.
-    pub fn fail_flow(&self, id: &str, version: u64, reason: &str) -> StoreResult<()> {
+    /// Block the Flow at its position; `lf flow resume --retry` or
+    /// `lf task resume` clears it.
+    pub fn fail_flow(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+        failure: &TaskFlowBlocker,
+    ) -> StoreResult<FlowInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
-        let mut cursor = flow.cursor.clone();
-        clear_candidate(&mut cursor);
-        write_cursor_in(
-            &tx,
-            id,
-            version,
-            &cursor,
-            Some(&TaskFlowBlocker::now(reason)),
-            false,
-        )?;
+        fail_flow_in(&tx, &flow, version, claim, failure)?;
+        let flow = current_flow_in(&tx, id)?;
+        tx.commit()?;
+        Ok(flow)
+    }
+
+    /// The Flow ran its last step.
+    pub fn end_flow(
+        &self,
+        id: &str,
+        claim: Option<&TaskWorkerClaim>,
+        summary: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        end_flow_in(&tx, id, claim, summary)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Park a Task's Flow at its review: the review Session exists and the
+    /// row waits on it.
+    pub fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowInvocation> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        if flow.version != version {
+            return Err(stale(id));
+        }
+        if flow.pending_session_id.is_none() {
+            super::sessions::reserve_task_review_in(&tx, &flow)?;
+        }
+        let flow = current_flow_in(&tx, id)?;
+        tx.commit()?;
+        Ok(flow)
+    }
+
+    /// The human completed the Task's review: its feedback becomes the next
+    /// step's direction, or the Flow's closing summary when the review was last.
+    pub fn complete_task_review(
+        &self,
+        task_id: &TaskId,
+        expected: &FlowInvocation,
+        summary: &str,
+    ) -> StoreResult<()> {
+        if expected.task_id.as_ref() != Some(task_id)
+            || !expected.is_human()
+            || expected.claim.is_some()
+            || expected.failure.is_some()
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task review completion requires its exact unclaimed position".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = task_flow_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        if current != *expected {
+            return Err(StoreError::InvalidAuthority(
+                "Task review position changed before completion".to_string(),
+            ));
+        }
+        super::sessions::complete_review_in(&tx, expected)?;
+        let mut next = expected.cursor.clone();
+        next.leaf_mut().progress.direction = Some(summary.to_string());
+        let finished = next
+            .finish(&expected.invocation.steps)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        if finished {
+            end_flow_in(&tx, expected.id(), None, summary)?;
+        } else {
+            write_cursor_in(
+                &tx,
+                (expected.id(), expected.version),
+                &next,
+                None,
+                true,
+                None,
+                true,
+            )?;
+            report_to_task_in(
+                &tx,
+                expected.id(),
+                &TaskEventKind::Progress {
+                    summary: summary.to_string(),
+                },
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn claim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected_invocation: &str,
+        expected_version: u64,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaimOutcome> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let outcome = claim_task_worker_in(
+            &tx,
+            task_id,
+            expected_invocation,
+            expected_version,
+            owner,
+            claimed_at,
+            None,
+        )?;
+        tx.commit()?;
+        Ok(outcome)
+    }
+
+    /// Replace the claim of a worker proven dead at the same position.
+    pub fn reclaim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let outcome = claim_task_worker_in(
+            &tx,
+            task_id,
+            &expected.invocation_id,
+            expected.position_version,
+            owner,
+            claimed_at,
+            Some(expected),
+        )?;
+        let TaskWorkerClaimOutcome::Claimed(claim) = outcome else {
+            return Err(stale_task_worker(task_id));
+        };
+        tx.commit()?;
+        Ok(claim)
     }
 
     /// `lf flow decide` from inside the step's Run.
@@ -575,7 +1139,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let flow = conn
             .query_row(
-                &format!("{FLOW_SELECT} WHERE pending_session_id=?1 AND state='current'"),
+                &format!("{FLOW_SELECT} WHERE f.pending_session_id=?1 AND f.state='current'"),
                 [session_id],
                 read_flow,
             )
@@ -587,6 +1151,91 @@ impl SqliteStore {
             })?;
         Ok(flow)
     }
+}
+
+fn decode_flow_progress(
+    json: Option<&str>,
+    failure: &mut Option<TaskFlowBlocker>,
+    observed_at: OffsetDateTime,
+) -> StoreResult<crate::engine::transitions::FlowProgress> {
+    let Some(json) = json else {
+        return Ok(Default::default());
+    };
+    let mut value: serde_json::Value = serde_json::from_str(json)?;
+    if let Some(node) = value
+        .get("node_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    {
+        let count = value
+            .get("completed_passes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        value = serde_json::json!({
+            "repeats": {node: count}, "direction": value.get("direction"),
+            "verdict": value.get("verdict"),
+        });
+    }
+    // Blocked was historically serialized as a navigation verdict. Preserve
+    // its evidence as a retryable stop without inventing a forward decision.
+    if value.pointer("/verdict/decision").and_then(|v| v.as_str()) == Some("blocked") {
+        let reason = value
+            .pointer("/verdict/summary")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| StoreError::InvalidData("blocked Flow verdict has no summary".into()))?;
+        let reason = if reason.trim().is_empty() {
+            "legacy Flow verdict is blocked without evidence"
+        } else {
+            reason
+        };
+        match failure {
+            Some(existing) if existing.reason != reason => {
+                existing
+                    .reason
+                    .push_str(&format!("\nLegacy Flow blocker: {reason}"));
+            }
+            Some(_) => {}
+            None => {
+                *failure = Some(TaskFlowBlocker {
+                    run_id: None,
+                    reason: reason.into(),
+                    restart_required: false,
+                    observed_at,
+                })
+            }
+        }
+        value["verdict"] = serde_json::Value::Null;
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
+pub(super) fn decode_flow_cursor(
+    review_json: Option<&str>,
+    step_index: i64,
+    iteration: i64,
+    failure: &mut Option<TaskFlowBlocker>,
+    updated_at: OffsetDateTime,
+) -> StoreResult<ExecutionCursor> {
+    let root_index = usize::try_from(step_index).map_err(invalid)?;
+    let root_iteration = u32::try_from(iteration).map_err(invalid)?;
+    let saved = review_json
+        .map(serde_json::from_str::<serde_json::Value>)
+        .transpose()?;
+    let cursor = match saved {
+        Some(value) if value.get("index").is_some() => serde_json::from_value(value)?,
+        _ => ExecutionCursor {
+            index: root_index,
+            iteration: root_iteration,
+            progress: decode_flow_progress(review_json, failure, updated_at)?,
+            ..Default::default()
+        },
+    };
+    if cursor.index != root_index || cursor.iteration != root_iteration {
+        return Err(StoreError::InvalidData(
+            "stored Flow cursor does not match its root projection".into(),
+        ));
+    }
+    Ok(cursor)
 }
 
 #[cfg(test)]
@@ -660,8 +1309,12 @@ mod tests {
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
                 failure: None,
                 finished: false,
+                updated_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap()
     }
@@ -690,8 +1343,12 @@ mod tests {
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
                 failure: None,
                 finished: false,
+                updated_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap();
         let id = flow.id().to_string();
@@ -722,7 +1379,9 @@ mod tests {
             "an unsettled Run keeps the Flow waiting"
         );
         // A checkpoint of the same position keeps the recorded decision.
-        let version = store.checkpoint_flow(&id, 1, &flow.cursor).unwrap();
+        let version = store
+            .checkpoint_flow(&id, 1, &flow.cursor, None, None)
+            .unwrap();
         assert_eq!(version, 1, "nothing to write");
         assert_eq!(
             store.flow(&id).unwrap().unwrap().cursor.progress.verdict,
@@ -750,9 +1409,12 @@ mod tests {
         assert!(store
             .record_flow_decision(&id, blocked.version, &run.id, &iterate)
             .is_err());
-        let retried = store.retry_flow(&id).unwrap();
+        let retried = store.retry_flow(&id, None).unwrap();
         assert!(retried.failure.is_none() && retried.current_attempt.is_none());
-        assert!(store.retry_flow(&id).is_err(), "nothing left to retry");
+        assert!(
+            store.retry_flow(&id, None).is_err(),
+            "nothing left to retry"
+        );
 
         // The second attempt completes; its decision survives to the settled edge.
         let second = attempt(&store, &id, Some("loop-decide"), "codex");
@@ -778,7 +1440,9 @@ mod tests {
         let mut next = settled.cursor.clone();
         assert!(!next.finish(&steps).unwrap());
         assert_eq!((next.index, next.iteration), (0, 1));
-        let version = store.checkpoint_flow(&id, settled.version, &next).unwrap();
+        let version = store
+            .checkpoint_flow(&id, settled.version, &next, None, None)
+            .unwrap();
         let moved = store.flow(&id).unwrap().unwrap();
         assert_eq!((moved.version, &moved.cursor), (version, &next));
         assert!(
@@ -789,7 +1453,7 @@ mod tests {
             .record_flow_decision(&id, version, &second.id, &verdict(FlowDecision::Advance))
             .is_err());
         assert!(store
-            .checkpoint_flow(&id, version - 1, &moved.cursor)
+            .checkpoint_flow(&id, version - 1, &moved.cursor, None, None)
             .is_err());
     }
 
@@ -835,7 +1499,7 @@ mod tests {
             Some("interrupted".into())
         );
 
-        let retried = store.retry_flow(&id).unwrap();
+        let retried = store.retry_flow(&id, None).unwrap();
         assert!(retried.failure.is_none() && retried.current_attempt.is_none());
         let second = attempt(&store, &id, None, "loopflow");
         assert_eq!(second.attempt, Some(2));

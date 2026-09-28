@@ -86,6 +86,9 @@ Kickoff draft under review: commit `0381a195f`.
 - "Let's dream to do a great job but not make it bureaucratic". The design
   was cut from 24 KB to one page; the evidence stays in earlier commits.
 
+- On the objective: "with accessible guidance instead of clear meaning
+  maybe?" and "a light editing touch would be appreciated".
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

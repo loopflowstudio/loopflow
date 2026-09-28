@@ -74,11 +74,11 @@ crons:
 
 ## Objective
 
-Get new, updated Loopflow delivered to the public on regular intervals, with
-clear meaning, without bugs, in a recoverable and smart rollout strategy.
+Deliver new and updated Loopflow to the public at regular intervals, with
+accessible guidance, without bugs, through a smart and recoverable rollout.
 ```
 
-The objective is Jack's sentence. The split creates a Linear Initiative and
+The objective is Jack's sentence, lightly edited at his request. The split creates a Linear Initiative and
 moves a live schedule, so it runs from the installed `lf` after the code
 lands.
 

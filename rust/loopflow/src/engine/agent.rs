@@ -24,6 +24,7 @@ use crate::provider_account::{
     ProviderAccountRoute, RateLimitSignal,
 };
 use crate::provider_auth::Provider;
+use crate::run_record::CaptureHandle;
 use crate::store::ProviderAccountId;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -281,41 +282,10 @@ pub struct ProcessConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct AgentCapture(crate::run_record::CaptureHandle);
+pub struct AgentCapture(CaptureHandle);
 
-impl AgentCapture {
-    fn record_raw(&self, stream: &str, line: &str) {
-        self.0.record_raw(stream, line);
-    }
-
-    fn record_stream_event(&self, event: &crate::engine::stream::StreamEvent) {
-        self.0.record_stream_event(event);
-    }
-
-    fn record_conversation(&self, event: crate::chat::types::ConversationEvent) {
-        self.0.record_conversation(event);
-    }
-
-    fn fail_and_begin_attempt(
-        &self,
-        provider: String,
-        model: Option<String>,
-        account_id: Option<ProviderAccountId>,
-    ) {
-        self.0.fail_and_begin_attempt(provider, model, account_id);
-    }
-
-    fn set_provider_session_id(&self, session_id: Option<String>) {
-        self.0.set_provider_session_id(session_id);
-    }
-
-    fn finish(&self, outcome: &str) -> crate::store::StoreResult<()> {
-        self.0.finish(outcome)
-    }
-}
-
-impl From<crate::run_record::CaptureHandle> for AgentCapture {
-    fn from(capture: crate::run_record::CaptureHandle) -> Self {
+impl From<CaptureHandle> for AgentCapture {
+    fn from(capture: CaptureHandle) -> Self {
         Self(capture)
     }
 }
@@ -1173,6 +1143,7 @@ pub fn launch_agent(
             Ok(_) | Err(_) => "failed",
         };
         capture
+            .0
             .finish(outcome)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
@@ -1492,7 +1463,7 @@ fn _begin_implicit_capture(
         flow: crate::run_record::RunFlowMembership::Independent,
     };
     let capture = if process.auto {
-        crate::run_record::CaptureHandle::begin_with_launch(
+        CaptureHandle::begin_with_launch(
             spec,
             crate::run_record::RunLaunchRequest::from_prepared(launch, capabilities),
         )
@@ -1501,7 +1472,7 @@ fn _begin_implicit_capture(
             &system_prompt_with_structured_replies(launch),
             &launch.task_prompt,
         );
-        crate::run_record::CaptureHandle::begin_with_context(spec, &context)
+        CaptureHandle::begin_with_context(spec, &context)
     };
     capture
         .map(|capture| {
@@ -1537,7 +1508,7 @@ fn _launch_codex_harness_once(
     use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::harness::ApprovalPolicy;
 
-    let capture = process.capture.as_ref();
+    let capture = process.capture.as_ref().map(|capture| &capture.0);
     let account_route = match resolve_account_route_blocking(Provider::Codex, launch) {
         Ok(route) => route,
         Err(error) => {
@@ -1597,7 +1568,7 @@ fn _launch_codex_harness_once(
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         let provider_session_id = harness.provider_session_id();
         if let Some(capture) = capture {
-            capture.set_provider_session_id(provider_session_id.clone());
+            capture.observe_provider(provider_session_id.clone(), harness.provider_account_id());
         }
         let can_failover = account_route.is_some()
             && launch.provider_account_authority_home.is_none();
@@ -1629,6 +1600,7 @@ fn _launch_codex_harness_once(
                             continue;
                         };
                         if let Some(capture) = capture {
+                            capture.observe_provider(harness.provider_session_id(), harness.provider_account_id());
                             capture.record_conversation(event.clone());
                         }
                         match event {
@@ -1816,8 +1788,9 @@ fn _launch_agent_once(
         );
         route.apply(&mut cmd);
     }
+    let capture = process.capture.as_ref().map(|capture| &capture.0);
     if retry {
-        if let Some(capture) = &process.capture {
+        if let Some(capture) = capture {
             capture.fail_and_begin_attempt(
                 harness.clone(),
                 model.clone(),
@@ -1829,7 +1802,14 @@ fn _launch_agent_once(
     }
     apply_harness_env(&harness, &mut cmd, launch, process);
 
-    let capture = process.capture.as_ref();
+    if let Some(capture) = capture {
+        capture.observe_provider(
+            None,
+            account_route
+                .as_ref()
+                .map(|route| route.account_id().clone()),
+        );
+    }
 
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
@@ -1841,6 +1821,14 @@ fn _launch_agent_once(
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd, process.timeout)
     };
+    if let (Some(capture), Ok(result)) = (capture, &result) {
+        capture.observe_provider(
+            _provider_resume_token(result),
+            account_route
+                .as_ref()
+                .map(|route| route.account_id().clone()),
+        );
+    }
     let mut can_failover =
         account_route.is_some() && launch.provider_account_authority_home.is_none();
     if let (Some(route), Ok(result)) = (&account_route, &result) {
@@ -1872,7 +1860,7 @@ fn _launch_agent_once(
 fn launch_batch(
     cmd: &mut Command,
     timeout: Option<Duration>,
-    capture: Option<&AgentCapture>,
+    capture: Option<&CaptureHandle>,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     cmd.stdout(Stdio::piped());
@@ -1983,7 +1971,7 @@ fn launch_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
-    capture: Option<&AgentCapture>,
+    capture: Option<&CaptureHandle>,
 ) -> Result<LaunchResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -2165,10 +2153,10 @@ fn format_timeout(timeout: Option<Duration>) -> String {
 pub fn missing_agent_message(cli: &str) -> String {
     let hint = match cli {
         "claude" => {
-            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf auth claude`."
+            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf auth connect claude`."
         }
         "codex" => {
-            "Install it with `npm install -g @openai/codex`, then sign in with `lf auth codex`."
+            "Install it with `npm install -g @openai/codex`, then sign in with `lf auth connect codex`."
         }
         "opencode" => "Install it with `npm install -g opencode-ai`.",
         _ => "Install it, or choose another agent with `-m claude` or `-m codex`.",

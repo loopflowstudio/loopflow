@@ -33,8 +33,9 @@ failures.
 git rev-parse --show-toplevel
 uname -s
 lf --version
-lf auth status
-lf route show
+lf auth status                   # cached; no provider request
+lf auth status --verify --json    # inspect accepted managed evidence
+lf auth route show
 lf home id --json
 lf ls --json
 command -v claude
@@ -133,20 +134,23 @@ For durable planning and delivery, inspect `lf auth status` and offer only the
 missing connections:
 
 ```bash
-lf auth github
-lf auth linear
-lf auth claude
-lf auth status
+lf auth connect github
+lf auth connect linear
+lf auth connect claude
+lf auth status                   # cached; no provider request
+lf auth status --verify --json    # inspect accepted managed evidence
 ```
 
 OAuth client credentials resolve from environment first, with a Doppler fallback
 when configured. If this repository uses Doppler and credentials are missing,
-use `doppler run -- lf auth linear`. Otherwise follow the customer's secret
+use `doppler run -- lf auth connect linear`. Otherwise follow the customer's secret
 manager and the exact missing variable names. Never print credential values.
 
 Account connection is an external side effect. The user must choose it and
-complete the provider flow. Never claim a provider is connected until
-`lf auth status` proves it. Direct skills can proceed with a local agent even
+complete the provider flow. Claim a new connection only after connect completes;
+cached status is retained evidence, not a fresh authorization check. Managed
+verification requires an accepted managed row from `auth status --verify --json`.
+Direct skills can proceed with a local agent even
 when Linear is absent; do not block that path on PM setup.
 
 ## 4. Make one durable path real
@@ -253,8 +257,9 @@ changing placement, or starting a Wave; each changes durable execution state.
 Run the smallest read-only checks that prove the selected path:
 
 ```bash
-lf auth status
-lf route show
+lf auth status                   # cached; no provider request
+lf auth status --verify --json    # inspect accepted managed evidence
+lf auth route show
 lf home id --json
 lf ls --json
 ```

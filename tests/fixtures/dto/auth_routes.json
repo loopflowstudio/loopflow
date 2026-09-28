@@ -1,0 +1,26 @@
+[
+  {
+    "provider": "claude",
+    "scope": "default",
+    "ambient": false,
+    "candidates": [
+      {
+        "account_id": "engineering",
+        "login": "engineering@example.com",
+        "source": "forwarded_origin",
+        "credential_state": "connected",
+        "routing": "automatic",
+        "cooldown_until": null,
+        "demotion": "weekly 95% used"
+      }
+    ],
+    "diagnostic": null
+  },
+  {
+    "provider": "codex",
+    "scope": "automatic",
+    "ambient": true,
+    "candidates": [],
+    "diagnostic": null
+  }
+]

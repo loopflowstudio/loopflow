@@ -245,10 +245,10 @@ and uses authority installed on its own machine. See
 Auth connects your providers locally:
 
 ```bash
-lf auth github    # connect GitHub
-lf auth claude    # connect Claude
-lf auth linear    # connect Linear with OAuth
-lf auth status    # check connections
+lf auth connect github    # connect GitHub
+lf auth connect claude    # connect Claude
+lf auth connect linear    # connect Linear with OAuth
+lf auth status    # inspect cached credentials
 ```
 
 ---

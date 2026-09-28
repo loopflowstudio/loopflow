@@ -1241,9 +1241,9 @@ launchd coalesces sleeping calendar intervals into one run at wake. Rerun
 dependency. Failed downloads or promotion remain nonzero and can be retried.
 Linux supports `lf install`; automatic scheduling currently requires macOS.
 
-`lf list`, authentication, profiles, Home identity, and machine inspection also
-work outside repositories. `lf route show` displays defaults there;
-`lf route set --repo owner/name` selects a repository explicitly. Inside a
+`lf list`, authentication, Home identity, and machine inspection also
+work outside repositories. `lf auth route show` displays defaults there;
+`lf auth route set --repo owner/name` selects a repository explicitly. Inside a
 repository, catalog and listing commands use its context. Outside, `lf ls`,
 `lf roadmap`, and `lf session list` show machine-wide records.
 
@@ -1359,7 +1359,7 @@ fails, registered completion retains pending writeback; repeat the command to
 reconcile it without changing the original completion time. A later provider
 conflict preserves recorded Done history and reports the pending conflict.
 
-Connect Linear first with `doppler run -- lf auth linear`. `lf wave connect` pins the Initiative
+Connect Linear first with `doppler run -- lf auth connect linear`. `lf wave connect` pins the Initiative
 into `GOAL.md` and the repository Team into `.lf/config.yaml`. Every Wave in
 that repository reuses the Team and Task prefix (`LOO-1`, `LOO-2`); Initiatives
 and Project membership decide which Wave owns a Task. `wave connect --all` discovers
@@ -1387,7 +1387,7 @@ Fresh PM operations renew expiring Linear credentials automatically and store
 the rotated access/refresh pair together. Temporary endpoint failures get one
 retry within the read deadline; `--sync` reports failure if it cannot obtain a
 fresh snapshot. Retry a temporary failure with `lf wave sync --wave <wave>`.
-Reconnect with `doppler run -- lf auth linear` only when the error identifies a
+Reconnect with `doppler run -- lf auth connect linear` only when the error identifies a
 missing credential or unusable refresh grant/client configuration. A timeout
 during persistence can leave its outcome pending; the next read checks the
 stored credential before attempting another exchange.

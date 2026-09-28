@@ -63,7 +63,7 @@ The current application tables group by owner:
 | PM projection | `pm_snapshots`, `observation_outbox` | bounded Linear reads and deferred publication |
 | Metrics | `metric_instruments`, `metric_observations` | registered producers and accepted evidence |
 | PR landing | `pr_landings`, `ci_incidents` | exact-head supervision and bounded repair |
-| Home and provider | `homes`, `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens`, `provider_deliveries` | routes, credentials, selection, limits, receipts |
+| Home and provider | `homes`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens`, `provider_deliveries` | routes, credentials, selection, limits, receipts |
 | Local observation/cache | `run_events`, `blob_tokens` | outer command history and deterministic Git-blob token counts |
 | Schema | `schema_migrations` | applied migration identity and checksum frontier |
 

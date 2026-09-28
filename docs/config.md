@@ -436,7 +436,7 @@ than `config.yaml`:
 
 ```bash
 lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf route set claude primary@ engineering@
+lf auth route set claude primary@ engineering@
 lf --account primary@ implement
 ```
 

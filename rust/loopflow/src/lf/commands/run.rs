@@ -633,7 +633,10 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
             crate::run_record::read_provider_session(&capture.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
-            capture.set_provider_session_id(Some(provider_session.provider_session_id));
+            capture.observe_provider(
+                Some(provider_session.provider_session_id),
+                provider_session.account_id,
+            );
         }
         if target == LaunchTarget::Ide && result.is_ok() {
             capture.mark_handoff(surface);
@@ -1454,6 +1457,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             implicit_events.matches("provider_attempt_started").count(),
             2
         );
+        let accounts: Vec<serde_json::Value> = implicit_events
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .filter(|event: &serde_json::Value| event["type"] == "provider_account_selected")
+            .collect();
+        assert_eq!(accounts.len(), 2);
+        assert!(accounts.iter().all(|event| event["account_id"].is_null()));
+        assert_ne!(accounts[0]["attempt_key"], accounts[1]["attempt_key"]);
         assert!(registry_blocker.is_dir());
     }
 

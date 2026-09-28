@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use crate::durable::{ProjectId, TaskId, WorkRef};
 use crate::id::WaveId;
 use crate::profile::{
-    AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
+    AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
 use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
@@ -268,13 +268,16 @@ fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<A
 fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccessProfile>> {
     let profile_id = row.get::<_, String>(0)?;
     let chrome_directory = row.get(1)?;
-    let expected_login = row.get::<_, String>(2)?;
+    let expected_login = row.get::<_, Option<String>>(2)?;
     let created_at = row.get(3)?;
     let updated_at = row.get(4)?;
     Ok(ProfileId::parse(&profile_id)
         .map_err(StoreError::InvalidData)
         .and_then(|id| {
-            EmailAddress::parse(&expected_login)
+            expected_login
+                .as_deref()
+                .map(EmailAddress::parse)
+                .transpose()
                 .map_err(StoreError::InvalidData)
                 .map(|expected_login| AccessProfile {
                     id,
@@ -286,25 +289,28 @@ fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<Acce
         }))
 }
 
-fn read_account_access_profile(
+fn read_auth_browser_binding(
     row: &rusqlite::Row,
-) -> rusqlite::Result<StoreResult<AccountAccessProfile>> {
+) -> rusqlite::Result<StoreResult<AuthBrowserBinding>> {
     let provider = row.get::<_, String>(0)?;
-    let account_id = row.get::<_, String>(1)?;
+    let account_id = row.get::<_, Option<String>>(1)?;
     let position = row.get::<_, i64>(2)? as usize;
     let profile_id = row.get::<_, String>(3)?;
     Ok(provider
         .parse::<Provider>()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
         .and_then(|provider| {
-            ProviderAccountId::parse(&account_id)
+            account_id
+                .as_deref()
+                .map(ProviderAccountId::parse)
+                .transpose()
                 .map_err(StoreError::InvalidData)
                 .map(|account_id| (provider, account_id))
         })
         .and_then(|(provider, account_id)| {
             ProfileId::parse(&profile_id)
                 .map_err(StoreError::InvalidData)
-                .map(|profile_id| AccountAccessProfile {
+                .map(|profile_id| AuthBrowserBinding {
                     provider,
                     account_id,
                     position,
@@ -509,12 +515,20 @@ impl SqliteStore {
     /// Observability commands use this when a source build may be older than
     /// the machine's release-owned database.
     pub(crate) fn open_run_ledger_read_only(path: &Path) -> StoreResult<Self> {
+        let store = Self::open_read_only(path)?;
+        {
+            let conn = store.conn.lock().expect("store mutex poisoned");
+            validate_run_events_schema(&conn)?;
+        }
+        Ok(store)
+    }
+
+    pub(crate) fn open_read_only(path: &Path) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-        validate_run_events_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -824,6 +838,38 @@ impl SqliteStore {
 
     // -- Provider tokens -------------------------------------------------------
 
+    pub(crate) fn provider_auth_snapshot(
+        &self,
+        provider: Provider,
+    ) -> StoreResult<Option<crate::provider_auth::ProviderAuthSnapshot>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT login, expires_at, credential_type FROM provider_tokens WHERE provider = ?1",
+            [provider.as_str()],
+            |row| {
+                let login: Option<String> = row.get(0)?;
+                let expires_at: Option<i64> = row.get(1)?;
+                let credential_type: String = row.get(2)?;
+                Ok((login, expires_at, credential_type))
+            },
+        )
+        .optional()?
+        .map(|(login, expires_at, credential_type)| {
+            Ok(crate::provider_auth::ProviderAuthSnapshot {
+                provider,
+                status: if expires_at.is_some_and(|expiry| expiry <= now_unix()) {
+                    crate::provider_auth::AuthStatus::Expired
+                } else {
+                    crate::provider_auth::AuthStatus::Active { login }
+                },
+                expires_at,
+                next_refresh_at: None,
+                credential_type: Some(super::CredentialType::from_db(&credential_type)),
+            })
+        })
+        .transpose()
+    }
+
     pub fn get_provider_token(&self, provider: &str) -> StoreResult<Option<super::ProviderToken>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
@@ -1098,12 +1144,48 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn clear_provider_account_cooldown(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts SET cooldown_until = NULL, cooldown_reason = NULL,
+             updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
+            params![provider, account_id.as_str(), now_unix()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     pub fn reset_provider_account_health(
         &self,
         provider: &str,
         account_id: &ProviderAccountId,
     ) -> StoreResult<()> {
         self.record_provider_account_health(provider, account_id, None, None, None)
+    }
+
+    /// Verification changes credential evidence, never routing or cooldown policy.
+    pub fn update_provider_account_credential_state(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        state: CredentialState,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts SET credential_state = ?3, updated_at = ?4
+             WHERE provider = ?1 AND account_id = ?2",
+            params![provider, account_id.as_str(), state.as_str(), now_unix()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
     }
 
     pub fn record_provider_account_credential_invalidated(
@@ -1173,10 +1255,11 @@ impl SqliteStore {
         windows: &[crate::store::AccountLimitWindow],
         source: &str,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
         let now = now_unix();
         for window in windows {
-            conn.execute(
+            transaction.execute(
                 "INSERT INTO provider_account_limits
                      (provider, account_id, window, used_percent, resets_at, plan, observed_at, source)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -1198,6 +1281,7 @@ impl SqliteStore {
                 ],
             )?;
         }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -1235,7 +1319,7 @@ impl SqliteStore {
             params![
                 profile.id.as_str(),
                 profile.chrome_directory,
-                profile.expected_login.as_str(),
+                profile.expected_login.as_ref().map(EmailAddress::as_str),
                 profile.created_at,
                 profile.updated_at,
             ],
@@ -1265,10 +1349,10 @@ impl SqliteStore {
         rows.map(|row| row?).collect()
     }
 
-    pub fn set_account_access_profiles(
+    pub fn set_auth_browser_profiles(
         &self,
         provider: Provider,
-        account_id: &ProviderAccountId,
+        account_id: Option<&ProviderAccountId>,
         profile_ids: &[ProfileId],
     ) -> StoreResult<()> {
         let unique = profile_ids.iter().collect::<std::collections::HashSet<_>>();
@@ -1280,17 +1364,17 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute(
-            "DELETE FROM account_access_profiles WHERE provider = ?1 AND account_id = ?2",
-            params![provider.as_str(), account_id.as_str()],
+            "DELETE FROM auth_browser_bindings WHERE provider = ?1 AND account_id IS ?2",
+            params![provider.as_str(), account_id.map(ProviderAccountId::as_str)],
         )?;
         for (position, profile_id) in profile_ids.iter().enumerate() {
             transaction.execute(
-                "INSERT INTO account_access_profiles (
+                "INSERT INTO auth_browser_bindings (
                     provider, account_id, position, profile_id
                  ) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     provider.as_str(),
-                    account_id.as_str(),
+                    account_id.map(ProviderAccountId::as_str),
                     position as i64,
                     profile_id.as_str(),
                 ],
@@ -1300,23 +1384,22 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn list_account_access_profiles(
+    pub fn list_auth_browser_profiles(
         &self,
         provider: Option<Provider>,
         account_id: Option<&ProviderAccountId>,
-    ) -> StoreResult<Vec<AccountAccessProfile>> {
+    ) -> StoreResult<Vec<AuthBrowserBinding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let provider = provider.map(|value| value.as_str());
         let account_id = account_id.map(ProviderAccountId::as_str);
         let mut statement = conn.prepare(
             "SELECT provider, account_id, position, profile_id
-             FROM account_access_profiles
+             FROM auth_browser_bindings
              WHERE (?1 IS NULL OR provider = ?1)
                AND (?2 IS NULL OR account_id = ?2)
              ORDER BY provider, account_id, position",
         )?;
-        let rows =
-            statement.query_map(params![provider, account_id], read_account_access_profile)?;
+        let rows = statement.query_map(params![provider, account_id], read_auth_browser_binding)?;
         rows.map(|row| row?).collect()
     }
 
@@ -1465,7 +1548,6 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_unix();
-        let today = time::OffsetDateTime::now_utc().date();
         let newest_selection = transaction.query_row(
             "SELECT COALESCE(MAX(last_selected_at), 0)
              FROM provider_accounts WHERE provider = ?1",
@@ -1515,10 +1597,9 @@ impl SqliteStore {
                 )
                 .optional()?
                 .transpose()?;
-            if let Some(account) = account.filter(|account| {
-                account.eligible_for_automatic_routing(today)
-                    && account.cooldown_until.is_none_or(|until| until <= now)
-            }) {
+            if let Some(account) = account
+                .filter(|account| crate::provider_account::account_route_eligible(account, now))
+            {
                 available.push(account);
             }
         }
@@ -2411,5 +2492,116 @@ mod linear_oauth_tests {
             .unwrap();
         assert!(matches!(outcome, ProviderTokenReplacement::Replaced));
         assert!(store.get_provider_token("linear").await.unwrap().as_ref() == Some(&replacement));
+    }
+}
+
+#[cfg(test)]
+mod account_observation_tests {
+    use super::SqliteStore;
+    use crate::store::{
+        AccountLimitWindow, CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
+    };
+
+    fn account() -> ProviderAccount {
+        ProviderAccount {
+            provider: "claude".into(),
+            account_id: ProviderAccountId::parse("primary").unwrap(),
+            home: None,
+            login_email: None,
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Disabled,
+            plan: Some("configured".into()),
+            paid_through: None,
+            utilization_percent: Some(98),
+            cooldown_until: Some(1900000000),
+            cooldown_reason: Some("weekly".into()),
+            last_selected_at: Some(7),
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn account_observations_preserve_policy_and_omitted_windows() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let expected = account();
+        store.upsert_provider_account(&expected).unwrap();
+        let weekly = AccountLimitWindow {
+            window: "weekly".into(),
+            used_percent: 98,
+            resets_at: Some(1900000000),
+            plan: Some("max".into()),
+        };
+        store
+            .upsert_provider_account_limits("claude", &expected.account_id, &[weekly], "stream")
+            .unwrap();
+        let previous = store.provider_account_limits(None).unwrap().remove(0);
+        for state in [CredentialState::Missing, CredentialState::Connected] {
+            store
+                .update_provider_account_credential_state("claude", &expected.account_id, state)
+                .unwrap();
+            let mut actual = store
+                .get_provider_account("claude", &expected.account_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(actual.credential_state, state);
+            actual.credential_state = expected.credential_state;
+            actual.updated_at = expected.updated_at;
+            assert_eq!(actual, expected);
+        }
+        let session = AccountLimitWindow {
+            window: "session".into(),
+            used_percent: 2,
+            resets_at: None,
+            plan: None,
+        };
+        store
+            .upsert_provider_account_limits("claude", &expected.account_id, &[session], "poll")
+            .unwrap();
+        let rows = store.provider_account_limits(None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.iter().find(|row| row.window == "weekly"),
+            Some(&previous)
+        );
+    }
+
+    #[test]
+    fn account_observation_batch_rolls_back_on_later_window_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        let session = AccountLimitWindow {
+            window: "session".into(),
+            used_percent: 22,
+            resets_at: None,
+            plan: None,
+        };
+        store
+            .upsert_provider_account_limits(
+                "claude",
+                &account.account_id,
+                std::slice::from_ref(&session),
+                "stream",
+            )
+            .unwrap();
+        let previous = store.provider_account_limits(None).unwrap();
+        store.conn.lock().unwrap().execute_batch("CREATE TRIGGER reject_weekly BEFORE INSERT ON provider_account_limits WHEN NEW.window = 'weekly' BEGIN SELECT RAISE(ABORT, 'simulated disk failure'); END;").unwrap();
+        let windows = [
+            AccountLimitWindow {
+                used_percent: 40,
+                ..session.clone()
+            },
+            AccountLimitWindow {
+                window: "weekly".into(),
+                ..session
+            },
+        ];
+        assert!(store
+            .upsert_provider_account_limits("claude", &account.account_id, &windows, "poll")
+            .is_err());
+        assert_eq!(store.provider_account_limits(None).unwrap(), previous);
     }
 }

@@ -316,7 +316,7 @@ async fn run_task_with(
         return Err(error);
     }
     if let Some(capture) = &capture {
-        capture.set_provider_session_id(harness.provider_session_id());
+        capture.observe_provider(harness.provider_session_id(), harness.provider_account_id());
     }
     let mut steer_cursor = prepared.seeded_steer_id;
     let mut interrupt_cursor = prepared.interrupt_id;
@@ -396,6 +396,7 @@ async fn run_task_with(
                     ).await;
                 };
                 if let Some(capture) = &capture {
+                    capture.observe_provider(harness.provider_session_id(), harness.provider_account_id());
                     capture.record_conversation(event.clone());
                 }
                 match event {
@@ -1318,6 +1319,7 @@ mod planning_tests {
         events: tokio::sync::mpsc::UnboundedSender<crate::chat::types::ConversationEvent>,
         seen: std::sync::Arc<std::sync::Mutex<Vec<(String, RunId)>>>,
         restart: bool,
+        session_ready: bool,
         failure: Option<&'static str>,
         expected_input: Option<(Vec<&'static str>, std::sync::Arc<tokio::sync::Notify>)>,
     }
@@ -1378,6 +1380,31 @@ mod planning_tests {
             let step = position.current();
             let routing = matches!(position.current_plan(), crate::engine::ConcreteStep::Xor(_));
             let run = position.claim.unwrap().worker_run_id.unwrap();
+            let (dir, _) = crate::run_record::resolve_manifest(
+                &crate::store::observability_home_dir(),
+                run.as_str(),
+            )?;
+            // Inspect the actual worker while input is pending and no native ID exists.
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                loop {
+                    let events =
+                        std::fs::read_to_string(dir.join("events.jsonl")).unwrap_or_default();
+                    if events.lines().any(|line| {
+                        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|event| {
+                            event["type"] == "provider_account_selected"
+                                && event["account_id"] == "selected-account"
+                        })
+                    }) {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("running Task must record its selected account before a session ID");
+            assert!(!dir.join("terminal.json").exists());
+            assert!(crate::run_record::read_provider_session(&dir)?.is_none());
+            self.session_ready = true;
             self.seen
                 .lock()
                 .unwrap()
@@ -1449,7 +1476,10 @@ mod planning_tests {
             Ok(())
         }
         fn provider_session_id(&self) -> Option<String> {
-            None
+            self.session_ready.then(|| "task-provider-session".into())
+        }
+        fn provider_account_id(&self) -> Option<crate::store::ProviderAccountId> {
+            Some(crate::store::ProviderAccountId::parse("selected-account").unwrap())
         }
     }
 
@@ -1639,7 +1669,7 @@ mod planning_tests {
                     let task_id = task.id.clone();
                     let seen = seen.clone();
                     move |_, _, events| Ok(Box::new(SliceHarness {
-                        store: store.clone(), task_id: task_id.clone(), events, seen: seen.clone(), restart: false, failure: None, expected_input: None,
+                        store: store.clone(), task_id: task_id.clone(), events, seen: seen.clone(), restart: false, session_ready: false, failure: None, expected_input: None,
                     }))
                 });
                 // The simulated provider uses a preflighted fixture route.
@@ -1648,6 +1678,12 @@ mod planning_tests {
                     path: guard.ledger.home().join("fixture.db"), store: store.clone(), graphql_url: url,
                 }, super::drive_task(store.clone(), task.id.clone(), claim, create)).await.unwrap();
                 let turns = seen.lock().unwrap().clone();
+                for (_, run) in &turns {
+                    let (dir, _) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
+                    let session = crate::run_record::read_provider_session(&dir).unwrap().unwrap();
+                    assert_eq!(session.provider_session_id, "task-provider-session");
+                    assert_eq!(session.account_id.unwrap().as_str(), "selected-account");
+                }
                 assert_eq!(turns.iter().map(|(step, _)| step.as_str()).collect::<Vec<_>>(),
                     ["xor-route", "implement", "compress", "review-slice", "concept-review", "loop-decide", "implement", "compress", "review-slice", "concept-review", "loop-decide"]);
                 assert_eq!(turns.iter().map(|(_, run)| run).collect::<std::collections::HashSet<_>>().len(), 11);
@@ -1701,7 +1737,7 @@ mod planning_tests {
                     let task_id = task.id.clone();
                     move |_, _, events| Ok(Box::new(SliceHarness {
                         store: store.clone(), task_id: task_id.clone(), events,
-                        seen: Default::default(), restart: true, failure: None, expected_input: None,
+                        seen: Default::default(), restart: true, session_ready: false, failure: None, expected_input: None,
                     }))
                 });
                 let (url, _) = test_server::spawn(vec![json_response(
@@ -1899,7 +1935,7 @@ mod planning_tests {
                     let store = store.clone(); let task_id = task.id.clone(); let seen = seen.clone();
                     move |_, _, events| Ok(Box::new(SliceHarness {
                         store: store.clone(), task_id: task_id.clone(), events,
-                        seen: seen.clone(), restart: false, failure: Some(failure), expected_input: None,
+                        seen: seen.clone(), restart: false, session_ready: false, failure: Some(failure), expected_input: None,
                     }))
                 });
                 let owner = TaskWorkerOwner {
@@ -1998,7 +2034,7 @@ mod planning_tests {
                     let store = store.clone(); let task_id = task.id.clone(); let seen = seen.clone();
                     move |_, _, events| Ok(Box::new(SliceHarness {
                         store: store.clone(), task_id: task_id.clone(), events,
-                        seen: seen.clone(), restart: false, failure: Some(failure), expected_input: None,
+                        seen: seen.clone(), restart: false, session_ready: false, failure: Some(failure), expected_input: None,
                     }))
                 });
                 let owner = TaskWorkerOwner {
@@ -2097,7 +2133,7 @@ mod planning_tests {
                         let store = store.clone(); let task_id = task.id.clone(); let seen = seen.clone(); let resumed = resumed.clone();
                         move |_, _, events| Ok(Box::new(SliceHarness {
                             store: store.clone(), task_id: task_id.clone(), events, seen: seen.clone(),
-                            restart: false, failure: Some("missing"), expected_input: Some((vec![feedback, reason], resumed.clone())),
+                            restart: false, session_ready: false, failure: Some("missing"), expected_input: Some((vec![feedback, reason], resumed.clone())),
                         }))
                     });
                     let (url, _) = test_server::spawn(vec![json_response(axum::http::StatusCode::OK,

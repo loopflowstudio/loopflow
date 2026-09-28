@@ -44,9 +44,9 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["flow", "show", "code"],
         vec!["flow", "validate", "code"],
         vec!["auth", "status"],
-        vec!["profile", "list"],
-        vec!["route", "show"],
-        vec!["route", "show", "--repo", "example/project"],
+        vec!["auth", "status", "--details"],
+        vec!["auth", "route", "show"],
+        vec!["auth", "route", "show", "--repo", "example/project"],
         vec!["ls", "--json"],
         vec!["ps", "--json"],
     ] {
@@ -58,7 +58,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         if args == ["list"] || args == ["--list"] {
             assert!(stdout.contains("debug"));
         }
-        if args[0] == "route" {
+        if args.get(1) == Some(&"route") {
             assert!(stdout.contains("claude"));
         }
         assert!(
@@ -85,7 +85,7 @@ fn missing_repository_and_missing_home_are_distinct() {
     let output = command(
         home.path(),
         cwd.path(),
-        &["route", "set", "claude", "person@example.com"],
+        &["auth", "route", "set", "claude", "person@example.com"],
     )
     .output()
     .unwrap();

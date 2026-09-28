@@ -293,6 +293,10 @@ enum RunEvent {
         attempt_key: String,
         outcome: String,
     },
+    ProviderAccountSelected {
+        attempt_key: String,
+        account_id: Option<crate::store::ProviderAccountId>,
+    },
     ProviderSessionObserved {
         attempt_key: String,
         provider_session_id: String,
@@ -735,6 +739,7 @@ pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<Provid
         Err(error) => return Err(error),
     };
     let mut provider_session = None;
+    let mut accounts = HashMap::new();
     for line in BufReader::new(file).lines() {
         let envelope: EventEnvelope =
             serde_json::from_str(&line?).map_err(std::io::Error::other)?;
@@ -744,16 +749,29 @@ pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<Provid
                 "unsupported Run event schema",
             ));
         }
-        if let RunEvent::ProviderSessionObserved {
-            provider_session_id: observed,
-            ..
-        } = envelope.event
-        {
-            provider_session = Some(ProviderSessionRef {
-                schema_version: SCHEMA_VERSION,
-                provider_session_id: observed,
-                account_id: None,
-            });
+        match envelope.event {
+            RunEvent::ProviderAttemptStarted {
+                attempt_key,
+                account_id,
+                ..
+            }
+            | RunEvent::ProviderAccountSelected {
+                attempt_key,
+                account_id,
+            } => {
+                accounts.insert(attempt_key, account_id);
+            }
+            RunEvent::ProviderSessionObserved {
+                attempt_key,
+                provider_session_id,
+            } => {
+                provider_session = Some(ProviderSessionRef {
+                    schema_version: SCHEMA_VERSION,
+                    provider_session_id,
+                    account_id: accounts.get(&attempt_key).cloned().flatten(),
+                });
+            }
+            _ => {}
         }
     }
     Ok(provider_session)
@@ -1725,25 +1743,34 @@ impl CaptureHandle {
         self.with_capture(|capture| capture.fail_and_begin_attempt(provider, model, account_id));
     }
 
-    pub(crate) fn set_provider_session_id(&self, session_id: Option<String>) {
-        let Some(session_id) = session_id else {
-            return;
-        };
+    pub(crate) fn observe_provider(
+        &self,
+        session_id: Option<String>,
+        account_id: Option<crate::store::ProviderAccountId>,
+    ) {
         self.with_capture(|capture| {
-            let account_id = read_provider_session(&capture.dir)?
-                .and_then(|session| session.account_id)
-                .or_else(|| {
-                    capture
-                        .manifest
-                        .launch
-                        .as_ref()
-                        .and_then(|launch| launch.account_id.clone())
-                });
-            write_provider_session(&capture.dir, &session_id, account_id)?;
+            let account_changed = !capture.account_observed || capture.account_id != account_id;
+            if account_changed {
+                capture.append_event(RunEvent::ProviderAccountSelected {
+                    attempt_key: capture.attempt_key(),
+                    account_id: account_id.clone(),
+                })?;
+                capture.account_id = account_id;
+                capture.account_observed = true;
+            }
+            let Some(session_id) = session_id else {
+                return Ok(());
+            };
+            if !account_changed && capture.provider_session_id.as_ref() == Some(&session_id) {
+                return Ok(());
+            }
+            write_provider_session(&capture.dir, &session_id, capture.account_id.clone())?;
             capture.append_event(RunEvent::ProviderSessionObserved {
                 attempt_key: capture.attempt_key(),
-                provider_session_id: session_id,
-            })
+                provider_session_id: session_id.clone(),
+            })?;
+            capture.provider_session_id = Some(session_id);
+            Ok(())
         });
     }
 
@@ -1793,6 +1820,8 @@ struct RunCapture {
     provider: String,
     model: Option<String>,
     account_id: Option<crate::store::ProviderAccountId>,
+    account_observed: bool,
+    provider_session_id: Option<String>,
     attempt: u32,
     attempt_started: bool,
     turn_key: String,
@@ -1864,6 +1893,8 @@ impl RunCapture {
                 .launch
                 .as_ref()
                 .and_then(|launch| launch.account_id.clone()),
+            account_observed: false,
+            provider_session_id: None,
             manifest,
             dir,
             attempt: 1,
@@ -1917,6 +1948,8 @@ impl RunCapture {
         self.provider = provider;
         self.model = model;
         self.account_id = account_id;
+        self.account_observed = false;
+        self.provider_session_id = None;
         self.attempt += 1;
         self.attempt_started = false;
         self.turn_key = Uuid::new_v4().to_string();
@@ -2799,7 +2832,7 @@ mod tests {
     fn provider_session_identity_is_durable_before_the_provider_starts() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.set_provider_session_id(Some("provider-session".to_string()));
+        capture.observe_provider(Some("provider-session".to_string()), None);
 
         assert_eq!(
             read_provider_session(&capture.artifact_dir())
@@ -2826,6 +2859,74 @@ mod tests {
             .expect("provider session reference");
         assert_eq!(session.provider_session_id, "provider-session");
         assert_eq!(session.account_id, Some(account_id));
+    }
+
+    #[test]
+    fn provider_account_observation_precedes_session_and_preserves_attempts() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let dir = capture.artifact_dir();
+        let first = crate::store::ProviderAccountId::parse("primary").unwrap();
+        let second = crate::store::ProviderAccountId::parse("fallback").unwrap();
+        capture.mark_spawn_requested();
+        capture.observe_provider(None, Some(first.clone()));
+        capture.0.lock().unwrap().recorder.drain_after_settlement();
+
+        assert!(!dir.join("terminal.json").exists());
+        assert!(read_provider_session(&dir).unwrap().is_none());
+        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
+        assert!(events.contains("\"account_id\":\"primary\""));
+
+        capture.observe_provider(Some("first-session".into()), Some(first.clone()));
+        capture.observe_provider(Some("first-session".into()), Some(first.clone()));
+        assert_eq!(
+            read_provider_session(&dir).unwrap().unwrap().account_id,
+            Some(first)
+        );
+        capture.fail_and_begin_attempt("proof".into(), None, Some(second.clone()));
+        capture.observe_provider(Some("second-session".into()), Some(second.clone()));
+        capture.0.lock().unwrap().recorder.drain_after_settlement();
+        fs::remove_file(dir.join("provider-session.json")).unwrap();
+        let recovered = read_provider_session(&dir).unwrap().unwrap();
+        assert_eq!(recovered.provider_session_id, "second-session");
+        assert_eq!(recovered.account_id, Some(second));
+        capture.fail_and_begin_attempt("proof".into(), None, None);
+        capture.observe_provider(Some("ambient-session".into()), None);
+        capture.finish("completed").unwrap();
+
+        let events: Vec<serde_json::Value> = fs::read_to_string(dir.join("events.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let accounts: Vec<_> = events
+            .iter()
+            .filter(|event| event["type"] == "provider_account_selected")
+            .map(|event| (event["attempt_key"].clone(), event["account_id"].clone()))
+            .collect();
+        assert_eq!(
+            accounts,
+            vec![
+                (serde_json::json!("attempt-1"), serde_json::json!("primary")),
+                (
+                    serde_json::json!("attempt-2"),
+                    serde_json::json!("fallback")
+                ),
+                (serde_json::json!("attempt-3"), serde_json::Value::Null),
+            ]
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["type"] == "provider_session_observed")
+                .count(),
+            3
+        );
+        let ambient = read_provider_session(&dir).unwrap().unwrap();
+        assert_eq!(ambient.provider_session_id, "ambient-session");
+        assert_eq!(ambient.account_id, None);
+        fs::remove_file(dir.join("provider-session.json")).unwrap();
+        assert_eq!(read_provider_session(&dir).unwrap(), Some(ambient));
     }
 
     #[test]

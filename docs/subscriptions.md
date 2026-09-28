@@ -10,11 +10,11 @@ Connect Claude and Codex logins once, then route each repository through them:
 ```bash
 lf auth connect claude personal@example.com --chrome-profile personal@example.com
 lf auth connect codex work@example.com --chrome-profile work@example.com
-lf auth accounts
+lf auth status
 
-lf route set claude personal@
-lf route set codex work@ personal@
-lf route show
+lf auth route set claude personal@
+lf auth route set codex work@ personal@
+lf auth route show
 ```
 
 Loopflow manages Claude and Codex subscription logins as separate identities.
@@ -30,8 +30,8 @@ Claude or Codex account.
 lf auth connect claude personal@example.com --chrome-profile personal@example.com
 lf auth connect codex work@example.com --chrome-profile work@example.com
 
-lf auth import claude --email personal@example.com  # adopt the ambient Claude login
-lf auth disconnect claude --email personal@
+lf auth connect claude personal@example.com --import  # adopt the ambient Claude login
+lf auth disconnect claude personal@
 ```
 
 Connect creates a **local managed identity**, not a new Claude or Codex account:
@@ -48,8 +48,27 @@ Connect creates a **local managed identity**, not a new Claude or Codex account:
 5. Loopflow writes the verified login and non-secret operating state to
    `~/.lf/loopflow.db`.
 
+Claude opens its native browser callback route and completes after approval.
+If the callback cannot reach this terminal, type `m` then Enter to open the
+provider's manual route in the same profile; code input is hidden. Headless
+connect never consumes stdin as an authorization code.
+
+Select a Chrome profile once for each target:
+
+```bash
+lf auth connect linear --chrome-profile Work
+lf auth connect linear                          # reuse Work
+lf auth connect claude personal@                # reuse this account's profile
+```
+
+Saved names and ordered profile choices remain reusable. A first interactive
+connection offers local Chrome profiles; headless connection requires
+`--chrome-profile` when no choice is saved. A new choice need not have a Google
+login. Existing expected-login constraints remain enforced. Browser selection is
+remembered only after successful authorization, independently for each target.
+
 If verification fails, the staging login is discarded and an existing identity
-is left unchanged. `lf auth import claude --email <email>` is the explicit
+is left unchanged. `lf auth connect claude <email> --import` is the explicit
 exception: it copies
 the ambient Claude login from `~/.claude` or the macOS Keychain into a new
 isolated account home, then performs the same login verification.
@@ -67,8 +86,9 @@ selector.
 An access profile records which Chrome profile can authenticate an identity:
 
 ```bash
-lf profile create --chrome-profile personal@example.com --as personal
-lf auth access set claude personal@ --profile personal
+lf auth set claude personal@ --chrome-profile Personal --chrome-profile Work
+lf auth set linear --chrome-profile Work
+lf auth status --details
 ```
 
 The profile is an authentication venue, not the identity that spends provider
@@ -82,14 +102,61 @@ same account ID so fallback and resume do not silently change identities.
 ## Inspect account state
 
 ```bash
-lf auth status                   # every connected service
-lf auth accounts claude          # cached subscription state
-lf auth accounts --verify        # compare every credential with its provider
+lf auth status                       # offline managed and local evidence
+lf auth status claude --verify       # request managed Claude observations
+lf auth status --details --json      # sources, saved browsers, full timestamps
 ```
 
-`auth accounts --verify` records a revoked credential as missing and prints
-the exact `lf auth connect` recovery command. Provider routes skip missing,
-disabled, cooling, and limited accounts and continue to the next candidate.
+Status lists stable account IDs beside full usable logins. Managed accounts and
+local service credentials have separate sections: an expired local token says
+nothing about a managed account. Missing local tokens leave ambient auth
+uninspected. Cached inspection opens the database read-only, starts no provider,
+does not decrypt local tokens or create an encryption key, and leaves an absent
+store absent. An inherited account lease carries no cached identity catalog:
+plain status reports forwarded identities as uninspected without contacting the
+origin broker. Local token metadata is cached evidence, not server acceptance;
+`--verify` reports local server verification unavailable.
+
+`auth status --verify` persists recognized managed subscription windows before
+printing percentages, reset times and plan. Each window keeps its own observation
+age and source; omitted or unavailable windows retain older evidence. A passed
+reset asks for refresh instead of implying zero usage. `lf usage` reports Run
+token/cost usage separately. With `--verify`, status reads forwarded identity
+metadata from the origin broker, without acquiring a remote credential or
+verifying remote accounts. An unavailable broker leaves local evidence visible.
+
+JSON contains `accounts`, optional `forwarded_accounts_diagnostic`, and optional
+`browser` details. Unknown forwarded identities have no invented account rows.
+Each row has `scope`
+(`managed`, `local`, or `forwarded`), provider, account ID, login, cached
+credential state, verification, windows, diagnostic and recovery. Verification
+is `accepted`, `rejected`, `unavailable`, or `not_checked`. Window rows retain
+`observed_at`, `resets_at`, source and plan; `verified_windows` identifies only
+this invocation's new observations. Null means unknown. A successful report
+does not imply successful authentication. Cron-host requires accepted managed
+evidence:
+
+```bash
+lf auth status --verify --json |
+  jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")'
+```
+
+Claude's cached login metadata does not establish a freshly observed plan.
+Until the usage response supplies confirmed plan evidence, its new observations
+leave plan unknown. Codex retains the plan returned by its rate-limit response.
+
+Cached account inspection starts no provider and changes no stored state. Missing
+credentials remain visible with older usage and the `lf auth connect` recovery
+command. Unreadable credentials are distinguished from missing files. Verification
+records decisive rejection as missing; unavailable usage leaves credential state
+unchanged. Neither success nor rejection clears a routing cooldown or changes
+account configuration. Provider routes skip missing, disabled, cooling and
+limited accounts and continue to the next candidate.
+
+A credential replacement detected during verification makes that result
+unavailable and retains prior account evidence. Claude refresh coordination with
+native sessions is still under development; these comparisons do not serialize
+native refresh or credential writes.
 
 An active usage window at 95% or above demotes that account behind candidates
 below the threshold. Declared route order decides ties. A provider session stays
@@ -101,8 +168,11 @@ Control automatic routing per account:
 ```bash
 lf auth set claude personal@ --paid-through 2026-08-14
 lf auth set claude personal@ --routing explicit-only
-lf auth reset claude personal@
+lf auth set claude personal@ --clear-cooldown
 ```
+
+Clearing cooldown retains credential state, aggregate utilization and every
+observed window. It does not reset provider quota.
 
 An `explicit-only` identity runs only when a route or command selects it.
 `disabled` identities never run. Once `paid-through` passes, an otherwise
@@ -114,10 +184,15 @@ A repository account route is an ordered list of subscription logins to try for
 one provider in one repository:
 
 ```bash
-lf route set claude personal@ work@
-lf route set codex work@ personal@
-lf route show
+lf auth route set claude personal@ work@
+lf auth route set codex work@ personal@
+lf auth route set codex work@ --default
+lf auth route show --json
 ```
+
+Show lists eligible launch candidates in order without selecting one. Explicit
+`--repo` and `--default` work outside Git; a write without either requires a
+repository origin.
 
 It is account-selection metadata, not an SSH or network route, and it contains
 no credential. Repository routes live in the local Loopflow database.
@@ -128,6 +203,18 @@ candidate. With no managed candidate, the provider CLI can use its ambient
 default login.
 
 ## Select accounts for one launch
+
+Inspect a running worker's selected account:
+
+```bash
+lf runs <run-id> --events
+```
+
+`provider_account_selected` records the actual account and attempt, including
+headless Task steps before a provider session ID is available. Later attempts
+retain earlier account evidence; a null account means ambient execution. Once
+the provider reports its session ID, the Run's session reference records that
+session with its selected account.
 
 Prefer an account while keeping the normal route as fallback:
 
@@ -211,10 +298,40 @@ for the broker, process-lifetime, and remote trust boundary.
 OpenCode Zen uses one credential rather than the managed subscription route:
 
 ```bash
-lf auth opencode
-lf auth configure opencode
+lf auth connect opencode
+lf auth connect opencode --api-key
 ```
 
 Its stored credential applies to local OpenCode launches and foreground SSH.
 Subscription polling, repository account routes, and the 95% demotion threshold
 do not apply.
+
+## Rust API migration
+
+This auth consolidation changes the published Rust library's source API. Crate
+consumers must migrate; the removed interfaces have no compatibility aliases.
+
+- Call `ProviderAuthService::start_auth(provider)` and `disconnect(provider)`
+  without an event sink. `AuthEvent`, `AuthEventSink` and `no_event_sink` are
+  removed. After opening the returned browser URL, await
+  `wait_for_auth(provider)` once to receive that attempt's completion, including
+  persistence errors. Do not use cached `status()` as completion evidence.
+- Construct `AuthFlowResponse` with `completion: AuthCompletion`. Use
+  `supports_authorization_code()` and `pending_supports_authorization_code()`
+  in place of the former `requires` methods. Manual input support does not mean
+  authorization requires a code. Chrome authorization-code scraping is removed;
+  use provider completion or explicit manual submission.
+- Replace `AccountAccessProfile` with `AuthBrowserBinding`. Its `account_id`
+  is optional: `Some(id)` selects a managed account; `None` names local service
+  scope. `AccessProfile::expected_login` is also optional. Store and SqliteStore
+  expose `set_auth_browser_profiles` / `list_auth_browser_profiles` in place of
+  the account-access methods. In the list method, a missing account filter lists
+  both scopes; filter binding rows when selecting a local service.
+- Include `plan: Option<String>` when constructing `SubscriptionUsage`. Read
+  the account's stored `home` instead of the removed `subscription::account_home`
+  path constructor.
+
+The forward database migration preserves existing account/profile identities,
+ordered bindings and configured expected logins. Source API compatibility and
+database preservation are separate contracts; local tests do not establish that
+external crate consumers have migrated.

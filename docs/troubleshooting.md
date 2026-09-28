@@ -168,7 +168,7 @@ the install command. For Claude Code:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-lf auth claude
+lf auth connect claude
 ```
 
 With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and

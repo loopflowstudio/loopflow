@@ -20,6 +20,8 @@ pub struct PrOptions {
     pub title: Option<String>,
     pub body: Option<String>,
     pub agent: Option<String>,
+    /// Create drafts and preserve existing readiness instead of marking ready.
+    pub draft: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +57,7 @@ const TASK_PR_CONTEXT_END: &str = "<!-- loopflow:task-pr-context:end -->";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TaskPrCopyLifecycle {
+    Draft,
     Published,
     Continues { next_slug: Option<String> },
     Completes,
@@ -148,6 +151,8 @@ pub fn create_or_update_pr(
     // A same-head refresh preserves an armed request. Read it under the mutation
     // lock, after pushing has revoked any request for a superseded head.
     let task_context = crate::ops::task::task_pr_context(repo)?;
+    let existing_pr = find_open_pr(repo)?;
+    let draft = options.draft && existing_pr.as_ref().is_none_or(|pr| pr.is_draft);
     let lifecycle = match task_context
         .as_ref()
         .and_then(|context| context.merge_request.as_ref())
@@ -159,6 +164,7 @@ pub fn create_or_update_pr(
         Some(request) => TaskPrCopyLifecycle::Continues {
             next_slug: request.next_slug.clone(),
         },
+        None if draft => TaskPrCopyLifecycle::Draft,
         None => TaskPrCopyLifecycle::Published,
     };
     let copy = normalize_task_pr_copy(copy, task_context.as_ref(), &lifecycle)?;
@@ -166,12 +172,12 @@ pub fn create_or_update_pr(
     let body = copy.body.trim();
     crate::ops::task::request_task_pr_publication(repo, title, body)?;
 
-    let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
+    let (result, pr) = if let Some(mut pr) = existing_pr {
         progress.status("Updating PR...");
-        update_pr(repo, pr.number, title, body, &base_branch)?;
-        if pr.is_draft {
-            mark_pr_ready(repo, pr.number)?;
+        if !draft {
+            mark_pr_ready(repo, &mut pr)?;
         }
+        update_pr(repo, pr.number, title, body, &base_branch)?;
         let info = pr_info(&branch, pr);
         (
             PrResult {
@@ -182,11 +188,11 @@ pub fn create_or_update_pr(
         )
     } else {
         progress.status("Creating PR...");
-        let url = create_pr(repo, title, body, &base_branch)?;
-        let visible = find_open_pr(repo)?;
-        if let Some(pr) = &visible {
-            if pr.is_draft {
-                mark_pr_ready(repo, pr.number)?;
+        let url = create_pr(repo, title, body, &base_branch, draft)?;
+        let mut visible = find_open_pr(repo)?;
+        if let Some(pr) = &mut visible {
+            if !draft {
+                mark_pr_ready(repo, pr)?;
             }
         }
         let info = match visible {
@@ -194,7 +200,7 @@ pub fn create_or_update_pr(
             None => pr_number_from_url(&url).map(|number| PrInfo {
                 number,
                 url: url.clone(),
-                state: "open".to_string(),
+                state: if draft { "draft" } else { "open" }.to_string(),
                 branch: branch.clone(),
                 merge_commit: None,
                 merged_at: None,
@@ -238,6 +244,10 @@ pub(crate) fn normalize_task_pr_copy(
 
     let task_link = context.task_link();
     let pr_lifecycle = match lifecycle {
+        TaskPrCopyLifecycle::Draft => format!(
+            "PR {} is a draft; no Task settlement is requested.",
+            context.sequence
+        ),
         TaskPrCopyLifecycle::Published => format!(
             "PR {} is published for review; no Task settlement is requested.",
             context.sequence
@@ -383,24 +393,10 @@ fn resolve_pr_copy(
 fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
     let cached = read_cached_pr_copy(repo, progress)?;
     let scratch = repo.join("scratch");
-    if !scratch.exists() {
-        return Ok(cached);
-    }
-
     let mut removed = false;
-    for entry in std::fs::read_dir(&scratch)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let gate_owned = matches!(
-            name.as_ref(),
-            ".pr-copy-ref" | "pr-title.txt" | "pr-body.md"
-        ) || name.ends_with("-review.md");
-        if gate_owned {
+    for name in [".pr-copy-ref", "pr-title.txt", "pr-body.md"] {
+        let path = scratch.join(name);
+        if path.is_file() {
             std::fs::remove_file(path)?;
             removed = true;
         }
@@ -1140,11 +1136,14 @@ pub(crate) fn retarget_open_pr(repo: &Path, base: &str) -> OpsResult<()> {
     Ok(())
 }
 
-fn mark_pr_ready(repo: &Path, number: u64) -> OpsResult<()> {
+fn mark_pr_ready(repo: &Path, pr: &mut GhPr) -> OpsResult<()> {
+    if !pr.is_draft {
+        return Ok(());
+    }
     let output = Command::new("gh")
         .arg("pr")
         .arg("ready")
-        .arg(number.to_string())
+        .arg(pr.number.to_string())
         .current_dir(repo)
         .output()?;
     if !output.status.success() {
@@ -1153,10 +1152,11 @@ fn mark_pr_ready(repo: &Path, number: u64) -> OpsResult<()> {
             stderr: stderr_from_output(&output),
         });
     }
+    pr.is_draft = false;
     Ok(())
 }
 
-fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<String> {
+fn create_pr(repo: &Path, title: &str, body: &str, base: &str, draft: bool) -> OpsResult<String> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
         .arg("create")
@@ -1166,6 +1166,9 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<Stri
         .arg(body)
         .arg("--base")
         .arg(base);
+    if draft {
+        cmd.arg("--draft");
+    }
     let output = cmd.current_dir(repo).output()?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
@@ -1184,7 +1187,7 @@ pub(crate) fn create_pr_from_pushed_branch(
     body: &str,
     base: &str,
 ) -> OpsResult<PrInfo> {
-    let url = create_pr(repo, title, body, base)?;
+    let url = create_pr(repo, title, body, base, false)?;
     let number = pr_number_from_url(&url).ok_or_else(|| {
         OpsError::Message(format!("could not read PR number from created URL {url}"))
     })?;
@@ -1854,6 +1857,10 @@ mod tests {
             body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewers can see what work remains.\n\n\n    lf wave status example\n\n## Evaluate\n\nRecorded proof.".to_string(),
         };
         for (lifecycle, expected) in [
+            (
+                TaskPrCopyLifecycle::Draft,
+                "is a draft; no Task settlement is requested.",
+            ),
             (
                 TaskPrCopyLifecycle::Published,
                 "no Task settlement is requested.",

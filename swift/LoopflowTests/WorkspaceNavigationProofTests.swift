@@ -151,7 +151,7 @@ struct WorkspaceNavigationProofTests {
         ]
         let orphans = [
             record("demo", title: "demo", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
-            record("review-slice", title: "review-slice", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
+            record("realign", title: "realign", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
             record("luna-aria", title: "luna-aria", work: NSNull(), cwd: "/src/loopflow.release-run"),
             record("loopflow", title: "loopflow", work: NSNull(), cwd: "/src/loopflow.build-size"),
         ]

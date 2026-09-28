@@ -207,6 +207,7 @@ fn publish_refuses_when_registry_inaccessible_before_any_push() {
     let err = create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("inaccessible".to_string()),
             body: Some("authority proof".to_string()),
             agent: None,
@@ -343,6 +344,7 @@ fn publish_refuses_when_registry_schema_incompatible_before_any_push() {
     let err = create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("schema-incompatible".to_string()),
             body: Some("authority proof".to_string()),
             agent: None,
@@ -395,6 +397,7 @@ fn valid_authority_publishes_and_records_the_pr() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("valid authority".to_string()),
             body: Some("authority proof".to_string()),
             agent: None,
@@ -461,6 +464,7 @@ fn ordinary_pr_publishes_when_worktree_is_not_a_task_worktree() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("ordinary non-Task PR".to_string()),
             body: Some("not a task".to_string()),
             agent: None,
@@ -500,6 +504,7 @@ fn ordinary_pr_publishes_when_no_registry_exists() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("ordinary PR no registry".to_string()),
             body: Some("not a task".to_string()),
             agent: None,

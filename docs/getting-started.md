@@ -160,8 +160,8 @@ and Wave goals.
 ### Shipping
 
 ```bash
-lf pr publish   # push + create or update PR (no browser)
-lf pr open      # publish, then open the PR for review
+lf pr open      # push + create or update a draft, then open its page
+lf pr publish   # push + create or update PR and mark ready (no browser)
 lf pr submit    # prepare the exact head; you click merge
 lf pr arm       # arm exact-head auto-merge and return
 lf pr land      # watch, repair CI, and return after GitHub merges

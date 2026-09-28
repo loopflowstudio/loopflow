@@ -1,6 +1,6 @@
-name: builtin_review_slice
+name: builtin_realign
 repo: tests/parity/fixtures/basic
-skill: review-slice
+skill: realign
 surface: headless
 docs: []
 diff_files: false

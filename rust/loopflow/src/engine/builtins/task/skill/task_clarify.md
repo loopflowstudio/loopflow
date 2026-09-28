@@ -61,8 +61,8 @@ Before leaving clarify, make the design note state:
   adapters, fallbacks, dual writes, or locally passing states that would still
   violate the intended architecture.
 - **Internal slices** — for an indivisible change, keep the complete end state
-  intact, mark one `This slice`, and append evidence to a slice ledger rather
-  than replacing the design with a narrower plan.
+  intact, mark one `This slice`, and update remaining work and consequential
+  evidence in place rather than replacing the design with a narrower plan.
 
 Files changed, migrations applied, tests added, and a PR opened are
 implementation receipts. They may support the proof, but they are not the

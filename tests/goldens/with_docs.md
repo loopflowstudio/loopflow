@@ -28,11 +28,12 @@ lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish is the default for making work visible; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not rebase. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf pr open` also opens
-the review page; use it only when the user asks to see the PR.
+selected delivery skill for preparation and recovery. `lf pr open` creates or
+updates a draft and opens its page; use it when the user asks to see the PR.
+It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -99,8 +100,8 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `update-wave` or
-`record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`, `update-wave`,
+or `record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
 maintainer instructions into customer skills.
 
 </lf:loopflow>

@@ -28,11 +28,12 @@ lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish is the default for making work visible; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not rebase. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf pr open` also opens
-the review page; use it only when the user asks to see the PR.
+selected delivery skill for preparation and recovery. `lf pr open` creates or
+updates a draft and opens its page; use it when the user asks to see the PR.
+It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -99,8 +100,8 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `update-wave` or
-`record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`, `update-wave`,
+or `record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
 maintainer instructions into customer skills.
 
 </lf:loopflow>
@@ -149,13 +150,13 @@ Produce a first draft quickly. Polish cleans it up. You can be re-invoked if nee
 
 ## Workflow
 
-The design doc and style guides are in your context.
+Use the supplied design and repository conventions. A small change may have its
+plan in the conversation; do not require a document template or a prior skill.
 
 1. **Understand the design**
-   The design doc has data structures, function signatures, constraints, a
-   "done when" check, the complete target architecture, and one marked current
-   slice. Reconstruct the current concepts, authorities, writers, persistence,
-   and call paths before choosing where the behavior belongs.
+   Recover the intended outcome, accepted constraints, approach, and proof.
+   Read the current plan wherever it lives. Reconstruct the affected concepts,
+   owners, persistence, and call paths before choosing where behavior belongs.
 
 2. **Implement**
    - Data structures first—get the core types right
@@ -163,32 +164,26 @@ The design doc and style guides are in your context.
    - Match existing patterns in the codebase
    - Reshape the existing owner instead of adding a parallel representation
    - Delete the authority or path the design makes obsolete
-   - Slice vertically: move one real consumer end to end and delete what it
-     replaces in the same cut. Adding a new owner beside the old one is not a
-     slice. Name the switched consumer and search for the removed path.
-   - A large design proceeds in slices—one coherent piece at a time, each
-     checked against both its focused proof and the full-design trajectory—but
-     the branch ships as one PR. Update only `This slice` and the slice ledger;
-     never replace the complete design with a local implementation plan. Don't
-     stage the landing with flags, v2s, or setups nothing uses yet.
+   - When replacing an existing path, move a real consumer end to end and
+     delete the predecessor in the same cut. New capabilities need no invented
+     predecessor or deletion quota.
+   - Follow the design's delivery boundary. An indivisible architectural change
+     proceeds in coherent internal slices but ships as one PR. Keep the complete
+     target and update the remaining work as implementation teaches us more.
+     Do not stage the landing with flags, v2s, or setups nothing uses yet.
 
 3. **Verify**
    - Run the smallest behavioral test that proves the behavior you changed
    - Run the "done when" check from the design doc
    - If a required proof cannot run, stop dependent work and record the exact
      command and blocker. "Authored, not executed" is not a completed pass.
-   - In the existing slice record, report measured non-test lines added and
-     removed, compared revisions, excluded tests/generated files, the replaced
-     path, and proof commands with observed outcomes. Keep one record per pass;
-     do not create another implementation report.
+   - Update the working plan in place with remaining work, consequential
+     discoveries, and proof results or links. Delete stale instructions; retain
+     accepted requirements and unresolved counterexamples. Leave a brief summary
+     of progress, learning, and proof when useful for the handoff; avoid
+     duplicating the plan in a report for each pass.
    - Do not run an affected-suite or full-repository gate here; gate and CI own
      those broader proofs
-
-A worked example: one 30-minute implementation Run first failed its acceptance
-test, moved interactive Sessions onto database rows end to end, and removed
-16 predecessor items in the same cut: +396 / −409 non-test lines. Its record
-named the switched reader, executed proof, and remaining gaps. Judge that
-consumer replacement and honest boundary, not the duration or a deletion quota.
 
 ## Rules
 

@@ -203,7 +203,7 @@
             {
               "key": "2",
               "id": null,
-              "label": "review-slice",
+              "label": "realign",
               "kind": "skill",
               "human": false,
               "returns_to": null,
@@ -500,7 +500,7 @@
             {
               "key": "2",
               "id": null,
-              "label": "review-slice",
+              "label": "realign",
               "kind": "skill",
               "human": false,
               "returns_to": null,
@@ -827,7 +827,7 @@
             {
               "key": "2",
               "id": null,
-              "label": "review-slice",
+              "label": "realign",
               "kind": "skill",
               "human": false,
               "returns_to": null,
@@ -941,7 +941,7 @@
           }
         ],
         "execution": "running",
-        "reason": "Worker is running review-slice",
+        "reason": "Worker is running realign",
         "restart_required": false,
         "iterations": [
           [

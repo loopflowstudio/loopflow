@@ -245,10 +245,16 @@ and [demo decisions](https://github.com/loopflowstudio/loopflow/blob/3abb64bf1a2
 preserve failed attempts, measured replacements and proof scope before scratch
 clearing. These identify local history; remote availability was not checked.
 
-Jack selected implement → compress → review-slice → loop-decide. Compress edits
-anything related to the diff and leaves only a commit explanation and a few slice
-lines. Review-slice owns concept checks and the two-pass no-replacement blocker;
-loop-decide judges caller-supplied criteria generically. Concept-review stays a
+Jack initially selected implement → compress → review-slice → loop-decide.
+The September 28 realign branch supersedes that inner loop with implement →
+compress → refresh → loop-decide; refresh composes rebase → realign. Publication
+follows convergence before the existing human demo. Jack accepted refresh's
+leased branch push. Realign edits the plan, code, and identified Wave memory;
+its minimal evidence summary replaces the two-pass no-replacement blocker and
+mandatory slice ledger. Loop-decide still judges caller-supplied criteria;
+publication checks readiness because successful reconciliation can leave work
+unfinished. The [prompting lessons](../intelligence/MEMORY.md#reconciliation-and-reusable-skills-branch-evidence-2026-09-28)
+retain the rationale and agent-behavior proof limits. Concept-review stays a
 self-contained interactive skill. Ship calls gate directly; task-gate is removed.
 Captured invocations retain their definitions. Tests must locate decision policy
 in the captured Flow rather than copy a catalog step index: shortening pursue
@@ -459,7 +465,9 @@ implementation, not another chapter plan.
   Keep title/body together through copy resolution. A same-head publication must
   display the persisted merge request, read under the mutation lock; publication
   alone does not request settlement. Landing reads copy before clearing scratch;
-  publication consumes gate artifacts on its own path. Release re-arming retains
+  publication consumes only `.pr-copy-ref`, `pr-title.txt`, and `pr-body.md` on
+  its own path. Independent review evidence survives publication; gate no longer
+  requires a duplicate review report. Release re-arming retains
   remote copy. Prove landing and release consumers when changing that shared path.
 - Chapter rotation owns one deterministic boundary. Preserve started Task
   identity, expire untouched backlog and freeze predecessor metric targets,
@@ -478,6 +486,22 @@ implementation, not another chapter plan.
   Installed-updater compatibility lives in docs/lf.md. The env setup helper is
   `scripts/env-setup.sh`; `.lf/` holds executable configuration and chapter history,
   not a catch-all for maintainer notes. Historical chapter records are retained.
+
+### Draft PR readiness (branch evidence, 2026-09-28)
+
+Jack requested draft-by-default `lf pr open`, preserving an already-ready PR.
+Publish/submit/arm/land promote drafts; opening the browser has no readiness
+effect. CLI and headless Flow operations share the existing create/update path.
+Promotion owns its local readiness update after GitHub succeeds, so a failed
+promotion cannot advance Task state or publish ready copy over a draft.
+
+The [preserved realign design](https://github.com/loopflowstudio/loopflow/blob/60ee8daff36b2c97ad5a6f30e1f5daa98a40bca4/scratch/realign.md)
+records stateful local GitHub/browser proofs for new drafts, repeated opens,
+ready-PR opens, promotion failure and retry, plus focused Task-copy and delivery
+checks. The final 27 selected builtin/export/draft tests and all-target Clippy
+passed. These are recorded branch checks, not fresh checks from this curation,
+real PR mutations, installed acceptance, or proof of Task completion. Historical
+links identify local commits; remote availability was not checked.
 
 ## PR landing recovery (branch evidence, 2026-09-25)
 

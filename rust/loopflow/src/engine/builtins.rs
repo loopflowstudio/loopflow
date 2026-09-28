@@ -265,15 +265,7 @@ mod tests {
             );
         }
 
-        for name in [
-            "explore",
-            "refine",
-            "review-design",
-            "prompt",
-            "review-open-work",
-            "review",
-            "init",
-        ] {
+        for name in ["explore", "refine", "review-open-work", "review", "init"] {
             let skill = get_builtin_skill(name).expect("builtin skill");
             assert!(
                 skill.contains("## Reviewer mode"),
@@ -374,7 +366,7 @@ mod tests {
             .contains("human:"));
         assert!(get_builtin_flow("slice")
             .expect("Task loop flow")
-            .contains("- review-slice"));
+            .contains("- realign"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
             .contains("- op: pr land -c"));

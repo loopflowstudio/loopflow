@@ -308,7 +308,7 @@ agent: codex          # harness default
 Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific models.
 
 Four built-in skills intentionally default to Claude: `kickoff`,
-`review-design`, `review-slice`, and `prompt`. Every other unconfigured
+`review-design`, `realign`, and `prompt`. Every other unconfigured
 built-in skill uses Codex when it is installed, then Claude, then OpenCode. A
 CLI `-m` or authored `agent:` config remains an explicit override.
 

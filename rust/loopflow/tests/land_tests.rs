@@ -999,6 +999,7 @@ fn latest_land_disposition_wins_before_merge() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("refresh published PR".to_string()),
             body: Some("same head".to_string()),
             agent: None,
@@ -1086,6 +1087,7 @@ fn latest_land_disposition_wins_before_merge() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some(presentation.title.clone()),
             body: Some(presentation.body.clone()),
             agent: None,

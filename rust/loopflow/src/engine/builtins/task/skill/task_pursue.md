@@ -28,8 +28,8 @@ selection. Follow the repo style guide.
   available to this process, and keep responsibility for integrating the result.
 - Implement the smallest coherent slice described by the design doc. Check it
   against both its focused proof and the complete target architecture. Update
-  only `This slice` and the slice ledger; never replace the north star with a
-  local implementation plan.
+  the remaining work and consequential evidence in the existing design; preserve
+  the full target while correcting stale assumptions.
 - Before adding a type, store, writer, or launch path, identify the existing
   concept that should own the behavior and what becomes obsolete. A v2,
   Legacy/New split, adapter, fallback, dual write, or parallel authority is

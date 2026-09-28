@@ -1214,7 +1214,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "review-slice"] {
+            for expected in ["implement", "compress", "rebase", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(
                     !super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap()
@@ -1236,6 +1236,9 @@ mod planning_tests {
             });
             assert!(!super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap());
         }
+        assert_eq!(position.current().step, "pr-publish");
+        assert!(!position.is_human());
+        assert!(!super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap());
         assert!(position.is_human());
         assert_eq!(position.current().step, "demo");
         assert_eq!(position.cursor.iteration, 9);
@@ -1255,7 +1258,7 @@ mod planning_tests {
             position.cursor.progress.direction.as_deref(),
             Some("Human requested a delivery correction")
         );
-        for _ in 0..3 {
+        for _ in 0..4 {
             super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         }
         assert_eq!(position.current().step, "loop-decide");
@@ -1268,13 +1271,15 @@ mod planning_tests {
         assert_eq!(position.cursor.progress.repeats["decide"], 10);
         // Final Advance is the only edge into queue and landing. This traverses
         // the authored plan without invoking any publication operation.
-        for _ in 0..3 {
+        for _ in 0..4 {
             super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         }
         position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
             decision: crate::engine::transitions::FlowDecision::Advance,
             summary: "Revision proved".into(),
         });
+        super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        assert_eq!(position.current().step, "pr-publish");
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         assert_eq!(position.current().step, "demo");
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
@@ -1487,6 +1492,15 @@ mod planning_tests {
         }
     }
 
+    fn pursue_decision(task: &Task) -> FlowPosition {
+        let mut flow = super::start_task_flow(task, "pursue").unwrap();
+        while !flow.is_decision() {
+            assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
+        }
+        assert_eq!(flow.current().step, "loop-decide");
+        flow
+    }
+
     #[test]
     fn task_decision_recovery_requires_the_original_successful_run() {
         let guard = super::TestLfBinGuard::pin();
@@ -1498,9 +1512,8 @@ mod planning_tests {
             for routing in [false, true] {
                 for status in ["completed", "failed", "interrupted", "running", "missing"] {
                     let (store, mut task, _) = human_task_fixture().await;
-                    let mut flow = super::start_task_flow(&task, "pursue").unwrap();
-                    flow.invocation.steps.truncate(4);
-                    flow.cursor.index = 3;
+                    let mut flow = pursue_decision(&task);
+                    flow.invocation.steps.truncate(flow.cursor.index + 1);
                     if routing {
                         flow.cursor.index = 0;
                         flow.invocation.steps = vec![crate::engine::ConcreteStep::Xor(
@@ -1657,7 +1670,7 @@ mod planning_tests {
                 let definitions = task.worktree.join(".lf/flows");
                 std::fs::create_dir_all(&definitions).unwrap();
                 std::fs::write(definitions.join("nested-slice.yaml"), "- xor:\n    paths:\n      selected:\n        flow: saved-body\n        description: pursue the approved design\n").unwrap();
-                std::fs::write(definitions.join("saved-body.yaml"), "- step:\n    name: implement\n    id: work\n- compress\n- review-slice\n- concept-review\n- step:\n    name: loop-decide\n    id: decide\n    repeat:\n      from: work\n").unwrap();
+                std::fs::write(definitions.join("saved-body.yaml"), "- step:\n    name: implement\n    id: work\n- compress\n- realign\n- concept-review\n- step:\n    name: loop-decide\n    id: decide\n    repeat:\n      from: work\n").unwrap();
                 let flow = super::start_task_flow(&task, "nested-slice").unwrap();
                 // Delete the sources before routing: every possible path was captured.
                 std::fs::remove_file(definitions.join("nested-slice.yaml")).unwrap();
@@ -1689,7 +1702,7 @@ mod planning_tests {
                     assert_eq!(session.account_id.unwrap().as_str(), "selected-account");
                 }
                 assert_eq!(turns.iter().map(|(step, _)| step.as_str()).collect::<Vec<_>>(),
-                    ["xor-route", "implement", "compress", "review-slice", "concept-review", "loop-decide", "implement", "compress", "review-slice", "concept-review", "loop-decide"]);
+                    ["xor-route", "implement", "compress", "realign", "concept-review", "loop-decide", "implement", "compress", "realign", "concept-review", "loop-decide"]);
                 assert_eq!(turns.iter().map(|(_, run)| run).collect::<std::collections::HashSet<_>>().len(), 11);
                 for (_, run) in &turns {
                     let (_, manifest) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
@@ -1702,9 +1715,8 @@ mod planning_tests {
 
                 // Recover a completed decision Run before replacing its claim.
                 // Settlement consumes its saved result without another provider.
-                let mut flow = super::start_task_flow(&task, "pursue").unwrap();
-                flow.invocation.steps.truncate(4);
-                flow.cursor.index = 3;
+                let mut flow = pursue_decision(&task);
+                flow.invocation.steps.truncate(flow.cursor.index + 1);
                 let flow = store.set_flow_position(&task.id, flow).await.unwrap();
                 let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(
                     &task.id, &flow.invocation.id, flow.version, &owner, time::OffsetDateTime::now_utc(),
@@ -1730,8 +1742,7 @@ mod planning_tests {
 
                 // A late error cannot release a replacement invocation's claim,
                 // even when restart reuses its version and generation.
-                let mut flow = super::start_task_flow(&task, "pursue").unwrap();
-                flow.cursor.index = 3;
+                let flow = pursue_decision(&task);
                 let flow = store.set_flow_position(&task.id, flow).await.unwrap();
                 let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(
                     &task.id, &flow.invocation.id, flow.version, &owner, time::OffsetDateTime::now_utc(),
@@ -1780,8 +1791,7 @@ mod planning_tests {
         let (store, task, _) = runtime.block_on(human_task_fixture());
         crate::journal::with_runtime(&task.worktree, &["live-unblock-proof".into()], || {
             runtime.block_on(async {
-                let mut flow = super::start_task_flow(&task, "pursue").unwrap();
-                flow.cursor.index = 3;
+                let flow = pursue_decision(&task);
                 let flow = store.set_flow_position(&task.id, flow).await.unwrap();
                 let owner = crate::journal::current_process_identity().unwrap();
                 let TaskWorkerClaimOutcome::Claimed(claim) = store
@@ -1928,8 +1938,7 @@ mod planning_tests {
                     refresh_token: None, oauth_client_id: None, expires_at: None,
                     login: None, updated_at: 1, credential_type: crate::store::CredentialType::OAuth,
                 }).await.unwrap();
-                let mut flow = super::start_task_flow(&task, "pursue").unwrap();
-                flow.cursor.index = 3;
+                let flow = pursue_decision(&task);
                 let flow = store.set_flow_position(&task.id, flow).await.unwrap();
                 let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
                 let context = crate::ops::pm::PmTestContext {
@@ -1960,7 +1969,7 @@ mod planning_tests {
                 let (directory, _) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
                 assert_eq!(crate::run_record::read_run_snapshot(&directory).unwrap().status(), "failed");
                 assert!(blocked.claim.is_none());
-                assert_eq!(blocked.cursor.index, 3);
+                assert_eq!(blocked.cursor.index, flow.cursor.index);
                 let (execution, graph) = crate::ops::task_execution::task_execution_and_flow(&store, &task.id).await.unwrap();
                 assert_eq!(execution.state, crate::ops::task_execution::TaskExecutionState::Blocked);
                 assert_eq!(execution.run_id.as_ref(), Some(&run));
@@ -2027,8 +2036,7 @@ mod planning_tests {
                     refresh_token: None, oauth_client_id: None, expires_at: None,
                     login: None, updated_at: 1, credential_type: crate::store::CredentialType::OAuth,
                 }).await.unwrap();
-                let mut flow = super::start_task_flow(&task, "pursue").unwrap();
-                flow.cursor.index = 3;
+                let flow = pursue_decision(&task);
                 let flow = store.set_flow_position(&task.id, flow).await.unwrap();
                 let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
                 let context = crate::ops::pm::PmTestContext {
@@ -2059,7 +2067,7 @@ mod planning_tests {
                 let (directory, _) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
                 assert_eq!(crate::run_record::read_run_snapshot(&directory).unwrap().status(), "failed");
                 assert!(blocked.claim.is_none());
-                assert_eq!(blocked.cursor.index, 3);
+                assert_eq!(blocked.cursor.index, flow.cursor.index);
                 let (execution, graph) = crate::ops::task_execution::task_execution_and_flow(&store, &task.id).await.unwrap();
                 assert_eq!(execution.state, crate::ops::task_execution::TaskExecutionState::Blocked);
                 assert_eq!(execution.run_id.as_ref(), Some(&run));
@@ -3545,13 +3553,15 @@ mod planning_tests {
         ];
         flow.cursor.route = Some("work".into());
         super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
-        for _ in 0..3 {
-            super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
+        while !flow.is_decision() {
+            assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
         }
         flow.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
             decision: FlowDecision::Advance,
             summary: "ready to demonstrate".into(),
         });
+        super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
+        assert_eq!(flow.current().step, "pr-publish");
         super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
         assert!(flow.is_human());
         assert_eq!(flow.current().step, "demo");
@@ -3618,14 +3628,17 @@ mod planning_tests {
             std::fs::read_to_string(notes.join("design.md")).unwrap(),
             design
         );
-        for _ in 0..3 {
-            super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap();
+        while !saved.is_decision() {
+            assert!(!super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap());
         }
         saved.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
             decision: FlowDecision::Advance,
             summary: "revision demonstrated".into(),
         });
         super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap();
+        assert_eq!(saved.current().step, "pr-publish");
+        super::finish_task_flow_turn(&mut saved, Lifecycle::Completed).unwrap();
+        assert!(saved.is_human());
         store.set_flow_position(&task.id, saved).await.unwrap();
         let later = park_human_task(&store, &task, &flow).await;
         assert_ne!(later.iteration, token.iteration);

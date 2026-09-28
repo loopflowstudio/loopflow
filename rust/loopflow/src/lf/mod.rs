@@ -1187,7 +1187,7 @@ pub enum PrCommand {
         /// then the sequence number).
         slug: Option<String>,
     },
-    /// Publish a PR headlessly: push, create or refresh, print state + URL.
+    /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
         #[arg(short = 'm', long = "model", short_alias = 'M')]
@@ -1197,8 +1197,8 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Publish a PR, then open it for review (the GitHub page in the browser).
-    /// Open the PR for review when requested.
+    /// Push and create or update a draft PR, then open its GitHub page.
+    /// Existing ready PRs stay ready; opening a draft does not publish it.
     Open {
         #[arg(short = 'm', long = "model", short_alias = 'M')]
         model: Option<String>,

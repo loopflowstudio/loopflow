@@ -83,6 +83,7 @@ struct ActiveRunsObservationTests {
         let survivor = Process()
         survivor.executableURL = URL(fileURLWithPath: "/bin/sleep")
         survivor.arguments = ["30"]
+        var survivorExit = exits(survivor).makeAsyncIterator()
         try survivor.run()
         defer { if survivor.isRunning { survivor.terminate() } }
         // exec preserves the ignored TERM disposition; KILL must be the fallback.
@@ -96,7 +97,7 @@ struct ActiveRunsObservationTests {
         #expect(ContinuousClock.now - start < .seconds(4))
         #expect(survivor.isRunning)
         survivor.terminate()
-        try await waitForExit(survivor)
+        #expect(await survivorExit.next() == SIGTERM)
     }
 
     @Test("Silence expires the reading and stops the reader")
@@ -178,6 +179,7 @@ struct ActiveRunsObservationTests {
         let clientInput = Pipe()
         client.standardInput = clientInput
         client.standardOutput = FileHandle.nullDevice
+        var clientExit = exits(client).makeAsyncIterator()
         try client.run()
         defer {
             try? clientInput.fileHandleForWriting.close()
@@ -209,6 +211,7 @@ struct ActiveRunsObservationTests {
         let secondInput = Pipe()
         secondClient.standardInput = secondInput
         secondClient.standardOutput = FileHandle.nullDevice
+        var secondExit = exits(secondClient).makeAsyncIterator()
         try secondClient.run()
         defer {
             try? secondInput.fileHandleForWriting.close()
@@ -222,7 +225,7 @@ struct ActiveRunsObservationTests {
         #expect(recovered.gaps.isEmpty)
         #expect(recovered.home == first.home)
         try secondInput.fileHandleForWriting.close()
-        try await waitForExit(secondClient)
+        #expect(await secondExit.next() == 0)
         let afterExit = try await nextReady(&iterator, count: 1)
         #expect(afterExit.runs.map(\.id) == [firstID])
         await reader.cancel()
@@ -230,18 +233,16 @@ struct ActiveRunsObservationTests {
         #expect(process.terminationStatus == 0)
         #expect(client.isRunning)
         try clientInput.fileHandleForWriting.close()
-        try await waitForExit(client)
+        #expect(await clientExit.next() == 0)
     }
 
-    private func waitForExit(_ process: Process) async throws {
-        // Foundation's blocking wait can hang when an async test joins an
-        // already-reaped child again during cleanup. Observe exit without
-        // blocking a cooperative executor, including on repeated calls.
-        let deadline = ContinuousClock.now + .seconds(3)
-        while process.isRunning, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
+    private func exits(_ process: Process) -> AsyncStream<Int32> {
+        AsyncStream { continuation in
+            process.terminationHandler = { process in
+                continuation.yield(process.terminationStatus)
+                continuation.finish()
+            }
         }
-        try #require(!process.isRunning, "Fixture process did not exit")
     }
 
     private func nextReady(_ iterator: inout AsyncThrowingStream<ActiveRunsSnapshot, any Error>.Iterator, count: Int) async throws -> ActiveRunsSnapshot {

@@ -12,18 +12,11 @@ lf prompt: create a dependency-audit skill
 lf prompt: tighten wave/infra/GOAL.md
 ```
 
-## Reviewer mode
-
-The launch prompt identifies the reviewer for this exercise.
-
-- **Interactive reviewer:** read any named file, state the contract you see, and ask
-  only about choices whose answers materially change behavior, scope, or
-  authority. Write reversible improvements as decisions land.
-- **Parent reviewer:** treat the supplied directive, quoted user language, and
-  existing asset as intent. Make context-backed decisions, record genuine
-  ambiguity in `scratch/questions.md`, and use the review protocol to return the
-  exact proposed content. Do not wait for an unavailable reviewer or claim their
-  confirmation.
+Read the supplied intent and existing asset. When someone is present, ask only
+about choices that materially change behavior, scope, or authority, and edit as
+decisions land. Otherwise make evidence-backed corrections and leave genuine
+ambiguities visible without inventing confirmation. Use a review protocol when
+the caller supplies one; ordinary authoring needs no reviewer role or protocol.
 
 ## Choose the artifact
 
@@ -62,6 +55,12 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    - affected boundaries, edge cases, permissions, and exclusions;
    - the command, observation, or artifact that proves success.
 
+   Build a useful atom before choosing its place in a process. Require the
+   information the task needs, not a preceding skill, named Flow, Task binding,
+   branch name, or document layout that happened to supply it once. Keep real
+   domain constraints and authority boundaries. Let callers compose rebasing,
+   publication, and navigation around the operation.
+
    Match proof to maturity: an early Task needs a concrete problem and
    recognizable success; design chooses the implementation and operational proof.
    Name the output's reader and their next decision. State how separate input
@@ -73,7 +72,15 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    observations separately from hypotheses, externalize the cheapest useful
    model, run the smallest safe check that separates leading explanations,
    verify against all relevant old and new evidence, and replan after a
-   counterexample. Ask tools or tests to enforce this when prose cannot.
+   counterexample. Use that understanding to update the artifact that owns the
+   truth while the context is available. Delete stale instructions; retain
+   accepted constraints and unresolved contrary evidence. Save consequential
+   rationale and links to proof. Leave a minimal review when it helps the next
+   reader: progress against the plan, what worked, what was learned, and what
+   remains unresolved. Supply evidence for the next decision without making
+   that decision for its owner. Avoid duplicating the plan or accumulating
+   reports by default. Ask tools or tests
+   to enforce this when prose cannot.
 
 4. **Write the prompt.** Start directly. Use imperative language, concrete
    verbs, and only the sections the artifact needs. Put output shape next to
@@ -93,8 +100,11 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    planning/execution updates belong in authorized comments; raw receipts belong
    behind links. Test a later scope change: reconcile the brief instead of stacking
    amendments, preserving the decision history and unresolved contrary evidence.
-   Apply this second-revision check to other artifacts too. Put resulting guidance
-   only in authorship surfaces that exercise it.
+   Apply this second-revision check to other artifacts too. Try the skill
+   standalone, midstream with partial evidence, and again when the work already
+   satisfies its contract. It should adapt, name exact missing inputs, and stop
+   without manufacturing edits or reports. Put resulting guidance only in
+   authorship surfaces that exercise it.
 
 6. **Deliver at the source.** Update the named customer file or return reviewed
    prompt text. Do not create a second copy in documentation. Summarize the
@@ -110,26 +120,24 @@ configuration, then one direct opening line:
 
 ```markdown
 ---
-requires: diff vs main
-produces: scratch/security-audit.md
+requires: findings and the intended behavior
+produces: corrected and prioritized findings in their existing location
 ---
-Audit the changed authentication boundary and prove every caller still fails closed.
+Turn findings into an accurate, ordered set of remaining work.
 
 ## Workflow
 
-1. Reconstruct the affected trust boundary.
-2. Exercise the success, denial, absent-credential, and malformed-input paths.
-3. Write only reproducible findings.
+1. Check the supplied findings against current behavior and evidence.
+2. Remove duplicates and disproved claims; retain uncertain findings as uncertain.
+3. Edit the original list with blockers first, evidence, and the next useful action.
 
-## Output
-
-Write `scratch/security-audit.md` with evidence, severity, and reproduction.
+Return conversation-only findings here. Do not create a second assessment file.
 ```
 
 Give procedural skills numbered work and a concrete output. Give exploratory
 skills room to follow evidence without turning “explore” into permission to
-change unrelated code. Skills that may run interactively must also
-define bounded behavior for a headless parent reviewer.
+change unrelated code. Define behavior when required judgment is unavailable
+without assuming a particular launch mode or reviewer protocol.
 
 ## Wave goal contract
 
@@ -168,4 +176,6 @@ ceremony to ordinary deterministic work.
 - Observations cannot be silently rewritten to save a hypothesis.
 - Unexpected evidence has a named consequence.
 - Output is useful to the next reader or agent.
+- The operation works outside its original process and edits the owning artifact.
+- Reports have a distinct purpose; no-op runs need no new artifact.
 - Repeated runs can stop without inventing work.

@@ -188,6 +188,12 @@ Build the current CLI before running it; an existing developer build can hide
 a missing prerequisite in a clean checkout. CI and `scripts/test.py --swift`
 include this build.
 
+Transport tests register `Process.terminationHandler` before launch and await
+its notification. Do not use `waitUntilExit()` after an async suspension: the
+test can resume on a different thread and hang in Foundation's run-loop wait
+even after the child exits. When a Swift run stops reporting progress, sample
+the test helper process before changing timeouts; cleanup can be the blocker.
+
 In asynchronous terminal proofs, observe the surface after each wake-up before
 checking the deadline. A busy main actor can resume after the deadline even
 when the PTY produced its output in time; do not fail on a pre-sleep snapshot.
@@ -380,6 +386,16 @@ containing Git but no `lf`.
 When editing the repeated Task body, exercise every step on two passes and
 saved-decision recovery. Keep loop-decide after work and review so navigation
 cannot skip a later review.
+
+Include the CLI/desktop unblock projection when changing builtin Flow composition:
+
+```bash
+cargo test -p loopflow --test task_initialization_tests task_live_unblock
+```
+
+Fixtures targeting a named boundary should resolve its node ID in the expanded
+invocation. A hard-coded step index can silently select a different skill when
+a nested Flow gains a step.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
 running its Python behavior tests:

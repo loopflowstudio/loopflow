@@ -46,8 +46,8 @@ agent cannot mistake a proposal for approval.
 
 Keep a concise account in the existing working design: accepted experience and
 model, consequences across layers, unresolved product choices, and next proof.
-Do not create a per-slice review or repeat implementation evidence; review-slice
-owns autonomous source and behavior review. Do not rewrite implementation or
+Do not create a per-slice review or repeat implementation evidence; realign
+reconciles the plan and code using what the work has taught us. Do not rewrite implementation or
 restart execution unless requested.
 
 Use this skill on request or inside the interactive unblock Session when a

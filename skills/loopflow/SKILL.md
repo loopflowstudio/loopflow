@@ -45,10 +45,11 @@ lf rebase --plan                     # show strategy; bare `lf rebase` applies i
 lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
 ```
 
-Three commitment levels: **publish** (work in flight — the default "make a
-PR" verb), **submit** (done, the user merges it), **land** (done, loopflow
-lands it). `lf pr open` opens a browser — only when a person asked to see the
-PR.
+**Publish** makes a PR ready for review without opening a browser. **Submit**
+prepares it for the user's merge click; **arm/land** request auto-merge.
+`lf pr open` creates or updates a draft and opens its page when a person asks
+to see it. Existing ready PRs stay ready; opening a draft does not publish it.
+Publish/submit/arm/land make drafts ready.
 
 Stay in the worktree loopflow placed for this run. Never use raw
 `git worktree`; the sibling naming convention (`<repo>.<name>`) is

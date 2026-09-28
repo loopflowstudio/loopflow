@@ -246,8 +246,7 @@ and claims the next eligible position. It stops at a human boundary, a blocker,
 interruption, or Flow completion. No resident provider conversation decides what happens next.
 
 The deciding occurrence's `repeat` policy belongs to the pinned invocation.
-In pursue, implement → compress → review-slice → concept-review supplies the
-work and review evidence; loop-decide owns the navigation judgment:
+In pursue, implement → compress → refresh updates the work and its evidence; loop-decide owns the navigation judgment:
 
 ```bash
 lf flow decide iterate "remaining work, direction and evidence"

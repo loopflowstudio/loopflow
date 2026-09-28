@@ -32,7 +32,7 @@
         {
           "key": "2",
           "id": null,
-          "label": "review-slice",
+          "label": "realign",
           "kind": "skill",
           "human": false,
           "returns_to": null,

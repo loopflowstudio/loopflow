@@ -5,7 +5,6 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 ## For Jack Heart
 
-3. Should scheduled Runs stop reading `wave/` from main?
 4. Does Infrastructure's objective keep "delivers verified releases" once
    release has its own?
 5. The wording of the short note that rides with Wave files.
@@ -14,6 +13,8 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 ## Settled
 
+- Scheduled and ad hoc Runs read the same way: the Wave from the Task or
+  `--wave`, the files from the checkout the Run is in.
 - A Task reaches its Wave through its Project, by id, as LOO-298 has it.
   Jack Heart asked only that it be done right. A Wave stored on the Task is
   added when a read needs it, with LOO-298's check.

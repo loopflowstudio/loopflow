@@ -96,6 +96,10 @@ Kickoff draft under review: commit `0381a195f`.
   or care but worth doing right whatever that means". Stored by id; left as
   LOO-298 has it.
 
+- On scheduled Runs: "whether a run was scheduled or ran ad hoc should not
+  matter. it rewads from wave/<foo> when it runs from a task of <foo>'s
+  worktree, or passes --wave foo , etc".
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

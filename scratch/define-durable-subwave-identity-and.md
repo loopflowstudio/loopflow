@@ -55,6 +55,9 @@ skipped  wave/infrastructure/auth/      sibling
 skipped  wave/product/, …               other Waves
 ```
 
+- The Wave comes from the Task the Run belongs to, or from `--wave`. How the
+  Run was started does not matter: scheduled and ad hoc Runs follow the same
+  rule. Jack Heart, 2026-09-28.
 - Memory is one of those files, not a special case.
 - No children, no siblings.
 - There is no single Wave memory. It is whatever this checkout holds, and an
@@ -119,8 +122,6 @@ leaves release's row alone.
 - **Cron logs.** The log path uses the Wave name as written, so
   `infrastructure/release` points into a directory nothing creates. Read from
   `ops/cron.rs`, not run.
-- **Cron runs in main.** Both installed jobs start in the main checkout, and
-  a scheduled prompt reads main's `wave/` files, uncommitted edits included.
 - **Memory conflicts.** Two Tasks curating one 18,400-token file will meet at
   rebase. Subwaves make that rarer.
 - **The written contract.** LOO-298's architecture reference describes Wave

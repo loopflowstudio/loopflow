@@ -14,7 +14,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::str::FromStr;
 
-
 pub(crate) const SSH_CONNECT_TIMEOUT_SECS: u32 = 10;
 const SSH_SERVER_ALIVE_INTERVAL_SECS: u32 = 10;
 const SSH_SERVER_ALIVE_COUNT_MAX: u32 = 3;
@@ -279,5 +278,4 @@ mod tests {
 
         assert_eq!(home("local").ssh_destination(), None);
     }
-
 }

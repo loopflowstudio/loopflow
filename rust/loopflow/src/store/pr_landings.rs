@@ -21,7 +21,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.get_pr_landing(&landing_id)).await
     }
 
-
     pub async fn claim_pr_landing(
         &self,
         landing_id: &PrLandingId,

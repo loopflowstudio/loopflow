@@ -918,7 +918,9 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
         .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_none());
-    assert!(runtime.block_on(task.store.task_started(&task.task.id)).unwrap());
+    assert!(runtime
+        .block_on(task.store.task_started(&task.task.id))
+        .unwrap());
     // Invocation-addressed resume retains the Task's recovery policy, even
     // with --retry: a restart-only failure must not reach a provider.
     let retry = runtime

@@ -10,9 +10,6 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::child::ChildRef;
-use loopflow::work::wave::metrics::{
-    load_metric_contract, MetricObservation, ObservationAcceptance,
-};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
@@ -20,6 +17,9 @@ use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
     Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
+};
+use loopflow::work::wave::metrics::{
+    load_metric_contract, MetricObservation, ObservationAcceptance,
 };
 use loopflow::work::wave::Wave;
 use time::OffsetDateTime;

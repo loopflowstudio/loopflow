@@ -256,10 +256,8 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 
 | Field | What it does |
 |-------|-------------|
-| `owner` | Optional OS user allowed to start the Wave automatically |
-| `home` | Optional HomeId, hostname, or IP allowed to start the Wave automatically |
 | `agent` | Preferred agent harness/model |
-| `crons` | Supplementary flow schedules, fired by the wave's resident loop |
+| `crons` | Flow schedules installed through `lf cron sync` |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf wave connect`) |
 
 The repository owns PM provider and Team authority in `.lf/config.yaml`:
@@ -273,12 +271,9 @@ pm:
 Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
 the repository Team and owns only its Initiative.
 
-`owner` and `home` say where automatic startup is wanted. Both are optional and
-independent. They are policy, not authorization or observed runtime state.
-Execution placement remains durable state: use
-`lf wave place <wave-id> <home-id>`. The Home daemon observes both the authored
-policy and recorded placement. Chat connections preserve that placement;
-there is no separate Wave enablement or pause setting.
+Execution placement is durable state: use `lf wave place <wave-id> <home-id>`.
+Change local eligibility with `lf wave enable|disable <wave>`; these commands
+do not edit the goal or stop existing Runs.
 
 ### Writing KRs
 

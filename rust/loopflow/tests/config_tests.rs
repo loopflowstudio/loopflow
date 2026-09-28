@@ -245,37 +245,3 @@ fn config_land_defaults_to_gh() {
         .unwrap();
     assert_eq!(config.land, "gh");
 }
-
-// =============================================================================
-// Autoprune
-// =============================================================================
-
-#[test]
-fn config_autoprune_bool() {
-    let temp = TempDir::new().unwrap();
-    write_config(temp.path(), "autoprune: true");
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert!(config.autoprune.enabled);
-}
-
-#[test]
-fn config_autoprune_object() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-autoprune:
-  enabled: true
-  poll_interval_seconds: 120
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert!(config.autoprune.enabled);
-    assert_eq!(config.autoprune.poll_interval_seconds, 120);
-}

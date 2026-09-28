@@ -146,10 +146,9 @@ Use shared readers: `lf wave list --json` for the repository, `lf wave status <w
 for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
-A Work names a stable Home authority. `owner`/`home` in GOAL only filter automatic
-startup; placement is changed through `lf wave place <wave-id> <home-id>`.
-Use `lf home id`, then `lf chat --follow -w <wave>` locally or
-`lf ssh <home-id> chat --follow -w <wave>` at its placement. `lf ssh` runs the target's `lf`;
+A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
+Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
+`lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 

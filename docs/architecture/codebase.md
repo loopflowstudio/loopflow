@@ -24,7 +24,6 @@ complexity.
 | Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes, routes, leases |
-| Home daemon | `lfd/` | 2,900 | Home HTTP API, webhooks, Wave and service reconciliation |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Run records, artifacts, repository identity, subscriptions |
 | Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | immutable schema history and current draft frontier |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | shared DTOs/services and macOS presentation |
@@ -49,9 +48,8 @@ subprocess edge to one concept.
 | Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` Run |
 | Task boundary executor | [`controller/task/`](../../rust/loopflow/src/controller/task/) | one claimed Flow boundary |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
-| Wave automation | [`controller/wave/`](../../rust/loopflow/src/controller/wave/) | listener, resident, placement policy, runtime |
+| Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
-| Home daemon | [`lfd/mod.rs`](../../rust/loopflow/src/lfd/mod.rs) | Home HTTP and service reconciliation |
 | machine install | [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) | artifact set and switch receipt |
 | Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow/) | required-field DTOs from `lf --json` |
 
@@ -60,8 +58,6 @@ subprocess edge to one concept.
 ```text
 lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
-lfd                        one Home's service keeper and webhook receiver
-lf __resident              Wave resident process
 lf task __worker           one already-claimed Task boundary
 lf __provider-session      provider hook that binds native session identity to a Run
 lf __screenshot-supervisor bounded browser-capture owner
@@ -79,7 +75,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wt`, `commit`, `rebase`, `pr`, `ci` | worktree and delivery operations |
 | `lf runs`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf home`, `start`, `stop`, `pause`, `resume`, `ssh` | Home identity, placement, service routing |
+| `lf home`, `lf ssh` | Home identity, placement, command routing |
 | `lf auth` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
@@ -110,16 +106,11 @@ the Task worker joins them with the exact `FlowInvocation` worker claim.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 
-## HTTP boundaries
+## External transport
 
-The Home daemon exposes Home-scoped health, status, Wave start/stop/reconcile,
-webhook, and landing-claim routes. A Wave listener exposes only that Wave's
-channel, conversation, events, messages, observations, stop, and
-resident attachment/context routes.
-
-HTTP is a local supervision and presentation transport. It does not centralize
-Run records, provider credentials, or cross-Home process control. Remote access
-reaches the target Home explicitly; see [Homes and processes](homes.md).
+The CLI talks to planning and model providers. The independent Discord bridge
+uses outbound REST requests. Remote execution reaches the target Home through
+`lf ssh`; see [Homes and processes](homes.md).
 
 ## Add a provider
 

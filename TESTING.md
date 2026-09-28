@@ -419,7 +419,7 @@ When changing Wave chat operations, include the parent module's HTTP and SSE
 tests. Selecting only `runner::tests` or steering-named tests misses them.
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
+cargo nextest run -p loopflow --lib -E 'test(work::wave::)' --no-fail-fast
 ```
 
 Retired operations must be rejected without journaling, while ordinary messages
@@ -464,6 +464,9 @@ no child is launched; an installed `lf` on PATH can hide this missing fixture.
 Fixtures selecting a private `LF_HOME` must also clear and restore
 `LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
 control authority, and Run lookup otherwise reads outside the fixture's Home.
+Clearing inherited authority alone does not isolate a process that falls back
+to its development Home. Give each proof phase a disposable default `LF_HOME`
+and `LF_DB_PATH`; individual fixtures can override those with their own stores.
 Reproduce executable-resolution failures with the compiled test
 binary, `LF_BIN`, `LF_CONTROL_BIN`, and `CARGO_BIN_EXE_lf` unset, and a PATH
 containing Git but no `lf`.
@@ -707,9 +710,9 @@ uv run tests/e2e/linear_oauth.py --lf /root/.local/bin/lf
 ```
 
 Give the container `--add-host api.linear.app:127.0.0.1`, Python, Git, and
-`uv`. Install the published CLI/daemon fallback and promote the candidate with
+`uv`. Install the published CLI fallback and promote the candidate with
 `lf install promote --from-build ...` first. That Home needs a registered
-repository and `tmux` so promotion can verify its daemon. Never mount a real
+repository. Never mount a real
 Home or credentials into this container: the fixture replaces its Linear row
 and seeds planning data in the selected development store.
 
@@ -728,8 +731,8 @@ uv run --no-project --python 3.14 /fixture/install_bootstrap.py
 ```
 
 Copy `tests/e2e/install_bootstrap.py`, `release/install.sh`, and a Linux candidate
-pair to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
-`/fixture/bin/{lf,lfd}`. Build the pair in a separate disposable source snapshot
+CLI to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
+`/fixture/bin/lf`. Build the CLI in a separate disposable source snapshot
 after `canonicalize_migrations.py --materialize-for-tests`, using release
 provenance and published migration authority only in that isolated build.
 The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
@@ -739,7 +742,7 @@ external-installer transition.
 
 The script creates separate OS accounts and a local HTTPS release endpoint.
 It exercises the real CLI, verified shell installer, store creation, repeat
-installation, missing-daemon repair, checkout preservation, and recovery after
+installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
@@ -786,7 +789,7 @@ When changing Wave chat operations, include the parent module's HTTP and SSE
 tests. Selecting only `runner::tests` or steering-named tests misses them.
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
+cargo nextest run -p loopflow --lib -E 'test(work::wave::)' --no-fail-fast
 ```
 
 Retired operations must be rejected without journaling, while ordinary messages

@@ -147,7 +147,7 @@ standalone `lf discord serve` process is the implementer's call; either is
 independent of any resident and must not reintroduce a Wave HTTP server, journal
 reader or inbox. Basic send/receive is the bar; anything beyond is follow-up.
 
-## Implementation ledger — 2026-09-27, in progress
+## Implementation ledger — 2026-09-27
 
 Cut start: `5eec3a805b78003e06ba483b0668769e3bfd8fd6`; main comparison:
 `5bdcef6b65419d5db2583ee791cede2f1a95b3df`. This ledger supersedes the
@@ -184,3 +184,206 @@ is in progress. No behavioral pass, migration rehearsal, Swift pass, configured
 provider, installed Home or rendered app acceptance is claimed yet. A stray
 `#[cfg(test)]` left by fixture-module deletion initially hid the shared Flow
 module; removed it without changing H3 executor logic. Logs: `.lf/tmp/cut-i/`.
+
+
+### Recovery continuation — 2026-09-28
+
+Preserved the interrupted writer's edits and the supervisor's backup. During
+continuation, HEAD became `8ccb0bde9` (`lf pr open: prepare branch`), containing
+the retained Cut I edits. This Run did not invoke publication or PR commands and
+did not undo that checkpoint. Cut-start and main comparisons remain unchanged.
+
+Completed the surviving Rust, Swift, Python, packaging and documentation
+consumers. Removed obsolete command/fixture expectations, Wave chat-history
+queries, unused service configuration (`owner`, `home`, `autoprune`), and
+outbox-only observation wrappers. Home identity, placement and enablement stay.
+Task selection no longer imports a deleted chat subject enum. Historical
+Project/Task events still decode; installation artifacts still decode the
+retired daemon role and retain their original digest and switch identity.
+
+The source review found a semantic migration validator still querying the
+deleted observation outbox. Removed that validator and added a populated
+forward-migration proof over retained Tasks, invocations/current attempts, Runs,
+metrics and landing PID/heartbeat/generation. The existing `wave_chapters`
+owner is now correctly named in the architecture inventory; H7's redesign is
+not implemented here.
+
+Fresh resource checks passed (75.7 GiB initially; 71.1 GiB after app compilation,
+64 GiB floor). Proofs scrub inherited LF/LOOPFLOW authority and use four workers, nice +10
+and 900-second phases. Fixtures supply private stores; the rebase fallback
+exception and repaired runner isolation are recorded below. No installed Home,
+Discord, webhook, service or installation was changed.
+
+Recovery proof (final reconciliation below):
+
+- Rust all-target compilation passed after removing the obsolete journal prompt
+  fixture. Focused migration and loopback Discord transport tests passed: 2.
+  The latter proves message decoding/filtering and UTF-16-safe reply chunks with
+  mentions disabled; it does not run a configured Discord bot or provider.
+- Python affected checks passed: 59 (architecture, installation staging,
+  release publishing, shell installer and skill alignment). Earlier failures
+  were two renamed extractor calls and stale architecture owners/links.
+- Swift's full run executed 267 tests and reported 18 issues in nine tests
+  across five suites, all retaining deleted listener/paused/live expectations.
+  Removed obsolete cases, retained Task-condition and required-field proofs,
+  and reran those five suites: 43 passed, including the DTO fixtures. This is
+  full-run evidence plus focused repairs, not a second full green run.
+- Xcode app and signed test runners: `build-for-testing` passed after preserving
+  the `TaskEventKind` import still required by historical Project event decoding.
+  This is compilation, not rendered or installed acceptance.
+- Architecture inventory: all seven inventories pass, 33/33 SQLite owners.
+  Migration checker: 54 released migrations unchanged, 14 drafts. Swift
+  multiplatform boundary check and portable architecture/README sync: pass.
+
+The attempted `scripts/test.py --loopflow` command also selected the changed
+Python suite. Stopped its owned test groups, then ran only the authored Xcode
+compile commands. Its interrupted broad run establishes no additional pass.
+The first portable-HTML command ran from the root environment and lacked
+`fasthtml`; running it from the documented website environment succeeded.
+
+The initial Rust crate run exposed a stale webhook
+command assertion (now replaced by the Discord command and removed-command
+checks) and a Session publication fixture using this test binary's old PID
+start time as a new client. That fixture now owns a freshly spawned sleep child,
+records it and cleans it up; the production identity comparison is unchanged.
+Final Rust results and canonical proof follow below.
+
+
+Recovery review also found that ordinary provider launches did not scrub the
+independent bridge's Discord token. The common harness and direct launch now
+remove it after applying launch overrides; vendor helper processes remove it
+as well. A real shell child with a synthetic token verifies absence. No secret
+was read or printed. Landing conclusion's fixture now uses the shared ambient
+environment lock so another fixture cannot redirect its Run capture into a
+different database.
+
+The first crate-wide `cargo test -p loopflow --no-fail-fast -j 4` phase hit the
+900-second limit after 1,329 passes and four failures, before integration
+binaries ran. The failures were the removed webhook command, Session client
+start identity, landing fixture isolation, and historical JSON validation
+reaching the deleted outbox query. All four now pass in the remaining-test
+selection. `.lf/tmp/cut-i/remaining.py` retains the exact excluded-pass filter;
+`cargo nextest run -p loopflow --no-fail-fast --test-threads 4 -E <filter>` runs
+only failed/unexecuted tests, the revised migration proof and the new token
+proof. No retry setting or production identity relaxation was added.
+
+A final in-checkout architecture check encountered a separate ignored research
+snapshot at `.lf/tmp/research-execution-records/snapshot` and reported its old
+vocabulary. Its files were not changed or moved. The same checker on the
+complete tracked/untracked source snapshot outside the checkout passes all
+seven inventories (33/33 tables), with no vocabulary findings. This is source
+validation, not a claim that the polluted checkout command passed. Refreshing
+the portable architecture after the final data-owner documentation correction
+resolved its stale-output check; the two website consistency checks pass.
+
+
+The remaining integration run found the Rust counterpart of Swift's obsolete
+required-`paused` assertion. It now retains Flow round-trip and required
+`enabled` checks; all nine Rust DTO tests pass. Seven rebase tests lacked an
+explicit Home and attempted a read of the checkout's pre-existing development
+store, which rejected its divergent `task_agent` frontier before mutation.
+Clearing inherited authority had not isolated that fallback. The bounded
+runner now supplies a disposable default `LF_HOME`/`LF_DB_PATH`; all seven
+failed rebase cases pass there. TESTING.md records that distinction. No installed
+Home was accessed, repaired or promoted.
+
+The canonical rehearsal materialized all 14 drafts into hypothetical 0.12.24
+outside this checkout, leaving source package versions and released migrations
+unchanged. Three proofs pass there: populated service-table removal preserving
+execution/metrics/landing authority, H3 claim/current-attempt preservation, and
+landing conclusion consumption once. Final Clippy passed after moving the
+landing test's synchronous environment lock outside its async runtime. Rust
+doc tests contain zero cases and pass. Logs and exact commands are in
+`.lf/tmp/cut-i/{canonical-proof,clippy-complete-2,dto-final,rebase-isolated,rust-doc}.log`.
+
+
+**Retained H4 counterexample:** `session_cutover_tests::launch_proceeds_when_the_store_cannot_be_written`
+fails because interactive native admission returns the SQLite open error before
+the provider starts. Its expectation still describes Cut 3's warn-and-proceed
+behavior. `run_record.rs` and this test are byte-identical to the H3 cut start;
+Cut I does not change the interactive capture/admission path. Kept the test and
+failure unchanged. H4 must reconcile the remaining warn-and-proceed writers
+with Jack's refuse-every-launch decision; this result does not prove that
+headless path, because the test stops at its first interactive assertion.
+No full-green Rust-suite claim follows from this Cut I checkpoint.
+
+### Measured deletion
+
+Reproducible method: `.lf/tmp/cut-i/measure.py`, results in `line-counts.json`.
+Compare actual working bytes with `5eec3a805b78003e06ba483b0668769e3bfd8fd6`
+and main `5bdcef6b65419d5db2583ee791cede2f1a95b3df`. Include untracked source
+paths from `git ls-files --others --exclude-standard`; count moved code on both
+old and new paths. Exclude test directories/files, generated files and trailing
+`#[cfg(test)]` modules using the retained review-lines prefix method; inline
+helpers before that boundary remain counted. Documentation is not production
+code in this measure.
+
+| Comparison | Rust/Swift | Python/shell | SQL (separate) |
+| --- | --- | --- | --- |
+| Cut I vs H3 start | +2,284 / −20,723; **net −18,439** | +19 / −48 | +11 / −0 |
+| Whole branch vs main | +8,705 / −25,735; net −17,030 | +19 / −48 | +472 / −0 |
+
+The metrics and relocation moves are included on both sides. Deletion is the
+removed listener/resident/daemon, webhook inbox/outbox and Wave chat authority;
+file movement itself is not claimed as a removed owner.
+
+
+The remaining Rust phase reported 514 passes and 15 failures before its
+900-second phase limit terminated the last Wave-resolution matrix. Its final
+consumer failures were obsolete `chat`/`wave serve` registry expectations and
+relocation's deleted Wave-journal directory assertion. Removed those expectations
+and the matrix's chat-only stdin/silent-drop machinery; retained Wave, Task,
+cron and placement coverage, and classified Discord as explicit-Wave-only.
+
+The fleet-contention test did not finish. Its process had exceeded 22 minutes
+of wall-clock time while nextest reported 406 seconds of elapsed execution.
+Stopped only its verified PID/process group `45099`, owned by this nextest
+run. The discrepancy is observed; its cause was not established. The resulting
+SIGTERM is retained as incomplete proof, not an assertion failure or a pass.
+The later phase timeout interrupted the matrix after 38 seconds; it is rerun
+with the consumer repairs. No test deadline or retry count was increased.
+
+
+### Recovery outcome — 2026-09-28
+
+All five final consumer proofs pass (`final-consumers.log`), including the full
+Wave-resolution matrix in 138 seconds. Across the bounded initial run and
+remaining-test selection plus focused repairs: **1,855 distinct enabled Rust
+cases pass**, **one retained H4 case fails**, **one contention case is
+incomplete**, and **eight cases remain ignored**. This reconciles 1,328 reused
+initial passes + 514 remaining-run passes + 13 repaired/interrupted cases;
+the revised migration proof is not double-counted. Three canonical repeats
+and nine DTO-suite passes are supporting repeats, not additional distinct cases.
+
+Python: 59 affected cases pass. Swift: full run of 267 cases followed by the
+43 passing cases in the five repaired suites; no second full-green invocation
+is claimed. Xcode app/test-runner build, Rust/Swift DTOs, current all-target
+Clippy, formatting, migration history and source-snapshot architecture checks
+pass. Final HTML consistency check passes. No full repository gate or hosted
+CI was run.
+
+The simulated code review changed the work: removed the stale JSON validator
+against a dropped table, prevented Discord credentials reaching provider
+children, preserved historical Project event decoding, and repaired fixture
+isolation/removed-owner assumptions. Metrics, Home/placement, local landing,
+command receipts, cron, Task claims and the common Flow executor retain their
+existing owners and behavioral proofs.
+
+Exact remaining gaps for review-slice:
+
+- H4's unwritable-store counterexample above is still failing and unchanged.
+- Fleet-contention receipt proof is interrupted, not proven. No test retry or
+  reduced workload substitutes for it.
+- Configured Discord/provider round trip, existing loaded-service retirement,
+  real release/installed migration, and rendered desktop acceptance were not
+  attempted. Network responses/provider effects in automated proofs are
+  simulated; Xcode establishes compilation only. Existing old-service shutdown
+  belongs to deployment, and is documented without being performed.
+- The in-checkout architecture command still scans the unrelated ignored
+  research snapshot; clean source-snapshot validation passes. That snapshot and
+  the unrelated untracked `scratch/research-execution-records-and-resume.md`
+  are left untouched and excluded from the Cut I checkpoint.
+
+No H4 or later implementation, Ask, publication, installation, live service
+mutation, new worker or new worktree was performed. This is a local checkpoint
+for separate review-slice, not Task completion or permission to deploy.

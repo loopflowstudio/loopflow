@@ -34,6 +34,7 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     }
     command
         .envs(&config.env)
+        .env_remove(crate::engine::process::DISCORD_TOKEN_ENV)
         .env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
@@ -54,6 +55,7 @@ fn set_vendor_std_env(
         .env_remove("LF_BIN")
         .env_remove("LF_HOME")
         .env_remove("LF_DB_PATH");
+    command.env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
     // Development readers intentionally ignore inherited control pins. Forward
     // this freshly resolved private context through their ordinary overrides;
     // never change release relaunches into historical-binary launches.
@@ -89,6 +91,20 @@ mod environment_tests {
 
     use super::{configure_agent_env, set_vendor_std_env};
     use crate::engine::agent::AgentConfig;
+
+    #[tokio::test]
+    async fn provider_child_cannot_read_the_bridge_token() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
+        command.env(crate::engine::process::DISCORD_TOKEN_ENV, "fixture-token");
+        let mut config = AgentConfig::default();
+        config.env.insert(
+            crate::engine::process::DISCORD_TOKEN_ENV.into(),
+            "fixture-override".into(),
+        );
+        configure_agent_env(&mut command, &config);
+        assert!(command.status().await.unwrap().success());
+    }
 
     #[test]
     fn vendor_environment_preserves_development_and_release_contexts() {

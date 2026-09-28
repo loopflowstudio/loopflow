@@ -1,6 +1,6 @@
 """Exercise candidate installation in a disposable Linux container, never on a host.
 
-Run with uv after copying a release-shaped lf/lfd pair to /fixture/bin and the
+Run with uv after copying a release-shaped lf binary to /fixture/bin and the
 shell installer to /fixture/install.sh. Draft migrations must be materialized
 in a disposable source snapshot before building with published authority.
 Optionally put a checksum-verified older release pair in /fixture/prior.
@@ -27,7 +27,6 @@ from pathlib import Path
 FIXTURE = Path("/fixture")
 ASSETS = FIXTURE / "release"
 CLI = FIXTURE / "bin/lf"
-DAEMON = FIXTURE / "bin/lfd"
 REQUESTS: list[str] = []
 
 
@@ -84,7 +83,6 @@ def release_server(version: str) -> http.server.HTTPServer:
     archive = ASSETS / f"lf-{architecture}-unknown-linux-gnu.tar.gz"
     with tarfile.open(archive, "w:gz", compresslevel=1) as package:
         package.add(CLI, arcname="lf")
-        package.add(DAEMON, arcname="lfd")
     with tarfile.open(archive) as package:
         for source in [CLI, DAEMON]:
             member = package.extractfile(source.name)
@@ -235,12 +233,9 @@ def main() -> None:
         assert not any("/download/" in path for path in REQUESTS)
         with sqlite3.connect(fresh / ".lf/loopflow.db") as store:
             frontier = store.execute("SELECT * FROM schema_migrations").fetchall()
-        (fresh / ".local/bin/lfd").unlink()
-        invoke("lf-fresh", checkout, str(installed), "install")
-        assert (
-            invoke("lf-fresh", fresh, str(fresh / ".local/bin/lfd"), "--version").strip()
-            == f"lfd {version}"
-        )
+        installed.unlink()
+        invoke("lf-fresh", checkout, str(CLI), "install")
+        assert invoke("lf-fresh", fresh, str(installed), "--version").strip() == f"lf {version}"
         with sqlite3.connect(fresh / ".lf/loopflow.db") as store:
             assert store.execute("SELECT * FROM schema_migrations").fetchall() == frontier
         assert snapshot(checkout) == before
@@ -256,10 +251,6 @@ def main() -> None:
             "promote",
             "--cli-target",
             str(blocked / "lf"),
-            "--daemon-source",
-            str(DAEMON),
-            "--daemon-target",
-            str(blocked / "lfd"),
             succeeds=False,
         )
         receipt_path = recovery / ".lf-machine/install/switch.json"

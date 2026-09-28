@@ -4,7 +4,7 @@
 //! subdirectory and build.rs generates the HashMap entries.
 
 /// Bundled LOOPFLOW.md - the one loopflow operating document every launched
-/// agent receives, including the speech vocabulary (`lf chat`).
+/// agent receives, including the Work and Session vocabulary.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
 /// Headless preamble — the only surface that needs one (no user is present).
@@ -312,7 +312,7 @@ mod tests {
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
             "lf home observe <home-id>",
-            "lf wave probe <wave> --json",
+            "lf ssh <home-id> --wave <wave> wave/operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }

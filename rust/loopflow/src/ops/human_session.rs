@@ -2987,12 +2987,7 @@ mod tests {
     #[test]
     fn initial_session_publication_requires_history_and_an_owned_client() {
         let dir = tempfile::tempdir().unwrap();
-        let harness = std::env::current_exe()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let harness = "sleep".to_string();
         let manifest = RunManifest {
             schema_version: 1,
             run_id: crate::durable::RunId::new(),
@@ -3023,7 +3018,14 @@ mod tests {
         assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
         crate::run_record::write_provider_session(dir.path(), "provider-session", None).unwrap();
         assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
-        crate::run_record::write_provider_client(dir.path(), std::process::id()).unwrap();
-        assert!(session_run_is_resumable(dir.path(), &manifest).unwrap());
+        let mut client = std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        crate::run_record::write_provider_client(dir.path(), client.id()).unwrap();
+        let resumable = session_run_is_resumable(dir.path(), &manifest);
+        client.kill().unwrap();
+        client.wait().unwrap();
+        assert!(resumable.unwrap());
     }
 }

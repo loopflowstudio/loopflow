@@ -92,6 +92,10 @@ Kickoff draft under review: commit `0381a195f`.
 - On parent and directory: "No. It can only live in infrastructure if
   parent_id is infra's".
 
+- On a Task's Wave: "is wave stored as a name or and id? I dont relaly know
+  or care but worth doing right whatever that means". Stored by id; left as
+  LOO-298 has it.
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

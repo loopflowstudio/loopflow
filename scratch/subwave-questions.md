@@ -5,7 +5,6 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 ## For Jack Heart
 
-2. How should a Task know its Wave? Jack said he is unsure of the API.
 3. Should scheduled Runs stop reading `wave/` from main?
 4. Does Infrastructure's objective keep "delivers verified releases" once
    release has its own?
@@ -15,6 +14,9 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 ## Settled
 
+- A Task reaches its Wave through its Project, by id, as LOO-298 has it.
+  Jack Heart asked only that it be done right. A Wave stored on the Task is
+  added when a read needs it, with LOO-298's check.
 - A Wave's parent is the Wave whose directory it sits in.
 
 ## Owed to LOO-330 and LOO-331

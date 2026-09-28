@@ -330,28 +330,6 @@ missing-sample and PID-reuse counterexamples when changing the projection.
 Repeated samples of a reused body PID must remain Unknown; they cannot replace
 the observer's original body identity and later establish a stall for that Run.
 
-When changing Wave chat operations, include the parent module's HTTP and SSE
-tests. Selecting only `runner::tests` or steering-named tests misses them.
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(work::wave::)' --no-fail-fast
-```
-
-Retired operations must be rejected without journaling, while ordinary messages
-and bare interrupts retain their behavior.
-
-When changing Wave listener ownership or placement, include the Home reconciler
-and relocation proofs:
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(wave_host::tests::) | test(controller::wave::relocate::tests::)' --no-fail-fast
-```
-
-Retirement fixtures must use Wave relocation's retirement transition; generic
-Work abandonment does not retire a Wave registration. Keep simulated listeners
-pending until the host stops them, and assert the desired Wave set before
-reconciliation so an incidental startup failure cannot masquerade as shutdown.
-
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
 steering publishes to Linear and belongs with the mocked Linear boundary tests.
@@ -684,16 +662,6 @@ cargo nextest run -p loopflow --test session_cutover_tests -E 'test(a_task_flow_
 Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
 a human review preserves its invocation and cursor while preparing its Run;
 assert those facts instead of equality of the entire versioned Flow record.
-
-When changing Wave chat operations, include the parent module's HTTP and SSE
-tests. Selecting only `runner::tests` or steering-named tests misses them.
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(work::wave::)' --no-fail-fast
-```
-
-Retired operations must be rejected without journaling, while ordinary messages
-and bare interrupts retain their behavior.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;

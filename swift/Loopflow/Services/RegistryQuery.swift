@@ -408,7 +408,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
     public let runs: WorkEvidence<RunSnapshot>
-    /// The focused Wave's Home probed for liveness and its one contextual action.
 
     public var workMap: WaveWorkMap {
         WaveWorkMap(objective: wave.goal, chapter: chapter, tasks: tasks)

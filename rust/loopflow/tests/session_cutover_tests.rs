@@ -1359,6 +1359,66 @@ fn session_list_reads_a_taskless_review_from_sql() {
     assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
 }
 
+#[test]
+fn importing_after_bind_does_not_report_the_task_started_again() {
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "bound-import",
+        &fixture.repo.head_sha(),
+    );
+    assert!(fixture.run(&LAUNCH).status.success());
+    let original = fixture.launches()[0].clone();
+    let (session, ..) = fixture.session_row(&original);
+    fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
+    let started = || -> i64 {
+        fixture
+            .db()
+            .query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.task.id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    let bound_at = started();
+    assert_eq!(fixture.run_parents(&original), (None, None, None));
+
+    let historical = loopflow::durable::RunId::new();
+    let mut manifest: Value = serde_json::from_slice(
+        &std::fs::read(fixture.run_dir(&original).join("manifest.json")).unwrap(),
+    )
+    .unwrap();
+    manifest["run_id"] = serde_json::json!(historical);
+    manifest["surface"] = serde_json::json!("headless");
+    manifest["subjects"] = serde_json::json!([
+        {"selector": "task:INF-123", "source": "declared"}
+    ]);
+    let dir = fixture.run_dir(historical.as_str());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    for args in [
+        vec!["session", "import", "--dry-run", "--json"],
+        vec!["session", "import", "--json"],
+    ] {
+        let report = fixture.json(&args);
+        assert_eq!(report["tasks_started"], serde_json::json!([]), "{report}");
+        assert_eq!(report["run"], 1, "{report}");
+        assert_eq!(report["failed"], serde_json::json!([]), "{report}");
+        assert_eq!(started(), bound_at);
+    }
+    assert_eq!(fixture.run_parents(&original), (None, None, None));
+    assert_eq!(
+        fixture.run_parents(historical.as_str()).0.as_deref(),
+        Some(task.task.id.as_str())
+    );
+}
+
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
 fn import_stores_each_old_session_once_with_its_name() {

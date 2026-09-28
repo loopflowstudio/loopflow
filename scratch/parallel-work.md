@@ -83,6 +83,13 @@ Its overlap includes `docs/lf.md`, Task controller expectations, catalog tests,
 Flow graph indexes and prompt goldens. Reconcile new catalog behavior while
 retaining the current Task's captured invocation; no captured graph refresh is
 authorized by this upstream change.
+The ancestry checkpoint was `91341c16b` before rebase. Main resolved the
+`docs/lf.md` conflict and completed integration: local head
+`7f357827a4872ec3632d0e657b17b50563888514`, merge base `a2b59ed50`, zero behind
+and 82 ahead. Supervisor inspected the post-rebase change set and retained
+realign/queue documentation. Publication has not yet been observed. All-target
+Clippy passes after boxing the enlarged lookup enum value
+(`ancestry-clippy-2.log`, 14.71s); the preceding large-enum failure remains recorded.
 All four affected review tests pass (`review-executable-pins.log`, 1.572s),
 including two additional unguarded callers found by the supervisor. Initial public
 rename checks passed Flow retry/review and inventory scoping but exposed two old
@@ -152,6 +159,21 @@ source packages all 21 drafts as `0.12.25.001_release`; owner/capture/native-his
 preservation, ancestry/Started upgrade, prospective bind history and empty-draft
 initialization pass. Source receipt: `canonical-ancestry-source.json`. This is
 neither published release bytes nor an installed-Home conversion.
+Supervisor found a remaining ancestry reader in `Import::start`: it reports newly
+started Tasks by enumerating Runs. A Task already started by binding can have
+no historically attributed Run, so a later import can misreport it as newly
+started. This is source evidence, not an executed regression or a claimed
+timestamp rewrite. Verified comment `6f2b644e-d86f-4ca0-a05e-f6aa9bfb78f1`
+directs main to use the existing Started-column reader and prove bind-before-import
+preserves the timestamp and omits the Task from `tasks_started`, retaining dry-run
+and untouched-Task behavior. `import-started-red.log` now reproduces the error
+through the private real CLI: dry-run reports the already-bound Task as newly
+started (6.102s; 20.36s compile). Main replaced the Run inventory with
+`Store::task_started`; all three focused repair/rebase checks pass in
+`import-started-and-rebase.log` (29.65s compile, 8.918s execution): the new
+regression, existing import preservation and reconciled Feature navigation.
+The regression verifies both dry-run and import, unchanged original
+Run ancestry and the retained bind timestamp; its history input is synthetic.
 Scratch-clear failed because the required working evidence remains. The prior
 CI run **36482349277** failed canonical Rust initialization, installation,
 Python and website checks. Those failures remain history, not green results.
@@ -284,13 +306,15 @@ that their recommendations or fixes have been implemented:
 
 ## Measurement and history
 
-Latest fixed production-prefix measurement, local checkpoint `d8665a753` versus
-`c512813b5`: **+13,240 / -29,446 = -16,206** across Rust/Swift,
+Latest fixed production-prefix measurement, local checkpoint `7f357827a` versus
+`a2b59ed50`: **+13,577 / -29,448 = -15,871** across Rust/Swift,
 Python/shell and SQL. Tests/docs excluded, no rename detection, trailing test
 modules excluded with the known trailing production block retained. Repeating
-the method reproduced the prior `e13f29909` receipt exactly before measuring the
-new checkpoint. Receipt: `.lf/tmp/execution-model/status-counts-d8665a753.json`.
-This excludes the ongoing ancestry edits and is not a new published-head count.
+the method reproduced the prior `d8665a753` receipt exactly before measuring the
+new checkpoint. Receipt: `.lf/tmp/execution-model/status-counts-7f357827a.json`.
+This includes the committed ancestry work and excludes the pending import-report
+repair; it is not a new published-head count. The earlier local checkpoint was
+**+13,240 / -29,446 = -16,206** against `c512813b5`.
 Changing merge bases changes the comparison; moved files alone never count as
 removed code. Earlier published count remains in `status-counts-e13f29909.json`.
 

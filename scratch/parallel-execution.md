@@ -663,3 +663,21 @@ Final ancestry formatting and all-target Clippy pass (ancestry-clippy-2.log,
 and the Task branch2958d289c. Jack's standing checkpoint publication request
 applies; local commit then manual rebase precede publication. No landing,
 installation or saved-Flow replacement is selected.
+
+Manual rebase onto a2b59ed50666a433c97cb9002476e74351723759 completed,
+82/0 ahead/behind. Conflicts were catalog docs and the queue tail assertion;
+main's retired memory skills and rebase/realign queue remain. The Task status
+receipt still names invocation1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c,13steps,
+implement index2/iteration9, Run8e4800ebef6045699e0be1fac668e6cb. No saved
+invocation was recompiled.
+
+Supervisor found Import::start still inferred Started from Task Run membership.
+The new actual-CLI bind-then-import fixture reproduced this on dry-run (wrong
+nonempty tasks_started) in import-started-red.log. Import now reads the existing
+Task Started column. import-started-and-rebase.log passes3/3 (29.65s compile,
+8.918s tests): bind-first dry/real import retains Started and reports no new
+start, untouched first import still reports its Task, and the reconciled catalog
+Flow reaches its delivery boundary. No provider or publication occurred in the
+fixture. The physical owner/Run-removal work remains incomplete.
+
+Post-rebase all-target Clippy passes15.06s (ancestry-rebase-clippy.log); formatting and whitespace pass.

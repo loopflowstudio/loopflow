@@ -299,7 +299,7 @@ impl Import<'_> {
         Ok(Some(kind))
     }
 
-    /// Report the Task this Run starts, if it is the Task's first.
+    /// Report first assignment, including existing conversation bindings.
     async fn start(&mut self, run: &Run) -> Result<()> {
         let Some(task) = &run.task_id else {
             return Ok(());
@@ -307,8 +307,7 @@ impl Import<'_> {
         if self.store.get_task(task).await?.is_none() {
             bail!("Task {task} is not registered");
         }
-        let runs = self.store.runs(None, None, Some(task.as_str()), None, 0);
-        if runs.await?.is_empty() && !self.report.tasks_started.contains(task) {
+        if !self.store.task_started(task).await? && !self.report.tasks_started.contains(task) {
             self.report.tasks_started.push(task.clone());
         }
         Ok(())

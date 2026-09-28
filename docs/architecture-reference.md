@@ -317,7 +317,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
 | **Exec** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ExecId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/exec.rs) | `execs`, `run_events` | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | Ordinary parsed CLI commands | — |
 | **Local process observation** — outer command receipts joined to current OS facts | A live kernel process plus a matching local receipt is observation, not durable ownership. Registered orphan OpenCode groups may be reaped; unclaimed provider PIDs may not. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Home-local Exec receipts and OpenCode server registry | The foreground observer samples the process table; no keeper asserts Run liveness | `lf ps`, `lf top`, `lf prune`, `lf doctor` | `exec:/bin/ps`, `exec:ps`, `exec:lsof`, `exec:kill`, `exec:which` |
-| **Provider account / route** — credential authority and ordered provider selection on one Home | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage, Doppler, or forwarded foreground leases. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Home | `lf auth`, `lf profile`, `lf route` | `provider:claude`, `provider:codex`, `provider:doppler`, `provider:opencodezen`, `exec:claude`, `exec:codex`, `exec:doppler`, `exec:opencode`, `exec:security`, `exec:secret-tool` |
+| **Provider account / route** — credential authority and ordered provider selection on one Home | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage, Doppler, or forwarded foreground leases. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Home | `lf auth` | `provider:claude`, `provider:codex`, `provider:doppler`, `provider:opencodezen`, `exec:claude`, `exec:codex`, `exec:doppler`, `exec:opencode`, `exec:security`, `exec:secret-tool` |
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf tokens` | — |
 | **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf release` | `exec:sh` (release hooks) |
 <!-- architecture-map:end -->
@@ -354,7 +354,7 @@ kernel locks                 live local exclusion authority
 | PM projection | `pm_snapshots` | Bounded Linear reads |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head supervision and repair generations |
-| Home and provider authority | `homes`, `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, delivery receipts |
+| Home and provider authority | `homes`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, delivery receipts |
 | Local observation/cache | `run_events`, `blob_tokens` | Outer command events and deterministic Git-blob token counts |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
@@ -580,7 +580,7 @@ Task row ----> managed worktree ----> commits
                               complete Task
 ```
 
-1. `lf task prepare` resolves one Linear Issue inside one Project and creates
+1. `lf task checkout` resolves one Linear Issue inside one Project and creates
    or reuses Task Work, its worktree, and its serial PR identity. It starts no
    boundary Run.
 2. Independent `lf --task ...` Runs may work in that substrate directly.
@@ -750,14 +750,14 @@ Intentional copies stay read projections:
 <!-- architecture-projections:start -->
 | Projection | Authority copied | Freshness and consumer |
 | --- | --- | --- |
-| [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs) / `pm_snapshots` | Linear planning | Atomic PM sync replacement; `lf status`, `lf roadmap`, and the Mac app read it but never author through it. |
+| [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs) / `pm_snapshots` | Linear planning | Atomic PM sync replacement; `lf wave status`, `lf roadmap`, and the Mac app read it but never author through it. |
 | [`TaskLinearObservation`](../rust/loopflow/src/work/task/mod.rs) / `task_linear_observations` | Linear Issue state | Reconciliation records provider evidence before applying lifecycle changes. |
 | [`GithubObservation`](../rust/loopflow/src/work/task/mod.rs) / `task_prs`, `ci_incidents` | GitHub PR/check state | Webhook or foreground reads update Task delivery evidence; GitHub remains merge truth. |
 | `tests/fixtures/dto/` | Rust `lf --json` DTOs | Rust and Swift fixture tests reject required-field or enum drift. |
 | `tests/fixtures/migrations/` | Ordinal-free migration drafts and the Python canonicalizer | Rust build/runtime and Python release tests reject ordering, body-byte, checksum, and graph-error drift. |
 <!-- architecture-projections:end -->
 
-`lf status` and `lf roadmap` derive Task conditions from Work, invocation and
+`lf wave status` and `lf roadmap` derive Task conditions from Work, invocation and
 PR facts. Sessions are one query joining Session and Run rows; all Run filters
 use those same ancestry fields. No projection acquires launch, Work-mutation,
 credential or signal authority. UI grouping is cached presentation, not another

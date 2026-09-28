@@ -152,6 +152,7 @@ fn clear_inherited_execution() {
         "LF_HUMAN_SESSION",
         "LF_HUMAN_SESSION_RUN_BIND",
         "LF_ACCOUNT_LEASE",
+        "LF_AGENT_CALLER",
         super::CONTROL_BIN_ENV,
     ] {
         std::env::remove_var(name);
@@ -186,6 +187,33 @@ fn seed_store(source: &Path, destination: &Path) -> io::Result<()> {
                 ));
             }
             std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(backup);
+        // Copy history, never a socket or a live driver's write capability.
+        // Installed schemas may predate these columns; the snapshot is not a migration.
+        let columns = target
+            .prepare("PRAGMA table_info(sessions)")
+            .map_err(io::Error::other)?
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(io::Error::other)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io::Error::other)?;
+        let assignments = [
+            ("driver_exec_id", "driver_exec_id=NULL"),
+            ("driver_generation", "driver_generation=driver_generation+1"),
+            ("provider_endpoint", "provider_endpoint=NULL"),
+        ]
+        .into_iter()
+        .filter(|(column, _)| columns.iter().any(|name| name == column))
+        .map(|(_, assignment)| assignment)
+        .collect::<Vec<_>>();
+        if !assignments.is_empty() {
+            target
+                .execute(
+                    &format!("UPDATE sessions SET {}", assignments.join(",")),
+                    [],
+                )
+                .map_err(io::Error::other)?;
         }
     }
     temporary.as_file().sync_all()?;
@@ -235,6 +263,7 @@ mod tests {
             assert!(std::env::var_os("LF_RUN_ID").is_none());
             assert!(std::env::var_os("LF_RUN_DIR").is_none());
             assert!(std::env::var_os("LF_WORK_ADVANCE_CLAIM").is_none());
+            assert!(std::env::var_os("LF_AGENT_CALLER").is_none());
             assert!(crate::run_record::task_origin());
             assert!(crate::lf::commands::install::guard_task_origin().is_err());
 
@@ -262,8 +291,10 @@ mod tests {
                     skill: None,
                     subjects: Vec::new(),
                     flow: RunFlowMembership::Independent,
+                    work: None,
                 },
                 &PreparedTurnContext::from_prompts("", "private data proof"),
+                None,
             )
             .unwrap();
             capture.record_raw("stdout", "branch output");
@@ -319,6 +350,7 @@ mod tests {
                 .env("LF_BIN", installed.join("lf"))
                 .env("LF_CONTROL_BIN", installed.join("lf"))
                 .env("CARGO_BIN_EXE_lf", std::env::current_exe().unwrap())
+                .env("LF_AGENT_CALLER", "inherited conversation caller")
                 .env("LF_RUN_ID", "run_inherited")
                 .env("LF_RUN_DIR", installed.join("runs/parent"))
                 .env_remove("LF_TASK_ORIGIN")
@@ -351,6 +383,80 @@ mod tests {
             );
             assert_eq!(std::fs::read_dir(&installed).unwrap().count(), 1);
         }
+    }
+
+    #[test]
+    fn copied_conversation_keeps_history_without_live_connection_or_driver_authority() {
+        let root = tempdir().unwrap();
+        let source_path = root.path().join("source.db");
+        let target_path = root.path().join("private/copy.db");
+        let source = SqliteStore::open_ephemeral(&source_path).unwrap();
+        let exec = crate::id::ExecId::new();
+        {
+            let conn = Connection::open(&source_path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys=OFF;
+                INSERT INTO sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
+                VALUES('conversation','run_fixture','Retained','human',1,'conversation',1);
+                INSERT INTO runs(id,session_id,created_at,cwd,published)
+                VALUES('run_fixture','conversation',1,'/fixture',1);").unwrap();
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'trace',1)",
+                [exec.as_str()],
+            )
+            .unwrap();
+        }
+        let driver = source
+            .claim_session_driver("conversation", None, &exec, true)
+            .unwrap();
+        source
+            .record_session_connection("conversation", &driver, "/private/original.sock", "thread")
+            .unwrap();
+        source
+            .record_session_turn_origin(
+                "conversation",
+                "thread",
+                "turn",
+                driver.provider_generation,
+                &exec,
+            )
+            .unwrap();
+        source
+            .record_session_event(
+                "conversation",
+                "thread",
+                "turn",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
+        let history = source.session_history("conversation", 0, 0).unwrap();
+        seed_store(&source_path, &target_path).unwrap();
+        let target = SqliteStore::open_read_only(&target_path).unwrap();
+        assert_eq!(
+            target.session_history("conversation", 0, 0).unwrap(),
+            history
+        );
+        assert!(target.session_connection("conversation").unwrap().is_none());
+        let detached = target.session_driver("conversation").unwrap().unwrap();
+        assert!(detached.exec_id.is_none());
+        assert_ne!(detached.generation, driver.generation);
+        assert_eq!(detached.provider_generation, driver.provider_generation);
+        assert_eq!(detached.provider_exec_id, exec);
+        let writable = SqliteStore::open_ephemeral(&target_path).unwrap();
+        assert!(writable
+            .with_session_driver::<()>("conversation", &driver, || panic!(
+                "copied driver gained authority"
+            ))
+            .is_err());
+        assert_eq!(source.session_driver("conversation").unwrap(), Some(driver));
+        assert_eq!(
+            source.session_connection("conversation").unwrap(),
+            Some(("/private/original.sock".into(), "thread".into()))
+        );
+        assert_eq!(
+            source.session_history("conversation", 0, 0).unwrap(),
+            history
+        );
     }
 
     #[test]

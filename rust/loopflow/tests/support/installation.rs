@@ -29,9 +29,7 @@ impl Installation {
         assert!(!root.exists(), "each proof owns an empty installation");
         let artifacts = tempfile::tempdir().unwrap();
         let cli = artifacts.path().join("lf");
-        let daemon = artifacts.path().join("lfd");
         fs::copy(env!("CARGO_BIN_EXE_lf"), &cli).unwrap();
-        fs::copy(env!("CARGO_BIN_EXE_lfd"), &daemon).unwrap();
         // Installation recognizes byte-identical copies, regardless of path.
         // An ELF trailer distinguishes this fixture's installed identity while
         // executing the real CLI code. This does not simulate an older schema.
@@ -41,10 +39,7 @@ impl Installation {
             .unwrap()
             .write_all(b"\nloopflow disposable installed fixture\n")
             .unwrap();
-        let artifacts_identity = vec![
-            ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-            ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
-        ];
+        let artifacts_identity = vec![ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap()];
         let content_sha256 = hex::encode(Sha256::digest(
             artifacts_identity
                 .iter()
@@ -59,8 +54,7 @@ impl Installation {
             content_sha256,
             artifacts: artifacts_identity,
         };
-        set.verify(&[ArtifactRole::Cli, ArtifactRole::Daemon])
-            .unwrap();
+        set.verify(&[ArtifactRole::Cli]).unwrap();
         let mut fallback = set.clone();
         fallback.source = InstallSource::Published;
         write_active(

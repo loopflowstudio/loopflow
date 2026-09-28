@@ -25,9 +25,8 @@ lf <skill>: args                  # run with arguments
 lf <namespace>/<skill>            # run a repo-local or installed namespaced skill
 lf npx/<owner>/<repo>            # fetch any Claude Skill live via npx skills
 lf : "inline prompt"             # no skill file, just prompt
-lf list                          # show skills and flows, including flow expansions
-lf -l                            # short form of `lf list`
-lf ls                            # list Waves in the local registry
+lf catalog                          # show skills and flows, including flow expansions
+lf wave list                            # list Waves in the local registry
 ```
 
 ## Examples
@@ -39,7 +38,7 @@ lf team/review                    # run .lf/skills/team/review.md
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf task prepare DES-123           # tracked Work + worktree, no execution
+lf task checkout DES-123           # tracked Work + worktree, no execution
 lf --task DES-123 design "Revise the discovery design"
 lf --task DES-123 code "Implement the accepted slice"
 lf --task DES-123 research \
@@ -107,12 +106,12 @@ Names resolve in this order:
 1. `.lf/skills/<skill>.md` or `.lf/skills/<ns>/<skill>.md` — repo-local (also overrides builtins)
 2. `.claude/commands/<skill>.md` — Claude Code compatible
 3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
-4. Core built-in skills, grouped by Task, Wave, and Ops (`lf list` shows the live catalog)
+4. Core built-in skills, grouped by Task, Wave, and Ops (`lf catalog` shows the live catalog)
 5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
 Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
 Ownership uses `/` (`wave/operate`); words within one name use `-`
-(`review-slice`). Public catalog names never use `_`.
+(`review-design`). Public catalog names never use `_`.
 
 ### Skill Arguments
 
@@ -125,7 +124,7 @@ Inside skill files, `{args}` is replaced with whatever comes after the colon.
 ### Builtin Catalog
 
 Skills and flows share one catalog organized by the thing they act on:
-**task**, **project**, **wave**, and **ops**. `lf list` shows each flow both as
+**task**, **project**, **wave**, and **ops**. `lf catalog` shows each flow both as
 written and collapsed into the skills and operations that execute.
 
 Task skills — concrete implementation, investigation, review, and delivery:
@@ -151,7 +150,6 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `loop-decide` | Assess a pass's progress and evidence to choose Advance, Iterate, or human help |
 | `unblock` | Resolve stalled work with the human inside an Ask Session, using concept-review by default |
 | `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
-| `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
 
 Planning skills — shape and pursue the current chapter:
@@ -368,7 +366,7 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 ## Running Waves and Tasks
 
 ```bash
-lf task prepare DES-123                             # Task Work + worktree, no execution
+lf task checkout DES-123                             # Task Work + worktree, no execution
 lf task create --wave designer --title "Dark mode" --notes "Keep contrast readable"
 lf task create --run --wave <wave> --title "fix the flaky chord-timeout test"
 pbpaste | lf task create --run --wave incidents
@@ -378,7 +376,7 @@ lf task run DES-125 --flow incident
 lf -m claude task run DES-126    # retain this agent for every Flow step
 lf task status                 # Task on the checked-out branch
 lf task status DES-123
-lf task advance DES-123                              # drive the saved Flow
+lf task run DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
 lf ask "Review this proof with me"                    # block on a human session
 lf session list --json                                # unresolved human Sessions
@@ -390,7 +388,7 @@ lf task comment DES-123 "take the smaller approach"
 lf task comment DES-123 --json                       # read the complete thread
 lf task interrupt DES-123                             # end the active turn
 lf task wait DES-123
-lf task resume DES-123 --reason "provider credentials repaired"
+lf task run DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
 lf task restart DES-123 --flow feature                 # replace the pinned Flow; rejected before any checkpoint if unusable
 lf flow list --json                                  # every Flow with the topology it would pin
@@ -398,7 +396,6 @@ lf task status task_... --json                  # stable Work projection
 lf wave place wave_... home_...                 # move idle Wave Work to a Home
 lf wave relocate wave_... --name platform       # rename a Wave
 lf wave relocate wave_... --repo ../moved-repo  # repair or move its repository
-lf task enable task_...                         # restore Task eligibility
 lf --wave designer : "scan the runtime"             # independent Wave Run
 ```
 
@@ -441,12 +438,12 @@ filesystem or snapshot operation fails, the error names the retained issue and
 its recovery command. Placement uses the validated base commit even if a later
 fetch advances the remote branch. An unconfirmed creation reports the uncertainty
 and directs a retry of the same command to look up its marker.
-`task advance` drives an existing Flow until human input, a blocker, interruption,
+`task run` continues an existing Flow until human input, a blocker, interruption,
 or completion; repeated calls report the active driver. A human review waits
 for its exact Session to be completed. Each autonomous boundary starts a fresh provider Run from durable
 Task facts; no provider transcript or resident Task process is required.
-`resume` preserves the Work, selected Flow, Steers, worktree, branch, and PR
-while starting a fresh worker.
+Continuation preserves the Work, selected Flow, Steers, worktree, branch, and PR.
+An explicit `--flow` cannot replace a saved invocation; use `task restart` for that.
 `task comment ISSUE TEXT` posts a Linear Task comment and never starts a worker. Direct Linear
 comments enter the same delivery path. Only Task advancers consume steering;
 independent `--task` or `--as` Runs do not. `task run` selects the Flow when
@@ -468,25 +465,26 @@ replaced invocations stay readable; completion clears the current invocation
 without completing Task Work or selecting another Flow.
 
 A Project normally selects `feature`: design review, then implement → compress
-→ review-slice → loop-decide. Iterate returns to implement;
-Advance reaches `demo human:true`. Completing demo supplies feedback to a
+→ refresh → loop-decide. Iterate returns to implement;
+Advance publishes the PR, then reaches `demo human:true`.
+Already-captured invocations keep their own graph and review boundaries. Completing demo supplies feedback to a
 second loop-decide, whose edge can also return to implement. `pursue` starts at
 implementation; `task-design` finishes after its design review. PR delivery
 and Task completion remain explicit operations.
 
-A Task retains `-m` supplied to `task run`, `start`, `resume`, or `restart`.
+A Task retains `-m` supplied to `task run`, `create --run`, or `restart`.
 The chosen agent overrides every step's frontmatter. With no Task choice, the
 step's agent/default_agent applies, then checkout configuration. Omitting `-m`
 keeps the saved choice; `task status` shows the saved choice (`null` in JSON means default). A live Run keeps
-its captured agent; changing it immediately uses interrupt then resume with `-m`.
+its captured agent; changing it immediately uses interrupt then `task run` with `-m`.
 
 
 ### Flow decisions and recovery
 
 ```sh
 lf task run DES-123 --flow feature  # create a Task-owned invocation
-lf task advance DES-123             # drive its captured graph
-lf task resume DES-123 --reason "provider credentials repaired"
+lf task run DES-123             # drive its captured graph
+lf task run DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 --flow incident
 ```
 
@@ -506,15 +504,17 @@ lf flow decide iterate "Remaining work, next action, and the proof to collect"
 lf flow blocked "What stalled, what was tried, and what needs human judgment"
 ```
 
-Implement moves a real consumer end to end and deletes the replaced path.
-Compress simplifies anything related to the diff; it leaves a
-diff, not another review document. Review-slice records executed proof, measured
-non-test additions/deletions, and remaining gaps in one short pass record.
-Review-slice reports a convergence blocker after two consecutive implementation
-passes replace nothing, or when a required proof cannot run. Loop-decide judges
-that finding against the supplied criteria and records Blocked with its reason.
+Implement builds the intended behavior and updates the working plan with what
+remains. When replacing a path, move its consumer and delete the predecessor.
+Compress simplifies code related to the change. Refresh rebases, then runs
+realign. Realign edits the plan, corrects clear code mismatches, and reads and
+updates the identified Wave's memory using what the work has taught us. Accepted
+requirements and unresolved evidence stay visible; no per-pass report or
+replacement count is required. Loop-decide reads the current work and evidence
+to decide whether to continue. Pursue publishes after convergence, before demo.
 
-Compress edits code; review-slice supplies one review record per pass. Concept-review is interactive, on request or inside unblock, and does not own navigation. Blocked is
+Concept-review is interactive, on request or inside unblock, and does not own
+navigation. Blocked is
 a stopped execution outcome, separate from Advance/Iterate. Meaningful learning
 counts as progress; repeating a failure without new evidence calls for help.
 
@@ -538,7 +538,7 @@ unblock Session still shows Blocked. Observation never authorizes termination.
 If a Task decision Run exits without a valid verdict, its saved Flow becomes
 Blocked, retains that Run and failure reason, and opens the same keyed unblock
 Session. CLI status and the desktop use that shared projection. After completing
-the Session, run `lf task resume TASK`; its feedback seeds reassessment at the
+the Session, run `lf task run TASK`; its feedback seeds reassessment at the
 failed decision, without choosing Advance or Iterate. Retrying Session launch
 reuses its record, including after a launcher failure.
 A candidate decision takes effect only after its Run succeeds. Inspect any
@@ -607,7 +607,7 @@ network command failure, Loopflow records the exact command blocker as a
 non-resumable Task failure. Status assigns the next move to the User with
 `no_action`; missing-process reconciliation and automatic recovery do not
 replace or repeat it. Correct the capability, then run
-`lf task resume ID --reason "<what changed>"` to create a fresh input boundary.
+`lf task run ID --reason "<what changed>"` to create a fresh input boundary.
 
 Worktree safety comes from short OS-held mutation locks and prepared Git state,
 not Run identity. Commit, restart checkpointing, rebase, and land serialize
@@ -678,7 +678,7 @@ without starting a provider. Listing fails with that recovery command until the
 boundary is prepared; it never allocates a Run itself.
 
 ```sh
-lf task prepare DES-124 --stack-on DES-123
+lf task checkout DES-124 --stack-on DES-123
 # In DES-124's existing checkout:
 lf rebase --plan
 lf rebase
@@ -791,9 +791,9 @@ see [Discord bridge](waves.md#discord-bridge) for the delivery limits.
 ## Reading This Home
 
 ```bash
-lf ls --json                    # every durable Wave and its Home/runtime evidence
-lf ls --current --json          # current Waves, including stopped ones
-lf status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
+lf wave list --json                    # every durable Wave and its Home/runtime evidence
+lf wave list --current --json          # current Waves, including stopped ones
+lf wave status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
 lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
@@ -1481,8 +1481,6 @@ lf wave status designer --no-sync        # cache-only agent/app read
 lf wave update-plan --wave designer --plan plan.json
 lf wave new-chapter --chapter 2026-09 --plan chapter.json --dry-run --json
 lf wave new-chapter --chapter 2026-09 --plan chapter.json --json
-lf wave history --wave designer --json
-lf wave status designer --chapter 2026-08 --json
 lf task create --wave designer --title "Dark mode"
 lf task edit 1207... --title "Refine dark mode"
 lf task comment 1207... --json       # read the complete comment thread

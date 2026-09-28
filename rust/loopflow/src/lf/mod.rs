@@ -828,18 +828,6 @@ pub enum WaveCommand {
         #[arg(long = "no-sync")]
         no_sync: bool,
     },
-    /// Probe a Wave's Home for liveness and the one contextual action.
-    ///
-    /// Prints the Home route, its state (unreachable/stopped/running/unknown)
-    /// with the evidence, the attach endpoint when running, and the action to
-    /// offer. `--json` emits the `HomeRuntimeDto` a UI consumes.
-    Probe {
-        /// Wave name; defaults to the ambient wave.
-        wave: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)
@@ -1632,7 +1620,6 @@ mod tests {
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
-            vec!["lf", "wave", "probe", "product", "--json"],
             vec!["lf", "pr", "checks"],
             vec!["lf", "wave", "sync", "product"],
             vec!["lf", "wave", "sync", "--all"],
@@ -1728,7 +1715,7 @@ mod tests {
                 }
             })
         ));
-        assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_err());
         assert!(Cli::try_parse_from(["lf", "pr", "checks", "--logs"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "home", "probe", "product"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "ci"]).is_err());

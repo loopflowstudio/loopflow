@@ -5827,7 +5827,10 @@ mod tests {
         // A parked human boundary keeps its Session's reserved Run without
         // launching a provider; everything else about the position is untouched.
         let stored = store.task_flow(&task.id).await.unwrap().unwrap();
-        let sessions = store.sessions(&crate::session::SessionFilter::default()).await.unwrap();
+        let sessions = store
+            .sessions(&crate::session::SessionFilter::default())
+            .await
+            .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].1.task_id, Some(task.id.clone()));
         assert!(!sessions[0].1.published);

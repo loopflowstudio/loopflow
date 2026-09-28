@@ -14,17 +14,20 @@
 //!   `turn/completed` status "interrupted" (probed live).
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use tokio_tungstenite::{client_async, tungstenite::Message};
 
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{
@@ -592,6 +595,13 @@ pub struct CodexHarness {
     /// kill-session` orphaned the app-server pair).
     child_group: Arc<AtomicU32>,
     interrupt_hook_registered: bool,
+    engine_directory: Option<tempfile::TempDir>,
+    endpoint: Option<PathBuf>,
+    session_driver: Option<(
+        crate::store::sqlite::SqliteStore,
+        String,
+        crate::exec::SessionDriver,
+    )>,
 }
 
 impl std::fmt::Debug for CodexHarness {
@@ -627,6 +637,9 @@ impl CodexHarness {
             should_seed_prompt: true,
             child_group: Arc::new(AtomicU32::new(0)),
             interrupt_hook_registered: false,
+            engine_directory: None,
+            endpoint: None,
+            session_driver: None,
         }
     }
 
@@ -754,7 +767,7 @@ impl Harness for CodexHarness {
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
-        if self.child.is_some() {
+        if self.outbound_tx.is_some() {
             return Ok(());
         }
         self.shutdown_requested.store(false, Ordering::Relaxed);
@@ -909,13 +922,46 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
+        if self.session_driver.is_some() && self.thread_id().is_some() {
+            // A driver's lifetime is not its engine's. Detach even if this is
+            // still the driver: transfer may race teardown, and the engine may
+            // contain another active conversation. Explicit turn interruption
+            // goes through the fenced socket writer.
+            self.child.take();
+            self.child_group.store(0, Ordering::Release);
+            if let Some(directory) = self.engine_directory.take() {
+                let _ = directory.keep();
+            }
+            self.shutdown_tasks().await;
+            return Ok(());
+        }
+
         let _ = self.interrupt().await;
 
-        if let Some(child) = self.child.as_mut() {
-            if let Some(pid) = child.id() {
+        let group = self.child_group.clone();
+        let terminate = || {
+            let pid = group.swap(0, Ordering::AcqRel);
+            if pid != 0 {
                 kill_process_group(pid);
             }
-            let _ = child.start_kill();
+            Ok(())
+        };
+        if let Some((store, session, expected)) = &self.session_driver {
+            if store
+                .with_session_driver(session, expected, terminate)
+                .is_err()
+            {
+                self.child.take();
+                if let Some(directory) = self.engine_directory.take() {
+                    let _ = directory.keep();
+                }
+                self.shutdown_tasks().await;
+                return Ok(());
+            }
+        } else {
+            terminate()?;
+        }
+        if let Some(child) = self.child.as_mut() {
             let _ = child.wait().await;
         }
         self.child = None;
@@ -923,6 +969,7 @@ impl Harness for CodexHarness {
         self.turn_in_progress.store(false, Ordering::Relaxed);
 
         self.shutdown_tasks().await;
+        self.engine_directory.take();
 
         Ok(())
     }
@@ -948,6 +995,22 @@ impl Harness for CodexHarness {
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
+        self.session_driver = launch
+            .session_driver
+            .as_ref()
+            .map(|(session, driver)| {
+                let path = crate::store::database_path_from_env()?;
+                Ok::<_, anyhow::Error>((
+                    crate::store::sqlite::SqliteStore::new(&path)?,
+                    session.clone(),
+                    driver.clone(),
+                ))
+            })
+            .transpose()?;
+        let directory = tempfile::Builder::new()
+            .prefix("lf-codex-")
+            .tempdir_in("/tmp")?;
+        let endpoint = directory.path().join("engine.sock");
         let mut command = Command::new("codex");
         if self
             .account_route
@@ -960,12 +1023,13 @@ impl CodexHarness {
             // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
             // to `codex app-server` (verified against 0.142.5).
             .arg("app-server")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
+            .args(["--listen", &format!("unix://{}", endpoint.display())])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
-            // Dropping the harness (e.g. a run task is aborted)
-            // must not leak a live app-server.
-            .kill_on_drop(true);
+            // Failed startup owns this child; after connection, stop consults
+            // the Session fence before deciding whether to terminate it.
+            .kill_on_drop(false);
         super::configure_agent_env(&mut command, launch);
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
@@ -988,6 +1052,18 @@ impl CodexHarness {
             "features.shell_snapshot=false",
         ]);
 
+        // Codex's shell policy need not inherit arbitrary engine environment.
+        // Tool authority belongs to this conversation, including when another
+        // conversation later shares its engine. Pass only explicit launch and
+        // freshly resolved lf executable/Home values as thread configuration.
+        let tool_environment = super::conversation_environment(command.as_std(), launch);
+        // The engine can host another conversation. Only this thread receives
+        // its caller/capture provenance; engine defaults must not lend it to a
+        // newly admitted sibling.
+        for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
+            command.env_remove(name);
+        }
+
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
@@ -1001,7 +1077,7 @@ impl CodexHarness {
         if let Some(pid) = child.id() {
             self.child_group.store(pid, Ordering::Release);
         }
-        if !self.interrupt_hook_registered {
+        if self.session_driver.is_none() && !self.interrupt_hook_registered {
             self.interrupt_hook_registered = true;
             let group = Arc::clone(&self.child_group);
             crate::engine::agent::register_interrupt_cleanup(move || {
@@ -1012,22 +1088,41 @@ impl CodexHarness {
             });
         }
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("missing codex stdin"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("missing codex stdout"))?;
+        self.endpoint = Some(endpoint.clone());
+        self.engine_directory = Some(directory);
+        let socket = tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    return Err(anyhow!(
+                        "codex app-server exited before opening its socket: {status}"
+                    ));
+                }
+                match UnixStream::connect(&endpoint).await {
+                    Ok(socket) => return Ok(socket),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                        ) =>
+                    {
+                        tokio::time::sleep(Duration::from_millis(20)).await
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        })
+        .await??;
+        let (socket, _) = client_async("ws://localhost", socket).await?;
+        let (mut writer, mut reader) = socket.split();
         let stderr = child
             .stderr
             .take()
             .ok_or_else(|| anyhow!("missing codex stderr"))?;
 
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
+        let authority = self.session_driver.clone();
+        let writer_events = self.events.clone();
         let writer_task = tokio::spawn(async move {
-            let mut writer = stdin;
             while let Some(message) = outbound_rx.recv().await {
                 let payload = match message {
                     OutboundRpc::Request { id, method, params } => {
@@ -1040,16 +1135,44 @@ impl CodexHarness {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
                 };
-                let Ok(line) = serde_json::to_string(&payload) else {
-                    continue;
+                let message = Message::Text(payload.to_string().into());
+                let outcome = if let Some((store, session, expected)) = authority.clone() {
+                    let runtime = tokio::runtime::Handle::current();
+                    let dispatched = tokio::task::spawn_blocking(move || {
+                        let outcome = store.with_session_driver(&session, &expected, || {
+                            runtime.block_on(async {
+                                tokio::time::timeout(Duration::from_secs(2), writer.send(message))
+                                    .await
+                                    .map_err(|_| {
+                                        crate::store::StoreError::InvalidData(
+                                            "Native dispatch timed out; outcome unknown".into(),
+                                        )
+                                    })?
+                                    .map_err(|error| {
+                                        crate::store::StoreError::InvalidData(error.to_string())
+                                    })
+                            })
+                        });
+                        (writer, outcome)
+                    })
+                    .await;
+                    let Ok((returned, outcome)) = dispatched else {
+                        break;
+                    };
+                    writer = returned;
+                    outcome.map_err(|error| error.to_string())
+                } else {
+                    writer
+                        .send(message)
+                        .await
+                        .map_err(|error| error.to_string())
                 };
-                if writer.write_all(line.as_bytes()).await.is_err() {
-                    break;
-                }
-                if writer.write_all(b"\n").await.is_err() {
-                    break;
-                }
-                if writer.flush().await.is_err() {
+                if let Err(message) = outcome {
+                    let _ = writer_events.send(ConversationEvent::Error {
+                        code: "codex_dispatch_rejected".into(),
+                        message,
+                        evidence: None,
+                    });
                     break;
                 }
             }
@@ -1070,8 +1193,8 @@ impl CodexHarness {
         let pending_requests = self.pending_requests.clone();
         let retired_requests = self.retired_requests.clone();
         let account_route = self.account_route.clone();
+        let history = self.session_driver.clone();
         let reader_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
             let mut initialized_tx = Some(initialized_tx);
             let mut state = NotificationState::new(
                 turn_in_progress.clone(),
@@ -1080,16 +1203,30 @@ impl CodexHarness {
                 Some(thread_id_tx),
             );
 
-            while let Ok(Some(line)) = lines.next_line().await {
+            while let Some(Ok(message)) = reader.next().await {
+                let Message::Text(line) = message else {
+                    continue;
+                };
                 if let Some(raw_provider) = &raw_provider {
                     let _ = raw_provider.send(RawProviderEvent {
                         stream: "notification",
-                        line: line.clone(),
+                        line: line.to_string(),
                     });
                 }
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
+                if let Some((store, session, driver)) = &history {
+                    if let Err(error) =
+                        super::codex_history::record(store, session, Some(driver), None, &value)
+                    {
+                        let _ = event_tx.send(ConversationEvent::Error {
+                            code: "conversation_history_unavailable".into(),
+                            message: error.to_string(),
+                            evidence: None,
+                        });
+                    }
+                }
 
                 let method = value
                     .get("method")
@@ -1264,8 +1401,16 @@ impl CodexHarness {
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
 
-        let (thread_method, thread_params) =
+        let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_provider_session_id.as_deref());
+        thread_params.insert(
+            "config".into(),
+            json!({
+                "shell_environment_policy.set": tool_environment,
+                "allow_login_shell": false,
+                "features.shell_snapshot": false,
+            }),
+        );
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.
@@ -1283,6 +1428,14 @@ impl CodexHarness {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
+                if let Some((store, session, driver)) = &self.session_driver {
+                    store.record_session_connection(
+                        session,
+                        driver,
+                        &endpoint.to_string_lossy(),
+                        &thread_id,
+                    )?;
+                }
                 tracing::debug!(thread_id = %thread_id, "codex thread started");
             }
             Ok(Err(_)) => {

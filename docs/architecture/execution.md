@@ -71,6 +71,15 @@ commands must reach their exact-store authority checks before any logging-induce
 store open; unavailable-store coverage is reported explicitly. An inspection
 Exec does not reserve agent work or mark a Task Started.
 
+Ordinary parsed commands enter the process lifecycle before fallible Wave and
+account selection, so selection errors retain a failed Exec. Help and parse
+errors exit before that lifecycle; screenshot and installation use independent
+bootstrap paths. Current-directory failure and unavailable storage can also
+prevent recording. None justifies claiming an Exec for every OS process or
+opening the installed store before candidate installation authority checks.
+File-journal setup or append failure does not suppress a writable SQLite Exec;
+the obstruction and diagnostic remain evidence.
+
 ## Publish before spawn
 
 1. Resolve one Home for the store and payload root; validate typed ancestry.

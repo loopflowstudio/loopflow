@@ -1482,6 +1482,7 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
+            session_driver: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: Some("opencode".to_string()),

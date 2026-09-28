@@ -808,6 +808,23 @@ impl LinearClient {
             })
     }
 
+    pub async fn rename_project(&self, project_id: &str, name: &str) -> PmResult<()> {
+        let response: Value = self
+            .graphql(
+                r#"mutation RenameProject($id: String!, $name: String!) {
+                projectUpdate(id: $id, input: { name: $name }) { success }
+            }"#,
+                json!({ "id": project_id, "name": name }),
+            )
+            .await?;
+        if response["projectUpdate"]["success"] != true {
+            return Err(PmError::Message(
+                "Linear did not confirm Project rename".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn set_project_status(
         &self,
         project_id: &str,

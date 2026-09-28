@@ -1694,7 +1694,7 @@ mod tests {
         assert_eq!(terminal_at, 1_700_000_000);
         assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
         assert_eq!(
-            store.flow_position(&task.id).await.unwrap(),
+            store.task_flow(&task.id).await.unwrap(),
             Some(position.clone())
         );
         let owner = TaskWorkerOwner {
@@ -2428,7 +2428,11 @@ mod tests {
         };
 
         let stopped = store
-            .release_task_worker(&task.id, &old_claim)
+            .release_flow(
+                &old_claim.invocation_id,
+                old_claim.position_version,
+                Some(&old_claim),
+            )
             .await
             .unwrap();
         store

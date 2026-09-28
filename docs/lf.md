@@ -381,6 +381,7 @@ lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --flow incident
 lf -m claude task run DES-126    # retain this agent for every Flow step
+lf task status                 # Task on the checked-out branch
 lf task status DES-123
 lf task advance DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
@@ -398,12 +399,11 @@ lf task resume DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
 lf task restart DES-123 --flow feature                 # replace the pinned Flow; rejected before any checkpoint if unusable
 lf flow list --json                                  # every Flow with the topology it would pin
-lf work status task task_... --json                  # stable Work projection
-lf work interrupt task task_...                      # refuses without exact process ownership
-lf work place wave wave_... home_...                 # move idle Wave Work to a Home
-lf work relocate wave wave_... --name platform       # rename a stopped Wave
-lf work relocate wave wave_... --repo ../moved-repo  # repair or move its repository
-lf work enable task task_...                         # restore Task eligibility
+lf task status task_... --json                  # stable Work projection
+lf wave place wave_... home_...                 # move idle Wave Work to a Home
+lf wave relocate wave_... --name platform       # rename a stopped Wave
+lf wave relocate wave_... --repo ../moved-repo  # repair or move its repository
+lf task enable task_...                         # restore Task eligibility
 lf --wave designer : "scan the runtime"             # independent Wave Run
 ```
 
@@ -427,6 +427,27 @@ PR state, Flow invocation, and Run evidence stay separate. `task prepare` ensure
 Project and Task Work records, one stable Task worktree, and its first serial PR
 identity without starting execution. `task run` uses that same substrate,
 selects a Flow when none is active, and starts its mechanical driver.
+`task restart` waits for its captured worker to exit before replacing the Flow.
+Unknown process identity, a worker that remains live, or a concurrent replacement
+leaves the Flow intact and reports the unresolved execution. Retry after resolving
+the reported worker; restart never discards a new claim acquired while stopping.
+`task edit` changes title/notes in Linear and refreshes planning facts locally.
+It works before placement; replacing notes preserves the original creation retry
+marker. `task comment ISSUE` reads the thread; adding text publishes direction
+without starting execution. Both accept the issue ID or a registered Task ID and
+resolve the owning Wave from the issue. An optional `--wave` checks that ownership.
+
+`task create` files planning backlog in Linear and refreshes the local snapshot.
+It leaves the checkout alone and needs no agent execution credentials. Use
+`--notes` for its description, or pipe a report; `--title` overrides the report's
+first line. Repeating the same title and report reuses the issue's creation marker.
+`task create --run` validates the Flow, workspace name, stack parent, base,
+and execution credentials before creating a Linear issue. Retrying the same
+report reuses its marked issue and any registered Task placement. If a later
+filesystem or snapshot operation fails, the error names the retained issue and
+its recovery command. Placement uses the validated base commit even if a later
+fetch advances the remote branch. An unconfirmed creation reports the uncertainty
+and directs a retry of the same command to look up its marker.
 `task restart` waits for its captured worker to exit before replacing the Flow.
 Unknown process identity, a worker that remains live, or a concurrent replacement
 leaves the Flow intact and reports the unresolved execution. Retry after resolving

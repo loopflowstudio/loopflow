@@ -95,6 +95,17 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn rebind_session_run(
+        &self,
+        expected: FlowPosition,
+        next: RunId,
+    ) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.rebind_session_run(&expected, &next)
+        })
+        .await
+    }
+
     pub async fn flow_position(&self, task_id: &TaskId) -> StoreResult<Option<FlowPosition>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.flow_position(&task_id)).await

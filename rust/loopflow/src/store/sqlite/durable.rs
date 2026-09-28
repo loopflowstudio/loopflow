@@ -208,6 +208,33 @@ impl SqliteStore {
         Ok(stored)
     }
 
+    pub(crate) fn rebind_session_run(
+        &self,
+        expected: &FlowPosition,
+        next: &RunId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE task_flow_positions SET session_run_id=?1, position_version=position_version+1
+             WHERE task_id=?2 AND position_version=?3 AND session_run_id IS ?4
+             AND invocation_json=?5 AND review_json=?6 AND claim_json IS NULL AND human=1",
+            params![
+                next.as_str(),
+                expected.task_id.as_str(),
+                i64::try_from(expected.version).map_err(invalid_durable)?,
+                expected.session_run_id.as_ref().map(RunId::as_str),
+                serde_json::to_string(&expected.invocation)?,
+                serde_json::to_string(&expected.cursor)?
+            ],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "Session position changed or is actively claimed".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn flow_position(&self, task_id: &TaskId) -> StoreResult<Option<FlowPosition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         flow_position_in(&conn, task_id)
@@ -1978,6 +2005,60 @@ mod durable_store_tests {
         let stored = store.flow_position(&work).unwrap().unwrap();
         assert_eq!(stored.session_run_id, Some(run_id));
         assert_eq!(stored.ready_summary.as_deref(), Some("Ready for review"));
+    }
+
+    #[test]
+    fn session_rebinding_preserves_review_state_and_loses_to_advancement_and_claims() {
+        let (_dir, store, task) = store_with_task();
+        let mut position = autonomous_position(&task);
+        position.invocation =
+            crate::durable::test_flow_invocation("review", 0, "review", Some("boundary"), true);
+        position.ready_summary = Some("retain feedback".into());
+        position.session_run_id = Some(RunId::new());
+        position.failure = Some(TaskFlowBlocker {
+            run_id: None,
+            reason: "retain failure".into(),
+            restart_required: false,
+            observed_at: position.updated_at,
+        });
+        store.set_flow_position(&task, &position).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_flow_positions SET worker_generation=9 WHERE task_id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        let before = store.flow_position(&task).unwrap().unwrap();
+        let next = RunId::new();
+        store.rebind_session_run(&before, &next).unwrap();
+        let mut expected = before.clone();
+        expected.session_run_id = Some(next);
+        expected.version += 1;
+        assert_eq!(store.flow_position(&task).unwrap().unwrap(), expected);
+        assert!(store.rebind_session_run(&before, &RunId::new()).is_err());
+        assert_eq!(store.flow_position(&task).unwrap().unwrap(), expected);
+        // A later autonomous position can acquire a claim; stale recovery must
+        // preserve the new owner's complete claim, including embedded version.
+        let mut advanced = autonomous_position(&task);
+        advanced.version = expected.version;
+        let advanced = store.set_flow_position(&task, &advanced).unwrap();
+        store
+            .claim_task_worker(
+                &task,
+                &advanced.invocation.id,
+                advanced.version,
+                &owner(101),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap();
+        let claimed = store.flow_position(&task).unwrap().unwrap();
+        assert!(claimed.claim.is_some());
+        assert!(store.rebind_session_run(&expected, &RunId::new()).is_err());
+        assert!(store.rebind_session_run(&claimed, &RunId::new()).is_err());
+        assert_eq!(store.flow_position(&task).unwrap().unwrap(), claimed);
     }
 
     #[test]

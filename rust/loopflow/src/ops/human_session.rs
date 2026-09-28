@@ -7,7 +7,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1111,7 +1111,6 @@ pub(crate) fn prepared_run_id() -> Result<Option<RunId>> {
     let Some(value) = std::env::var_os(PREPARED_RUN_ENV) else {
         return Ok(None);
     };
-    std::env::remove_var(PREPARED_RUN_ENV);
     active_session_token()?;
     Ok(Some(RunId::parse(
         &value
@@ -1182,13 +1181,23 @@ pub(crate) async fn open(
                 bail!("--replace and --try apply only to interactive provider sessions");
             }
             let id = boundary_id(&target)?;
+            let run = match &target {
+                SessionTarget::Ask(record) => record.session_run_id.as_ref(),
+                SessionTarget::Flow { position, .. } => position.session_run_id.as_ref(),
+                _ => unreachable!("boundary target"),
+            };
+            let observed = if resume {
+                run.map(observed_clients).transpose()?.unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             prepare_boundary(store, &id).await?;
             let target = find_session(store, &id)
                 .await?
                 .ok_or_else(|| session_not_found(&id))?;
             let mut session = session_surface(store, &target).await?;
             if resume {
-                session.run_id = open_boundary(store, &id).await?;
+                session.run_id = open_boundary(store, &id, &observed).await?;
             }
             Ok(session)
         }
@@ -1232,90 +1241,129 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     Ok(session)
 }
 
-async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
-    if let Some(mut record) = read_ask_record(session_id)? {
-        loop {
-            if !matches!(record.status, AskSessionStatus::Waiting) {
-                bail!("session {session_id:?} is already complete");
-            }
-            let observed_run = record.session_run_id.clone();
-            if let Some(run_id) = &observed_run {
-                if resume_native_run(
-                    run_id,
-                    &HumanSessionToken::Ask {
-                        id: record.id.clone(),
-                    },
-                )? {
-                    return Ok(run_id.clone());
+async fn open_boundary(
+    store: &SharedStore,
+    session_id: &str,
+    observed: &[crate::run_record::ProviderClientRef],
+) -> Result<RunId> {
+    let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
+    loop {
+        let lock_id = session_id.to_string();
+        let launch_lock =
+            tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
+        if let Some(mut record) = read_ask_record(session_id)? {
+            ensure!(
+                matches!(record.status, AskSessionStatus::Waiting),
+                "Session is already complete"
+            );
+            let previous = record.session_run_id.clone();
+            let token = HumanSessionToken::Ask {
+                id: record.id.clone(),
+            };
+            let action = previous
+                .as_ref()
+                .map(|id| open_native_run_locked(id, &token, observed))
+                .transpose()?
+                .unwrap_or(NativeOpen::Prepared);
+            match action {
+                NativeOpen::Started(running) => {
+                    drop(launch_lock);
+                    running.wait()?;
+                    return session_run_id(session_id, previous.as_ref());
+                }
+                NativeOpen::Owned => return session_run_id(session_id, previous.as_ref()),
+                NativeOpen::Starting => {
+                    drop(launch_lock);
+                    ensure!(
+                        tokio::time::Instant::now() < deadline,
+                        "Session is still starting; its client remains running"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                NativeOpen::Replace(provider_lock) => {
+                    record.session_run_id = crate::run_record::prepare_session_replacement(
+                        previous.as_ref().expect("replacement has Run"),
+                    )?;
+                    prepare_ask_run(&mut record)?;
+                    carry_session_name(
+                        session_id,
+                        previous.as_ref(),
+                        record.session_run_id.as_ref(),
+                    )?;
+                    write_ask_record(&record)?;
+                    retire_replaced_run(
+                        previous.as_ref(),
+                        record
+                            .session_run_id
+                            .as_ref()
+                            .expect("prepared replacement"),
+                    )?;
+                    drop(provider_lock);
+                }
+                NativeOpen::Prepared => {
+                    prepare_ask_run(&mut record)?;
+                    write_ask_record(&record)?;
                 }
             }
-            let lock_id = session_id.to_string();
-            let launch_lock =
-                tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
-            record = read_ask_record(session_id)?
-                .ok_or_else(|| anyhow!("session {session_id:?} no longer exists"))?;
-            if !matches!(record.status, AskSessionStatus::Waiting) {
-                bail!("session {session_id:?} is already complete");
-            }
-            if record.session_run_id != observed_run {
-                drop(launch_lock);
-                continue;
-            }
-            if let Some(run_id) = &record.session_run_id {
-                if !run_is_prepared(run_id)? {
-                    record.session_run_id = None;
-                    record.ready_summary = None;
-                }
-            }
-            prepare_ask_run(&mut record)?;
-            carry_session_name(
-                session_id,
-                observed_run.as_ref(),
-                record.session_run_id.as_ref(),
-            )?;
-            write_ask_record(&record)?;
             let run_id = session_run_id(session_id, record.session_run_id.as_ref())?;
             serve_ask_locked(session_id, launch_lock).await?;
             return Ok(run_id);
         }
-    }
-    loop {
         let (task, mut position) = find_flow_session(store, session_id).await?;
         let previous = position.session_run_id.clone();
         let token = flow_token(&task, &position)?;
-        if let Some(run_id) = &previous {
-            if resume_native_run(
-                run_id,
-                &HumanSessionToken::Flow {
-                    token: Box::new(token.clone()),
-                },
-            )? {
-                return Ok(run_id.clone());
+        let human_token = HumanSessionToken::Flow {
+            token: Box::new(token.clone()),
+        };
+        let action = previous
+            .as_ref()
+            .map(|id| open_native_run_locked(id, &human_token, observed))
+            .transpose()?
+            .unwrap_or(NativeOpen::Prepared);
+        match action {
+            NativeOpen::Started(running) => {
+                drop(launch_lock);
+                running.wait()?;
+                return session_run_id(session_id, previous.as_ref());
+            }
+            NativeOpen::Owned => return session_run_id(session_id, previous.as_ref()),
+            NativeOpen::Starting => {
+                drop(launch_lock);
+                ensure!(
+                    tokio::time::Instant::now() < deadline,
+                    "Session is still starting; its client remains running"
+                );
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+            NativeOpen::Replace(provider_lock) => {
+                let expected = position.clone();
+                position.session_run_id = crate::run_record::prepare_session_replacement(
+                    previous.as_ref().expect("replacement has Run"),
+                )?;
+                prepare_flow_run(&task, &mut position)?;
+                carry_session_name(
+                    session_id,
+                    previous.as_ref(),
+                    position.session_run_id.as_ref(),
+                )?;
+                let next = position
+                    .session_run_id
+                    .as_ref()
+                    .expect("prepared replacement");
+                store.rebind_session_run(expected, next.clone()).await?;
+                retire_replaced_run(previous.as_ref(), next)?;
+                drop(provider_lock);
+            }
+            NativeOpen::Prepared => {
+                if previous.is_none() {
+                    prepare_flow_run(&task, &mut position)?;
+                    store.set_flow_position(&task.id, position.clone()).await?;
+                }
             }
         }
-        let lock_id = session_id.to_string();
-        let launch_lock =
-            tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
-        let (task, current) = find_flow_session(store, session_id).await?;
-        if current.session_run_id != previous {
-            drop(launch_lock);
-            continue;
-        }
-        position = current;
-        if let Some(run_id) = &previous {
-            if !run_is_prepared(run_id)? {
-                position.session_run_id = None;
-                position.ready_summary = None;
-            }
-        }
-        prepare_flow_run(&task, &mut position)?;
-        carry_session_name(
-            session_id,
-            previous.as_ref(),
-            position.session_run_id.as_ref(),
-        )?;
         let run_id = session_run_id(session_id, position.session_run_id.as_ref())?;
-        store.set_flow_position(&task.id, position).await?;
         serve_flow_locked(store.clone(), token, launch_lock).await?;
         return Ok(run_id);
     }
@@ -1380,6 +1428,11 @@ async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
             .into_iter()
             .filter_map(|record| record.session_run_id),
     );
+    for id in run_ids.clone() {
+        if let Some(parent) = superseded_session_run(&id)? {
+            run_ids.insert(parent);
+        }
+    }
     Ok(run_ids)
 }
 
@@ -1668,56 +1721,169 @@ pub(crate) async fn spawn_session_run(
     let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
     loop {
         let manifest = crate::run_record::read_manifest(&dir)?;
-        if session_run_is_resumable(&dir, &manifest)? {
+        if session_run_has_owned_client(&dir, &manifest)? {
             return Ok(child);
         }
         if let Some(status) = child.try_wait().context("probe human Session Run")? {
-            bail!("human Session Run {run_id} exited with {status} before becoming resumable");
+            bail!("human Session Run {run_id} exited with {status} before establishing client ownership");
         }
         if tokio::time::Instant::now() >= deadline {
-            bail!("human Session Run {run_id} did not become resumable within 30s");
+            bail!("human Session Run {run_id} did not establish client ownership within 30s");
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
-fn session_run_is_resumable(dir: &Path, manifest: &RunManifest) -> Result<bool> {
-    if crate::run_record::read_provider_session(dir)?.is_none() {
-        return Ok(false);
-    }
+fn session_run_has_owned_client(dir: &Path, manifest: &RunManifest) -> Result<bool> {
     Ok(!crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?.is_empty())
 }
 
-pub(crate) fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Result<bool> {
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error).context("resolve Session Run"),
+#[derive(Debug)]
+pub(crate) enum NativeOpen {
+    Prepared,
+    Replace(File),
+    Starting,
+    Owned,
+    Started(crate::lf::commands::util::RunningSession),
+}
+
+pub(crate) fn observed_clients(
+    run_id: &RunId,
+) -> Result<Vec<crate::run_record::ProviderClientRef>> {
+    let (dir, manifest) = crate::run_record::resolve_manifest(
+        &crate::store::observability_home_dir(),
+        run_id.as_str(),
+    )?;
+    crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)
+}
+
+// Caller owns the boundary launch lock. Replacement retains the provider lock
+// until the candidate is prepared and its binding is conditionally published.
+pub(crate) fn open_native_run_locked(
+    run_id: &RunId,
+    token: &HumanSessionToken,
+    observed: &[crate::run_record::ProviderClientRef],
+) -> Result<NativeOpen> {
+    use crate::harness::claude_history::{self, ClaudeHistory};
+    use crate::lf::commands::util;
+    let (dir, manifest) = crate::run_record::resolve_manifest(
+        &crate::store::observability_home_dir(),
+        run_id.as_str(),
+    )?;
+    if let Some(parent) = superseded_session_run(run_id)? {
+        retire_replaced_run(Some(&parent), run_id)?;
+    }
+    let lock = util::lock_provider_clients(&dir)?;
+    util::require_provider_session_launch(&dir)?;
+    if dir.join("prepared").try_exists()? {
+        return Ok(NativeOpen::Prepared);
+    }
+    let clients = util::active_provider_clients(&dir, &manifest.harness)?;
+    if clients.iter().any(|client| !observed.contains(client)) {
+        return Ok(NativeOpen::Owned);
+    }
+    let reference = crate::run_record::read_provider_session(&dir)?;
+    let persisted = match &reference {
+        Some(reference) if manifest.harness == "claude" => {
+            claude_history::inspect(&dir, reference)? == ClaudeHistory::Persisted
+        }
+        Some(_) => true,
+        None => false,
     };
-    crate::lf::commands::util::require_provider_session_launch(&dir)?;
-    let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
-    crate::lf::commands::util::replace_provider_clients(
+    if !persisted {
+        if !clients.is_empty() {
+            return Ok(NativeOpen::Starting);
+        }
+        ensure!(
+            !dir.join("launching").try_exists()?,
+            "Session launcher is still starting"
+        );
+        if reference.is_some() {
+            ensure!(
+                crate::run_record::read_run_snapshot(&dir)?
+                    .outcome
+                    .is_some(),
+                "Session launcher has not settled; retaining its Run"
+            );
+        }
+        return Ok(NativeOpen::Replace(lock));
+    }
+    util::replace_provider_clients_locked(
         &dir,
         &manifest.harness,
         &clients,
         crate::run_record::ProviderClientStopReason::Moved,
     )?;
-    let Some(provider_session) = crate::run_record::read_provider_session(&dir)? else {
-        return Ok(false);
-    };
+    let reference = reference.expect("persisted history has a provider reference");
+    if manifest.harness == "claude" {
+        ensure!(
+            claude_history::inspect(&dir, &reference)? == ClaudeHistory::Persisted,
+            "Claude history disappeared during handoff; retaining its Run"
+        );
+    }
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
-    crate::lf::commands::util::resume_session_with_env(
+    let running = util::start_resume_session_locked(
         &manifest.harness,
         manifest.model.as_deref(),
         &manifest.cwd,
         &manifest.run_id,
         &dir,
-        &provider_session,
+        &reference,
         &environment,
     )?;
-    Ok(true)
+    Ok(NativeOpen::Started(running))
+}
+
+fn superseded_session_run(run_id: &RunId) -> Result<Option<RunId>> {
+    let Some(dir) = local_session_run_dir(run_id) else {
+        return Ok(None);
+    };
+    let manifest = crate::run_record::read_manifest(&dir)?;
+    let Some(parent) = manifest.parent_run_id else {
+        return Ok(None);
+    };
+    let Some(parent_dir) = local_session_run_dir(&parent) else {
+        return Ok(None);
+    };
+    let parent_manifest = match crate::run_record::read_manifest(&parent_dir) {
+        Ok(manifest) => manifest,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if manifest.harness != "claude"
+        || parent_manifest.harness != "claude"
+        || parent_manifest.surface != "tui"
+        || manifest.context.is_none()
+        || parent_manifest.flow != manifest.flow
+    {
+        return Ok(None);
+    }
+    let Some(reference) = crate::run_record::read_provider_session(&parent_dir)? else {
+        return Ok(None);
+    };
+    let (Ok(prompt), Ok(parent_prompt)) = (
+        crate::run_record::archived_session_prompt(&dir),
+        crate::run_record::archived_session_prompt(&parent_dir),
+    ) else {
+        return Ok(None);
+    };
+    if prompt != parent_prompt
+        || crate::harness::claude_history::inspect(&parent_dir, &reference).ok()
+            != Some(crate::harness::claude_history::ClaudeHistory::Absent)
+    {
+        return Ok(None);
+    }
+    Ok(Some(parent))
+}
+
+pub(crate) fn retire_replaced_run(previous: Option<&RunId>, next: &RunId) -> Result<()> {
+    if let Some(previous) = previous.filter(|previous| *previous != next) {
+        if let Some(dir) = local_session_run_dir(previous) {
+            crate::run_record::resolve_provider_session(&dir)?;
+        }
+    }
+    Ok(())
 }
 
 fn stop_native_run(run_id: &RunId) -> Result<()> {
@@ -2353,8 +2519,8 @@ mod tests {
         active_flow_skill, ask, ask_background_name, ask_launch_args, ask_once, ask_record_path,
         complete_ask, flow_background_name, flow_id, flow_token_id, human_open_argv,
         list_ask_sessions, preferred_work_selector, question_title, read_ask_record, serve_ask,
-        session_run_is_resumable, token_matches, wait_for_ask, write_ask_record, AskSessionRecord,
-        AskSessionStatus, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
+        session_run_has_owned_client, token_matches, wait_for_ask, write_ask_record,
+        AskSessionRecord, AskSessionStatus, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
     };
     use crate::durable::{FlowPosition, RunId};
     use crate::engine::{prepare_launch_prompt, Config, LaunchPromptInput, Surface};
@@ -2607,7 +2773,7 @@ mod tests {
             record.retain_completed = true;
             write_ask_record(&record).unwrap();
             let lock = super::lock_session_launch(&record.id).unwrap();
-            let mut reopening = Box::pin(super::open_boundary(&store, &record.id));
+            let mut reopening = Box::pin(super::open_boundary(&store, &record.id, &[]));
             let progress = std::future::poll_fn(|cx| {
                 std::task::Poll::Ready(std::future::Future::poll(reopening.as_mut(), cx))
             })
@@ -3269,8 +3435,98 @@ mod tests {
         );
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn pending_claude_open_keeps_client_alive_and_concurrent_open_uses_owned_generation() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        let store = home.store().await;
+        let provider = home.home.path().join("claude");
+        std::fs::write(&provider, "#!/bin/sh\nread -r input\n").unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        struct Client(std::process::Child);
+        impl Drop for Client {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut client = Client(
+            std::process::Command::new(&provider)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let capture = crate::run_record::CaptureHandle::begin_at(
+            home.home.path(),
+            crate::run_record::RunSpec {
+                harness: "claude".into(),
+                model: None,
+                surface: "tui".into(),
+                cwd: home.home.path().into(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
+            },
+        )
+        .unwrap();
+        let dir = capture.artifact_dir();
+        crate::run_record::write_provider_session_at(
+            &dir,
+            &uuid::Uuid::new_v4().to_string(),
+            None,
+            Some(home.home.path().into()),
+        )
+        .unwrap();
+        crate::run_record::write_provider_client(&dir, client.0.id()).unwrap();
+        let token = HumanSessionToken::Ask {
+            id: "ask_pending".into(),
+        };
+        assert!(matches!(
+            super::open_native_run_locked(&capture.run_id(), &token, &[]).unwrap(),
+            super::NativeOpen::Owned
+        ));
+        let record = AskSessionRecord {
+            id: "ask_pending".into(),
+            skill: None,
+            retain_completed: false,
+            parent_run_id: RunId::new(),
+            parent_run_dir: Some(home.home.path().into()),
+            work: None,
+            work_selector: None,
+            title: "Pending".into(),
+            detail: "Pending".into(),
+            prompt: "seed".into(),
+            cwd: home.home.path().into(),
+            model: "claude".into(),
+            session_run_id: Some(capture.run_id()),
+            ready_summary: Some("retain readiness".into()),
+            status: AskSessionStatus::Waiting,
+        };
+        write_ask_record(&record).unwrap();
+        let before = std::fs::read(super::ask_record_path(&record.id)).unwrap();
+        let error = super::open_boundary(
+            &store,
+            &record.id,
+            &super::observed_clients(&capture.run_id()).unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("still starting"), "{error:#}");
+        assert!(client.0.try_wait().unwrap().is_none());
+        assert_eq!(
+            std::fs::read(super::ask_record_path(&record.id)).unwrap(),
+            before
+        );
+        assert!(!std::fs::read_to_string(dir.join("events.jsonl"))
+            .unwrap()
+            .contains("provider_session_observed"));
+    }
+
     #[test]
-    fn initial_session_publication_requires_history_and_an_owned_client() {
+    fn initial_session_publication_requires_an_owned_client_not_history() {
         let dir = tempfile::tempdir().unwrap();
         let harness = std::env::current_exe()
             .unwrap()
@@ -3305,10 +3561,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
+        assert!(!session_run_has_owned_client(dir.path(), &manifest).unwrap());
         crate::run_record::write_provider_session(dir.path(), "provider-session", None).unwrap();
-        assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
+        assert!(!session_run_has_owned_client(dir.path(), &manifest).unwrap());
         crate::run_record::write_provider_client(dir.path(), std::process::id()).unwrap();
-        assert!(session_run_is_resumable(dir.path(), &manifest).unwrap());
+        assert!(session_run_has_owned_client(dir.path(), &manifest).unwrap());
     }
 }

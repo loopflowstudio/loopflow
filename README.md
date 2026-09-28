@@ -137,6 +137,12 @@ lf session iterate <flowstep-id> "Narrow the design"
 
 Ready, provider exit, and pane close resolve nothing. Complete resolves an
 interactive Run or Ask. Approve and Iterate act only on Task FlowSteps.
+If a Claude boundary Session exits before saving a conversation, open the same
+Session again. It reuses the archived context and account without clearing review
+feedback. An open waits up to 30 seconds for a starting client; it leaves that
+client running if history is still pending. Unreadable or unfamiliar history
+stays in place and reports an inspection error.
+
 In Loopflow.app, switching Sessions or closing a pane keeps its terminal live.
 **Move here** explicitly takes over a Session active in another terminal.
 

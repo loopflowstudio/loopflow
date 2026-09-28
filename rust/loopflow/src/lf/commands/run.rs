@@ -23,6 +23,9 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+    if let Some(built) = archived_prepared_prompt()? {
+        return launch_prompt(&built, cli);
+    }
     if let Some(binding) = checkout_binding(cli)? {
         let mut bound = cli.launch_options();
         bound.wave = Some(binding.wave_name.clone());
@@ -44,6 +47,9 @@ pub(crate) fn run_saved(
     cli: &Cli,
     repo: &Path,
 ) -> Result<()> {
+    if let Some(built) = archived_prepared_prompt()? {
+        return launch_prompt(&built, cli);
+    }
     let mut built = build_prompt_at(
         Some(&skill.name),
         message,
@@ -69,6 +75,9 @@ pub fn run_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<()> {
+    if let Some(built) = archived_prepared_prompt()? {
+        return launch_prompt(&built, cli);
+    }
     let message = bound_message(binding, message);
     let resolved_skill = skill
         .map(crate::ops::human_session::active_flow_skill)
@@ -581,6 +590,40 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
+fn archived_prepared_prompt() -> Result<Option<PromptBuild>> {
+    let Some(id) = crate::ops::human_session::prepared_run_id()? else {
+        return Ok(None);
+    };
+    let (dir, manifest) =
+        crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), id.as_str())?;
+    if manifest.context.is_none() {
+        return Ok(None);
+    }
+    let prompt = crate::run_record::archived_session_prompt(&dir)?;
+    Ok(Some(PromptBuild {
+        repo_root: manifest.cwd.clone(),
+        config: Config::default(),
+        agent_config: AgentConfig {
+            cwd: Some(manifest.cwd),
+            ..Default::default()
+        },
+        process: ProcessConfig::default(),
+        capabilities: AgentCapabilities::default(),
+        components: PromptComponents::default(),
+        context: crate::trace::PreparedTurnContext::from_prompts("", &prompt),
+        prompt,
+        harness: manifest.harness,
+        model: manifest.model,
+        skill_name: manifest.skill,
+        log_name: "session".into(),
+        subjects: manifest
+            .subjects
+            .into_iter()
+            .map(|subject| subject.selector)
+            .collect(),
+    }))
+}
+
 fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     // Bare terminal control always stays in the TUI. Other interactive skills
     // use explicit flags first, then the configured launch target.
@@ -633,8 +676,24 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
             crate::run_record::read_provider_session(&capture.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
+            let persisted = if built.harness == "claude" {
+                match crate::harness::claude_history::inspect(
+                    &capture.artifact_dir(),
+                    &provider_session,
+                ) {
+                    Ok(history) => {
+                        history == crate::harness::claude_history::ClaudeHistory::Persisted
+                    }
+                    Err(error) => {
+                        warn!(%error, "Claude persistence remains unresolved");
+                        false
+                    }
+                }
+            } else {
+                true
+            };
             capture.observe_provider(
-                Some(provider_session.provider_session_id),
+                persisted.then_some(provider_session.provider_session_id),
                 provider_session.account_id,
             );
         }
@@ -788,25 +847,28 @@ fn begin_run_capture(
         subjects,
         flow: crate::ops::flow_run::capture_membership()?,
     };
-    let capture = if let Some(id) = crate::ops::human_session::prepared_run_id()? {
+    let context = if surface == "tui" {
+        crate::trace::PreparedTurnContext::from_prompts("", &built.prompt)
+    } else {
+        built.context.clone()
+    };
+    let prepared_id = crate::ops::human_session::prepared_run_id()?;
+    std::env::remove_var(crate::ops::human_session::PREPARED_RUN_ENV);
+    let capture = if let Some(id) = prepared_id {
         crate::run_record::CaptureHandle::start_prepared(
             &crate::store::lf_home_dir(),
             &id,
             spec,
-            &built.context,
+            &context,
         )
     } else if surface == "headless" {
         let launch = crate::run_record::RunLaunchRequest::from_prepared(
             prepared_config,
             &built.capabilities,
         );
-        crate::run_record::CaptureHandle::begin_with_launch_and_context(
-            spec,
-            launch,
-            &built.context,
-        )
+        crate::run_record::CaptureHandle::begin_with_launch_and_context(spec, launch, &context)
     } else {
-        crate::run_record::CaptureHandle::begin_with_context(spec, &built.context)
+        crate::run_record::CaptureHandle::begin_with_context(spec, &context)
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);

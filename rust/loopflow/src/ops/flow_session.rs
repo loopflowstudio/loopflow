@@ -273,38 +273,39 @@ fn review_message(run: &FlowRun, token: &StepToken) -> String {
 
 /// Called under the Session launch lock. A Run can bind before its provider
 /// publishes native history; a failed launch must not strand the review.
-fn recover_unpublished_run(token: &StepToken) -> Result<()> {
+fn recover_unpublished_run(token: &StepToken, previous: &RunId) -> Result<()> {
+    let mut candidate = flow_run::read(&token.invocation)?;
+    let boundary = validate(&candidate, token)?;
+    ensure!(
+        boundary.run_id.as_ref() == Some(previous),
+        "Flow Session Run changed"
+    );
+    let replacement = crate::run_record::prepare_session_replacement(previous)?;
+    let boundary = candidate.active.as_mut().expect("validated boundary");
+    boundary.run_id = replacement;
+    boundary.run_dir = None;
+    prepare_run(&mut candidate)?;
+    let next = candidate
+        .active
+        .as_ref()
+        .and_then(|boundary| boundary.run_id.as_ref())
+        .expect("prepared replacement");
+    let (dir, _) = crate::run_record::resolve_manifest(
+        &crate::store::observability_home_dir(),
+        next.as_str(),
+    )?;
+    human_session::carry_session_name(&session_id(token), Some(previous), Some(next))?;
     flow_run::update(&token.invocation, |run| {
-        let boundary = validate(run, token)?;
-        let Some(run_id) = &boundary.run_id else {
-            return Ok(());
-        };
-        let (dir, manifest) = crate::run_record::resolve_manifest(
-            &crate::store::observability_home_dir(),
-            run_id.as_str(),
-        )?;
-        if human_session::run_is_prepared(run_id)?
-            || crate::run_record::read_provider_session(&dir)?.is_some()
-        {
-            return Ok(());
-        }
         ensure!(
-            crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?.is_empty(),
-            "Flow Session provider is still starting; reopen after it becomes resumable"
+            validate(run, token)?.run_id.as_ref() == Some(previous),
+            "Flow Session Run changed"
         );
-        let previous = run_id.clone();
-        let boundary = run.active.as_mut().expect("validated human boundary");
-        boundary.run_id = None;
-        boundary.run_dir = None;
-        boundary.ready_summary = None;
-        prepare_run(run)?;
-        human_session::carry_session_name(
-            &session_id(token),
-            Some(&previous),
-            run.active.as_ref().and_then(|b| b.run_id.as_ref()),
-        )?;
+        let boundary = run.active.as_mut().expect("validated boundary");
+        boundary.run_id = Some(next.clone());
+        boundary.run_dir = Some(dir);
         Ok(())
-    })
+    })?;
+    human_session::retire_replaced_run(Some(previous), next)
 }
 
 pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Result<SessionRecord> {
@@ -312,34 +313,55 @@ pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Res
         mode == OpenMode::Refuse,
         "--replace and --try apply only to interactive provider sessions"
     );
-    let id = session_id(token);
-    let lock =
-        tokio::task::spawn_blocking(move || human_session::lock_session_launch(&id)).await??;
-    recover_unpublished_run(token)?;
-    flow_run::update(&token.invocation, prepare_run)?;
-    let surface = surface(token)?;
-    if !resume {
-        return Ok(surface);
-    }
-    let run = flow_run::read(&token.invocation)?;
-    let boundary = validate(&run, token)?;
+    let initial = flow_run::read(&token.invocation)?;
+    let observed = validate(&initial, token)?
+        .run_id
+        .as_ref()
+        .map(human_session::observed_clients)
+        .transpose()?
+        .unwrap_or_default();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     let human_token = HumanSessionToken::StandaloneFlow {
         token: token.clone(),
     };
-    if let Some(run_id) = boundary.run_id.as_ref() {
-        if !human_session::run_is_prepared(run_id)? {
-            // Retain a published native identity even if history is temporarily absent.
-            // The launch lock guards startup only, not the whole interactive session.
-            let run_id = run_id.clone();
-            drop(lock);
-            ensure!(
-                human_session::resume_native_run(&run_id, &human_token)?,
-                "Flow Session {0} has Run {run_id} but native history is unavailable",
-                session_id(token)
-            );
-            return Ok(surface);
+    let lock = loop {
+        let id = session_id(token);
+        let lock =
+            tokio::task::spawn_blocking(move || human_session::lock_session_launch(&id)).await??;
+        flow_run::update(&token.invocation, prepare_run)?;
+        if !resume {
+            return surface(token);
         }
-    }
+        let run = flow_run::read(&token.invocation)?;
+        let boundary = validate(&run, token)?;
+        let run_id = boundary.run_id.as_ref().expect("prepared boundary");
+        match human_session::open_native_run_locked(run_id, &human_token, &observed)? {
+            human_session::NativeOpen::Started(running) => {
+                let session = surface(token)?;
+                drop(lock);
+                running.wait()?;
+                return Ok(session);
+            }
+            human_session::NativeOpen::Owned => return surface(token),
+            human_session::NativeOpen::Starting => {
+                drop(lock);
+                ensure!(
+                    tokio::time::Instant::now() < deadline,
+                    "Session is still starting; its client remains running"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            human_session::NativeOpen::Replace(provider_lock) => {
+                recover_unpublished_run(token, run_id)?;
+                drop(provider_lock);
+                break lock;
+            }
+            human_session::NativeOpen::Prepared => break lock,
+        }
+    };
+    let surface = surface(token)?;
+    let run = flow_run::read(&token.invocation)?;
+    let boundary = validate(&run, token)?;
     let skill = &current_skill(&run)?.skill;
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let mut command = tokio::process::Command::new(lf);
@@ -520,101 +542,83 @@ mod tests {
         })
     }
 
-    struct NativeClient(std::process::Child);
-
-    impl Drop for NativeClient {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-
     #[test]
-    fn failed_human_launch_can_reopen_without_losing_published_history_or_feedback() {
+    fn failed_claude_launch_preserves_flow_boundary_and_ready_feedback() {
         let _lock = crate::journal::test_env_lock();
         let home = TestHome::new();
         let cli = Cli::try_parse_from(["lf"]).unwrap();
         let steps = vec![skill("demo", true, None)];
-        for state in ["failed", "starting", "published"] {
-            let run =
-                flow_run::create("review", &steps, home.directory.path(), None, &cli).unwrap();
-            let (token, _) = flow_run::begin_boundary(&run.id).unwrap();
-            let capture = crate::run_record::CaptureHandle::begin_at(
-                home.directory.path(),
-                crate::run_record::RunSpec {
-                    harness: "sleep".into(),
-                    model: None,
-                    surface: "tui".into(),
-                    cwd: home.directory.path().into(),
-                    repo: None,
-                    worktree: None,
-                    skill: Some("demo".into()),
-                    subjects: Vec::new(),
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                },
-            )
-            .unwrap();
-            let dir = capture.artifact_dir();
-            flow_run::update(&run.id, |run| {
-                let boundary = run.active.as_mut().unwrap();
-                boundary.run_id = Some(capture.run_id());
-                boundary.run_dir = Some(dir.clone());
-                Ok(())
-            })
-            .unwrap();
-            let _client = if state == "starting" {
-                let child = NativeClient(
-                    std::process::Command::new("sleep")
-                        .arg("60")
-                        .spawn()
-                        .unwrap(),
-                );
-                crate::run_record::write_provider_client(&dir, child.0.id()).unwrap();
-                Some(child)
-            } else {
-                None
-            };
-            if state == "published" {
-                crate::run_record::write_provider_session(&dir, "native-review", None).unwrap();
-            }
-            crate::run_record::write_session_name(
-                &dir,
-                "Delivery review",
-                crate::run_record::SessionTitleSource::Human,
-            )
-            .unwrap();
-            let manifest = fs::read(dir.join("manifest.json")).unwrap();
-            let launch_lock =
-                crate::ops::human_session::lock_session_launch(&session_id(&token)).unwrap();
-            let recovery = recover_unpublished_run(&token);
-            let recovered = flow_run::read(&run.id).unwrap();
-            let boundary = recovered.active.unwrap();
-            assert_eq!(boundary.id, token.boundary);
-            assert_eq!(recovered.cursor, run.cursor);
-            assert!(!boundary.completed);
-            assert_eq!(fs::read(dir.join("manifest.json")).unwrap(), manifest);
-            if state == "failed" {
-                recovery.unwrap();
-                assert_ne!(boundary.run_id, Some(capture.run_id()));
-                assert!(crate::ops::human_session::run_is_prepared(
-                    boundary.run_id.as_ref().unwrap()
-                )
-                .unwrap());
-                let name = crate::run_record::read_session_name(boundary.run_dir.as_ref().unwrap())
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(name.title, "Delivery review");
-                assert_eq!(name.source, crate::run_record::SessionTitleSource::Human);
-            } else {
-                assert_eq!(boundary.run_id, Some(capture.run_id()));
-                assert_eq!(recovery.is_err(), state == "starting");
-            }
-            mark_ready(&token, boundary.run_id.as_ref().unwrap(), "reviewed").unwrap();
-            record_completion(&token).unwrap();
-            assert!(recover_unpublished_run(&token).is_err());
-            assert!(flow_run::read(&run.id).unwrap().active.unwrap().completed);
-            drop(launch_lock);
-        }
+        let run = flow_run::create("review", &steps, home.directory.path(), None, &cli).unwrap();
+        let (token, _) = flow_run::begin_boundary(&run.id).unwrap();
+        let capture = crate::run_record::CaptureHandle::begin_with_context(
+            crate::run_record::RunSpec {
+                harness: "claude".into(),
+                model: Some("haiku".into()),
+                surface: "tui".into(),
+                cwd: home.directory.path().into(),
+                repo: None,
+                worktree: None,
+                skill: Some("demo".into()),
+                subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
+            },
+            &crate::trace::PreparedTurnContext::from_prompts("archived system", "archived task"),
+        )
+        .unwrap();
+        let dir = capture.artifact_dir();
+        crate::run_record::write_provider_session_at(
+            &dir,
+            &uuid::Uuid::new_v4().to_string(),
+            None,
+            Some(home.directory.path().to_path_buf()),
+        )
+        .unwrap();
+        capture.finish("failed").unwrap();
+        flow_run::update(&run.id, |run| {
+            let boundary = run.active.as_mut().unwrap();
+            boundary.run_id = Some(capture.run_id());
+            boundary.run_dir = Some(dir.clone());
+            Ok(())
+        })
+        .unwrap();
+        crate::run_record::write_session_name(
+            &dir,
+            "Delivery review",
+            crate::run_record::SessionTitleSource::Human,
+        )
+        .unwrap();
+        mark_ready(&token, &capture.run_id(), "preserved readiness").unwrap();
+        let before = flow_run::read(&run.id).unwrap();
+        let before_json = serde_json::to_value(&before).unwrap();
+        let launch_lock =
+            crate::ops::human_session::lock_session_launch(&session_id(&token)).unwrap();
+        recover_unpublished_run(&token, &capture.run_id()).unwrap();
+        let recovered = flow_run::read(&run.id).unwrap();
+        let boundary = recovered.active.as_ref().unwrap();
+        let next = boundary.run_id.as_ref().unwrap();
+        assert_ne!(next, &capture.run_id());
+        assert!(crate::ops::human_session::run_is_prepared(next).unwrap());
+        assert_eq!(
+            crate::run_record::archived_session_prompt(boundary.run_dir.as_ref().unwrap()).unwrap(),
+            "archived system\n\narchived task"
+        );
+        assert_eq!(
+            crate::run_record::read_session_name(boundary.run_dir.as_ref().unwrap())
+                .unwrap()
+                .unwrap()
+                .title,
+            "Delivery review"
+        );
+        let mut expected = before_json;
+        expected["active"]["run_id"] = serde_json::to_value(next).unwrap();
+        expected["active"]["run_dir"] = serde_json::to_value(&boundary.run_dir).unwrap();
+        assert_eq!(serde_json::to_value(&recovered).unwrap(), expected);
+        assert!(recover_unpublished_run(&token, &capture.run_id()).is_err());
+        assert_eq!(
+            serde_json::to_value(flow_run::read(&run.id).unwrap()).unwrap(),
+            expected
+        );
+        drop(launch_lock);
     }
 
     #[test]

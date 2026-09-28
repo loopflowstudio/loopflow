@@ -272,6 +272,7 @@ pub(crate) struct ProviderSessionRef {
     schema_version: u32,
     pub(crate) provider_session_id: String,
     pub(crate) account_id: Option<crate::store::ProviderAccountId>,
+    pub(crate) history_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -593,7 +594,7 @@ pub(crate) fn scan_unresolved_provider_runs(
                 continue;
             }
         };
-        if !has_interactive_history(&dir, &manifest)? {
+        if dir.join("prepared").try_exists()? || !has_interactive_history(&dir, &manifest)? {
             continue;
         }
         let unresolved = match provider_session_is_resolved(&dir) {
@@ -748,6 +749,71 @@ pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
     })
 }
 
+pub(crate) fn archived_session_prompt(dir: &Path) -> anyhow::Result<String> {
+    let manifest = read_manifest(dir)?;
+    anyhow::ensure!(
+        context_ref_is_valid(dir, manifest.context.as_ref()),
+        "Session archived context is missing or corrupt; retaining the original Run"
+    );
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("context.json"))?)?;
+    let task = value
+        .pointer("/context/task/text")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Session archived task context is missing"))?;
+    let system = value
+        .pointer("/context/system/text")
+        .and_then(serde_json::Value::as_str);
+    Ok(match system {
+        Some(system) if !system.is_empty() => format!("{system}\n\n{task}"),
+        _ => task.to_string(),
+    })
+}
+
+pub(crate) fn prepare_session_replacement(previous: &RunId) -> anyhow::Result<Option<RunId>> {
+    let home = crate::store::observability_home_dir();
+    let (dir, manifest) = resolve_manifest(&home, previous.as_str())?;
+    let Some(reference) = read_provider_session(&dir)?.filter(|_| manifest.harness == "claude")
+    else {
+        return Ok(None);
+    };
+    let prompt = archived_session_prompt(&dir)?;
+    let root = crate::harness::claude_history::history_root(&dir, &reference)?;
+    let id = CaptureHandle::prepare_at(
+        &home,
+        RunSpec {
+            harness: manifest.harness,
+            model: manifest.model,
+            surface: manifest.surface,
+            cwd: manifest.cwd,
+            repo: manifest.repo,
+            worktree: manifest.worktree,
+            skill: manifest.skill,
+            subjects: manifest.subjects,
+            flow: manifest.flow.unwrap_or(RunFlowMembership::Independent),
+        },
+        Some(previous.clone()),
+    )?;
+    let (candidate, mut manifest) = resolve_manifest(&home, id.as_str())?;
+    let context = crate::trace::PreparedTurnContext::from_prompts("", &prompt);
+    let bytes = serde_json::to_vec_pretty(&RunContextArtifact {
+        schema_version: SCHEMA_VERSION,
+        context: &context,
+    })?;
+    write_private_exclusive(&candidate.join("context.json"), &bytes)?;
+    manifest.context = Some(RunContextRef {
+        path: "context.json".into(),
+        content_sha256: hex::encode(Sha256::digest(&bytes)),
+        bytes: bytes.len() as u64,
+    });
+    let staging = candidate.join(".manifest-replacement.json");
+    write_private_exclusive(&staging, &serde_json::to_vec_pretty(&manifest)?)?;
+    fs::rename(staging, candidate.join("manifest.json"))?;
+    let session_id = uuid::Uuid::parse_str(id.as_str().trim_start_matches("run_"))?.to_string();
+    write_provider_session_at(&candidate, &session_id, reference.account_id, Some(root))?;
+    sync_dir(&candidate)?;
+    Ok(Some(id))
+}
+
 pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
     match fs::read(dir.join("provider-session.json")) {
         Ok(bytes) => {
@@ -801,6 +867,7 @@ pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<Provid
                     schema_version: SCHEMA_VERSION,
                     provider_session_id,
                     account_id: accounts.get(&attempt_key).cloned().flatten(),
+                    history_root: None,
                 });
             }
             _ => {}
@@ -890,6 +957,16 @@ pub(crate) fn write_provider_session(
     provider_session_id: &str,
     account_id: Option<crate::store::ProviderAccountId>,
 ) -> std::io::Result<()> {
+    let history_root = read_provider_session(dir)?.and_then(|session| session.history_root);
+    write_provider_session_at(dir, provider_session_id, account_id, history_root)
+}
+
+pub(crate) fn write_provider_session_at(
+    dir: &Path,
+    provider_session_id: &str,
+    account_id: Option<crate::store::ProviderAccountId>,
+    history_root: Option<PathBuf>,
+) -> std::io::Result<()> {
     if provider_session_id.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -905,6 +982,7 @@ pub(crate) fn write_provider_session(
             schema_version: SCHEMA_VERSION,
             provider_session_id: provider_session_id.to_string(),
             account_id,
+            history_root,
         })
         .map_err(std::io::Error::other)?,
     )?;
@@ -1565,14 +1643,22 @@ impl CaptureHandle {
             schema_version: SCHEMA_VERSION,
             context,
         })?;
-        write_private_exclusive(&dir.join("context.json"), &bytes).map_err(record_error)?;
-        manifest.context = Some(RunContextRef {
-            path: "context.json".to_string(),
-            content_sha256: hex::encode(Sha256::digest(&bytes)),
-            bytes: bytes.len() as u64,
-        });
-        // Finalize launch provenance on the existing identity. Preparation did
-        // not freeze a prompt, runtime, or model selection before launch.
+        if manifest.context.is_some() {
+            if !context_ref_is_valid(&dir, manifest.context.as_ref()) {
+                return Err(record_error(std::io::Error::other(
+                    "invalid archived Session context",
+                )));
+            }
+        } else {
+            write_private_exclusive(&dir.join("context.json"), &bytes).map_err(record_error)?;
+            manifest.context = Some(RunContextRef {
+                path: "context.json".to_string(),
+                content_sha256: hex::encode(Sha256::digest(&bytes)),
+                bytes: bytes.len() as u64,
+            });
+        }
+        // Finalize launch provenance on the existing identity. A replacement
+        // supplies its frozen prompt/model; ordinary preparation assembles them.
         manifest.harness = spec.harness;
         manifest.model = spec.model;
         manifest.surface = spec.surface;

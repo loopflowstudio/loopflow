@@ -613,3 +613,239 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         serde_json::json!({"completed": {"summary": "Ship to staging"}})
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn claude_missing_history_reopens_archived_seed_then_resumes() {
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    // Simulation of Claude persistence, not a native loader acceptance test.
+    for exit_code in [0, 17] {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path();
+        let sessions = root.join("human-sessions");
+        let bin = root.join("bin");
+        let history = root.join("claude-home");
+        for dir in [&sessions, &bin, &history] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let id = "ask_claude-recovery";
+        let record_path = sessions.join(format!("{id}.json"));
+        let mut record = serde_json::json!({
+            "id": id, "parent_run_id": "run_00000000000000000000000000000002",
+            "parent_run_dir": root.join("parent"), "work": null, "work_selector": null,
+            "title": "Review recovery", "detail": "proof", "prompt": "ORIGINAL_TASK_MARKER",
+            "cwd": root, "model": "claude:haiku", "session_run_id": null,
+            "ready_summary": "Keep this readiness", "status": "waiting"
+        });
+        std::fs::write(&record_path, record.to_string()).unwrap();
+        let provider = bin.join("claude");
+        std::fs::write(&provider, r#"#!/bin/sh
+if [ "$1" = --version ]; then exit 0; fi
+printf '%s\n' "$@" > "$LF_PROOF/args"
+printf '%s' "$CLAUDE_CONFIG_DIR" > "$LF_PROOF/root"
+printf '%s' "$LF_RUN_ID" > "$LF_PROOF/current-run"
+if [ -f "$LF_PROOF/fail" ]; then exit "$LF_EXIT_CODE"; fi
+if [ -f "$LF_PROOF/reject" ]; then exit 19; fi
+previous=
+for argument in "$@"; do
+  if [ "$previous" = --session-id ]; then session="$argument"; fi
+  if [ "$previous" = --resume ]; then printf '%s' "$argument" > "$LF_PROOF/resumed"; fi
+  previous="$argument"
+done
+if [ -n "$session" ]; then
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/another-project"
+  printf '{"type":"user","sessionId":"%s","uuid":"11111111-1111-4111-8111-111111111111","timestamp":"2026-09-28T12:00:00Z","message":{"content":"saved seed"}}\n' "$session" > "$CLAUDE_CONFIG_DIR/projects/another-project/$session.jsonl"
+fi
+touch "$LF_PROOF/started"
+read -r input
+"#).unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // An accidental reroute fails locally instead of reaching an installed provider.
+        std::fs::write(bin.join("opencode"), "#!/bin/sh\nexit 91\n").unwrap();
+        std::fs::set_permissions(bin.join("opencode"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        let make_command = || {
+            let mut cmd = command(root, &["session", "open", id]);
+            cmd.current_dir(root)
+                .env(
+                    "PATH",
+                    format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+                )
+                .env("CLAUDE_CONFIG_DIR", &history)
+                .env("LF_PROOF", root)
+                .env("LF_EXIT_CODE", exit_code.to_string())
+                .env_remove("LF_ACCOUNT_LEASE")
+                .env_remove("LF_ACCOUNT_SELECTION")
+                .env_remove("LF_HUMAN_SESSION")
+                .env_remove("LF_FLOW_STEP");
+            cmd
+        };
+        std::fs::write(root.join("fail"), "").unwrap();
+        let _first = make_command().output().unwrap();
+        let original = std::fs::read_to_string(root.join("current-run")).unwrap();
+        let original_dir = root.join("runs").join(&original[4..6]).join(&original);
+        let events = std::fs::read_to_string(original_dir.join("events.jsonl")).unwrap();
+        assert!(!events.contains("provider_session_observed"));
+        let terminal: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(original_dir.join("terminal.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            terminal["outcome"],
+            if exit_code == 0 {
+                "completed"
+            } else {
+                "failed"
+            }
+        );
+        let reference: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(original_dir.join("provider-session.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reference["history_root"], history.to_str().unwrap());
+        if exit_code != 0 {
+            let project = history.join("projects/old-project");
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::write(
+                project.join(format!(
+                    "{}.jsonl",
+                    reference["provider_session_id"].as_str().unwrap()
+                )),
+                "",
+            )
+            .unwrap();
+        }
+        // Exercise old split-channel captures as well as a changed present-day seed.
+        let context_path = original_dir.join("context.json");
+        let saved_context = std::fs::read(&context_path).unwrap();
+        let old_binding = std::fs::read(&record_path).unwrap();
+        std::fs::write(&context_path, "corrupt").unwrap();
+        let refused = make_command().output().unwrap();
+        assert!(!refused.status.success());
+        assert_eq!(std::fs::read(&record_path).unwrap(), old_binding);
+        std::fs::write(&context_path, saved_context).unwrap();
+        let mut context: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&context_path).unwrap()).unwrap();
+        context["context"]["system"] = serde_json::json!({"text":"ARCHIVED_SYSTEM_MARKER"});
+        let bytes = serde_json::to_vec(&context).unwrap();
+        std::fs::write(&context_path, &bytes).unwrap();
+        let manifest_path = original_dir.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["context"]["content_sha256"] = hex::encode(Sha256::digest(&bytes)).into();
+        manifest["context"]["bytes"] = bytes.len().into();
+        std::fs::write(&manifest_path, manifest.to_string()).unwrap();
+        record = serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+        record["model"] = "opencode".into();
+        record["prompt"] = "CHANGED_TASK_MARKER".into();
+        std::fs::write(&record_path, record.to_string()).unwrap();
+        rename(root, &[id, "Preserved review name"]);
+        std::fs::remove_file(root.join("fail")).unwrap();
+        let before = record.clone();
+        let mut replacement = None;
+        for resume in [false, true] {
+            let mut child = make_command()
+                .env("CLAUDE_CONFIG_DIR", root.join("changed-default"))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !root.join("started").exists()
+                && Instant::now() < deadline
+                && child.try_wait().unwrap().is_none()
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let started = root.join("started").exists();
+            if !started {
+                let _ = child.kill();
+            }
+            // The boundary lock is released at client registration, before the
+            // interactive lifetime. Use that publication barrier before exit.
+            if started {
+                let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
+                let lock = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(sessions.join(format!(".{name}.launch.lock")))
+                    .unwrap();
+                fs2::FileExt::lock_exclusive(&lock).unwrap();
+                drop(lock);
+            }
+            let _ = child
+                .stdin
+                .take()
+                .map(|mut stdin| stdin.write_all(b"done\n"));
+            let output = child.wait_with_output().unwrap();
+            assert!(started && output.status.success(), "{output:?}");
+            let args = std::fs::read_to_string(root.join("args")).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.join("root")).unwrap(),
+                history.to_str().unwrap()
+            );
+            let after: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+            let next = after["session_run_id"].as_str().unwrap().to_string();
+            if resume {
+                assert_eq!(Some(&next), replacement.as_ref());
+                assert!(args.contains("--resume"));
+                assert!(!args.contains("ORIGINAL_TASK_MARKER"));
+            } else {
+                assert_ne!(next, original);
+                assert!(
+                    args.contains("ORIGINAL_TASK_MARKER")
+                        && args.contains("ARCHIVED_SYSTEM_MARKER")
+                );
+                assert!(!args.contains("CHANGED_TASK_MARKER"));
+                assert!(args.contains("haiku"));
+                replacement = Some(next.clone());
+            }
+            let mut expected = before.clone();
+            expected["session_run_id"] = next.into();
+            assert_eq!(after, expected);
+            assert_eq!(listed(root, id)["title"], "Preserved review name");
+            let all: Vec<serde_json::Value> =
+                serde_json::from_slice(&run(root, &["session", "list", "--all", "--json"]).stdout)
+                    .unwrap();
+            assert_eq!(all.len(), 1);
+            std::fs::remove_file(root.join("started")).unwrap();
+        }
+        let next = replacement.unwrap();
+        let next_dir = root.join("runs").join(&next[4..6]).join(&next);
+        let next_ref: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(next_dir.join("provider-session.json")).unwrap())
+                .unwrap();
+        let transcript = history.join("projects/another-project").join(format!(
+            "{}.jsonl",
+            next_ref["provider_session_id"].as_str().unwrap()
+        ));
+        let saved_history = std::fs::read(&transcript).unwrap();
+        let saved_binding = std::fs::read(&record_path).unwrap();
+        // Existing history rejected by the provider never selects replacement.
+        std::fs::write(root.join("reject"), "").unwrap();
+        assert!(!make_command().output().unwrap().status.success());
+        assert_eq!(std::fs::read(&record_path).unwrap(), saved_binding);
+        assert_eq!(std::fs::read(&transcript).unwrap(), saved_history);
+        std::fs::remove_file(root.join("reject")).unwrap();
+        for contents in ["{", "{\"type\":\"file-history-snapshot\"}"] {
+            std::fs::write(&transcript, contents).unwrap();
+            let metadata = run(root, &["session", "open", id, "--json"]);
+            assert!(metadata.status.success());
+            assert!(!make_command().output().unwrap().status.success());
+            assert_eq!(std::fs::read(&record_path).unwrap(), saved_binding);
+            assert_eq!(std::fs::read_to_string(&transcript).unwrap(), contents);
+        }
+        std::fs::write(&transcript, &saved_history).unwrap();
+        std::fs::rename(&history, root.join("unavailable-home")).unwrap();
+        assert!(!make_command().output().unwrap().status.success());
+        assert_eq!(std::fs::read(&record_path).unwrap(), saved_binding);
+        std::fs::rename(root.join("unavailable-home"), &history).unwrap();
+        assert_eq!(std::fs::read(&context_path).unwrap(), bytes);
+    }
+}

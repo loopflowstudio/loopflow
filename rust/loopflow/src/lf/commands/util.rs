@@ -257,6 +257,29 @@ pub(crate) fn resume_session_with_env(
     provider_session: &crate::run_record::ProviderSessionRef,
     extra_environment: &BTreeMap<String, String>,
 ) -> Result<()> {
+    let lock = lock_provider_clients(run_dir)?;
+    let running = start_resume_session_locked(
+        harness,
+        model,
+        worktree,
+        run_id,
+        run_dir,
+        provider_session,
+        extra_environment,
+    )?;
+    drop(lock);
+    running.wait()
+}
+
+pub(crate) fn start_resume_session_locked(
+    harness: &str,
+    model: Option<&str>,
+    worktree: &Path,
+    run_id: &crate::durable::RunId,
+    run_dir: &Path,
+    provider_session: &crate::run_record::ProviderSessionRef,
+    extra_environment: &BTreeMap<String, String>,
+) -> Result<RunningSession> {
     let user_name = crate::engine::config::launch_user_name()?;
     let command = build_resume_session_command(
         harness,
@@ -276,7 +299,8 @@ pub(crate) fn resume_session_with_env(
         crate::engine::config::USER_NAME_ENV.to_string(),
         user_name.unwrap_or_default(),
     );
-    spawn_session_command_with_env(
+    require_provider_session_launch(run_dir)?;
+    start_session_command_locked(
         &command,
         &environment,
         Some(&provider_session.provider_session_id),
@@ -307,7 +331,7 @@ pub(crate) fn replace_provider_clients(
     replace_provider_clients_locked(dir, harness, clients, reason)
 }
 
-fn lock_provider_clients(dir: &Path) -> Result<File> {
+pub(crate) fn lock_provider_clients(dir: &Path) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -353,7 +377,7 @@ pub(crate) fn require_provider_session_launch(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn replace_provider_clients_locked(
+pub(crate) fn replace_provider_clients_locked(
     dir: &Path,
     harness: &str,
     clients: &[ProviderClientRef],
@@ -584,21 +608,20 @@ fn spawn_session_command_with_env(
         provider_session_id,
         exact_account_id,
     )?;
+    finish_session_command(command, outcome)
+}
+
+fn finish_session_command(command: &SessionCommand, outcome: SessionCommandOutcome) -> Result<()> {
     if let Some(reason) = outcome.stop_reason {
         eprintln!("{}", provider_client_stop_message(reason));
         Ok(())
     } else if outcome.status.success() {
         Ok(())
-    } else if provider_session_id.is_some() {
-        Err(anyhow!(
-            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session open --replace` for a Loopflow-owned client.",
-            command.program,
-            outcome.status,
-        ))
     } else {
         Err(anyhow!(
-            "session launcher exited with status {}",
-            outcome.status
+            "{} could not open this session (status {}). The Session remains open for recovery.",
+            command.program,
+            outcome.status,
         ))
     }
 }
@@ -633,6 +656,18 @@ fn session_command_status_with_env(
             Ok(launch)
         })
         .transpose()?;
+    let running =
+        start_session_command_locked(command, environment, provider_session_id, exact_account_id)?;
+    drop(launch);
+    running.wait_status()
+}
+
+fn start_session_command_locked(
+    command: &SessionCommand,
+    environment: &BTreeMap<String, String>,
+    provider_session_id: Option<&str>,
+    exact_account_id: Option<&crate::store::ProviderAccountId>,
+) -> Result<RunningSession> {
     if !check_cli_available(&command.program) {
         return Err(anyhow!(missing_agent_message(&command.program)));
     }
@@ -642,17 +677,43 @@ fn session_command_status_with_env(
         "codex" => Some(Provider::Codex),
         _ => None,
     };
-    let account_route = provider
-        .map(|provider| {
-            crate::provider_account::resolve_provider_account_exact_blocking(
-                provider,
-                provider_session_id.map(str::to_string),
-                exact_account_id.cloned(),
-            )
-        })
-        .transpose()
-        .map_err(|error| anyhow!("failed to select provider account: {error}"))?
+    let recorded = environment
+        .get(crate::run_record::RUN_DIR_ENV)
+        .filter(|_| command.program == "claude")
+        .map(|dir| crate::run_record::read_provider_session(Path::new(dir)))
+        .transpose()?
         .flatten();
+    let account_route = if let Some(recorded) = &recorded {
+        match (&recorded.account_id, provider) {
+            (Some(account), Some(provider)) => {
+                let dir = Path::new(
+                    environment
+                        .get(crate::run_record::RUN_DIR_ENV)
+                        .expect("recorded Run has directory"),
+                );
+                let home = dir.ancestors().nth(3).context("Run Home unavailable")?;
+                crate::provider_account::resolve_recorded_provider_account_blocking(
+                    provider,
+                    provider_session_id.map(str::to_string),
+                    account.clone(),
+                    home.to_path_buf(),
+                )?
+            }
+            _ => None,
+        }
+    } else {
+        provider
+            .map(|provider| {
+                crate::provider_account::resolve_provider_account_exact_blocking(
+                    provider,
+                    provider_session_id.map(str::to_string),
+                    exact_account_id.cloned(),
+                )
+            })
+            .transpose()
+            .map_err(|error| anyhow!("failed to select provider account: {error}"))?
+            .flatten()
+    };
 
     let mut process = Command::new(&command.program);
     if provider == Some(Provider::Codex)
@@ -692,16 +753,49 @@ fn session_command_status_with_env(
         );
         route.record_launch_blocking(provider_session_id.map(str::to_string), None)?;
     }
+    if command.program == "claude" {
+        if let Some(root) = recorded
+            .as_ref()
+            .and_then(|session| session.history_root.as_ref())
+        {
+            process.env("CLAUDE_CONFIG_DIR", root);
+        }
+    }
+    let history_root = if command.program == "claude" {
+        let configured = process
+            .get_envs()
+            .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR");
+        let root = match configured {
+            Some((_, value)) => value.map(PathBuf::from),
+            None => std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from),
+        }
+        .or_else(|| {
+            let home = match process.get_envs().find(|(key, _)| *key == "HOME") {
+                Some((_, value)) => value.map(PathBuf::from),
+                None => dirs::home_dir(),
+            };
+            home.map(|home| home.join(".claude"))
+        })
+        .context("Claude history Home is unavailable")?;
+        Some(if root.is_absolute() {
+            root
+        } else {
+            command.cwd.join(root)
+        })
+    } else {
+        None
+    };
     if let (Some(run_dir), Some(provider_session_id)) = (
         environment.get(crate::run_record::RUN_DIR_ENV),
         provider_session_id,
     ) {
-        crate::run_record::write_provider_session(
+        crate::run_record::write_provider_session_at(
             Path::new(run_dir),
             provider_session_id,
             account_route
                 .as_ref()
                 .map(|route| route.account_id().clone()),
+            history_root,
         )?;
     }
     let mut child = process.spawn()?;
@@ -713,7 +807,6 @@ fn session_command_status_with_env(
             return Err(error);
         }
     };
-    drop(launch);
     let observer = observed_run.map(|run_dir| {
         let stderr = child
             .stderr
@@ -721,21 +814,46 @@ fn session_command_status_with_env(
             .expect("piped OpenCode stderr is available");
         std::thread::spawn(move || observe_opencode_session(&run_dir, stderr))
     });
-    let status = child.wait()?;
-    if let Some(observer) = observer {
-        observer
-            .join()
-            .map_err(|_| anyhow!("OpenCode session observer panicked"))??;
-    }
-    let stop_reason = client
-        .as_ref()
-        .map(ProviderClientGuard::take_stop_reason)
-        .transpose()?
-        .flatten();
-    Ok(SessionCommandOutcome {
-        status,
-        stop_reason,
+    Ok(RunningSession {
+        child,
+        client,
+        observer,
+        command: command.clone(),
     })
+}
+
+#[derive(Debug)]
+pub(crate) struct RunningSession {
+    child: std::process::Child,
+    client: Option<ProviderClientGuard>,
+    observer: Option<std::thread::JoinHandle<std::io::Result<()>>>,
+    command: SessionCommand,
+}
+
+impl RunningSession {
+    pub(crate) fn wait(self) -> Result<()> {
+        let command = self.command.clone();
+        finish_session_command(&command, self.wait_status()?)
+    }
+
+    fn wait_status(mut self) -> Result<SessionCommandOutcome> {
+        let status = self.child.wait()?;
+        if let Some(observer) = self.observer.take() {
+            observer
+                .join()
+                .map_err(|_| anyhow!("OpenCode session observer panicked"))??;
+        }
+        let stop_reason = self
+            .client
+            .as_ref()
+            .map(ProviderClientGuard::take_stop_reason)
+            .transpose()?
+            .flatten();
+        Ok(SessionCommandOutcome {
+            status,
+            stop_reason,
+        })
+    }
 }
 
 #[derive(Debug)]

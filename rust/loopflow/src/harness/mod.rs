@@ -1,4 +1,5 @@
 pub mod claude;
+pub(crate) mod claude_history;
 mod claude_mapping;
 pub mod codex;
 mod codex_mapping;

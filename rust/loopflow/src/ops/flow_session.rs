@@ -81,6 +81,8 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowInvocation) -> Resul
                 id,
                 current_run_id: run.id.clone(),
                 kind: SessionKind::FlowReview,
+                interactive: true,
+                repo: None,
                 title: skill,
                 title_source: TitleSource::Generated,
                 request: None,
@@ -281,7 +283,7 @@ mod tests {
                 reserve(&store, &completed).await.unwrap().as_deref(),
                 Some("Use the revised design")
             );
-            assert!(store.open_sessions().await.unwrap().is_empty());
+            assert!(store.sessions(&crate::session::SessionFilter::default()).await.unwrap().is_empty());
             assert_eq!(completed.cursor, waiting.cursor);
         });
         for (key, value) in previous {

@@ -5,9 +5,14 @@ title: Architecture
 
 # Architecture
 
-Loopflow turns one reusable instruction into one observed model-provider run.
-Everything else composes that path, gives it durable purpose, delivers its
-changes, places it on a machine, or projects what happened.
+Loopflow records commands, preserves agent conversations, and advances captured
+Flows. Exec, AgentSession and FlowSession own those three lifetimes.
+
+**Implementation status:** this is the accepted model for the execution cutover.
+Exec recording and the native transport proof exist; the public AgentSession /
+FlowSession lifecycle and status-based Chapter rotation are still being converted.
+The checked inventory in the reference describes the current source, including
+the Run storage that remains to be removed. Examples below specify the target.
 
 This guide is for developers changing Loopflow. It starts with the smallest
 complete path, then opens into the six areas that own the system. Command
@@ -21,9 +26,9 @@ lf implement
 ```
 
 That command discovers `implement`, assembles its context, chooses a provider,
-publishes a Run manifest, launches the provider, records direct evidence, and
-settles once. It needs no Wave, Project, Task, or daemon. The local SQLite
-store records the Run even when all its planning parents are null.
+records its Exec, reserves an AgentSession, captures the input, then launches the
+provider. It needs no Wave, Project, Task, or daemon. The conversation persists
+after that command exits; a later command can connect to the same AgentSession.
 
 ```text
 request
@@ -32,24 +37,22 @@ request
 lf CLI --> Skill discovery --> prompt --> provider route --> harness
                                                           |
                                                           v
-                                               SQLite Run row
-                                               + launch/evidence artifacts
+                                               AgentSession history
+                                               + immutable input/output artifacts
 ```
 
-Before the provider starts, the current Home has a `runs` row and launch evidence:
+Before the provider starts, the current Home has the conversation reservation
+and its immutable input. SQLite owns identity, attribution, driver authority and
+history references; payload files retain large captured inputs and output.
+Admission failure stops before provider launch. General command logging has a
+different boundary: unavailable/bootstrap stores leave explicitly unrecorded
+Execs rather than bypassing installation authority to create a receipt.
 
-```text
-$LF_HOME/runs/<prefix>/<run-id>/
-  manifest.json
-```
-
-While it runs, Loopflow may append lifecycle, conversation, tool, raw provider,
-and usage evidence to `events.jsonl`. When the harness returns, it creates
-`terminal.json` once. The row owns Run identity, current ancestry, and lifecycle;
-files retain immutable launch inputs and append-only evidence. A failed Run-row
-write stops before provider launch. Missing telemetry cannot change the provider
-result. [Run publication and recovery](architecture-reference.md#harness-launch-and-run-records)
-define the database/filesystem boundary.
+AgentSession history records provider outcomes, retries and usage. Exec records
+the command's outcome. A provider can finish successfully before a later command
+operation fails; neither result overwrites the other. Missing telemetry stays
+missing. The [execution contract](architecture-reference.md#core-models-and-apis)
+defines these ownership boundaries.
 
 The implementation follows the same order as the diagram:
 
@@ -60,7 +63,7 @@ The implementation follows the same order as the diagram:
 | Assemble context | [`engine/prompt.rs`](../rust/loopflow/src/engine/prompt.rs) | System and task prompts |
 | Select credentials and route | [`provider_account.rs`](../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
 | Launch and normalize | [`harness/`](../rust/loopflow/src/harness/) | Provider output and usage events |
-| Record the Run and evidence | [`run_record.rs`](../rust/loopflow/src/run_record.rs) and the store | Run row, immutable launch inputs, and terminal evidence |
+| Record command and conversation evidence | [`journal/`](../rust/loopflow/src/journal/) and the store | Exec completion, AgentSession history and immutable payloads |
 
 [Follow the complete execution path →](architecture/execution.md)
 
@@ -68,7 +71,7 @@ The implementation follows the same order as the diagram:
 
 The Skill runner is useful by itself. The rest of Loopflow grows outward by
 adding one kind of capability at each layer. Tracked Work owns autonomous
-progression; transient boundary Runs consume the same execution and delivery
+progression; attributed conversations consume the same execution and delivery
 operations available to helpers without becoming resident Work identities.
 
 ```text
@@ -84,12 +87,12 @@ one Skill run
     |
     +-- Home: place execution, credentials, services, files, and locks
     |
-    `-- Views: project planning, Run, provider, Git, and OS evidence
+    `-- Views: project planning, command, conversation, provider, Git, and OS evidence
 ```
 
 | Area | What it adds | Start here |
 | --- | --- | --- |
-| Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
+| Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](architecture/execution.md) |
 | Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
 | Homes | Placement, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
@@ -107,13 +110,13 @@ task                          Task worker
 
 ops/chapter.rs                deterministic chapter rotation
 
-execution kernel: engine/ + harness/ + Run records
+execution kernel: engine/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
 ```
 
 `work` never imports `controller`. The execution kernel works without either
 layer and never loads Work. CLI and boundary callers resolve Work identity,
-Wave memory, and the Task's current Flow invocation, then pass ordinary launch
+Wave memory, and the Task's managed FlowSession, then pass ordinary launch
 inputs into the kernel.
 
 Release delivery also separates proof from authority:
@@ -164,7 +167,7 @@ user / agent --> lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                    Home-local Run record
+                    Exec / AgentSession / FlowSession
                               |
                               v
                   status / roadmap / usage / app
@@ -173,7 +176,7 @@ another machine is another Home; cross it explicitly with `lf ssh`
 ```
 
 There is no central Loopflow server. A Home owns its processes, credentials,
-planning store, Run records, and OS locks. Repository files carry authored
+planning store, execution history, and OS locks. Repository files carry authored
 definitions and memory. Linear and GitHub keep shared planning and delivery
 truth. Readers join those sources; they do not replace them with a universal
 ledger.
@@ -182,62 +185,77 @@ ledger.
 
 ```text
 Repository
-  |-- Chapter                 one current; a repository-wide clock
-  `-- Wave                    durable objective, memory, cadence, budget, chat, metrics
-        `-- Project           = (Wave, Chapter); Tasks, KRs, metric targets, Flow
-              `-- Task        one active remote branch, worktree, and PR
-                    `-- Flow invocation   0..n, one current: unrolled graph + cursor + returns
-                          `-- Run         optional invocation; task => wave, each nullable
+  `-- Wave                    enduring objective, memory and cadence
+        `-- Linear Project    status + shared chapter name + Flow + KRs
+              `-- Task        identity, worktree, PR and managed FlowSession
 
-Session --< Run               one conversation with a Run history
-Session.current_run -> Run    one of that Session's Runs
-
-Flow = ordered Skill | Command | Xor | human boundaries, with optional backward edges
-WorkRef = Wave | Project | Task
-WorkStatus = Ready | Done | Abandoned
+Exec                          one actual lf process; immutable causal parent
+AgentSession                  one conversation; nullable current driver Exec
+  `-- history                 provider starts, outcomes, retries and usage
+FlowSession                   captured graph, cursor, return counts and claim
+  `-- history                 mechanical results or exact agent completion refs
 ```
 
 | Model | Represents | Primary truth |
 | --- | --- | --- |
-| Skill | Reusable instructions plus declared context needs | Repository override, builtin, or installed Markdown |
-| Flow | The template: ordered Skill and mechanical nodes, Xor routing, human boundaries, backward edges | Repository or builtin YAML |
-| Flow invocation | One running Flow: the fully unrolled graph, its cursor, and each loop's return count | `flow_invocations` row |
-| Run | Evidence from one mediated provider launch, with its nullable invocation, Task, and Wave | `runs` row plus one immutable Home-local record |
-| Session | One conversation across Runs, with a current Run: interactive, Flow review, or Ask | `sessions` row plus provider-native history |
-| Chapter | The repository's planning clock; one current, advanced for every Wave at once | `chapters` row |
-| Wave | Durable operating context with goal, memory, cadence, budget, chat, and metric instruments | Repository Wave files, `waves` row, Linear Initiative membership |
-| Project | One Wave's plan for one Chapter: Tasks, KRs, metric targets, and the Flow its Tasks invoke | `projects` row plus its Linear Project |
-| Task | One concrete change, investigation, or document | `tasks` row, Linear Issue, Git, GitHub |
-| Work | Shared durable planning state for one Wave, Project, or Task | Rows keyed directly by stable Work identity |
-| Steer | Ordered authored correction to Work | Append-only Work input |
-| Home | Stable machine authority whose route may change | Home identity and observed SSH route |
-| Placement | Assignment of one Work to one Home | `(WorkRef, HomeId)` |
+| Skill | Reusable instructions and declared context | Repository, builtin or installed Markdown |
+| Flow | Reusable graph of agent, mechanical, routing and review steps | Repository or builtin YAML |
+| Exec | One actual lf process, its caller and command completion | `execs` |
+| AgentSession | An interactive or headless conversation across drivers and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
+| FlowSession | One captured Flow's progress, including taskless execution | `flow_sessions` and its subordinate history |
+| Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
+| Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
+| Project | A Wave's plan, KRs, targets and default Flow | Linear Project and its synchronized `projects` row |
+| Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
+| Steer | An authored correction to Work | Ordered Work input |
+| Home | A machine's store, credentials and exact process authority | Home identity and observed route |
+| Placement | Where a Work executes | `(WorkRef, HomeId)` |
 
-SQLite owns each product record; files carry authored definitions and large
-evidence artifacts. Sessions, Runs, and Flow invocations each have one reader.
-A Session has a stable ID, owns its Runs, and points to its current Run.
-Its Task, Wave, provider, and execution membership come from the current Run.
-Renaming updates the Session. Binding fills its current Run's missing ancestry
-once, after confirming the exact target; it never changes or clears a Task.
-Replacing a Run retains the Session and its name, and preserves every prior Run.
-Landing a PR never erases those links.
+An AgentSession keeps its ID, name, feedback and native conversation when its
+command process changes. Its `interactive` field is independent of purpose,
+Flow membership and completion. Default conversation views show interactive
+Sessions; explicit filters expose headless and completed history. Large captured
+payloads remain files, but readers select and page rows before opening them.
 
-An invocation's Task is optional: Flows also run without planning records.
-A Run in an invocation shares its nullable Task; a present Task implies Wave.
-Construction fills omitted ancestors and refuses mismatches; binding preserves
-execution membership. Runs without a Task may name only a Wave or no planning
-parent, whether or not they belong to an invocation. A Task selects its Project's Flow by
-default and accepts an explicit override. Completed invocations remain readable.
+Connect uses the live engine when possible. Passive display acquires no claim.
+Transferring the conversation driver revokes the old client's ability to start
+or steer turns and mutate Session state, including queued writes. It does not
+replace the provider generation or interrupt an existing turn. Explicit restart
+replaces only the exact conversation owner; it never kills a shared engine to
+restart one thread. Engine PID, client PID and conversation driver are distinct.
 
-The [reference](architecture-reference.md#core-models-and-apis) owns fields,
-validators, and write contracts. The [Flow execution contract](architecture-reference.md#flow-execution)
-distinguishes template expansion from runtime nesting.
+Exec ancestry records the actual lf caller. A direct child names its parent's
+Exec; an agent-issued child also records `via_agent` and AgentSession provenance.
+The provider's generation resolves to the current driver at child admission.
+A delayed command from a replaced provider retains historical provenance; old
+Exec parents are never rewritten. Causal ancestry grants no control authority.
 
-Run identity records causality and provenance. It never grants Work mutation,
-credential, Git, or process-signal authority.
+A Task selects one managed FlowSession and permits other attributed Flows.
+Taskless and Task-owned Flows use the same captured graph and driver. Runtime
+loop nesting creates child FlowSessions; template composition only expands the
+graph. Each agent-backed step references the exact successful AgentSession
+history entry that fulfilled it. Mechanical results stay in FlowSession history;
+an in-process step creates neither a fake Exec nor an agent conversation.
+Failed or interrupted work remains visible, and stale results cannot advance
+the current boundary. Conversation continuation is separate from Flow retry.
 
-Provider-backed steps, including review conversations and routing Skills, have
-Runs. A mechanical operation or a cursor transition need not launch a provider.
+Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
+Bind fills an unassigned conversation's Task once, after confirming the exact
+target; it cannot clear or move an assignment or change Flow membership. Done
+and landed Tasks remain valid targets. Under the current conservative attribution
+assumption, earlier usage retains its recorded owner; binding affects subsequent
+work, and uncertain mid-turn allocation remains unknown.
+
+`tasks.started_at` is set once when actual Task work is reserved or first bound.
+Recording an inspection command's Exec does not start a Task. Chapter retirement
+also checks authored work, PRs and active claims; missing history alone cannot
+prove untouched backlog. Rotation converges from fresh Linear facts using the
+explicit target name and stable Project identities. A partially rotated repository
+must be retryable; unrelated competing plans remain unresolved.
+
+The [reference](architecture-reference.md#core-models-and-apis) owns the field and
+write contracts. Run is a historical representation to import and remove, not a
+fourth execution object or a generic attempt type under another name.
 
 ## Follow the common paths
 
@@ -265,11 +283,11 @@ lf task status INF-123 --json
 
 `prepare` creates or reuses tracked Task Work, its one worktree, and the active
 serial PR identity. It starts no Task execution. Each `--task` command
-is an independent Run in that worktree; several may overlap and write distinct
+starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
 Those commands act on delivery facts, not on Flow-driving authority. `submit`,
 `arm`, and `land` therefore work the same whether the Task was pursued by its
-Task worker, piecemeal helper Runs, or another system.
+Task worker, piecemeal helper AgentSessions, or another system.
 
 ### Bounded Task advancement
 
@@ -280,19 +298,17 @@ lf --wave <wave> wave/operate "ship invoices first"
 lf wave status product
 ```
 
-Task commands claim the Task's current Flow
-invocation for one worker. Chapter rotation is a deterministic
-repository-wide operation that gives every Wave a new Project at once.
-Direct questions and helper work use ordinary fresh attributed Runs without
-gaining Task Flow authority.
-A Task review FlowStep starts the persisted Skill as a provider Run and remains
-parked until its exact decision arrives.
+Task commands claim the Task's managed FlowSession. Repository rotation converges
+every Wave on the requested Project name, preserving active Task identity and
+execution. Direct questions and helpers use attributed AgentSessions without
+gaining Flow authority. A review starts its captured Skill in an AgentSession
+and parks until the exact saved feedback is completed and consumed.
 
 ### Another machine
 
 ```bash
-lf ssh build-home runs --json
-lf ssh build-home start product
+lf ssh build-home session list --json
+lf ssh build-home --wave product wave/operate
 ```
 
 The origin transports one command. The target resolves its own Home state and

@@ -1,6 +1,6 @@
 [
   {
-    "kind": "interactive",
+    "kind": "conversation",
     "state": "waiting",
     "actions": [
       {
@@ -18,7 +18,7 @@
     ]
   },
   {
-    "kind": "interactive",
+    "kind": "conversation",
     "state": "active",
     "actions": [
       {
@@ -42,7 +42,7 @@
     ]
   },
   {
-    "kind": "interactive",
+    "kind": "conversation",
     "state": "ready",
     "actions": [
       {
@@ -60,7 +60,7 @@
     ]
   },
   {
-    "kind": "interactive",
+    "kind": "conversation",
     "state": "closed",
     "actions": [
       {

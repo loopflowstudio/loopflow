@@ -18,7 +18,7 @@ contracts checked against source.
 ## The system grows outward from a direct Skill launch
 
 The direct Skill launch is the kernel of Loopflow. It remains useful with
-no Wave, Project, Task, or daemon. It requires its Home's writable Run store. Higher layers
+no Wave, Project, Task, or daemon. Agent admission requires its Home's writable store. Higher layers
 supply composition, durable context, delivery, placement, and views around its
 discovery, prompt, provider, harness, and evidence components. Their
 boundary executors remain domain-specific because their settlement rules differ.
@@ -103,168 +103,173 @@ below are the architecture's central constraint.
 
 ## Planning and execution vocabulary
 
+The contracts in this section describe the accepted execution cutover. The
+public AgentSession/FlowSession lifecycle and status-based Chapters are not yet
+complete. The checked source inventory below retains the existing table names
+until their writers and readers are converted; it is not a second target model.
+
 ```text
-Repository --< Chapter                         one current for the repository
-     |                                             |
-     `--< Wave ------------------------------< Project  unique (Wave, Chapter)
-                                                 |-- KRs, metric targets, Flow
-                                                 `--< Task
-                                                       |-- worktree and serial PRs
-                                                       `--< Flow invocation
-                                                              `--< Run
+Wave --< Linear Project --< Task --< FlowSession
+                             `-- managed_flow_session
 
-Session --< Run                                    Run.session_id is nullable
-Session.current_run_id -> Run                      points to one of its Runs
-
-Run.invocation_id                                  nullable; invocation Task is optional
-Run.task_id => Run.wave_id                         nullable, filled upward
-Flow invocation.parent_id                          runtime nesting only
+Exec --< Exec                 one row per actual lf process, causal edges
+AgentSession --> Exec         nullable current driver, with generation fence
+AgentSession --< history      immutable provider outcomes and usage
+FlowSession --< history       mechanical results or agent completion references
 ```
 
-The Run arrows above describe execution ownership. Independent Runs can belong
-to a Task, only a Wave, or neither. Session owns a Run history and selects its
-current Run; it has no separate Work parent.
-Project is a plan within a Chapter, not a second name for Chapter. Work remains
-`Wave | Project | Task`; Run parentage grants no Work or process-control authority.
-
-| Concept | Stable identity | Owns |
-| --- | --- | --- |
-| Repository | Canonical repository identity | Chapter clock and Wave membership |
-| Chapter | Repository-scoped Chapter ID | One synchronized planning boundary and its history |
-| Wave | `WaveId` | Objective, memory, cadence, budget, chat, metric instruments |
-| Project | `ProjectId` | One Wave's Tasks, KRs, metric targets, and Flow in one Chapter |
-| Task | `TaskId`, linked to a Linear Issue | Worktree, serial PRs, Flow invocations |
-| Flow | Template name and source | Authored Skill/Command/Xor/human nodes and backward edges |
-| Flow invocation | Invocation ID | Captured expanded graph, cursor, return counts, runtime children |
-| Run | `RunId` | One launch, current attribution, execution membership, provider and outcome |
-| Session | `SessionId` | One conversation's kind, name, readiness, completion, Runs and current Run |
-| Home | `HomeId` | Store, artifacts, credentials, local process authority |
-| Placement | `(WorkRef, HomeId)` | Where Work executes, not ownership of an observed process |
-| Steer | Work event identity | Ordered authored correction |
+| Concept | Owns |
+| --- | --- |
+| Repository | Wave membership and repository-wide Project rotation |
+| Chapter | No stored object: the shared name of each Wave's In Progress Project |
+| Wave | Enduring objective, memory, cadence, budget and metric instruments |
+| Project | Linear status, Tasks, KRs, targets and the default Flow |
+| Task | Worktree, serial PRs, attributed FlowSessions and one managed selection |
+| Flow | Reusable authored graph of agent/mechanical/router/review nodes |
+| Exec | One lf process's immutable causal ancestry and command completion |
+| AgentSession | Conversation identity, title, feedback, native thread and provider history |
+| FlowSession | Captured graph, cursor, return counts, claim, review and completion |
+| Home | Store, payloads, credentials and exact local process authority |
+| Placement | Where Work executes; no authority over merely observed processes |
+| Steer | Ordered authored correction to Work |
 
 ## Core models and APIs
 
-All constructors and mutation APIs validate before committing. A decoded struct
-is input to validation, never a way around it. Read DTOs carry typed identities;
-CLI names and issue identifiers resolve once at the boundary.
+Constructors and mutation APIs validate within the writing transaction. DTOs
+carry typed ancestry; CLI names and issue identifiers resolve at the boundary.
+There is no replacement Request, Execution, SkillInvocation, AgentExec or generic
+attempt object. History entries have stable references, not independent lifecycles.
 
-| Row | Authoritative fields and operations |
+| Owner | Authoritative fields and operations |
 | --- | --- |
-| `chapters` | Repository identity, Chapter ID, current status, dated boundary and transition state; rotate the repository, inspect history |
-| `waves` | Stable identity and repository locator; authored goal/memory/instrument definitions stay in repository files |
-| `projects` | `wave_id`, `chapter_id`, Flow template selection, provider Project identity; read/update the Linear-backed plan |
-| `tasks` | `project_id`, provider Issue identity, Work state, worktree, delivery facts and validated set-once `started_at`; derive Wave through Project |
-| `flow_invocations` | Nullable Task and Wave, launch facts (`cwd`, `message`, `model`) for a saved Flow, captured Flow name/source and complete graph, local node cursor, loop return counts, status, claim/version/generation, current attempt Run, pending review Session; create, claim, checkpoint, record decision/route, settle, recover, retry, restart |
-| `runs` | ID, nullable `session_id` FK, causal parent Run, Home/repository/cwd, provider/model/skill, timestamps/outcome, nullable `invocation_id`, `task_id`, `wave_id`, `work_source`, node, iteration tuple and `membership_known`; create, settle, bind, query |
-| `sessions` | Stable `id`, `current_run_id` FK; `kind` = `interactive | flow_review | ask`; `title`, `title_source` = `generated | human`; `state` = `waiting | active | ready | closed`; `ready_summary`; query Runs, open, ready, complete, rename |
+| `execs` | ID, immutable parent Exec, incoming direct/agent bit and calling AgentSession/provider generation when known; command, cwd, start/end and observed outcome/exit/signal; admit, finish, filter/page |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave/Flow ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, restart, bind, rename, ready, complete |
+| `flow_sessions` | Nullable Task/Wave, captured graph and launch context, cursor/return counts, runtime parent, claim/version/generation, selected conversation/completion reference, pending review and status; capture, claim, checkpoint, settle, recover |
+| `tasks` | Project, issue, durable disposition, worktree/delivery facts, managed FlowSession selection and set-once `started_at` |
+| `projects` | Wave, stable Linear Project identity, status, shared chapter name, Flow and planning facts |
+| `waves` | Stable repository identity; authored objective/memory/instruments stay in repository files |
 
-A Session reads ancestry, cwd, provider, and Flow membership through its current Run.
-Session rows do not copy these fields. Headless Runs may have an optional name;
-a conversational Run's displayed name is its Session title, not a synchronized
-second title. Native provider identity and attachment receipts are Run-owned
-operational data in SQLite; the provider still owns its transcript. Ask request,
-caller, selected Skill, keyed retry identity and completed result are Session
-kind-specific fields. There is no separate Ask file or Session registry.
+### Conversation and driver lifetime
 
-`Session.runs` queries `runs.session_id`; it is not a second stored list.
-`current_run_id` must refer to a Run whose `session_id` is this Session.
-Creation reserves both records and the current pointer in one transaction;
-replacement appends a Run and changes the pointer atomically, comparing the
-expected previous Run. No committed Session has a missing or foreign current
-Run. Closed Sessions retain the pointer and their complete Run history.
-Session identity, title and feedback survive replacement. Run outcomes, usage,
-native identities and process receipts stay attached to their original Runs.
+Every agent conversation is an AgentSession: skills, inline prompts, helpers,
+Asks, reviews, interactive and headless work. Default views select interactive
+conversations. Explicit filters expose headless and completed history; `--all`
+continues to mean all repositories. Interactive mode grants neither review
+completion nor Flow authority.
 
-A step position is `(invocation, node, iteration tuple)`. It has zero or more
-Runs, ordered as attempts, and one current attempt once execution is reserved.
-That position key is an index, never a unique Run identity. Headless steps and
-human reviews share the current-attempt selection and version fence. A Session
-is the conversational instance of this rule: its current Run agrees with the
-invocation's current attempt while that review is pending.
+An AgentSession can have many historical driving Execs and at most one current
+driver. Driver compare-and-set increments its driver generation. A continuing
+engine keeps its provider generation and origin through handoff and a driverless
+interval. Old clients may display events but cannot start/steer turns or write
+Session state. Passive connection acquires no claim. Dispatch fences include
+queued native RPCs and approval replies, not only database claim updates.
 
-Failure, interruption or abandonment retains the attempt without advancing the
-cursor. One successful current attempt completes the step; a superseded Run
-cannot submit a decision or settle it. Retries stay at the same node and loop
-tuple. Returning through a loop creates a different position, not a retry.
-Position readers and DTOs expose the attempt list and selected Run. Node details
-and Session membership show all attempts. Usage and execution duration sum over
-attempts; a running status line measures only its current attempt. Offline import
-preserves repeated attempts rather than deduplicating by position.
+Explicit restart replaces the exact conversation owner and preserves the native
+conversation and history. Graceful thread-specific stop precedes force termination
+of an exclusively owned process. A shared engine must survive another thread's
+restart. PID/start identity and native endpoint are operational evidence;
+conversation identity, causality and elapsed time grant no signal authority.
 
-### Three validator groups
+AgentSession history records provider starts, successful/failed/interrupted
+outcomes, retries, durations and usage, correlated with driving Exec and native
+turn/receipt. Repeated receipts are idempotent. Missing measurements differ from
+zero; cumulative samples are not added together. Later continuation never rewrites
+an earlier completion already consumed by a Flow. Provider completion and Exec
+completion are distinct: subsequent command work may fail after the agent succeeds.
 
-| Validator | Enforced contract | Mutation boundary |
-| --- | --- | --- |
-| Planning ancestry | Project's Wave and Chapter name the same repository; `(wave_id, chapter_id)` is unique; a repository has one current Chapter; Task's Wave is derived from its Project | Plan writes and atomic chapter activation |
-| Invocation structure | Invocation has an optional Task; parent has the same nullable Task; parent chain is acyclic and describes runtime entry; node exists in the captured expanded graph; a Task's current invocation names that Task | Invocation creation, child entry, cursor settlement, restart |
-| Run ancestry | Invocation supplies its nullable Task; a present Task fills Wave; supplied parents must match. An invocation-owned Run has a valid node/iteration tuple even when taskless; an independent Run has neither. Membership never changes through bind; Task assignment is write-once and existing Wave is retained; Started timestamp presence equals Task Run existence | All Run creation, binding, import and ancestry-changing writes |
+### Exec lifetime and causality
 
-SQLite foreign keys, uniqueness and nullability constraints back these APIs.
-Cross-row checks run in the same write transaction as the change. Task moves
-within a Wave leave Run ancestry unchanged; a cross-Wave move validates and
-updates dependent Run Wave values atomically. It cannot silently invalidate
-historical execution. Current attribution and immutable launch evidence are
-different facts.
+One actual lf process gets one Exec, including nested direct and agent-issued
+commands. In-process wrappers and Flow steps reuse it and cannot settle it early.
+The incoming `via_agent` bit describes the caller, not whether the command later
+launches an agent. Agent-issued children resolve stable Session/provider-generation
+provenance to the current matching driver once, at admission. Delayed children
+of a replaced provider retain their historical origin; existing parents never change.
 
-Every new Run records known membership: either a validated invocation location
-or an independent launch. Imported history without execution evidence has
-`membership_known = false` and no claimed invocation location. Readers show
-Unknown, never Independent, for those rows. A known invocation link requires
-known membership. Binding cannot manufacture missing execution evidence.
+Exec outcomes are succeeded, failed or interrupted when observed. Unobserved
+completion, exit code and signal stay unknown. The outer command owns terminal
+settlement, including interruption. Bootstrap/installation logging must not open
+or migrate an incompatible installed store before its authority preflight.
+Unavailable-store recording limitations are explicit. Agent admission still
+requires its rows and capture before provider launch.
 
-`work_source` is nullable for no attribution, otherwise `declared`, `checkout`,
-`inherited`, or `bound`. Explicit launch selectors win over checkout inference.
-An Ask copies its caller's Task/Wave with `inherited`; it does not inherit the
-caller's invocation just because it shares a checkout. Only a Flow driver sets
-execution membership on Runs it launches.
+### Flow outcomes and authority
 
-Bind fills missing ancestry with `bound` provenance. A Run with no parent may
-receive a Wave or a Task; a Wave-only Run may receive a Task in that same Wave.
-Once set, its Task cannot change or be cleared. Bind never changes an existing
-Wave. Binding to a done or landed Task is allowed and does not reopen it. The
-operation and every UI calling it state the exact target and require one
-confirmation before the permanent assignment. There is no unbind operation.
-The transaction validates the selected current Run and ancestry together;
-concurrent binding cannot redirect the confirmed target.
+A FlowSession is the existing invocation owner evolved, not a parallel cursor.
+Task and taskless execution share it. A Task selects one managed FlowSession
+without excluding other attributed Flows. Template composition expands the graph;
+only runtime loop entry creates a child FlowSession. Parent/child nullable Task
+ancestry must agree. Captured definitions survive source deletion or edits.
 
-Invocation membership still constrains nullable Task equality: a taskless
-invocation's Run cannot independently acquire a Task. Binding never rewrites
-the invocation, node, iteration tuple, launch artifact, provider history,
-Session identity or name. Authorized cross-Wave Task moves retain their separate
-operation and update dependent Run Wave values atomically.
+A boundary is the Session, node and iteration tuple. It may fail or be interrupted
+several times before succeeding. Preserve each outcome in its owning history.
+Agent steps consume an exact successful AgentSession history entry; mechanical
+steps retain a correlated start/result in FlowSession history and create no fake
+agent or Exec. One Exec can complete a step and later fail another.
 
-A Task is started when any Run has that Task. `tasks.started_at` records when
-it first receives a Run: the shared Run writer sets it only if null, in the
-same transaction as launch or bind. A first bind uses the bind time, not the
-Run's creation time. Later launches and binds leave the timestamp unchanged,
-even for older Runs. It never moves earlier, later, or back to null.
+Settlement validates the FlowSession identity, version, claim, boundary and
+selected completion. Record completion and consumption atomically when they share
+the store. Old successes, stale drivers and helper conversations cannot advance
+the current boundary. Human feedback is saved before teardown and consumed once;
+readiness or provider exit never chooses a navigation edge. A conversation driver
+handoff does not itself transfer the separate Flow orchestration claim.
 
-The write validator checks `started_at IS NOT NULL` exactly when a Run with
-that Task exists; it does not compare timestamps with `MIN(created_at)`. Offline
-import sets it for every Task with imported Runs and leaves other Tasks null.
-The sidebar and roadmap read this column through one Started reader. Wave chat
-projects the same column into its existing observation stream; historical Started
-event IDs remain readable, but no new Started event is stored.
-Write-once binding keeps the evidence monotonic; usage and history never move
-between Tasks. Chapter retirement also examines authored work, PRs and active
-invocation claims: absence of a Run alone never proves untouched backlog.
+### Attribution, binding and Started
 
-The shared readers select Session rows joined to their current Runs, and Runs by their typed
-parents. `runs --task`, `session list --task`, usage, activity and the desktop
-agree. No read calls the launch resolver or requires an active PR. A Session
-with null Task is an orphan in the workspace, including a Wave-only Session;
-a Task-bound Session missing from a visible roadmap remains bound and reachable.
-Swift caches the workspace projection by its input readings and uses IDs for
-forward and reverse lookup.
+Task implies Wave. Constructors fill omitted ancestors and reject disagreements.
+A Flow-owned conversation shares the FlowSession's nullable Task. `work_source`
+is declared, checkout, inherited or bound when known. Historical unknown membership
+stays Unknown; absence of evidence does not become Independent.
 
-Session lifecycle is explicit: `closed` requires completion; `ready` retains
-saved feedback. `active` and `waiting` reflect exact provider-client evidence,
-reconciled before returning a current reading. A stale state field cannot
-authorize signaling or turn provider exit into Session completion.
+Bind is write-once: null to a Task, preserving any existing Wave. Same-target bind
+is a no-op; reassignment and clearing are unavailable. Done/landed Tasks remain
+valid without reopening them. The operation and UI state the exact target and
+confirm once before permanent assignment. The writer compares the selected
+conversation/driver and ancestry atomically. Binding cannot alter Flow membership
+or bind one member of a taskless Flow inconsistently with its owner.
+
+The supervisor's conservative implementation assumption is prospective usage
+attribution: bind records assignment time; earlier usage retains its owner.
+This is not an additional decision from Jack. Preserve active-turn start/assignment
+evidence; unknown allocation remains unknown rather than inventing a token split.
+Authorized Project/Task moves preserve immutable historical attribution while
+validating current ancestry.
+
+`tasks.started_at` is set once when actual agent work or a mechanical Flow boundary
+first belongs to the Task, including first bind. General command observation
+never starts a Task. Preserve existing Started timestamps and supporting history
+on import; imported inferred times are labeled. No later launch or bind moves or
+clears the timestamp. Chapter retirement also checks authored work, PRs and active
+claims: absent execution evidence alone cannot prove untouched backlog.
+
+### Readers and import
+
+One indexed reader per object selects and pages identity, ancestry, command,
+skill, title and status before opening payload files. No inventory scans manifests,
+sidecars or live PRs to reconstruct identity. Bound conversations remain bound even
+when absent from the visible roadmap. Desktop panes key on AgentSession identity,
+so bind, rename and driver replacement retain the surface and draft.
+
+One-time import preserves four conversational origins, headless history, command
+journal evidence, captures, feedback, old IDs, repeated failures/successes and
+unknown facts. It never invents an Exec from a Run without process evidence or
+merges unrelated conversations by title/path/provider. Conflict/interruption
+recovery and idempotence must preserve the source evidence. Ordinary reads neither
+import nor fall back to old files. Runtime Run ownership disappears after migration.
+
+### Chapters
+
+Linear statuses are the owner: one In Progress Project per Wave, sharing a chapter
+name across the repository. Planned Projects express future plans; Completed
+Projects retain history. Project `flow:` is required and supplies new Tasks' default.
+There is no Chapter row, packet or local switch. Rotation uses an explicit target
+and stable Project identities, converges after partial mutations, preserves active
+Task identity/worktree/PR/FlowSession, and refuses unrelated competing plans.
+A second Home adopts the same state through ordinary synchronization.
 
 Adjacent APIs keep their own authority: Task PR operations own Git/GitHub;
 provider routing owns credentials; Home placement owns routing; exact process
-receipts plus OS evidence own signaling. None is derived from these FKs.
+receipts and current OS evidence own signaling. None follows from causal ancestry.
 
 ## Code territory and rough size
 
@@ -420,55 +425,27 @@ detaching.
 
 ## Harness launch and Run records
 
-Every Loopflow-mediated launch uses the same Run constructor and recorder.
-Task, Wave, Ask and ordinary CLI callers supply typed context, not different
-persistence formats. Project-scope planning Runs carry their Wave; Project is
-not an extra Run parent.
+The heading remains an inbound documentation anchor; Run is historical vocabulary.
+The execution cutover uses one AgentSession admission and capture path for Task,
+Wave, Ask, helper and direct callers.
 
-```text
-Home SQLite: sessions -> runs (Run.session_id is null without a conversation)
-             sessions.current_run_id -> one of that Session's Runs
-$LF_HOME/runs/<prefix>/<run-id>/
-  manifest.json       immutable launch inputs, prompt/context references
-  context.json        captured prompt context when present
-  events.jsonl        append-only provider and usage evidence
-  terminal.json       immutable terminal evidence
-```
+1. Admit the actual lf Exec; resolve typed work without granting Flow authority.
+2. Reserve the AgentSession and its initial history/capture reference before
+   provider launch. Claim its driver and record exact publication state.
+3. Publish immutable input atomically. An unpublished reservation is recoverable;
+   uncertain publication/spawn evidence never permits a blind duplicate launch.
+4. Start or reconnect the native engine. Record its identity and endpoint, distinct
+   from the client's process and the conversation's driver.
+5. Append correlated provider outcomes and usage; retain missingness. Settle a
+   selected Flow completion only under its separate boundary claim.
+6. Settle the actual command's Exec when the process completes, independently of
+   whether its conversation or parked Flow remains open.
 
-1. Resolve the Home once for the store and artifact root. Resolve optional
-   Work selectors without granting execution authority; validate Run ancestry.
-2. Reserve the Run and create or reuse its Session in one transaction, in
-   prepared state. Set the Session's current Run and bind the review boundary's
-   exact Run in the same transaction. Headless Runs need no Session.
-3. Publish final launch inputs atomically in its artifact directory. Mark the
-   Run launchable only after publication. No provider starts before both exist.
-4. Spawn and record the exact native provider/attachment information in the
-   store. Append telemetry without putting event writes on the critical path.
-5. Publish terminal evidence and settle the Run row. A recovery pass can finish
-   this interrupted settlement from that exact receipt, never from elapsed time.
-
-Prepared rows without launch artifacts remain recoverable preparation failures.
-Publication without a spawn receipt does not authorize a blind second spawn;
-recovery uses the existing exact process evidence or reports uncertainty.
-Completion of a provider Run does not close its Session. Session readiness and
-completion have their own transaction boundary.
-
-The store owns current Work attribution. Launch artifacts retain original
-inputs and cannot answer current ancestry after bind. Renaming/binding never
-rewrites them. Native provider IDs, client attachment and stop receipts live
-with the Run's operational state in SQLite, not mutable files beside it. These
-receipts describe exact processes; a stored `active` label alone is not liveness.
-
-Run listing filters indexed row fields before its result limit. Detailed output,
-replay and usage may read the selected Run's evidence files. Usage attribution
-joins current Run parents, so it follows bind; provider counters remain original
-observations. Retry/failover attempts stay within one Run and use distinct usage
-streams. Missing counters remain unknown; settlement never invents provider
-finality or sums cumulative checkpoints.
-
-Run/Session storage is required locally. No live PM request, Wave listener or
-daemon is required for an unbound launch. Database failures are reported before
-spawn rather than manufacturing an unindexed file-only Run.
+Payloads may remain large immutable files. SQLite owns identity, attribution,
+current control and searchable history. Old `runs/` manifests, JSONL, terminal
+receipts and sidecars are import inputs with their original bytes preserved until
+verified migration; ordinary readers do not consult them as alternate identity.
+The retained operational process evidence is not a new lifecycle object.
 
 ## Tracked Work and bounded Task advancement
 
@@ -520,100 +497,65 @@ lf task comment INF-123 "keep the public name"
 
 ### Questions and sessions
 
+These examples specify the public lifecycle being implemented in the cutover.
+
 ```bash
+lf -b implement
+lf session list --interactive false --task INF-123 --json
+lf session connect SESSION
+lf session connect SESSION --restart
+lf session rename SESSION "Migration review"
+lf session bind SESSION --task INF-123
 lf ask "Review this migration with me"
-lf session list --task INF-123 --json
-lf session open <session-id> --json
-lf session rename <session-id> "Migration review"
-lf session bind <session-id> --task INF-123 --json
 lf session ready "Ready for review"
-lf session complete <session-id>
+lf session complete SESSION
 ```
 
-All three Session kinds are rows selected by the same query. Session identity
-is independent of Run identity. Flow review preparation creates its Run and Session before
-provider launch; an Ask creates a child Run with the caller's Task/Wave and a
-Session holding the request. Standalone interactive launches use the same rows.
-There is no concatenation of file scans and runtime boundaries to build a list.
+Every conversation has one AgentSession regardless of launch surface. Connect
+uses the existing engine where possible; restart is explicit. Name, feedback,
+native identity and history survive both. A suggested title cannot overwrite a
+human-assigned title. CLI and Desktop use the same action and availability reason.
 
-Open resumes native history on the same Run. Retrying an unpublished launch
-keeps that reserved identity. If an unrecoverable published launch requires a
-replacement, the old Run remains in the Session's history. A new Run belongs to
-the same Session and becomes its current Run. An exact boundary transaction
-updates the pointer and pending attempt together, retaining the relationship to
-the previous attempt. Late results from the old Run cannot settle the new one.
-Session ID, name and feedback stay on the same row; no name copy is needed.
+Ready saves feedback and keeps the conversation open. Complete persists its
+closed state and exact feedback before teardown. A keyed Ask retry returns the
+saved result without launching another conversation. A Flow review returns
+feedback for the following decision; it never selects that decision's edge.
+Pane close, provider exit and readiness do not complete the review.
 
-Rename updates the title and provenance atomically; an agent's generated title
-cannot overwrite a human title. Bind delegates to the current Run's ancestry validator.
-The same operation and Rust-owned availability reason serve every UI surface.
-
-Ready saves the summary and leaves the Session open. Complete persists the
-closed state and final feedback before provider teardown or continuation.
-An Ask returns that saved result to its waiting caller, including keyed retries.
-A Flow review supplies feedback to the next step; the following deciding Run
-chooses an edge. Provider exit, pane close and readiness do not complete reviews.
-Completed rows remain history and default lists select open rows.
-
-The terminal pool belongs to the desktop window. Bind and rename retain the
-pane, provider client, scrollback and draft. A detached PTY cradle can host a
-client before the UI arrives; it owns neither Session identity nor completion.
+The desktop terminal pool keys on stable AgentSession identity. Rename, bind,
+reconnect and replacement retain the pane and draft when reusing that surface.
+Provider restart does not claim preservation of text never submitted to Loopflow
+without separate UI evidence.
 
 ## Flow execution
 
 ```bash
-lf task run INF-123                  # invoke the Project's Flow
-lf task run INF-124 --flow incident  # explicit template override
-lf task advance INF-123             # drive the saved invocation
-lf task restart INF-123 --flow feature
+lf task run INF-123                  # Project's Flow
+lf task run INF-124 --flow incident  # explicit override
+lf flow example                     # with or without Task attribution
+lf flow resume FLOW_SESSION          # captured progress
 ```
 
-A Flow is an authored template. Expansion resolves composed sub-Flows and
-captures every Skill, router and Xor alternative before execution. An invocation
-stores that fully expanded graph plus cursor, return counts and claims in one
-row. Changing the Project's Flow affects future invocations only. Templates may
-be displayed folded; the running invocation exposes its expanded nodes.
-Fully expanded means no unresolved template references; backward edges and
-unchosen Xor alternatives remain finite graph structure. It does not mean
-preallocating an unbounded number of future loop passes.
+FlowSession captures the fully expanded graph, every Skill/router/Xor alternative,
+cursor and return counts. Definition changes affect new Sessions, never saved
+execution. Backward edges stay finite graph structure; future loop passes are
+not preallocated. Node IDs are local typed identities, not path strings.
 
-Flow invocations can run without a Task. `lf flow <name>` creates a taskless
-invocation when no Task is selected or inferred; Task launch uses the selected
-Task. Both use the same invocation records and execution machinery, including
-captured recovery and human boundaries. Taskless execution needs no synthetic
-Task, Project, or Wave. Its Runs may carry Wave-only attribution or none.
+Runtime loop entry creates a child FlowSession for that pass with the same nullable
+Task. Parent wait and child completion settle under the existing claim transaction.
+Retry uses the same child; another loop pass creates another child. Task and
+Taskless launch use one driver and need no synthetic planning records.
 
-Nodes have local typed IDs. Template composition does not create invocation
-parents. Runtime entry into a nested loop body creates a child invocation for
-that pass, linked to the parent's entry node. Child and parent belong to the
-same nullable Task. The parent records which child it awaits; child completion and parent
-resumption settle together. Retrying reuses the same child; a new pass creates
-a new child. There is no path-string node identity or separate occurrence row.
+A decision records Advance or Iterate for its selected successful agent completion.
+Failure or interruption cannot submit a verdict. A keyed unblock Ask returns
+feedback for reassessment at that same boundary. Review definitions and feedback
+survive source deletion, restart and repeated completion. There is no alternate
+file-backed cursor. Recovery of an uncertain mechanical effect still requires
+inspection; cursor settlement alone cannot establish exactly-once external effects.
 
-Each invocation keeps local loop return counts. A Run captures the iteration
-tuple along its invocation's ancestry at launch; later cursor movement cannot
-change that tuple. The constructor validates it against the locked invocation
-chain. An execution location is invocation ID, node ID and tuple; it is a value,
-not an independently stored object.
-
-Backward edges name earlier nodes in the captured graph. Counts measure progress
-without imposing a pass budget. `loop-decide` records Advance or Iterate under
-its exact Run authority. A candidate becomes effective only after that Run
-succeeds; failed/interrupted Runs cannot decide. Mechanical operation retries
-require checking prior effects; cursor recovery alone cannot prove exactly-once
-external effects.
-
-`lf flow blocked` opens a keyed Ask for the decision boundary. Completing it
-returns evidence for reassessment and never chooses a verdict. Human nodes use
-`flow_review` Sessions. Their saved feedback survives restart, source deletion
-and repeated completion calls. Claims and pending review links settle under the
-same invocation transaction; there is no file-backed cursor adapter.
-
-The Wave scheduler continues to run finite `wave/operate` Runs. Wave journal
-history and process ownership remain separate. Historical Wave continuations
-are preserved recovery evidence; inspect with `lf wave recover <name>` and
-explicitly disposition unresolved work. Missing termination evidence never
-permits replacement of an unknown active attempt.
+Finite Wave planning uses ordinary attributed agent conversations. Historical
+Wave continuations remain preservation evidence and confer no new execution or
+process-control authority.
 
 ## Task delivery algorithm
 

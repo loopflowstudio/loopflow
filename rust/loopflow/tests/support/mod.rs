@@ -277,6 +277,8 @@ fn register_task_fixture(
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
             slug: "task-pr-tests".to_string(),
             name: "Task PR tests".to_string(),

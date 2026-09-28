@@ -1,7 +1,7 @@
 //! Durable tracking for one Linear Project's KRs.
 //!
-//! A Project coordinates Tasks from the owning Wave's clean
-//! control checkout. It owns no worktree, shipping branch, PR, permanent
+//! Linear status selects the current plan; Project planning facts include its
+//! default Flow. A Project owns no worktree, shipping branch, PR, permanent
 //! memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;

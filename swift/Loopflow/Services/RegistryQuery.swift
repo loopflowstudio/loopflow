@@ -69,18 +69,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
-    public func chapterHistory(wave: String, cwd: String?) async throws -> [ChapterHistoryEntry] {
-        try Self.decode([ChapterHistoryEntry].self, from: await run(["wave", "history", "--wave", wave, "--json"], cwd))
-    }
 
-    public func chapter(wave: String, id: String, cwd: String?) async throws -> ChapterSnapshot {
-        try Self.decode(ChapterSnapshot.self, from: await run(["wave", "status", wave, "--chapter", id, "--json"], cwd))
-    }
-
-
-    /// Every durable plan row across the machine, joined to the same Task
-    /// references and live evidence as `lf wave status`. One subprocess reads every
-    /// Wave; an optional scope filters that shared snapshot at the source.
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         var args = ["roadmap"]
         if let wave {
@@ -212,7 +201,9 @@ public struct RegistryQuery: Sendable {
 
     /// Sessions in this repository.
     public func sessions(cwd: String? = nil) async throws -> [SessionRecord] {
-        let stdout = try await run(["session", "list", "--json"], cwd)
+        // One SQL selection retains a complete inventory despite concurrent
+        // rename/completion; separate offset pages could skip or duplicate IDs.
+        let stdout = try await run(["session", "list", "--json", "--limit", "0"], cwd)
         return try Self.decode([SessionRecord].self, from: stdout)
     }
 
@@ -258,7 +249,7 @@ public struct RegistryQuery: Sendable {
         if sync { _ = try await run(["wave", "sync", wave], cwd) }
         let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
-        return WavePlan(objective: objective, chapter: snapshot.chapter)
+        return WavePlan(objective: objective, projects: snapshot.projects)
     }
 
     /// Direct provider-authored usage for recent Home-local Runs, optionally
@@ -385,12 +376,13 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
-    public let chapter: ChapterSummary?
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<RoadmapTask>
     public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case wave, chapter, tasks
+        case wave, projects, tasks
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }
@@ -421,18 +413,19 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
-    public let chapter: ChapterSummary?
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
     public let runs: WorkEvidence<RunSnapshot>
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, chapter: chapter, tasks: tasks)
+        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, chapter, tasks, runs
+        case wave, projects, tasks, runs
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }

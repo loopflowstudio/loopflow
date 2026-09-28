@@ -321,6 +321,89 @@ impl SqliteStore {
         Ok(tasks)
     }
 
+    /// Select a dependency without claiming that Git or GitHub has moved.
+    pub fn stack_task_pr(&self, expected: &TaskPr, parent_id: &TaskPrId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let child = active_task_pr_on(&tx, &expected.task_id)?.ok_or(StoreError::NotFound)?;
+        if child.id != expected.id || child.base_commit != expected.base_commit {
+            return Err(StoreError::InvalidAuthority(
+                "Task PR changed; retry preparation".into(),
+            ));
+        }
+        if child.parent_pr_id.as_ref() == Some(parent_id) {
+            return Ok(());
+        }
+        if child.parent_pr_id.is_some() {
+            return Err(StoreError::InvalidAuthority(
+                "Task PR already has a parent; retain its dependency until explicit reparenting"
+                    .into(),
+            ));
+        }
+        if child
+            .publication
+            .as_ref()
+            .is_some_and(|publication| publication.merge.is_some())
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task PR has a merge request; cancel its delivery before selecting a parent".into(),
+            ));
+        }
+        let ready: bool = tx.query_row(
+            "SELECT work_state='ready' FROM tasks WHERE id=?1",
+            [child.task_id.as_str()],
+            |row| row.get(0),
+        )?;
+        let claimed: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND claim_json IS NOT NULL)",
+            [child.task_id.as_str()], |row| row.get(0),
+        )?;
+        if !ready || claimed {
+            return Err(StoreError::InvalidAuthority(
+                "Task must be ready with its worker claim released before selecting a parent; use the existing Task stop/recovery path".into(),
+            ));
+        }
+        let parent = task_pr_on(&tx, parent_id)?.ok_or(StoreError::NotFound)?;
+        if parent.is_settled() || parent.github().is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "open the parent PR before stacking work on it".into(),
+            ));
+        }
+        let same_repo: bool = tx.query_row(
+            "SELECT cw.repo=pw.repo FROM tasks c
+             JOIN projects cp ON cp.id=c.project_id JOIN waves cw ON cw.id=cp.wave_id
+             JOIN tasks p ON p.id=?2
+             JOIN projects pp ON pp.id=p.project_id JOIN waves pw ON pw.id=pp.wave_id
+             WHERE c.id=?1",
+            params![child.task_id.as_str(), parent.task_id.as_str()],
+            |row| row.get(0),
+        )?;
+        if !same_repo {
+            return Err(StoreError::InvalidAuthority(
+                "stack parent belongs to another repository".into(),
+            ));
+        }
+        let mut ancestor = Some(parent);
+        let mut seen = std::collections::HashSet::new();
+        while let Some(pr) = ancestor {
+            if pr.task_id == child.task_id || !seen.insert(pr.id.clone()) {
+                return Err(StoreError::InvalidAuthority(
+                    "stack parent would create a dependency cycle".into(),
+                ));
+            }
+            ancestor = match pr.parent_pr_id {
+                Some(id) => Some(task_pr_on(&tx, &id)?.ok_or(StoreError::NotFound)?),
+                None => None,
+            };
+        }
+        tx.execute(
+            "UPDATE task_prs SET parent_pr_id=?2, updated_at=?3 WHERE id=?1",
+            params![child.id.as_str(), parent_id.as_str(), now_unix()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
         validate_task_pr(pr)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -944,9 +1027,11 @@ fn insert_initial_task(
     validate_task_project(conn, task)?;
     require_task_not_deleted(conn, task)?;
     let expired: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM projects p JOIN wave_chapters c ON c.wave_id=p.wave_id AND c.current=1
-         WHERE p.id=?1 AND p.external_project_id != c.project_id)",
-        [task.project_id.as_str()], |row| row.get(0),
+        "SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND
+         (p.status != 'started' OR (SELECT count(*) FROM projects current
+          WHERE current.wave_id=p.wave_id AND current.status='started') != 1))",
+        [task.project_id.as_str()],
+        |row| row.get(0),
     )?;
     if expired {
         return Err(StoreError::InvalidData(
@@ -1197,7 +1282,7 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             publication_requested_at=?7, after_merge=?8, next_slug=?9,
             github_number=?10, github_url=?11, merge_commit=?12,
             abandoned_at=?13, updated_at=?15, github_head_sha=?16,
-            ci_observation=?17, parent_pr_id=?18, github_observation=?19,
+            ci_observation=?17, github_observation=?19,
             linear_attachment_id=?20, linear_comment_id=?21, linear_link_error=?22,
             merge_mode=?23, merge_requested_at=?24, merge_head_sha=?25,
             pr_title=?26, pr_body=?27, pr_copy_head_sha=?28
@@ -1658,25 +1743,25 @@ const PROJECT_INSERT: &str = "INSERT INTO projects (
     id, wave_id, external_project_id, project_slug, project_name,
     project_prompt_context, pm_snapshot_synced_at,
     abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration
+    created_at, updated_at, iteration, flow, status
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
 )";
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration
+    created_at, updated_at, iteration, flow, status
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration
+    created_at, updated_at, iteration, flow, status
     FROM projects WHERE id=?1";
 const PROJECT_FACT_UPDATE: &str = "UPDATE projects SET
     wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
     project_prompt_context=?6, pm_snapshot_synced_at=?7,
     abandon_requested_at=?8, abandon_reason=?9,
-    created_at=?10, updated_at=?11
+    created_at=?10, updated_at=?11, flow=?12, status=?13
     WHERE id=?1";
 fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
@@ -1702,11 +1787,15 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
         Box::new(project.created_at.unix_timestamp()),
         Box::new(project.updated_at.unix_timestamp()),
         Box::new(project.iteration),
+        Box::new(project.plan.flow.clone()),
+        Box::new(project.plan.status.as_str().to_string()),
     ]
 }
 
 fn project_fact_params(project: &Project) -> Vec<Box<dyn ToSql>> {
-    project_params(project).into_iter().take(11).collect()
+    let mut parameters = project_params(project);
+    parameters.remove(11); // Planning refresh cannot overwrite completed judgment passes.
+    parameters
 }
 
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
@@ -1728,6 +1817,9 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
             name: row.get(3)?,
             prompt_context: row.get(4)?,
             pm_snapshot_synced_at: row.get(6)?,
+            flow: row.get(12)?,
+            status: serde_json::from_value(serde_json::Value::String(row.get(13)?))
+                .map_err(|error| invalid_column(13, error))?,
         },
         wave_id: row.get(5)?,
         iteration: row.get::<_, i64>(11)? as u32,

@@ -25,8 +25,8 @@ private enum SessionFixtureKind: String {
         }
         return """
         {
-          "id": "\(id)", "run_id": "\(id)",
-          "kind": "\(rawValue)",
+          "id": "\(id)", "run_id": "\(id)", "interactive": true,
+          "kind": "\(self == .interactive ? "conversation" : rawValue)",
           "work": \(work),
           "title": "\(rawValue.capitalized) fixture",
           "detail": "fixture-provider",
@@ -51,7 +51,7 @@ private actor SessionFixtureStore {
     }
 
     func run(_ args: [String]) throws -> String {
-        if args == ["session", "list", "--json"] {
+        if args == ["session", "list", "--json", "--limit", "0"] {
             return unresolved ? "[\(kind.record)]" : "[]"
         }
         if args.starts(with: ["session", "open", kind.id]), args.contains("--json") {

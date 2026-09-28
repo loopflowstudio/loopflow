@@ -129,6 +129,15 @@ impl Store {
         .await
     }
 
+    pub async fn stack_task_pr(&self, expected: &TaskPr, parent: &TaskPrId) -> StoreResult<()> {
+        let expected = expected.clone();
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.stack_task_pr(&expected, &parent)
+        })
+        .await
+    }
+
     pub async fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await

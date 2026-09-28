@@ -50,7 +50,7 @@ struct SessionChromeProofTests {
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         value["state"] = "active"
         value["provider"] = "claude"
-        value["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
         value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": invocation,

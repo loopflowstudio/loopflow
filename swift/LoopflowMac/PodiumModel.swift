@@ -448,10 +448,10 @@ final class PodiumModel {
     private func openHistoricalReference(_ reference: String) async {
         for wave in visibleRoadmaps {
             guard !Task.isCancelled else { return }
-            let result = try? await query.chapterHistory(wave: wave.wave.name, cwd: wave.wave.repo)
+            let result = try? await query.status(wave: wave.wave.name, cwd: wave.wave.repo)
             guard !Task.isCancelled else { return }
-            guard let entries = result else { continue }
-            if entries.contains(where: { $0.sourceProjectId == reference || $0.sourceProjectSlug == reference || $0.sourceWorkId == reference }) {
+            guard let entries = result?.projects.items else { continue }
+            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.workId == reference }) {
                 select(.wave(id: wave.wave.id))
                 historyReference = reference
                 historyWave = wave.wave
@@ -643,7 +643,7 @@ final class PodiumModel {
     }
 
     func waveForChapter(projectId: String) -> WaveRoadmap? {
-        roadmap.value?.waves.first { $0.chapter?.sourceProjectId == projectId || $0.chapter?.sourceProjectSlug == projectId || $0.chapter?.sourceWorkId == projectId }
+        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.workId == projectId }
     }
 
     func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
@@ -652,7 +652,7 @@ final class PodiumModel {
         }
         if let previous = navigation.selectedTaskEvidence, previous.task.id == id,
            let current = wave(id: previous.wave.wave.id),
-           current.tasks.unavailableReason != nil || current.chapter?.phase != "complete" {
+           current.tasks.unavailableReason != nil || current.projects.unavailableReason != nil || current.projects.items.filter { $0.status == .started }.count != 1 {
             return (current, previous.task)
         }
         return nil

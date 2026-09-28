@@ -139,9 +139,9 @@ struct WorkspaceNavigationProofTests {
         snapshot["waves"] = waves
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         func record(_ id: String, title: String, work: Any, cwd: String) -> [String: Any] {
-            ["id": id, "run_id": id, "kind": "interactive", "work": work, "title": title, "detail": "claude",
+            ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": work, "title": title, "detail": "claude",
              "provider": "claude", "cwd": cwd, "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(kind: "interactive", state: "active"), "title_source": "generated",
+             "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated",
              "flow_membership": ["kind": "independent"], "terminal_ids": [], "open_argv": ["must-not-launch"]]
         }
         let attached = [
@@ -269,7 +269,7 @@ struct WorkspaceNavigationProofTests {
             let record = try renameFixtureRecord(id, title: index == 0 ? "review-design" : "lyric-cadenza", work: task)
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
             value["terminal_ids"] = [shells[index]]
             value["open_argv"] = ["must-not-launch"]
             return value
@@ -489,9 +489,9 @@ struct WorkspaceNavigationProofTests {
             let shell = workspace.multiplexer.layout.firstPane.id
             workspace.multiplexer.setFocusedPane(shell)
             records.append([
-                "id": "row-\(index)", "run_id": "row-\(index)", "kind": "interactive", "work": NSNull(),
+                "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "kind": "conversation", "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -579,9 +579,9 @@ struct WorkspaceNavigationProofTests {
         defer { registry.surfaces.release(.shell(pane)) }
         let surface = try #require(terminal.surface)
         let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
-            ["id": id, "run_id": id, "kind": "interactive", "work": NSNull(),
+            ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(),
              "title": id, "detail": "Local PTY", "cwd": "/tmp",
-             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [pane],
+             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [pane],
              "open_argv": ["unused"]] as [String: Any]
         }), as: UTF8.self)
         let query = RegistryQuery { args, _ in
@@ -657,7 +657,7 @@ struct WorkspaceNavigationProofTests {
         defer { registry.surfaces.release(.session("review-decision")) }
         let surface = try #require(terminal.surface)
         let records = """
-        [{"id":"review-decision", "run_id": "review-decision","kind":"flow","work":null,"work_path":null,
+        [{"id":"review-decision", "run_id": "review-decision", "interactive": true,"kind":"flow","work":null,"work_path":null,
           "title":"Review decision","detail":"Human review","cwd":"/tmp",
           "state":"ready","ready_summary":"Ready for review","title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],
           "actions":\(sessionActionFixtureJSON(kind: "flow", state: "ready")),"open_argv":["/bin/cat"]}]
@@ -797,15 +797,15 @@ struct WorkspaceNavigationProofTests {
             "tests/fixtures/dto/roadmap_snapshot.json"
         ), encoding: .utf8)
         let records = """
-        [{"id":"navigation-split", "run_id": "navigation-split","kind":"interactive",
+        [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
-        [{"id":"context-session", "run_id": "context-session","kind":"interactive","work":null,
+        [{"id":"context-session", "run_id": "context-session", "interactive": true,"kind":"conversation","work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
         """
         let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
         defer { completionResponse.finish() }

@@ -11,8 +11,6 @@
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
 
-use crate::pm::ChapterMetricTarget;
-
 use std::io::IsTerminal;
 use std::path::Path;
 
@@ -24,7 +22,7 @@ use crate::durable::{Home, WorkRef, WorkStatus};
 use crate::lf::commands::runs::{format_tokens, RunSnapshot};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
-use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot, ProjectFlowPlan};
+use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -69,7 +67,7 @@ pub struct WaveSnapshot {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
-    pub chapter: Option<ChapterSummary>,
+    pub projects: Evidence<ProjectSummary>,
     pub tasks: Evidence<TaskDetailSnapshot>,
     /// Wave-owned live evidence derived once by Rust for every consumer.
     pub metric_portfolio: MetricPortfolioDto,
@@ -379,96 +377,72 @@ pub struct RoadmapSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveRoadmap {
     pub wave: WaveSnapshot,
-    pub chapter: Option<ChapterSummary>,
+    pub projects: Evidence<ProjectSummary>,
     pub metric_portfolio: MetricPortfolioDto,
     pub tasks: Evidence<RoadmapTask>,
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChapterSummary {
+pub struct ProjectSummary {
     pub id: String,
-    pub source_project_id: String,
-    pub source_project_slug: Option<String>,
-    pub source_work_id: Option<String>,
-
-    pub metric_targets: Vec<ChapterMetricTarget>,
-    pub flows: ProjectFlowPlan,
-    pub krs: Vec<PmKrSummary>,
-    pub phase: crate::work::chapter::ChapterPhase,
-    pub error: Option<String>,
+    pub work_id: Option<String>,
+    pub slug: String,
+    pub name: String,
+    pub flow: String,
+    pub status: crate::pm::ProjectStatus,
+    pub metric_targets: Vec<crate::pm::ChapterMetricTarget>,
+    pub krs: Vec<crate::pm::PmKr>,
 }
 
-async fn chapter_summary(store: &SharedStore, wave: &Wave) -> Result<Option<ChapterSummary>> {
-    let pending = store
-        .chapters(wave.id())
-        .await?
-        .into_iter()
-        .find(|chapter| chapter.phase != crate::work::chapter::ChapterPhase::Complete);
-    let Some(chapter) = store
-        .chapter(wave.id(), None)
-        .await?
-        .or_else(|| pending.clone())
-    else {
-        return Ok(None);
-    };
-    let phase = pending.as_ref().map_or(chapter.phase, |next| next.phase);
-    let error = pending
-        .as_ref()
-        .and_then(|next| {
-            next.error.as_ref().map(|error| {
-                format!(
-                    "Chapter {}: {error}. Resume with the same chapter id.",
-                    next.id.as_str()
-                )
-            })
-        })
-        .or_else(|| chapter.error.clone());
-    let source = match store.pm_snapshot(wave.id()).await? {
-        Some(row) => decode_pm_planning(wave, &row.payload)
-            .ok()
-            .and_then(|planning| {
-                planning
-                    .projects
-                    .into_iter()
-                    .find(|project| project.id == chapter.project_id)
-            }),
-        None => None,
-    };
-    let source_project_slug = source.as_ref().map(|project| project.slug.clone());
-    let source_work_id = store
-        .get_project_by_project(&chapter.project_id)
-        .await?
-        .map(|project| project.id.to_string());
-    let content = source
-        .map(|project| crate::pm::ProjectContent {
-            metric_targets: project.metric_targets.clone(),
-            flows: project.flows.unwrap_or_else(ProjectFlowPlan::empty),
-            krs: project.krs,
-        })
-        .or_else(|| chapter.activated_at.is_none().then_some(chapter.content));
-    let Some(content) = content else {
-        return Ok(None);
-    };
-    Ok(Some(ChapterSummary {
-        id: chapter.id.as_str().to_string(),
-        source_project_id: chapter.project_id,
-        source_project_slug,
-        source_work_id,
-
-        metric_targets: content.metric_targets,
-        flows: content.flows,
-        krs: content
-            .krs
+async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
+    let result = async {
+        let row = store
+            .pm_snapshot(wave.id())
+            .await?
+            .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
+        let registered = store.list_projects(Some(wave.id())).await?;
+        let projects = decode_pm_planning(wave, &row.payload)?
+            .projects
             .into_iter()
-            .map(|kr| PmKrSummary {
-                text: kr.text,
-                holds: kr.holds,
+            .map(|project| ProjectSummary {
+                work_id: registered
+                    .iter()
+                    .find(|work| work.plan.id.as_str() == project.id)
+                    .map(|work| work.id.to_string()),
+                id: project.id,
+                slug: project.slug,
+                name: project.name,
+                flow: project.flow,
+                status: project.status,
+                metric_targets: project.metric_targets,
+                krs: project.krs,
             })
-            .collect(),
-        phase,
-        error,
-    }))
+            .collect();
+        Ok((projects, false))
+    }
+    .await;
+    Evidence::from_result(result)
+}
+
+fn print_projects(projects: &Evidence<ProjectSummary>) {
+    match projects {
+        Evidence::Unavailable { reason } => println!("  projects unavailable: {reason}"),
+        Evidence::Ok { items, .. } => {
+            for project in items
+                .iter()
+                .filter(|project| project.status == crate::pm::ProjectStatus::Started)
+            {
+                println!(
+                    "  project   {} ({}) · flow {}",
+                    project.name, project.id, project.flow
+                );
+                for kr in &project.krs {
+                    println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
+                }
+            }
+        }
+    }
 }
 
 /// One Task in the roadmap: plan row, durable Task Work when it exists, its
@@ -561,7 +535,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
                 },
             )),
             wave: snapshot,
-            chapter: chapter_summary(&store, &wave).await?,
+            projects: project_planning(&store, &wave).await,
             tasks: task_snapshots.tasks,
             metric_portfolio,
             unavailable_tasks: task_snapshots.unavailable_tasks,
@@ -651,7 +625,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
                 });
             roadmaps.push(WaveRoadmap {
                 wave: snapshot,
-                chapter: chapter_summary(&store, wave).await?,
+                projects: project_planning(&store, wave).await,
                 tasks: match task_snapshots.tasks {
                     Evidence::Ok { items, truncated } => Evidence::Ok {
                         items: items.into_iter().map(roadmap_task).collect(),
@@ -868,18 +842,10 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
     else {
         return Ok(None);
     };
-    let chapter = store.chapter(wave.id(), None).await?
-        .ok_or_else(|| anyhow!("Wave {} needs its first chapter; preview `lf wave new-chapter --wave {} --chapter <id> --dry-run`", wave.name(), wave.name()))?;
     let mut planning = decode_pm_planning(wave, &row.payload)?;
-    planning
-        .projects
-        .retain(|project| project.id == chapter.project_id);
-    planning
-        .items
-        .retain(|item| item.project_id == chapter.project_id);
-    if planning.projects.is_empty() {
-        anyhow::bail!("current chapter planning is unavailable; resume its transition or run `lf wave sync --wave {}`", wave.name());
-    }
+    let current = crate::ops::chapter::select_current(wave.name(), &planning.projects)?;
+    planning.projects.retain(|project| project.id == current.id);
+    planning.items.retain(|item| item.project_id == current.id);
     Ok(Some(planning))
 }
 
@@ -979,7 +945,7 @@ async fn snapshot_tasks(
             team_id: String::new(),
             assignee: None,
         };
-        let recommended = crate::ops::task::recommended_task_flow(plan).to_string();
+        let recommended = plan.flow.clone();
         details.push(
             snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
         );
@@ -1016,7 +982,7 @@ fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> Stri
     projects
         .iter()
         .find(|project| project.id == project_id)
-        .map_or("feature", crate::ops::task::recommended_task_flow)
+        .map_or("feature", |project| project.flow.as_str())
         .to_string()
 }
 
@@ -1621,16 +1587,7 @@ fn print_status(status: &WaveDetailSnapshot) {
     println!("  goal      {}", wave.goal);
     println!("  enabled   {}", wave.enabled);
     println!("  home      {} ({})", wave.home.id, wave.home.route);
-    if let Some(chapter) = &status.chapter {
-        println!("  chapter   {}  {:?}", chapter.id, chapter.phase);
-
-        for kr in &chapter.krs {
-            println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
-        }
-        if let Some(error) = &chapter.error {
-            println!("  pending   {error}");
-        }
-    }
+    print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);
     match &status.tasks {
         Evidence::Unavailable { reason } => println!("  tasks unavailable: {reason}"),
@@ -2020,9 +1977,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             name = wave.wave.name,
             status = wave.wave.status.label(),
         );
-        if let Some(chapter) = &wave.chapter {
-            println!("  chapter {}", chapter.id);
-        }
+        print_projects(&wave.projects);
         print_metric_portfolio(&wave.metric_portfolio);
         print_unavailable_tasks(&wave.unavailable_tasks);
         let tasks = match &wave.tasks {
@@ -2178,28 +2133,6 @@ mod tests {
             team_id: "team".into(),
             assignee: None,
         };
-        let mut chapter = crate::work::chapter::Chapter {
-            predecessor_metrics: vec![],
-            id: crate::work::chapter::ChapterId::parse("one").unwrap(),
-            wave_id: wave.id().clone(),
-            wave: wave.name().into(),
-            project_id: "current".into(),
-            content: crate::ops::chapter::empty_plan(),
-            predecessors: vec![],
-            tasks: vec![crate::work::chapter::ChapterTask {
-                task: item.clone(),
-                disposition: crate::work::chapter::TaskDisposition::Abandon,
-                reason: "Untouched backlog expired".into(),
-                applied: true,
-                observed_at: 1,
-                at_boundary: true,
-            }],
-            phase: crate::work::chapter::ChapterPhase::Complete,
-            created_at: 1,
-            activated_at: Some(1),
-            completed_at: Some(2),
-            error: None,
-        };
         let mut items = vec![item.clone()];
         item.id = "completed".into();
         item.identifier = "FIX-2".into();
@@ -2213,32 +2146,25 @@ mod tests {
             synced_at: 1,
             payload: serde_json::json!({"projects":[{
                 "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
-                "metric_targets":[], "flows":{"recommended":null}, "krs":[],
+                "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":items})
             .to_string(),
         };
-        store.save_chapter(&chapter, true).await.unwrap();
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
         let before = super::wave_tasks(&store, &wave, false).await.unwrap();
         assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
-        chapter = store
-            .record_chapter_task_applied(&chapter, "removed")
+        store
+            .confirm_task_deletion(wave.id(), "removed", "FIX-1")
             .await
             .unwrap();
-        for next_chapter in [false, true] {
-            if next_chapter {
-                chapter.id = crate::work::chapter::ChapterId::parse("two").unwrap();
-                chapter.project_id = "next".into();
-                chapter.tasks.clear();
-                store.save_chapter(&chapter, true).await.unwrap();
-            }
+        for project_id in ["current", "next"] {
             let mut stale = snapshot.clone();
             let mut payload: serde_json::Value = serde_json::from_str(&stale.payload).unwrap();
-            payload["projects"][0]["id"] = serde_json::json!(chapter.project_id);
+            payload["projects"][0]["id"] = serde_json::json!(project_id);
             for item in payload["items"].as_array_mut().unwrap() {
-                item["project_id"] = serde_json::json!(chapter.project_id);
+                item["project_id"] = serde_json::json!(project_id);
             }
             stale.payload = payload.to_string();
             store.put_pm_snapshot(stale).await.unwrap();
@@ -2264,7 +2190,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wave_keeps_current_plan_visible_with_a_failed_preparing_chapter() {
+    async fn wave_reads_project_plan_and_preserves_unavailable_evidence() {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2279,30 +2205,10 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut chapter = crate::work::chapter::Chapter {
-            predecessor_metrics: Vec::new(),
-            id: crate::work::chapter::ChapterId::parse("one").unwrap(),
-            wave_id: wave.id().clone(),
-            wave: wave.name().into(),
-            project_id: "first".into(),
-            content: crate::ops::chapter::empty_plan(),
-            predecessors: vec![],
-            tasks: vec![],
-            phase: crate::work::chapter::ChapterPhase::Complete,
-            created_at: 1,
-            activated_at: Some(1),
-            completed_at: Some(1),
-            error: None,
-        };
-        chapter.content.krs = vec![crate::pm::PmKr {
-            text: "Current proof".into(),
-            holds: false,
-        }];
-        store.save_chapter(&chapter, true).await.unwrap();
-        assert!(super::chapter_summary(&store, &wave)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(matches!(
+            super::project_planning(&store, &wave).await,
+            super::Evidence::Unavailable { .. }
+        ));
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
                 .await
@@ -2316,37 +2222,23 @@ mod tests {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
             payload: serde_json::json!({"projects":[{
                 "id":"first", "slug":"first", "name":"First chapter", "summary":"",
-                "metric_targets":[], "flows":{"recommended":null}, "krs":[{"text":"Edited proof", "holds":false}],
+                "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]}).to_string(),
         }).await.unwrap();
-        chapter.id = crate::work::chapter::ChapterId::parse("two").unwrap();
-        chapter.project_id = "second".into();
-        chapter.content = crate::ops::chapter::empty_plan();
-        chapter.phase = crate::work::chapter::ChapterPhase::Preparing;
-        chapter.activated_at = None;
-        chapter.completed_at = None;
-        chapter.error = Some("Task state is unresolved".into());
-        store.save_chapter(&chapter, false).await.unwrap();
-
-        let summary = super::chapter_summary(&store, &wave)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(summary.id, "one");
-        assert_eq!(summary.krs[0].text, "Edited proof");
-        assert_eq!(summary.phase, crate::work::chapter::ChapterPhase::Preparing);
-        assert!(summary
-            .error
-            .unwrap()
-            .contains("Chapter two: Task state is unresolved"));
+        let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
+            panic!("Project plan unavailable");
+        };
+        assert_eq!(items[0].id, "first");
+        assert_eq!(items[0].krs[0].text, "Edited proof");
+        assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         unreadable.payload = "{}".into();
         store.put_pm_snapshot(unreadable).await.unwrap();
-        assert!(super::chapter_summary(&store, &wave)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(matches!(
+            super::project_planning(&store, &wave).await,
+            super::Evidence::Unavailable { .. }
+        ));
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
                 .await

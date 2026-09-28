@@ -18,21 +18,17 @@ pub(crate) async fn wave_metric_portfolio(
     wave: &Wave,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto> {
-    let targets = if store.chapter(wave.id(), None).await?.is_some() {
-        match super::chapter::current_project(store, wave).await {
-            Ok(project) => project.metric_targets,
-            Err(error) => {
-                return Ok(MetricPortfolioDto {
-                    metrics: Vec::new(),
-                    contract_issues: vec![MetricContractIssueDto::ChapterUnavailable {
-                        wave_id: wave.id().to_string(),
-                        reason: error.to_string(),
-                    }],
-                })
-            }
+    let targets = match super::chapter::current_project(store, wave).await {
+        Ok(project) => project.metric_targets,
+        Err(error) => {
+            return Ok(MetricPortfolioDto {
+                metrics: Vec::new(),
+                contract_issues: vec![MetricContractIssueDto::ChapterUnavailable {
+                    wave_id: wave.id().to_string(),
+                    reason: error.to_string(),
+                }],
+            })
         }
-    } else {
-        Vec::new()
     };
     chapter_metric_portfolio(store, wave, &targets, evaluation_time).await
 }
@@ -371,7 +367,7 @@ mod tests {
     use time::Duration;
 
     use crate::id::WaveId;
-    use crate::pm::{PmKr, ProjectFlowPlan};
+    use crate::pm::PmKr;
     use crate::store::StorageConfig;
     use crate::work::wave::metrics::{
         load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
@@ -388,7 +384,8 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flows: Some(ProjectFlowPlan::empty()),
+            flow: "feature".into(),
+            status: crate::pm::ProjectStatus::Started,
             krs: vec![PmKr {
                 text: "Proof holds for one week".to_string(),
                 holds: false,

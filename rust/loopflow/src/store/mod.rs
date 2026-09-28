@@ -1505,6 +1505,8 @@ mod tests {
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                flow: "feature".into(),
+                status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new("project-uuid").unwrap(),
                 slug: "developer-efficiency".to_string(),
                 name: "Developer Efficiency".to_string(),
@@ -2547,6 +2549,8 @@ mod tests {
             .unwrap();
 
         project.plan.prompt_context = "Definition:\nCurrent proof".to_string();
+        project.plan.flow = "incident".into();
+        project.plan.status = crate::pm::ProjectStatus::Completed;
         project.plan.pm_snapshot_synced_at += 1;
         project.iteration = 9;
         store.update_project(&project).await.unwrap();

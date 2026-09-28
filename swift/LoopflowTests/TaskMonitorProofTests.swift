@@ -131,14 +131,16 @@ struct TaskMonitorProofTests {
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
-        var chapter = try #require(waves[0]["chapter"] as? [String: Any])
+        var projects = try #require(waves[0]["projects"] as? [String: Any])
+        let plans = try #require(projects["items"] as? [[String: Any]])
         let tasks = try #require(waves[0]["tasks"] as? [String: Any])
-        chapter["id"] = "next-chapter"
-        chapter["source_project_id"] = "successor-project"
-        chapter["source_work_id"] = "successor-work"
+        var successor = plans[0]
+        successor["name"] = "next-chapter"
+        successor["id"] = "successor-project"
+        successor["work_id"] = "successor-work"
         for transferring in [true, false] {
-            chapter["phase"] = transferring ? "transferring" : "complete"
-            waves[0]["chapter"] = chapter
+            projects["items"] = transferring ? plans + [successor] : [successor]
+            waves[0]["projects"] = projects
             waves[0]["tasks"] = transferring ? ["state": "ok", "items": [], "truncated": false] : tasks
             wire["waves"] = waves
             let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
@@ -147,7 +149,7 @@ struct TaskMonitorProofTests {
             try await settle(window)
             #expect(model.selection == .task(id: "issue-review"))
             #expect(model.task(id: "issue-review")?.task.runtime?.workId == taskWork)
-            if !transferring { #expect(model.task(id: "issue-review")?.wave.chapter?.sourceWorkId == "successor-work") }
+            if !transferring { #expect(model.task(id: "issue-review")?.wave.currentProject?.workId == "successor-work") }
             #expect(model.sessions.value?.first?.runId == sessionRun)
             #expect(multiplexer.focusedPaneId == monitorPane)
             #expect(terminals[0].surface == surfaces[0])
@@ -237,14 +239,14 @@ struct TaskMonitorProofTests {
             .deletingLastPathComponent().deletingLastPathComponent()
         let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
         let records = """
-        [{"id":"monitor-review","run_id":"monitor-review","kind":"interactive",
+        [{"id":"monitor-review","run_id":"monitor-review", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Review Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]},
-         {"id":"monitor-other","run_id":"monitor-other","kind":"interactive",
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]},
+         {"id":"monitor-other","run_id":"monitor-other", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_now00000000000000000000000000000"},
           "title":"Other Task Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         var active = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/active_runs.json"))) as? [String: Any])
         var run = try #require((active["runs"] as? [[String: Any]])?.first)

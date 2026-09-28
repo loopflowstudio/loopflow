@@ -47,11 +47,12 @@
       "iterations": [
         []
       ]
-    }
+    },
+    "interactive": true
   },
   {
     "id": "run_00000000000000000000000000000002",
-    "kind": "interactive",
+    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -103,11 +104,12 @@
           1
         ]
       ]
-    }
+    },
+    "interactive": true
   },
   {
     "id": "run_00000000000000000000000000000003",
-    "kind": "interactive",
+    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -151,11 +153,12 @@
     "run_id": "run_00000000000000000000000000000003",
     "flow_membership": {
       "kind": "independent"
-    }
+    },
+    "interactive": true
   },
   {
     "id": "run_00000000000000000000000000000004",
-    "kind": "interactive",
+    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -194,11 +197,12 @@
     "flow_membership": {
       "kind": "unknown",
       "reason": "Run run_00000000000000000000000000000004 predates recorded Flow membership"
-    }
+    },
+    "interactive": true
   },
   {
     "id": "run_00000000000000000000000000000006",
-    "kind": "interactive",
+    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -247,11 +251,12 @@
           1
         ]
       ]
-    }
+    },
+    "interactive": true
   },
   {
     "id": "run_00000000000000000000000000000007",
-    "kind": "interactive",
+    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -295,7 +300,8 @@
       "occurrence": "past",
       "node": null,
       "iterations": null
-    }
+    },
+    "interactive": true
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -350,6 +356,7 @@
           0
         ]
       ]
-    }
+    },
+    "interactive": true
   }
 ]

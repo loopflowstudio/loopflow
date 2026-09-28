@@ -2,33 +2,42 @@ import Foundation
 
 public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
-    public let chapter: ChapterSummary?
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<WaveTaskWork>
 
-    public init(objective: String, chapter: ChapterSummary?, tasks: WorkEvidence<WaveTaskWork>) {
+    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<WaveTaskWork>) {
         self.objective = objective
-        self.chapter = chapter
+        self.projects = projects
         self.tasks = tasks
     }
 }
 
-public struct ChapterSummary: Decodable, Sendable, Hashable {
+public enum ProjectStatus: String, Decodable, Sendable, Hashable {
+    case backlog, planned, started, paused, completed, canceled
+}
+
+public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
-    public let sourceProjectId: String
-    public let sourceWorkId: String?
-    public let sourceProjectSlug: String?
+    public let workId: String?
+    public let slug: String
+    public let name: String
+    public let flow: String
+    public let status: ProjectStatus
     public let metricTargets: [ChapterMetricTarget]
-    public let flows: ProjectFlowPlanSnapshot
     public let krs: [PlanningKeyResult]
-    public let phase: String
-    public let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, flows, krs, phase, error
+        case id, slug, name, flow, status, krs
+        case workId = "work_id"
         case metricTargets = "metric_targets"
-        case sourceProjectId = "source_project_id"
-        case sourceWorkId = "source_work_id"
-        case sourceProjectSlug = "source_project_slug"
+    }
+}
+
+extension WorkEvidence where Item == ProjectPlanningSnapshot {
+    public var currentProject: ProjectPlanningSnapshot? {
+        let current = items.filter { $0.status == .started }
+        return current.count == 1 ? current[0] : nil
     }
 }
 
@@ -50,10 +59,6 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
-}
-
-public struct ProjectFlowPlanSnapshot: Decodable, Sendable, Hashable {
-    public let recommended: String?
 }
 
 public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {

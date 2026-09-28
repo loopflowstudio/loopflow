@@ -47,7 +47,7 @@ struct TaskRunsProofTests {
             renameFixtureRecord("design", title: "review-design", work: work)
         )) as? [String: Any])
         design["state"] = "ready"
-        design["actions"] = sessionActionFixture(kind: "interactive", state: "ready")
+        design["actions"] = sessionActionFixture(kind: "conversation", state: "ready")
         design["terminal_ids"] = [shells[0]]
         design["open_argv"] = ["must-not-launch"]
         design["provider"] = "claude"

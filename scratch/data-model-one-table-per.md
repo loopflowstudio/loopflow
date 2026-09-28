@@ -18,13 +18,23 @@ reviewable account of usage, owners, deletion and remaining deployment evidence.
 A plan, new tables, renamed types, one passing slice or a contributor's conclusion
 alone does not reach that stop. Publication, installation and real-Home conversion
 are separate actions; no branch binary may touch the installed Home.
+Until the code-complete review is returned to Jack, checkpoint locally only:
+no push, PR publication/mutation, landing, installation or live-Home conversion.
+This overrides publication defaults in individual skills. The saved 13-step
+feature invocation still contains implement → compress → review-slice →
+concept-review → loop-decide, then a human demo boundary. Preserve its captured
+order; a partial implementation's concept review is not the requested finish.
 
 H1–H3 are implemented and reviewed: Task selects its managed invocation; all
 Task-attributed Flows retain attribution; Task and taskless Flows share a row
-owner and executor. Preserve that work. Cut I is checkpointed at `71496d5da`:
-listeners, residents and lfd are deleted. Its independent review remains owed.
-Its ledger records 1,855 Rust passes, one inherited launch-contract failure,
-one interrupted contention proof and eight ignored tests—not a green full gate.
+owner and executor. Preserve that work. Cut I is reviewed at `2d597800e`:
+listeners, residents and lfd are deleted. The canonical fleet proof preserved
+all 1,020 receipts in 4.540 seconds; architecture, formatting and all-target
+Clippy passed. The draft build was interrupted after 376.234 seconds, with
+repeated expected-schema reconstruction observed on database opens. Repair that
+development performance path without weakening schema validation. Retain the
+inherited unwritable-store counterexample for the new writer contract. This is
+local Cut I acceptance, not a green full gate or installed acceptance.
 
 The new execution model replaces H4–H6. H7 remains in this Task, governed by
 [Chapters](chapters.md), which Jack accepted on 2026-09-27. The old proposal
@@ -38,6 +48,11 @@ for a chapters table, packet, config line and chapter history API is superseded.
 | AgentSession | One agent conversation that can continue | Durable conversation row; interactive or headless, with stable name, feedback and native conversation identity |
 | FlowSession | One started Flow that can continue | Evolve the existing invocation row: captured graph, cursor, return counts, current boundary, claim and completion |
 | Agent process | Actual provider engine/process | Exact native identity and OS evidence; can outlive a client and may serve more than one conversation |
+
+The physical product owners are `execs`, `agent_sessions` and `flow_sessions`.
+Evolve/rename the existing Session and invocation tables instead of maintaining
+old and new runtime owners together. History is subordinate to its Session;
+history tables or journal entries do not become another public lifecycle.
 
 No separate Request, Execution, SkillInvocation, AgentExec, SkillExec or replacement
 Run product object. Jack confirmed on 2026-09-28 that agent outcomes belong in
@@ -119,6 +134,9 @@ live parent. Causal ancestry grants no signal or Flow-settlement authority.
 
 Every Exec records its command's terminal outcome and end time, with exit code
 or signal when observed, whether it drove an agent, a Flow or a plain command.
+The lifecycle covers succeeded, failed and interrupted commands. Terminal
+fields remain absent where no trustworthy completion was observed; process
+disappearance alone cannot manufacture an exit code, signal or completion time.
 The existing journal already emits command completion/error events; evolve that
 writer into the indexed Exec owner rather than inventing a second result path.
 An absent terminal receipt remains unknown and is not proof that the process is
@@ -127,9 +145,12 @@ running. Exact process observation and command outcome answer different question
 AgentSession history references the driving Exec. Several Execs can continue
 one conversation; a Flow-driving Exec may also drive several conversations, so
 do not assume one nullable Session FK on Exec represents every launch path.
-Where an Exec performs exactly one agent call, reuse its recorded outcome without
-copying it into a competing result. For several calls or steps in one Exec,
-correlate their individual completion entries in Session/Flow history. A successful
+Reuse Exec's outcome when displaying the command result; do not copy it into a
+competing result field. Provider completion is a different fact even in a
+one-call Exec: the provider may finish and a later command operation fail.
+AgentSession history retains that provider completion and references its driving
+Exec. For several calls or steps in one Exec, correlate their individual
+completion entries in Session/Flow history. A successful
 Exec that parks a Flow at review does not mean the Flow is complete; a resumed
 conversation does not reopen or change a completed Exec.
 
@@ -179,6 +200,14 @@ Record the completion and its Flow consumption atomically when they share the
 store, retaining existing version/claim comparisons. Provider process receipts
 remain exact operational evidence, without becoming another product object.
 
+Handoff must distinguish the Flow driver from the conversation driver. A Flow
+can keep its orchestration claim while its selected AgentSession changes driver.
+The old conversation driver may no longer start turns or change Session state;
+the Flow consumes only the selected, recorded completion under its own fence.
+An observer may display events but does not acquire either claim. If the driver
+dies and the engine finishes a turn, recovery must retain that provider outcome
+once, rather than replace it with the driver's exit result or silently lose it.
+
 ## Attribution, Started and historical import
 
 Task implies Wave; supplied ancestors must agree. Flow-owned AgentSessions share
@@ -195,9 +224,15 @@ inferred; it does not fabricate successful work.
 
 Historical attribution is not bulk rewritten just because the Session's current
 driver changes. Preserve the existing historical-attempt boundary when converting
-Runs. The exact treatment of pre-bind unassigned usage must be demonstrated in
-the import/bind proof and stated before implementation changes it; the earlier
-current-Run-only assumption is not authorization to reattribute every old event.
+Runs. **Supervisor implementation assumption, not a new Jack decision:** a bind
+affects subsequent work; earlier usage retains its recorded attribution. Jack
+was asked about whole-conversation versus prospective binding and no answer has
+been recorded. Proceed with this conservative boundary, recording the assignment
+time so mid-turn cumulative usage cannot silently move the whole earlier turn.
+Attribute a turn/receipt according to its recorded start/assignment evidence;
+unknown allocation remains explicit rather than inventing a token split.
+Prove pre-bind, post-bind and active-turn cases in the import/bind fixture. The
+earlier current-Run-only assumption does not authorize rewriting every old event.
 A taskless FlowSession and its member Sessions cannot be bound piecemeal to
 incompatible Tasks. Whole-Flow binding remains outside this selected operation.
 
@@ -273,7 +308,9 @@ implementation obligations; successful native attachment does not prove them.
    command and verify parent plus `via_agent`. Explicit restart preserves native
    thread and fences late output. Include shared-engine sibling survival.
    Failed feasibility changes the transport design before schema-wide work.
-3. **Convert one complete lifecycle.** Exec/AgentSession/FlowSession writers,
+3. **Convert one complete lifecycle.** First align the core architecture,
+   CLI/Session and planning documentation and STYLE guide with this accepted
+   contract, marking unimplemented behavior. Then convert Exec/AgentSession/FlowSession writers,
    indexed readers, events and import together for headless → discover → connect
    → restart, with Task and taskless Flow paths. Carry H4 admission/publication,
    H5 opaque identity/history and H6 typed ancestry into this change. Delete
@@ -328,10 +365,10 @@ perform forbidden installed-Home changes to close a checklist.
 
 The accepted object names and Exec-tree requirements are settled. Transport
 feasibility is an engineering proof, not a request for Jack to choose a protocol.
-Pre-bind historical usage attribution remains a product boundary: keep existing
-recorded attribution until its intended conversion is explicit. Never silently
-use the current Session Task to rewrite all old usage.
+Prospective bind attribution is the explicit implementation assumption above;
+Jack may revise it. Never silently use the current Session Task to rewrite all
+old usage. This assumption does not block the remaining independent work.
 
-Next action: independent Cut I review and the connect/Exec feasibility proof,
+Next action: continue the saved implementation step with the connect/Exec ownership proof,
 using the exact acceptance rows above. Update this plan when evidence changes
 an implementation choice; do not append another competing model.

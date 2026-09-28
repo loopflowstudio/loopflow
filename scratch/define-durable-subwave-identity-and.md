@@ -217,9 +217,9 @@ disposable Home first. *Open:* release's objective text.
 | Runs, Projects, Tasks | untouched | untouched |
 | Addresses shown | every descendant's, computed | release's and its descendants' |
 
-*Open:* whether `lf wave relocate`, about 1,000 lines with recovery receipts
-on LOO-298, shrinks to this or is replaced by moving the directory and letting
-discovery record it.
+`lf wave relocate` is left as LOO-298 leaves it. Jack Heart, 2026-09-28:
+revisit after LOO-298 is done, stated with "idk". Slice 4 is deferred with
+it.
 
 ## What the code does today
 
@@ -296,6 +296,29 @@ Wave chat left this list with LOO-298. From a terminal the invoking checkout
 answers it. Cron runs in the directory recorded at sync. The app has no
 invoking checkout.
 
+### Cron today
+
+Researched at Jack Heart's request, 2026-09-28. Installed jobs and receipts
+were read from his machine, read-only; source was read on LOO-298.
+
+| Fact | Evidence |
+|---|---|
+| Both installed jobs run in the main checkout, `/Users/jack/src/loopflow` | `~/Library/LaunchAgents/loopflow.cron.infrastructure.*.plist` |
+| All 69 scheduled receipts record that directory | `lf cron history --wave infrastructure --json` |
+| A job runs `lf --wave <wave> --batch <kind> <flow>` with that directory as its working directory | `ops/cron.rs:770-780` |
+| `telemetry-daily` is two read-only operations, `doctor` and a scorecard | `.lf/flows/telemetry-daily.yaml` |
+| `release-run` starts in that directory and does its work in generated `prepare-…` and `publish-…` worktrees | `engine/builtins/ops/skill/release-run.md:55-62` |
+| A scheduled release retry removed two uncommitted memory edits from main | Infrastructure memory, 2026-08-23, LOO-266 |
+| The log path uses the Wave name unescaped: `cron.{wave}.{flow}.log` | `ops/cron.rs:40-44`; only the Flow's `/` is replaced |
+
+The existing pattern is: start in main, do effects in generated worktrees.
+Reads are what still depend on main's working tree: the Wave files a scheduled
+prompt carries are whatever main holds, uncommitted edits included.
+
+Read from source and not run: a Wave named `infrastructure/release` would put
+its log at `.lf/logs/cron.infrastructure/release.release-run.log`, inside a
+directory nothing creates. The release prototype would meet this first.
+
 ## The demo
 
 In a disposable Home and repository fixture:
@@ -333,8 +356,9 @@ Each is a case the build must prove, stated as what would go wrong.
    links `release` to `platform` with sibling paths, as an existing unit test
    does. Which wins depends on the open question above.
 5. **Fresh clone or second Home.** Files exist and rows do not. Context reads
-   work. Discovery creates rows, and a second Home must not mint a different
-   id for a Wave the first Home already named.
+   work. Two Homes sync a Wave's id when nothing conflicts. Jack Heart,
+   2026-09-28: conflict handling comes later. A conflict is reported and
+   nothing is overwritten.
 6. **Reused address.** A new Wave at a retired Wave's address shows none of
    the old Runs.
 7. **Same name under two parents.** `infrastructure/release` and

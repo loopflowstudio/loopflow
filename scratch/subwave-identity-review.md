@@ -67,6 +67,12 @@ Kickoff draft under review: commit `0381a195f`.
   infra/release if infrastructure changes to infra".
 - "Ok, i guess we need raw parent id, with fast input / syntax or something".
 
+- On a second machine: "this is at least allowing you to sync when there arent
+  conflicts. Handling nasty conflicts can come a bit later".
+- On `lf wave relocate`: "just fix it after 298 is done? idk".
+- On cron Runs: "idk, research existing work exampels". Researched; see the
+  design's Cron today section.
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

@@ -11,12 +11,9 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
    writes the parent from the tree and the column only records it.
 2. **The API for a Task's Wave.** With ids kept, rename no longer touches
    Tasks, so the choice is about reads only.
-3. **Second Home.** Rows are local and ids are random. Two Homes discovering
-   the same files must agree on the id.
-4. **`lf wave relocate`:** shrink to one-row updates, or replace with a
-   directory move that discovery records.
-5. **Cron Runs:** the directory recorded at sync, or a fresh worktree per
-   firing.
+5. **Cron Runs.** Researched; both jobs run in main and `release-run` works
+   in generated worktrees. Whether scheduled reads should leave main is
+   undecided.
 6. **The app's Wave page:** through Tasks only, or what has landed on the
    default branch.
 7. **Release's objective text.**
@@ -47,6 +44,9 @@ Several were reached after a reversal; the review notes keep the order.
 - No product experience requires the main checkout's `wave/`.
 - Release becomes a real Wave, as the prototype of the child Wave setup.
 - This work is based on LOO-298.
+
+- Two Homes sync Wave ids when nothing conflicts; conflict handling is later.
+- `lf wave relocate` is revisited after LOO-298 lands.
 
 ## Withdrawn in review
 

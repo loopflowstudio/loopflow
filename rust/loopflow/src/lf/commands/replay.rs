@@ -196,8 +196,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":5,"o
         std::fs::create_dir(&decoy_home).unwrap();
         std::env::set_var(crate::store::CONTROL_HOME_ENV, &decoy_home);
         std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
-        let registry = home.path().join("unreadable-registry");
-        std::fs::create_dir(&registry).unwrap();
+        let registry = home.path().join("loopflow.db");
         std::env::set_var("LF_DB_PATH", &registry);
 
         let request = RunLaunchRequest {
@@ -244,6 +243,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":5,"o
         assert!(child_dir.join("terminal.json").is_file());
         assert!(!child_dir.join("owner.json").exists());
         assert!(!decoy_home.join("runs").exists());
-        assert!(registry.is_dir());
+        assert!(registry.is_file());
+        let db = rusqlite::Connection::open(&registry).unwrap();
+        let tasks: i64 = db
+            .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tasks, 0, "replay requires no registered planning Work");
     }
 }

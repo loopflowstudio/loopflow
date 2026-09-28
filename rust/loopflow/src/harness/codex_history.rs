@@ -65,7 +65,7 @@ impl History {
         let params = &rpc["params"];
         let result = &rpc["result"];
         let stored_thread = if expected_thread.is_none() {
-            store.session_connection(session)?.map(|(_, thread)| thread)
+            store.session_thread(session)?
         } else {
             None
         };

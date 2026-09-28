@@ -50,7 +50,180 @@ execution authority. No branch draft binary may access the installed Home.
 
 ## Published checkpoint and proof
 
-Published head **2958d289c0e4087118e6920390fa6c8975c216d8**, base
+Current published head **705645cd1ad36808460e8f0e9e4767d1d8cc7191**, base
+**a2b59ed50666a433c97cb9002476e74351723759**, [PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296).
+Supervisor independently verified remote branch, GitHub head, Task publication
+and presentation heads. Auto-merge is absent. CI **36491822378** finished with failure;
+its Rust job failed after 669 passes, two failures, 13 skipped and 1,258 unrun.
+The two tests are `ad_hoc_batch_launch_uses_generic_run_record_without_planning_registry`
+and `replay_uses_recorded_request_without_the_planning_store`: both deliberately
+select an unwritable database while expecting agent capture to succeed. Source
+inspection confirms the obsolete expectation conflicts with Jack's writable-store
+decision. Supervisor relayed exact failures and preservation constraints in
+comment `025bc27b-b194-40f2-9c73-03fef2b27a7a`: writable private empty planning
+stores for success cases; retain replay prompt/parent/Home and stale-authority
+assertions plus refusal before provider launch on store failure. Log:
+`ancestry-checkpoint-rust-ci.log`. Migration, architecture, Python, website, lint,
+smoke, installation, Swift and UI compile jobs pass; scratch-clear fails on
+retained working notes. No full passing CI result follows.
+Post-rebase Clippy passes in 15.06s
+(`ancestry-rebase-clippy.log`), and the corrected import/report plus reconciled
+Feature checks pass as recorded below. The saved invocation remains implement
+2/13, iteration 9, same invocation and worker Run. Main has resumed headless
+Flow AgentSession ownership; publication does not finish the cutover.
+
+The new Flow conversation test first fails before provider launch because no
+Session exists (`flow-conversation-red.log`), then passes its SQL reservation/retry
+checks (`flow-conversation-admission.log`, 26.48s compile, 1.306s test). It retains
+Session identity/title and the failed attempt, rejects stale publication, and
+creates no AgentSession for a mechanical operation. This is not native retry proof.
+Supervisor found its next reachable dependency: TaskLauncher explicitly supplies
+no native resume identity, capture claims a replacement provider generation, and
+Codex startup creates a new app-server/thread. A retained Session row alone can
+therefore mask native conversation replacement while a detached engine survives.
+Verified comment `7d2ae7eb-f3cc-4e8e-9d90-36504127987c` requires the accepted
+Task/taskless native-history, account, live-engine exclusion and exact Flow
+completion proof through this cut. This is source evidence, not a live failure;
+main still owns the implementation and public proof.
+
+The actual CLI test next failed because Session inventory gave a headless Flow
+conversation Unknown membership (`flow-conversation-cli.log`). Main changed the
+surface to read its stored Flow and the Run's recorded node/iterations, including
+past occurrences. `flow-conversation-and-ci.log` passes **4/4** (29.62s compile,
+11.780s tests): failure/retry/review, both hosted fixture repairs, and store
+refusal before provider launch. Its compile warned about the now-unused
+`SessionFlowMembership::of_position`; this result is not a clean Clippy pass.
+
+The in-progress native patch reuses an endpoint/thread and propagates the resume
+token. Supervisor source review identifies remaining distinctions: a stored
+endpoint is not live-engine evidence; the thread must survive endpoint loss;
+resuming an in-progress turn must not unconditionally send new initial input;
+and equality of thread IDs does not validate the retained account/native Home.
+Verified comment `bd17d589-71a4-4bd4-92fa-bb0e0ff693ba` supplies these concrete
+cases to the same worker. These are source observations of unfinished code, not
+executed provider failures or reasons to add another product object. Native
+retry after engine loss, driver-loss recovery and exact history consumption remain
+unproven.
+
+A subsequent real Codex / synthetic Responses proof passes the **taskless Flow
+failure → retry** path: `native-flow-retry-1/results.json`, CLI SHA-256
+`a4fcad5a4d948fd9fdc5437b6afd0d3eb6f794eb2161fbf7e73149ef93dca8c9`.
+The first command exits 1 after the controlled provider error; retry exits 0.
+The same Session, native thread, endpoint, provider generation and provider-owner
+Exec survive; one engine is created. Prior history is byte-identical, with
+separate failed and completed turns. The agent-issued child names the new driver
+and retained provider generation. Supervisor inspected the assertions and receipt.
+This is not a configured-account or managed-Task proof; the Flow still settles
+through its Run attempt. It does not close the three source gaps above or prove
+atomic consumption of the selected native completion.
+
+The supervisor then reproduced **engine-loss retry failure** against those same
+CLI bytes, in `supervisor-flow-engine-loss-2/results.json`. After a controlled
+provider failure, the copied fixture gracefully stops its exact PID/start/group
+and confirms termination. Public `lf flow resume --retry` exits 1 with
+`No such file or directory (os error 2)` instead of reopening the saved thread.
+This turns the stale-endpoint hypothesis into a real CLI counterexample over
+real Codex and synthetic Responses. Verified comment
+`e91eedae-9a46-41df-9f85-e9d2338c857d` gives main the probe and required repair.
+The first probe invocation failed before launch because the repo venv lacked
+websockets; the second used the script's declared uv dependencies and reached
+this product failure. Both logs remain. Only the disposable fixture engine was
+stopped; no installed Home or configured provider account was touched.
+The exact failing probe source is retained beside that receipt as `probe.py`
+with its SHA-256. The working probe now has engine-replacement success assertions:
+stable Session/thread and prior history, one provider-generation increment, new
+provider-owner Exec, new child provenance, exactly one replacement engine. Its
+original live-engine-only postconditions required no replacement and were
+unreachable at the observed failure. Revising those postconditions does not
+change the retained failure or claim a passing recovery result.
+
+Main then rebuilt and ran that corrected engine-loss probe successfully:
+`native-flow-engine-loss-1/results.json`, CLI SHA-256
+`2b07fbcb7a30905c7e0b932ec92f60731ffd8625419841261ba74cd8e9835cf3`.
+Build `flow-engine-build.log` passes in 19.34s. The fixture confirms the old
+engine stopped; retry exits 0, Session/native thread stay identical, provider
+generation advances 1→2, the provider-owner Exec changes, and the child command
+names generation 2/new owner. Prior history stays byte-identical and the two
+turns remain failed/completed. Exactly one replacement engine is admitted.
+Supervisor inspected the result and the probe's full assertions; no redundant
+rerun was needed. This closes the reproduced dead-engine case for taskless Flow
+and private native Home only. Managed-account selection, surviving-turn driver
+loss and exact Flow history consumption are still open.
+The final native pair, `native-flow-live-final` and `native-flow-loss-final`,
+both passes on CLI `4ac6ec1310b509c3ba97884902a5a1f5dc7982da6c08ea540b216a68e98835f3`:
+live retry retains generation 1, dead-engine retry advances 1→2. All-target
+Clippy passes before the subsequent graph repair (`flow-native-clippy.log`,
+14.91s). These are matching private-fixture cases, not a full gate.
+
+Independent `supervisor-flow-recovered-origin-1` passes on the same `4ac6ec13`
+CLI. The fixture deliberately deletes only a failed native turn's SQL completion,
+retains its start, stops the exact engine, and retries publicly under generation
+2. Public Session history restores the failure under generation 1/original Exec
+and shows success under generation 2/new Exec; repeated reads are identical.
+Session/thread, prior start and two distinct outcomes survive. The receipt retains
+the exact probe source/digest. Comment `18375b37-9bf0-4e8b-97da-0d23c73bef7e`
+relays this result. Missing SQL completion was simulated; actual write failure,
+missed-usage recovery, managed accounts and Flow's exact consumption are not proven.
+
+The next ownership test batch did not execute: `conversation-engine-ownership.log`
+failed compilation because a test still called the deleted review-only
+`SessionFlowMembership::of_position`. Main is repairing that fixture against the
+current reader. This does not invalidate the separately built CLI probe, but no
+passing ownership-suite result follows from it.
+
+After deleting that obsolete call, `conversation-engine-ownership-2.log` passes
+**4/4** (26.12s compile, 1.373s tests): retained nested capture, recovered receipt
+missingness/conflicts, Flow conversation reservation/retry, and copied-Home
+history without live driver/endpoint/process authority. Those scopes differ:
+the nested test now checks capture only, not the public Session projection.
+
+Supervisor found a resulting DTO mismatch: `surface` emits the stored preorder
+numeric node as text, while Desktop's `WorkspaceBreadcrumbBar.flowTarget` still
+looks it up in a graph keyed by structural strings. The nested fixture's key
+`1/fix/1` and stored node 3 differ; nodes after an XOR diverge too. Comment
+`f103c020-37f9-49c1-8c39-08c4c984bc00` requests coordinated graph/membership/Swift
+conversion and a stored-Session-to-graph regression, preserving the accepted
+numeric-node model. This is source evidence, not a rendered Desktop observation.
+The green capture-only test does not establish that consumer boundary.
+
+Main's replacement behavioral regression reaches the reported mismatch:
+`stored-session-graph-red.log` compiles in 26.80s, then fails its stored-Session
+projection at `Some("3")` versus `Some("1/fix/1")` (1.304s test). The fixture
+reserves real SQL Session/Run rows at nested, post-XOR and initial nodes, moves
+the cursor, and checks retained earlier/current occurrences, labels and iteration
+tuples. This is an executed Rust projection failure, still not a rendered UI
+result. Main is preserving the current graph wire contract until the coordinated
+numeric DTO conversion; that conversion remains required for the final model.
+
+The repaired stored-Session test passes in `stored-session-graph-green.log`
+(26.45s compile, 1.341s test). The existing FlowGraph now resolves its stored
+preorder node into the existing wire key without consulting the current cursor;
+nested, post-XOR and earlier/current projections agree. This preserves the
+current Desktop contract; numeric graph/DTO migration is still unfinished.
+
+Final checkpoint static analysis passes in `flow-native-final-clippy-2.log`
+(14.92s); its preceding attempt flagged the new test's environment MutexGuard
+held across await points and is retained as a failed check. `canonical-engine.log` materializes all 22 drafts as
+0.12.25.001_release in a disposable source copy and passes **4/4** (26.79s compile,
+2.004s tests): receipt recovery/conflicts, copied-Home authority removal, stored
+Session-to-graph projection, and canonical initialization/upgrade preservation.
+These do not establish installed-Home migration or the unfinished ownership paths.
+
+A separate **driver-loss / surviving-engine** probe also fails against the same
+CLI bytes: `supervisor-flow-driver-loss-1/results.json`. The native turn reaches
+a held synthetic response, the fixture kills its own lf process group (exit -9),
+and PID/start evidence confirms the separately grouped Codex engine survives.
+Public `flow resume --retry` refuses before attachment: `Flow ... is waiting for
+Run ...; its completion is not recorded`. The Flow remains current without a
+failure record. This supersedes the predicted busy-send as the earliest observed
+blocker on that path; the busy-send source concern remains later in recovery.
+Verified comment `7e34bc04-bb84-4104-a57e-d65e8985186a` ties the counterexample
+to the planned exact Session-history consumption and Run removal. Do not infer
+Run success or interruption from process disappearance. This probe does not prove
+native turn completion after driver death; it establishes surviving engine and
+public recovery refusal. Fixture children were cleaned up under exact identity.
+
+Earlier checkpoint **2958d289c0e4087118e6920390fa6c8975c216d8**, base
 **c512813b5b333f2ae012503b1781fcbd458be67a**, [PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296).
 Remote branch, GitHub and Task PR row independently agree. Manual rebase was
 conflict-free, zero commits behind the freshly observed main. Auto-merge is off.
@@ -58,7 +231,7 @@ Jack's publication direction was relayed in comment
 `de0d4762-6acb-4535-af07-45c9ac20d8c0`; it makes this implementation checkpoint
 available to dependent Tasks, without claiming completion.
 
-CI **36487487807** is the current checkpoint run. Python, website, installation,
+CI **36487487807** belongs to that earlier checkpoint. Python, website, installation,
 smoke, migration, architecture, Rust lint, Swift and UI compile checks passed.
 Rust stopped at two review-completion fixtures that cannot resolve `lf` on the
 clean CI PATH (`controller/task/mod.rs:952`), after 11 passes, with 1,912 tests
@@ -306,14 +479,14 @@ that their recommendations or fixes have been implemented:
 
 ## Measurement and history
 
-Latest fixed production-prefix measurement, local checkpoint `7f357827a` versus
-`a2b59ed50`: **+13,577 / -29,448 = -15,871** across Rust/Swift,
+Latest fixed production-prefix measurement, published checkpoint `705645cd1` versus
+`a2b59ed50`: **+13,576 / -29,448 = -15,872** across Rust/Swift,
 Python/shell and SQL. Tests/docs excluded, no rename detection, trailing test
 modules excluded with the known trailing production block retained. Repeating
-the method reproduced the prior `d8665a753` receipt exactly before measuring the
-new checkpoint. Receipt: `.lf/tmp/execution-model/status-counts-7f357827a.json`.
-This includes the committed ancestry work and excludes the pending import-report
-repair; it is not a new published-head count. The earlier local checkpoint was
+the method reproduced the prior `7f357827a` receipt exactly before measuring the
+new checkpoint. Receipt: `.lf/tmp/execution-model/status-counts-705645cd1.json`.
+This includes the committed ancestry work and import-report repair; ongoing
+headless Flow conversion is excluded. The earlier local checkpoint was
 **+13,240 / -29,446 = -16,206** against `c512813b5`.
 Changing merge bases changes the comparison; moved files alone never count as
 removed code. Earlier published count remains in `status-counts-e13f29909.json`.

@@ -104,6 +104,55 @@ impl SqliteStore {
         ).optional()?)
     }
 
+    pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    pub(crate) fn session_provider_process(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<(u32, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT provider_pid,provider_started_at FROM agent_sessions WHERE id=?1
+             AND provider_pid IS NOT NULL AND provider_started_at IS NOT NULL",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    pub(crate) fn record_session_provider_process(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        pid: u32,
+        started_at: i64,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        tx.execute(
+            "UPDATE agent_sessions SET provider_pid=?2,provider_started_at=?3 WHERE id=?1",
+            params![session, pid, started_at],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn record_session_connection(
         &self,
         session: &str,
@@ -179,13 +228,18 @@ impl SqliteStore {
         };
         tx.execute(
             "UPDATE agent_sessions SET driver_exec_id=?2,driver_generation=?3,
-                provider_generation=?4,provider_exec_id=?5 WHERE id=?1",
+                provider_generation=?4,provider_exec_id=?5,
+                provider_endpoint=CASE WHEN ?6 THEN NULL ELSE provider_endpoint END,
+                provider_pid=CASE WHEN ?6 THEN NULL ELSE provider_pid END,
+                provider_started_at=CASE WHEN ?6 THEN NULL ELSE provider_started_at END
+             WHERE id=?1",
             params![
                 session,
                 driver.exec_id,
                 driver.generation,
                 driver.provider_generation,
-                driver.provider_exec_id
+                driver.provider_exec_id,
+                replace_provider
             ],
         )?;
         tx.commit()?;

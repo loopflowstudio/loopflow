@@ -1620,9 +1620,50 @@ impl CaptureHandle {
                 "Conversation already has a driver; connect to it".into(),
             ));
         }
-        let driver = store.claim_session_driver(&session.id, expected.as_ref(), &exec_id, true)?;
+        let mut replace_provider = match store.session_provider_process(&session.id)? {
+            Some((pid, started)) => match crate::journal::process_started_at(pid) {
+                Ok(Some(current)) => (current - started).abs() > 3,
+                Ok(None) => true,
+                Err(_) => false,
+            },
+            None => expected.is_none(),
+        };
+        let connection = store.session_connection(&session.id)?;
+        if replace_provider {
+            if let Some((endpoint, _)) = &connection {
+                // A launcher can have handed its engine to another process.
+                // A surviving connection wins over the old launcher's exit;
+                // only ordinary absence/refusal permits dead-engine recovery.
+                replace_provider = match std::os::unix::net::UnixStream::connect(endpoint) {
+                    Ok(_) => false,
+                    Err(error) => matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ),
+                };
+            }
+        }
+        if !replace_provider && connection.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Conversation has no connection and no confirmed engine exit".into(),
+            ));
+        }
+        let driver = store.claim_session_driver(
+            &session.id,
+            expected.as_ref(),
+            &exec_id,
+            replace_provider,
+        )?;
         capture.driver = Some((session.id, driver));
         Ok(())
+    }
+
+    pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<String>> {
+        let capture = self.0.lock().expect("Run capture mutex poisoned");
+        let Some((session, _)) = &capture.driver else {
+            return Ok(None);
+        };
+        row_store(&capture.dir)?.session_thread(session)
     }
 
     pub(crate) fn session_driver(&self) -> Option<(String, crate::exec::SessionDriver)> {

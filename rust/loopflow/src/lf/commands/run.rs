@@ -1389,9 +1389,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
-        let registry_blocker = home.path().join("unreadable-registry");
-        std::fs::create_dir(&registry_blocker).unwrap();
-        std::env::set_var("LF_DB_PATH", &registry_blocker);
+        let registry = home.path().join("loopflow.db");
+        std::env::set_var("LF_DB_PATH", &registry);
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
         std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
         std::env::set_var(crate::durable::RUN_ID_ENV, RunId::new().as_str());
@@ -1507,7 +1506,15 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert_eq!(accounts.len(), 2);
         assert!(accounts.iter().all(|event| event["account_id"].is_null()));
         assert_ne!(accounts[0]["attempt_key"], accounts[1]["attempt_key"]);
-        assert!(registry_blocker.is_dir());
+        assert!(registry.is_file());
+        let db = rusqlite::Connection::open(&registry).unwrap();
+        let tasks: i64 = db
+            .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            tasks, 0,
+            "agent work needs storage, not registered planning Work"
+        );
     }
 
     #[cfg(unix)]

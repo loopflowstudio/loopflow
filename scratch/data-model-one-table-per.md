@@ -18,9 +18,12 @@ reviewable account of usage, owners, deletion and remaining deployment evidence.
 A plan, new tables, renamed types, one passing slice or a contributor's conclusion
 alone does not reach that stop. Publication, installation and real-Home conversion
 are separate actions; no branch binary may touch the installed Home.
-Until the code-complete review is returned to Jack, checkpoint locally only:
-no push, PR publication/mutation, landing, installation or live-Home conversion.
-This overrides publication defaults in individual skills. The saved 13-step
+Jack authorized publishing the next verified checkpoint on 2026-09-28 so
+dependent Tasks could use it. That checkpoint is published as `e13f29909` on
+PR #1296, based on `c512813b5`; the remote branch, GitHub head and Task record
+were independently checked. This supersedes the earlier local-only hold for
+that publication, without claiming code completion or authorizing landing,
+installation or live-Home conversion. The saved 13-step
 feature invocation still contains implement → compress → review-slice →
 concept-review → loop-decide, then a human demo boundary. Preserve its captured
 order; a partial implementation's concept review is not the requested finish.

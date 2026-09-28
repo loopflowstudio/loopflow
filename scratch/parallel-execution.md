@@ -471,3 +471,95 @@ and Run removal, import preservation, exact Flow success consumption, normalized
 usage and Desktop history/off-roadmap ancestry/pane retention, final dense
 measurements and concept review. Configured provider/Desktop, real-Home migration
 and release are not established by this checkpoint.
+
+### Published checkpoint and canonical CI repair, 2026-09-28
+
+Published e13f299093d2234b3728a8063ad310fd212f62eb through the captured installed
+CLI/Home. Remote branch, GitHub#1296 and the Task's publication.github.head_sha
+agree. Base remains c512813b5 (79 ahead/0 behind at publication), no auto-merge,
+working tree clean afterward. Saved invocation1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c
+still selects implement in its13-step captured Flow. Readbacks remain under
+.lf/tmp/rebase-integration/. No landing or installed-Home conversion occurred.
+
+CI run36482349277 exposed the canonical empty-draft initialization path nesting
+migration transactions. The physical conversion is held until this is repaired.
+`canonical-init-red.log` reproduces the exact error locally with an explicit
+empty manifest. `canonical-init-repair.log` passes4/4 (compile30.91s/tests3.016s):
+fresh in-memory/file initialization, populated canonical upgrade with retained
+previous-generation backup, retry, concurrent draft initialization, backup/writer
+exclusion and current-store lock behavior. The repair keeps one transaction
+owner; canonical file migration prepares WAL and its lock before entering it.
+The three exact CI controller failures still require the materialized-source
+replay. No draft checksum was changed.
+
+The Rust installation fixture no longer requires the removed --daemon-target;
+retained CLI target, Home, preview and unchanged-store assertions remain. Its
+real installation proof requires the disposable container harness, never this OS
+account. Python release contribution has been read and accepted:4 focused
+simulated installer checks pass; source assertions still require candidate-owned
+promotion/CLI target and prohibit direct activation. Website contribution remains
+independent; main replaced its separately owned obsolete portable-HTML Run phrase.
+
+Resource preflight fell to60.2GiB free below64GiB. Builds held. The prescribed
+--recover launched uv cache prune under uv run and remained pending; lsof showed
+both owned parent66562 and child68679 opening the same cache lock. Main terminated
+only child68679 to release this attempt; retry without an enclosing uv run is
+pending. No shared live source, installed state or provider was targeted.
+
+The same recovery attempt subsequently completed (exit0), so the proposed retry
+was unnecessary. Cache pruning failed without deleting cache bytes; the resource
+script reclaimed allowlisted inactive build artifacts and reported65.9GiB free.
+The canonical-materialized7-test replay is running in a disposable source copy
+with inherited authority removed. No product build was launched before recovery.
+
+Website handoff read in full after its writer returned. Main's final portable
+HTML check passes1/1 in0.82s (`portable-html-repair.log`), including generated
+freshness, title, canonical execution link and standalone stylesheet behavior.
+The contributor's security browser pass remains scoped to its unchanged bytes.
+The resource-recovery contributor owns scripts/resource_envelope.py and its
+Python tests; main does not edit or checkpoint that active contribution.
+
+Canonical replay is green: `canonical-materialized-repair.log`,7/7 in4.373s,
+compile31.14s, all19 drafts materialized only in the recorded disposable copy.
+It includes all3 exact failing CI controller tests and the4 migration checks.
+
+The disposable-account installation harness passed3/4, including retained-pair
+compatibility. Fourth test failed at its initial Task run because tmux is absent.
+Trace: ensure_flow_position calls park_at_review on a human boundary with no
+pending Session, before launch_task_process's is_human return. Park reserves an
+unpublished review; prepare launches its terminal because session_run_id only
+returns published work. Production behavior is intentional, not an autonomous
+cursor mistake. The fixture now seeds the existing published review it intends
+to complete, using normal reservation and explicit synthetic publication; no
+terminal/provider is launched. Branch-only feedback is written through the
+existing ready_session operation. Its installed authority, stale token, retry,
+branch isolation and single-consumption assertions remain; rerun pending.
+
+Container cleanup completed on the failure. The source snapshot predates removal
+of one unused `complete` binding found by its compiler. Disk fell below64GiB
+after the builds; recovery is running from the activated virtualenv without an
+outer uv process before any further product build.
+
+Installed-readiness repair passes in the disposable Docker account:
+`task-review-installation-final.log`,1/1 in17.31s after23.69s compilation.
+The preceding targeted rerun reached stale readiness and failed only at an old
+error string; the final fixture requires current `Session is stale` and unchanged
+saved Flow. The first3 installation checks passed in the original run; no broad
+repeat was needed. Containers were removed after each run. These are real CLI
+installation-routing proofs with synthetic published review evidence, not an
+actual provider/terminal launch or installed-host acceptance.
+
+Resource handoff is read and accepted:6 focused tests plus Ruff/format and a
+private real uv reproduction. TESTING.md now names the15s timeout and retry
+condition. Main's real recovery used this bounded path, timed out explicitly,
+and continued;64.6GiB free was observed. No global-cache-prune success is claimed.
+The next preflight passed64.4GiB; all-target Clippy is running serially.
+Canonical history check retains55 shipped migrations and19 drafts; architecture
+inventory passes its declared coverage. Full physical owner conversion, restart,
+import/Flow/usage/Desktop acceptance remains outstanding.
+
+CI-repair all-target Clippy passes (`ci-repair-clippy.log`,16.70s); formatting
+and working-diff whitespace pass. All contributor ownership has returned. This
+checkpoint includes the canonical transaction repair, installed-readiness fixture
+reconciliation, stale installer/website assertions and bounded cache recovery.
+It does not establish full CI, physical owner conversion or code completion.

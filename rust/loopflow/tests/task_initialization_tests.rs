@@ -389,8 +389,26 @@ fn task_review_completion_consumes_only_installed_readiness() {
         failure: None,
         updated_at: time::OffsetDateTime::now_utc(),
     };
-    runtime
+    let position = runtime
         .block_on(task.store.start_task_flow(&task.task.id, position))
+        .unwrap();
+    // This proof consumes an existing review's readiness. Seed its acknowledged
+    // launch, without starting a terminal or provider in the installation fixture.
+    let position = runtime
+        .block_on(
+            task.store
+                .reserve_task_review(position.id(), position.version),
+        )
+        .unwrap();
+    let (_, review) = runtime
+        .block_on(task.store.reserve_review_run(&position))
+        .unwrap();
+    Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE runs SET published=1, provider='claude', model='sonnet' WHERE id=?1",
+            [review.id.as_str()],
+        )
         .unwrap();
     let installation = installation::Installation::new(home.path());
     let command = |cli: &std::path::Path, selected_home: &std::path::Path, args: &[&str]| {
@@ -475,18 +493,17 @@ fn task_review_completion_consumes_only_installed_readiness() {
             &loopflow::store::StorageConfig::sqlite(branch_data.join("loopflow.db")),
         ))
         .unwrap();
-    let copied = runtime
-        .block_on(branch_store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
     let session_id = position.pending_session_id.as_ref().unwrap();
-    let (mut session, run) = runtime
+    let (session, run) = runtime
         .block_on(task.store.session(session_id))
         .unwrap()
         .unwrap();
-    session.ready_summary = Some("Branch-only feedback must stay private".into());
     runtime
-        .block_on(branch_store.create_session(session, run, Some(copied)))
+        .block_on(branch_store.ready_session(
+            &session.id,
+            &run.id,
+            "Branch-only feedback must stay private",
+        ))
         .unwrap();
     let copied = runtime
         .block_on(branch_store.task_flow(&task.task.id))
@@ -569,7 +586,18 @@ fn task_review_completion_consumes_only_installed_readiness() {
     };
     let stale = ready(&token);
     assert!(!stale.status.success());
-    assert!(String::from_utf8_lossy(&stale.stderr).contains("review session is stale"));
+    assert!(
+        String::from_utf8_lossy(&stale.stderr).contains("Session is stale"),
+        "{}",
+        String::from_utf8_lossy(&stale.stderr)
+    );
+    assert_eq!(
+        runtime
+            .block_on(task.store.task_flow(&task.task.id))
+            .unwrap()
+            .unwrap(),
+        position
+    );
     token["token"]["iteration"] = position.cursor.iteration.into();
     let ready = ready(&token);
     assert!(

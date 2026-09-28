@@ -40,7 +40,7 @@ impl SessionEventKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Session {
+pub struct AgentSession {
     pub id: String,
     pub current_run_id: RunId,
     pub kind: SessionKind,

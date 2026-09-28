@@ -481,7 +481,7 @@ def _public_connection_contract(
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
             endpoint, thread, generation = database.execute(
                 "SELECT provider_endpoint,provider_thread,provider_generation "
-                "FROM sessions WHERE id=?",
+                "FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
         engine = Client(Path(endpoint))
@@ -531,7 +531,7 @@ def _public_connection_contract(
             with sqlite3.connect(env["LF_DB_PATH"]) as database:
                 outcome = database.execute(
                     "SELECT outcome FROM execs "
-                    "WHERE id=(SELECT provider_exec_id FROM sessions WHERE id=?)",
+                    "WHERE id=(SELECT provider_exec_id FROM agent_sessions WHERE id=?)",
                     (session,),
                 ).fetchone()[0]
             assert outcome == "interrupted", outcome
@@ -567,7 +567,7 @@ def _public_connection_contract(
         )
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
             driver, observed_generation, interactive = database.execute(
-                "SELECT driver_exec_id,provider_generation,interactive FROM sessions WHERE id=?",
+                "SELECT driver_exec_id,provider_generation,interactive FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
             before = {row[0] for row in database.execute("SELECT id FROM execs")}
@@ -620,7 +620,7 @@ def _public_connection_contract(
             assert server.held.wait(10), "provider did not reach held third turn"
             with sqlite3.connect(env["LF_DB_PATH"]) as database:
                 original_driver = database.execute(
-                    "SELECT driver_exec_id FROM sessions WHERE id=?", (session,)
+                    "SELECT driver_exec_id FROM agent_sessions WHERE id=?", (session,)
                 ).fetchone()[0]
             departed = []
             for child in processes:
@@ -735,7 +735,7 @@ def _public_connection_contract(
 
 def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses) -> dict:
     with sqlite3.connect(env["LF_DB_PATH"]) as database:
-        existing = {row[0] for row in database.execute("SELECT id FROM sessions")}
+        existing = {row[0] for row in database.execute("SELECT id FROM agent_sessions")}
     server.held.clear()
     server.release.clear()
     child = subprocess.Popen(
@@ -751,7 +751,7 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
             sessions = [
                 row[0]
-                for row in database.execute("SELECT id FROM sessions")
+                for row in database.execute("SELECT id FROM agent_sessions")
                 if row[0] not in existing
             ]
         assert len(sessions) == 1, sessions
@@ -847,14 +847,14 @@ def _launch_contract(binary: Path, work: Path, env: dict[str, str], results: dic
         ).fetchall()
         results["observed_agent_children"] = children
         results["observed_session_driver"] = database.execute(
-            "SELECT provider_exec_id,driver_exec_id,provider_generation FROM sessions WHERE id=?",
+            "SELECT provider_exec_id,driver_exec_id,provider_generation FROM agent_sessions WHERE id=?",
             (results["session_id"],),
         ).fetchone()
         assert len(children) == 1, children
         child, parent, session, generation = children[0]
         assert session == results["session_id"] and generation == 1, children
         creator = database.execute(
-            "SELECT provider_exec_id,driver_exec_id FROM sessions WHERE id=?", (session,)
+            "SELECT provider_exec_id,driver_exec_id FROM agent_sessions WHERE id=?", (session,)
         ).fetchone()
         assert creator == (parent, None), (creator, children)
         assert database.execute("SELECT outcome FROM execs WHERE id=?", (parent,)).fetchone() == (

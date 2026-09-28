@@ -169,7 +169,7 @@ impl Fixture {
         self.db()
             .query_row(
                 "SELECT s.id, s.kind, s.title, s.title_source, s.completed_at IS NOT NULL
-                 FROM sessions s JOIN runs r ON r.session_id=s.id AND s.current_run_id=r.id
+                 FROM agent_sessions s JOIN runs r ON r.session_id=s.id AND s.current_run_id=r.id
                  WHERE r.id=?1",
                 [run_id],
                 |row| {
@@ -255,7 +255,7 @@ fn interactive_session_is_rows_from_launch_to_completion() {
 
     let (first, first_run) = fixture.attach(&LAUNCH);
     assert_eq!(
-        (fixture.count("sessions"), fixture.count("runs")),
+        (fixture.count("agent_sessions"), fixture.count("runs")),
         (1, 1),
         "launch reserves one Session and its Run"
     );
@@ -325,14 +325,20 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     assert_eq!(resumed_run, first_run);
     assert_eq!(fixture.sessions()[0]["state"], "active");
     fixture.release(resumed);
-    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (1, 1));
+    assert_eq!(
+        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (1, 1)
+    );
 
     // Another launch in the same checkout is another conversation.
     let (second, second_run) = fixture.attach(&LAUNCH);
     fixture.release(second);
     let (second_id, ..) = fixture.session_row(&second_run);
     assert_ne!(second_id, id);
-    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (2, 2));
+    assert_eq!(
+        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (2, 2)
+    );
     assert_eq!(fixture.sessions().len(), 2);
 
     let completed = fixture.run(&["session", "complete", &id]);
@@ -414,7 +420,7 @@ fn interactive_run_records_checkout_and_declared_work() {
         "Review the parser",
     ]);
     assert_eq!(fixture.run_parents(&declared), parents("declared"));
-    assert_eq!(fixture.count("sessions"), 3);
+    assert_eq!(fixture.count("agent_sessions"), 3);
 }
 
 #[test]
@@ -455,7 +461,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             caller_run_id: None,
             ended: None,
         };
-        let session = loopflow::session::Session {
+        let session = loopflow::session::AgentSession {
             id: id.clone(),
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::Conversation,
@@ -724,7 +730,7 @@ fn ask_session_is_rows_from_request_to_answer() {
         fixture
             .db()
             .query_row(
-                "SELECT id, current_run_id FROM sessions WHERE kind='ask'",
+                "SELECT id, current_run_id FROM agent_sessions WHERE kind='ask'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -736,7 +742,10 @@ fn ask_session_is_rows_from_request_to_answer() {
             .contains("serve-ask")
             .then_some(())
     });
-    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (2, 2));
+    assert_eq!(
+        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (2, 2)
+    );
     let inherited = (
         Some(task.task.id.to_string()),
         Some(task.task.wave_id.to_string()),
@@ -803,7 +812,7 @@ fn ask_session_is_rows_from_request_to_answer() {
             .db()
             .query_row(
                 "SELECT title, ready_summary, current_run_id, completed_at IS NOT NULL
-                 FROM sessions WHERE id=?1",
+                 FROM agent_sessions WHERE id=?1",
                 [&id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
@@ -852,7 +861,7 @@ fn ask_session_is_rows_from_request_to_answer() {
     );
     let stale = inside(&first_run, &["session", "ready", "Late answer"]);
     assert!(!stale.status.success(), "{stale:?}");
-    assert_eq!(fixture.count("sessions"), 2);
+    assert_eq!(fixture.count("agent_sessions"), 2);
 
     let completed = fixture.run(&["session", "complete", &id]);
     assert!(completed.status.success(), "{completed:?}");
@@ -940,7 +949,7 @@ fn agent_admission_requires_the_store_before_provider_launch() {
     );
     let stored: (i64, i64) = rows
         .query_row(
-            "SELECT (SELECT count(*) FROM sessions), (SELECT count(*) FROM runs)",
+            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM runs)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -998,7 +1007,7 @@ impl Fixture {
         );
         self.db()
             .query_row(
-                "SELECT s.id, r.invocation_id, r.id FROM sessions s
+                "SELECT s.id, r.invocation_id, r.id FROM agent_sessions s
                  JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id
                  WHERE s.kind='flow_review'",
                 [],
@@ -1012,7 +1021,7 @@ impl Fixture {
         self.db()
             .query_row(
                 "SELECT title, title_source, ready_summary, current_run_id,
-                    completed_at IS NOT NULL FROM sessions WHERE id=?1",
+                    completed_at IS NOT NULL FROM agent_sessions WHERE id=?1",
                 [id],
                 |row| {
                     Ok((
@@ -1032,12 +1041,15 @@ impl Fixture {
 fn taskless_flow_review_is_rows_from_request_to_completion() {
     let fixture = Fixture::new(true);
     let (id, invocation, first_run) = fixture.waiting_review();
-    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (1, 1));
+    assert_eq!(
+        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (1, 1)
+    );
     let parents: (Option<String>, Option<String>, String, String) = fixture
         .db()
         .query_row(
             "SELECT r.task_id, f.task_id, f.pending_session_id, f.state
-             FROM runs r JOIN flow_invocations f ON f.id=r.invocation_id WHERE r.id=?1",
+             FROM runs r JOIN flow_sessions f ON f.id=r.invocation_id WHERE r.id=?1",
             [&first_run],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
@@ -1080,7 +1092,10 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
         String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
         "{waiting:?}"
     );
-    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (1, 1));
+    assert_eq!(
+        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (1, 1)
+    );
     let ready = inside(&first_run, &["session", "ready", "Ship the parser"]);
     assert!(ready.status.success(), "{ready:?}");
     let named = fixture.json(&["session", "rename", &id, "Parser review", "--json"]);
@@ -1124,7 +1139,7 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     let current: String = fixture
         .db()
         .query_row(
-            "SELECT current_run_id FROM flow_invocations WHERE id=?1",
+            "SELECT current_run_id FROM flow_sessions WHERE id=?1",
             [&invocation],
             |row| row.get(0),
         )
@@ -1153,13 +1168,16 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     let state: String = fixture
         .db()
         .query_row(
-            "SELECT state FROM flow_invocations WHERE id=?1",
+            "SELECT state FROM flow_sessions WHERE id=?1",
             [&invocation],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(state, "completed");
-    assert_eq!((fixture.count("sessions"), fixture.count("runs")), (1, 2));
+    assert_eq!(
+        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (1, 2)
+    );
     assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
 }
 
@@ -1210,7 +1228,7 @@ fn session_list_reads_a_taskless_review_from_sql() {
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
 fn import_stores_each_old_session_once_with_its_name() {
-    use loopflow::durable::{FlowInvocation, RunId};
+    use loopflow::durable::{FlowSession, RunId};
     use loopflow::engine::invocation::QueuedInvocation;
     use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
     use serde_json::json;
@@ -1317,7 +1335,7 @@ fn import_stores_each_old_session_once_with_its_name() {
             .store
             .start_task_flow(
                 &task.task.id,
-                FlowInvocation {
+                FlowSession {
                     invocation: QueuedInvocation::new("captured", vec![review]).unwrap(),
                     cursor: ExecutionCursor::default(),
                     version: 0,
@@ -1359,7 +1377,7 @@ fn import_stores_each_old_session_once_with_its_name() {
             caller_run_id: None,
             ended: None,
         };
-        let session = loopflow::session::Session {
+        let session = loopflow::session::AgentSession {
             id: review_id,
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::FlowReview,
@@ -1446,7 +1464,11 @@ fn import_stores_each_old_session_once_with_its_name() {
     );
 
     let planned = fixture.json(&["session", "import", "--dry-run", "--json"]);
-    assert_eq!(fixture.count("sessions"), 1, "a dry run stores nothing");
+    assert_eq!(
+        fixture.count("agent_sessions"),
+        1,
+        "a dry run stores nothing"
+    );
     let first = fixture.json(&["session", "import", "--json"]);
     for report in [&planned, &first] {
         for (kind, count) in [
@@ -1493,7 +1515,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         expected
     };
     assert_eq!(names(), expected);
-    assert_eq!(fixture.count("sessions"), 4);
+    assert_eq!(fixture.count("agent_sessions"), 4);
     assert_eq!(fixture.count("runs"), 6);
     // (session, invocation, caller, provider, outcome, ended) of an imported Run.
     type Imported = (
@@ -1575,7 +1597,7 @@ fn import_stores_each_old_session_once_with_its_name() {
     let feedback: String = fixture
         .db()
         .query_row(
-            "SELECT ready_summary FROM sessions WHERE id=?1",
+            "SELECT ready_summary FROM agent_sessions WHERE id=?1",
             [format!("flow:{invocation}:{boundary}")],
             |row| row.get(0),
         )
@@ -1694,7 +1716,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     let (review, invocation): (String, String) = fixture
         .db()
         .query_row(
-            "SELECT r.id, r.invocation_id FROM sessions s
+            "SELECT r.id, r.invocation_id FROM agent_sessions s
              JOIN runs r ON r.id=s.current_run_id WHERE s.kind='flow_review'",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1903,7 +1925,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     let (invocation, failure, pointer): (String, Option<String>, Option<String>) = fixture
         .db()
         .query_row(
-            "SELECT f.id, f.failure_json, t.current_invocation_id FROM flow_invocations f
+            "SELECT f.id, f.failure_json, t.current_invocation_id FROM flow_sessions f
              JOIN tasks t ON t.id=f.task_id WHERE f.task_id=?1",
             [&task_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -1990,7 +2012,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     let state: String = fixture
         .db()
         .query_row(
-            "SELECT state FROM flow_invocations WHERE id=?1",
+            "SELECT state FROM flow_sessions WHERE id=?1",
             [&invocation],
             |row| row.get(0),
         )
@@ -2034,7 +2056,7 @@ fn a_taskless_step_records_its_decision_on_the_invocation() {
     let (state, task, cursor): (String, Option<String>, String) = fixture
         .db()
         .query_row(
-            "SELECT state, task_id, review_json FROM flow_invocations",
+            "SELECT state, task_id, review_json FROM flow_sessions",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

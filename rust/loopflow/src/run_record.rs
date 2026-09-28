@@ -90,7 +90,7 @@ pub struct RunFlowStep {
 
 impl RunFlowStep {
     /// The step an invocation's cursor selects; its Task is the invocation's.
-    pub(crate) fn of(flow: &crate::durable::FlowInvocation) -> anyhow::Result<Self> {
+    pub(crate) fn of(flow: &crate::durable::FlowSession) -> anyhow::Result<Self> {
         let step = flow
             .step_name()
             .ok_or_else(|| anyhow::anyhow!("Flow position has no current step"))?;
@@ -1821,7 +1821,7 @@ impl RunCapture {
         if manifest.harness != "loopflow" && run.invocation_id.is_none() {
             let id = format!("session_{}", Uuid::new_v4().simple());
             run.session_id = Some(id.clone());
-            let session = crate::session::Session {
+            let session = crate::session::AgentSession {
                 id,
                 current_run_id: run.id.clone(),
                 kind: crate::session::SessionKind::Conversation,

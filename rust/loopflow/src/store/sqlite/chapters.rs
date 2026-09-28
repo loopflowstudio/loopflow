@@ -74,7 +74,7 @@ impl SqliteStore {
         )?;
         let claimed: bool = conn.query_row(
             &format!(
-                "SELECT EXISTS(SELECT 1 FROM flow_invocations
+                "SELECT EXISTS(SELECT 1 FROM flow_sessions
                  WHERE {} AND claim_json IS NOT NULL)",
                 super::flows::TASK_INVOCATION
             ),
@@ -105,7 +105,7 @@ impl SqliteStore {
         tx.execute(
             &format!(
                 "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
-                 AND NOT EXISTS(SELECT 1 FROM flow_invocations WHERE {} AND claim_json IS NOT NULL)
+                 AND NOT EXISTS(SELECT 1 FROM flow_sessions WHERE {} AND claim_json IS NOT NULL)
                  AND started_at IS NULL
                  AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1
                     AND (publication_requested_at IS NOT NULL OR merge_commit IS NOT NULL))

@@ -1,4 +1,4 @@
-use crate::durable::{FlowInvocation, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
+use crate::durable::{FlowSession, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::transitions::{FlowDecision, FlowVerdict};
 use crate::engine::{
@@ -99,7 +99,7 @@ fn execute(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let flow = FlowInvocation {
+    let flow = FlowSession {
         invocation: QueuedInvocation::new(flow_name, items.to_vec())?,
         cursor: ExecutionCursor::default(),
         version: 0,
@@ -304,7 +304,7 @@ fn active_step() -> Result<flow_run::ActiveStep> {
 fn drive_saved(
     runtime: &tokio::runtime::Runtime,
     store: SharedStore,
-    flow: FlowInvocation,
+    flow: FlowSession,
     cli: &Cli,
 ) -> Result<FlowOutcome> {
     let mut launch = cli.launch_options();
@@ -348,7 +348,7 @@ impl std::error::Error for StepEnd {}
 /// provider runs and how a review parks.
 pub(crate) async fn drive(
     store: SharedStore,
-    flow: FlowInvocation,
+    flow: FlowSession,
     claim: Option<TaskWorkerClaim>,
     launcher: &dyn StepLauncher,
 ) -> Result<FlowOutcome> {
@@ -541,13 +541,13 @@ impl Drop for EnvVarGuard {
 pub(crate) trait StepLauncher: Send + Sync {
     /// Park at the review: its feedback once the review completed, `None`
     /// while it waits.
-    async fn review(&self, flow: &FlowInvocation, skill: &ConcreteSkill) -> Result<Option<String>>;
+    async fn review(&self, flow: &FlowSession, skill: &ConcreteSkill) -> Result<Option<String>>;
 
     /// Run the step's provider to completion. `flow.current_attempt` is the
     /// reserved Run the launch publishes. Returns the step's progress summary.
     async fn launch(
         &self,
-        flow: &FlowInvocation,
+        flow: &FlowSession,
         skill: &ConcreteSkill,
         ctx: &ExecutionContext,
         claim: Option<&TaskWorkerClaim>,
@@ -578,7 +578,7 @@ impl CliFlowExecutor<'_> {
             .clone()
     }
 
-    fn observe(&self, flow: &FlowInvocation) {
+    fn observe(&self, flow: &FlowSession) {
         *self.version.lock().expect("Flow version mutex poisoned") = flow.version;
         if flow.claim.is_none() {
             *self.claim.lock().expect("Flow claim mutex poisoned") = None;
@@ -586,7 +586,7 @@ impl CliFlowExecutor<'_> {
     }
 
     /// The row at the step about to run, with any earlier attempt settled.
-    async fn begin(&self) -> Result<FlowInvocation> {
+    async fn begin(&self) -> Result<FlowSession> {
         let flow = self
             .store
             .recover_flow(&self.id, self.claim().as_ref())
@@ -600,7 +600,7 @@ impl CliFlowExecutor<'_> {
     }
 
     /// The step's Run, stored before anything launches it.
-    async fn reserve(&self, flow: FlowInvocation) -> Result<FlowInvocation> {
+    async fn reserve(&self, flow: FlowSession) -> Result<FlowSession> {
         let flow = self
             .store
             .reserve_attempt(&self.id, flow.version, self.claim().as_ref())
@@ -753,7 +753,7 @@ struct SavedLauncher {
 
 #[async_trait]
 impl StepLauncher for SavedLauncher {
-    async fn review(&self, flow: &FlowInvocation, skill: &ConcreteSkill) -> Result<Option<String>> {
+    async fn review(&self, flow: &FlowSession, skill: &ConcreteSkill) -> Result<Option<String>> {
         let feedback = crate::ops::flow_session::reserve(&self.store, flow).await?;
         if feedback.is_none() {
             eprintln!(
@@ -767,7 +767,7 @@ impl StepLauncher for SavedLauncher {
 
     async fn launch(
         &self,
-        flow: &FlowInvocation,
+        flow: &FlowSession,
         skill: &ConcreteSkill,
         ctx: &ExecutionContext,
         _claim: Option<&TaskWorkerClaim>,

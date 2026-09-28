@@ -30,9 +30,9 @@ kernel locks                  live local exclusion authority
 | --- | --- |
 | What is this Wave trying to do? | `wave/<name>/GOAL.md` and `MEMORY.md` |
 | What Projects and Tasks exist? | Linear, through the bounded PM projection |
-| What Task boundary should resume? | Work domain state joined to its exact `flow_invocations` row |
-| What saved Flow step should resume? | its `flow_invocations` row: cursor, current attempt Run and failure |
-| What human input is pending? | `sessions` rows joined to their current Runs |
+| What Task boundary should resume? | Work domain state joined to its exact `flow_sessions` row |
+| What saved Flow step should resume? | its `flow_sessions` row: cursor, current attempt Run and failure |
+| What human input is pending? | `agent_sessions` rows joined to their current Runs |
 | Which Runs worked on this Wave or Task? | `runs` rows |
 | What did one provider launch emit? | the Run record on the Home that launched it |
 | Is a local process moving now? | the OS process table joined to local command receipts |
@@ -57,12 +57,12 @@ The current application tables group by owner:
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
-| Project and Task progression | `projects`, `tasks`, `flow_invocations` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
-| Conversations and execution | `sessions`, `runs` | stable conversation identity, current Run, title and saved feedback; every Run's Session, invocation, Task, Wave, caller, provider, times and end |
+| Project and Task progression | `projects`, `tasks`, `flow_sessions` | Project operation evidence; managed Task's captured Flow, cursor, claim, and blocker |
+| Conversations and execution | `agent_sessions`, `runs` | stable conversation identity, current Run, title and saved feedback; every Run's Session, invocation, Task, Wave, caller, provider, times and end |
 | CLI processes | `execs` | one actual lf process, immutable causal parent and agent provenance, command completion; the journal transaction maintains its indexed summary |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
-| Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current Ask Sessions use `sessions` |
+| Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current Ask Sessions use `agent_sessions` |
 | PM projection | `pm_snapshots` | bounded Linear reads |
 | Metrics | `metric_instruments`, `metric_observations` | registered producers and accepted evidence |
 | PR landing | `pr_landings`, `ci_incidents` | exact-head supervision and bounded repair |
@@ -76,7 +76,7 @@ ordered development frontier and become released only through the release
 workflow.
 
 Project and Task progression lives on the Work records and exact
-`flow_invocations`; there is no controller table, provider continuation,
+`flow_sessions`; there is no controller table, provider continuation,
 phase epoch, active controller slot, Task writer token, or generic Work lease.
 The short advancement claim fences one Flow-position version and uses the
 existing process ledger for liveness evidence.
@@ -86,7 +86,7 @@ Flow settlement only touches the Task timestamp.
 
 The current Task invocation stores the shared `ExecutionCursor` tree in `review_json`;
 the current Flow name, step, node and human policy come from its captured graph.
-Session discovery joins `sessions` to its current `runs` row without decoding
+Session discovery joins `agent_sessions` to its current `runs` row without decoding
 unrelated invocations. Exact Task execution reads still validate the selected
 capture. Completion and restart close the invocation without deleting its
 capture, cursor or exact claim. Session completion and boundary settlement share
@@ -126,8 +126,8 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | `.lf/skills/`, `.lf/flows/`, `.lf/config.yaml` | repository-owned execution definitions | ordinary reviewed file edits |
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | authored Wave intent and evidence contracts | ordinary reviewed file edits |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | provider-launch manifest, streams, terminal | publish once, append, settle once |
-| current Home `flows/<invocation-id>/driver.lock` | saved Flow driver exclusion only; the Flow's definition, cursor, launch facts, current attempt, failure and completion are its `flow_invocations` row | kernel-held lock, no contents |
-| current Home `human-sessions/.<hash>.launch.lock` | Session launch exclusion only; an Ask's question, caller, readiness and answer are its `sessions` row and its Runs | kernel-held lock, no contents |
+| current Home `flows/<invocation-id>/driver.lock` | saved Flow driver exclusion only; the Flow's definition, cursor, launch facts, current attempt, failure and completion are its `flow_sessions` row | kernel-held lock, no contents |
+| current Home `human-sessions/.<hash>.launch.lock` | Session launch exclusion only; an Ask's question, caller, readiness and answer are its `agent_sessions` row and its Runs | kernel-held lock, no contents |
 | provider account homes | provider-native login and resume state | provider adapter owns format |
 | absolute Git directory `loopflow/` | writer and rebase receipts | kernel-held lock plus readable JSON |
 | machine-install root | versioned artifacts and switch receipts | stage immutably, select atomically |
@@ -243,3 +243,12 @@ provide.
 [Execution →](execution.md) owns Run-record writes.
 [Codebase map →](codebase.md) maps these stores to source modules and public
 surfaces.
+
+## Rust owner names
+
+Use `session::AgentSession` and `durable::FlowSession` in place of the former
+`session::Session` and `durable::FlowInvocation` types. These are source-breaking
+renames without aliases. The forward migration renames their existing SQLite
+tables in place; IDs, captures, claims and native receipts retain their bytes.
+Run fields and history consumers still require the remaining ownership cutover;
+these renames alone do not implement the final execution model.

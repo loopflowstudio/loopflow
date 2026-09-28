@@ -416,7 +416,7 @@ fn prepare_ask(
         )
         .and_then(|db| {
             db.query_row(
-                "SELECT id, current_run_id FROM sessions WHERE kind='ask' AND request=?1",
+                "SELECT id, current_run_id FROM agent_sessions WHERE kind='ask' AND request=?1",
                 [question],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )

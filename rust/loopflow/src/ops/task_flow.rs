@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{FlowInvocation, WorkStatus};
+use crate::durable::{FlowSession, WorkStatus};
 use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowReturn};
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 
@@ -47,7 +47,7 @@ pub struct PinnedTaskFlow {
 }
 
 impl PinnedTaskFlow {
-    pub(crate) fn new(position: &FlowInvocation, execution: &TaskExecutionSnapshot) -> Self {
+    pub(crate) fn new(position: &FlowSession, execution: &TaskExecutionSnapshot) -> Self {
         let projection = project_cursor(&position.invocation.steps, &position.cursor);
         Self {
             invocation_id: position.invocation.id.clone(),

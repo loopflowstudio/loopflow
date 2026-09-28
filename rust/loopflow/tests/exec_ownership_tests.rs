@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use loopflow::durable::RunId;
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
-use loopflow::session::{Run, Session, SessionKind, TitleSource};
+use loopflow::session::{AgentSession, Run, SessionKind, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
@@ -367,7 +367,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
     let run_id = RunId::new();
     store
         .create_session(
-            Session {
+            AgentSession {
                 id: session_id.into(),
                 current_run_id: run_id.clone(),
                 kind: SessionKind::Conversation,

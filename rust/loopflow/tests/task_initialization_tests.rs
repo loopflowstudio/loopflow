@@ -364,7 +364,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let position = loopflow::durable::FlowInvocation {
+    let position = loopflow::durable::FlowSession {
         task_id: Some(task.task.id.clone()),
         wave_id: Some(task.task.wave_id.clone()),
         cwd: task.task.worktree.clone(),
@@ -677,7 +677,7 @@ fn direct_open_preserves_another_installations_development_store() {
 
 #[test]
 fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
-    use loopflow::durable::{FlowInvocation, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
+    use loopflow::durable::{FlowSession, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use sha2::{Digest, Sha256};
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -710,7 +710,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
                     if skill.id.as_deref() == Some("decide"))
             })
             .expect("pursue has an implementation decision boundary");
-        let position = FlowInvocation {
+        let position = FlowSession {
             invocation,
             cursor: loopflow::engine::ExecutionCursor {
                 index: decision_index,
@@ -786,7 +786,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             "type": "text", "text": "Fixture decision is active"
         }))).unwrap();
         // The deciding Run and its recovery share one keyed unblock Session.
-        let keyed = |position: &FlowInvocation| {
+        let keyed = |position: &FlowSession| {
             format!(
                 "ask_once_{}",
                 hex::encode(Sha256::digest(position.blocker_key().unwrap().as_bytes()))
@@ -812,7 +812,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             caller_run_id: Some(caller),
             ended: None,
         };
-        let ask_session = |run: &loopflow::session::Run| loopflow::session::Session {
+        let ask_session = |run: &loopflow::session::Run| loopflow::session::AgentSession {
             id: run.session_id.clone().unwrap(),
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::Ask,

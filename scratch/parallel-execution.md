@@ -563,3 +563,41 @@ and working-diff whitespace pass. All contributor ownership has returned. This
 checkpoint includes the canonical transaction repair, installed-readiness fixture
 reconciliation, stale installer/website assertions and bounded cache recovery.
 It does not establish full CI, physical owner conversion or code completion.
+
+Repair checkpoint2958d289c was published to existing PR1296 under Jack's renewed
+publication direction. GitHub head, remote branch and Task publication and
+presentation heads agree; basec512813b5,80/0 ahead/behind after conflict-free
+manual rebase. Auto-merge remains absent. The saved invocation is unchanged.
+
+Physical conversion began afterward: AgentSession and FlowSession Rust names,
+in-place agent_sessions/flow_sessions table rename with unchanged historical
+migration bytes, current SQL consumers and a populated preservation regression.
+This is retained intermediate work, not Run removal or cutover acceptance.
+The next focused command is held by resource preflight62.1GiB/64GiB; no build is
+running. Main is removing only this checkout's rebuildable loopflow package
+artifacts with cargo clean -p loopflow, retaining dependencies and proof receipts.
+
+Owner rename proof passes3/3 (`renamed-owners.log`,28.87s compilation,1.374s
+tests): populated captures/claims/feedback/native history unchanged, no parallel
+old tables, and copied-store connection/driver exclusion. Branch copying still
+recognizes the historical table spelling only to remove copied operational
+authority before its one-time upgrade; current readers use the renamed owner.
+Physical names and Rust types are changed without aliases. Existing Run fields
+still require relocation. The five selected actual-CLI Session/Flow proofs are
+running; this is not cutover acceptance. Package cleanup removed13.2GiB of this
+checkout's artifacts; subsequent resource preflight passed75.2GiB.
+
+The five CLI selections first returned2pass/3fail: two obsolete count("sessions")
+assertions and one stdio-only shared Codex stand-in. Updated counts use the
+physical owner and the shared stand-in accepts the advertised Unix WebSocket.
+The four affected CLI assertions then passed, with one Nextest LEAK retained in
+renamed-owner-cli-repair.log. The socket stand-in now ends its own client and
+child after the synthetic completion; provider-fixture-teardown.log passes both
+Flow tests without a leak (16.791s). Production engine survival is unchanged.
+
+Hosted CI executable lookup failures are repaired under TestLfBinGuard, including
+the two additional reachable review fixtures identified by the supervisor.
+review-executable-pins.log passes4/4 (31.53s compile,1.572s tests). No production
+executable fallback was introduced. Shared mock transport is synthetic evidence,
+not a new live provider result. This remains an intermediate checkpoint; the
+next owner conversion moves ancestry and prospective bind off historical Runs.

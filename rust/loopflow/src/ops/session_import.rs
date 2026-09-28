@@ -16,12 +16,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::{FlowInvocation, RunId, TaskId, WorkRef};
+use crate::durable::{FlowSession, RunId, TaskId, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
 use crate::run_record::{AttributionSource, RunFlowMembership, RunManifest};
-use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, Run, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 #[derive(Debug, Serialize)]
@@ -135,12 +135,12 @@ impl FlowFile {
         Some((task, binding.wave_id))
     }
 
-    fn invocation(&self, work: Option<(Option<TaskId>, WaveId)>) -> FlowInvocation {
+    fn invocation(&self, work: Option<(Option<TaskId>, WaveId)>) -> FlowSession {
         let (task_id, wave_id) = match work {
             Some((task, wave)) => (task, Some(wave)),
             None => (None, None),
         };
-        FlowInvocation {
+        FlowSession {
             invocation: QueuedInvocation {
                 id: self.id.clone(),
                 flow: self.flow.clone(),
@@ -282,9 +282,9 @@ impl Import<'_> {
     async fn store(
         &mut self,
         kind: Stored,
-        session: Session,
+        session: AgentSession,
         run: Run,
-        review: Option<FlowInvocation>,
+        review: Option<FlowSession>,
     ) -> Result<Option<Stored>> {
         if self.store.session(&session.id).await?.is_some() {
             return Ok(Some(Stored::Unchanged));
@@ -405,7 +405,7 @@ impl Import<'_> {
             caller_run_id: Some(file.parent_run_id),
             ended: None,
         };
-        let session = Session {
+        let session = AgentSession {
             id: file.id,
             current_run_id: run.id.clone(),
             kind: SessionKind::Ask,
@@ -471,7 +471,7 @@ impl Import<'_> {
             caller_run_id: None,
             ended: None,
         };
-        let session = Session {
+        let session = AgentSession {
             id,
             current_run_id: run.id.clone(),
             kind: SessionKind::FlowReview,
@@ -547,7 +547,7 @@ impl Import<'_> {
             caller_run_id: None,
             ended: None,
         };
-        let session = Session {
+        let session = AgentSession {
             id,
             current_run_id: run.id.clone(),
             kind: SessionKind::Conversation,

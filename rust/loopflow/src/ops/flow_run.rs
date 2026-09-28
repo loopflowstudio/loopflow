@@ -1,6 +1,6 @@
 //! What a saved Flow keeps outside its invocation row: the driver's kernel
 //! lock and the step identity a Run carries in its environment. The cursor,
-//! attempt and failure live on `flow_invocations`.
+//! attempt and failure live on `flow_sessions`.
 use std::fs::{self, File, OpenOptions};
 
 use anyhow::{Context, Result};
@@ -18,7 +18,7 @@ pub(crate) struct ActiveStep {
 }
 
 impl ActiveStep {
-    pub(crate) fn of(flow: &crate::durable::FlowInvocation) -> Self {
+    pub(crate) fn of(flow: &crate::durable::FlowSession) -> Self {
         Self {
             invocation: flow.id().to_owned(),
             version: flow.version,

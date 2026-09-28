@@ -190,7 +190,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
             "BEGIN;
-             INSERT INTO sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
+             INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
              VALUES('conversation','run_fixture','Retained','human',1,'conversation',1);
              INSERT INTO runs(id,session_id,created_at,cwd,published)
              VALUES('run_fixture','conversation',1,'/fixture',1);

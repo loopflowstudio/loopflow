@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use time::OffsetDateTime;
 
 use crate::durable::{
-    FlowAttempt, FlowInvocation, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
+    FlowAttempt, FlowSession, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
     TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
 };
 use crate::engine::invocation::QueuedInvocation;
@@ -32,9 +32,9 @@ const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index
     (SELECT published FROM runs WHERE id=f.current_run_id),
     (SELECT outcome FROM runs WHERE id=f.current_run_id),
     f.pending_session_id,
-    (SELECT ready_summary FROM sessions WHERE id=f.pending_session_id),
+    (SELECT ready_summary FROM agent_sessions WHERE id=f.pending_session_id),
     f.worker_generation, f.claim_json, f.failure_json, f.state
-    FROM flow_invocations f LEFT JOIN tasks t ON t.id=f.task_id";
+    FROM flow_sessions f LEFT JOIN tasks t ON t.id=f.task_id";
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -44,7 +44,7 @@ fn stale(id: &str) -> StoreError {
     StoreError::InvalidAuthority(format!("Flow {id} changed under its driver"))
 }
 
-fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowInvocation>> {
+fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowSession>> {
     let invocation_json: String = row.get(0)?;
     let review_json: Option<String> = row.get(1)?;
     let step_index: i64 = row.get(2)?;
@@ -65,7 +65,7 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowInvoca
     let claim_json: Option<String> = row.get(17)?;
     let failure_json: Option<String> = row.get(18)?;
     let state: String = row.get(19)?;
-    let decode = || -> StoreResult<FlowInvocation> {
+    let decode = || -> StoreResult<FlowSession> {
         let invocation: QueuedInvocation = serde_json::from_str(&invocation_json)?;
         let updated_at = OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?;
         let mut failure = failure_json
@@ -84,7 +84,7 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowInvoca
                 invocation.id
             ))
         })?;
-        Ok(FlowInvocation {
+        Ok(FlowSession {
             cursor,
             version: u64::try_from(version).map_err(invalid)?,
             task_id: task_id
@@ -126,7 +126,7 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowInvoca
     }))
 }
 
-pub(super) fn flow_in(conn: &Connection, id: &str) -> StoreResult<Option<FlowInvocation>> {
+pub(super) fn flow_in(conn: &Connection, id: &str) -> StoreResult<Option<FlowSession>> {
     conn.query_row(&format!("{FLOW_SELECT} WHERE f.id=?1"), [id], read_flow)
         .optional()?
         .transpose()
@@ -136,7 +136,7 @@ pub(super) fn flow_in(conn: &Connection, id: &str) -> StoreResult<Option<FlowInv
 pub(super) fn task_flow_in(
     conn: &Connection,
     task_id: &TaskId,
-) -> StoreResult<Option<FlowInvocation>> {
+) -> StoreResult<Option<FlowSession>> {
     conn.query_row(
         &format!("{FLOW_SELECT} WHERE f.{TASK_INVOCATION}"),
         [task_id.as_str()],
@@ -152,7 +152,7 @@ pub(super) fn task_flow_in(
     })
 }
 
-fn current_flow_in(conn: &Connection, id: &str) -> StoreResult<FlowInvocation> {
+fn current_flow_in(conn: &Connection, id: &str) -> StoreResult<FlowSession> {
     let flow = flow_in(conn, id)?.ok_or(StoreError::NotFound)?;
     if flow.finished {
         return Err(StoreError::InvalidAuthority(format!(
@@ -193,7 +193,7 @@ pub(super) fn capture_in(
     let (capture, cursor, index, iteration, updated_at): (String, Option<String>, i64, i64, i64) =
         conn.query_row(
             "SELECT invocation_json, review_json, step_index, iteration, updated_at
-             FROM flow_invocations WHERE id=?1",
+             FROM flow_sessions WHERE id=?1",
             [id],
             |row| {
                 Ok((
@@ -216,7 +216,7 @@ pub(super) fn capture_in(
     Ok((capture, cursor))
 }
 
-fn validate_flow(flow: &FlowInvocation) -> StoreResult<()> {
+fn validate_flow(flow: &FlowSession) -> StoreResult<()> {
     crate::engine::flow::validate_repeats(&flow.invocation.steps).map_err(invalid)?;
     let step = flow
         .current_checked()
@@ -238,10 +238,10 @@ fn validate_flow(flow: &FlowInvocation) -> StoreResult<()> {
 /// Store a launched Flow at its first step. A Task invocation runs in the
 /// Task worktree and stores no cwd of its own; its Wave is the Task's. The
 /// import re-registers a Flow it already stored; the row it finds wins.
-pub(super) fn insert_flow_in(conn: &Connection, flow: &FlowInvocation) -> StoreResult<()> {
+pub(super) fn insert_flow_in(conn: &Connection, flow: &FlowSession) -> StoreResult<()> {
     validate_flow(flow)?;
     conn.execute(
-        "INSERT INTO flow_invocations(id, task_id, wave_id, cwd, message, model, invocation_json,
+        "INSERT INTO flow_sessions(id, task_id, wave_id, cwd, message, model, invocation_json,
             step_index, iteration, position_version, worker_generation, failure_json,
             updated_at, review_json, state)
          VALUES(?1,?2,COALESCE(?3,(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id
@@ -281,7 +281,7 @@ fn write_cursor_in(
     release_claim: bool,
 ) -> StoreResult<u64> {
     let changed = conn.execute(
-        "UPDATE flow_invocations SET review_json=?3, step_index=?4, iteration=?5,
+        "UPDATE flow_sessions SET review_json=?3, step_index=?4, iteration=?5,
             failure_json=?6, updated_at=?7, position_version=position_version+1,
             claim_json=CASE WHEN ?10 THEN NULL ELSE claim_json END,
             current_run_id=CASE WHEN ?8 THEN NULL ELSE current_run_id END,
@@ -323,7 +323,7 @@ fn clear_candidate(cursor: &mut ExecutionCursor) {
 /// named on it. A Task's own Flow records the failure on the Task.
 fn fail_flow_in(
     tx: &Transaction<'_>,
-    flow: &FlowInvocation,
+    flow: &FlowSession,
     version: u64,
     claim: Option<&TaskWorkerClaim>,
     failure: &TaskFlowBlocker,
@@ -361,7 +361,7 @@ fn fail_flow_in(
 /// candidate is discarded, and the step runs again as a new attempt.
 fn release_in(
     tx: &Transaction<'_>,
-    flow: &FlowInvocation,
+    flow: &FlowSession,
     version: u64,
     claim: Option<&TaskWorkerClaim>,
     direction: Option<&str>,
@@ -385,7 +385,7 @@ fn end_flow_in(
 ) -> StoreResult<()> {
     let flow = current_flow_in(tx, id)?;
     if tx.execute(
-        "UPDATE flow_invocations SET state='completed', ended_at=?2, claim_json=NULL
+        "UPDATE flow_sessions SET state='completed', ended_at=?2, claim_json=NULL
          WHERE id=?1 AND state='current' AND claim_json IS ?3",
         params![
             id,
@@ -415,7 +415,7 @@ fn end_flow_in(
 /// Store the step's Run before anything launches it. An attempt already at
 /// this position is kept: a reservation the launcher has not published, or a
 /// completed candidate the driver is about to settle.
-fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowInvocation) -> StoreResult<()> {
+fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<()> {
     if flow.current_attempt.is_some() {
         return Ok(());
     }
@@ -450,7 +450,7 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowInvocation) -> StoreResul
 /// Settle the current attempt from its Run's row: a failed or interrupted
 /// Run blocks the Flow, a live Run keeps it waiting, a completed Run is the
 /// step's completion, and a reservation nothing launched is the next launch.
-fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowInvocation) -> StoreResult<FlowInvocation> {
+fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<FlowSession> {
     let id = flow.invocation.id.clone();
     if flow.finished || flow.failure.is_some() || flow.is_human() {
         return Ok(flow);
@@ -493,7 +493,7 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowInvocation) -> StoreResult<
 }
 
 fn require_attempt_authority(
-    flow: &FlowInvocation,
+    flow: &FlowSession,
     version: u64,
     run: &RunId,
     what: &str,
@@ -552,7 +552,7 @@ pub(super) fn record_verdict_in(
     }
     progress.verdict = Some(verdict.clone());
     tx.execute(
-        "UPDATE flow_invocations SET review_json=?2 WHERE id=?1",
+        "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
         params![id, serde_json::to_string(&cursor)?],
     )?;
     Ok(())
@@ -585,7 +585,7 @@ pub(super) fn record_route_in(
     }
     *route = Some(path.to_owned());
     tx.execute(
-        "UPDATE flow_invocations SET review_json=?2 WHERE id=?1",
+        "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
         params![id, serde_json::to_string(&cursor)?],
     )?;
     Ok(())
@@ -643,7 +643,7 @@ fn claim_task_worker_in(
     // The claim also clears a blocker the cursor's legacy verdict shape
     // carried, by writing the cursor as it decoded.
     let changed = tx.execute(
-        "UPDATE flow_invocations SET worker_generation=?2, claim_json=?3, failure_json=NULL,
+        "UPDATE flow_sessions SET worker_generation=?2, claim_json=?3, failure_json=NULL,
             updated_at=?4, review_json=?7
          WHERE id=?1 AND position_version=?5 AND claim_json IS ?6",
         params![
@@ -664,7 +664,7 @@ fn claim_task_worker_in(
             // A reservation the dead worker never launched is nobody's Run.
             Some(attempt) if !attempt.published => {
                 tx.execute(
-                    "UPDATE flow_invocations SET current_run_id=NULL WHERE id=?1",
+                    "UPDATE flow_sessions SET current_run_id=NULL WHERE id=?1",
                     [&flow.invocation.id],
                 )?;
             }
@@ -684,7 +684,7 @@ fn claim_task_worker_in(
 }
 
 impl SqliteStore {
-    pub fn create_flow(&self, flow: &FlowInvocation) -> StoreResult<FlowInvocation> {
+    pub fn create_flow(&self, flow: &FlowSession) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_flow_in(&tx, flow)?;
@@ -698,8 +698,8 @@ impl SqliteStore {
     pub fn start_task_flow(
         &self,
         task_id: &TaskId,
-        flow: &FlowInvocation,
-    ) -> StoreResult<FlowInvocation> {
+        flow: &FlowSession,
+    ) -> StoreResult<FlowSession> {
         if flow.task_id.as_ref() != Some(task_id) {
             return Err(StoreError::InvalidAuthority(
                 "Flow position does not belong to this Task".to_string(),
@@ -723,7 +723,7 @@ impl SqliteStore {
                 )));
             }
             tx.execute(
-                "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE id=?1",
+                "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE id=?1",
                 params![current.invocation.id, now_unix()],
             )?;
         }
@@ -737,13 +737,13 @@ impl SqliteStore {
         Ok(stored)
     }
 
-    pub fn flow(&self, id: &str) -> StoreResult<Option<FlowInvocation>> {
+    pub fn flow(&self, id: &str) -> StoreResult<Option<FlowSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         flow_in(&conn, id)
     }
 
     /// The Flow a Task points at.
-    pub fn task_flow(&self, task_id: &TaskId) -> StoreResult<Option<FlowInvocation>> {
+    pub fn task_flow(&self, task_id: &TaskId) -> StoreResult<Option<FlowSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_flow_in(&conn, task_id)
     }
@@ -757,7 +757,7 @@ impl SqliteStore {
         &self,
         id: &str,
         claim: Option<&TaskWorkerClaim>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = flow_in(&tx, id)?.ok_or(StoreError::NotFound)?;
@@ -775,7 +775,7 @@ impl SqliteStore {
         id: &str,
         version: u64,
         claim: Option<&TaskWorkerClaim>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -801,7 +801,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
             "UPDATE runs SET published=1, provider=?5, model=?6 WHERE id=?2 AND published=0
-             AND EXISTS(SELECT 1 FROM flow_invocations WHERE id=?1 AND current_run_id=?2
+             AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?1 AND current_run_id=?2
                 AND position_version=?3 AND state='current' AND claim_json IS ?4)",
             params![
                 id,
@@ -822,7 +822,7 @@ impl SqliteStore {
 
     /// Clear a recorded failure so the step runs again as a new attempt, with
     /// `direction` for the next attempt when the human supplied one.
-    pub fn retry_flow(&self, id: &str, direction: Option<&str>) -> StoreResult<FlowInvocation> {
+    pub fn retry_flow(&self, id: &str, direction: Option<&str>) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = settle_attempt_in(&tx, current_flow_in(&tx, id)?)?;
@@ -853,7 +853,7 @@ impl SqliteStore {
         id: &str,
         version: u64,
         claim: Option<&TaskWorkerClaim>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -874,7 +874,7 @@ impl SqliteStore {
         cursor: &ExecutionCursor,
         claim: Option<&TaskWorkerClaim>,
         progress: Option<&str>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = current_flow_in(&tx, id)?;
@@ -911,7 +911,7 @@ impl SqliteStore {
             return Ok(saved);
         }
         // A driver parks at a review; the claim goes with the same write.
-        let parks = FlowInvocation {
+        let parks = FlowSession {
             cursor: next.clone(),
             ..saved.clone()
         }
@@ -947,7 +947,7 @@ impl SqliteStore {
         version: u64,
         claim: Option<&TaskWorkerClaim>,
         failure: &TaskFlowBlocker,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -973,7 +973,7 @@ impl SqliteStore {
 
     /// Park a Task's Flow at its review: the review Session exists and the
     /// row waits on it.
-    pub fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowInvocation> {
+    pub fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -993,7 +993,7 @@ impl SqliteStore {
     pub fn complete_task_review(
         &self,
         task_id: &TaskId,
-        expected: &FlowInvocation,
+        expected: &FlowSession,
         summary: &str,
     ) -> StoreResult<()> {
         if expected.task_id.as_ref() != Some(task_id)
@@ -1143,7 +1143,7 @@ impl SqliteStore {
     }
 
     /// The saved Flow waiting on this review Session.
-    pub fn waiting_review(&self, session_id: &str) -> StoreResult<FlowInvocation> {
+    pub fn waiting_review(&self, session_id: &str) -> StoreResult<FlowSession> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let flow = conn
             .query_row(
@@ -1153,7 +1153,7 @@ impl SqliteStore {
             )
             .optional()?
             .transpose()?
-            .filter(FlowInvocation::is_human)
+            .filter(FlowSession::is_human)
             .ok_or_else(|| {
                 StoreError::InvalidAuthority("Flow Session is stale or already decided".into())
             })?;
@@ -1248,7 +1248,7 @@ pub(super) fn decode_flow_cursor(
 
 #[cfg(test)]
 mod tests {
-    use crate::durable::{FlowInvocation, RunId};
+    use crate::durable::{FlowSession, RunId};
     use crate::engine::flow::{Op, RepeatPolicy};
     use crate::engine::invocation::QueuedInvocation;
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
@@ -1301,9 +1301,9 @@ mod tests {
             .unwrap()
     }
 
-    fn launched(store: &SqliteStore, steps: Vec<ConcreteStep>, index: usize) -> FlowInvocation {
+    fn launched(store: &SqliteStore, steps: Vec<ConcreteStep>, index: usize) -> FlowSession {
         store
-            .create_flow(&FlowInvocation {
+            .create_flow(&FlowSession {
                 invocation: QueuedInvocation::new("proof", steps).unwrap(),
                 cursor: ExecutionCursor {
                     index,
@@ -1337,7 +1337,7 @@ mod tests {
             step("finish", None),
         ];
         let flow = store
-            .create_flow(&FlowInvocation {
+            .create_flow(&FlowSession {
                 invocation: QueuedInvocation::new("proof", steps.clone()).unwrap(),
                 cursor: ExecutionCursor {
                     index: 1,

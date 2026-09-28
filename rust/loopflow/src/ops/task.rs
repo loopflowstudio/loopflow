@@ -2488,7 +2488,7 @@ async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {
 async fn stop_task_worker(
     store: &SharedStore,
     task: &Task,
-) -> OpsResult<Option<crate::durable::FlowInvocation>> {
+) -> OpsResult<Option<crate::durable::FlowSession>> {
     let position = store
         .task_flow(&task.id)
         .await
@@ -5292,13 +5292,13 @@ mod tests {
         task_fixture_at(identifier, repository).await
     }
 
-    async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowInvocation {
+    async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowSession {
         let started_at = time::OffsetDateTime::now_utc().unix_timestamp();
         let position = fixture
             .store
             .start_task_flow(
                 &fixture.task.id,
-                crate::durable::FlowInvocation {
+                crate::durable::FlowSession {
                     task_id: Some(fixture.task.id.clone()),
                     wave_id: Some(fixture.task.wave_id.clone()),
                     cwd: fixture.task.worktree.clone(),
@@ -5352,7 +5352,7 @@ mod tests {
         claimed
     }
 
-    fn record_stop_process(home: &std::path::Path, position: &crate::durable::FlowInvocation) {
+    fn record_stop_process(home: &std::path::Path, position: &crate::durable::FlowSession) {
         let owner = &position.claim.as_ref().unwrap().owner;
         let root = home.join(crate::journal::EXEC_PROCESS_ROOT);
         std::fs::create_dir_all(&root).unwrap();
@@ -5760,7 +5760,7 @@ mod tests {
         let position = store
             .start_task_flow(
                 &task.id,
-                crate::durable::FlowInvocation {
+                crate::durable::FlowSession {
                     invocation: crate::durable::test_flow_invocation(
                         "task-design",
                         1,

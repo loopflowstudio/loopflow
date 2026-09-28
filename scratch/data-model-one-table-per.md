@@ -19,7 +19,7 @@ A plan, new tables, renamed types, one passing slice or a contributor's conclusi
 alone does not reach that stop. Publication, installation and real-Home conversion
 are separate actions; no branch binary may touch the installed Home.
 Jack authorized publishing the next verified checkpoint on 2026-09-28 so
-dependent Tasks could use it. That checkpoint is published as `e13f29909` on
+dependent Tasks could use it. The latest repair checkpoint is `2958d289c` on
 PR #1296, based on `c512813b5`; the remote branch, GitHub head and Task record
 were independently checked. This supersedes the earlier local-only hold for
 that publication, without claiming code completion or authorizing landing,
@@ -384,6 +384,11 @@ Prospective bind attribution is the explicit implementation assumption above;
 Jack may revise it. Never silently use the current Session Task to rewrite all
 old usage. This assumption does not block the remaining independent work.
 
-Next action: continue the saved implementation step with the connect/Exec ownership proof,
-using the exact acceptance rows above. Update this plan when evidence changes
-an implementation choice; do not append another competing model.
+Next action: finish physical owner conversion and Run removal in the saved
+implementation step. The in-place AgentSession/FlowSession rename has a populated
+preservation proof; its remaining Run fields are explicitly intermediate. Retain
+the later connect/handoff/history proofs in `parallel-work.md` within their stated
+limits, and complete the exact acceptance rows above, including Flow consumption,
+restart, import, usage, Desktop and indexed discovery. Repair the two current CI
+fixture executable-selection failures alongside the conversion. Update this plan
+when evidence changes an implementation choice; do not append another model.

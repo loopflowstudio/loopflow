@@ -10,7 +10,7 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
     let row = conn
         .query_row(
             "SELECT driver_exec_id,driver_generation,provider_generation,provider_exec_id
-         FROM sessions WHERE id=?1",
+         FROM agent_sessions WHERE id=?1",
             [session],
             |row| {
                 Ok((
@@ -51,7 +51,10 @@ impl SqliteStore {
                 "Session driver changed".into(),
             ));
         }
-        tx.execute("UPDATE sessions SET interactive=1 WHERE id=?1", [session])?;
+        tx.execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            [session],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -59,7 +62,7 @@ impl SqliteStore {
     pub fn session_connection(&self, session: &str) -> StoreResult<Option<(String, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT provider_endpoint,provider_thread FROM sessions WHERE id=?1 AND provider_endpoint IS NOT NULL AND provider_thread IS NOT NULL",
+            "SELECT provider_endpoint,provider_thread FROM agent_sessions WHERE id=?1 AND provider_endpoint IS NOT NULL AND provider_thread IS NOT NULL",
             [session], |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?)
     }
@@ -79,7 +82,7 @@ impl SqliteStore {
             ));
         }
         tx.execute(
-            "UPDATE sessions SET provider_endpoint=?2,provider_thread=?3 WHERE id=?1",
+            "UPDATE agent_sessions SET provider_endpoint=?2,provider_thread=?3 WHERE id=?1",
             params![session, endpoint, thread],
         )?;
         tx.commit()?;
@@ -138,7 +141,7 @@ impl SqliteStore {
                 .map_or_else(|| exec.clone(), |value| value.provider_exec_id.clone()),
         };
         tx.execute(
-            "UPDATE sessions SET driver_exec_id=?2,driver_generation=?3,
+            "UPDATE agent_sessions SET driver_exec_id=?2,driver_generation=?3,
                 provider_generation=?4,provider_exec_id=?5 WHERE id=?1",
             params![
                 session,
@@ -168,7 +171,7 @@ impl SqliteStore {
         current.exec_id = None;
         current.generation += 1;
         tx.execute(
-            "UPDATE sessions SET driver_exec_id=NULL,driver_generation=?2 WHERE id=?1",
+            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=?2 WHERE id=?1",
             params![session, current.generation],
         )?;
         tx.commit()?;

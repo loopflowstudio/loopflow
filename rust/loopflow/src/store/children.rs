@@ -70,7 +70,7 @@ impl Store {
     pub(crate) async fn restart_task_flow(
         &self,
         task: &Task,
-        expected: Option<&crate::durable::FlowInvocation>,
+        expected: Option<&crate::durable::FlowSession>,
         checkpoint_head: &str,
     ) -> StoreResult<()> {
         let expected = expected.cloned();

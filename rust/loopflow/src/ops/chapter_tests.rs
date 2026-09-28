@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use super::{
     classify_task, plan_rotation, rotate, successor_id, TaskDisposition, TaskStartEvidence,
 };
-use crate::durable::FlowInvocation;
+use crate::durable::FlowSession;
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
 use crate::id::WaveId;
@@ -477,7 +477,7 @@ async fn local_task(
 async fn local_started_task(
     context: &PmTestContext,
     repo: &std::path::Path,
-) -> (Task, TaskPr, FlowInvocation) {
+) -> (Task, TaskPr, FlowSession) {
     let (task, _) = local_task(
         context,
         repo,
@@ -492,7 +492,7 @@ async fn local_started_task(
         .store
         .start_task_flow(
             &task.id,
-            FlowInvocation {
+            FlowSession {
                 invocation: QueuedInvocation::new(
                     "captured",
                     vec![ConcreteStep::Skill(ConcreteSkill {

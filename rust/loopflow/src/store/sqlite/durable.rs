@@ -709,7 +709,7 @@ mod durable_store_tests {
 
     use super::super::runs::{insert_run_in, read_run};
     use crate::durable::{
-        FlowInvocation, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
+        FlowSession, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
         TaskWorkerClaimOutcome, TaskWorkerOwner,
     };
     use crate::engine::execution::NestedCursor;
@@ -808,8 +808,8 @@ mod durable_store_tests {
         (dir, store, task_id)
     }
 
-    fn autonomous_position(task_id: &TaskId) -> FlowInvocation {
-        FlowInvocation {
+    fn autonomous_position(task_id: &TaskId) -> FlowSession {
+        FlowSession {
             invocation: crate::durable::test_flow_invocation(
                 "task",
                 0,
@@ -835,7 +835,7 @@ mod durable_store_tests {
         }
     }
 
-    fn review_position(task_id: &TaskId) -> FlowInvocation {
+    fn review_position(task_id: &TaskId) -> FlowSession {
         let mut position = autonomous_position(task_id);
         position.invocation = crate::durable::test_flow_invocation(
             "review",
@@ -856,12 +856,7 @@ mod durable_store_tests {
         }
     }
 
-    fn claim(
-        store: &SqliteStore,
-        task: &TaskId,
-        flow: &FlowInvocation,
-        pid: u32,
-    ) -> TaskWorkerClaim {
+    fn claim(store: &SqliteStore, task: &TaskId, flow: &FlowSession, pid: u32) -> TaskWorkerClaim {
         match store
             .claim_task_worker(
                 task,
@@ -891,7 +886,7 @@ mod durable_store_tests {
     /// Launch the reserved Run: the worker's publication of its attempt.
     fn publish(
         store: &SqliteStore,
-        flow: &FlowInvocation,
+        flow: &FlowSession,
         run: &RunId,
         claim: &TaskWorkerClaim,
     ) -> StoreResult<()> {
@@ -903,9 +898,9 @@ mod durable_store_tests {
     fn parked_review(
         store: &SqliteStore,
         task: &TaskId,
-        position: &FlowInvocation,
+        position: &FlowSession,
         ready: Option<&str>,
-    ) -> (FlowInvocation, String, RunId) {
+    ) -> (FlowSession, String, RunId) {
         let flow = store.start_task_flow(task, position).unwrap();
         let flow = store.reserve_task_review(flow.id(), flow.version).unwrap();
         let session_id = crate::ops::human_session::flow_id(&flow).unwrap();
@@ -926,24 +921,22 @@ mod durable_store_tests {
             .expect("fixture Flow has a repeating decision")
     }
 
-    fn retained_invocation(store: &SqliteStore, id: &str) -> (FlowInvocation, String) {
+    fn retained_invocation(store: &SqliteStore, id: &str) -> (FlowSession, String) {
         let flow = store.flow(id).unwrap().unwrap();
         let state = store
             .conn
             .lock()
             .unwrap()
-            .query_row(
-                "SELECT state FROM flow_invocations WHERE id=?1",
-                [id],
-                |row| row.get(0),
-            )
+            .query_row("SELECT state FROM flow_sessions WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
             .unwrap();
         (flow, state)
     }
 
     /// `flow` as its row reads once the Flow ended.
-    fn ended(flow: &FlowInvocation) -> FlowInvocation {
-        FlowInvocation {
+    fn ended(flow: &FlowSession) -> FlowSession {
+        FlowSession {
             finished: true,
             claim: None,
             ..flow.clone()
@@ -974,7 +967,7 @@ mod durable_store_tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
+            "INSERT INTO flow_sessions(id,invocation_json,step_index,iteration,
             position_version,worker_generation,updated_at,state)
             VALUES(?1,?2,0,0,1,0,1,'current')",
             rusqlite::params![taskless.id, serde_json::to_string(&taskless).unwrap()],
@@ -1093,7 +1086,7 @@ mod durable_store_tests {
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .unwrap();
                 tx.execute(
-                    "INSERT INTO sessions(id,current_run_id,title,title_source,created_at)
+                    "INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at)
                     VALUES('failed-conversation',?1,'Must roll back','generated',100)",
                     [requested.id.as_str()],
                 )
@@ -1106,7 +1099,7 @@ mod durable_store_tests {
                 run_count
             );
             assert_eq!(
-                conn.query_row("SELECT count(*) FROM sessions", [], |row| row
+                conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
                     .get::<_, i64>(0))
                     .unwrap(),
                 0
@@ -1115,7 +1108,7 @@ mod durable_store_tests {
         // Changing a parent cannot invalidate an already reserved child's ancestry.
         assert!(conn
             .execute(
-                "UPDATE flow_invocations SET task_id=NULL WHERE id=?1",
+                "UPDATE flow_sessions SET task_id=NULL WHERE id=?1",
                 [&position.invocation.id]
             )
             .is_err());
@@ -1392,7 +1385,7 @@ mod durable_store_tests {
                 caller_run_id: None,
                 ended: None,
             };
-            let session = crate::session::Session {
+            let session = crate::session::AgentSession {
                 id: id.to_string(),
                 current_run_id: run.id.clone(),
                 kind: crate::session::SessionKind::Conversation,
@@ -1447,7 +1440,7 @@ mod durable_store_tests {
         )
         .unwrap();
         store
-            .create_flow(&crate::durable::FlowInvocation {
+            .create_flow(&crate::durable::FlowSession {
                 invocation: about.clone(),
                 cursor: ExecutionCursor::default(),
                 version: 0,
@@ -1526,7 +1519,7 @@ mod durable_store_tests {
         let conn = store.conn.lock().unwrap();
         let state: String = conn
             .query_row(
-                "SELECT state FROM flow_invocations WHERE id=?1",
+                "SELECT state FROM flow_sessions WHERE id=?1",
                 [&about.id],
                 |row| row.get(0),
             )
@@ -1781,7 +1774,7 @@ mod durable_store_tests {
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
                 SELECT ?1,project_id,?1,?1,'/repo.broken',1 FROM tasks WHERE id=?2",
                 rusqlite::params![broken.as_str(), task_id.as_str()]).unwrap();
-            conn.execute("INSERT INTO flow_invocations(id,task_id,wave_id,invocation_json,step_index,iteration,
+            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,
                 position_version,worker_generation,updated_at,state)
                 SELECT 'broken',?1,p.wave_id,'{\"id\":\"broken\",\"flow\":\"broken\",\"steps\":\"unreadable\"}',0,0,1,0,1,'current'
                 FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
@@ -1956,7 +1949,7 @@ mod durable_store_tests {
                 .lock()
                 .unwrap()
                 .execute(
-                    "UPDATE flow_invocations SET review_json=?2 WHERE id=?1",
+                    "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
                     rusqlite::params![position.invocation.id, progress],
                 )
                 .unwrap();
@@ -1978,7 +1971,7 @@ mod durable_store_tests {
                 .lock()
                 .unwrap()
                 .query_row(
-                    "SELECT review_json FROM flow_invocations WHERE id=?1",
+                    "SELECT review_json FROM flow_sessions WHERE id=?1",
                     [&position.invocation.id],
                     |row| row.get(0),
                 )
@@ -2020,7 +2013,7 @@ mod durable_store_tests {
                     .lock()
                     .unwrap()
                     .execute(
-                        "UPDATE flow_invocations SET review_json=?2 WHERE state='current' AND task_id=?1",
+                        "UPDATE flow_sessions SET review_json=?2 WHERE state='current' AND task_id=?1",
                         rusqlite::params![task_id.as_str(), json],
                     )
                     .unwrap();
@@ -2073,7 +2066,7 @@ mod durable_store_tests {
                 .lock()
                 .unwrap()
                 .execute(
-                    "UPDATE flow_invocations SET review_json=?2 WHERE state='current' AND task_id=?1",
+                    "UPDATE flow_sessions SET review_json=?2 WHERE state='current' AND task_id=?1",
                     rusqlite::params![task_id.as_str(), json],
                 )
                 .unwrap();

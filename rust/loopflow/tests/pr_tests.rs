@@ -6,7 +6,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::durable::{FlowInvocation, WorkStatus};
+use loopflow::durable::{FlowSession, WorkStatus};
 use loopflow::engine::flow::Command as FlowCommand;
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
@@ -1241,7 +1241,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let position = FlowInvocation {
+    let position = FlowSession {
         invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
         cursor: loopflow::engine::ExecutionCursor {
             index: 1,

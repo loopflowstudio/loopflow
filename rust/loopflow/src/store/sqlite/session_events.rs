@@ -46,7 +46,7 @@ impl SqliteStore {
         // that start retains missing attribution instead of borrowing today's bind.
         let attribution: (Option<String>, Option<String>) = if kind == SessionEventKind::Started {
             tx.query_row(
-                "SELECT r.task_id,r.wave_id FROM sessions s JOIN runs r ON r.id=s.current_run_id WHERE s.id=?1",
+                "SELECT r.task_id,r.wave_id FROM agent_sessions s JOIN runs r ON r.id=s.current_run_id WHERE s.id=?1",
                 [session], |row| Ok((row.get(0)?, row.get(1)?)),
             )?
         } else {
@@ -185,7 +185,7 @@ mod tests {
             .unwrap()
             .execute_batch(
                 "BEGIN;
-             INSERT INTO sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
+             INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
              VALUES('conversation','run_fixture','Retained','human',1,'conversation',1);
              INSERT INTO runs(id,session_id,created_at,cwd,published)
              VALUES('run_fixture','conversation',1,'/fixture',1);

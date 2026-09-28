@@ -121,7 +121,7 @@ impl SqliteStore {
     pub(crate) fn restart_task_flow(
         &self,
         task: &Task,
-        expected: Option<&crate::durable::FlowInvocation>,
+        expected: Option<&crate::durable::FlowSession>,
         checkpoint_head: &str,
     ) -> StoreResult<()> {
         validate_task(task)?;
@@ -151,7 +151,7 @@ impl SqliteStore {
         let task_work = task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?;
         transaction.execute(
             &format!(
-                "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE {}",
+                "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE {}",
                 super::flows::TASK_INVOCATION
             ),
             params![task.id.as_str(), now_unix()],
@@ -355,7 +355,7 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let claimed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND claim_json IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM flow_sessions WHERE task_id=?1 AND claim_json IS NOT NULL)",
             [child.task_id.as_str()], |row| row.get(0),
         )?;
         if !ready || claimed {

@@ -1483,22 +1483,16 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              ## Wave memory\n\n\
              Persistent memory at {}. Read it before every iteration; its current\n\
              contents, when any, ride this prompt's wave-memory section.\n\
-             Keep it compact enough to include every iteration: correct stale entries,\n\
-             add durable observations, and delete session-specific notes.\n\n\
-             Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.\n\
+             Edit it through the ordinary repository workflow; no live Wave is required.\n\
+             `realign` reconciles memory with the plan and code. Keep durable observations,\n\
+             correct or remove stale entries, and drop session-specific notes. Use absolute dates.\n\n\
+             Organize as useful, for example:\n\
              - Patterns: codebase conventions, architecture, how things connect\n\
              - Preferences: user workflow, tool choices, communication norms\n\
              - Learnings: what worked, what failed, surprises\n\n\
-             What belongs elsewhere:\n\
-             - architectural decisions → wave docs or explicit docs\n\
-             - design rationale → scratch/ or wave plan\n\
-             - session-specific notes → nowhere (let them die)\n\n\
-             How to update:\n\
-             - Edit the file through the ordinary repository workflow; no live Wave is required.\n\
-             - `update-wave` owns deliberate end-of-work curation.\n\
-             - Correct or remove entries that are wrong or stale.\n\
-             - Use absolute dates, not \"today\" or \"recently\".\n\
-             - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\
+             Keep memory compact enough for every iteration. Put architectural decisions\n\
+             in wave docs or explicit docs, and design rationale in scratch/ or the wave plan.\n\
+             As sections grow, promote stable entries to wave docs or explicit docs and trim.\n\
              </lf:wave>",
             wave, wave, memory_path
         ));

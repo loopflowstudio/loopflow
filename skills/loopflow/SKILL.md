@@ -125,8 +125,8 @@ through typed Work observations and targeted Ask/Answer exchanges.
 `lf chat` is the User surface. Work Steer is the live correction path. When the
 active skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md`
 through the ordinary repository workflow. Keep it curated rather than appending
-a transcript. `update-wave` owns deliberate end-of-work memory curation; no
-live Wave is required.
+a transcript. `realign` reconciles memory with the plan and code; no live Wave
+is required.
 
 ## Where To Write
 

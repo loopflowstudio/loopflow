@@ -99,6 +99,6 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`, `update-wave`,
-or `record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
-maintainer instructions into customer skills.
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
+skills.

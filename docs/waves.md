@@ -244,8 +244,7 @@ $EDITOR wave/shipper/MEMORY.md
 ```
 
 The file is the whole memory surface — read and edit it directly, running Wave
-or not. `update-wave` owns
-deliberate end-of-work curation: merge durable context into the existing
+or not. `realign` curates it: merge durable context into the existing
 structure, correct stale entries, and drop transient Run detail. When a task ships,
 its context folds forward into memory and the remaining Linear tasks — fold,
 don't drop.

@@ -383,7 +383,8 @@ mod tests {
                 "demo",
                 "loop-decide",
                 "compress",
-                "update-wave",
+                "rebase",
+                "realign",
                 "gate",
                 "pr land -c"
             ]
@@ -402,7 +403,7 @@ mod tests {
             ]
         );
         assert!(graph.steps[1].human && graph.steps[8].human);
-        assert_eq!(graph.steps[13].kind, FlowNodeKind::Op);
+        assert_eq!(graph.steps[14].kind, FlowNodeKind::Op);
         assert_eq!(graph.steps[5].parents, ["feature", "pursue", "refresh"]);
     }
 

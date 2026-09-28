@@ -256,6 +256,12 @@ publication checks readiness because successful reconciliation can leave work
 unfinished. The [prompting lessons](../intelligence/MEMORY.md#reconciliation-and-reusable-skills-branch-evidence-2026-09-28)
 retain the rationale and agent-behavior proof limits. Concept-review stays a
 self-contained interactive skill. Ship calls gate directly; task-gate is removed.
+The September 28 `retire-update-wave` branch also changes queue to compress →
+refresh → gate, expanding refresh to rebase → realign before validation.
+Ship and ship-demo drop record-learnings; reconciliation and memory edits belong
+before gate. These are source Flow changes, not proof of installed adoption or
+live delivery. Historical directions such as LOO-320's update-wave step above
+remain evidence of what was requested at the time.
 Captured invocations retain their definitions. Tests must locate decision policy
 in the captured Flow rather than copy a catalog step index: shortening pursue
 exposed exactly that stale assumption in CI. The repaired test retains both
@@ -560,7 +566,8 @@ Current mechanics belong in [delivery documentation](../../docs/architecture/del
 - The installed `update-wave` skill explicitly sent unnamed-Wave learnings to
   `.lf/`, even after source guidance had changed. Resolve the owning Wave from
   repository objectives and refresh exported skills after changing their source.
-  A repository with zero Waves starts with one repo-wide Wave; missing launch
+  The retirement branch replaces that skill with realign, which curates existing
+  identified Wave memory and creates no Wave for unbound work. Missing launch
   attribution is not a reason to create another memory location.
 
 ## Chapter boundaries and preservation (2026-09-23)

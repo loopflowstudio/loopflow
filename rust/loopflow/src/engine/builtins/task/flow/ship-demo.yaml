@@ -4,5 +4,4 @@
     id: review_demo
     name: demo
     human: true
-- record-learnings
 - op: pr land -c

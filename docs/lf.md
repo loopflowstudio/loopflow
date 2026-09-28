@@ -128,7 +128,6 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `qa` | Thorough quality assessment of the current branch |
 | `triage` | Correct and prioritize findings in their existing location |
 | `review-design` | Reshape the working design around the intended experience |
-| `record-learnings` | Put lessons into the code, guidance, or memory that owns them |
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
 | `realign` | Reconcile plan, code, and Wave memory with what the work has taught us |
@@ -158,7 +157,7 @@ Wave skills — maintain the durable operating context and its portfolio:
 | `review` | Review mutations, amend or revert if needed |
 | `wave/operate` | Read, decide, and take the one or two useful Wave moves in one turn |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
-| `update-wave` / `split-wave` | Maintain Wave structure and memory |
+| `split-wave` | Split a Wave's structure and memory |
 | `wave/start-chapter` / `wave/review-chapter` | One Wave's chapter: propose its fresh plan / report every KR verdict |
 | `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
 | `s3-scan` / `s3-assess` | Control: live health, velocity, CI, retries, worker-pool size |
@@ -291,12 +290,12 @@ for composition limitations.
 | `pursue` | repeat implement → compress → refresh → loop-decide, then pr-publish and human demo |
 | `slice` | code → realign → pr-publish |
 | `refresh` | op: rebase → realign |
-| `ship` | gate → record-learnings → op: pr land -c |
-| `ship-demo` | gate → demo review → record-learnings → op: pr land -c |
+| `ship` | gate → op: pr land -c |
+| `ship-demo` | gate → demo review → op: pr land -c |
 | `deploy` | gate → op: pr land |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `incident` | restore → 5whys |
-| `queue` | compress → update-wave → gate |
+| `queue` | compress → refresh → gate |
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `govern-coordination` | s2-scan → s2-assess → mutate |
 | `govern-control` | s3-scan → s3-assess → mutate |

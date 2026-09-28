@@ -78,6 +78,18 @@ proof. Independent audits and chapter histories retain their distinct readers.
 Authoring rules live in [PROMPTS.md](../../PROMPTS.md) and builtin prompt;
 reconciliation instructions live in builtin realign.
 
+Jack Heart requested retiring `update-wave` and `record-learnings`; the
+September 28 `retire-update-wave` branch removes both. `realign` now owns
+memory curation alongside plan and code reconciliation. Keep that procedure
+in the skill, with compact ownership guidance in assembled prompts and docs.
+Existing invocations and installed exports may still carry the retired wording;
+their presence is not evidence that the source catalog still offers those skills.
+
+Commit `1a1baa883` records passing prompt goldens, formatting, and all-target
+Clippy after the guidance reduction. Those checks establish rendered guidance
+and static validity, not installed skill refresh or successful live curation.
+Current Flow composition is documented in [CLI docs](../../docs/lf.md).
+
 The [preserved design and proof limits](https://github.com/loopflowstudio/loopflow/blob/60ee8daff36b2c97ad5a6f30e1f5daa98a40bca4/scratch/realign.md)
 record passing assembled-prompt, export, catalog, and Flow checks. These prove
 instruction delivery. The stale-plan, code-defect, aligned-repeat, and missing-

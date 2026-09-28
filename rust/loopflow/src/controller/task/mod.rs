@@ -319,6 +319,9 @@ impl StepLauncher for TaskLauncher {
             &prepared.turn.context,
             publish,
         )?;
+        capture.claim_conversation_driver()?;
+        prepared.turn.config.session_driver = capture.session_driver();
+        prepared.turn.config.resume_token = capture.conversation_resume_token()?;
         capture.record_input("initial", &prepared.turn.input);
         capture.record_input("steer_seed_through", &prepared.seeded_steer_id.to_string());
         prepared.turn.config.env.extend(capture.environment());
@@ -338,7 +341,7 @@ impl StepLauncher for TaskLauncher {
         let requested_account = crate::store::ProviderAccountId::parse(&account)
             .map_err(|reason| anyhow!("invalid Task provider account route: {reason}"))?;
         harness.set_provider_account_id(Some(requested_account));
-        harness.set_provider_session_id(None);
+        harness.set_provider_session_id(prepared.turn.config.resume_token.clone());
         if let Err(error) = harness.start(&prepared.turn.config).await {
             return Err(fail(&error.to_string(), true));
         }

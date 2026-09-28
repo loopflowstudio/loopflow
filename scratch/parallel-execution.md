@@ -681,3 +681,116 @@ Flow reaches its delivery boundary. No provider or publication occurred in the
 fixture. The physical owner/Run-removal work remains incomplete.
 
 Post-rebase all-target Clippy passes15.06s (ancestry-rebase-clippy.log); formatting and whitespace pass.
+
+Published checkpoint705645cd1ad36808460e8f0e9e4767d1d8cc7191 to existing
+PR1296 after manual rebase. GitHub head, remote branch, Task presentation and
+publication heads agree; basea2b59ed50, auto-merge absent. The same saved13-step
+invocation and implement Run remain. Evidence retained in
+.lf/tmp/rebase-integration/task-after-ancestry-publish.json.
+
+Next cut: headless Flow reservation lacked an AgentSession. The focused
+flow-conversation-red.log reproduced that missing admission; reservation now
+creates the conversation before launch and reuses it for a retry at the same
+captured node/iteration, retaining name and failed Run history. Mechanical steps
+remain without agent conversations. flow-conversation-admission.log passes1/1
+(26.48s compile,1.306s tests). Managed Task launch now claims the same driver
+before provider launch. Public CLI failure/retry and taskless-decision proofs
+are running. This is unfinished: native retry continuation, exact native success
+consumption and physical Run removal are still due, not proved by this store test.
+
+flow-conversation-cli first passed taskless decisions but failed Task-attributed
+headless membership: surface still treated every Flow conversation as a review.
+It now reads the stored Flow and retained node/iteration for current/earlier/past
+membership; the replaced review-only helper is deleted. flow-conversation-and-ci
+passes4/4 (29.62s compile,11.780s tests): actual CLI failed/retried conversation
+identity/title, two hosted ad hoc/replay fixtures, and inaccessible-store refusal
+before provider launch. Successful unplanned work uses an empty writable private
+registry, not unrecorded launches. The compiler's unused old membership helper
+warning was then removed by deleting the helper.
+
+Native taskless retry: .lf/tmp/execution-model/native-flow-retry-1/results.json
+passes on copied binary SHA a4fcad5a4d948fd9fdc5437b6afd0d3eb6f794eb2161fbf7e73149ef93dca8c9.
+Actual Codex0.157.1 receives a synthetic Responses failure, then public Flow
+resume --retry succeeds. Session, endpoint, native thread, provider generation
+and origin remain identical; old history is byte-equivalent, failed/completed
+turn IDs differ, and the new nested lf Exec follows the retry driver. Exactly
+one fixture engine was launched and exact owned-engine cleanup completed. This
+proves the live-endpoint taskless case only: managed-account/native-Home
+continuation, dead-engine recovery, busy surviving turn and exact Flow history
+selection remain required. Stored endpoint is not liveness, and this passing
+probe does not supply it. No configured provider, installed Home or new
+publication was used.
+
+The supervisor's engine-loss probe made the stored-endpoint failure concrete:
+public retry returned ENOENT after exact fixture-engine termination. The native
+connection now retains PID/start evidence on AgentSession separately from driver
+lifetime. A known dead/replaced PID permits a fenced new provider generation;
+unknown process evidence does not. Replacement clears transport/process evidence
+while preserving the native thread. A copied Home clears these process facts too.
+The tracked --flow-engine-loss fixture resumes the same thread, retains prior
+history and records its successful turn under the replacement generation;
+native-flow-engine-loss-1 passes on 2b07fbcb7a30905c7e0b932ec92f60731ffd8625419841261ba74cd8e9835cf3.
+This is actual Codex with synthetic Responses in a disposable Home, not configured
+account or Task-worker recovery. No old engine was signaled by production code.
+
+conversation-engine-ownership initially failed compilation because the removed
+review-only membership helper retained a test caller. After repairing that test,
+conversation-engine-ownership-2 passed4/4 (26.12s compile,1.373s tests), including
+copy isolation, replacement fencing/history, Flow reservation and nested capture.
+All-target Clippy passed14.91s before the subsequent graph-projection regression.
+The supervisor correctly distinguished nested capture from Session navigation:
+numeric stored node IDs were incorrectly stringified into structural wire keys.
+A new stored-Session projection test now covers nested/post-XOR current and earlier
+occurrences; its red/repair result will be recorded below. Wire meaning remains
+structural until the coordinated numeric Rust/Swift graph conversion.
+
+Driver-loss remains an actual failing public recovery case:
+supervisor-flow-driver-loss-1 retains the live engine but Flow waits for an absent
+Run completion. The next dependent owner conversion must select exact Session
+turn history under Flow/version/claim authority and retain the unknown command
+outcome. It must not synthesize a Run success/interruption from process death.
+TaskLauncher unconditional input and current-account selection are still open;
+these tests do not establish busy-turn recovery, recorded native Home/account
+continuity, exact Flow history consumption or complete Run removal.
+
+The stored Session navigation proof first failed with node3 instead of1/fix/1
+(stored-session-graph-red.log). The projection now resolves the stored preorder
+ID through the captured graph before emitting the existing structural wire key.
+stored-session-graph-green passes1/1 (26.45s compile,1.345s tests), exercising
+nested and post-XOR Sessions as current and earlier occurrences with retained
+iteration tuples. This repairs the current wire contract; it does not implement
+the final numeric Rust/Swift graph DTO conversion or prove rendered navigation.
+Native live retry and engine-loss retry both passed again on the final thread
+identity guard in native-flow-live-final and native-flow-loss-final. A subsequent
+source safety review added a connection probe before replacing a dead launcher's
+provider: a surviving native endpoint retains its generation, while ambiguous
+connection errors cannot authorize replacement. Final build/replay remains due
+for that last change.
+
+The projection regression passes after materializing all22 drafts into a canonical
+0.12.25 batch in a disposable source copy. canonical-engine.log passes4/4
+(26.79s compile,2.004s tests): stored graph navigation, retained native history/
+fences, copied-Home authority exclusion and empty-draft initialization/upgrade.
+The source fingerprint is canonical-engine-source.json beside that log. Final
+all-target Clippy passes14.92s after moving the environment-guarded test's async
+body into its explicitly owned runtime; the prior Clippy failure was an
+await_holding_lock test warning, not a runtime proof failure.
+
+Supervisor independently proved recovered completion origin on candidate4ac6ec13:
+supervisor-flow-recovered-origin-1/results.json deliberately removes the SQL
+completion after a real failed turn, retaining its start. After exact engine
+termination/retry, native recovery restores the old failure with generation1/
+original Exec; the new success names generation2/retry Exec, and repeated public
+history reads match. This uses real Codex, synthetic Responses and a simulated
+missing SQL receipt; it is not an observed database write failure, managed account
+acceptance or missed-usage proof. Driver-loss and exact Flow consumption remain.
+
+Final checkpoint engine-loss replay passes on709b1ca131aa7c39f7b26ddf3fea8f5139a42c1122a5dc6a5c02d7f22efabdae
+(native-flow-checkpoint/results.json): controlled failure1, retry0, same native
+thread and Session, old history retained, one replacement engine/generation.
+Formatting/whitespace pass and main remainsa2b59ed50 by fresh ls-remote; the
+Task branch remains705645cd1 before this checkpoint. Scope review found no new
+product owner: new PID/start facts are AgentSession operational evidence, cleared
+when copying stores; native thread is independent of socket lifetime. The current
+wire graph key remains a projection, never stored Session ancestry. Run-backed
+Flow settlement/account continuation remain known unfinished behavior.

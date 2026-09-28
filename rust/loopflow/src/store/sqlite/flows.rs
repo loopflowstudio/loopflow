@@ -422,11 +422,50 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<(
     let step = flow
         .current_checked()
         .ok_or_else(|| invalid("Flow position has no current step"))?;
+    let run_id = RunId::new();
+    let session = if step.kind != crate::engine::invocation::StepKind::Op && !flow.is_human() {
+        let (node, iterations) = super::runs::location_in(tx, flow.id())?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT s.id FROM runs r JOIN agent_sessions s ON s.id=r.session_id
+             WHERE r.invocation_id=?1 AND r.node=?2 AND r.iterations=?3
+             AND s.kind='conversation' ORDER BY r.attempt DESC LIMIT 1",
+                params![flow.id(), node, serde_json::to_string(&iterations)?],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match existing {
+            Some(session) => Some(session),
+            None => {
+                let session = format!("session_{}", uuid::Uuid::new_v4().simple());
+                let repo = if flow.cwd.is_dir() {
+                    crate::repo::discover_repo_root(&flow.cwd)
+                        .map_err(invalid)?
+                        .map(|root| {
+                            crate::repository::CanonicalRepo::discover(&root)
+                                .map(|repo| repo.to_string())
+                        })
+                        .transpose()
+                        .map_err(invalid)?
+                } else {
+                    None
+                };
+                tx.execute(
+                    "INSERT INTO agent_sessions(id,current_run_id,kind,title,title_source,created_at,interactive,repo)
+                     VALUES(?1,?2,'conversation',?3,'generated',?4,0,?5)",
+                    params![session, run_id.as_str(), step.step, now_unix(), repo],
+                )?;
+                Some(session)
+            }
+        }
+    } else {
+        None
+    };
     let run = super::runs::insert_run_in(
         tx,
         Run {
-            id: RunId::new(),
-            session_id: None,
+            id: run_id,
+            session_id: session.clone(),
             invocation_id: Some(flow.id().to_owned()),
             node: None,
             iterations: None,
@@ -444,6 +483,12 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<(
             ended: None,
         },
     )?;
+    if let Some(session) = session {
+        tx.execute(
+            "UPDATE agent_sessions SET current_run_id=?2 WHERE id=?1",
+            params![session, run.id.as_str()],
+        )?;
+    }
     super::runs::select_attempt_in(tx, flow.id(), flow.version, &run.id)
 }
 
@@ -1328,6 +1373,83 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap()
+    }
+
+    #[test]
+    fn agent_steps_reserve_a_conversation_and_retries_retain_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let flow = launched(&store, vec![step("work", None)], 0);
+        let reserved = store
+            .reserve_attempt(flow.id(), flow.version, None)
+            .unwrap();
+        let first = reserved.current_attempt.as_ref().unwrap();
+        let (session, run) = store
+            .session_for_run(&first.run_id)
+            .unwrap()
+            .expect("agent admission reserves its conversation before provider launch");
+        assert!(!session.interactive);
+        assert_eq!(session.flow_session_id.as_deref(), Some(flow.id()));
+        assert!(!run.published);
+        assert!(
+            reserved.pending_session_id.is_none(),
+            "headless work is not a review"
+        );
+        store
+            .rename_session(
+                &session.id,
+                Some(&run.id),
+                "Investigation",
+                crate::session::TitleSource::Human,
+            )
+            .unwrap();
+        store
+            .publish_attempt(flow.id(), reserved.version, &run.id, None, "codex", None)
+            .unwrap();
+        store
+            .end_run(
+                &run.id,
+                &RunEnd {
+                    outcome: "failed".into(),
+                    at: 2,
+                },
+            )
+            .unwrap();
+        store.recover_flow(flow.id(), None).unwrap();
+        let retry = store.retry_flow(flow.id(), None).unwrap();
+        let retry = store
+            .reserve_attempt(flow.id(), retry.version, None)
+            .unwrap();
+        let second = retry.current_attempt.unwrap();
+        let (same, replacement) = store.session_for_run(&second.run_id).unwrap().unwrap();
+        assert_eq!(same.id, session.id);
+        assert_eq!(same.title, "Investigation");
+        assert_eq!(same.current_run_id, replacement.id);
+        assert_ne!(run.id, replacement.id);
+        assert_eq!(
+            store.run(&run.id).unwrap().unwrap().ended.unwrap().outcome,
+            "failed"
+        );
+        assert!(store
+            .publish_attempt(flow.id(), reserved.version, &run.id, None, "codex", None)
+            .is_err());
+
+        let op = launched(
+            &store,
+            vec![ConcreteStep::Op(ConcreteOp {
+                item: Op {
+                    command: "status".into(),
+                    args: vec![],
+                },
+                flow_parents: vec![],
+            })],
+            0,
+        );
+        let reserved = store.reserve_attempt(op.id(), op.version, None).unwrap();
+        assert!(store
+            .session_for_run(&reserved.current_attempt.unwrap().run_id)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

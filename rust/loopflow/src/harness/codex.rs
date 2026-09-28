@@ -1007,10 +1007,44 @@ impl CodexHarness {
                 ))
             })
             .transpose()?;
-        let directory = tempfile::Builder::new()
-            .prefix("lf-codex-")
-            .tempdir_in("/tmp")?;
-        let endpoint = directory.path().join("engine.sock");
+        let connection = self
+            .session_driver
+            .as_ref()
+            .map(|(store, session, _)| store.session_connection(session))
+            .transpose()?
+            .flatten();
+        let saved_thread = self
+            .session_driver
+            .as_ref()
+            .map(|(store, session, _)| store.session_thread(session))
+            .transpose()?
+            .flatten();
+        if let Some(thread) = &saved_thread {
+            if self.resume_provider_session_id.as_ref() != Some(thread) {
+                anyhow::bail!(
+                    "Saved conversation thread differs; reconnect with its recorded provider"
+                );
+            }
+        }
+        let directory = if connection.is_none() {
+            Some(
+                tempfile::Builder::new()
+                    .prefix("lf-codex-")
+                    .tempdir_in("/tmp")?,
+            )
+        } else {
+            None
+        };
+        let endpoint = connection
+            .as_ref()
+            .map(|(endpoint, _)| std::path::PathBuf::from(endpoint))
+            .unwrap_or_else(|| {
+                directory
+                    .as_ref()
+                    .expect("new engine owns a directory")
+                    .path()
+                    .join("engine.sock")
+            });
         let mut command = Command::new("codex");
         if self
             .account_route
@@ -1064,9 +1098,15 @@ impl CodexHarness {
             command.env_remove(name);
         }
 
-        let mut child = command
-            .spawn()
-            .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
+        let mut child = if connection.is_none() {
+            Some(
+                command
+                    .spawn()
+                    .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?,
+            )
+        } else {
+            None
+        };
 
         // Publish the group pid for the interrupt hook: the signal handler
         // (SIGINT/SIGTERM/SIGHUP — see bin/lf.rs) exits the process before
@@ -1074,8 +1114,13 @@ impl CodexHarness {
         // hook is what keeps `tmux kill-session` from orphaning the
         // app-server group. Registered once per harness; restarts just
         // update the atomic.
-        if let Some(pid) = child.id() {
+        if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
             self.child_group.store(pid, Ordering::Release);
+            if let Some((store, session, driver)) = &self.session_driver {
+                if let Some(started_at) = crate::journal::process_started_at(pid)? {
+                    store.record_session_provider_process(session, driver, pid, started_at)?;
+                }
+            }
         }
         if self.session_driver.is_none() && !self.interrupt_hook_registered {
             self.interrupt_hook_registered = true;
@@ -1089,21 +1134,25 @@ impl CodexHarness {
         }
 
         self.endpoint = Some(endpoint.clone());
-        self.engine_directory = Some(directory);
+        self.engine_directory = directory;
         let socket = tokio::time::timeout(Duration::from_secs(15), async {
             loop {
-                if let Some(status) = child.try_wait()? {
-                    return Err(anyhow!(
-                        "codex app-server exited before opening its socket: {status}"
-                    ));
+                if let Some(child) = &mut child {
+                    if let Some(status) = child.try_wait()? {
+                        return Err(anyhow!(
+                            "codex app-server exited before opening its socket: {status}"
+                        ));
+                    }
                 }
                 match UnixStream::connect(&endpoint).await {
                     Ok(socket) => return Ok(socket),
                     Err(error)
-                        if matches!(
-                            error.kind(),
-                            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-                        ) =>
+                        if connection.is_none()
+                            && matches!(
+                                error.kind(),
+                                std::io::ErrorKind::NotFound
+                                    | std::io::ErrorKind::ConnectionRefused
+                            ) =>
                     {
                         tokio::time::sleep(Duration::from_millis(20)).await
                     }
@@ -1114,10 +1163,7 @@ impl CodexHarness {
         .await??;
         let (socket, _) = client_async("ws://localhost", socket).await?;
         let (mut writer, mut reader) = socket.split();
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| anyhow!("missing codex stderr"))?;
+        let stderr = child.as_mut().and_then(|child| child.stderr.take());
 
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
         let authority = self.session_driver.clone();
@@ -1288,6 +1334,20 @@ impl CodexHarness {
                     // The thread/start response carries the vendor thread id.
                     if id.is_some() && id == Some(thread_start_request_id.load(Ordering::Relaxed)) {
                         thread_start_request_id.store(0, Ordering::Relaxed);
+                        if let Some(turn) = value
+                            .pointer("/result/thread/turns")
+                            .and_then(Value::as_array)
+                            .and_then(|turns| {
+                                turns.iter().find(|turn| turn["status"] == "inProgress")
+                            })
+                        {
+                            state.turn_in_progress.store(true, Ordering::Relaxed);
+                            *state
+                                .current_turn_id
+                                .lock()
+                                .expect("codex turn id lock poisoned") =
+                                turn["id"].as_str().map(str::to_owned);
+                        }
                         if let Some(thread_id) = value
                             .get("result")
                             .and_then(codex_mapping::extract_thread_id)
@@ -1381,13 +1441,13 @@ impl CodexHarness {
             }
         });
 
-        let stderr_task = spawn_stderr_logger(stderr, "harness::codex");
+        let stderr_task = stderr.map(|stderr| spawn_stderr_logger(stderr, "harness::codex"));
 
-        self.child = Some(child);
+        self.child = child;
         self.outbound_tx = Some(outbound_tx);
         self.writer_task = Some(writer_task);
         self.reader_task = Some(reader_task);
-        self.stderr_task = Some(stderr_task);
+        self.stderr_task = stderr_task;
 
         // Handshake: initialize -> response -> client `initialized`.
         let init_id = self.next_request_id;

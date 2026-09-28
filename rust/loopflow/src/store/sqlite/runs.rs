@@ -305,7 +305,10 @@ pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<Wave
     WaveId::parse(&wave).map_err(invalid)
 }
 
-fn location_in(conn: &Connection, invocation: &str) -> StoreResult<(u32, Vec<Vec<u32>>)> {
+pub(super) fn location_in(
+    conn: &Connection,
+    invocation: &str,
+) -> StoreResult<(u32, Vec<Vec<u32>>)> {
     let (capture, cursor) = super::flows::capture_in(conn, invocation)?;
     Ok((
         capture.node_id(&cursor).map_err(invalid)?,

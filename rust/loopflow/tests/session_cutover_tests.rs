@@ -2168,6 +2168,25 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
         (failed[0].2, failed[0].3.as_deref(), failed[0].4.as_deref()),
         (1, Some("failed"), Some(task_id.as_str()))
     );
+    let headless = fixture.json(&[
+        "session",
+        "list",
+        "--all",
+        "--interactive",
+        "false",
+        "--json",
+    ]);
+    assert_eq!(headless.as_array().unwrap().len(), 1);
+    let conversation = headless[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(headless[0]["run_id"], failed[0].0);
+    assert_eq!(headless[0]["flow_membership"]["invocation_id"], invocation);
+    fixture.json(&[
+        "session",
+        "rename",
+        &conversation,
+        "Parser investigation",
+        "--json",
+    ]);
 
     let waiting = fixture.run(&["flow", "resume", &invocation, "--retry"]);
     assert!(
@@ -2184,6 +2203,18 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     );
     assert_eq!((runs[2].2, runs[2].3.as_deref()), (1, None));
     assert_ne!(runs[2].1, runs[1].1, "the review is its own node");
+    let headless = fixture.json(&[
+        "session",
+        "list",
+        "--all",
+        "--interactive",
+        "false",
+        "--json",
+    ]);
+    assert_eq!(headless.as_array().unwrap().len(), 1);
+    assert_eq!(headless[0]["id"], conversation);
+    assert_eq!(headless[0]["title"], "Parser investigation");
+    assert_eq!(headless[0]["run_id"], runs[1].0);
     for run in &runs {
         assert_eq!(run.4.as_deref(), Some(task_id.as_str()), "{run:?}");
     }

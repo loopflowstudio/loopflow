@@ -334,6 +334,18 @@ cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
 Retired operations must be rejected without journaling, while ordinary messages
 and bare interrupts retain their behavior.
 
+When changing Wave listener ownership or placement, include the Home reconciler
+and relocation proofs:
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(wave_host::tests::) | test(controller::wave::relocate::tests::)' --no-fail-fast
+```
+
+Retirement fixtures must use Wave relocation's retirement transition; generic
+Work abandonment does not retire a Wave registration. Keep simulated listeners
+pending until the host stops them, and assert the desired Wave set before
+reconciliation so an incidental startup failure cannot masquerade as shutdown.
+
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
 steering publishes to Linear and belongs with the mocked Linear boundary tests.

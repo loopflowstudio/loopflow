@@ -414,7 +414,7 @@ mod tests {
 
     use crate::durable::{HomeId, WorkRef};
     use crate::id::WaveId;
-    use crate::store::StorageConfig;
+    use crate::store::{StorageConfig, WaveLocatorUpdate};
     use crate::work::wave::{Wave, WaveLocator};
 
     use super::{waves_for_home, HostedWave, WaveHost, WaveStartState, WaveStartup};
@@ -569,27 +569,53 @@ mod tests {
             .expect("open store"),
         );
         let local = store.local_home().await.expect("read local Home");
+        let target = WaveLocator::discover(&repo, "assigned").expect("discover Wave locator");
         let wave = Wave::new(
             WaveId::new(),
             "assigned".to_string(),
-            repo.display().to_string(),
+            target.repo().to_string(),
         );
         store.create_wave(&wave).await.expect("create Wave");
+        let replacement = Wave::new(
+            WaveId::new(),
+            "replacement".to_string(),
+            target.repo().to_string(),
+        );
+        store
+            .create_wave(&replacement)
+            .await
+            .expect("create replacement Wave");
+        let remote = store
+            .observe_home(&HomeId::new(), "ssh://operator@remote.example.com")
+            .await
+            .expect("observe replacement Home");
+        store
+            .place_work(&WorkRef::Wave(replacement.id().clone()), &remote.id)
+            .await
+            .expect("place replacement Wave remotely");
         let host = WaveHost::new(local.id, store.clone(), None);
         let (_startup_tx, startup) =
             tokio::sync::watch::channel(WaveStartup::Live("127.0.0.1:1".to_string()));
-        let task = tokio::spawn(async {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        });
+        let task = tokio::spawn(std::future::pending());
         host.waves
             .lock()
             .await
             .insert(wave.id().clone(), HostedWave { task, startup });
         store
-            .abandon(&WorkRef::Wave(wave.id().clone()), "retired")
+            .relocate_waves(vec![WaveLocatorUpdate {
+                wave_id: replacement.id().clone(),
+                expected_repo: replacement.repo().to_string(),
+                expected_slug: replacement.name().to_string(),
+                target,
+                retire_collision: Some(wave.id().clone()),
+            }])
             .await
-            .expect("disable Wave");
+            .expect("retire destination Wave during relocation");
 
+        assert!(waves_for_home(&store, host.home_id(), None)
+            .await
+            .expect("select assigned Waves after retirement")
+            .is_empty());
         host.reconcile().await;
 
         assert_eq!(host.active_count().await, 0);

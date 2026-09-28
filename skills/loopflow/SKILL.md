@@ -26,7 +26,7 @@ lf --version || echo "not installed"
 ## Caller Authority
 
 An external harness opened by a person acts as a Loopflow **User**. It may read
-status and use `lf chat` when the user asks it to inspect or steer a Wave. It
+status and start a Session when the user asks it to inspect or steer a Wave. It
 does not become a Wave, Project, or Task worker.
 
 An agent launched by Loopflow is a Loopflow-launched internal participant. It
@@ -101,9 +101,9 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 ```bash
 lf home id                                      # this machine's HomeId
 lf wave place <wave-id> <home-id>          # only while no Run is live
-lf chat --follow -w <wave>                       # connect to chat
-lf ssh <home-id> wave status <wave> --json           # inspect it on that Home
-lf ssh <home-id> chat --follow -w <wave>         # connect on that Home
+lf --wave <wave> wave/operate                    # one finite pass here
+lf ssh <home-id> status <wave> --json           # inspect it on that Home
+lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
 ```
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
@@ -120,9 +120,9 @@ summaries extracted from them use names. Use known preferred names and preserve
 unknown attribution instead of guessing who made a request.
 
 Answer the user's message in turn text. Tasks, Projects, and Waves communicate
-through typed Work observations and targeted Ask/Answer exchanges.
+through durable Task facts and targeted Ask Sessions.
 
-`lf chat` is the User surface. Work Steer is the live correction path. When the
+Sessions are the conversation surface. Work Steer is the live correction path. When the
 active skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md`
 through the ordinary repository workflow. Keep it curated rather than appending
 a transcript. `update-wave` owns deliberate end-of-work memory curation; no

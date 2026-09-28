@@ -1,5 +1,5 @@
 // Repository rail, Wave list, and the selected Wave's work map + conversation.
-// Discovery is a periodic registry query (`lf wave list`); live conversation and
+// Discovery is a periodic registry query (`lf wave list`); Work and Session
 // resident motion stream directly from that Wave's listener.
 
 import SwiftUI
@@ -272,7 +272,7 @@ struct WavesView: View {
         .padding(.vertical, Spacing.md)
     }
 
-    // MARK: - Wave detail (WaveChat)
+    // MARK: - Wave detail
 
     @ViewBuilder
     private var waveDetail: some View {
@@ -306,11 +306,7 @@ struct WavesView: View {
         selectedWaveId = waveSelectionId(wave)
     }
 
-    /// On-disk repo root for the wave's state, where its
-    /// `wave/<name>/.wave-endpoint` discovery pointer lives. Wave state is
-    /// published at the ORIGIN repo, so a worktree rail path resolves here
-    /// (memoized) — chat discovery, the launcher, and Session navigation all
-    /// inherit the same origin path.
+    /// Resolve the canonical repository shared by Work and Session navigation.
     private func waveRepoPath(for wave: WaveViewModel) -> String {
         WaveOrigin.resolve(repoState(for: wave)?.repo.path ?? wave.repo)
     }
@@ -532,10 +528,7 @@ struct WavesView: View {
         }
     }
 
-    /// Discovery has no stream: re-query the registry on a slow cadence so a
-    /// wave that started, stopped, or advanced since the last read shows up.
-    /// Each wave's live conversation + run motion is its own per-wave SSE,
-    /// opened by the detail pane — not funnelled through a center.
+    /// Refresh Work observations without starting execution.
     private func pollRegistry() async {
         if AppTestMode.shouldBypassRegistry { return }
         while !Task.isCancelled {

@@ -40,7 +40,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
    Linear is the source of truth; there are no local Project or Task lists.
 
 2. **Read runtime state.** For each member wave:
-   - `lf wave status <wave-name> --json` — Wave presence, resident state, current chapter, Tasks, next owners, worktrees, PRs, and conditions
+   - `lf wave status <wave-name> --json` — Wave placement, current chapter, Tasks, next owners, worktrees, PRs, and conditions
    - `lf task status <issue-id> --json` only when the Wave snapshot needs
      deeper inspection
 
@@ -110,7 +110,7 @@ Write `scratch/garden-scan.md`:
 <objective, cadence, policy, PM binding>
 
 ### Runtime
-<Wave presence and resident state, active Tasks, conditions>
+<Wave placement, active Tasks, conditions>
 
 ### Progress
 <what shipped recently, what's in flight>

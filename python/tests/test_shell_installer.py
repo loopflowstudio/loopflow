@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -66,16 +65,12 @@ def _write_stubs(stub_dir: Path) -> None:
         'prev=""\n'
         'for arg in "$@"; do\n'
         '  case "$prev" in\n'
-        '    --cli-target|--daemon-target) cp "$0" "$arg" ;;\n'
+        '    --cli-target) cp "$0" "$arg" ;;\n'
         "  esac\n"
         '  prev="$arg"\n'
         "done\n"
         "exit 0\n"
         "LF\n"
-        "  cat > \"$dir/lfd\" <<'LFD'\n"
-        "#!/bin/sh\n"
-        "exit 0\n"
-        "LFD\n"
         "fi\n"
         "exit 0\n"
     )
@@ -142,53 +137,6 @@ def test_installer_syntax_is_valid(installer: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("explicit_directory", [False, True])
-def test_legacy_refresh_installs_published_binaries(
-    env: dict[str, str], tmp_path: Path, explicit_directory: bool
-) -> None:
-    destination = tmp_path / "installed binaries"
-    args = [sys.executable, str(REPO_ROOT / "scripts/install.py"), "refresh"]
-    if explicit_directory:
-        args.extend(["--install-dir", str(destination)])
-    else:
-        env["LF_INSTALL_DIR"] = str(destination)
-
-    result = subprocess.run(args, env={**os.environ, **env}, capture_output=True, text=True)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert (destination / "lf").is_file()
-    assert (destination / "lfd").is_file()
-    assert f"Installed to {destination}/lf and {destination}/lfd" in result.stdout
-
-
-@pytest.mark.parametrize(
-    ("failure", "diagnostic"),
-    [({"LFTEST_CURL_RC": "22"}, "Download failed"), ({"LFTEST_BAD_SUMS": "1"}, "Digest mismatch")],
-)
-def test_legacy_refresh_preserves_installation_on_download_failure(
-    env: dict[str, str], tmp_path: Path, failure: dict[str, str], diagnostic: str
-) -> None:
-    destination = Path(env["LF_INSTALL_DIR"])
-    destination.mkdir()
-    for name in ("lf", "lfd"):
-        (destination / name).write_text("previous installation")
-
-    result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts/install.py"), "refresh"],
-        env={**os.environ, **env, **failure},
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert diagnostic in result.stdout + result.stderr
-    assert "refresh failed" in result.stderr
-    assert all(
-        (destination / name).read_text() == "previous installation" for name in ("lf", "lfd")
-    )
-    assert not (tmp_path / "promote.log").exists()
-
-
 def test_removed_no_interactive_flag_fails_clearly(installer: Path, env: dict[str, str]) -> None:
     result = _run(installer, ["--no-interactive"], env)
     assert result.returncode != 0
@@ -231,13 +179,7 @@ def test_downloaded_candidate_owns_activation(
         "--cli-target",
         str(tmp_path / "dest/lf"),
     ]
-    assert args[4] == "--daemon-source"
-    assert Path(args[5]).name == "lfd"
-    assert args[6:] == [
-        "--daemon-target",
-        str(tmp_path / "dest/lfd"),
-        "--sync-skills",
-    ]
+    assert args[4:] == ["--sync-skills"]
 
 
 def test_latest_release_is_pinned_before_the_archive_download(

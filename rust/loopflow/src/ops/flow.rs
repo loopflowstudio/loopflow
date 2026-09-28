@@ -364,10 +364,10 @@ fn unsupported() -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::work::wave::metrics::MetricEvidenceDto;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::store::{open_store, storage_config_from_env};
+    use crate::work::wave::metrics::MetricEvidenceDto;
     use crate::work::wave::Wave;
 
     #[test]

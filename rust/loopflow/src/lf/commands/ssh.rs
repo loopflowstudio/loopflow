@@ -22,8 +22,8 @@
 //! Agent forwarding (`ssh -A`) is off by default — git pushes ride the
 //! forwarded `GH_TOKEN` over HTTPS, so the caller's SSH identity stays home.
 
-use std::io::Write;
 use clap::Parser;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -156,7 +156,6 @@ pub fn run(
         &extra_env,
     )
 }
-
 
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {

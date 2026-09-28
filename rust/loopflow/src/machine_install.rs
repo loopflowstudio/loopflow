@@ -555,8 +555,14 @@ impl SwitchReceipt {
             || self.target.artifact_set.content_sha256 != prior.target.artifact_set.content_sha256
             || self.target.artifact_set.artifact(&ArtifactRole::Cli)
                 != prior.target.artifact_set.artifact(&ArtifactRole::Cli)
-            || self.target.artifact_set.artifact(&ArtifactRole::RetiredDaemon)
-                != prior.target.artifact_set.artifact(&ArtifactRole::RetiredDaemon)
+            || self
+                .target
+                .artifact_set
+                .artifact(&ArtifactRole::RetiredDaemon)
+                != prior
+                    .target
+                    .artifact_set
+                    .artifact(&ArtifactRole::RetiredDaemon)
             || self.target_published_fallback != prior.target_published_fallback;
         if identity_changed {
             return Err(anyhow!(
@@ -744,7 +750,9 @@ pub fn install_entry_gate(root: &Path, role: &ArtifactRole, source: &Path) -> Re
 }
 
 fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
-    std::env::var(INSTALL_SWITCH_ENV).ok().filter(|value| !value.is_empty())
+    std::env::var(INSTALL_SWITCH_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
 }
 
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
@@ -1163,7 +1171,6 @@ fn artifact_matches_runtime_role(artifact: &ArtifactRole, runtime: &ArtifactRole
             (artifact, runtime),
             (ArtifactRole::AppHelper(name), ArtifactRole::Cli) if name == "lf"
         )
-
 }
 
 pub fn authorize_current(role: &ArtifactRole) -> Result<Option<InstallSelection>> {
@@ -1315,7 +1322,11 @@ pub(crate) fn tree_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(digest.finalize()))
 }
 
-pub(crate) fn artifact_set_sha256(cli: &Path, daemon: Option<&Path>, app: Option<&Path>) -> Result<String> {
+pub(crate) fn artifact_set_sha256(
+    cli: &Path,
+    daemon: Option<&Path>,
+    app: Option<&Path>,
+) -> Result<String> {
     let mut digest = Sha256::new();
     digest.update(file_sha256(cli)?.as_bytes());
     if let Some(daemon) = daemon {

@@ -18,14 +18,11 @@ use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::{
-    Project, ProjectEvent, ProjectEventKind, ProjectId,
-};
+use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearObservationApply, LinearObservationOutcome,
     PmWritebackState, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
-    TaskPrRepairKind,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
 use super::durable::{create_project_work, create_task_work};
@@ -623,8 +620,6 @@ impl SqliteStore {
     /// signal the body observation reads: a live body that has written nothing to
     /// its event log past the stall deadline is stalled, not working. `None` means
     /// no events yet (the status change is the only progress the caller can use).
-    /// Project first assignment into chat without storing a second Started fact.
-
     pub fn latest_task_event_at(&self, task_id: &TaskId) -> StoreResult<Option<OffsetDateTime>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let seconds: Option<i64> = conn.query_row(
@@ -830,9 +825,6 @@ impl SqliteStore {
             .as_ref()
             .and_then(crate::work::project::HistoricalFailure::from_event))
     }
-
-
-
 }
 
 fn validate_task(task: &Task) -> StoreResult<()> {
@@ -1756,8 +1748,6 @@ fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEve
     })
 }
 
-
-
 pub(super) fn insert_task_event_in(
     conn: &Connection,
     task: &Task,
@@ -1800,5 +1790,3 @@ pub(super) fn insert_project_event_in(
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })
 }
-
-

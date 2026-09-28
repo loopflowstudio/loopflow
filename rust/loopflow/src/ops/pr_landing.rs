@@ -1270,11 +1270,15 @@ mod tests {
         assert_eq!(*driver.repairs.lock().unwrap(), 0);
     }
 
-    #[tokio::test]
-    async fn landing_waiter_reads_completed_repair_output_once() {
+    #[test]
+    fn landing_waiter_reads_completed_repair_output_once() {
         use crate::chat::types::{ConversationEvent, ConversationItem};
         use crate::run_record::{CaptureHandle, RunSpec};
 
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
         let (home, store) = store().await;
         let landing = claimed(&store, home.path()).await;
         let mut shown = std::collections::HashSet::new();
@@ -1331,6 +1335,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        });
     }
 
     #[tokio::test]

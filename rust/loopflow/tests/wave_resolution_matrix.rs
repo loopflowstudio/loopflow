@@ -6,10 +6,9 @@
 //! and fails CI when a new `--wave`-bearing command is not registered.
 
 use std::collections::HashSet;
-use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use clap::{ArgAction, CommandFactory};
 use loopflow::id::WaveId;
@@ -33,30 +32,6 @@ enum WaveForm {
     Flag,
     /// `<name>` positional on the subcommand.
     Positional,
-    /// `WaveTargetArgs` flattened: `--wave <name>`.
-    Target,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct Special {
-    /// `NoContext` → proceed globally (list all waves, sync all waves) — exit
-    /// 0 or downstream error, not a resolution error. Roadmap and `pm status`
-    /// behave this way.
-    global_default: bool,
-    /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). `chat post`
-    /// drops silently instead of erroring.
-    silent_drop: bool,
-    /// Pipes this text to stdin (for commands whose `trailing_var_arg` would
-    /// swallow `--wave` if text were on the command line).
-    stdin: Option<&'static str>,
-}
-
-impl Special {
-    const NONE: Self = Self {
-        global_default: false,
-        silent_drop: false,
-        stdin: None,
-    };
 }
 
 struct Cmd {
@@ -67,7 +42,8 @@ struct Cmd {
     base_args: &'static [&'static str],
     wave_form: WaveForm,
     kind: Kind,
-    special: Special,
+    /// With no context, read all Waves instead of requiring one.
+    global_default: bool,
 }
 
 /// Commands that resolve an ambient wave without a `wave` arg on the
@@ -98,6 +74,7 @@ const FILTER_ONLY: &[&[&str]] = &[
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
     &["wave", "relocate"],
+    &["discord", "serve"],
     &["cron", "preflight"],
     &["cron", "sync"],
     &["cron", "run"],
@@ -114,7 +91,7 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["wave", "status", "--json"],
         wave_form: WaveForm::Positional,
         kind: Kind::Read,
-        special: Special::NONE,
+        global_default: false,
     },
     Cmd {
         id: "roadmap",
@@ -122,26 +99,7 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["roadmap", "--json"],
         wave_form: WaveForm::Flag,
         kind: Kind::Read,
-        special: Special {
-            global_default: true,
-            ..Special::NONE
-        },
-    },
-    Cmd {
-        id: "chat history",
-        path: &["chat"],
-        base_args: &["chat", "--history", "--json"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "wave probe",
-        path: &["wave", "probe"],
-        base_args: &["wave", "probe", "--json"],
-        wave_form: WaveForm::Positional,
-        kind: Kind::Read,
-        special: Special::NONE,
+        global_default: true,
     },
     Cmd {
         id: "wave history",
@@ -149,30 +107,16 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["wave", "history", "--json"],
         wave_form: WaveForm::Flag,
         kind: Kind::Read,
-        special: Special::NONE,
+        global_default: false,
     },
     // ── Mutations ────────────────────────────────────────────────────────
-    // `chat post` uses stdin for text: its `trailing_var_arg` would swallow
-    // `--wave` if text were on the command line.
-    Cmd {
-        id: "chat post",
-        path: &["chat"],
-        base_args: &["chat"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Mutation,
-        special: Special {
-            silent_drop: true,
-            stdin: Some("matrix-test-message\n"),
-            ..Special::NONE
-        },
-    },
     Cmd {
         id: "wave connect",
         path: &["wave", "connect"],
         base_args: &["wave", "connect"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
-        special: Special::NONE,
+        global_default: false,
     },
     Cmd {
         id: "wave sync",
@@ -180,10 +124,7 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["wave", "sync"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
-        special: Special {
-            global_default: true,
-            ..Special::NONE
-        },
+        global_default: true,
     },
     Cmd {
         id: "cron add",
@@ -198,7 +139,7 @@ const COMMANDS: &[Cmd] = &[
         ],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
-        special: Special::NONE,
+        global_default: false,
     },
     Cmd {
         id: "task create",
@@ -206,7 +147,7 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["task", "create", "--title", "Fixture task"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
-        special: Special::NONE,
+        global_default: false,
     },
     Cmd {
         id: "wave new-chapter",
@@ -214,7 +155,7 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["wave", "new-chapter", "--chapter", "next", "--dry-run"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
-        special: Special::NONE,
+        global_default: false,
     },
     Cmd {
         id: "wave update-plan",
@@ -222,7 +163,7 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["wave", "update-plan", "--plan", "plan.json"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
-        special: Special::NONE,
+        global_default: false,
     },
 ];
 
@@ -238,8 +179,6 @@ enum Outcome {
     NoContext,
     /// Resolver rejected an explicit name absent from the registry.
     UnknownExplicit,
-    /// Publish-to-no-subscriber: no wave resolved → exit 0 "dropped".
-    Drop,
 }
 
 struct Env {
@@ -310,10 +249,7 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     }
 
     if env.id == "absent" {
-        if cmd.special.silent_drop {
-            return Outcome::Drop;
-        }
-        if cmd.special.global_default {
+        if cmd.global_default {
             return Outcome::Resolved;
         }
         return Outcome::NoContext;
@@ -357,10 +293,6 @@ fn classify(output: &std::process::Output) -> Outcome {
         return Outcome::Resolved;
     }
 
-    // Exit 0
-    if combined.contains("dropped") || combined.contains("nothing to tune in to") {
-        return Outcome::Drop;
-    }
     Outcome::Resolved
 }
 
@@ -445,7 +377,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
     args.extend(cmd.base_args.iter().map(|s| s.to_string()));
     if let Some(w) = explicit {
         match cmd.wave_form {
-            WaveForm::Flag | WaveForm::Target => {
+            WaveForm::Flag => {
                 args.push("--wave".to_string());
                 args.push(w.to_string());
             }
@@ -458,8 +390,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
 }
 
 /// Run `lf` with the given home, repo, command, and environment. Returns the
-/// process output (stdout, stderr, exit code). Long-running commands are
-/// killed after a timeout; stdin-needing commands receive piped input.
+/// process output (stdout, stderr, exit code). The enclosing proof phase owns its timeout.
 fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Output {
     let args = build_args(cmd, env);
 
@@ -487,26 +418,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
 
     if let Some(id) = &env.wave_id {
         command.env("LF_WAVE_ID", id);
-    }
-    if let Some(stdin_text) = cmd.special.stdin {
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = command.spawn().expect("spawn");
-        // Write stdin on a separate thread so wait_with_output can drain
-        // stdout/stderr concurrently — a child that errors before reading
-        // stdin must not deadlock the pipe.
-        let stdin = child.stdin.take();
-        let text = stdin_text.to_string();
-        let handle = std::thread::spawn(move || {
-            if let Some(mut stdin) = stdin {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-        });
-        let output = child.wait_with_output().expect("wait");
-        let _ = handle.join();
-        return output;
     }
 
     command.output().expect("lf runs")

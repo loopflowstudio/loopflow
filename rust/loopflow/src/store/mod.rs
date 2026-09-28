@@ -1190,9 +1190,7 @@ pub async fn open_ephemeral_store(cfg: &StorageConfig) -> StoreResult<Store> {
 }
 
 /// Open the machine's shared registry store only if one already exists.
-/// `None` means this machine has no registry yet; callers that instrument best-effort (lf
-/// self-registration, the wave server) treat that as "not instrumented" and
-/// stay silent rather than conjuring an empty db.
+/// Returns `None` if the registry is absent or incompatible; never creates it.
 pub async fn open_existing_store() -> Option<Store> {
     let cfg = crate::store::storage_config_from_env().ok()?;
     let StorageConfig::Sqlite { path } = &cfg;
@@ -1595,8 +1593,9 @@ mod tests {
             .await
             .unwrap();
         let events = store.task_events_after(&task.id, 0).await.unwrap();
-        assert!(events.iter().any(|event| matches!(event.kind, TaskEventKind::Failed { .. })));
-
+        assert!(events
+            .iter()
+            .any(|event| matches!(event.kind, TaskEventKind::Failed { .. })));
     }
 
     #[tokio::test]

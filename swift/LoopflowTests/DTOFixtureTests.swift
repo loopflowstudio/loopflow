@@ -171,6 +171,14 @@ struct DTOFixtureTests {
             try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingHomeData)
         }
 
+        var missingEnabled = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var waveWithoutEnabled = try #require(missingEnabled["wave"] as? [String: Any])
+        waveWithoutEnabled.removeValue(forKey: "enabled")
+        missingEnabled["wave"] = waveWithoutEnabled
+        let missingEnabledData = try JSONSerialization.data(withJSONObject: missingEnabled)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingEnabledData)
+        }
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -243,17 +251,6 @@ struct DTOFixtureTests {
         _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
-    @Test("child activity preserves typed delivery evidence")
-    func childActivityPreservesTypedDeliveryEvidence() throws {
-        let data = try loadFixtureData("child_control_activity.json")
-        let activity = try JSONDecoder().decode(ChildControlActivity.self, from: data)
-
-        #expect(activity.subject == .task)
-        #expect(activity.subjectId == "INF-123")
-        #expect(activity.workId == "ts_22222222222222222222222222222222")
-        #expect(activity.kind == .prOpened)
-        #expect(activity.title == "Opened PR #1073")
-    }
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(

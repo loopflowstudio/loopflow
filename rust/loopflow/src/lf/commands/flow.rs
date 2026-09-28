@@ -352,12 +352,7 @@ pub(crate) async fn drive(
 ) -> Result<FlowOutcome> {
     let id = flow.id().to_owned();
     let _driver = flow_run::driver_lock(&id)?;
-    let current = store
-        .flow(&id)
-        .await?
-        .ok_or_else(|| anyhow!("Flow {id} is missing"))?;
-    anyhow::ensure!(current.claim == claim, "Flow {id} driver claim is stale");
-    let mut flow = store.recover_flow(&id).await?;
+    let mut flow = store.recover_flow(&id, claim.as_ref()).await?;
     if flow.finished {
         println!("Flow {} is already finished.", flow.invocation.flow);
         return Ok(FlowOutcome::Completed);
@@ -605,7 +600,10 @@ impl CliFlowExecutor<'_> {
 
     /// The row at the step about to run, with any earlier attempt settled.
     async fn begin(&self) -> Result<FlowInvocation> {
-        let flow = self.store.recover_flow(&self.id).await?;
+        let flow = self
+            .store
+            .recover_flow(&self.id, self.claim().as_ref())
+            .await?;
         anyhow::ensure!(
             !flow.finished && flow.failure.is_none(),
             "Flow is not ready to execute"
@@ -687,7 +685,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
             .lock()
             .expect("Flow progress mutex poisoned")
             .take();
-        let version = self
+        let flow = self
             .store
             .checkpoint_flow(
                 &self.id,
@@ -697,7 +695,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 progress.as_deref(),
             )
             .await?;
-        *self.version.lock().expect("Flow version mutex poisoned") = version;
+        self.observe(&flow);
         Ok(())
     }
 

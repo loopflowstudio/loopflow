@@ -36,9 +36,17 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_flow(&task_id)).await
     }
 
-    pub async fn recover_flow(&self, id: &str) -> StoreResult<FlowInvocation> {
+    pub async fn recover_flow(
+        &self,
+        id: &str,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowInvocation> {
         let id = id.to_string();
-        run_sqlite(&self.sqlite, move |store| store.recover_flow(&id)).await
+        let claim = claim.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.recover_flow(&id, claim.as_ref())
+        })
+        .await
     }
 
     pub async fn reserve_attempt(
@@ -116,7 +124,7 @@ impl Store {
         cursor: &ExecutionCursor,
         claim: Option<&TaskWorkerClaim>,
         progress: Option<&str>,
-    ) -> StoreResult<u64> {
+    ) -> StoreResult<FlowInvocation> {
         let id = id.to_string();
         let cursor = cursor.clone();
         let claim = claim.cloned();

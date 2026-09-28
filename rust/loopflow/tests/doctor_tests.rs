@@ -52,23 +52,28 @@ fn continuity_check(output: &Output) -> serde_json::Value {
 
 fn insert_run_event(store: &SqliteStore, id: &str, ts: i64) {
     store
-        .insert_run_event(&RunEventRow {
-            run_id: id.to_string(),
-            process_id: id.to_string(),
-            parent_process_id: None,
-            seq: 0,
-            ts,
-            repo: Some("/src/loopflow".to_string()),
-            worktree: Some("/src/loopflow".to_string()),
-            wave: Some("infrastructure".to_string()),
-            node: "run".to_string(),
-            event: "completed".to_string(),
-            command: Some(r#"["lf","flow","telemetry-daily"]"#.to_string()),
-            flow: Some("telemetry-daily".to_string()),
-            skill: None,
-            step_index: None,
-            error: None,
-        })
+        .insert_run_event(
+            &RunEventRow {
+                run_id: id.to_string(),
+                process_id: id.to_string(),
+                parent_process_id: None,
+                seq: 0,
+                ts,
+                repo: Some("/src/loopflow".to_string()),
+                worktree: Some("/src/loopflow".to_string()),
+                wave: Some("infrastructure".to_string()),
+                node: "run".to_string(),
+                event: "completed".to_string(),
+                command: Some(r#"["lf","flow","telemetry-daily"]"#.to_string()),
+                flow: Some("telemetry-daily".to_string()),
+                skill: None,
+                step_index: None,
+                error: None,
+            },
+            None,
+            None,
+            None,
+        )
         .unwrap();
 }
 

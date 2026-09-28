@@ -5,12 +5,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
+use crate::store::Store;
 use crate::work::wave::metrics::{
     compose_metric_portfolio, discover_metric_contracts, load_metric_contract,
     MetricContractDiscovery, MetricContractIssueDto, MetricObservation, MetricPortfolioDto,
     ObservationAcceptance,
 };
-use crate::store::Store;
 use crate::work::wave::Wave;
 
 pub(crate) async fn wave_metric_portfolio(
@@ -370,12 +370,12 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::work::wave::metrics::{
-        load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
-    };
     use crate::id::WaveId;
     use crate::pm::{PmKr, ProjectFlowPlan};
     use crate::store::StorageConfig;
+    use crate::work::wave::metrics::{
+        load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
+    };
 
     use super::*;
     use crate::pm::PmProject;

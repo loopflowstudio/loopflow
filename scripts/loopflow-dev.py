@@ -281,13 +281,11 @@ def cmd_run() -> int:
 
 
 def _print_run_debug_checklist() -> None:
-    """Print the manual review path for Wave Chat and work supervision."""
+    """Print the manual review path for Work and Session surfaces."""
     print("Review checklist:")
-    print("  1. Select a Wave: its conversation and work map should agree on identity.")
-    print("  2. Send while idle: Wave Chat should connect automatically.")
-    print("  3. Send while turning: the composer should expose Steer and Interrupt & Send.")
-    print("  4. Verify Wave KRs, Tasks, decisions, and PR delivery refresh from `lf wave status`.")
-    print("  5. Switch Waves: each conversation should retain its own endpoint and playhead.")
+    print("  1. Select a Wave: inspect its plan, Tasks and Runs.")
+    print("  2. Open a Session under a Task and verify its terminal is retained across navigation.")
+    print("  3. Verify Task conditions and PR delivery refresh from lf wave status.")
 
 
 def cmd_run_debug(repo: Path = REPO_ROOT) -> int:

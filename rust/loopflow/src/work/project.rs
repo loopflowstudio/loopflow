@@ -103,34 +103,3 @@ impl HistoricalFailure {
         })
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectObservation {
-    pub project_id: ProjectId,
-    pub project: String,
-    pub event_id: i64,
-    pub event: ProjectEventKind,
-}
-
-impl ProjectObservation {
-    pub fn inbox_id(&self) -> String {
-        format!("project-{}-{}", self.project_id, self.event_id)
-    }
-
-    pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&self.event)
-            .expect("Project observation always serializes to structured JSON");
-        format!(
-            "<project_observation project_id=\"{}\" project=\"{}\" event_id=\"{}\">\n{}\n</project_observation>",
-            self.project_id, self.project, self.event_id, payload
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ChildEventPayload {
-    Project { event: ProjectEventKind },
-    Task { event: TaskEventKind },
-}
-

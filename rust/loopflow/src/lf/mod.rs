@@ -770,18 +770,6 @@ fn reject_retired_op(sub: &str) -> Result<String, String> {
     Err(format!("`lf op {sub}` was removed; {hint}"))
 }
 
-/// Wave targeting for `lf chat`: default is the invoking context's wave
-/// (`LF_WAVE_ID` env, else the worktree name).
-#[derive(Args, Debug, Clone, Default)]
-pub struct WaveTargetArgs {
-    /// Target wave by name
-    #[arg(short = 'w', long = "wave", conflicts_with = "parent")]
-    pub wave: Option<String>,
-    /// Target the invoking wave's parent (escalation up the wave tree)
-    #[arg(long)]
-    pub parent: bool,
-}
-
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
     /// List every wave in the registry (running and stopped), marking which
@@ -1389,7 +1377,6 @@ pub enum RepoCommand {
         #[arg(long)]
         apply: bool,
     },
-
 }
 
 /// Inspect and observe durable Homes.
@@ -1407,7 +1394,6 @@ pub enum HomeCommand {
         #[arg(long)]
         json: bool,
     },
-
 }
 
 #[derive(Debug, Subcommand)]
@@ -1619,6 +1605,19 @@ mod tests {
         for verb in ["enable", "disable", "serve"] {
             assert!(Cli::try_parse_from(["lf", "wave", verb, "product"]).is_err());
         }
+        for removed in [
+            "start",
+            "stop",
+            "pause",
+            "resume",
+            "chat",
+            "reply",
+            "__resident",
+        ] {
+            assert!(command.find_subcommand(removed).is_none());
+        }
+        assert!(Cli::try_parse_from(["lf", "repo", "webhook", "serve"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wave", "serve", "product"]).is_err());
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
@@ -1634,7 +1633,7 @@ mod tests {
                 "product",
                 "home_00000000000000000000000000000001",
             ],
-            vec!["lf", "repo", "webhook", "serve"],
+            vec!["lf", "discord", "serve", "product"],
             vec!["lf", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
             vec!["lf", "wave", "status", "product", "--no-sync"],
@@ -2755,10 +2754,6 @@ mod tests {
             "--fresh",
             "--cli-target",
             "/tmp/bin/lf",
-            "--daemon-source",
-            "/tmp/lfd",
-            "--daemon-target",
-            "/tmp/bin/lfd",
         ])
         .expect("parse local promotion");
         assert!(matches!(
@@ -2778,10 +2773,6 @@ mod tests {
             "--fresh",
             "--cli-target",
             "/tmp/bin/lf",
-            "--daemon-source",
-            "/tmp/lfd",
-            "--daemon-target",
-            "/tmp/bin/lfd",
         ])
         .is_err());
     }
@@ -2860,7 +2851,6 @@ mod tests {
         };
         assert!(apply);
     }
-
 
     #[test]
     fn radio_is_not_a_first_class_command() {

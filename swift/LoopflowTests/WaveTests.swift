@@ -16,7 +16,7 @@ struct WaveTests {
         #expect(wave.id == "wave-123")
         #expect(wave.displayName == "infrastructure")
         #expect(wave.repo == "/tmp/repo")
-        #expect(wave.lens.color == .green)
+        #expect(wave.lens.color == .black)
         #expect(wave.isRegistered)
     }
 

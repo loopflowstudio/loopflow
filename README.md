@@ -35,7 +35,7 @@ Requires macOS or Linux and one of
 cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 ```
 
-The Mac app — wave chat, the machine-wide roadmap, every task's worktree — is
+The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
 It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the
 terminal control conversation. On canonical main, it first carries local
@@ -86,8 +86,9 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf chat --follow -w designer
+lf --wave designer wave/operate        # one finite planning pass
 lf --wave designer wave/operate "ship the button audit first"
+lf --wave designer wave/operate        # one finite planning pass
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a

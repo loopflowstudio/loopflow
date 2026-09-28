@@ -227,7 +227,6 @@ pub struct PromotionArtifacts<'a> {
     pub legacy_app_target: Option<&'a Path>,
 }
 
-
 /// The pure promotion decision. Given the candidate's authority, its
 /// compatibility with the store, decide whether the global command may be
 /// replaced. Pure over its inputs — no I/O — so every branch is unit-tested
@@ -958,7 +957,6 @@ fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
     stage_binary_as(source, bin_dir, "lf")
 }
 
-
 fn prepare_artifacts(
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
@@ -1018,7 +1016,6 @@ fn prepare_artifacts(
 fn preserve_prior_binary(cli_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
     preserve_prior_binary_as(cli_target, bin_dir, "lf")
 }
-
 
 fn preserve_prior_binary_as(target: &Path, bin_dir: &Path, name: &str) -> Result<Option<PathBuf>> {
     let metadata = match fs::symlink_metadata(target) {
@@ -1099,28 +1096,17 @@ fn verify_entry_gate_targets(
     root: &Path,
     activation: &crate::machine_install::ActivationTargets,
 ) -> Result<()> {
-    for (role, target) in [
-        (
-            crate::machine_install::ArtifactRole::Cli,
-            activation.cli.as_path(),
-        ),
-    ] {
-        let expected = fs::canonicalize(crate::machine_install::entry_gate_path(root, &role)?)?;
-        let actual = fs::canonicalize(target).with_context(|| {
-            format!(
-                "resolve {:?} public entry target {}",
-                role,
-                target.display()
-            )
-        })?;
-        if actual != expected {
-            return Err(anyhow!(
-                "public {:?} target {} bypasses machine entry gate {}",
-                role,
-                target.display(),
-                expected.display()
-            ));
-        }
+    let role = crate::machine_install::ArtifactRole::Cli;
+    let target = &activation.cli;
+    let expected = fs::canonicalize(crate::machine_install::entry_gate_path(root, &role)?)?;
+    let actual = fs::canonicalize(target)
+        .with_context(|| format!("resolve public CLI target {}", target.display()))?;
+    if actual != expected {
+        return Err(anyhow!(
+            "public CLI target {} bypasses machine entry gate {}",
+            target.display(),
+            expected.display()
+        ));
     }
     Ok(())
 }
@@ -1179,11 +1165,7 @@ fn activate_prepared_machine_switch(
             },
         )?;
     }
-    entry_gate_targets(
-        root,
-        &receipt.candidate.path,
-        &receipt.activation,
-    )?;
+    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app, &receipt.target.artifact_set)?;
     }
@@ -1448,7 +1430,6 @@ fn validate_staged_app_helper(
     Ok(())
 }
 
-
 fn validate_rollback_verdict(verdict: &Verdict) -> Result<()> {
     match verdict {
         Verdict::Promote => Ok(()),
@@ -1494,8 +1475,6 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     retained_binary_path_as(candidate, bin_dir, "lf")
 }
 
-
-
 fn app_executable_paths(
     selection: &crate::machine_install::InstallSelection,
     app_target: Option<&Path>,
@@ -1514,8 +1493,7 @@ fn app_executable_paths(
         .map(|artifact| artifact.path.clone())
         .collect::<Vec<_>>();
     if let Some(bundle) = app_target {
-        paths
-            .extend(["Loopflow", "lf"].map(|name| bundle.join("Contents/MacOS").join(name)));
+        paths.extend(["Loopflow", "lf"].map(|name| bundle.join("Contents/MacOS").join(name)));
     }
     paths.sort();
     paths.dedup();
@@ -1716,22 +1694,12 @@ fn resume_switch_app(_receipt: &crate::machine_install::SwitchReceipt) -> Result
     Ok(())
 }
 
-
-
-
-
-
-
 fn required_machine_artifact_roles(has_app: bool) -> Vec<crate::machine_install::ArtifactRole> {
-    let mut roles = vec![
-        crate::machine_install::ArtifactRole::Cli,
-
-    ];
+    let mut roles = vec![crate::machine_install::ArtifactRole::Cli];
     if has_app {
         roles.extend([
             crate::machine_install::ArtifactRole::App,
             crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
-
         ]);
     }
     roles
@@ -1833,12 +1801,10 @@ fn machine_artifact_set(
         crate::machine_install::InstallSource::Development => "development",
     };
     let id = format!("{label}-{digest}");
-    let mut artifacts = vec![
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::Cli,
-            cli,
-        )?,
-    ];
+    let mut artifacts = vec![crate::machine_install::ArtifactIdentity::capture(
+        crate::machine_install::ArtifactRole::Cli,
+        cli,
+    )?];
     artifacts.extend(retain_bundle_artifacts(app, root, &id, candidate)?);
     let set = crate::machine_install::ArtifactSet {
         id,
@@ -1955,10 +1921,10 @@ fn active_install_for_local_promotion(
             ))
         }
     };
-    active.selection.artifact_set.verify(&[
-        crate::machine_install::ArtifactRole::Cli,
-
-    ])?;
+    active
+        .selection
+        .artifact_set
+        .verify(&[crate::machine_install::ArtifactRole::Cli])?;
     active
         .published_fallback
         .verify(&required_machine_artifact_roles(
@@ -1967,7 +1933,6 @@ fn active_install_for_local_promotion(
         .with_context(|| "the complete published fallback is unavailable; run `lf install`")?;
     Ok(active)
 }
-
 
 fn active_selection_has_settled_receipt(
     root: &Path,
@@ -2034,10 +1999,7 @@ fn active_install_matches_candidate(
             ))
         }
     }
-    let digest = artifact_set_digest(
-        candidate_binary,
-        artifacts.app_source,
-    )?;
+    let digest = artifact_set_digest(candidate_binary, artifacts.app_source)?;
     if set.content_sha256 != digest {
         return Ok(false);
     }
@@ -2302,9 +2264,7 @@ fn promote_local_candidate(
     crate::machine_install::write_switch(&root, &switch)?;
 
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     let repair = (|| {
         if let Some(app) = switch.activation.app.as_deref() {
@@ -2318,26 +2278,18 @@ fn promote_local_candidate(
                 )?;
             }
         }
-        entry_gate_targets(
-            &root,
-            &switch.candidate.path,
-            &switch.activation,
-        )?;
+        entry_gate_targets(&root, &switch.candidate.path, &switch.activation)?;
         if let Some(app) = switch.activation.app.as_deref() {
             verify_selected_app_bundle(app, &prior.selection.artifact_set)?;
         }
         Ok(())
     })();
     if let Err(error) = repair {
-        return Err(restore_before_local_advance(
-            &root, &switch, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::Quiesced;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
 
     if !reuse {
@@ -2376,23 +2328,17 @@ fn promote_local_candidate(
         }
         switch.disposable_store_owned = true;
         if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-            return Err(restore_before_local_advance(
-                &root, &switch, lock, error,
-            ));
+            return Err(restore_before_local_advance(&root, &switch, lock, error));
         }
         if let Err(error) =
             _copy_store_for_candidate(&crate::store::production_database_path(), &target_store)
         {
-            return Err(restore_before_local_advance(
-                &root, &switch, lock, error,
-            ));
+            return Err(restore_before_local_advance(&root, &switch, lock, error));
         }
     }
     switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
 
@@ -2551,7 +2497,6 @@ fn bundle_for_app_artifact(path: &Path) -> Result<&Path> {
         })
 }
 
-
 fn activate_switch_targets(
     root: &Path,
     receipt: &mut crate::machine_install::SwitchReceipt,
@@ -2586,11 +2531,7 @@ fn activate_switch_targets(
             superseded_app = commit_app_bundle(&staged, &plan)?;
         }
     }
-    entry_gate_targets(
-        root,
-        &receipt.candidate.path,
-        &receipt.activation,
-    )?;
+    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app_target) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app_target, &receipt.target.artifact_set)?;
     }
@@ -2964,14 +2905,13 @@ fn promote_published_from_machine_install(
         crate::machine_install::MachineInstallState::Legacy => None,
     };
     if let Some(prior) = &prior {
-        prior.selection.artifact_set.verify(&[
-            crate::machine_install::ArtifactRole::Cli,
-
-        ])?;
-        prior.published_fallback.verify(&[
-            crate::machine_install::ArtifactRole::Cli,
-
-        ])?;
+        prior
+            .selection
+            .artifact_set
+            .verify(&[crate::machine_install::ArtifactRole::Cli])?;
+        prior
+            .published_fallback
+            .verify(&[crate::machine_install::ArtifactRole::Cli])?;
     }
     let store_path = crate::store::production_database_path();
     let preview = read_binary_preview(candidate_binary)?;
@@ -3077,21 +3017,15 @@ fn promote_published_from_machine_install(
     };
     crate::machine_install::write_switch(&root, &switch)?;
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::Quiesced;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
     activate_prepared_machine_switch(
@@ -3324,11 +3258,7 @@ pub fn rollback(
             ))
         }
     }
-    let candidate = rollback_from_store(
-        cli_target,
-        candidate,
-        &lf_bin_dir(),
-    )?;
+    let candidate = rollback_from_store(cli_target, candidate, &lf_bin_dir())?;
     println!(
         "rolled back: {} -> {}",
         cli_target.display(),

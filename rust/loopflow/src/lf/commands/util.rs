@@ -858,6 +858,10 @@ fn percent_encode(value: &str) -> String {
     encoded
 }
 
+pub(crate) fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1222,7 +1226,6 @@ mod tests {
             .unwrap()
             .is_empty());
     }
-
 
     #[cfg(unix)]
     #[test]
@@ -2085,8 +2088,4 @@ mod tests {
         assert_eq!(elapsed_seconds("01:02:03"), Some(3_723));
         assert_eq!(elapsed_seconds("2-01:02:03"), Some(176_523));
     }
-}
-
-pub(crate) fn short_id(id: &str) -> String {
-    id.chars().take(8).collect()
 }

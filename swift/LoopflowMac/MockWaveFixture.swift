@@ -129,9 +129,7 @@ enum MockWaveFixture {
             "goal": "Make releases boring.",
             "repo": "/src/loopflow",
             "active_tasks": 1,
-            "live": true,
-
-            "endpoint": "127.0.0.1:7777",
+            "enabled": true,
             "created_at": "2026-07-01T00:00:00Z",
             "parent_wave_id": null,
             "retired_at": null,
@@ -144,7 +142,6 @@ enum MockWaveFixture {
               "observed_at": "2026-07-17T00:00:00Z"
             }
           },
-          "loop_state": "idle",
           "metric_portfolio": {
             "metrics": [
               {
@@ -289,21 +286,6 @@ enum MockWaveFixture {
                 "surface": "headless"
               }
             ]
-          },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "ssh://jack@mini-heart",
-              "created_at": "2026-07-01T00:00:00Z",
-              "observed_at": "2026-07-17T00:00:00Z"
-            },
-            "state": "running",
-            "reason": "resident is serving on the Home",
-            "endpoint": "127.0.0.1:7777",
-            "action": {
-              "kind": "attach",
-              "endpoint": "127.0.0.1:7777"
-            }
           },
           "chapter": {
             "id": "current",

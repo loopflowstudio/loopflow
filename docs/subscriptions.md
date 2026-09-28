@@ -300,14 +300,13 @@ inspection shows `local` or `forwarded` provenance. Forwarded identities are
 read-only: connect, disconnect, and edit their routes on the machine that owns
 them.
 
-Launch selectors govern foreground work. A Wave resident that survives the SSH
-command sheds forwarded state before detaching and selects from routes stored
+Launch selectors govern foreground work. A detached worker sheds forwarded state before detaching and selects from routes stored
 on its own machine. Configure the target repository route for durable account
 choice:
 
 ```bash
 lf ssh my-company route set codex work@
-lf ssh my-company start shipper
+lf ssh my-company --wave shipper wave/operate
 ```
 
 The origin does not copy account homes or refresh credentials. It advertises

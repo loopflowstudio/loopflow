@@ -1,21 +1,13 @@
 # Homes and processes
 
-A Home is a durable Loopflow execution destination on a machine. It owns local
-processes, credentials, planning storage, Run records, service managers, and OS
-locks. Its SSH route may change without changing its identity. A Wave's Home
-expresses where work for that Wave belongs; placement does not require the Wave
-itself to have a resident process.
-
-A data directory holds local state. `LF_HOME` selects that directory; it does
-not select a remote execution destination. A branch data copy preserves the
-database's recorded Home identities and placements without registering another
-Home or acquiring process-control authority. Installed data and branch data can
-therefore describe the same Home while retaining independent writes.
+A Home is one machine's stable Loopflow authority. It owns local processes,
+credentials, planning storage, Run records, and OS locks.
+Its SSH route may change without changing its identity.
 
 ```bash
 lf home id
 lf wave place product <home-id>
-lf ssh <home-id> chat --follow -w product
+lf ssh <home-id> --wave product wave/operate
 ```
 
 ## Local by default
@@ -26,7 +18,7 @@ lf ps --json             # OS-live processes on this Home
 lf wave status product        # planning and runtime view resolved here
 
 lf ssh build-home runs   # run the same reader on build-home
-lf ssh build-home chat --follow -w product
+lf ssh build-home --wave product wave/operate
 ```
 
 `lf ssh` is transport, not a second API. The target runs its own `lf`, verifies
@@ -35,63 +27,34 @@ There is no implicit fan-out and no central Run database.
 
 The Home and placement types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
-the CLI under [`lf/`](../../rust/loopflow/src/lf/). The Home daemon lives in
-[`lfd/`](../../rust/loopflow/src/lfd/).
+the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 
 ## Place Work
 
-`Placement` maps one `WorkRef` to one `HomeId`. Optional Wave goal `owner` and
-`home` fields filter automatic startup; they do not replace placement.
-
-```text
-origin Home                         target Home
------------                         -----------
-lf wave place ... home_B  ------->  Placement(Work, home_B)
-
-lf ssh home_B chat --follow -w product
-        |
-        `--- SSH transport --------> target `lf chat --follow -w product`
-                                      |
-                                      v
-                                     lfd
-                                      |
-                                      v
-                                Wave listener
-```
-
-`lfd` starts eligible Waves placed on its Home. Placement is a
-planning fact. It is not proof that a process exists and never supplies signal
-authority.
+`Placement` maps one `WorkRef` to one `HomeId`. It records where Work belongs,
+not whether a process exists. `lf wave place` changes placement;
+`lf wave enable|disable` controls local eligibility.
 
 ## Process topology
 
 ```text
 shell / automation / Loopflow.app
                |
-               v
-              lf ---------------- Linear / GitHub / provider auth
+               lf ---- Linear / GitHub / provider auth
                |
-      local store + repository/Git
+        store + repository
                |
-               v
-              lfd -------- Wave listener / resident
-
- Task or Project CLI
-          |
-          v
- Work Flow position -- exact claim --> boundary Run
-                                      |
-                                      `--> Home-local Run record
+      Invocation claim --> boundary Run --> provider child
 ```
 
-The process that directly spawns a child owns that child handle and may cancel
-it. Project and Task execution authority comes from the exact Flow-position
-claim, not from a resident ancestor or deterministic tmux name. The current
-Wave listener still owns its resident governance child separately.
+Wave operations are finite attributed Runs. Tasks drive their selected Flow
+invocation through the common executor. Cron invokes commands on schedule;
+local PR supervision watches and repairs delivery in the invoking process.
 
-None of those local facts becomes generic cross-process Run control. A PID,
-tmux name, parent Run, Work identity, or telemetry row cannot prove that a
-later process may send a signal.
+The process that directly spawns a child owns its child handle. Cross-process
+recovery requires exact saved process identity and the applicable claim or
+lock. A PID, tmux name, parent Run, Work identity or telemetry row alone grants
+no signal authority.
 
 ## Observe processes
 
@@ -114,15 +77,11 @@ control would require the launcher to create a fresh process scope and publish
 PID plus kernel birth identity, boot/Home identity, and the exact process group
 or native scope. Every signal would need to revalidate that receipt.
 
-## Run services on the Home
+## Independent bridges
 
-`lfd` serves one Home. It reconciles eligible Wave listeners, receives Linear
-and GitHub webhooks, and claims PR landing work. A Wave listener serves its own
-channel, conversation, event, and resident endpoints.
-
-Detached services scrub credentials forwarded from an origin. They use only
-authority installed on the target Home. A foreground SSH launch may offer an
-explicit account lease for that command.
+`lf discord serve <wave>` is a foreground bridge from a configured channel to
+bounded Runs. It has no Wave cursor or inbox authority. Cron and Task execution
+do not require a daemon or bridge. See [Discord](../waves.md#discord-bridge).
 
 ## Move a Wave without changing its identity
 
@@ -133,8 +92,7 @@ A bare slug may be ambiguous across repositories and is not mutation authority.
 lf wave relocate <wave-id> --repo <target> --name <slug>
 ```
 
-Relocation fences the Wave listener and locator, moves authored files and the
-journal, commits the new locator transactionally, and keeps PM, Work, and Home
+Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM, Work, and Home
 placement joined to the unchanged UUID. A local receipt bridges the filesystem
 and SQLite commit boundary so retry can finish verified cleanup after a crash.
 
@@ -152,8 +110,8 @@ Promotion changes the executable selected by future top-level processes:
 3. Apply the candidate schema to that isolated copy and prove it can be read.
 4. Acquire the machine promotion lock.
 5. Atomically select the new artifact.
-6. Replace only the known Home services and app surfaces owned by promotion.
-7. persist a switch receipt for recovery or rollback.
+6. Replace the app surface owned by promotion.
+7. Persist a switch receipt for recovery or rollback.
 
 The promotion lock lives at the OS account's `$HOME/.lf/promotion.lock` and is held only for the
 switch transaction. Ordinary harnesses do not check or hold it. Promotion does
@@ -164,8 +122,7 @@ selected. On the first published-to-development promotion, it may keep writing
 successfully to the prior production store; those writes are then invisible to
 commands reading the newly selected clone. A later development promotion may
 reuse and migrate the selected development store in place, in which case an
-old writer may instead fail against the changed schema. Promotion pauses known
-Home services but does not discover arbitrary shells or providers. Retry the
+old writer may instead fail against the changed schema. Promotion does not discover arbitrary shells or providers. Retry the
 operation with a current process after checking which store received the old
 write. The isolated clone proves candidate readability, not old-writer
 continuity across the selection switch.
@@ -182,7 +139,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Home.
 - Direct child handles are local capability; inferred process ownership is not.
-- Promotion owns artifact selection and known service replacement, not Run
+- Promotion owns artifact selection and app replacement, not Run
   lifecycle.
 - A schema clone protects preview and recovery; it can also leave old writers
   authoring the prior, now-unselected store.
@@ -190,4 +147,4 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 ## Next
 
 [Data and persistence →](data.md) maps the stores on each Home.
-[Codebase map →](codebase.md) maps the daemon, CLI, and process entrypoints.
+[Codebase map →](codebase.md) maps CLI and process entrypoints.

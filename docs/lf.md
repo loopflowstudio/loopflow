@@ -368,11 +368,6 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 ## Running Waves and Tasks
 
 ```bash
-lf start designer                                  # serve it on this machine
-lf wave serve designer                                   # foreground development mode
-lf pause designer                                  # keep listening; queue new turn starts
-lf resume designer                                 # enable queued and future turns
-lf stop designer                                   # stop it; leave the Home keeper running
 lf task prepare DES-123                             # Task Work + worktree, no execution
 lf task create --wave designer --title "Dark mode" --notes "Keep contrast readable"
 lf task create --run --wave <wave> --title "fix the flaky chord-timeout test"
@@ -401,7 +396,7 @@ lf task restart DES-123 --flow feature                 # replace the pinned Flow
 lf flow list --json                                  # every Flow with the topology it would pin
 lf task status task_... --json                  # stable Work projection
 lf wave place wave_... home_...                 # move idle Wave Work to a Home
-lf wave relocate wave_... --name platform       # rename a stopped Wave
+lf wave relocate wave_... --name platform       # rename a Wave
 lf wave relocate wave_... --repo ../moved-repo  # repair or move its repository
 lf task enable task_...                         # restore Task eligibility
 lf --wave designer : "scan the runtime"             # independent Wave Run
@@ -415,10 +410,6 @@ owning data, and the opening command's Run journal retains the failure after a
 retry. Opening or retrying a review does not complete it. Session listing still
 reads the selected installation's store; save the handoff before switching.
 
-Wave chat connects automatically when opened in the app or through `lf chat`.
-The local connection respects the assigned Home and never moves Work. For a remote
-Home, connect explicitly with `lf ssh HOME chat --follow -w WAVE`; this change
-does not add remote chat transport to the app.
 `lf --wave <wave> wave/operate` makes one finite planning pass over the chapter
 and Tasks. Every Wave reads its Project in the repository's current Chapter.
 Task Work has stable identities and small state:
@@ -752,75 +743,31 @@ neither completion nor permission to advance the Flow.
 lf home id --json
 lf home observe <home-id> ssh://jack@mini.local
 lf wave place <wave-id> <home-id>
-lf start shipper --json
-lf pause shipper --json
-lf resume shipper --json
-lf stop shipper
 lf ssh <home-id> status shipper --json
-lf ssh <home-id> start shipper --json
-lf ssh <home-id> pause shipper --json
+lf ssh <home-id> --wave shipper wave/operate
 ```
-
-`lf start` returns the same Wave rows as `lf ls --json`; it does not define a
-second launch-result model. With no names it starts every eligible Wave in the
-current repo on this machine. `lfd` starts the same eligible set across all
-repositories known to its local store and reconciles it every 30 seconds.
-`lf stop` stops the selected Wave on this machine while `lfd` and sibling Waves
-continue. It disables the Wave in this Home's SQLite registry, so the Home
-leaves that Wave off across daemon and machine restarts without changing the
-repository. An explicit `lf start <name>` enables it again. Bare `lf start`
-does not start disabled Waves.
 
 `lf wave enable|disable <wave>` and `lf task enable|disable <issue>` change
-the same default-on machine control for the selected Wave or Task. Disabling
-a Wave does not prohibit invoking an enabled Task directly, and it does not
-stop an already-running descendant.
+local eligibility. Disabling a Wave does not stop a running Task or prohibit
+invoking an enabled Task directly. Placement and process liveness are separate.
 
-`lf pause` and `lf resume` change turn intent, not process residency. A paused
-listener keeps serving and queues messages while refusing message, heartbeat,
-and cron turn starts. `lf ls` reports that authored intent as the required
-`paused` field and the `TURNS` column, independently from `live`. The commands
-preserve the GOAL body and unrelated frontmatter; resume removes the key because
-enabled turns are the default.
+`lf ssh <HomeId>` resolves the observed route and makes the target prove its
+identity. Everything after the target is normal `lf` syntax. Foreground commands
+can use origin and target accounts; detached processes scrub forwarded authority.
 
-`lf ssh <HomeId>` resolves the Home's current observed route and makes the
-target prove that identity. The remote `lf` is implicit, so everything after
-the target is normal `lf` syntax. Foreground commands can use origin and target
-accounts; durable processes scrub forwarded authority before detaching.
-
-## Speaking to Waves
-
-The **thread** is the user surface: durable, replayed, and owned by a running
-Wave. Typed Work observations carry Task progress directly to the Wave.
+## Talking with Wave context
 
 ```bash
-lf chat "ship the button audit first"       # post into the current wave's thread
-lf chat -w infra "CI is red on the PR"      # target a wave by name
-lf chat --parent "blocked on schema change" # escalate to the parent wave
-lf chat --follow -w intelligence            # watch and speak from one terminal pane
-lf chat --history --json -w intelligence    # read the saved tail while stopped
-lf reply intelligence "Should this get an answer?"  # one reply decision, no listener
+lf --wave product : "Which Task should own this change?"
+lf --wave product wave/operate "Review the current blockers"
+doppler run -- lf discord serve product
 ```
 
-| Command | What it does |
-|---------|--------------|
-| `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
-| `lf reply WAVE [TEXT]` | Run the Wave's chat-reply capability once and print only a warranted reply. Reads stdin when TEXT is omitted; `--agent` selects a provider and `--max-turns` bounds it. It starts no listener, resident, or governance pass. |
-
-A Wave's durable memory is the ordinary repository file `wave/<name>/MEMORY.md`
-— read and edit it directly.
-
-Managed Work processes default to their invoking Wave through `LF_WAVE_ID`. From an
-interactive shell, pass `--wave`; repository location does not identify one of the
-Waves sharing `main`.
-
-| Flag | Description |
-|------|-------------|
-| `-w, --wave NAME` | Target a wave by name |
-| `--parent` | Target the invoking wave's parent (`lf chat`) |
-| `--follow` | Replay the selected thread's latest 12 turns and continue live while typed lines post (`lf chat`) |
-| `--history --json` | Read the selected Wave's durable local thread without requiring a listener (`lf chat`) |
-| `--limit N` | Bound a `--history` read (default: 12) |
+Ordinary Sessions retain conversations; `wave/operate` makes one finite planning
+pass. Memory stays in `wave/<name>/MEMORY.md`. The independent Discord bridge
+uses the GOAL.md channel binding, starts a bounded Run for each new message and
+posts its final answer. Its cursor is in memory and startup skips old messages;
+see [Discord bridge](waves.md#discord-bridge) for the delivery limits.
 
 ## Reading This Home
 
@@ -1361,7 +1308,11 @@ lf install schedule    # update Loopflow at login and weekly (macOS)
 lf install schedule daily  # weekly, daily, hourly, or 5min
 ```
 
-Updates the installed CLI, daemon, and macOS application through verified
+Before upgrading a Home that still runs the retired `lfd` service, stop and
+uninstall it with that older release's `lfd uninstall` command. New installations
+do not manage or require a daemon; promotion does not stop an existing one.
+
+Updates the installed CLI and macOS application through verified
 release downloads and the existing promotion transaction. Requires no Git
 repository, source checkout, Python, uv, or Homebrew. An already-current,
 complete release skips asset downloads; missing or stale artifacts are repaired.
@@ -1381,7 +1332,7 @@ To restore retained development data while promoting a local build:
 
 ```bash
 local-bin/lf install promote --from-build local-bin/lf --reuse-home local-<id> \
-  --cli-target ~/.local/bin/lf --daemon-source local-bin/lfd --daemon-target ~/.local/bin/lfd \
+  --cli-target ~/.local/bin/lf \
   --app-source local-bin/Loopflow.app --app-target /Applications/Loopflow.app --preview
 ```
 
@@ -1461,12 +1412,8 @@ branch activity when no current-head PR is open. Main, the current worktree,
 nonterminal Tasks, and worktrees owned by live processes remain protected.
 Use `lf wt remove NAME --force` for an explicit destructive override.
 
-`lfd` runs a lossless sweep on startup and every 15 minutes: only clean
-landed, remotely deleted, or terminal Task worktrees are removed. Disable
-with `autoprune: false` in config. Subscribe the daemon to GitHub merge and
-branch-deletion webhooks by defining `LF_GITHUB_WEBHOOK_URL` and
-`LF_GITHUB_WEBHOOK_SECRET` in Doppler; the secret travels over stdin and
-never appears in process arguments or the service file.
+Run `lf wt prune --dry-run` to inspect candidates, then `lf wt prune` to remove
+eligible worktrees. There is no automatic service sweep.
 
 ## lf cron
 

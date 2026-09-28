@@ -64,8 +64,8 @@ pub use release::{
     ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome,
     ReleaseStatusResult,
 };
-pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
 pub(crate) use run::render_task_context;
+pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
 #[doc(hidden)]
 pub use run::{
     resolve_checkout_binding, resolve_work_binding, resolve_work_selection, WorkBinding,

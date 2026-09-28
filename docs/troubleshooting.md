@@ -3,19 +3,18 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## Wave chat cannot connect
+## A Wave has no active Run
 
-Open chat to connect its internal listener. If connection fails, read the error
-and inspect the assigned Home:
+Wave operations are finite. Read its plan and invoke the next pass explicitly,
+or inspect its cron schedule:
 
 ```bash
 lf wave status <wave> --json
-lf wave probe <wave>
-lf chat --follow -w <wave>
+lf --wave <wave> wave/operate
+lf cron list
 ```
 
-For a remote placement, run chat through `lf ssh <home-id>`. Task execution and
-scheduled work remain independent of the chat listener.
+A quiet Wave needs no service restart.
 
 ## Task Work stops advancing
 

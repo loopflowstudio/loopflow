@@ -810,16 +810,80 @@ in library proofs are simulated. Real configured provider recovery, a real
 five-minute stall, installed Home migration, desktop agreement and the full
 LOO-298 acceptance remain unproven.
 
-### Next review
+### Post-rebase review · 2026-09-27
 
-The supervisor owns `lf rebase`, then review-slice. Reconcile the actual released
-migration frontier before any new migration claim; inspect retained claims,
-late-result/current-attempt fences, managed resume policy and the explicit
-worker-stop requirement for replacing a Flow. The root-only replacement still
-carries the full design's outstanding runtime-child invocation obligation.
-Review the small Started projection with Cut I's pending deletion in mind; H3
-does not begin that deletion. H4 still owns refusal of every unrecorded launch,
-manifest-prefix lookup and prepared-marker removal; H5/H6 own the remaining
-Session/DTO reductions. H7's old Chapter-table proposal is superseded by
-`../chapters.md` (Linear In Progress Projects). No Flow edge or Task completion
-is selected by this checkpoint.
+Reviewed `77e44a6cce89cc9c601ac548fb32202485abeb09` on released main
+`5bdcef6b65419d5db2583ee791cede2f1a95b3df`, at Jack's request. **H3 holds after
+two bounded repairs.** This is local source acceptance of the common driver,
+not whole-Task acceptance or publication. The [integration receipt](../h3-upstream-integration.md)
+retains its earlier failures and proof boundaries.
+
+- **Fixed: stopping an advanced worker.** The claim retains its original
+  `position_version` across checkpoints. Stop passed that old value to release,
+  so a dead worker could prevent restart after progress. The extended real-process
+  regression failed with `Flow … changed under its driver`. Stop now supplies
+  the observed current version and the same exact claim; replacement, unknown
+  identity and still-live-process refusals remain intact.
+- **Fixed: recovery could consume a replacement claim.** The driver's separate
+  read/check did not fence the recovery transaction, and later step recovery
+  made no comparison. A deterministic takeover regression showed recovery
+  accepting the superseded caller and settling the replacement's interrupted
+  attempt. Recovery now compares the supplied claim inside its transaction;
+  rejected recovery leaves the row, attempt and Task events unchanged. The
+  replacement can still recover. The separate pre-read is deleted.
+- **Review handoff preserved.** Checkpoint returns the updated invocation,
+  including its released claim when parking. The executor observes that result
+  before entering the review; unchanged checkpoints also validate the claim.
+  A new shared-driver test executes an operation, parks at the review and
+  verifies its unpublished Session Run and retained Task/invocation ancestry.
+- **Documentation repaired.** Removed duplicated Task create/restart/edit prose
+  introduced by integration and documented same-Flow resume versus replacement
+  of an unclaimed managed invocation by a different selection.
+
+Ownership inspection follows launch, claim/reservation, publication, checkpoint,
+recovery, review completion and restart. One production `SkillExecutor`, one
+Flow SELECT/decoder and one cursor writer remain. All 15 predecessor names in
+H3's deletion table are absent from Rust source; `cursor.finish` in the Task
+controller is test-only, and `position.json` is import-only. Launchers supply
+provider/review policy, not competing persistence. H2 replaced the saved-Flow
+consumer; H3 replaces the Task consumer, so the two-pass no-replacement blocker
+does not apply. Main's deletion admission reads typed Run attribution; its
+stop-to-restart expected-observation transaction remains intact.
+
+Fresh proof uses private Homes, scrubbed `LF_*`/`LOOPFLOW_*`, nice +10, four
+Cargo workers and 900-second phase limits. Resource preflight passed at 70.4 GiB
+free. Both defect regressions failed before production repairs (an earlier
+fixture field typo failed compilation and was corrected before those assertions).
+Results are retained under `.lf/tmp/h3-codex-recovery/review-*.log`:
+
+- `review-final-focus.log`: 45 passed, one explicitly ignored configured-Codex
+  test; Task controller, Flow recovery/fences and worker-stop selection. The
+  additional parking test below brings fresh library proof to 46 passes.
+- `review-parking.log`: one passed; operation-to-review driver handoff.
+- `review-cli.log`: four passed through the real binary: claim-time reservation
+  and captured Task operation after source removal, managed resume policy,
+  attributed-Flow isolation, failed/retried step plus review, and taskless
+  decision persistence. Providers/Linear are stand-ins, not configured services.
+- Formatting, all-target Clippy and whitespace pass. Schema and architecture
+  bytes are unchanged, so the integration's seven canonical repeats, released
+  migration preservation and architecture/doc receipts retain their stated scope;
+  they were not rerun or promoted to full-gate evidence.
+
+Retained non-test-prefix measurement, excluding test files/trailing test modules,
+docs and generated files but **retaining inline test helpers**: H3 plus integration
+and this review versus rebased H3 parent `f47581d37`: **+2,213 / −2,751 = −538**
+across 26 Rust/Swift files, plus its 21-line SQL draft. Review alone versus
+`77e44a6cc`: **+36 / −25 = +11**, four production prefixes; the added lines carry
+transactional recovery authority and the checkpoint's returned state. Whole branch
+versus main `5bdcef6b6`: **+6,495 / −5,086 = +1,409**, 47 files; SQL **+461**.
+`human_session.rs` remains **2,081** prefix lines. No production file was deleted;
+named owner removals, not these counts, establish the reduction.
+
+Remaining scope is unchanged: H4 owns missing Run/end writes and dead-skill
+recovery; H5/H6 own Session/DTO reductions; status-based Chapters use
+`../chapters.md`; runtime loop children and installed/desktop acceptance remain
+unproved. The first-Home initialization race and prior OAuth contention flake
+are unresolved. The architecture inventory still lacks `wave_chapters` (H7).
+Next action belongs to the supervisor: Cut I is next in the recorded order,
+followed by H4's killed-step/failed-end-write proof. No product decision, new Ask,
+Flow edge, Task completion, push, PR mutation or installed-Home action occurred.

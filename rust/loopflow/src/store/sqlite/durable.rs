@@ -2220,6 +2220,37 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn stale_driver_recovery_preserves_the_replacement_claim_and_attempt() {
+        let (_dir, store, task_id) = store_with_task();
+        let position = store
+            .start_task_flow(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        let first = claim(&store, &task_id, &position, 301);
+        let run = reserved_run(&store, &task_id);
+        publish(&store, &position, &run, &first).unwrap();
+        let replacement = store
+            .reclaim_task_worker(
+                &task_id,
+                &first,
+                &owner(302),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap();
+        let before = store.task_flow(&task_id).unwrap().unwrap();
+        let events = store.task_events_after(&task_id, 0).unwrap();
+        assert_eq!(before.claim.as_ref(), Some(&replacement));
+        assert!(store.recover_flow(position.id(), Some(&first)).is_err());
+        assert!(store.recover_flow(position.id(), None).is_err());
+        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
+        assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
+        let recovered = store
+            .recover_flow(position.id(), Some(&replacement))
+            .unwrap();
+        assert!(recovered.claim.is_none());
+        assert_eq!(recovered.failure.unwrap().run_id, Some(run));
+    }
+
+    #[test]
     fn review_discovery_follows_the_captured_nested_step() {
         let (_dir, store, task_id) = store_with_task();
         let mut position = autonomous_position(&task_id);
@@ -2682,7 +2713,7 @@ mod durable_store_tests {
             .unwrap();
         let settled = store.task_flow(&work).unwrap().unwrap();
         assert_eq!(
-            (settled.version, version),
+            (settled.version, version.version),
             (position.version + 1, position.version + 1)
         );
         assert_eq!(settled.current().step, "review");

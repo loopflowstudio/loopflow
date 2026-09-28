@@ -753,10 +753,17 @@ impl SqliteStore {
     /// the step's completion. The caller holds the Flow's `driver.lock`, so an
     /// operation's Run without an outcome has no process left and settles as
     /// interrupted.
-    pub fn recover_flow(&self, id: &str) -> StoreResult<FlowInvocation> {
+    pub fn recover_flow(
+        &self,
+        id: &str,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = flow_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if flow.claim.as_ref() != claim {
+            return Err(stale(id));
+        }
         let flow = settle_attempt_in(&tx, flow)?;
         tx.commit()?;
         Ok(flow)
@@ -867,11 +874,11 @@ impl SqliteStore {
         cursor: &ExecutionCursor,
         claim: Option<&TaskWorkerClaim>,
         progress: Option<&str>,
-    ) -> StoreResult<u64> {
+    ) -> StoreResult<FlowInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = current_flow_in(&tx, id)?;
-        if saved.version != version {
+        if saved.version != version || saved.claim.as_ref() != claim {
             return Err(stale(id));
         }
         let mut next = cursor.clone();
@@ -901,7 +908,7 @@ impl SqliteStore {
             leaf.route = saved_leaf.route.clone().or(leaf.route.take());
         }
         if next == saved.cursor {
-            return Ok(version);
+            return Ok(saved);
         }
         // A driver parks at a review; the claim goes with the same write.
         let parks = FlowInvocation {
@@ -909,7 +916,7 @@ impl SqliteStore {
             ..saved.clone()
         }
         .is_human();
-        let version = write_cursor_in(
+        write_cursor_in(
             &tx,
             (id, version),
             &next,
@@ -927,8 +934,9 @@ impl SqliteStore {
                 },
             )?;
         }
+        let saved = current_flow_in(&tx, id)?;
         tx.commit()?;
-        Ok(version)
+        Ok(saved)
     }
 
     /// Block the Flow at its position; `lf flow resume --retry` or
@@ -1353,7 +1361,11 @@ mod tests {
             .unwrap();
         let id = flow.id().to_string();
         assert_eq!(flow.version, 1);
-        assert!(store.recover_flow(&id).unwrap().current_attempt.is_none());
+        assert!(store
+            .recover_flow(&id, None)
+            .unwrap()
+            .current_attempt
+            .is_none());
 
         // The step's Run is the attempt allowed to decide, at the version it saw.
         let run = attempt(&store, &id, Some("loop-decide"), "codex");
@@ -1375,13 +1387,14 @@ mod tests {
             .record_flow_decision(&id, 1, &run.id, &verdict(FlowDecision::Advance))
             .is_err());
         assert!(
-            store.recover_flow(&id).is_err(),
+            store.recover_flow(&id, None).is_err(),
             "an unsettled Run keeps the Flow waiting"
         );
         // A checkpoint of the same position keeps the recorded decision.
         let version = store
             .checkpoint_flow(&id, 1, &flow.cursor, None, None)
-            .unwrap();
+            .unwrap()
+            .version;
         assert_eq!(version, 1, "nothing to write");
         assert_eq!(
             store.flow(&id).unwrap().unwrap().cursor.progress.verdict,
@@ -1399,7 +1412,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let blocked = store.recover_flow(&id).unwrap();
+        let blocked = store.recover_flow(&id, None).unwrap();
         assert!(blocked
             .failure
             .unwrap()
@@ -1431,7 +1444,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let settled = store.recover_flow(&id).unwrap();
+        let settled = store.recover_flow(&id, None).unwrap();
         assert_eq!(settled.cursor.progress.verdict, Some(iterate));
         assert_eq!(
             settled.current_attempt.unwrap().outcome.as_deref(),
@@ -1442,7 +1455,8 @@ mod tests {
         assert_eq!((next.index, next.iteration), (0, 1));
         let version = store
             .checkpoint_flow(&id, settled.version, &next, None, None)
-            .unwrap();
+            .unwrap()
+            .version;
         let moved = store.flow(&id).unwrap().unwrap();
         assert_eq!((moved.version, &moved.cursor), (version, &next));
         assert!(
@@ -1478,7 +1492,7 @@ mod tests {
         let id = flow.id().to_string();
         let run = attempt(&store, &id, None, "loopflow");
 
-        let blocked = store.recover_flow(&id).unwrap();
+        let blocked = store.recover_flow(&id, None).unwrap();
         let failure = blocked
             .failure
             .expect("an operation without a receipt blocks");
@@ -1512,7 +1526,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let settled = store.recover_flow(&id).unwrap();
+        let settled = store.recover_flow(&id, None).unwrap();
         assert!(settled.failure.is_none());
         assert_eq!(
             settled.current_attempt.unwrap().outcome.as_deref(),

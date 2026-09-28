@@ -1352,7 +1352,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn bind_fills_every_run_of_a_session_and_refuses_another_wave() {
+    fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let other_wave = WaveId::new();
@@ -1386,6 +1386,11 @@ mod durable_store_tests {
                 ended: None,
             };
             let session = crate::session::AgentSession {
+                task_id: None,
+                wave_id: None,
+                flow_session_id: None,
+                work_source: None,
+                bound_at: None,
                 id: id.to_string(),
                 current_run_id: run.id.clone(),
                 kind: crate::session::SessionKind::Conversation,
@@ -1398,7 +1403,7 @@ mod durable_store_tests {
                 completed_at: None,
                 created_at: 1,
             };
-            store.create_session(session, run, None).unwrap().1
+            store.create_session(session, run, None, None).unwrap().1
         };
         let first = open("orphan", None);
         let replacement = store
@@ -1410,20 +1415,94 @@ mod durable_store_tests {
                 },
             )
             .unwrap();
-        open("elsewhere", Some(other_wave));
-
-        let (_, current) = store.bind_session("orphan", &task_id).unwrap();
+        let elsewhere = open("elsewhere", Some(other_wave));
+        let old_runs = store.session_runs("orphan").unwrap();
+        store
+            .record_session_event(
+                "orphan",
+                "thread",
+                "active",
+                crate::session::SessionEventKind::Started,
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                "orphan",
+                "thread",
+                "active",
+                crate::session::SessionEventKind::Usage,
+                &serde_json::json!({"input": 20}),
+            )
+            .unwrap();
+        let earlier = store.session_history("orphan", 0, 0).unwrap();
+        assert!(store.bind_session("orphan", &first.id, &task_id).is_err());
+        let (bound, current) = store
+            .bind_session("orphan", &replacement.id, &task_id)
+            .unwrap();
         assert_eq!(current.id, replacement.id);
-        for run in store.session_runs("orphan").unwrap() {
-            assert_eq!(run.task_id, Some(task_id.clone()));
-            assert_eq!(run.wave_id, Some(task.wave_id.clone()));
-            assert_eq!(run.work_source, Some(WorkSource::Bound));
-        }
-        let refused = store.bind_session("elsewhere", &task_id).unwrap_err();
-        assert!(refused.to_string().contains("Wave other"), "{refused}");
-        assert_eq!(store.session("elsewhere").unwrap().unwrap().1.task_id, None);
-        let listed = store.runs(None, None, Some(task_id.as_str()), None, 0);
-        assert_eq!(listed.unwrap().len(), 2);
+        assert_eq!(bound.task_id, Some(task_id.clone()));
+        assert_eq!(bound.wave_id, Some(task.wave_id.clone()));
+        assert!(bound.bound_at.is_some());
+        assert_eq!(store.session_runs("orphan").unwrap(), old_runs);
+        assert_eq!(store.session_history("orphan", 0, 0).unwrap(), earlier);
+        assert_eq!(
+            store
+                .bind_session("orphan", &replacement.id, &task_id)
+                .unwrap()
+                .0,
+            bound
+        );
+        // A late cumulative observation belongs to the old turn, never the new bind.
+        store
+            .record_session_event(
+                "orphan",
+                "thread",
+                "active",
+                crate::session::SessionEventKind::Usage,
+                &serde_json::json!({"input": 30}),
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                "orphan",
+                "thread",
+                "future",
+                crate::session::SessionEventKind::Started,
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let events = store.session_history("orphan", 0, 0).unwrap();
+        assert!(events
+            .iter()
+            .filter(|event| event.provider_turn == "active")
+            .all(|event| event.task_id.is_none()));
+        assert_eq!(
+            events.last().unwrap().task_id.as_deref(),
+            Some(task_id.as_str())
+        );
+        let future = store
+            .replace_session_run(
+                &replacement.id,
+                Run {
+                    id: RunId::new(),
+                    ..replacement.clone()
+                },
+            )
+            .unwrap();
+        assert_eq!(future.task_id, Some(task_id.clone()));
+        assert_eq!(future.work_source, Some(WorkSource::Bound));
+        assert_eq!(store.run(&first.id).unwrap().unwrap(), first);
+        let refused = store
+            .bind_session("elsewhere", &elsewhere.id, &task_id)
+            .unwrap_err();
+        assert!(refused.to_string().contains("another Wave"), "{refused}");
+        assert_eq!(store.session("elsewhere").unwrap().unwrap().0.task_id, None);
+        let listed = store
+            .runs(None, None, Some(task_id.as_str()), None, 0)
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].run.id, future.id);
     }
 
     #[test]
@@ -1481,7 +1560,7 @@ mod durable_store_tests {
             caller_run_id: None,
             ended: None,
         };
-        let run = store.create_run(new_run(&about.id, None)).unwrap();
+        let run = store.create_run(new_run(&about.id, None), None).unwrap();
         assert_eq!(run.task_id, Some(task_id.clone()));
         assert_eq!(run.wave_id, Some(task.wave_id.clone()));
         let other_task = TaskId::new();
@@ -1492,7 +1571,7 @@ mod durable_store_tests {
         )
         .unwrap();
         assert!(store
-            .create_run(new_run(&about.id, Some(other_task.clone())))
+            .create_run(new_run(&about.id, Some(other_task.clone())), None)
             .is_err());
         assert_eq!(
             store

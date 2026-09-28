@@ -43,6 +43,12 @@ impl SessionEventKind {
 pub struct AgentSession {
     pub id: String,
     pub current_run_id: RunId,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<WaveId>,
+    pub flow_session_id: Option<String>,
+    pub work_source: Option<WorkSource>,
+    /// Time of a prospective bind; absent for admission or unknown historical timing.
+    pub bound_at: Option<i64>,
     pub kind: SessionKind,
     pub interactive: bool,
     /// Canonical local repository at admission; absent when unknown or taskless outside Git.

@@ -6,6 +6,39 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
+pub(super) fn agent_work_in(
+    conn: &rusqlite::Connection,
+    exec: &ExecId,
+) -> StoreResult<Option<crate::session::RunWork>> {
+    let row = conn.query_row(
+        "SELECT e.caller_provider_generation,s.provider_generation,s.task_id,s.wave_id
+         FROM execs e JOIN agent_sessions s ON s.id=e.caller_session_id WHERE e.id=?1 AND e.via_agent=1",
+        [exec], |row| Ok((row.get::<_, i64>(0)?,row.get::<_, i64>(1)?,
+            row.get::<_, Option<String>>(2)?,row.get::<_, Option<String>>(3)?)),
+    ).optional()?;
+    let Some((caller_generation, generation, task, wave)) = row else {
+        return Ok(None);
+    };
+    if caller_generation != generation {
+        return Err(StoreError::InvalidAuthority(
+            "calling provider was replaced".into(),
+        ));
+    }
+    Ok(Some(crate::session::RunWork {
+        task_id: task
+            .as_deref()
+            .map(crate::durable::TaskId::parse)
+            .transpose()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+        wave_id: wave
+            .as_deref()
+            .map(crate::id::WaveId::parse)
+            .transpose()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+        source: crate::session::WorkSource::Inherited,
+    }))
+}
+
 fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<SessionDriver>> {
     let row = conn
         .query_row(
@@ -39,6 +72,10 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
 }
 
 impl SqliteStore {
+    pub fn agent_work(&self, exec: &ExecId) -> StoreResult<Option<crate::session::RunWork>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        agent_work_in(&conn, exec)
+    }
     pub(crate) fn make_session_interactive(
         &self,
         session: &str,

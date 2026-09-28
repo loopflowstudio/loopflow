@@ -462,6 +462,11 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             ended: None,
         };
         let session = loopflow::session::AgentSession {
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
             id: id.clone(),
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::Conversation,
@@ -533,7 +538,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
 }
 
 #[test]
-fn binding_an_orphan_session_starts_its_task_once() {
+fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let fixture = Fixture::new(false);
     let task = support::register_unrun_task(
         fixture.home.path(),
@@ -597,26 +602,18 @@ fn binding_an_orphan_session_starts_its_task_once() {
         bound["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
     );
-    assert_eq!(
-        fixture.run_parents(&orphan),
-        (
-            Some(task.task.id.to_string()),
-            Some(task.task.wave_id.to_string()),
-            Some("bound".to_string()),
-        )
-    );
-    let bound_at = started(task.task.id.as_str()).expect("the bind starts the Task");
-    assert!((before..=after).contains(&bound_at), "{bound_at}");
-    let created: i64 = fixture
+    assert_eq!(fixture.run_parents(&orphan), (None, None, None));
+    let bound_at: i64 = fixture
         .db()
         .query_row(
-            "SELECT created_at FROM runs WHERE id=?1",
-            [orphan.as_str()],
+            "SELECT bound_at FROM agent_sessions WHERE id=?1",
+            [&session],
             |row| row.get(0),
         )
         .unwrap();
-    assert!(bound_at > created, "Started is the bind, not the launch");
-    assert_eq!(task_runs("INF-123"), vec![orphan.clone()]);
+    assert!((before..=after).contains(&bound_at));
+    assert_eq!(started(task.task.id.as_str()), Some(bound_at));
+    assert!(task_runs("INF-123").is_empty());
     let listed = fixture.sessions();
     assert_eq!(listed.len(), 1);
     assert_eq!(
@@ -645,10 +642,7 @@ fn binding_an_orphan_session_starts_its_task_once() {
         "{}",
         String::from_utf8_lossy(&again.stderr)
     );
-    assert_eq!(
-        fixture.run_parents(&orphan).0,
-        Some(task.task.id.to_string())
-    );
+    assert_eq!(fixture.run_parents(&orphan).0, None);
     assert_eq!(started(sibling.id.as_str()), None);
     assert!(task_runs("INF-124").is_empty());
 
@@ -662,22 +656,25 @@ fn binding_an_orphan_session_starts_its_task_once() {
         ":",
         "Review the parser",
     ]);
-    assert_eq!(started(task.task.id.as_str()), Some(bound_at));
-    assert_eq!(task_runs("INF-123"), vec![later, orphan]);
+    let started_at = started(task.task.id.as_str()).expect("future work starts the Task");
+    assert_eq!(started_at, bound_at);
+    assert_eq!(task_runs("INF-123"), vec![later]);
+    assert_eq!(fixture.run_parents(&orphan), (None, None, None));
 
     // Started is stored once and only beside a Run that names the Task.
     let db = fixture.db();
     let disagreeing: i64 = db
         .query_row(
             "SELECT count(*) FROM tasks t WHERE (t.started_at IS NOT NULL)
-                != EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.id)",
+                != (EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.id)
+                OR EXISTS(SELECT 1 FROM agent_sessions s WHERE s.task_id=t.id))",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(disagreeing, 0);
     for (id, value) in [
-        (task.task.id.as_str(), Some(bound_at + 1)),
+        (task.task.id.as_str(), Some(started_at + 1)),
         (task.task.id.as_str(), None),
         (sibling.id.as_str(), Some(bound_at)),
     ] {
@@ -688,6 +685,143 @@ fn binding_an_orphan_session_starts_its_task_once() {
             )
             .is_err());
     }
+}
+
+#[test]
+fn continuing_provider_children_inherit_the_bound_session_without_rewriting_history() {
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "task-binding",
+        &fixture.repo.head_sha(),
+    );
+    let untouched_path = fixture.repo.create_named_worktree("untouched");
+    let untouched = support::register_sibling_task(&task, "INF-124", "untouched", &untouched_path);
+    let output = fixture.run(&LAUNCH);
+    assert!(output.status.success(), "{output:?}");
+    let original = fixture.launches()[0].clone();
+    let (session, ..) = fixture.session_row(&original);
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    // This is synthetic provider provenance over real CLI admission, not a live engine.
+    let origin: String = fixture
+        .db()
+        .query_row(
+            "SELECT id FROM execs ORDER BY started_at,id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let origin = loopflow::id::ExecId::parse(&origin).unwrap();
+    let driver = match store.session_driver(&session).unwrap() {
+        Some(driver) => driver,
+        None => store
+            .claim_session_driver(&session, None, &origin, true)
+            .unwrap(),
+    };
+    let caller = serde_json::to_string(&driver.caller(session.clone())).unwrap();
+    fixture
+        .db()
+        .execute(
+            "UPDATE tasks SET work_state='done',work_terminal_at=1 WHERE id=?1",
+            [task.task.id.as_str()],
+        )
+        .unwrap();
+    fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
+    let started: i64 = fixture
+        .db()
+        .query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [task.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let observation = fixture
+        .command(&["session", "list", "--task", "INF-124", "--json"])
+        .env("LF_AGENT_CALLER", &caller)
+        .output()
+        .unwrap();
+    assert!(observation.status.success(), "{observation:?}");
+    let untouched_start: Option<i64> = fixture
+        .db()
+        .query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [untouched.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(untouched_start, None);
+
+    let child = fixture
+        .command(&LAUNCH)
+        .env("LF_AGENT_CALLER", &caller)
+        .output()
+        .unwrap();
+    assert!(child.status.success(), "{child:?}");
+    let child_run = fixture.launches().last().unwrap().clone();
+    let expected = (
+        Some(task.task.id.to_string()),
+        Some(task.task.wave_id.to_string()),
+        Some("inherited".to_string()),
+    );
+    assert_eq!(fixture.run_parents(&child_run), expected);
+    let asking = fixture
+        .ask(&original, "Keep the existing target?")
+        .env("LF_AGENT_CALLER", &caller)
+        .spawn()
+        .unwrap();
+    let (ask, ask_run): (String, String) = wait_for("bound child Ask", || {
+        fixture
+            .db()
+            .query_row(
+                "SELECT id,current_run_id FROM agent_sessions WHERE kind='ask'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok()
+    });
+    assert_eq!(fixture.run_parents(&ask_run), expected);
+    wait_for("Ask launcher", || {
+        fixture
+            .launcher_requests()
+            .contains("serve-ask")
+            .then_some(())
+    });
+    store
+        .ready_session(
+            &ask,
+            &loopflow::durable::RunId::parse(&ask_run).unwrap(),
+            "Keep it",
+        )
+        .unwrap();
+    let complete = fixture.run(&["session", "complete", &ask]);
+    assert!(complete.status.success(), "{complete:?}");
+    let answer = asking.wait_with_output().unwrap();
+    assert!(answer.status.success(), "{answer:?}");
+    assert!(String::from_utf8_lossy(&answer.stdout).contains("Keep it"));
+    assert_eq!(fixture.run_parents(&original), (None, None, None));
+    let retained: (i64, String, i64) = fixture
+        .db()
+        .query_row(
+            "SELECT started_at,work_state,work_terminal_at FROM tasks WHERE id=?1",
+            [task.task.id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(retained, (started, "done".to_string(), 1));
+    // A delayed tool from the replaced provider cannot borrow the continuing Session's assignment.
+    store
+        .claim_session_driver(&session, Some(&driver), &origin, true)
+        .unwrap();
+    let before = fixture.launches().len();
+    let stale = fixture
+        .command(&LAUNCH)
+        .env("LF_AGENT_CALLER", &caller)
+        .output()
+        .unwrap();
+    assert!(!stale.status.success(), "{stale:?}");
+    assert_eq!(fixture.launches().len(), before);
 }
 
 fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
@@ -1378,6 +1512,11 @@ fn import_stores_each_old_session_once_with_its_name() {
             ended: None,
         };
         let session = loopflow::session::AgentSession {
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
             id: review_id,
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::FlowReview,
@@ -1484,7 +1623,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         assert_eq!(report["tasks_started"], json!([sibling.id]), "{report}");
         let failed = report["failed"].as_array().unwrap();
         assert_eq!(failed.len(), 1, "{report}");
-        assert_eq!(failed[0]["path"], json!(broken));
+        assert_eq!(failed[0]["path"], json!(broken.canonicalize().unwrap()));
         assert!(!failed[0]["reason"].as_str().unwrap().is_empty());
     }
     let again = fixture.json(&["session", "import", "--json"]);
@@ -1505,7 +1644,7 @@ fn import_stores_each_old_session_once_with_its_name() {
             ("Design review".to_string(), "flow".to_string(), reviewed),
             (
                 "Parser review".to_string(),
-                "interactive".to_string(),
+                "conversation".to_string(),
                 interactive.clone(),
             ),
             ("Release target".to_string(), "ask".to_string(), asked),
@@ -1667,7 +1806,10 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
         fixture.run_parents(&of_wave),
         (None, Some(wave_id.clone()), declared.clone())
     );
-    assert_eq!(membership(&of_wave), (None, None, None));
+    assert_eq!(
+        membership(&of_wave),
+        (None, Some(fixture.session_row(&of_wave).0), None)
+    );
 
     // A headless Run that names a Task, and a child agent it launches. The
     // child names no Work and takes its caller's.
@@ -1680,8 +1822,17 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
             declared.clone()
         )
     );
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let parent_session = fixture.session_row(&of_task).0;
+    let caller = store
+        .session_driver(&parent_session)
+        .unwrap()
+        .unwrap()
+        .caller(parent_session);
     let child = launch(
         headless(&[])
+            .env("LF_AGENT_CALLER", serde_json::to_string(&caller).unwrap())
             .env("LF_RUN_ID", &of_task)
             .env("LF_RUN_DIR", fixture.run_dir(&of_task)),
     );
@@ -1693,7 +1844,14 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
             Some("inherited".to_string())
         )
     );
-    assert_eq!(membership(&child), (None, None, Some(of_task.clone())));
+    assert_eq!(
+        membership(&child),
+        (
+            None,
+            Some(fixture.session_row(&child).0),
+            Some(of_task.clone())
+        )
+    );
 
     // A saved Flow: its headless step, then the review it waits at. Both
     // Runs name the Flow's invocation.

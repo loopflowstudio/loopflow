@@ -813,6 +813,11 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             ended: None,
         };
         let ask_session = |run: &loopflow::session::Run| loopflow::session::AgentSession {
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
             id: run.session_id.clone().unwrap(),
             current_run_id: run.id.clone(),
             kind: loopflow::session::SessionKind::Ask,

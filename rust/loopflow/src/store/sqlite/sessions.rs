@@ -13,7 +13,8 @@ const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_so
     s.ready_summary, s.completed_at, s.created_at, s.kind, s.request, s.interactive, s.repo,
     r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
     r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt,
-    r.provider, r.model, r.caller_run_id, r.outcome, r.ended_at
+    r.provider, r.model, r.caller_run_id, r.outcome, r.ended_at,
+    s.task_id,s.wave_id,s.flow_session_id,s.work_source,s.bound_at
     FROM agent_sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(AgentSession, Run)>> {
@@ -33,6 +34,22 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(AgentS
             AgentSession {
                 id: id.clone(),
                 current_run_id: run_id.clone(),
+                task_id: row
+                    .get::<_, Option<String>>(29)?
+                    .map(|id| TaskId::parse(&id))
+                    .transpose()
+                    .map_err(invalid)?,
+                wave_id: row
+                    .get::<_, Option<String>>(30)?
+                    .map(|id| crate::id::WaveId::parse(&id))
+                    .transpose()
+                    .map_err(invalid)?,
+                flow_session_id: row.get(31)?,
+                work_source: row
+                    .get::<_, Option<String>>(32)?
+                    .map(|source| serde_json::from_value(serde_json::Value::String(source)))
+                    .transpose()?,
+                bound_at: row.get(33)?,
                 kind: match kind.as_str() {
                     "conversation" => SessionKind::Conversation,
                     "flow_review" => SessionKind::FlowReview,
@@ -106,7 +123,7 @@ fn inventory_query(
     if let Some(task) = &filter.task {
         let task = bind(Value::Text(task.clone()));
         sql.push_str(&format!(
-            " AND r.task_id IN (SELECT id FROM tasks
+            " AND s.task_id IN (SELECT id FROM tasks
             WHERE id={task} OR issue_identifier={task} OR external_issue_id={task})"
         ));
     }
@@ -226,8 +243,9 @@ impl SqliteStore {
     pub fn create_session(
         &self,
         mut session: AgentSession,
-        run: Run,
+        mut run: Run,
         review: Option<&FlowSession>,
+        caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<(AgentSession, Run)> {
         if run.session_id.as_deref() != Some(session.id.as_str())
             || run.id != session.current_run_id
@@ -277,7 +295,25 @@ impl SqliteStore {
                 session.repo
             ],
         )?;
+        super::runs::inherit_agent_work_in(&tx, &mut run, caller_exec)?;
         let run = super::runs::insert_run_in(&tx, run)?;
+        if session
+            .task_id
+            .as_ref()
+            .is_some_and(|id| Some(id) != run.task_id.as_ref())
+            || session
+                .wave_id
+                .as_ref()
+                .is_some_and(|id| Some(id) != run.wave_id.as_ref())
+            || session
+                .flow_session_id
+                .as_ref()
+                .is_some_and(|id| Some(id) != run.invocation_id.as_ref())
+        {
+            return Err(invalid(
+                "AgentSession admission ancestry disagrees with its work",
+            ));
+        }
         tx.execute(
             "UPDATE flow_sessions SET pending_session_id=?2, current_run_id=?3 WHERE id=?1",
             params![run.invocation_id, session.id, run.id.as_str()],
@@ -348,12 +384,60 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Assign a Task to the Session's Runs. Closed Sessions bind too.
-    pub fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(AgentSession, Run)> {
+    /// Assign future work without changing earlier attribution. Closed Sessions bind too.
+    pub fn bind_session(
+        &self,
+        id: &str,
+        expected_run: &RunId,
+        task: &TaskId,
+    ) -> StoreResult<(AgentSession, Run)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        super::runs::bind_session_runs_in(&tx, id, task)?;
+        let (session, _) = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if session.current_run_id != *expected_run {
+            return Err(StoreError::InvalidAuthority(
+                "Session changed before binding".into(),
+            ));
+        }
+        if let Some(bound) = &session.task_id {
+            if bound != task {
+                let issue: String = tx.query_row(
+                    "SELECT issue_identifier FROM tasks WHERE id=?1",
+                    [bound.as_str()],
+                    |row| row.get(0),
+                )?;
+                return Err(StoreError::InvalidAuthority(format!(
+                    "Session {id} already has Task {issue}; binding is permanent"
+                )));
+            }
+        } else {
+            let wave = super::runs::task_wave_in(&tx, task)?;
+            if session
+                .wave_id
+                .as_ref()
+                .is_some_and(|existing| *existing != wave)
+            {
+                return Err(StoreError::InvalidAuthority(format!(
+                    "Session {id} belongs to another Wave"
+                )));
+            }
+            if let Some(flow) = &session.flow_session_id {
+                let compatible: bool = tx.query_row(
+                    "SELECT task_id IS ?2 FROM flow_sessions WHERE id=?1",
+                    params![flow, task.as_str()],
+                    |row| row.get(0),
+                )?;
+                if !compatible {
+                    return Err(StoreError::InvalidAuthority(
+                        "AgentSession and FlowSession nullable Tasks disagree".into(),
+                    ));
+                }
+            }
+            tx.execute(
+                "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
+                params![id, task.as_str(), wave.as_str(), crate::store::rows::now_unix()],
+            )?;
+        }
         let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(bound)

@@ -4,6 +4,13 @@ use crate::session::{AgentSession, Run, TitleSource};
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub async fn agent_work(
+        &self,
+        exec: &crate::id::ExecId,
+    ) -> StoreResult<Option<crate::session::RunWork>> {
+        let exec = exec.clone();
+        run_sqlite(&self.sqlite, move |store| store.agent_work(&exec)).await
+    }
     pub async fn reserve_review_run(
         &self,
         expected: &FlowSession,
@@ -33,7 +40,11 @@ impl Store {
     }
 
     pub async fn create_run(&self, run: Run) -> StoreResult<Run> {
-        run_sqlite(&self.sqlite, move |store| store.create_run(run)).await
+        let caller = crate::journal::current_exec_id();
+        run_sqlite(&self.sqlite, move |store| {
+            store.create_run(run, caller.as_ref())
+        })
+        .await
     }
 
     pub async fn create_session(
@@ -42,8 +53,9 @@ impl Store {
         run: Run,
         review: Option<FlowSession>,
     ) -> StoreResult<(AgentSession, Run)> {
+        let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, run, review.as_ref())
+            store.create_session(session, run, review.as_ref(), caller.as_ref())
         })
         .await
     }
@@ -86,10 +98,19 @@ impl Store {
         .await
     }
 
-    pub async fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(AgentSession, Run)> {
+    pub async fn bind_session(
+        &self,
+        id: &str,
+        expected_run: &RunId,
+        task: &TaskId,
+    ) -> StoreResult<(AgentSession, Run)> {
         let id = id.to_string();
+        let expected_run = expected_run.clone();
         let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.bind_session(&id, &task)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.bind_session(&id, &expected_run, &task)
+        })
+        .await
     }
 
     pub async fn runs(

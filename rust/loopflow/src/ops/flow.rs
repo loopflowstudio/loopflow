@@ -172,6 +172,7 @@ fn persist_metric_observations(
 }
 
 fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResult<()> {
+    let draft = matches!(&cmd, PrCommand::Open { .. });
     match cmd {
         PrCommand::Arm {
             strict,
@@ -257,8 +258,8 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             )?;
             Ok(())
         }
-        // A flow `op:` runs headless, so both publish and open only publish —
-        // presentation is an explicitly requested CLI action, never an automation step.
+        // Headless operations preserve the command's draft/ready policy but
+        // leave browser presentation to an explicitly requested CLI action.
         PrCommand::Publish {
             model: _,
             title,
@@ -272,6 +273,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             create_or_update_pr(
                 repo,
                 &PrOptions {
+                    draft,
                     title,
                     body,
                     agent: None,

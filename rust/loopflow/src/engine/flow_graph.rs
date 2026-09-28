@@ -353,6 +353,17 @@ mod tests {
     }
 
     #[test]
+    fn refresh_integrates_upstream_before_realigning() {
+        let repo = tempfile::tempdir().unwrap();
+        let flow = load_flow("refresh", repo.path()).unwrap();
+        let graph = FlowGraph::new(&flow.name, &expand_flow(&flow, repo.path()).unwrap());
+        let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
+        assert_eq!(labels, ["rebase", "realign"]);
+        assert_eq!(graph.steps[0].kind, FlowNodeKind::Op);
+        assert_eq!(graph.steps[1].kind, FlowNodeKind::Skill);
+    }
+
+    #[test]
     fn feature_draws_both_returns_to_implement_with_forward_delivery() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("feature", repo.path()).unwrap();
@@ -365,8 +376,10 @@ mod tests {
                 "review-design",
                 "implement",
                 "compress",
-                "review-slice",
+                "rebase",
+                "realign",
                 "loop-decide",
+                "pr-publish",
                 "demo",
                 "loop-decide",
                 "compress",
@@ -388,9 +401,9 @@ mod tests {
                 (Some("decide_delivery".to_string()), &implement)
             ]
         );
-        assert!(graph.steps[1].human && graph.steps[6].human);
-        assert_eq!(graph.steps[11].kind, FlowNodeKind::Op);
-        assert_eq!(graph.steps[5].parents, ["feature", "pursue"]);
+        assert!(graph.steps[1].human && graph.steps[8].human);
+        assert_eq!(graph.steps[13].kind, FlowNodeKind::Op);
+        assert_eq!(graph.steps[5].parents, ["feature", "pursue", "refresh"]);
     }
 
     #[test]

@@ -470,6 +470,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("publish heal".to_string()),
             body: Some("proof body".to_string()),
             agent: None,

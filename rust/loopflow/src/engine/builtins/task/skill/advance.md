@@ -43,12 +43,12 @@ through `lf task create` and `lf task checkout`, carrying the complete approved
 scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
-directly to the `pursue` Flow (implement → compress → review-slice → concept-review
-→ loop-decide, repeated on Iterate, then human demo and another loop-decide).
+directly to the `pursue` Flow (implement → compress → refresh
+→ loop-decide, repeated on Iterate, then pr-publish, human demo, and another loop-decide).
 Both decisions have explicit edges to implementation. Do not repeat initial
 design work merely to launch implementation. For work that still
 needs design, use the complete feature Flow. Preserve any explicit User choice
-to perform implement → compress → review-slice → concept-review directly in this conversation.
+to perform implement → compress → refresh directly in this conversation.
 Ask only when intent or placement cannot be resolved from available evidence.
 
 ## Verify the handoff

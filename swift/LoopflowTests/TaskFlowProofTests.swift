@@ -226,8 +226,8 @@ struct TaskFlowProofTests {
         // Running reads `● step · elapsed · provider`; the fixture's runtime record
         // dates from July, so only the fixed parts are pinned here.
         let running = try text("task-flow-status")
-        #expect(running.hasPrefix("review-slice · ") && running.hasSuffix(" · claude"), "was \(running)")
-        #expect(try find("flow-node-2").accessibilityLabel().string() == "review-slice, running")
+        #expect(running.hasPrefix("realign · ") && running.hasSuffix(" · claude"), "was \(running)")
+        #expect(try find("flow-node-2").accessibilityLabel().string() == "realign, running")
         #expect((try? find("task-flow-pause")) == nil)
         try captureIfRequested(window, name: "task-flow-running")
 

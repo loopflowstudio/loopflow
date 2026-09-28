@@ -137,7 +137,7 @@ struct TaskFlowView: View {
         .onExitCommand { dismissTransient() }
     }
 
-    /// One line under the Flow. Running work reads `● review-slice · 12m · claude`:
+    /// One line under the Flow. Running work reads `● realign · 12m · claude`:
     /// the current occurrence, how long the shared Task record has been in this
     /// state, and the harness of the exact active Run (else the Task's provider).
     private var statusText: Text {

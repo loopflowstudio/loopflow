@@ -677,14 +677,23 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         )
         .unwrap();
         let owner: TaskWorkerOwner = serde_json::from_value(receipt).unwrap();
+        let invocation =
+            loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "pursue").unwrap();
+        let decision_index = invocation
+            .steps
+            .iter()
+            .position(|step| {
+                matches!(step, loopflow::engine::ConcreteStep::Skill(skill)
+                    if skill.policy.id.as_deref() == Some("decide"))
+            })
+            .expect("pursue has an implementation decision boundary");
         let position = FlowPosition {
             task_id: task.task.id.clone(),
-            invocation: loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "pursue")
-                .unwrap(),
+            invocation,
             session_run_id: None,
             ready_summary: None,
             cursor: loopflow::engine::ExecutionCursor {
-                index: 3,
+                index: decision_index,
                 ..Default::default()
             },
             version: 0,

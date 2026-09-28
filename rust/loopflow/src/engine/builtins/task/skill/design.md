@@ -69,8 +69,9 @@ Tighten the artifact to:
   reshapes or deletes.
 - **Forbidden outcomes** — duplicate representations, compatibility layers, or
   locally passing states that still violate the intended architecture.
-- **Internal slices** — ordered coherent cuts, one marked `This slice`, plus a
-  durable evidence ledger that never replaces the full design.
+- **Internal slices** — ordered coherent cuts, one marked `This slice`. Keep
+  consequential evidence and unresolved gaps in the working design while
+  preserving the full target; no separate pass ledger is required.
 - **Measure** — only when a meaningful before/after quantity exists.
 
 For an additive series, describe the keystone fully and list the intended follow-ups precisely enough for `launch-plan` to encode. Do not file them yet. Before finishing, reread the artifact and present the consequential scope, keystone boundary, follow-ups, and open assumptions.

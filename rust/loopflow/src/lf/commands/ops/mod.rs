@@ -534,18 +534,19 @@ fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()>
     Ok(())
 }
 
-/// Shared publication: push + create/update the PR. Opens no review surface.
-/// Both `lf pr publish` and `lf pr open` publish through here.
-fn publish_current(
+/// Push and create/update the PR with the requested readiness. Opens no browser.
+fn prepare_current_pr(
     title: Option<String>,
     body: Option<String>,
     agent_override: Option<&str>,
+    draft: bool,
     progress: &impl Progress,
 ) -> Result<crate::ops::PrResult> {
     let repo_root = find_repo_root()?;
     let result = create_or_update_pr(
         &repo_root,
         &PrOptions {
+            draft,
             title,
             body,
             agent: agent_override.map(str::to_string),
@@ -561,8 +562,8 @@ fn publish_pr(
     agent_override: Option<&str>,
     progress: &impl Progress,
 ) -> Result<()> {
-    let result = publish_current(title, body, agent_override, progress)?;
-    print_published_pr(&result);
+    let result = prepare_current_pr(title, body, agent_override, false, progress)?;
+    print_pr_result(&result);
     Ok(())
 }
 
@@ -572,22 +573,22 @@ fn open_pr(
     agent_override: Option<&str>,
     progress: &impl Progress,
 ) -> Result<()> {
-    let result = publish_current(title, body, agent_override, progress)?;
-    // Publication succeeded — print the URL before presenting so a failed
+    let result = prepare_current_pr(title, body, agent_override, true, progress)?;
+    // The PR exists — print the URL before presenting so a failed
     // review-surface launch fails only `pr open` and never hides the PR.
-    print_published_pr(&result);
+    print_pr_result(&result);
     crate::ops::present_pr_review(&result.url).map_err(|err| {
         anyhow!(
-            "PR published at {} but opening it for review failed: {err}",
+            "PR available at {} but opening it for review failed: {err}",
             result.url
         )
     })?;
     Ok(())
 }
 
-/// Print a freshly published PR's state and URL. Falls back to the raw URL when
+/// Print the PR's state and URL. Falls back to the raw URL when
 /// GitHub state can't be re-read.
-fn print_published_pr(result: &crate::ops::PrResult) {
+fn print_pr_result(result: &crate::ops::PrResult) {
     let verb = if result.created { "created" } else { "updated" };
     match find_repo_root()
         .ok()

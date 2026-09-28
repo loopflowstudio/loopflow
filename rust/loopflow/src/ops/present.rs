@@ -19,10 +19,9 @@ fn resolve_review_surface() -> ReviewSurface {
     ReviewSurface::default()
 }
 
-/// Present a published PR for review. This is the single presentation boundary:
-/// only `lf pr open` calls it, and only after publication has produced `url`.
-/// Publication never routes through here, so a failed surface launch can fail
-/// `pr open` alone and never makes a published PR look failed.
+/// Present an existing draft or ready PR. Only `lf pr open` calls this boundary;
+/// presentation does not change readiness. A failed browser launch leaves the
+/// PR available at its URL.
 pub fn present_pr_review(url: &str) -> OpsResult<()> {
     match resolve_review_surface() {
         ReviewSurface::GithubBrowser => open_url_checked(url).map_err(|err| {

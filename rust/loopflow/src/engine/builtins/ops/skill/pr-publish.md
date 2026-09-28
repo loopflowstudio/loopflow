@@ -16,15 +16,23 @@ Write reviewer-friendly PR copy with agent judgment. Use ops only for execution.
    git diff origin/main...HEAD --stat
    ```
 
+   Apply the caller's publication criteria to the current change and evidence.
+   In an implementation Flow, publish only when the applicable Done when claims
+   hold and the increment is coherent. A completed work or realign step may
+   still leave required behavior unfinished. If that boundary is not satisfied,
+   return the concrete gap without publishing; use the caller's blocker protocol
+   when one is supplied. Do not treat process completion as proof of readiness.
+
 2. Write the title and body using the authorship contract below.
 
 3. Publish or refresh the PR with explicit fields. This pushes and creates or
-   updates the PR, then prints its state and URL — it opens no browser.
+   updates the PR and marks it ready, then prints its state and URL — it opens no browser.
    ```bash
    lf pr publish --title "<title>" --body "<body>"
    ```
-   `lf pr open` does the same publish and then opens the PR for review; use it
-   only when a person explicitly asked to see the PR.
+   `lf pr open` creates or updates a draft and opens its page; use it when a
+   person explicitly asks to see the PR. It preserves existing readiness.
+   Publish/submit/arm/land make drafts ready.
 
 ## Authorship
 

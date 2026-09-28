@@ -2,12 +2,13 @@
     id: implement
     name: implement
 - compress
-- review-slice
+- flow: refresh
 - step:
     id: decide
     name: loop-decide
     repeat:
       from: implement
+- pr-publish
 - step:
     id: review_delivery
     name: demo

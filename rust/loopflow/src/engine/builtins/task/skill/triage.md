@@ -1,56 +1,26 @@
 ---
-requires: scratch/qa-findings.md
-produces: scratch/triage.md
+requires: findings and the outcome they may obstruct
+produces: corrected and prioritized findings in their existing location
 action_style: procedural
 ---
-Assess QA findings. Separate blocking issues from polish items.
+Turn findings into an accurate, ordered set of remaining work.
 
-## Orientation
+1. Read the supplied findings and recover the intended outcome and constraints.
+   Findings may come from a conversation, an issue, a test run, or a document;
+   no particular producer or filename is required.
 
-Before starting, orient yourself in this branch:
+2. Check each claim against the current code and evidence. Use the smallest
+   reproduction that resolves doubt. Remove disproved claims, resolved items,
+   and duplicates from the active list; retain evidence needed to explain a
+   consequential dismissal. Missing evidence makes a finding uncertain, not false.
 
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+3. Edit the original findings in place. Put blockers first, ordered by impact,
+   then nonblocking improvements. State the affected behavior, evidence or
+   reproduction, and the next useful action. Preserve unresolved counterexamples
+   and dependencies. Do not make a second assessment file or copy findings into
+   a guessed backlog.
 
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
-
-## Workflow
-
-1. Read `scratch/qa-findings.md` from the QA step.
-2. For each finding, assess:
-   - Is this a real issue or a false positive?
-   - Does it block deploy (regression, security, data loss) or is it polish?
-   - How severe? How hard to fix?
-3. Write the triage assessment.
-
-## Output
-
-Write to `scratch/triage.md`:
-
-```markdown
-## Summary
-
-[1-2 sentences: overall state of the branch. Deployable or not?]
-
-## Blocking
-
-Issues that must be fixed before deploy, ordered by severity.
-
-1. [issue] — [why it blocks, estimated fix complexity]
-
-## Polish
-
-Non-blocking items to track. Write each to `wave/polish/` if a polish wave exists.
-
-- [item] — [impact if left unfixed]
-
-## Verdict
-
-[DEPLOY or FIX] — [reasoning in one sentence]
-```
+Return the remaining blockers and next action briefly. When the input is only
+in conversation, return the corrected list here. If the source cannot be edited
+within the supplied authority, return the exact proposed correction. A clean
+findings list does not prove untested behavior or authorize deployment.

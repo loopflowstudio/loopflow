@@ -27,14 +27,12 @@ and change while preserving required behavior. The output is a diff.
    predecessor in the same cut. Clarity matters more than brevity or line count.
 
 4. Make coherent edits and verify the affected behavior with focused proof.
-   Preserve the accepted design, external contracts, installed callers, and
-   recoverable data; follow the repository's migration rules. Keep tests of the
-   surviving behavior and remove tests made obsolete by the change. If proof
-   fails, repair the reduction; if required proof cannot run, stop with its exact
-   blocker. Reuse applicable passing evidence; gate and CI own broader suites.
+   If proof fails, repair the reduction; if required proof cannot run, stop with
+   its exact blocker. Reuse applicable passing evidence; gate and CI own broader
+   suites.
 
-Leave the explanation in the commit message and at most a few lines in the
-existing slice record: what was removed and which proof ran with what result.
-Do not create a compression review or another document. If there is truly
-nothing to reduce, say so in one line and let the Flow continue. Review belongs
-to review-slice.
+Leave consequential rationale beside the changed code or in the existing plan.
+Summarize the simplification, applicable proof, and unresolved gaps briefly so
+the next reader can use them. No separate pass record is required. If nothing
+needs reducing, say so without manufacturing edits. Realign reconciles the plan
+with the work.

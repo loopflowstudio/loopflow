@@ -28,11 +28,12 @@ lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish is the default for making work visible; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not rebase. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf pr open` also opens
-the review page; use it only when the user asks to see the PR.
+selected delivery skill for preparation and recovery. `lf pr open` creates or
+updates a draft and opens its page; use it when the user asks to see the PR.
+It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -99,8 +100,8 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `update-wave` or
-`record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`, `update-wave`,
+or `record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
 maintainer instructions into customer skills.
 
 </lf:loopflow>
@@ -123,62 +124,73 @@ No rendering environment. Output is logged, not displayed.
 
 The skill.
 
-<lf:skill:review-slice>
-Review the implemented slice through behavior, intent, and source. Repair
-bounded gaps and return evidence; loop-decide owns navigation.
+<lf:skill:realign>
+Bring the plan and the implementation into agreement with what the work has taught us.
 
-## Evidence first
+1. Recover the intended outcome, accepted constraints, and current approach
+   from the supplied conversation, plan, and relevant code. Read existing
+   evidence and inspect the affected behavior. Use the context available;
+   do not require a Task, branch, previous pass, or particular document layout.
+   When the work identifies a Wave, read its objective and `wave/<name>/MEMORY.md`
+   alongside the plan. Recover accepted decisions, lessons, and evidence limits
+   that should shape the work. Use supplied Wave context or the repository's
+   memory location; do not invent a Wave for unbound work.
+   When intent is missing, ask for the specific missing decision rather than
+   treating the implementation as its own specification.
 
-Read the Task directive, `scratch/<branch>.md`, and the complete diff. Recover
-the current slice, full target, forbidden outcomes, and Done when claims.
-Separate observed results from expectations. Reuse applicable executed proof;
-never treat an authored test as a pass. An unrunnable required proof is a stop:
-record the exact failing command and blocker, then return it for resolution.
+2. Identify relevant changes and memories added since the plan was generated
+   or last reconciled. Look beyond this implementation: upstream changes,
+   related work, and new decisions or lessons in shared memory may change the
+   best approach. Is there an opportunity to adjust the plan to better fit
+   what is happening elsewhere? Incorporate supported improvements while
+   preserving the intended outcome and accepted constraints.
 
-Demonstrate the important changed behavior through the real configured path
-when available and safe. Otherwise run the closest local proof and label its
-limits. Do not mutate production to manufacture evidence.
+   Find where the work changed our understanding. Which assumptions failed?
+   Which planned mechanisms became unnecessary? What remains unimplemented,
+   or works differently than intended? Separate observations from explanations.
+   Reuse applicable proof; run a focused check when it will resolve uncertainty.
+   An unexecuted check is still a gap.
 
-Inspect the model behind that behavior. Does each real-world concept map to one
-representation? Has the change added a hop, duplicate owner, or fallback reader?
-Would deleting code make the system more true? Follow normal and recovery paths
-through their callers, writers, storage, and public interfaces.
+3. Reconcile at the source. Rewrite stale portions of the plan, delete obsolete
+   steps and explanations, and update the remaining work to fit what is now known.
+   Correct clear, bounded implementation mismatches and their affected tests or
+   docs. Preserve the full intended outcome and still-relevant constraints.
+   Evidence may change the approach; missing behavior does not justify weakening
+   acceptance. Keep a substantial code change explicit as remaining work.
+   When a change needs a product decision, show the exact choice and leave it
+   unresolved. Do not silently promote a proposal into an accepted decision.
 
-A slice moves a real consumer end to end and deletes what it replaces in the
-same cut. Adding an owner beside an existing one is not a slice. Search for the
-replaced paths; passing behavior does not excuse a reachable competing owner,
-dual write, or adapter preserving a caller that can migrate. Report measured
-non-test lines added and removed, the compared revisions, and exclusions for
-tests/generated files. Counts support the named replacement; they do not prove
-it or impose a deletion quota on new capabilities.
+   Reconcile the Wave's memory too. Replace stale guidance, remove duplication,
+   and write durable decisions and lessons learned from this work into its
+   existing memory. Attribute decisions by name and preserve contrary evidence
+   and proof limits. Keep the live implementation plan in its own artifact;
+   memory carries what future Wave work should know, not a copy of the pass.
+   Follow the repository's memory workflow. If identified memory is unavailable
+   or cannot be updated within the supplied authority, state that exact gap
+   and continue the independent local corrections.
 
-Compare the current and previous implementation passes. Two consecutive passes
-replacing nothing are a convergence blocker: name both passes and the next
-consumer that needs to switch. Return that finding for resolution rather than
-recommending another unchanged pass. The decision step owns navigation.
+4. Check the resulting agreement. The plan must distinguish what exists from
+   what remains, and the code must support claims of completed behavior. Verify
+   repairs with the smallest relevant proof. Keep blockers, contrary evidence,
+   and proof limits visible where they affect the next action. Stop dependent
+   work when a required check cannot run; state the command and blocker.
 
-A worked example: one 30-minute implementation Run first failed its acceptance
-test, moved interactive Sessions onto database rows end to end, and removed
-16 predecessor items in the same cut: +396 / −409 non-test lines. Its record
-named the switched reader, executed proof, and remaining gaps. Judge that
-consumer replacement and honest boundary, not the duration or a deletion quota.
+If no plan exists, update the supplied working context or write the smallest
+useful plan when continued work needs one.
 
-## Disposition
+Finish with a minimal review that makes the next decision easy:
 
-Fix clear, bounded gaps here and rerun the focused proof for changed behavior.
-If the model requires a product decision or a larger change, return the exact
-choice or next cut and proof. Preserve required behavior and recoverable data;
-a smaller diff is not a reason to discard them. A passing slice does not satisfy
-unproved whole-design claims.
+- Where the work stands against the plan: what is implemented and what remains.
+- What worked, with the checks or observations that support it and their limits.
+- What implementation taught us, and how the plan, code, or Wave memory changed.
+- What remains unresolved: contrary evidence, untested claims, blockers, or choices.
 
-Update one short review section in the existing slice record under `scratch/`.
-Include date/scope, claims with pass or gap and executed evidence, measured
-additions/deletions, removed paths, remaining findings, and the next action/proof.
-Carry unresolved findings forward; replace superseded notes rather than adding
-another review file. Return the record's path and a short takeaway. Do not
-repeat the design or write a second conceptual review.
+Keep it short and link to the current artifacts and proof. Update an existing
+summary when one serves the handoff; otherwise use the caller's output surface.
+Preserve useful evidence without copying the plan or accumulating a pass ledger.
+If everything already agrees, say so without manufacturing changes.
+Supply the facts for a reader such as loop-decide to judge; do not preselect
+Advance, Iterate, or Blocked. Publication and workflow navigation belong to
+the caller.
 
-When all applicable Done when claims hold and the slice is coherent, publish
-or refresh the Task PR with `lf pr publish`. Do not land or complete the Task.
-
-</lf:skill:review-slice>
+</lf:skill:realign>

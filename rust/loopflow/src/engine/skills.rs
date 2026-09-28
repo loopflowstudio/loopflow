@@ -406,6 +406,24 @@ mod tests {
         // Standalone vendor skills receive their procedures without an ambient prompt.
         for vendor in [".agents", ".claude"] {
             let root = home.path().join(vendor).join("skills");
+            for name in [
+                "realign",
+                "triage",
+                "gate",
+                "review-design",
+                "record-learnings",
+                "prompt",
+            ] {
+                let exported = fs::read_to_string(root.join(name).join("SKILL.md")).unwrap();
+                let (_, body) =
+                    split_frontmatter(builtins::get_builtin_skill(name).unwrap()).unwrap();
+                assert!(
+                    exported.contains(body.trim()),
+                    "{vendor} omitted {name}'s method"
+                );
+            }
+            assert!(!root.join("review-slice/SKILL.md").exists());
+            assert!(!root.join("refresh-plan/SKILL.md").exists());
             let control = fs::read_to_string(root.join("loopflow/SKILL.md")).unwrap();
             assert!(control.contains("lf task restart"));
             assert!(control.contains("lf wave place"));

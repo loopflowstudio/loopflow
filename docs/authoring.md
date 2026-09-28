@@ -32,28 +32,24 @@ it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
 Direct launch from a TTY runs interactively. `--batch` and automated
-flow execution run the same skill headlessly, so write a bounded contract for
-both surfaces when the work involves judgment or conversation:
+flow execution run the same skill headlessly. Define the inputs and useful
+change independently of the caller. When judgment is unavailable, make supported
+corrections and leave consequential choices explicit. Use a reviewer protocol
+only when the caller supplies one.
 
-```markdown
-## Reviewer mode
-
-- **Interactive reviewer:** explore the problem in the current conversation.
-- **Parent reviewer:** answer the assigned question from supplied evidence and
-  return without waiting for a person.
-```
-
-Skills chain through `scratch/`: a step writes `scratch/<branch>.md`, the
-next step reads it. That contract is what makes flows work — if your skill
-produces something a later step needs, write it to `scratch/`, not to chat.
+Pass work between skills through its existing owner: code, a working plan,
+or findings. Use `scratch/` for plans and evidence that later steps need;
+update them in place rather than creating a report per pass. Test skills
+standalone, midstream, and on repeated use.
 
 Use `concept-review` to reconsider the product with someone present, on request
-or inside unblock. Review-slice owns autonomous assessment. Draft the affected usage docs and
-skill guidance first, then follow the simpler interaction through types, APIs,
-and infrastructure. Product clarity is valuable even without deleting code.
+or inside unblock. Realign reconciles the plan, code, and identified Wave memory.
+Draft the affected usage docs and skill guidance first, then follow the simpler
+interaction through types, APIs, and infrastructure. Product clarity is valuable
+even without deleting code.
 Keep proposed alternatives distinct from accepted requirements and verified
-behavior. The review supplies evidence; `loop-decide` owns navigation when the
-Flow declares a decision step.
+behavior. The work and updated plan supply evidence; `loop-decide` owns navigation
+when the Flow declares a decision step.
 
 ## Flows
 
@@ -171,12 +167,13 @@ deciding step stable ids:
     id: implement
     name: implement
 - compress
-- review-slice
+- flow: refresh
 - step:
     id: decide
     name: loop-decide
     repeat:
       from: implement
+- pr-publish
 - step:
     id: review_delivery
     name: demo
@@ -188,12 +185,12 @@ deciding step stable ids:
       from: implement
 ```
 
-One pass runs implement, compress, review-slice, and loop-decide.
-The review supplies evidence; loop-decide chooses Advance or Iterate through the
+One pass runs implement, compress, refresh (rebase → realign), and loop-decide.
+The work and updated plan supply evidence; loop-decide chooses Advance or Iterate through the
 [decision protocol](lf.md#flow-decisions-and-recovery). Iterate returns to `from`
-with direction; Advance reaches the human demo. Complete returns the demo's
+with direction; Advance publishes, then reaches the human demo. Complete returns the demo's
 feedback and revised design to the second loop-decide. Its own explicit edge
-also targets implement: the outer loop repeats implementation, slice review,
+also targets implement: the outer loop repeats implementation, refresh,
 the inner decision loop, and demo. Review completion itself chooses no edge.
 
 At the deciding occurrence, use `lf flow decide advance "evidence"` or

@@ -95,7 +95,7 @@ Names resolve in this order:
 
 Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
 Ownership uses `/` (`wave/operate`); words within one name use `-`
-(`review-slice`). Public catalog names never use `_`.
+(`review-design`). Public catalog names never use `_`.
 
 ### Skill Arguments
 
@@ -118,7 +118,6 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `research` | Map the territory — architecture, complexity, quality, potential |
 | `iterate` | Read research, write design to address it |
-| `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
 | `5whys` | Root cause analysis on a bug fix |
 | `implement` | Build from a design doc |
 | `compress` | Simplify code and surrounding implementation related to the diff |
@@ -127,15 +126,16 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `ci-fix` | Fix failing CI checks for the current PR |
 | `integrate-upstream` | Adapt wave code after rebasing onto main |
 | `qa` | Thorough quality assessment of the current branch |
-| `triage` | Assess QA findings, separate blocking from polish |
+| `triage` | Correct and prioritize findings in their existing location |
+| `review-design` | Reshape the working design around the intended experience |
+| `record-learnings` | Put lessons into the code, guidance, or memory that owns them |
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
-| `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
+| `realign` | Reconcile plan, code, and Wave memory with what the work has taught us |
 | `concept-review` | Reconsider the intended experience together, then follow through concepts, data, and APIs |
 | `loop-decide` | Assess a pass's progress and evidence to choose Advance, Iterate, or human help |
 | `unblock` | Resolve stalled work with the human inside an Ask Session, using concept-review by default |
 | `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
-| `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
 | `task/clarify` / `task/pursue` / `task/mutate` | Clarify, implement, and judge one durable Task |
 
@@ -281,15 +281,16 @@ for composition limitations.
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → code → review-slice → demo |
+| `build` | kickoff → code → realign → pr-publish → demo |
 | `code` | implement → compress |
 | `pair` | design → code |
 | `design` | author one exact design at a User gate |
 | `launch-plan` | keep one coherent core here and launch independent follow-up Tasks |
 | `feature` | task-design → pursue → queue → op: pr land -c (default Task Flow) |
 | `task-design` | kickoff → human review-design |
-| `pursue` | repeat implement → compress → review-slice → loop-decide, then human demo |
-| `slice` | code → review-slice (publishes PR) |
+| `pursue` | repeat implement → compress → refresh → loop-decide, then pr-publish and human demo |
+| `slice` | code → realign → pr-publish |
+| `refresh` | op: rebase → realign |
 | `ship` | gate → record-learnings → op: pr land -c |
 | `ship-demo` | gate → demo review → record-learnings → op: pr land -c |
 | `deploy` | gate → op: pr land |
@@ -302,6 +303,10 @@ for composition limitations.
 | `govern-intelligence` | s4-scan → s4-assess → mutate |
 | `govern-identity` | s5-scan → s5-assess → mutate |
 | `sync` | rebase → integrate-upstream |
+
+`refresh` runs the existing `lf rebase` operation, including its branch push
+with a lease, then realign reconciles the plan, code, and identified Wave memory.
+It does not create or update PR copy; `pursue` does that after convergence.
 
 `sync` rebases the current branch and refreshes the default branch. The
 default-branch refresh is safe from sibling worktrees: it stashes dirty edits
@@ -411,8 +416,8 @@ selected Flow definition is persisted immutably for that invocation, so edits
 to repository Flow YAML cannot change a Task already in progress. When the
 Flow completes, Loopflow deletes its position and leaves the Task ready. The
 next explicit `task run` chooses afresh. With no recommendation, `feature` runs
-design review, then implement → compress → review-slice → loop-decide.
-Iterate returns to implement; Advance reaches `demo human:true`. Completing demo
+design review, then implement → compress → refresh → loop-decide.
+Iterate returns to implement; Advance publishes the PR, then reaches `demo human:true`. Completing demo
 passes its feedback to a second loop-decide whose explicit edge also targets
 implement. This outer loop can apply a revised design and demonstrate it again.
 A Task retains `-m` supplied to `task run`, `create --run`, or `restart`.
@@ -453,15 +458,17 @@ lf flow decide iterate "Remaining work, next action, and the proof to collect"
 lf flow blocked "What stalled, what was tried, and what needs human judgment"
 ```
 
-Implement moves a real consumer end to end and deletes the replaced path.
-Compress simplifies anything related to the diff; it leaves a
-diff, not another review document. Review-slice records executed proof, measured
-non-test additions/deletions, and remaining gaps in one short pass record.
-Review-slice reports a convergence blocker after two consecutive implementation
-passes replace nothing, or when a required proof cannot run. Loop-decide judges
-that finding against the supplied criteria and records Blocked with its reason.
+Implement builds the intended behavior and updates the working plan with what
+remains. When replacing a path, move its consumer and delete the predecessor.
+Compress simplifies code related to the change. Refresh rebases, then runs
+realign. Realign edits the plan, corrects clear code mismatches, and reads and
+updates the identified Wave's memory using what the work has taught us. Accepted
+requirements and unresolved evidence stay visible; no per-pass report or
+replacement count is required. Loop-decide reads the current work and evidence
+to decide whether to continue. Pursue publishes after convergence, before demo.
 
-Compress edits code; review-slice supplies one review record per pass. Concept-review is interactive, on request or inside unblock, and does not own navigation. Blocked is
+Concept-review is interactive, on request or inside unblock, and does not own
+navigation. Blocked is
 a stopped execution outcome, separate from Advance/Iterate. Meaningful learning
 counts as progress; repeating a failure without new evidence calls for help.
 
@@ -1004,7 +1011,8 @@ agent-facing semantics; this section is the user reference.
 
 ### lf pr publish
 
-Push and create or refresh a PR, then print its state and URL. Opens no
+Push and create or refresh a ready PR, then print its state and URL. Existing
+drafts become ready for review. Opens no
 browser — this is the headless publication command agents use.
 
 ```bash
@@ -1016,7 +1024,7 @@ lf -m codex pr publish        # one-off agent override for copy generation
 When `-m` is omitted, copy generation uses `agent:` from `.lf/config.yaml` or
 `~/.lf/config.yaml`. Use the `pr` ops skill to generate `--title`/`--body`
 with agent judgment. When task gate has written cached PR copy, publication
-consumes it and removes the gate-owned copy/review files before its first
+consumes it and removes the gate-owned PR copy files before its first
 commit or push. Other `scratch/` state remains untouched. Publication never
 fetches to integrate, rebases, rewrites Task stack metadata, or launches
 conflict recovery. A PR may remain behind its base until `lf rebase`, `lf gate`,
@@ -1025,10 +1033,13 @@ an error and presents nothing.
 
 ### lf pr open
 
-Publish (same as `lf pr publish`), then open the PR for review — the GitHub
-page in the browser. The explicit, user-initiated review action; agents use
-`publish`, `submit`, `arm`, or `land`. If launching the browser fails, only `open`
-fails — the PR is already published and its URL printed.
+Push and create or update a draft PR, then open its GitHub page. Existing drafts
+stay drafts; existing ready PRs stay ready. Opening the page does not mark a
+draft ready. If launching the browser fails, the PR still exists and its URL
+is printed.
+
+Use `publish`, `submit`, `arm`, or `land` to mark a draft ready. A headless Flow
+`op: pr open` uses the same draft policy without opening a browser.
 
 ### lf pr submit
 

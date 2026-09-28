@@ -471,7 +471,7 @@ only `from`. Counts describe backward traversals; there is no pass budget.
 Implicit forward progress carries direction through the body; explicit Advance
 clears it. Missing required decisions stop execution.
 
-`loop-decide` follows review-slice in pursue. Work and reviews supply
+`loop-decide` follows refresh (rebase → realign) in pursue. The updated plan, code, and focused proof supply
 evidence; loop-decide records `lf flow decide advance|iterate "summary"`.
 Blocked is separate from navigation: `lf flow blocked "reason and question"`
 uses a keyed Ask running unblock. Recovery joins the same Ask and reuses its

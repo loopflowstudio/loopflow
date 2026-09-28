@@ -1,7 +1,4 @@
--- name: auth_browser_bindings
--- id: 2cd101ad721f80ca7903d743acc094c4
--- depends_on: 
-
+-- draft: auth_browser_bindings
 CREATE TABLE auth_browser_bindings (
     provider TEXT NOT NULL,
     account_id TEXT,

@@ -1,36 +1,42 @@
-# v0.12.23
+# v0.12.24
 
-<!-- loopflow:release-notes=narrative;gate=safe -->
+v0.12.24 makes account access, Task execution, and unattended releases easier to inspect and recover. Authentication moves into one command family with retained usage observations, while branch builds keep private data and managed Tasks use their owning installation. Scheduled releases can hand failed checks to the landing repair supervisor and report failures back to cron.
 
-v0.12.23 makes unattended Tasks easier to steer and recover: agent choices persist, failed decisions expose their blockers, and stalled work becomes visible. Planning moves into Task, Wave, and repository commands, with retryable deletion that preserves historical evidence. Release retries can also reuse a version after its earlier release PR was withdrawn.
+## Inspect accounts and usage in one place
 
-## Keep Task choices through execution and recovery
+Login and account inspection now share `lf auth`. Browser choices are remembered independently for managed accounts and local services, and successful usage responses remain available for offline inspection.
 
-A Task's selected agent now survives launch, resume, restart, and review, overriding skill defaults without changing the configured default. The implementation loop is shorter, and CLI and desktop show blocked or stalled execution with recovery guidance.
+- Use `lf auth status` or `lf auth status --details` to inspect account IDs, cached usage windows, their age and reset time, and remembered browser bindings. `lf auth status codex --verify` refreshes observations for the selected account set.
+- Native browser callback completion and explicit hidden manual input replace Chrome page and clipboard scraping. New managed accounts are staged and checked for identity before registration.
+- Status distinguishes managed credentials, local tokens, and uninspected forwarding, keeping missing credentials visible. Verification saves returned usage windows atomically while preserving routing and cooldown state.
+- Account and route listings show IDs beside logins. Headless Runs record the account selected for each attempt before a provider Session ID exists.
 
-- Failed decisions retain their Run and open a keyed unblock Session instead of leaving the Task looking ready.
-- Five minutes without events or sampled body/tool CPU progress shows **Stalled**. Missing or mismatched samples remain **Unknown**; observing a stall does not authorize termination.
-- The `pursue` Flow runs implement → compress → review-slice → loop-decide. Compress edits code; review-slice reports replacement evidence and convergence blockers. Concept review remains interactive, and shipping removes the redundant task-gate wrapper.
+## Keep development data separate from installed work
 
-## Manage planning and deletion through one command family
+A branch build now seeds a private, source-specific data directory once, preserving subsequent private writes and clearing inherited execution authority. Managed Task operations route to the selected installation before preparation, checkpoints, or worker claims, keeping its executable and database together.
 
-Task creation, editing, comments, and completion now live under `lf task`. Deletion handles both registered and planning-only Tasks, so removing an issue no longer requires separate Linear and local actions.
+- `lf task run` starts or continues saved work; `lf task restart` replaces its invocation. Preparation is now `lf task checkout`, which can restore missing checkouts from retained history and work from dirty checkouts.
+- Managed operations return installed Task state and consume installed review readiness without transferring branch-only identities or feedback.
+- Opening a Wave chat connects it automatically. Separate Wave lifecycle and Task/Wave enablement controls are removed from the CLI, app, and wire models.
+- Task execution cannot change installations. Incompatible-database errors retain migration evidence and recommend recovery pairs only after checking their artifacts and exact database compatibility.
 
-- Use `lf task delete ISSUE` to delete a Task. Confirmed deletion removes it from current planning views while preserving completed outcomes, timestamps, authored files, and retained PRs. Explicit `lf task status ISSUE` keeps historical lookup available.
-- Saved issue identity and deletion confirmation let retries survive planning refresh and chapter replacement. Missing provider data never counts as confirmed deletion. Chapter rotation now sends untouched backlog to Linear's native trash.
-- Planning-only creation requires no checkout or execution credentials. `create --run` validates execution before filing the issue and reuses that issue on retry.
-- Connection, sync, and placement move to `lf wave`; provider administration moves to `lf repo`; planning diagnostics use `lf doctor --planning`.
-- Checkout Task identity comes from the checked-out branch, and completion evidence survives provider writeback retries.
+## Recover release checks and report failures
+
+Scheduled releases now use the existing landing repair supervisor when required checks fail. The release path retains version-metadata rebuilding when main advances and preserves blocked repair checkouts for recovery.
+
+- Cron receives the release operation's actual exit status. The scheduled release target resolves to the deterministic operation Flow before the same-named skill.
+- GitHub's temporary no-checks response after a push remains pending instead of being treated as a completed check result.
+- The blocking Swift fixture join reproduced locally is replaced with bounded asynchronous exit observation, addressing the cleanup defect investigated after the previous release's test hang. The original hosted job retained no stack, so that diagnosis remains limited to the local reproduction.
 
 ## Operational notes
 
-- **Command migration:** `pm`, `work`, and superseded Task commands are removed without aliases. Update scripts to the Task, Wave, repository, and doctor commands above; desktop callers, bundled skills, and documentation have been updated.
-- Task deletion does not certify process termination or complete Session/Run cleanup. Recorded Runs retain their attribution.
-- `lf release run` ignores release PRs closed without merging when finding a version's PR. A withdrawn PR no longer forces skipping that version; open and merged PRs still participate in lookup.
-- The Swift CI test step now times out after 20 minutes, allowing a hung step to fail and be rerun. The intermittent observation-cancellation test hang itself remains unfixed.
-- Only free disk space gates builds. Oversized sibling checkouts warn; the current checkout cleans its own oversized disposable build roots.
-- Recorded checks cover the affected Task suites, deletion and retry behavior, and all 41 release-module tests. Configured Claude launch/resume, a live five-minute stall, rendered Task states, installed deletion acceptance, and end-to-end release retry remain unverified in the supplied evidence. The final decision-policy revision also lacks live proof; earlier policy evidence used simulated planning state and synthetic feedback.
+- **Command migration:** six `lf auth` subcommands replace the old account/profile/access commands and top-level routing commands. Readers move to `lf catalog`, `lf wave list`, `lf wave status`, `lf wave probe`, and `lf pr checks`; removed commands have no compatibility aliases. Update scripts for these changes and the Task commands above.
+- The auth migration preserves populated account, profile, and route history. Published Rust API replacements are documented in `docs/subscriptions.md` under Rust API migration.
+- Branch and installed databases do not synchronize, so branch status can differ from state returned by a managed operation. Private databases do not isolate provider mutations or shared checkout edits. Remote placement remains supported; remote chat transport is not added to the app.
+- Recorded checks include 338 Swift tests, simulated failed-check repair before tagging, and all four disposable Linux installation proofs. Live installed-worker acceptance and live release publication remain unproven in the supplied evidence.
+- Browser login without pasted codes, first-time managed connection, remembered Linear profile targeting, and real Claude/Codex usage windows also remain unproven. The configured Claude probe returned `invalid_grant`; its decoder fixture is synthetic. A copied-Home demo retained a pre-migration detailed-status failure and a stored-route/absent-credential disagreement. Cross-account Session continuation, native credential refresh coordination, and remaining-headroom ranking are outside this release's auth scope.
 
 ## Small changes
 
-- Ruff is updated from 0.16.3 to 0.16.4.
+- Cold installation-proof image downloads have a network deadline separate from container creation.
+- CI adds a required disposable Linux installation job covering continuation, review completion, store protection, and recovery.

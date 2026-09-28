@@ -236,6 +236,7 @@ pub(crate) fn resume_session(
         provider_session,
         &BTreeMap::new(),
         None,
+        None,
     )
 }
 
@@ -249,14 +250,24 @@ pub(crate) fn resume_session_with_env(
     provider_session: &crate::run_record::ProviderSessionRef,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
+    remote: Option<&Path>,
 ) -> Result<()> {
     let user_name = crate::engine::config::launch_user_name()?;
-    let command = build_resume_session_command(
+    let mut command = build_resume_session_command(
         harness,
         model,
         worktree,
         &provider_session.provider_session_id,
     )?;
+    if let Some(remote) = remote {
+        if harness != "codex" {
+            bail!("This provider has no native remote connection");
+        }
+        command.args.splice(
+            1..1,
+            ["--remote".into(), format!("unix://{}", remote.display())],
+        );
+    }
     let mut environment = BTreeMap::from([
         (crate::durable::RUN_ID_ENV.to_string(), run_id.to_string()),
         (
@@ -1689,6 +1700,7 @@ mod tests {
                 &run_dir,
                 &session,
                 &BTreeMap::new(),
+                None,
                 None,
             )
             .unwrap();

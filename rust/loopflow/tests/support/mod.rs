@@ -339,7 +339,8 @@ fn register_task_fixture(
                 "name": project.plan.name.as_str(),
                 "summary": "",
                 "metric_targets": [],
-                "flows": null,
+                "flow": project.plan.flow,
+                "status": project.plan.status,
                 "krs": [],
                 "initiative_ids": ["initiative-task-pr-tests"],
                 "team_ids": ["team-task-pr-tests"]

@@ -187,46 +187,44 @@ pub fn create_or_update_pr(
     let body = copy.body.trim();
     crate::ops::task::request_task_pr_publication(repo, title, body)?;
 
-    let (result, pr) = if let Some(mut pr) = existing_pr {
+    if let Some(mut pr) = existing_pr {
+        let info = pr_info(&branch, &pr);
+        crate::ops::task::attach_task_github_pr(repo, Some(&info))?;
         progress.status("Updating PR...");
+        update_pr(repo, info.number, title, body, &base_branch)?;
         if !draft {
             mark_pr_ready(repo, &mut pr)?;
+            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
         }
-        update_pr(repo, pr.number, title, body, &base_branch)?;
-        let info = pr_info(&branch, pr);
-        (
-            PrResult {
-                url: info.url.clone(),
-                created: false,
-            },
-            Some(info),
-        )
+        Ok(PrResult { url: info.url, created: false })
     } else {
         progress.status("Creating PR...");
         let url = create_pr(repo, title, body, &base_branch, draft)?;
-        let mut visible = find_open_pr(repo)?;
-        if let Some(pr) = &mut visible {
-            if !draft {
-                mark_pr_ready(repo, pr)?;
-            }
+        let acknowledged = pr_number_from_url(&url).map(|number| PrInfo {
+            number,
+            url: url.clone(),
+            state: if draft { "draft" } else { "open" }.to_string(),
+            branch: branch.clone(),
+            merge_commit: None,
+            merged_at: None,
+            head_sha: None,
+            merge_state: None,
+        });
+        // Creation identity survives a later read, readiness or linking failure.
+        if let Some(info) = acknowledged.as_ref() {
+            crate::ops::task::attach_task_github_pr(repo, Some(info))?;
         }
-        let info = match visible {
-            Some(pr) => Some(pr_info(&branch, pr)),
-            None => pr_number_from_url(&url).map(|number| PrInfo {
-                number,
-                url: url.clone(),
-                state: if draft { "draft" } else { "open" }.to_string(),
-                branch: branch.clone(),
-                merge_commit: None,
-                merged_at: None,
-                head_sha: None,
-                merge_state: None,
-            }),
-        };
-        (PrResult { url, created: true }, info)
-    };
-    crate::ops::task::attach_task_github_pr(repo, pr.as_ref())?;
-    Ok(result)
+        if let Some(mut pr) = find_open_pr(repo)? {
+            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
+            if !draft {
+                mark_pr_ready(repo, &mut pr)?;
+                crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
+            }
+        } else if acknowledged.is_none() {
+            crate::ops::task::attach_task_github_pr(repo, None)?;
+        }
+        Ok(PrResult { url, created: true })
+    }
 }
 
 pub(crate) fn normalize_task_pr_copy(
@@ -338,7 +336,7 @@ fn _strip_managed_task_context(body: &str) -> String {
         .to_string()
 }
 
-fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
+fn pr_info(branch: &str, pr: &GhPr) -> PrInfo {
     PrInfo {
         url: pr.url,
         number: pr.number,

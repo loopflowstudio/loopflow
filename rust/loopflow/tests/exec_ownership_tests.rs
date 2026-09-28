@@ -51,6 +51,56 @@ async fn inspection_records_one_completed_exec_without_starting_work() {
     assert_eq!(work, 0, "inspection must not reserve agent or Task work");
 }
 
+#[test]
+fn obstructed_file_journal_preserves_command_start_and_completion_in_sql() {
+    for append in [false, true] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let trace = uuid::Uuid::new_v4().to_string();
+        let root = repo.path().join(".lf/journal/runs");
+        let obstruction = if append {
+            let path = root.join(&trace).join("events.jsonl");
+            std::fs::create_dir_all(&path).unwrap();
+            path
+        } else {
+            std::fs::create_dir_all(root.parent().unwrap()).unwrap();
+            std::fs::write(&root, "retained obstruction").unwrap();
+            root
+        };
+        let output = command(
+            home.path(),
+            repo.path(),
+            &["session", "list", "--all", "--json"],
+        )
+        .env("LF_TRACE_ID", &trace)
+        .output()
+        .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+            serde_json::json!([])
+        );
+        assert_eq!(obstruction.is_dir(), append);
+        if !append {
+            assert_eq!(
+                std::fs::read_to_string(&obstruction).unwrap(),
+                "retained obstruction"
+            );
+        }
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let events: Vec<String> = conn
+            .prepare("SELECT event FROM run_events WHERE node='run' ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(events, ["started", "completed"]);
+        let facts: (i64, i64) = conn.query_row("SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),(SELECT count(*) FROM runs)", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!(facts, (1, 0));
+    }
+}
+
 #[tokio::test]
 async fn command_failure_records_the_process_result() {
     let home = tempfile::tempdir().unwrap();
@@ -58,14 +108,21 @@ async fn command_failure_records_the_process_result() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let result = command(
-        home.path(),
-        home.path(),
-        &["session", "rename", "missing", "Name"],
-    )
-    .output()
-    .unwrap();
-    assert_eq!(result.status.code(), Some(1));
+    let repo = TestRepo::new();
+    for args in [
+        vec!["session", "rename", "missing", "Name"],
+        vec![
+            "--wave",
+            "fixture-wave-does-not-exist",
+            "session",
+            "list",
+            "--all",
+            "--json",
+        ],
+    ] {
+        let result = command(home.path(), repo.path(), &args).output().unwrap();
+        assert_eq!(result.status.code(), Some(1), "{result:?}");
+    }
     let conn = rusqlite::Connection::open(database).unwrap();
     let row: (String, i32) = conn
         .query_row("SELECT outcome,exit_code FROM execs", [], |row| {
@@ -73,6 +130,17 @@ async fn command_failure_records_the_process_result() {
         })
         .unwrap();
     assert_eq!(row, ("failed".into(), 1));
+    let failed: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM execs WHERE outcome='failed' AND exit_code=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        failed, 2,
+        "resolution failures and dispatch failures are both commands"
+    );
 }
 
 fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {

@@ -12,7 +12,8 @@ use crate::durable::FlowInvocation;
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
 use crate::id::WaveId;
-use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
+use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
+use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::pm::{PmItem, PmProject, ProjectStatus};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
@@ -236,6 +237,7 @@ struct Provider {
     mutations: usize,
     interrupt_after: Option<usize>,
     unavailable: bool,
+    status_change_at_final_inventory: Option<(String, String)>,
 }
 
 fn page(nodes: Vec<Value>) -> Value {
@@ -255,7 +257,22 @@ async fn graphql(
     }
     let data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
+    } else if query.contains("query ListInitiatives") {
+        json!({"initiatives":page(vec![
+            json!({"id":"initiative-a","name":"A","description":""}),
+            json!({"id":"initiative-b","name":"B","description":""}),
+        ])})
     } else if query.contains("query ListInitiativeProjects") {
+        // Apply an external status change only once the predecessor's dispositions finish.
+        if provider.status_change_at_final_inventory.is_some()
+            && vars["initiativeId"] == "initiative-a"
+            && provider.issues["a-started"]["project"]["id"] != "a-old"
+            && provider.issues["a-backlog"]["state"]["type"] == "canceled"
+        {
+            if let Some((id, status)) = provider.status_change_at_final_inventory.take() {
+                provider.projects.get_mut(&id).unwrap()["status"]["type"] = json!(status);
+            }
+        }
         let initiative = &vars["initiativeId"];
         json!({"initiative":{"projects":page(provider.projects.values().filter(|project|
             project["archivedAt"].is_null() && project["initiatives"]["nodes"].as_array().unwrap().iter().any(|node| &node["id"] == initiative)).cloned().collect())}})
@@ -295,6 +312,15 @@ async fn graphql(
         project["content"] = vars["input"]["content"].clone();
         if let Some(status) = vars["input"].get("statusId") {
             project["status"]["type"] = status.clone();
+        }
+        json!({"projectUpdate":{"success":true}})
+    } else if query.contains("mutation RenameProject") {
+        provider.projects.get_mut(id).unwrap()["name"] = vars["name"].clone();
+        json!({"projectUpdate":{"success":true}})
+    } else if query.contains("mutation UpdateProject") {
+        let project = provider.projects.get_mut(id).unwrap();
+        for field in ["name", "description", "content"] {
+            project[field] = vars[field].clone();
         }
         json!({"projectUpdate":{"success":true}})
     } else if query.contains("mutation SetProjectStatus") {
@@ -500,6 +526,8 @@ async fn local_started_task(
         .await
         .unwrap();
     let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);
+    // Compare persisted values: SQLite stores timestamps at second precision.
+    let task = context.store.get_task(&task.id).await.unwrap().unwrap();
     (task, pr, flow)
 }
 
@@ -588,6 +616,161 @@ async fn serve_fixture(provider: Arc<Mutex<Provider>>) -> (String, tokio::task::
     let app = Router::new().route("/", post(graphql)).with_state(provider);
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (url, server)
+}
+
+#[tokio::test]
+async fn rotation_preserves_conflicting_statuses_observed_in_the_final_inventory() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let successor = successor_id("initiative-a", "next");
+    for (index, (id, status)) in [
+        ("a-old", "canceled"),
+        ("a-old", "planned"),
+        (successor.as_str(), "canceled"),
+        (successor.as_str(), "planned"),
+        (successor.as_str(), "completed"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        {
+            let mut state = provider.lock().await;
+            *state = provider_fixture();
+            state.status_change_at_final_inventory = Some((id.into(), status.into()));
+        }
+        let home = context(
+            &directory.path().join(format!("conflict-{index}.db")),
+            &repo,
+            &url,
+        )
+        .await;
+        local_backlog_tasks(&home, &repo).await;
+        let failure = PM_TEST_CONTEXT
+            .scope(home, rotate(&repo, "next", false))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            failure.contains(if id == "a-old" {
+                "predecessor status changed"
+            } else {
+                "successor is no longer the intended In Progress Project"
+            }),
+            "{failure}"
+        );
+        let state = provider.lock().await;
+        assert!(state.status_change_at_final_inventory.is_none());
+        assert_eq!(
+            state.projects["a-old"]["status"]["type"],
+            if id == "a-old" { status } else { "started" }
+        );
+        assert_eq!(
+            state.projects[&successor]["status"]["type"],
+            if id == "a-old" { "started" } else { status }
+        );
+        assert_eq!(state.issues["a-started"]["project"]["id"], successor);
+        assert_eq!(state.issues["a-backlog"]["state"]["type"], "canceled");
+        assert_eq!(state.projects["b-old"]["status"]["type"], "started");
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn rotation_accepts_an_already_completed_predecessor_at_final_inventory() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let mut state = provider_fixture();
+    state.status_change_at_final_inventory = Some(("a-old".into(), "completed".into()));
+    let provider = Arc::new(Mutex::new(state));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = context(&directory.path().join("completed.db"), &repo, &url).await;
+    local_backlog_tasks(&home, &repo).await;
+    PM_TEST_CONTEXT
+        .scope(home, async {
+            rotate(&repo, "next", false).await.unwrap();
+            rotate(&repo, "next", false).await.unwrap();
+        })
+        .await;
+    let state = provider.lock().await;
+    assert!(state.status_change_at_final_inventory.is_none());
+    for wave in ["a", "b"] {
+        assert_eq!(
+            state.projects[&format!("{wave}-old")]["status"]["type"],
+            "completed"
+        );
+        let successor = successor_id(&format!("initiative-{wave}"), "next");
+        assert_eq!(state.projects[&successor]["status"]["type"], "started");
+        assert_eq!(
+            state.issues[&format!("{wave}-started")]["project"]["id"],
+            successor
+        );
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_content() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let original = "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n\n## Notes\nRetain this closing note.\n";
+    let mut state = provider_fixture();
+    let old = state.projects.get_mut("a-old").unwrap();
+    old["name"] = json!("previous");
+    old["description"] = json!("Authored summary unrelated to the Flow or KRs.");
+    old["content"] = json!(original);
+    old["status"]["type"] = json!("planned");
+    let mut expected = old.clone();
+    expected["name"] = json!("A — previous");
+    expected["content"] = json!(original.replace("recommended:", "flow:"));
+    expected["status"]["type"] = json!("started");
+    let provider = Arc::new(Mutex::new(state));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = context(&directory.path().join("sync.db"), &repo, &url).await;
+    let (task, pr, flow) = local_started_task(&home, &repo).await;
+    rusqlite::Connection::open(&home.path)
+        .unwrap()
+        .execute(
+            "UPDATE projects SET legacy_current=1 WHERE external_project_id='a-old'",
+            [],
+        )
+        .unwrap();
+    let store = home.store.clone();
+    // The public sync entry point owns a runtime; keep the fixture server running separately.
+    tokio::task::spawn_blocking(move || {
+        PM_TEST_CONTEXT.sync_scope(home, || {
+            for _ in 0..2 {
+                pm_sync(
+                    &repo,
+                    &PmSyncOptions {
+                        wave: Some("a".into()),
+                        plan: false,
+                    },
+                    &NullProgress,
+                )
+                .unwrap();
+            }
+        });
+    })
+    .await
+    .unwrap();
+    assert_eq!(provider.lock().await.projects["a-old"], expected);
+    let snapshot = store.pm_snapshot(&task.wave_id).await.unwrap().unwrap();
+    let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).unwrap();
+    let synced = snapshot
+        .projects
+        .iter()
+        .find(|project| project.id == "a-old")
+        .unwrap();
+    assert_eq!(synced.flow, "custom");
+    assert_eq!(synced.krs.len(), 1);
+    assert_eq!(synced.krs[0].text, "Keep this KR");
+    let retained = store.get_task(&task.id).await.unwrap().unwrap();
+    assert_eq!(retained.project_id, task.project_id);
+    assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+    server.abort();
 }
 
 #[tokio::test]

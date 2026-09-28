@@ -39,6 +39,53 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
 }
 
 impl SqliteStore {
+    pub(crate) fn make_session_interactive(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        tx.execute("UPDATE sessions SET interactive=1 WHERE id=?1", [session])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn session_connection(&self, session: &str) -> StoreResult<Option<(String, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT provider_endpoint,provider_thread FROM sessions WHERE id=?1 AND provider_endpoint IS NOT NULL AND provider_thread IS NOT NULL",
+            [session], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?)
+    }
+
+    pub fn record_session_connection(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        endpoint: &str,
+        thread: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        tx.execute(
+            "UPDATE sessions SET provider_endpoint=?2,provider_thread=?3 WHERE id=?1",
+            params![session, endpoint, thread],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Serialize native dispatch with driver transfer. The bounded transport
     /// write finishes before a replacement can acquire the same Session.
     pub(crate) fn with_session_driver<T>(

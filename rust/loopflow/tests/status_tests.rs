@@ -2,7 +2,6 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
-
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;

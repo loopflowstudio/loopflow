@@ -41,3 +41,32 @@ Primary sources:
   needs real backend semantics, including matching file-list membership.
 - Integrate beside retained Sessions; replacing the legacy Task workspace
   sheet preview alone does not deliver the proposed placement.
+
+## Product experience references
+
+Jack asked which apps provide the experience benchmark, beyond component choice.
+These are references selected from official product documentation on 2026-09-28,
+not the result of hands-on comparative timing or a claim of universal ranking.
+
+- **[CotEditor](https://coteditor.com/): lightweight Mac text editing.** Borrow
+  the immediate, familiar plain-text interaction and restrained chrome. Native
+  editing quality is the target; its full language/settings surface is outside
+  this browser's scope.
+- **[Kaleidoscope](https://kaleidoscope.app/help/docs/text-diffs-and-colors): diff
+  legibility.** Borrow quiet line backgrounds and clear distinction between
+  additions, deletions and surrounding context. Its word-level change emphasis
+  is a later refinement, not required for the first core. It offers dedicated
+  comparison layouts; the approved browser starts with one unified view.
+- **[Tower](https://www.git-tower.com/help/guides/working-copy/inspect-changes/mac):
+  changed-file navigation.** Borrow selecting a changed file on the left to
+  inspect its exact diff on the right, with compact change status. Keep scope
+  to the Task's two sources rather than its broader Git-management surface.
+- **[Zed](https://zed.dev/docs/git): moving between changes and source.** It
+  exposes both diff views and View File and reflects command-line changes.
+  Borrow that short path and live-state expectation. Zed's editable multibuffer
+  diffs differ from Jack's chosen read-only Diff / editable File distinction.
+
+The native spike should prove selection, focus, undo and responsiveness at the
+quality suggested by these references. Choosing NSTextView alone does not prove
+that experience. The design is a proposal borrowing these patterns, not a claim
+that the mock already achieves those apps' behavior.

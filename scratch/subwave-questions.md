@@ -5,20 +5,9 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 ## For Jack Heart
 
-5. The wording of the short note that rides with Wave files.
-6. `GOAL.md` or `<NAME>.md`.
-7. May `realign` at a parent read its children when asked?
-
-## Settled
-
-- A parent's objective may include subwave goals. Its KRs and Tasks should
-  not focus on a subwave's work; mentioning it is fine.
-- Scheduled and ad hoc Runs read the same way: the Wave from the Task or
-  `--wave`, the files from the checkout the Run is in.
-- A Task reaches its Wave through its Project, by id, as LOO-298 has it.
-  Jack Heart asked only that it be done right. A Wave stored on the Task is
-  added when a read needs it, with LOO-298's check.
-- A Wave's parent is the Wave whose directory it sits in.
+- The wording of the short note that rides with Wave files.
+- `GOAL.md` or `<NAME>.md`.
+- May `realign` at a parent read its children when asked?
 
 ## Skills cleanup, delivered separately
 

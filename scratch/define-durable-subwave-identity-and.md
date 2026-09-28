@@ -39,14 +39,17 @@ belongs in release's plan. Mentioning release is fine. Jack Heart,
 2026-09-28. This is guidance for whoever writes the plan, and nothing
 enforces it.
 
-A Wave's directory sits inside its parent's. Release lives in
-`wave/infrastructure/` only because its parent is Infrastructure. Jack Heart,
-2026-09-28. The directory is what you edit; the parent is recorded from it,
-and moving the directory is how a Wave changes parent.
+A Wave's directory sits inside its parent's. Discovery records the parent
+from the directory; moving the directory changes the parent. Jack Heart,
+2026-09-28.
 
 The id is what records point at, so renaming `infrastructure` to `infra`
 changes one row and release is untouched. Release is then reached as
 `infra/release`, because the path is worked out from names and stored nowhere.
+
+A Task reaches its Wave through its Project, by id, as LOO-298 has it.
+Jack Heart asked only that it be done right. A Wave stored on the Task is
+added when a read needs it, with LOO-298's check.
 
 ## What a Run reads
 
@@ -94,10 +97,10 @@ accessible guidance, without bugs, through a smart and recoverable rollout.
 ```
 
 The objective is Jack's sentence, lightly edited at his request.
-Infrastructure's objective keeps "delivers verified releases". KRs and open Tasks that are mainly about release move to release's plan at
-the split. The split creates a Linear Initiative and
-moves a live schedule, so it runs from the installed `lf` after the code
-lands.
+Infrastructure's objective keeps "delivers verified releases". KRs and open
+Tasks mainly about release move to release's plan at the split. The split
+creates a Linear Initiative and moves a live schedule, so it runs from the
+installed `lf` after the code lands.
 
 ## Build
 
@@ -107,7 +110,7 @@ lands.
    release with Infrastructure as its parent. Names become one segment.
 3. **Release.** Make it a Wave and use it.
 
-Shown working in a throwaway Home: a release Task's prompt carries
+Prove in a throwaway Home that a release Task's prompt carries
 Infrastructure's files then release's, and renaming the parent directory
 leaves release's row alone.
 
@@ -121,13 +124,12 @@ leaves release's row alone.
 
 ## Watch for
 
-- **Two hierarchies.** Directories and the parent field both say who the
-  parent is, and they must agree. The kickoff audit found the field empty
-  everywhere, which is why nesting did nothing. Step 2 makes discovery write
-  it, so a moved directory is re-recorded and nothing has to refuse.
+- **Parent discovery.** The kickoff audit found the parent field empty
+  everywhere. Step 2 must populate it and reconcile moved directories.
 - **Cron logs.** The log path uses the Wave name as written, so
-  `infrastructure/release` points into a directory nothing creates. Read from
-  `ops/cron.rs`, not run.
+  `infrastructure/release` adds a directory. `add_cron` creates only
+  `.lf/logs`; `spawn_cron_target` creates the full parent path. Verify the
+  scheduled launch path. Read from `ops/cron.rs`, not run.
 - **Memory conflicts.** Two Tasks curating one 18,400-token file will meet at
   rebase. Subwaves make that rarer.
 - **The written contract.** LOO-298's architecture reference describes Wave
@@ -136,7 +138,6 @@ leaves release's row alone.
 ## Not doing
 
 - A second kind of thing beside a Wave for memory-only directories.
-- Anything in a prompt from a sibling or child.
 - A check that refuses when directory and parent field differ.
 - Running a branch build against the installed Home.
 

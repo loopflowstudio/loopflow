@@ -1013,7 +1013,6 @@ fn derive_evidence(
             value,
             source_window_start,
             source_window_end,
-            complete,
             ..
         } if !fresh => MetricEvidenceDto::Unknown {
             cause: MetricUnknownCauseDto::StaleObservation {

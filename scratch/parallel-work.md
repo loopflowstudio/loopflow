@@ -1,5 +1,113 @@
 # LOO-298 parallel work
 
+## Resource recovery follow-up — 2026-09-28
+
+Contributor `run_c136605cdb4442bda1f8571eb511b5f3` is now completed;
+handle 52241 exited zero. Supervisor inspected the full report, source/test
+diff and actual command output: six tests passed in 0.43s, Ruff/format and
+whitespace passed. Real private nested uv recovery returned in 15.15s at the
+production deadline, retained the busy archive, removed the eligible fixture
+build, and pruned successfully after its enclosing uv exited. Source ownership
+returns to main; only script/test/report changed. No contributor performed
+real cleanup. Main's subsequent recovery log independently reports PASS at
+64.6 GiB, explicitly recording cache timeout and continued build recovery.
+
+The installer replay passed three cases, then failed the readiness case at
+its first Task run because tmux is absent. Source trace establishes human
+review preparation launches the terminal before the Task worker's human-step
+early return; `session_run_id` selects only published attempts. Main changed
+the fixture to seed an already-published review and retained installed/private
+feedback assertions; rerun remains due. No production behavior was relaxed.
+
+Jack asked about stale worktrees and disk recovery. Pinned `lf wt prune
+--dry-run` selects only `loopflow.dogfood`: clean, no commits outside
+`origin/main`, 74 MiB. Nothing was removed. A fresh read-only resource
+inventory passed with 65.84 GiB free against the 64 GiB floor; inactive
+allowlisted builds total 2.35 GiB and the uv cache occupies 12.95 GiB.
+Receipt: `.lf/tmp/execution-model/supervisor-resource-inventory.json`.
+The inventory is an observation, not cleanup authority for active builds.
+
+Main's canonical replay now passes all seven selected tests (31.14s compile,
+4.373s execution), including the three actual CI failures and populated-store
+backup preservation. `.lf/tmp/cut-i/canonical-materialized-repair.log` and
+`canonical-repair-source.json` retain the materialized source and result.
+Nineteen drafts became one canonical batch in a disposable source snapshot;
+1,534 unselected library tests did not run. This is no full-suite or hosted
+CI claim. The repaired portable-HTML check passed once in 0.82s.
+
+Main observed nested `uv run` / `uv cache prune` cache-lock contention and
+owns recovery and the subsequent canonical migration replay. Contributor
+`run_c136605cdb4442bda1f8571eb511b5f3` (handle 52241) owns only
+`scripts/resource_envelope.py`, `python/tests/test_resource_envelope.py`,
+and `scratch/parallel-resource-recovery.md` to reproduce privately and bound
+busy-cache recovery without force pruning. No real cleanup, large builds,
+Git, installed Home access or other file edits are delegated. Allocation
+comment `4bb4c134-5354-4d5e-ad4c-2473ab1f1bde` was read back and reached
+main's steer transport. The physical model conversion remains main's scope.
+
+## Published checkpoint and release-test contributor — 2026-09-28
+
+Website contributor completed (handle 95016, exit 0); main owns its files
+again. Supervisor read the full report and edits: security browser test and
+generated HTML freshness pass. The contributor exposed an additional stale
+portable-page assertion outside its scope; main has changed it to AgentSession
+history, with rerun still due. Generation hashes and the preserved failing
+result are in `scratch/parallel-website-ci.md`. All bounded contributors and
+supervisor probes are terminal. Main's `canonical-init-repair.log` passes all
+four focused migration tests in 3.016s after a 30.91s compile; materialized
+verification remains pending. Resource preflight reported 60.2 GiB free against
+the 64 GiB floor, and main owns the prescribed recovery before more tests.
+
+Release-test contributor completed (handle 3483, exit 0); main owns its file
+again. Supervisor read the full report and diff: two obsolete daemon argument
+assertions removed, all candidate activation assertions retained. The failing
+case reproduced before editing; afterward four focused assertions/behavioral
+tests passed in 2.18s with inherited authority cleared and installer effects
+stubbed. `scratch/parallel-release-test.md` retains commands and proof limits.
+No real installation or hosted rerun follows. Main's
+`canonical-init-red.log` independently reproduces the nested transaction in a
+fresh empty-draft store; its preservation regression and production repair are
+in progress.
+
+Publication verified: local/remote/GitHub/Task PR head `e13f29909`, base
+`c512813b5`, PR #1296 open with no auto-merge. The current design now records
+Jack's checkpoint publication exception; full code-complete review remains due.
+
+CI run `36482349277` failed Python on the obsolete daemon expectation in
+`test_release_installer_uses_the_promotion_boundary_to_activate_the_binary`
+(225 passed, 19 skipped, one failed). Contributor
+`run_47fe4b2589894b7abd55819969e7ec3d` / handle 3483 owns only
+`python/tests/test_release_automation.py` and `scratch/parallel-release-test.md`.
+It may run focused isolated Python tests, but no builds, installation, Git or
+publication. Main continues the physical owner conversion. No other source
+ownership was delegated. Rust lint, migration and architecture CI passed at
+observation; other jobs were running, and scratch-clear reflects retained notes.
+
+The website contributor `run_4709ca9579ee40fe985e4771e81e0102` / handle
+95016 owns only `website/tests/e2e/test_docs.py`, generated
+`docs/architecture.html`, and `scratch/parallel-website-ci.md`. Its two CI
+failures are the removed listener capability phrase and stale generated HTML
+(76 passes, three skips). Source Markdown remains main-owned; generated-source
+hashes must be recorded because main continues editing. No Rust/Swift build or
+publication is delegated.
+
+CI also exposed two main-owned repairs before dependent schema conversion:
+- Canonical Rust job 109130805169 stopped after seven passes and three Task
+  fixture failures, leaving 1,914 tests unrun. Each failed at ephemeral-store
+  creation with `cannot start a transaction within a transaction`. Source
+  inspection finds `apply_installed_development_sqlite` entering
+  `_migration_transaction`, then `_apply_development_in` taking its empty-draft,
+  absent-ledger branch into `apply_sqlite_with_backup`/`apply_sqlite`, which
+  begins another transaction. This is call-path evidence; main owns executable
+  reproduction and repair with backup/preservation semantics retained.
+- Installation job 109130805023 failed
+  `incompatible_branch_data_recommends_only_a_verified_retained_pair`; the
+  fixture still asserts `--daemon-target`, while the retained-pair recommendation
+  contains the post-Cut-I CLI-only command. Main owns the Rust fixture.
+
+E2E smoke and Loopflow UI CI passed. Other jobs remain independently assessed;
+none of these results proves a full green gate.
+
 ## Publication priority and busy-turn repair — 2026-09-28
 
 Fixed rebased checkpoint measurement, excluding current uncommitted repair:

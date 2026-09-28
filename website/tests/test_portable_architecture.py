@@ -12,6 +12,6 @@ def test_portable_architecture_matches_the_internal_surface():
     )
     html = (root / "docs" / "architecture.html").read_text()
     assert "Loopflow Developer Architecture" in html
-    assert "Home-local Run record" in html
+    assert "AgentSession history" in html
     assert 'href="https://loopflow.studio/architecture/execution"' in html
     assert 'href="/static/style.css"' not in html

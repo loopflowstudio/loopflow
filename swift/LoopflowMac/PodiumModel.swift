@@ -402,6 +402,7 @@ final class PodiumModel {
         repoPath = path
     }
 
+
     func updateTaskDirective(task: RoadmapTask, wave: WaveSnapshot, text: String) async throws {
         try await query.updateTaskDirective(id: task.id, wave: wave.name, text: text, cwd: wave.repo)
         // Polls started before this write must not restore the old directive.

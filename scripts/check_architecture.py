@@ -5,8 +5,7 @@
     uv run python scripts/check_architecture.py --json
 
 The check is deliberately finite. It covers live SQLite tables, root CLI
-families, executable/process entrypoints, Wave and Home-daemon HTTP routes,
-provider kinds, literal Rust subprocess edges, declared read projections and
+families, executable/process entrypoints, provider kinds, literal Rust subprocess edges, declared read projections and
 compatibility seams, and exact retired vocabulary. It does not claim that every
 public Rust item is an architectural concept.
 """
@@ -29,15 +28,12 @@ MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
-WAVE_SERVER = Path("rust/loopflow/src/controller/wave/server.rs")
-LFD_SERVER = Path("rust/loopflow/src/lfd/mod.rs")
 PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
 FLOWS = Path(".lf/flows")
 
 CODE_TOKEN = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
 MIGRATION_INCLUDE = re.compile(r'include_str!\("migrations/([^\"]+)"\)')
-ROUTE = re.compile(r'\.route\(\s*"([^"]+)"\s*,\s*(get|post|put|delete|patch)\(', re.S)
 COMMAND_EDGE = re.compile(r"(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\"")
 SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
 HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
@@ -217,14 +213,6 @@ def _discover_binaries(root: Path) -> set[str]:
             binaries.add(match.group(1))
     return binaries
 
-
-def _discover_routes(root: Path) -> set[str]:
-    routes: set[str] = set()
-    for owner, path in (("wave", WAVE_SERVER), ("lfd", LFD_SERVER)):
-        source = (root / path).read_text()
-        for route, method in ROUTE.findall(source):
-            routes.add(f"{owner} {method.upper()} {route}")
-    return routes
 
 
 def _discover_providers(root: Path) -> set[str]:
@@ -559,7 +547,6 @@ def check_repository(root: Path = REPO_ROOT) -> Report:
         tables = _discover_tables(root)
         coverage.append(_cover("SQLite owner/mirror", tables, persistence, errors))
         coverage.append(_projection_coverage(root, projection_rows, tables, errors))
-        coverage.append(_cover("HTTP route", _discover_routes(root), public, errors))
         coverage.append(_cover("provider edge", _discover_providers(root), edges, errors))
         coverage.append(_cover("subprocess edge", _discover_executable_edges(root), edges, errors))
         coverage.append(_shim_coverage(root, shim_tokens, errors))

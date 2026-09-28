@@ -1,13 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{File, OpenOptions};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
-use crate::controller::wave::server::{live_endpoint, ENDPOINT_FILE};
-use crate::controller::wave::wire::RESIDENT_TOKEN_FILE;
 use crate::engine::git::{
     current_branch, fetch, get_default_branch, has_origin, is_ancestor, is_clean, is_squash_merged,
     sync_main,
@@ -26,39 +23,6 @@ pub struct WaveRelocationReceipt {
     pub to_repo: String,
     pub to_name: String,
     pub waves_moved: usize,
-}
-
-#[derive(Debug)]
-pub(crate) struct WaveLocatorLock {
-    _file: File,
-}
-
-impl WaveLocatorLock {
-    pub(crate) fn acquire(repo: &Path, slug: &str) -> Result<Self> {
-        let path = repo
-            .join(".lf/tmp/locks/waves")
-            .join(format!("{slug}.lock"));
-        let parent = path
-            .parent()
-            .ok_or_else(|| anyhow!("Wave lock has no parent: {}", path.display()))?;
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create Wave lock directory {}", parent.display()))?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .with_context(|| format!("open Wave locator lock {}", path.display()))?;
-        file.try_lock_exclusive().map_err(|error| {
-            anyhow!(
-                "Wave locator {}/{} is active or being relocated; stop it first (--force cannot break the relocation fence): {error}",
-                repo.display(),
-                slug
-            )
-        })?;
-        Ok(Self { _file: file })
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -199,9 +163,7 @@ pub async fn relocate_wave(
     let mut moves = plan_moves(store, wave, target).await?;
     preflight(store, &mut moves).await?;
     let recovery = relocation_recovery(&moves);
-    let _locks = acquire_locks(&recovery.paths)?;
     ensure_no_shadow_relocation_receipts(&moves)?;
-    ensure_no_live_endpoints(&recovery.paths).await?;
     write_recovery(&recovery)?;
 
     for planned in &moves {
@@ -470,10 +432,6 @@ fn ensure_move_paths_do_not_overlap(planned: &PlannedWaveMove) -> Result<()> {
             authored_path(source_repo, planned.wave.name()),
             authored_path(target_repo, planned.target.slug()),
         ),
-        (
-            journal_path(source_repo, planned.wave.name()),
-            journal_path(target_repo, planned.target.slug()),
-        ),
     ] {
         if source != target && (source.starts_with(&target) || target.starts_with(&source)) {
             return Err(anyhow!(
@@ -490,48 +448,12 @@ fn is_strict_descendant(candidate: &str, parent: &str) -> bool {
     candidate != parent && Path::new(candidate).starts_with(parent)
 }
 
-fn acquire_locks(paths: &[RelocationPath]) -> Result<Vec<WaveLocatorLock>> {
-    let mut locators = BTreeSet::new();
-    for path in paths {
-        let source_repo = CanonicalRepo::discover(Path::new(&path.from_repo))
-            .map(|repo| repo.as_path().to_path_buf())
-            .unwrap_or_else(|_| PathBuf::from(&path.from_repo));
-        if source_repo.is_dir() {
-            locators.insert((source_repo, path.from_name.clone()));
-        }
-        locators.insert((PathBuf::from(&path.to_repo), path.to_name.clone()));
-    }
-    locators
-        .into_iter()
-        .map(|(repo, slug)| WaveLocatorLock::acquire(&repo, &slug))
-        .collect()
-}
 
-async fn ensure_no_live_endpoints(paths: &[RelocationPath]) -> Result<()> {
-    let mut locators = BTreeSet::new();
-    for path in paths {
-        locators.insert((PathBuf::from(&path.from_repo), path.from_name.as_str()));
-        locators.insert((PathBuf::from(&path.to_repo), path.to_name.as_str()));
-    }
-    for (repo, slug) in locators {
-        if let Some(endpoint) = live_endpoint(&repo, slug).await {
-            return Err(anyhow!(
-                "cannot relocate live Wave at {}/{} ({endpoint})",
-                repo.display(),
-                slug
-            ));
-        }
-    }
-    Ok(())
-}
 
 fn authored_path(repo: &Path, slug: &str) -> PathBuf {
     repo.join("wave").join(slug)
 }
 
-fn journal_path(repo: &Path, slug: &str) -> PathBuf {
-    repo.join(".lf/journal/waves").join(slug)
-}
 
 fn stage_wave_paths(planned: &PlannedWaveMove) -> Result<()> {
     let source_repo = Path::new(planned.wave.repo());
@@ -544,13 +466,7 @@ fn stage_wave_paths(planned: &PlannedWaveMove) -> Result<()> {
         true,
         stale_source,
     )?;
-    stage_tree(
-        &journal_path(source_repo, planned.wave.name()),
-        &journal_path(target_repo, planned.target.slug()),
-        false,
-        false,
-        stale_source,
-    )
+    Ok(())
 }
 
 fn stage_tree(
@@ -631,7 +547,7 @@ fn copy_tree(source: &Path, target: &Path, skip_boot_files: bool) -> Result<()> 
         if skip_boot_files
             && name
                 .to_str()
-                .is_some_and(|name| matches!(name, ENDPOINT_FILE | RESIDENT_TOKEN_FILE))
+                .is_some_and(|name| matches!(name, ".wave-endpoint" | ".wave-resident-token"))
         {
             continue;
         }
@@ -676,7 +592,7 @@ fn tree_contents(root: &Path, skip_boot_files: bool) -> Result<BTreeMap<PathBuf,
             if skip_boot_files
                 && name
                     .to_str()
-                    .is_some_and(|name| matches!(name, ENDPOINT_FILE | RESIDENT_TOKEN_FILE))
+                    .is_some_and(|name| matches!(name, ".wave-endpoint" | ".wave-resident-token"))
             {
                 continue;
             }
@@ -701,7 +617,7 @@ fn tree_contents(root: &Path, skip_boot_files: bool) -> Result<BTreeMap<PathBuf,
 }
 
 fn remove_boot_files(path: &Path) -> Result<()> {
-    for name in [ENDPOINT_FILE, RESIDENT_TOKEN_FILE] {
+    for name in [".wave-endpoint", ".wave-resident-token"] {
         match std::fs::remove_file(path.join(name)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -719,11 +635,6 @@ fn remove_old_paths(path: &RelocationPath) -> Result<()> {
             authored_path(source_repo, &path.from_name),
             authored_path(target_repo, &path.to_name),
             true,
-        ),
-        (
-            journal_path(source_repo, &path.from_name),
-            journal_path(target_repo, &path.to_name),
-            false,
         ),
     ] {
         if source != target && source.exists() {
@@ -871,8 +782,6 @@ async fn recover_committed_relocation(
             ));
         }
     }
-    let _locks = acquire_locks(&recovery.paths)?;
-    ensure_no_live_endpoints(&recovery.paths).await?;
     for move_path in &recovery.paths {
         remove_old_paths(move_path)?;
     }
@@ -997,10 +906,10 @@ mod tests {
     }
 
     #[test]
-    fn relocation_waits_for_resident_state_then_syncs_the_merged_bytes() {
+    fn relocation_preserves_unmerged_authored_work_then_syncs_merged_bytes() {
         let (root, repo, planned) = relocation_repo();
         let resident =
-            crate::controller::wave::resolve_resident_worktree(&repo, "infrastructure").unwrap();
+            crate::engine::worktrees::ensure_agent_worktree(&repo, crate::engine::worktrees::wave_agent_segment("infrastructure").unwrap()).unwrap();
         std::fs::write(
             resident.path.join("wave/infrastructure/MEMORY.md"),
             "Curated.\n",

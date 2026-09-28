@@ -76,7 +76,7 @@ impl ProjectFlowPlan {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChapterMetricTarget {
     pub metric_id: String,
-    pub target: crate::controller::wave::metrics::MetricTarget,
+    pub target: crate::work::wave::metrics::MetricTarget,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -744,7 +744,7 @@ mod tests {
         let project = ProjectContent {
             metric_targets: vec![ChapterMetricTarget {
                 metric_id: "throughput".into(),
-                target: crate::controller::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
+                target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
             }],
 
             flows: ProjectFlowPlan {

@@ -2,10 +2,6 @@
 import SwiftUI
 import Loopflow
 
-struct WaveComposerPrefill: Equatable {
-    let id: UUID
-    let text: String
-}
 
 struct WaveWorkSelection: Equatable {
     let kind: ChildActivitySubject
@@ -49,7 +45,6 @@ struct WaveDetailPane: View {
     @State private var selection: WaveWorkSelection?
     @State private var showHistory = false
     @State private var historyReference: String?
-    @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
     @StateObject private var terminalStore = TaskTerminalStore()
 
@@ -65,25 +60,12 @@ struct WaveDetailPane: View {
                     repoPath: repoPath,
                     selection: $selection,
                     refreshSignal: workRefresh,
-                    onTellWave: tellWave,
+
                     terminalStore: terminalStore
                 )
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
 
-                WaveChatView(
-                    repoPath: repoPath,
-                    waveName: wave.name,
-                    prefill: prefill,
-                    onSelectChild: { reference in
-                        if reference.kind == .project {
-                            historyReference = reference.id
-                            if wave.plan?.chapter?.sourceProjectId != reference.id && wave.plan?.chapter?.sourceProjectSlug != reference.id && wave.plan?.chapter?.sourceWorkId != reference.id { showHistory = true }
-                            selection = nil
-                        } else { selection = reference }
-                    },
-                    onChildActivity: { workRefresh &+= 1 }
-                )
-                    .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
+
             }
         }
         .sheet(isPresented: $showHistory) {
@@ -91,14 +73,6 @@ struct WaveDetailPane: View {
         }
     }
 
-    private func tellWave(_ selection: WaveWorkSelection) {
-        self.selection = selection
-        let noun = "Task"
-        prefill = WaveComposerPrefill(
-            id: UUID(),
-            text: "Regarding \(noun) \(selection.id): "
-        )
-    }
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
@@ -131,7 +105,6 @@ private struct WavePlanView: View {
     let repoPath: String
     @Binding var selection: WaveWorkSelection?
     let refreshSignal: UInt64
-    let onTellWave: (WaveWorkSelection) -> Void
     @ObservedObject var terminalStore: TaskTerminalStore
 
     @Environment(\.palette) private var palette
@@ -158,7 +131,6 @@ private struct WavePlanView: View {
                     WaveWorkInspector(
                         selection: selection,
                         workMap: workMap,
-                        onTellWave: onTellWave,
                         terminalStore: terminalStore
                     )
                 }
@@ -762,7 +734,6 @@ private struct WaveTaskWorkView: View {
 private struct WaveWorkInspector: View {
     let selection: WaveWorkSelection
     let workMap: WaveWorkMap
-    let onTellWave: (WaveWorkSelection) -> Void
     @ObservedObject var terminalStore: TaskTerminalStore
 
     @Environment(\.palette) private var palette
@@ -775,9 +746,6 @@ private struct WaveWorkInspector: View {
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 Spacer()
-                Button("Tell Wave about this") { onTellWave(selection) }
-                    .buttonStyle(.borderless)
-                    .font(Typography.caption(10))
             }
             if let task {
                 Text("\(task.task.identifier) · \(task.task.name)")

@@ -38,10 +38,13 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         guard isRegistered else {
             return WaveLens(
                 color: .unknown,
-                reason: "Not registered yet · open chat to connect"
+                reason: "Not registered"
             )
         }
-        return WaveLens.forWave(live: api.live)
+        return WaveLens.forWave(
+            enabled: api.enabled,
+            activeTasks: api.activeTasks
+        )
     }
 
     public var objectiveTagline: String? {

@@ -2646,20 +2646,6 @@ mod planning_tests {
             .len(),
             1
         );
-        let event = crate::webhook::WebhookEvent::Comment {
-            author_name: None,
-            issue_id: task.plan.id.as_str().into(),
-            comment_id: "c-1".into(),
-            revision: Some("2026-09-24T00:00:00Z".into()),
-            body: "revised advice".into(),
-            author_id: Some("my-account".into()),
-        };
-        assert_eq!(
-            crate::webhook::ingest_event(&store, event, "my-account", now)
-                .await
-                .unwrap(),
-            crate::webhook::WebhookOutcome::Comment { delivered: false }
-        );
         assert!(crate::ops::linear_observe::reconcile_linear_observation(
             &store,
             &task,

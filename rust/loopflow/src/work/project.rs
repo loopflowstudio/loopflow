@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
+use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
@@ -134,12 +134,3 @@ pub enum ChildEventPayload {
     Task { event: TaskEventKind },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObservationOutboxRow {
-    pub id: i64,
-    pub recipient: ObservationRecipient,
-    pub source: ChildRef,
-    pub event_id: i64,
-    pub payload: ChildEventPayload,
-    pub delivered_at: Option<OffsetDateTime>,
-}

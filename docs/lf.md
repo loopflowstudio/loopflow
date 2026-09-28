@@ -1068,7 +1068,7 @@ rotate its serial PR chain.
 
 ### lf pr arm
 
-Prepare the exact PR head, request auto-merge, and return without watching.
+Prepare the exact PR head, request auto-merge, record the landing, and return.
 
 ```bash
 lf pr arm
@@ -1084,21 +1084,35 @@ from GitHub's merge queue before pushing, then arms the updated head.
 
 ### lf pr land
 
-Prepare and arm the PR, then watch GitHub until merged or actionably blocked.
-Failing required checks launch one bounded `ci-fix` agent for the exact failed
-head. That agent rebases first, repairs and verifies, then pushes and enables
-auto-merge with the original Task disposition. The watcher observes the new
-head and completes after merge; it does not publish or re-arm repairs.
+Prepare and arm the PR, record its settlement intent, and return. Success means
+handoff, not merge. `lf pr arm` performs the same handoff.
 
 ```bash
-lf pr land                    # land one PR; the Task stays open
-lf pr land -c                 # land, then complete the owning Task
+lf pr land                    # hand off one PR; the Task stays open
+lf pr land -c                 # complete the owning Task after verified merge
 lf pr land --next parser-proof  # name the next serial Task PR
 ```
 
+### lf pr reconcile
+
+Check this repository's recorded landings once and return.
+
+```bash
+lf pr reconcile
+```
+
+Each landing is observed from GitHub. Pending checks wait. A confirmed failure
+launches one `ci-fix` agent for that exact head and check set; the agent rebases
+first, repairs and verifies, then pushes and re-arms with the original Task
+disposition. The same incident failing again blocks until evidence changes.
+A verified merge applies completion or rotation; a failed settlement is retried
+by the next check. A closed, unmerged PR never completes a Task. Unreadable
+GitHub state is reported and changes nothing. Overlapping checks of one landing
+return without acting.
+
 On Task PRs, arm and land record the same head-and-disposition request with Auto
 as the operator. `--match-head-commit` fences the arming command; Loopflow
-revokes Auto before its own later head mutation. Land applies completion or
+revokes Auto before its own later head mutation. Reconcile applies completion or
 rotation only after GitHub reports the PR merged. Concurrent Loopflow
 finalization and push commands in one worktree are refused rather than
 interleaved.

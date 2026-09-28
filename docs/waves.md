@@ -325,8 +325,8 @@ steering, resume and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf pr land --next parser-proof   # merge this PR, then rotate to the next
-lf pr land -c                    # merge this PR, then complete the Task
+lf pr land --next parser-proof   # after verified merge, rotate to the next
+lf pr land -c                    # after verified merge, complete the Task
 lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 ```
 

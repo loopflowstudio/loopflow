@@ -271,3 +271,62 @@ confirmation now precedes one action dispatch, and the Flow outcome is infallibl
 Focused landing/Flow/store proof: 14 passed; CLI land/arm proof: 2 passed (private
 Homes and provider stand-ins). Clippy and global format check passed; formatting
 also normalized six inherited files. Full Task and installed-demo gaps above remain.
+
+### Review: slice 1, finite reconcile and landing handoff (2026-09-28)
+
+Scope: `d07e56933..ff380db2d` plus the review repairs below. Providers and
+GitHub are stand-ins in private Homes; nothing here is installed acceptance.
+
+| Claim | Result | Executed evidence |
+| --- | --- | --- |
+| `pr land`/`pr arm` hand off and return; no watcher remains | pass | `land_tests`: 20 passed. `watch_armed_pr`, `wait_for_landing`, `supervise_pr_landing`, poll intervals: zero references in `rust/` |
+| Later check repairs once, settles merge, never completes closed-unmerged | pass | 12 reconciler tests, 3 landing-store tests |
+| Flow stays at `pr land` until that exact landing merges | pass | `handed_off_landing_keeps_the_saved_flow_before_its_next_review` |
+| Task completes only from merged evidence | pass, local only | `watched_landing_completes_task_only_from_merged_pr_evidence` |
+| Interrupted local/Linear settlement retries | **gap** | Source path exists; no test interrupts it |
+| Rebase required while green admits `ci-fix` | **gap** | `LandingObservation` has no such evidence; not implemented |
+| 30-minute CI deadline, rerun identity, retry bound | **gap** | Not implemented; pending waits forever |
+| Migration history | **blocked** | `check_migrations.py`: `0.12.24.001_release.sql` is on `origin/main`, absent here. LOO-298 is not on main (`c512813b5`) |
+
+Library run: 16 passed (reconciler, store, Flow, Task). Clippy all-targets,
+`cargo fmt --check`, `check_architecture.py` and `git diff --check` pass.
+
+Repairs made in review:
+
+- A blocked landing kept its old reason after checks recovered. Pending or
+  passing evidence on an armed head now returns it to watching.
+  `recovered_checks_clear_a_block_without_another_repair` failed first
+  (`Blocked != Watching`), then passed.
+- Four Task-bound `land_tests` failed at the base too: the shared fixture's
+  PM snapshot lacked LOO-298's required `flow`/`status`. Fixture repaired in
+  `tests/support/mod.rs`. The earlier ledger's CLI proof ran one filtered
+  test and did not surface this.
+- `docs/lf.md`, `docs/architecture/delivery.md`, `architecture-reference.md`,
+  `getting-started.md` and `waves.md` still described the watcher. Rewritten
+  for handoff and `lf pr reconcile`.
+
+Measured against `d07e56933`, Rust production lines before each file's first
+test module (`lf/commands/ops/mod.rs` whole): **+504 / −612, net −108**.
+Excludes tests, docs, generated files and the 6-line SQL draft.
+
+Findings carried forward:
+
+- Nothing wakes a Flow parked at a handed-off landing. `lf pr reconcile`
+  settles the landing; the Flow advances only when something drives it again.
+  Slice 2 admission owns this.
+- A repair runs inside the reconciling process. A scheduled tick therefore
+  lasts as long as `ci-fix`. Detached launch is slice 2.
+- A blocked landing makes `lf pr reconcile` exit nonzero on every tick until
+  evidence changes. Visible, and noisy for a one-minute schedule; the schedule
+  receipt in slice 3 must distinguish this from a failed observation.
+- Flow `pr land` records the landing twice (`arm`, then `record_armed_pr`).
+  Idempotent; remove when `arm` returns the landing.
+- `docs/architecture.html` is stale against LOO-298's `architecture.md`, and
+  `test_portable_architecture` asserts a phrase that rewrite removed. Left for
+  LOO-298; regenerating here would carry its content into this PR.
+
+Not published: three slice claims are gaps and the migration check cannot pass
+until LOO-298 integrates main. Next cut: needs-rebase evidence and the durable
+CI deadline in the reconciler, with an interrupted-settlement test, then Task
+admission. Proof: reconciler tests for each row of the evidence table, and one
+CLI test where `land -c` on a Task exits and a separate `reconcile` closes it.

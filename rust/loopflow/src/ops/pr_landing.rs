@@ -631,12 +631,12 @@ async fn reconcile_claimed(
                 "pull request closed without merging".into(),
             ))
         }
-        LandingObservation::Passing { .. } => {
+        LandingObservation::Passing { head_sha } => {
             store
                 .mark_ci_incidents_green(&landing.id, landing.generation, now)
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?;
-            Ok(())
+            resume_watching(store, landing, head_sha).await
         }
         LandingObservation::Unarmed { .. } => {
             block_landing(
@@ -646,7 +646,7 @@ async fn reconcile_claimed(
             )
             .await
         }
-        LandingObservation::Pending { .. } => Ok(()),
+        LandingObservation::Pending { head_sha } => resume_watching(store, landing, head_sha).await,
         LandingObservation::Degraded { reason } => {
             // Failure to read is never evidence of CI failure or merge.
             Err(OpsError::Message(reason))
@@ -702,6 +702,26 @@ async fn reconcile_claimed(
             .await
         }
     }
+}
+
+/// An armed head whose checks no longer fail has outlived its recorded block.
+async fn resume_watching(
+    store: &SharedStore,
+    landing: &mut PrLanding,
+    head_sha: String,
+) -> OpsResult<()> {
+    if landing.state != PrLandingState::Blocked {
+        return Ok(());
+    }
+    persist_landing_state(
+        store,
+        landing,
+        PrLandingState::Watching,
+        head_sha,
+        None,
+        None,
+    )
+    .await
 }
 
 async fn record_observed_head(
@@ -1062,6 +1082,38 @@ mod tests {
             .unwrap();
         assert_eq!(incidents.len(), 1);
         assert!(incidents[0].incident.responded_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn recovered_checks_clear_a_block_without_another_repair() {
+        let (_directory, store, landing) = fixture().await;
+        let driver = Arc::new(FakeDriver {
+            observations: Mutex::new(
+                vec![
+                    failure("head"),
+                    failure("head"),
+                    LandingObservation::Passing {
+                        head_sha: "head".into(),
+                    },
+                ]
+                .into(),
+            ),
+            repairs: Mutex::new(0),
+            repair_error: Some("needs a secret".into()),
+        });
+        assert!(
+            reconcile_pr_landing(store.clone(), landing.clone(), driver.clone())
+                .await
+                .is_err()
+        );
+        let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
+        assert_eq!(blocked.state, PrLandingState::Blocked);
+        let recovered = reconcile_pr_landing(store, blocked, driver.clone())
+            .await
+            .unwrap();
+        assert_eq!(recovered.state, PrLandingState::Watching);
+        assert!(recovered.blocked_reason.is_none());
+        assert_eq!(*driver.repairs.lock().unwrap(), 1);
     }
 
     #[tokio::test]

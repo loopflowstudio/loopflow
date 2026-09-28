@@ -36,7 +36,7 @@ Task Work ----> managed worktree ----> commits
 | managed worktree placement and serial PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, rebase state | Git |
 | PR head, required checks, merge | GitHub |
-| landing supervision and repair admission | exact recorded PR head plus landing generation |
+| landing checks and repair admission | exact recorded PR head plus landing generation |
 
 Task types live under [`work/task/`](../../rust/loopflow/src/work/task/). Operational Git,
 PR, CI, and landing workflows live under [`ops/`](../../rust/loopflow/src/ops/).
@@ -72,14 +72,16 @@ lf commit -m "checkpoint: parser proof"       # local checkpoint
 lf commit -m "parser: accept nested groups" -p # commit and push
 lf pr publish                                  # visible, still in flight
 lf pr arm                                      # request exact-head auto-merge and return
-lf pr land                                     # prepared and auto-merged
+lf pr land                                     # hand off delivery and return
+lf pr reconcile                                # check recorded landings once
 ```
 
 `publish` creates or refreshes the current PR without rebasing. `arm` and
 `land` integrate current main, clear merge-time scratch state, collapse
 checkpoint history into one authored commit, verify once, and push the exact
-head. `arm` requests GitHub auto-merge and returns. `land` watches through
-merge. `submit` performs the same preparation but leaves the exact-head merge
+head. `arm` and `land` request GitHub auto-merge, record the landing, and
+return; success means handoff, not merge. `lf pr reconcile` checks this
+repository's recorded landings once. `submit` performs the same preparation but leaves the exact-head merge
 to a person. These delivery commands inspect Task delivery state when present;
 they do not require a live Task worker or certify that a particular Flow ran.
 
@@ -124,15 +126,15 @@ recording, tests, or planning writes.
 repair, range healing, merge request, settlement, and serial rotation. A
 second mutation fails fast while that exact section is held.
 
-### Landing supervision
+### Landing checks
 
-`lf-pr-landing.lock` follows the supervisor's actual operation lifetime. A
-replacement waits while an old observation or repair is still running, even
-when its async waiter has been canceled. The file contains no state; the
-existing landing generation still fences database writes. Once the old
-operation returns, the replacement observes GitHub before deciding what to do.
-Joining an active landing updates the requested head and disposition while
-retaining the supervisor's checkout. Resuming a blocked landing can select the
+`lf-pr-landing.lock` follows one check's actual operation lifetime. A
+contending check returns immediately while an observation or repair is still
+running, even when its async waiter has been canceled. The file contains no
+state; the existing landing generation still fences database writes. Each
+check observes GitHub before deciding what to do and releases its claim when it
+returns. Joining an active landing updates the requested head and disposition
+while retaining the running check's checkout. Resuming a blocked landing can select the
 caller's current checkout.
 
 Raw Git commands do not participate in these advisory protocols. Loopflow can
@@ -147,39 +149,42 @@ observe GitHub PR head H1
 claim landing generation G
           |
           v
-wait for required checks on H1
+read required checks on H1 once
           |
-      +---+---+
-      |       |
-    pass     fail
-      |       |
-    merge   repair under supervisor G
-              |
-              v
-           observe current head --> fresh check evidence
+   +------+------+----------+
+   |      |      |          |
+ pending pass  merged      fail
+   |      |      |          |
+ return return settle   one repair under G, then return
 ```
 
-A landing supervisor never transfers green checks from one head to another.
-A failure may need several repairs, including on the same head. Incidents
-record responses; the supervisor owns execution. A moved head requires a new
-observation and check set. GitHub remains the final merge authority.
+The next `lf pr reconcile` repeats this from fresh evidence.
 
-`PrLanding` owns the supervisor generation. `LandingSupervisor` names the
-process, placement, and heartbeat used both to claim and to retain that
-ownership. Incidents retain response provenance and timing across generations.
+A check never transfers green checks from one head to another. A failure is
+confirmed by a second observation before repair. One incident (head plus
+failing check set) receives one repair; the same incident failing again blocks
+the landing until the head or evidence changes. A failed read is never evidence
+of CI failure or merge. GitHub remains the final merge authority.
 
-Rerun `lf pr land` after resolving a blocker. It resumes the existing landing
-under a fresh supervisor generation, including when the SHA has not changed.
-The waiting CLI displays completed `ci-fix` conclusions from existing Run
-records for this worktree, while the local process supervises the landing. Use
-`lf runs <run> --final` to inspect a conclusion separately.
+`PrLanding` owns the generation. `LandingSupervisor` names the process,
+placement, and heartbeat of the check currently holding the claim. Incidents
+retain response provenance and timing across generations.
 
-Watched repairs return `published` or `blocked` with a summary in their existing
-final answer. A blocked result names the required action. The watcher observes
-GitHub before returning it, so an already-merged PR still finishes successfully.
-Provider exit code zero alone does not mean the repair succeeded.
+A blocked landing stays observable: later checks still settle its merge, and
+checks that stop failing clear the block. Rerun `lf pr arm` or `lf pr land`
+after resolving a blocker to resume under a fresh generation, including when
+the SHA has not changed. Use `lf runs <run> --final` to inspect a repair's
+conclusion.
 
-After merge, bare `lf pr land` settles that PR and leaves the Task open.
+Repairs return `published` or `blocked` with a summary in their final answer.
+A blocked result names the required action. Provider exit code zero alone does
+not mean the repair succeeded.
+
+A PR closed without merging ends its landing unsettled. Merge evidence is
+recorded before Task settlement; a failed local or Linear settlement keeps the
+landing pending and the next check retries it.
+
+After verified merge, bare `lf pr land` settles that PR and leaves the Task open.
 `lf pr land -c` completes the Task. `lf pr land --next <slug>` rotates the
 serial chain to a new branch from fetched main.
 

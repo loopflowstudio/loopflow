@@ -425,29 +425,10 @@ Task Work has stable identities and small state:
 `ready`, `done`, or `abandoned`. Process liveness, Task condition, Sessions,
 PR state, Flow invocation, and Run evidence stay separate. `task prepare` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
-identity without starting execution. `task run` uses that same substrate,
-selects a Flow when none is active, and starts its mechanical driver.
-`task restart` waits for its captured worker to exit before replacing the Flow.
-Unknown process identity, a worker that remains live, or a concurrent replacement
-leaves the Flow intact and reports the unresolved execution. Retry after resolving
-the reported worker; restart never discards a new claim acquired while stopping.
-`task edit` changes title/notes in Linear and refreshes planning facts locally.
-It works before placement; replacing notes preserves the original creation retry
-marker. `task comment ISSUE` reads the thread; adding text publishes direction
-without starting execution. Both accept the issue ID or a registered Task ID and
-resolve the owning Wave from the issue. An optional `--wave` checks that ownership.
-
-`task create` files planning backlog in Linear and refreshes the local snapshot.
-It leaves the checkout alone and needs no agent execution credentials. Use
-`--notes` for its description, or pipe a report; `--title` overrides the report's
-first line. Repeating the same title and report reuses the issue's creation marker.
-`task create --run` validates the Flow, workspace name, stack parent, base,
-and execution credentials before creating a Linear issue. Retrying the same
-report reuses its marked issue and any registered Task placement. If a later
-filesystem or snapshot operation fails, the error names the retained issue and
-its recovery command. Placement uses the validated base commit even if a later
-fetch advances the remote branch. An unconfirmed creation reports the uncertainty
-and directs a retry of the same command to look up its marker.
+identity without starting execution. `task run` resumes the saved Flow or starts
+one when none is active. Selecting a different `--flow` replaces the unclaimed
+managed invocation; stop an active worker before changing its Flow. Other Flows
+attributed to the Task keep their own invocations.
 `task restart` waits for its captured worker to exit before replacing the Flow.
 Unknown process identity, a worker that remains live, or a concurrent replacement
 leaves the Flow intact and reports the unresolved execution. Retry after resolving

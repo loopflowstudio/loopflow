@@ -1,12 +1,10 @@
 pub mod activity;
 pub mod ask;
 pub mod auth;
-pub mod chat;
 pub mod ci;
 pub mod desktop;
 pub mod doctor;
-#[cfg(test)]
-pub(crate) mod fixtures;
+pub mod discord;
 pub mod flow;
 pub mod home;
 pub mod install;
@@ -15,19 +13,16 @@ pub mod ops;
 pub mod placement;
 pub mod profile;
 pub mod replay;
-pub mod reply;
 pub mod run;
 pub mod runs;
 mod runs_watch;
 pub mod screenshot;
 pub mod session;
 pub mod ssh;
-pub mod thread;
 pub mod tokens;
 pub mod top;
 pub mod usage;
 pub mod util;
-pub mod wave_intent;
 pub mod waves;
 pub(crate) mod work_catalog;
 

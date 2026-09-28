@@ -103,79 +103,8 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
-pub(crate) fn resolve_lfd_binary() -> PathBuf {
-    let cargo_override = std::env::var("CARGO_BIN_EXE_lfd")
-        .ok()
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from);
-    let lf = resolve_lf_binary();
-    let lf_sibling = lf
-        .parent()
-        .map(|parent| parent.join("lfd"))
-        .filter(|path| path.is_file());
-    let invoked_sibling = std::env::args_os()
-        .next()
-        .map(PathBuf::from)
-        .and_then(|invoked| invoked.parent().map(|parent| parent.join("lfd")))
-        .filter(|path| path.is_file());
-    let path_binary = which_on_path(Path::new("lfd"));
-    let current = std::env::current_exe().ok().filter(|path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lfd")
-    });
 
-    select_lfd_binary(
-        crate::build_info::provenance(),
-        cargo_override,
-        lf_sibling,
-        invoked_sibling,
-        path_binary,
-        current,
-    )
-}
 
-pub(crate) fn resolve_lfd_binary_checked() -> Result<PathBuf> {
-    let candidate = resolve_lfd_binary();
-    if candidate.is_absolute() {
-        return if candidate.is_file() {
-            Ok(candidate)
-        } else {
-            Err(anyhow!(
-                "lfd binary {} does not exist; install the current Home control pair",
-                candidate.display()
-            ))
-        };
-    }
-    which_on_path(&candidate).ok_or_else(|| {
-        anyhow!(
-            "cannot resolve an absolute path for `{}`; install lfd beside the current Home lf",
-            candidate.display()
-        )
-    })
-}
-
-fn select_lfd_binary(
-    provenance: crate::build_info::BuildProvenance,
-    cargo_override: Option<PathBuf>,
-    lf_sibling: Option<PathBuf>,
-    invoked_sibling: Option<PathBuf>,
-    path_binary: Option<PathBuf>,
-    current_lfd: Option<PathBuf>,
-) -> PathBuf {
-    if let Some(path) = cargo_override {
-        return path;
-    }
-    if provenance == crate::build_info::BuildProvenance::Development {
-        if let Some(path) = lf_sibling {
-            return path;
-        }
-    }
-    invoked_sibling
-        .or(path_binary)
-        .or(current_lfd)
-        .unwrap_or_else(|| PathBuf::from("lfd"))
-}
 
 fn select_binary_override(
     provenance: crate::build_info::BuildProvenance,
@@ -360,52 +289,8 @@ pub(crate) fn shell_escape(value: &str) -> String {
 
 /// Start a machine-Home process through the current installed/dev control pair,
 /// ignoring a historical body's `LF_CONTROL_*` pins.
-pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_home_session_with_env(session, cwd, argv, &[]).await
-}
 
-pub(crate) async fn start_home_session_with_env(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    let context = current_home_execution_context()?;
-    let lf_bin = context.lf_bin.to_string_lossy().to_string();
-    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
-    environment.extend_from_slice(env);
-    start_session_with_context(session, cwd, argv, &environment, context).await
-}
 
-pub(crate) async fn start_home_session_for_install_selection(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    selection: &crate::machine_install::InstallSelection,
-    switch_id: Option<&str>,
-) -> Result<()> {
-    let cli = selection
-        .artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::Cli)
-        .ok_or_else(|| anyhow!("install switch target has no CLI"))?;
-    cli.verify()?;
-    let lf_home = selection
-        .store
-        .parent()
-        .ok_or_else(|| anyhow!("install switch target store has no Home directory"))?
-        .to_path_buf();
-    let context = crate::child::ChildExecutionContext {
-        lf_bin: cli.path.clone(),
-        db_path: selection.store.clone(),
-        lf_home,
-    };
-    let lf_bin = context.lf_bin.to_string_lossy().to_string();
-    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
-    if let Some(switch_id) = switch_id {
-        environment.push((crate::machine_install::INSTALL_SWITCH_ENV, switch_id));
-    }
-    start_session_with_context(session, cwd, argv, &environment, context).await
-}
 
 pub(crate) async fn start_lf_session_with_env(
     session: &str,
@@ -589,7 +474,7 @@ mod tests {
 
     use super::{
         extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
+        pin_control_binary, select_binary_override, select_current_home_binary,
         DISCORD_TOKEN_ENV,
     };
     use crate::build_info::BuildProvenance;
@@ -637,31 +522,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn release_daemon_resolution_prefers_the_promoted_target_over_a_stale_store_sibling() {
-        assert_eq!(
-            select_lfd_binary(
-                BuildProvenance::Release,
-                None,
-                Some(PathBuf::from("/home/op/.lf/bin/lfd")),
-                None,
-                Some(PathBuf::from("/home/op/.local/bin/lfd")),
-                None,
-            ),
-            PathBuf::from("/home/op/.local/bin/lfd")
-        );
-        assert_eq!(
-            select_lfd_binary(
-                BuildProvenance::Development,
-                None,
-                Some(PathBuf::from("/repo/target/debug/lfd")),
-                None,
-                Some(PathBuf::from("/home/op/.local/bin/lfd")),
-                None,
-            ),
-            PathBuf::from("/repo/target/debug/lfd")
-        );
-    }
 
     /// The launch boundary must resolve the current Home lf (B), never the
     /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded
@@ -828,4 +688,23 @@ mod tests {
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));
     }
+}
+
+#[cfg(not(test))]
+pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    start_home_session_with_env(session, cwd, argv, &[]).await
+}
+
+#[cfg(not(test))]
+pub(crate) async fn start_home_session_with_env(
+    session: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> Result<()> {
+    let context = current_home_execution_context()?;
+    let lf_bin = context.lf_bin.to_string_lossy().to_string();
+    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
+    environment.extend_from_slice(env);
+    start_session_with_context(session, cwd, argv, &environment, context).await
 }

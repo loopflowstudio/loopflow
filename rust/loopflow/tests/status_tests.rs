@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::child::ChildRef;
-use loopflow::controller::wave::metrics::{
+use loopflow::work::wave::metrics::{
     load_metric_contract, MetricObservation, ObservationAcceptance,
 };
 use loopflow::id::WaveId;

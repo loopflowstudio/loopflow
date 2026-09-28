@@ -37,7 +37,9 @@ static AUTHORIZED_CURRENT: OnceLock<Option<InstallSelection>> = OnceLock::new();
 #[non_exhaustive]
 pub enum ArtifactRole {
     Cli,
-    Daemon,
+    /// Decoding and digest verification of retained pre-cutover artifact sets only.
+    #[serde(rename = "daemon")]
+    RetiredDaemon,
     App,
     AppHelper(String),
 }
@@ -125,13 +127,13 @@ impl ArtifactSet {
             .artifact(&ArtifactRole::Cli)
             .expect("validated artifact set has a CLI");
         let daemon = self
-            .artifact(&ArtifactRole::Daemon)
-            .expect("validated artifact set has a daemon");
+            .artifact(&ArtifactRole::RetiredDaemon)
+            .map(|artifact| artifact.path.as_path());
         let app = self
             .artifact(&ArtifactRole::App)
             .map(|artifact| app_bundle_for_executable(&artifact.path))
             .transpose()?;
-        let actual = artifact_set_sha256(&cli.path, &daemon.path, app)?;
+        let actual = artifact_set_sha256(&cli.path, daemon, app)?;
         if actual != self.content_sha256 {
             return Err(anyhow!(
                 "install artifact set {} content digest mismatch: expected {}, got {}",
@@ -183,7 +185,7 @@ impl ArtifactSet {
                 ));
             }
         }
-        for role in [ArtifactRole::Cli, ArtifactRole::Daemon] {
+        for role in [ArtifactRole::Cli] {
             if !roles.contains(&role) {
                 return Err(anyhow!(
                     "install artifact set {} is missing role {:?}",
@@ -334,14 +336,16 @@ pub enum RecoveryOwner {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ActivationTargets {
     pub cli: PathBuf,
-    pub daemon: PathBuf,
+    /// Retained receipt input; never activated by this executable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon: Option<PathBuf>,
     pub app: Option<PathBuf>,
     pub legacy_app: Option<PathBuf>,
 }
 
 impl ActivationTargets {
     fn validate(&self) -> Result<()> {
-        for path in [&self.cli, &self.daemon] {
+        for path in [&self.cli] {
             if !path.is_absolute() {
                 return Err(anyhow!(
                     "install activation target {} is not absolute",
@@ -551,8 +555,8 @@ impl SwitchReceipt {
             || self.target.artifact_set.content_sha256 != prior.target.artifact_set.content_sha256
             || self.target.artifact_set.artifact(&ArtifactRole::Cli)
                 != prior.target.artifact_set.artifact(&ArtifactRole::Cli)
-            || self.target.artifact_set.artifact(&ArtifactRole::Daemon)
-                != prior.target.artifact_set.artifact(&ArtifactRole::Daemon)
+            || self.target.artifact_set.artifact(&ArtifactRole::RetiredDaemon)
+                != prior.target.artifact_set.artifact(&ArtifactRole::RetiredDaemon)
             || self.target_published_fallback != prior.target_published_fallback;
         if identity_changed {
             return Err(anyhow!(
@@ -694,7 +698,6 @@ pub fn root() -> Result<PathBuf> {
 pub fn entry_gate_path(root: &Path, role: &ArtifactRole) -> Result<PathBuf> {
     let name = match role {
         ArtifactRole::Cli => "lf",
-        ArtifactRole::Daemon => "lfd",
         other => return Err(anyhow!("artifact role {other:?} has no machine entry gate")),
     };
     Ok(root.join(GATE_DIRECTORY).join(name))
@@ -740,23 +743,8 @@ pub fn install_entry_gate(root: &Path, role: &ArtifactRole, source: &Path) -> Re
     Ok(target)
 }
 
-fn _switch_capability(role: &ArtifactRole) -> Option<String> {
-    if let Some(capability) = std::env::var(INSTALL_SWITCH_ENV)
-        .ok()
-        .filter(|value| !value.is_empty())
-    {
-        return Some(capability);
-    }
-    if role != &ArtifactRole::Daemon {
-        return None;
-    }
-    let mut arguments = std::env::args_os();
-    while let Some(argument) = arguments.next() {
-        if argument == "--install-switch" {
-            return arguments.next().and_then(|value| value.into_string().ok());
-        }
-    }
-    None
+fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
+    std::env::var(INSTALL_SWITCH_ENV).ok().filter(|value| !value.is_empty())
 }
 
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
@@ -1118,10 +1106,7 @@ fn artifact_matches_runtime_role(artifact: &ArtifactRole, runtime: &ArtifactRole
             (artifact, runtime),
             (ArtifactRole::AppHelper(name), ArtifactRole::Cli) if name == "lf"
         )
-        || matches!(
-            (artifact, runtime),
-            (ArtifactRole::AppHelper(name), ArtifactRole::Daemon) if name == "lfd"
-        )
+
 }
 
 pub fn authorize_current(role: &ArtifactRole) -> Result<Option<InstallSelection>> {
@@ -1273,10 +1258,12 @@ pub(crate) fn tree_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(digest.finalize()))
 }
 
-pub(crate) fn artifact_set_sha256(cli: &Path, daemon: &Path, app: Option<&Path>) -> Result<String> {
+pub(crate) fn artifact_set_sha256(cli: &Path, daemon: Option<&Path>, app: Option<&Path>) -> Result<String> {
     let mut digest = Sha256::new();
     digest.update(file_sha256(cli)?.as_bytes());
-    digest.update(file_sha256(daemon)?.as_bytes());
+    if let Some(daemon) = daemon {
+        digest.update(file_sha256(daemon)?.as_bytes());
+    }
     if let Some(app) = app {
         digest.update(tree_sha256(app)?.as_bytes());
     }
@@ -1408,10 +1395,10 @@ mod tests {
             source,
             source_revision: format!("revision-{id}"),
             source_identity: format!("identity-{id}"),
-            content_sha256: artifact_set_sha256(&cli, &daemon, None).unwrap(),
+            content_sha256: artifact_set_sha256(&cli, Some(&daemon), None).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-                ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
+                ArtifactIdentity::capture(ArtifactRole::RetiredDaemon, &daemon).unwrap(),
             ],
         }
     }
@@ -1470,7 +1457,7 @@ mod tests {
                 .clone(),
             activation: ActivationTargets {
                 cli: directory.join("active-lf"),
-                daemon: directory.join("active-lfd"),
+                daemon: Some(directory.join("active-lfd")),
                 app: None,
                 legacy_app: None,
             },
@@ -1637,10 +1624,10 @@ mod tests {
             source: InstallSource::Published,
             source_revision: "revision".to_string(),
             source_identity: "release".to_string(),
-            content_sha256: artifact_set_sha256(&cli, &daemon, Some(&app)).unwrap(),
+            content_sha256: artifact_set_sha256(&cli, Some(&daemon), Some(&app)).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-                ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
+                ArtifactIdentity::capture(ArtifactRole::RetiredDaemon, &daemon).unwrap(),
                 ArtifactIdentity::capture(ArtifactRole::App, &app_executable).unwrap(),
             ],
         };

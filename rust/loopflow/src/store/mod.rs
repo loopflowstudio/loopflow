@@ -18,7 +18,6 @@ mod flows;
 mod metrics;
 pub mod migrations;
 mod pr_landings;
-pub mod provider_deliveries;
 pub mod rows;
 mod sessions;
 pub mod sqlite;
@@ -1555,20 +1554,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let pending = store
-            .pending_observations(&crate::child::ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert!(!pending.is_empty());
-        assert!(store
-            .pending_observations(&crate::child::ObservationRecipient::Project {
-                project_id: predecessor.id
-            })
-            .await
-            .unwrap()
-            .is_empty());
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert!(events.iter().any(|event| matches!(event.kind, TaskEventKind::Failed { .. })));
+
     }
 
     #[tokio::test]
@@ -2154,42 +2142,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let observations = store
-            .pending_observations(&crate::child::ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(observations.len(), 1);
-        store
-            .append_task_event(
-                &sibling.id,
-                &TaskEventKind::Failed {
-                    error: "arrived during the Wave pass".to_string(),
-                    resumable: true,
-                },
-            )
-            .await
-            .unwrap();
-        for observation in observations {
-            store
-                .mark_observation_delivered(observation.id)
-                .await
-                .unwrap();
-        }
-        let pending = store
-            .pending_observations(&crate::child::ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(pending.len(), 1);
-        assert!(matches!(
-            &pending[0].payload,
-            crate::work::project::ChildEventPayload::Task {
-                event: TaskEventKind::Failed { error, resumable: true }
-            } if error == "arrived during the Wave pass"
-        ));
 
         assert_eq!(
             store.work_status(&target_work).await.unwrap(),

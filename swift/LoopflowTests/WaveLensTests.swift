@@ -8,7 +8,7 @@ struct WaveLensTests {
 
     @Test("green when a body is live")
     func greenWhenLive() {
-        let lens = WaveLens.forWave(live: true, activeTasks: 0)
+        let lens = WaveLens.forWave(activeTasks: 0)
         #expect(lens.color == .green)
         #expect(lens.reason.contains("listener answered"))
     }
@@ -16,7 +16,7 @@ struct WaveLensTests {
     @Test("listener absence is not invented as live evidence")
     func absentListenerIsNotLiveEvidence() {
         let lens = WaveLens.forWave(
-            live: false,
+            
             activeTasks: 0
         )
         #expect(lens.color == .red)
@@ -25,7 +25,7 @@ struct WaveLensTests {
 
     @Test("red when stopped with outstanding work")
     func redWhenOutstanding() {
-        let lens = WaveLens.forWave(live: false, activeTasks: 2)
+        let lens = WaveLens.forWave(activeTasks: 2)
         #expect(lens.color == .red)
         #expect(lens.reason == "Stopped · 2 active items still expect work")
     }
@@ -33,7 +33,7 @@ struct WaveLensTests {
     @Test("black only when disabled")
     func disabledIsBlack() {
         let lens = WaveLens.forWave(
-            live: false,
+            
             enabled: false,
             activeTasks: 0
         )
@@ -61,7 +61,7 @@ struct WaveLensTests {
     @Test("default-on without a listener is red")
     func runningWithoutListenerIsRed() {
         let lens = WaveLens.forWave(
-            live: false,
+            
             activeTasks: 0
         )
         #expect(lens.color == .red)
@@ -71,16 +71,16 @@ struct WaveLensTests {
     @Test("paused turn intent is blue while listener evidence stays explicit")
     func pausedIsBlueWithListenerEvidence() {
         let serving = WaveLens.forWave(
-            live: true,
-            paused: true,
+            
+            
             activeTasks: 1
         )
         #expect(serving.color == .blue)
         #expect(serving.reason == "Paused · listener is serving and queueing input")
 
         let stopped = WaveLens.forWave(
-            live: false,
-            paused: true,
+            
+            
             activeTasks: 0
         )
         #expect(stopped.color == .blue)
@@ -205,11 +205,11 @@ struct WaveLensTests {
     func everyLensHasReason() throws {
         let lenses = [
             WaveLens.forWave(
-                live: true,
+                
                 activeTasks: 0
             ),
-            WaveLens.forWave(live: false, activeTasks: 1),
-            WaveLens.forWave(live: false, activeTasks: 0),
+            WaveLens.forWave(activeTasks: 1),
+            WaveLens.forWave(activeTasks: 0),
             WaveLens.forTask(try makeCondition(state: "unknown", reason: "unread")),
             WaveLens.forTasks(tasks: []),
         ]

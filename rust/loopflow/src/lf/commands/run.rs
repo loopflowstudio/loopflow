@@ -35,7 +35,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
             &bound,
             &binding,
             crate::session::WorkSource::Checkout,
-        );
+        ).map(|_| ());
     }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -50,7 +50,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     });
 
     print_context_header(&built, cli);
-    launch_prompt(&built, cli)
+    launch_prompt(&built, cli).map(|_| ())
 }
 
 pub(crate) fn run_saved(
@@ -76,7 +76,7 @@ pub(crate) fn run_saved(
     built.subjects = cli.work_subject_selector().into_iter().collect();
     built.work = work;
     print_context_header(&built, cli);
-    launch_prompt(&built, cli)
+    launch_prompt(&built, cli).map(|_| ())
 }
 
 #[doc(hidden)]
@@ -92,7 +92,13 @@ pub fn run_bound(
         cli,
         binding,
         crate::session::WorkSource::Declared,
-    )
+    ).map(|_| ())
+}
+
+/// Run a channel request through the ordinary attributed launch and settlement path.
+pub(crate) fn answer_bound(message: &str, cli: &Cli, binding: &crate::ops::WorkBinding) -> Result<Option<String>> {
+    launch_bound(None, Some(message), cli, binding, crate::session::WorkSource::Declared)
+        .map(|answer| answer.map(|answer| answer.text))
 }
 
 fn launch_bound(
@@ -101,7 +107,7 @@ fn launch_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
     source: crate::session::WorkSource,
-) -> Result<()> {
+) -> Result<Option<crate::run_record::FinalAnswer>> {
     let message = bound_message(binding, message);
     let resolved_skill = skill
         .map(crate::ops::human_session::active_flow_skill)
@@ -227,33 +233,6 @@ pub(crate) fn prepare_harness_turn_from_skill_at(
     )
 }
 
-pub(crate) fn prepare_wave_harness_turn(
-    skill: &Skill,
-    message: &str,
-    wave: &str,
-    max_turns: Option<u32>,
-    origin_repo: &std::path::Path,
-    resident_repo: &std::path::Path,
-    surface_override: Option<Surface>,
-) -> Result<PreparedHarnessTurn> {
-    let cli = Cli {
-        batch: true,
-        wave: Some(wave.to_string()),
-        max_turns,
-        ..Cli::default()
-    };
-    let mut prepared = prepare_runner_turn_at(
-        &skill.name,
-        message,
-        &cli,
-        origin_repo.to_path_buf(),
-        true,
-        surface_override,
-        Some(skill.clone()),
-    )?;
-    prepared.config.cwd = Some(resident_repo.to_path_buf());
-    Ok(prepared)
-}
 
 fn prepare_runner_turn_at(
     skill: &str,
@@ -624,7 +603,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
+fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<crate::run_record::FinalAnswer>> {
     // Bare terminal control always stays in the TUI. Other interactive skills
     // use explicit flags first, then the configured launch target.
     let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
@@ -686,7 +665,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
                 "failed"
             })?;
         }
-        return result;
+        return result.map(|_| None);
     }
 
     let cli_check_start = Instant::now();
@@ -718,7 +697,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         }
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Run completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Ok(())) => Ok(crate::run_record::read_final_answer(&capture.artifact_dir())?),
     }
 }
 
@@ -1246,7 +1225,7 @@ mod tests {
     use super::{
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
-        prepare_harness_turn_from_skill_at, prepare_wave_harness_turn, should_launch_via_skill,
+        prepare_harness_turn_from_skill_at, should_launch_via_skill,
         skill_launch_seed, split_skill_args, PromptBuild, PromptLaunchContext,
     };
     use crate::durable::RunId;
@@ -1730,35 +1709,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .contains("handoff evidence bytes"));
     }
 
-    #[test]
-    fn wave_harness_uses_started_skill_and_executes_in_resident_worktree() {
-        let origin = loopflow_test_support::TestRepo::new();
-        origin.create_file(".lf/skills/proof.md", "canonical skill instructions");
-        origin.stage_all();
-        origin.commit("canonical skill");
-        let resident = loopflow_test_support::TestRepo::new();
-        resident.create_file(".lf/skills/proof.md", "stale resident skill instructions");
-        resident.stage_all();
-        resident.commit("stale resident skill");
-
-        let skill = crate::engine::load_skill("proof", origin.path()).unwrap();
-        origin.create_file(".lf/skills/proof.md", "later instructions");
-        let prepared = prepare_wave_harness_turn(
-            &skill,
-            "continue",
-            "ship",
-            Some(4),
-            origin.path(),
-            resident.path(),
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(prepared.config.cwd.as_deref(), Some(resident.path()));
-        assert!(prepared.input.contains("canonical skill instructions"));
-        assert!(!prepared.input.contains("stale resident skill instructions"));
-        assert!(!prepared.input.contains("later instructions"));
-    }
 
     #[test]
     fn worktree_harness_preloads_committed_and_untracked_scratch_with_provenance() {

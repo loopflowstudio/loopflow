@@ -29,15 +29,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
-    @Test("stop command uses the single-wave lifecycle verb")
-    func stopCommandShape() {
-        #expect(LocalWaveAgentLauncher.waveStopCommand(
-            lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
-            waveName: "product"
-        ) == [
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "stop", "product",
-        ])
-    }
 
     @Test("Task controls use the bounded worker commands")
     func taskControlCommandShapes() {
@@ -156,17 +147,5 @@ struct LocalWaveAgentLauncherTests {
 
     // MARK: - Not-running copy
 
-    @Test("start hint keeps the launch command intact as inline code")
-    func startHintFormatsCommandAsCode() {
-        let hint = waveStartHint(waveName: "goals")
-
-        #expect(
-            String(hint.characters)
-                == "Start it here, or run lf start goals in a terminal — its conversation appears here live."
-        )
-
-        let codeRuns = hint.runs.filter { $0.inlinePresentationIntent == .code }
-        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf start goals"])
-    }
 }
 #endif

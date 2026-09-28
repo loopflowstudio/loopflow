@@ -402,24 +402,6 @@ final class PodiumModel {
         repoPath = path
     }
 
-    func setWavePaused(waveId: String, paused: Bool) async throws {
-        let target: (name: String, repo: String)? = if let roadmap = wave(id: waveId) {
-            (roadmap.wave.name, roadmap.wave.repo)
-        } else if let wave = rosterWave(id: waveId) {
-            (wave.name, wave.repo)
-        } else {
-            nil
-        }
-        guard let target else {
-            throw RegistryQueryError("Wave is absent from the latest Podium evidence")
-        }
-        _ = try await query.setWavePaused(
-            wave: target.name,
-            paused: paused,
-            cwd: target.repo
-        )
-        await refresh()
-    }
 
     func updateTaskDirective(task: RoadmapTask, wave: WaveSnapshot, text: String) async throws {
         try await query.updateTaskDirective(id: task.id, wave: wave.name, text: text, cwd: wave.repo)

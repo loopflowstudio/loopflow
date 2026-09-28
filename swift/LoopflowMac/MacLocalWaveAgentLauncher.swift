@@ -1,7 +1,4 @@
-// Starts and controls the local Wave backing a WaveChat pane.
-//
-// Loopflow uses the same `lf start <name>` lifecycle as the CLI. lfd owns the
-// detached listener; quitting the app never kills a wave.
+// Launch Tasks and local sessions through the CLI.
 
 #if os(macOS)
 import Foundation
@@ -22,18 +19,6 @@ private struct DevelopmentControlConfig: Decodable {
 }
 
 enum LocalWaveAgentLauncher {
-    /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
-    /// The server performs resident, registry, and discovery-file cleanup.
-    static func stopWave(repoPath: String, waveName: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(waveStopCommand(lfPath: lfPath, waveName: waveName), cwd: origin)
-    }
-
-    static func waveStopCommand(lfPath: String, waveName: String) -> [String] {
-        [lfPath, "stop", waveName]
-    }
-
     /// Start a filed Task through the same bounded worker command as the CLI.
     /// `lf task run` owns Project lookup, worktree placement, Flow selection,
     /// and the Task worker; the app does not reproduce those decisions.

@@ -38,12 +38,10 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         guard isRegistered else {
             return WaveLens(
                 color: .unknown,
-                reason: "Not served yet · run the Wave to read its state"
+                reason: "Not registered"
             )
         }
         return WaveLens.forWave(
-            live: api.live,
-            paused: api.paused,
             enabled: api.enabled,
             activeTasks: api.activeTasks
         )

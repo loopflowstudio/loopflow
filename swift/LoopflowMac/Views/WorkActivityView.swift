@@ -5,7 +5,6 @@ struct WorkActivityView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
-    @State private var isSettingTurnIntent = false
     @State private var turnIntentError: String?
 
     var body: some View {
@@ -43,15 +42,6 @@ struct WorkActivityView: View {
                         .accessibilityIdentifier("podium-activity-scope")
                 }
                 Spacer(minLength: Spacing.sm)
-                if let wave = selectedWave, model.selection?.kind == .wave {
-                    Button(wave.paused ? "Resume" : "Pause") {
-                        Task { await setPaused(!wave.paused, waveId: wave.id) }
-                    }
-                    .buttonStyle(.borderless)
-                    .font(Typography.caption(9).weight(.semibold))
-                    .disabled(isSettingTurnIntent)
-                    .accessibilityIdentifier("podium-wave-turn-control")
-                }
                 if model.selection != nil {
                     Button {
                         model.select(nil)
@@ -243,14 +233,4 @@ struct WorkActivityView: View {
     }
 
     @MainActor
-    private func setPaused(_ paused: Bool, waveId: String) async {
-        isSettingTurnIntent = true
-        turnIntentError = nil
-        defer { isSettingTurnIntent = false }
-        do {
-            try await model.setWavePaused(waveId: waveId, paused: paused)
-        } catch {
-            turnIntentError = error.localizedDescription
-        }
-    }
 }

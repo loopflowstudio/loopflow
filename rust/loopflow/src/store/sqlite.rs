@@ -26,7 +26,6 @@ mod durable;
 mod flows;
 mod metrics;
 mod pr_landings;
-mod provider_deliveries;
 mod runs;
 pub use runs::ListedRun;
 pub(crate) mod sessions;

@@ -114,9 +114,6 @@ struct WorkSurfaceView: View {
                             .font(Typography.display)
                             .foregroundStyle(palette.text)
                             .accessibilityIdentifier("wave-title")
-                        if roadmap.wave.paused {
-                            pausedChip(roadmap.wave.id)
-                        }
                         Spacer()
                     }
                     if !roadmap.wave.goal.isEmpty {
@@ -471,10 +468,6 @@ struct WorkSurfaceView: View {
         }
     }
 
-    private func pausedChip(_ waveId: String) -> some View {
-        WorkspaceChip(text: "paused", tone: .neutral)
-            .accessibilityIdentifier("wave-paused-\(waveId)")
-    }
 
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {

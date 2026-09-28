@@ -3,7 +3,7 @@
 use anyhow::Result;
 use time::OffsetDateTime;
 
-use crate::controller::wave::journal::short_id;
+use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
 use crate::run_record::RunSnapshot;

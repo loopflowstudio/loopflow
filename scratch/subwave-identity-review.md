@@ -100,6 +100,9 @@ Kickoff draft under review: commit `0381a195f`.
   matter. it rewads from wave/<foo> when it runs from a task of <foo>'s
   worktree, or passes --wave foo , etc".
 
+- On Infrastructure's objective: "ok for Infra's goal to include subgoals of
+  release. However *KRS and TASKS* should not mention subwave's stuff".
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

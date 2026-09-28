@@ -105,6 +105,9 @@ Kickoff draft under review: commit `0381a195f`.
 
 - Softened at once: "mention is a bit strong, but shouldnt focus on?"
 
+- "update-wave is deprecated, i think, now we just have realign?" The design
+  now names `realign`. `update-wave` still exists on main.
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

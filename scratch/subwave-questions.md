@@ -7,7 +7,7 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 5. The wording of the short note that rides with Wave files.
 6. `GOAL.md` or `<NAME>.md`.
-7. May `update-wave` at a parent read its children when asked?
+7. May `realign` at a parent read its children when asked?
 
 ## Settled
 
@@ -19,6 +19,13 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
   Jack Heart asked only that it be done right. A Wave stored on the Task is
   added when a read needs it, with LOO-298's check.
 - A Wave's parent is the Wave whose directory it sits in.
+
+## Found, not decided
+
+- Jack Heart understands `update-wave` to be deprecated in favor of
+  `realign`. On main both exist: `update-wave` is still a step in the `queue`
+  Flow and is named in `LOOPFLOW.md` beside `realign` and
+  `record-learnings`. Removing it is outside this Task.
 
 ## Owed to LOO-330 and LOO-331
 

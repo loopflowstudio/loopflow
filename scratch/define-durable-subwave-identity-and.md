@@ -70,7 +70,7 @@ skipped  wave/product/, …               other Waves
   edit is an ordinary change that lands with the PR.
 - `scratch/` stays recursive.
 - A short note says which memory is yours to curate. How to curate lives in
-  `update-wave`.
+  `realign`, which reconciles plan, code and Wave memory together.
 
 Approximate cost today: an Infrastructure Run carries 18,900 tokens from
 `wave/`. A release Run would carry about 20,000.
@@ -124,9 +124,10 @@ leaves release's row alone.
   parent is, and they must agree. The kickoff audit found the field empty
   everywhere, which is why nesting did nothing. Step 2 makes discovery write
   it, so a moved directory is re-recorded and nothing has to refuse.
-- **Release files are missing on this base.** LOO-298 branched before main
-  gained release memory and the `release-run` Flow file
-  ([#1311](https://github.com/loopflowstudio/loopflow/pull/1311)).
+- **This base is behind main.** LOO-298 branched before main gained release
+  memory and the `release-run` Flow file
+  ([#1311](https://github.com/loopflowstudio/loopflow/pull/1311)), and before
+  `realign` ([#1310](https://github.com/loopflowstudio/loopflow/pull/1310)).
 - **Cron logs.** The log path uses the Wave name as written, so
   `infrastructure/release` points into a directory nothing creates. Read from
   `ops/cron.rs`, not run.

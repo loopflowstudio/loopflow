@@ -1470,6 +1470,25 @@ fn main() -> anyhow::Result<()> {
         };
     }
 
+    let directory = loopflow::repo::working_directory()?;
+    with_runtime(&directory, &args, || {
+        dispatch(
+            cli,
+            &args,
+            explicit_wave,
+            account_selection,
+            inherited_account_lease,
+        )
+    })
+}
+
+fn dispatch(
+    mut cli: Cli,
+    args: &[String],
+    explicit_wave: Option<loopflow::work::wave::Wave>,
+    account_selection: loopflow::provider_account::lease::AccountSelection,
+    inherited_account_lease: bool,
+) -> anyhow::Result<()> {
     // Every HomeId-addressed SSH hop proves it reached the intended authority
     // before reads or mutations dispatch. Raw-host bootstrap carries no
     // expectation and falls through.
@@ -1838,8 +1857,7 @@ fn execute_command(
             lf_args,
         ),
         Some(Commands::Flow { cmd }) => {
-            let directory = loopflow::repo::working_directory()?;
-            loopflow::lf::commands::flow::control(cmd, cli, &directory)
+            loopflow::lf::commands::flow::control(cmd, cli)
         }
         Some(Commands::Skill { .. } | Commands::Run { .. } | Commands::External(_)) => {
             anyhow::bail!("a command target must name a builtin command")

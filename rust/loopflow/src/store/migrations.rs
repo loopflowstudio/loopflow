@@ -1266,12 +1266,7 @@ fn validate_json_column<T: DeserializeOwned>(
     Ok(failures)
 }
 
-pub(crate) fn apply_sqlite_with_backup(
-    conn: &rusqlite::Connection,
-    path: &Path,
-) -> StoreResult<()> {
-    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-    conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+pub(super) fn migration_lock(path: &Path) -> StoreResult<std::fs::File> {
     let lock_path = path.with_file_name(format!(
         "{}.migration.lock",
         path.file_name()
@@ -1287,6 +1282,16 @@ pub(crate) fn apply_sqlite_with_backup(
         .map_err(|error| StoreError::InvalidData(format!("open migration lock: {error}")))?;
     lock.lock_exclusive()
         .map_err(|error| StoreError::InvalidData(format!("acquire migration lock: {error}")))?;
+    Ok(lock)
+}
+
+pub(crate) fn apply_sqlite_with_backup(
+    conn: &rusqlite::Connection,
+    path: &Path,
+) -> StoreResult<()> {
+    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+    let lock = migration_lock(path)?;
+    conn.execute_batch("PRAGMA journal_mode = WAL;")?;
     let result = match requires_migration_sqlite(conn) {
         Ok(false) => Ok(()),
         Ok(true) => {

@@ -240,3 +240,19 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
     with_unknown_field["metrics"][0]["future_field"] = serde_json::json!(true);
     serde_json::from_value::<MetricPortfolioDto>(with_unknown_field).unwrap();
 }
+
+#[test]
+fn session_history_retains_receipts_and_unknown_driver() {
+    let input = include_str!("../../../tests/fixtures/dto/session_history.json");
+    let events: Vec<loopflow::session::SessionEvent> = serde_json::from_str(input).unwrap();
+    assert_eq!(
+        events[1].kind,
+        loopflow::session::SessionEventKind::Completed
+    );
+    assert!(events[1].exec_id.is_none());
+    assert_eq!(events[0].payload["total"]["inputTokens"], 40);
+    assert_eq!(
+        serde_json::to_value(events).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}

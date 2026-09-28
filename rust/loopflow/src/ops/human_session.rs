@@ -1129,6 +1129,17 @@ pub(crate) async fn open(
         {
             let native = NativeRun::of(session, run)?;
             let provider_session = native.history(session)?;
+            if resume
+                && mode != OpenMode::Replace
+                && native.provider == "codex"
+                && connect_live_codex(store, session, run, &native.dir, &provider_session).await?
+            {
+                let (session, run) = store
+                    .sqlite
+                    .session(&session.id)?
+                    .ok_or_else(|| session_not_found(&session.id))?;
+                return surface(store, &session, &run).await;
+            }
             if resume {
                 crate::lf::commands::util::require_provider_session_launch(&native.dir)?;
             }
@@ -1204,6 +1215,86 @@ pub(crate) async fn open(
             Ok(surface)
         }
     }
+}
+
+/// Connect to one existing provider thread. Native UI traffic crosses the same
+/// driver fence as the headless writer; closing the UI releases only its claim.
+#[cfg(unix)]
+async fn connect_live_codex(
+    store: &SharedStore,
+    session: &Session,
+    run: &Run,
+    dir: &Path,
+    provider: &crate::run_record::ProviderSessionRef,
+) -> Result<bool> {
+    let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
+        return Ok(false);
+    };
+    match tokio::net::UnixStream::connect(&endpoint).await {
+        Ok(socket) => drop(socket),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            return Ok(false)
+        }
+        Err(error) => return Err(error.into()),
+    }
+    if thread != provider.provider_session_id {
+        bail!("Recorded conversation differs from the live provider thread");
+    }
+    let exec = crate::journal::current_exec_id()
+        .ok_or_else(|| anyhow!("Connecting requires the current lf Exec"))?;
+    let expected = store.sqlite.session_driver(&session.id)?;
+    let driver = store
+        .sqlite
+        .claim_session_driver(&session.id, expected.as_ref(), &exec, false)?;
+    let connected = async {
+        store.sqlite.make_session_interactive(&session.id, &driver)?;
+        let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
+        let remote = directory.path().join("client.sock");
+        let listener = tokio::net::UnixListener::bind(&remote)?;
+        let connection = crate::harness::codex_connection::CodexConnection {
+            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, driver: Some(driver.clone()),
+        };
+        connection.recover_history(Path::new(&endpoint)).await?;
+        let relay = tokio::spawn(async move {
+            let mut clients = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((client, _)) = accepted else { break };
+                        let connection = connection.clone();
+                        let endpoint = endpoint.clone();
+                        clients.spawn(async move { connection.serve(client, Path::new(&endpoint)).await });
+                    }
+                    result = clients.join_next(), if !clients.is_empty() => {
+                        if let Some(Ok(Err(error))) = result { tracing::warn!(%error, "native conversation connection ended"); }
+                    }
+                }
+            }
+        });
+        let run = run.clone();
+        let dir = dir.to_path_buf();
+        let provider = provider.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            crate::lf::commands::util::resume_session_with_env(
+                "codex", run.model.as_deref(), &run.cwd, &run.id, &dir, &provider,
+                &BTreeMap::new(), None, Some(&remote),
+            )
+        }).await;
+        relay.abort();
+        let _ = relay.await;
+        result??;
+        Ok::<_, anyhow::Error>(true)
+    }.await;
+    match store.sqlite.release_session_driver(&session.id, &driver) {
+        Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
+        Err(error) => return Err(error.into()),
+    }
+    connected
 }
 
 pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<SessionRecord> {
@@ -1689,6 +1780,7 @@ pub(crate) fn resume_native_run(
         &provider_session,
         &environment,
         launch_lock.take(),
+        None,
     )?;
     Ok(true)
 }

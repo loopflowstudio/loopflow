@@ -61,6 +61,7 @@ fn insert_run_event(store: &SqliteStore, id: &str, ts: i64) {
                 step_index: None,
                 error: None,
             },
+            ts,
             None,
             None,
             None,

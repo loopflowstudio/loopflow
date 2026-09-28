@@ -852,41 +852,35 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             all,
             team_key,
             team_name,
-        } => {
-            return loopflow::lf::commands::ops::connect_wave(
-                repo,
-                wave.as_deref().or(wave_flag.as_deref()),
-                *all,
-                team_key.as_deref(),
-                team_name.as_deref(),
-            )
-        }
+        } => loopflow::lf::commands::ops::connect_wave(
+            repo,
+            wave.as_deref().or(wave_flag.as_deref()),
+            *all,
+            team_key.as_deref(),
+            team_name.as_deref(),
+        ),
         WaveCommand::Sync {
             wave,
             wave_flag,
             all,
-        } => {
-            return loopflow::lf::commands::ops::sync_planning(
-                repo,
-                wave.as_deref().or(wave_flag.as_deref()),
-                *all,
-                false,
-                false,
-            )
-        }
+        } => loopflow::lf::commands::ops::sync_planning(
+            repo,
+            wave.as_deref().or(wave_flag.as_deref()),
+            *all,
+            false,
+            false,
+        ),
         WaveCommand::Rename { wave, title } => {
-            return loopflow::lf::commands::ops::rename_wave(repo, wave, title)
+            loopflow::lf::commands::ops::rename_wave(repo, wave, title)
         }
         WaveCommand::Forget { .. }
         | WaveCommand::Place { .. }
         | WaveCommand::Relocate { .. }
-        | WaveCommand::Retire { .. } => {
-            return loopflow::lf::commands::placement::wave(repo, command)
-        }
+        | WaveCommand::Retire { .. } => loopflow::lf::commands::placement::wave(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             let content = serde_json::from_slice(&std::fs::read(plan)?)?;
             update_plan(repo, wave.as_deref(), &content)?;
-            return Ok(());
+            Ok(())
         }
     }
 }
@@ -1209,56 +1203,6 @@ fn main() -> anyhow::Result<()> {
         _ => {}
     }
 
-    let explicit_wave = cli
-        .wave
-        .as_deref()
-        .map(loopflow::work::wave::context::resolve_explicit_wave)
-        .transpose()?;
-    if let Some(wave) = &explicit_wave {
-        cli.wave = Some(wave.name().to_string());
-    }
-    // One resolved wave identity drives prompt context, registry attribution,
-    // journaling, and every child process.
-    let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
-        EnvGuard::set(
-            loopflow::work::wave::context::WAVE_ID_ENV,
-            wave.id().to_string(),
-        )
-    });
-    // Account flags before an SSH target shape the origin grant. Flags in the
-    // remote lf arguments become preferences over its merged local/forwarded
-    // catalog through LF_ACCOUNT_SELECTION.
-    let mut preferred_accounts = cli.account.clone();
-    let mut restricted_accounts = cli.only_account.clone();
-    if let Some(Commands::Ssh {
-        origin_account,
-        origin_only_account,
-        ..
-    }) = &cli.command
-    {
-        preferred_accounts.extend(origin_account.iter().cloned());
-        restricted_accounts.extend(origin_only_account.iter().cloned());
-    }
-    let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
-        &preferred_accounts,
-        &restricted_accounts,
-    )?;
-    let inherited_account_lease = loopflow::provider_account::lease::account_lease_active();
-    let _forwarded_account_selection = if inherited_account_lease && !account_selection.is_default()
-    {
-        Some(EnvGuard::set(
-            loopflow::provider_account::lease::ACCOUNT_SELECTION_ENV,
-            account_selection.env_value()?,
-        ))
-    } else {
-        None
-    };
-    if cli.account_lease_probe {
-        return loopflow::provider_account::lease::probe_forwarded_authority()
-            .map_err(anyhow::Error::from);
-    }
-    debug!(?cli, "parsed CLI arguments");
-
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
@@ -1318,6 +1262,56 @@ fn main() -> anyhow::Result<()> {
 
     let directory = loopflow::repo::working_directory()?;
     with_runtime(&directory, &args, || {
+        let explicit_wave = cli
+            .wave
+            .as_deref()
+            .map(loopflow::work::wave::context::resolve_explicit_wave)
+            .transpose()?;
+        if let Some(wave) = &explicit_wave {
+            cli.wave = Some(wave.name().to_string());
+        }
+        // One resolved wave identity drives prompt context, registry attribution,
+        // journaling, and every child process.
+        let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
+            EnvGuard::set(
+                loopflow::work::wave::context::WAVE_ID_ENV,
+                wave.id().to_string(),
+            )
+        });
+        // Account flags before an SSH target shape the origin grant. Flags in the
+        // remote lf arguments become preferences over its merged local/forwarded
+        // catalog through LF_ACCOUNT_SELECTION.
+        let mut preferred_accounts = cli.account.clone();
+        let mut restricted_accounts = cli.only_account.clone();
+        if let Some(Commands::Ssh {
+            origin_account,
+            origin_only_account,
+            ..
+        }) = &cli.command
+        {
+            preferred_accounts.extend(origin_account.iter().cloned());
+            restricted_accounts.extend(origin_only_account.iter().cloned());
+        }
+        let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
+            &preferred_accounts,
+            &restricted_accounts,
+        )?;
+        let inherited_account_lease = loopflow::provider_account::lease::account_lease_active();
+        let _forwarded_account_selection =
+            if inherited_account_lease && !account_selection.is_default() {
+                Some(EnvGuard::set(
+                    loopflow::provider_account::lease::ACCOUNT_SELECTION_ENV,
+                    account_selection.env_value()?,
+                ))
+            } else {
+                None
+            };
+        if cli.account_lease_probe {
+            return loopflow::provider_account::lease::probe_forwarded_authority()
+                .map_err(anyhow::Error::from);
+        }
+        debug!(?cli, "parsed CLI arguments");
+
         dispatch(
             cli,
             &args,

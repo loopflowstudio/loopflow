@@ -3,6 +3,7 @@ mod claude_mapping;
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
+mod codex_history;
 mod codex_mapping;
 mod common;
 #[cfg(test)]
@@ -42,6 +43,34 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
     }
+}
+
+pub(crate) fn conversation_environment(
+    command: &std::process::Command,
+    config: &AgentConfig,
+) -> std::collections::BTreeMap<String, String> {
+    command
+        .get_envs()
+        .filter_map(|(key, value)| {
+            let key = key.to_string_lossy();
+            let intended = config.env.contains_key(key.as_ref())
+                || matches!(
+                    key.as_ref(),
+                    "PATH"
+                        | "LF_BIN"
+                        | "LF_HOME"
+                        | "LF_DB_PATH"
+                        | "LF_CONTROL_BIN"
+                        | "LF_CONTROL_HOME"
+                        | "LF_CONTROL_DB_PATH"
+                        | "LOOPFLOW_DIRECTIVE_FILE"
+                );
+            intended
+                .then_some(value)
+                .flatten()
+                .map(|value| (key.into_owned(), value.to_string_lossy().into_owned()))
+        })
+        .collect()
 }
 
 fn set_vendor_std_env(
@@ -93,6 +122,58 @@ mod environment_tests {
 
     use super::{configure_agent_env, set_vendor_std_env};
     use crate::engine::agent::AgentConfig;
+
+    #[test]
+    fn conversation_tools_observe_sanitized_overrides_and_removals() {
+        let mut config = AgentConfig::default();
+        for key in [
+            "LF_DISCORD_TOKEN",
+            "LF_WORKTREE_WRITER_ID",
+            "LOOPFLOW_DIRECTIVE_FILE",
+            "LF_BIN",
+            "LF_HOME",
+            "LF_DB_PATH",
+        ] {
+            config.env.insert(key.into(), "stale-fixture".into());
+        }
+        config
+            .env
+            .insert("LF_AGENT_CALLER".into(), "current-fixture".into());
+        let mut engine = tokio::process::Command::new("vendor");
+        configure_agent_env(&mut engine, &config);
+        set_vendor_std_env(
+            engine.as_std_mut(),
+            Path::new("/control/lf"),
+            Path::new("/private"),
+            Path::new("/private/loopflow.db"),
+        )
+        .unwrap();
+        // Provider account environment is not conversation tool authority.
+        engine.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
+        let tools = super::conversation_environment(engine.as_std(), &config);
+        let context_check = if crate::build_info::provenance().is_release() {
+            "test -z \"${LF_BIN+x}${LF_HOME+x}${LF_DB_PATH+x}\""
+        } else {
+            "test \"$LF_HOME\" = /private && test \"$LF_DB_PATH\" = /private/loopflow.db"
+        };
+        let script = format!("test -z \"${{LF_DISCORD_TOKEN+x}}${{LF_WORKTREE_WRITER_ID+x}}${{LOOPFLOW_DIRECTIVE_FILE+x}}${{PROVIDER_ACCOUNT_FIXTURE+x}}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_CONTROL_HOME\" = /private && {context_check}");
+        assert!(std::process::Command::new("/bin/sh")
+            .env_clear()
+            .envs(tools)
+            .args(["-c", &script])
+            .status()
+            .unwrap()
+            .success());
+        // A released launcher explicitly removes these aliases. Keep that
+        // removal contract covered in development builds as well.
+        for key in ["LF_BIN", "LF_HOME", "LF_DB_PATH"] {
+            engine.env_remove(key);
+        }
+        let tools = super::conversation_environment(engine.as_std(), &config);
+        assert!(std::process::Command::new("/bin/sh").env_clear().envs(tools)
+            .args(["-c", "test -z \"${LF_BIN+x}${LF_HOME+x}${LF_DB_PATH+x}\" && test \"$LF_CONTROL_BIN\" = /control/lf"])
+            .status().unwrap().success());
+    }
 
     #[tokio::test]
     async fn provider_child_cannot_read_the_bridge_token() {

@@ -7,6 +7,19 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Conversation history retains native evidence and unknown driver")
+    func sessionHistoryFixture() throws {
+        let data = try loadFixtureData("session_history.json")
+        let events = try JSONDecoder().decode([SessionEvent].self, from: data)
+        #expect(events[1].kind == .completed)
+        #expect(events[1].execID == nil)
+        #expect(events[0].payload == .object([
+            "total": .object(["inputTokens": .integer(40), "outputTokens": .integer(10)]),
+            "last": .object(["inputTokens": .integer(20), "outputTokens": .integer(5)]),
+        ]))
+        #expect(try JSONDecoder().decode([SessionEvent].self, from: JSONEncoder().encode(events)) == events)
+    }
+
     @Test("Active Runs preserve exact attribution, waiting clients, and evidence gaps")
     func activeRunsFixture() async throws {
         let data = try loadFixtureData("active_runs.json")

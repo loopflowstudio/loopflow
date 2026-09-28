@@ -872,70 +872,12 @@ fn begin_run_capture(
         let launch = (!interactive).then(|| {
             crate::run_record::RunLaunchRequest::from_prepared(prepared_config, &built.capabilities)
         });
-        let run = launch_run(built, &spec);
-        crate::run_record::CaptureHandle::begin_reserved_with_context(
-            spec,
-            run.id.clone(),
-            launch,
-            &built.context,
-            |_| reserve_conversation(run, interactive),
-        )
+        crate::run_record::CaptureHandle::begin_with_context(spec, &built.context, launch)
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.claim_conversation_driver()?;
     capture.record_input("initial", &built.context.task.text);
     Ok(capture)
-}
-
-/// The first captured contribution to an independent agent conversation.
-fn launch_run(built: &PromptBuild, spec: &crate::run_record::RunSpec) -> crate::session::Run {
-    let work = built.work.as_ref();
-    crate::session::Run {
-        id: crate::durable::RunId::new(),
-        session_id: Some(format!("session_{}", uuid::Uuid::new_v4().simple())),
-        invocation_id: None,
-        node: None,
-        iterations: None,
-        attempt: None,
-        task_id: work.and_then(|work| work.task_id.clone()),
-        wave_id: work.and_then(|work| work.wave_id.clone()),
-        work_source: work.map(|work| work.source),
-        created_at: crate::store::rows::now_unix(),
-        published: true,
-        cwd: spec.cwd.clone(),
-        skill: spec.skill.clone(),
-        provider: Some(spec.harness.clone()),
-        model: spec.model.clone(),
-        caller_run_id: crate::run_record::inherited_parent(),
-        ended: None,
-    }
-}
-
-/// Admission stores the conversation before any provider starts.
-fn reserve_conversation(
-    run: crate::session::Run,
-    interactive: bool,
-) -> crate::store::StoreResult<()> {
-    let session = crate::session::Session {
-        id: run.session_id.clone().unwrap_or_default(),
-        current_run_id: run.id.clone(),
-        kind: crate::session::SessionKind::Conversation,
-        interactive,
-        repo: None,
-        title: run
-            .skill
-            .clone()
-            .unwrap_or_else(|| crate::engine::naming::word_pair(run.id.as_str())),
-        title_source: crate::session::TitleSource::Generated,
-        request: None,
-        ready_summary: None,
-        completed_at: None,
-        created_at: run.created_at,
-    };
-    let path = crate::store::observability_database_path()
-        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-    crate::store::sqlite::SqliteStore::new(&path)?.create_session(session, run, None)?;
-    Ok(())
 }
 
 pub(crate) fn attributed_context(
@@ -1775,7 +1717,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.commit("bound basis");
         let cli = Cli {
             interactive: true,
-            repo: None,
             ..Cli::default()
         };
 

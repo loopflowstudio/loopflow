@@ -5,6 +5,40 @@ use serde::{Deserialize, Serialize};
 use crate::durable::{RunId, TaskId};
 use crate::id::WaveId;
 
+/// Immutable native evidence. Missing start, attribution or usage stays missing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionEvent {
+    pub seq: i64,
+    pub session_id: String,
+    pub provider_thread: String,
+    pub provider_turn: String,
+    pub kind: SessionEventKind,
+    pub provider_generation: Option<i64>,
+    pub exec_id: Option<String>,
+    pub task_id: Option<String>,
+    pub wave_id: Option<String>,
+    pub observed_at: i64,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEventKind {
+    Started,
+    Usage,
+    Completed,
+}
+
+impl SessionEventKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Usage => "usage",
+            Self::Completed => "completed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,

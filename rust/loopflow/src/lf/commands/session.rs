@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
-use crate::ops::human_session::{OpenMode, SessionKind, SessionRecord, SessionState};
+use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
 use crate::run_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
@@ -29,6 +29,32 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::History {
+            id,
+            json,
+            after,
+            limit,
+        } => {
+            let store = open_shared_store().await?;
+            if store.session(id).await?.is_none() {
+                bail!("Session {id} was not found");
+            }
+            let events = store.sqlite.session_history(id, *after, *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string(&events)?);
+            } else {
+                for event in events {
+                    println!(
+                        "{} {} {} {}",
+                        event.seq,
+                        event.provider_turn,
+                        event.kind.as_str(),
+                        event.payload
+                    );
+                }
+            }
+            Ok(())
+        }
         SessionCommand::List {
             json,
             all,

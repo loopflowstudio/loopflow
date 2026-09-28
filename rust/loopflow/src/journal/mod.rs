@@ -120,7 +120,9 @@ struct RunContext {
     process_id: ExecId,
     parent_process_id: Option<ExecId>,
     agent_caller: Option<AgentCaller>,
+    /// Time this command entered the runtime, independent of OS inspection.
     started_at: i64,
+    process_started_at: Option<i64>,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
     /// File-journal directory. Written in any git checkout; None only when the
@@ -324,7 +326,12 @@ fn try_emit(
 
     let event = LfEvent {
         run_id: context.run_id.clone(),
-        ts: OffsetDateTime::now_utc(),
+        ts: if is_run_started {
+            OffsetDateTime::from_unix_timestamp(context.started_at)
+                .map_err(std::io::Error::other)?
+        } else {
+            OffsetDateTime::now_utc()
+        },
         node,
         event,
         wave_name: fields.wave_name,
@@ -338,7 +345,9 @@ fn try_emit(
     };
 
     if let Some(run_dir) = &context.run_dir {
-        append_event(run_dir, &event)?;
+        if let Err(error) = append_event(run_dir, &event) {
+            warn!(%error, path = %run_dir.display(), "file journal append failed; recording to ledger");
+        }
     }
 
     let seq = next_seq();
@@ -400,6 +409,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
             };
             if let Err(err) = store.insert_run_event(
                 &row,
+                context.started_at,
                 context.agent_caller.as_ref(),
                 event.signal.as_deref(),
                 exit_code,
@@ -557,12 +567,12 @@ fn ensure_run_context(
     // Write the file journal wherever we can. Fall back to ledger-only when
     // the journal can't be
     // git-excluded (e.g. not a git repo).
-    let run_dir = match ensure_journal_ignored(repo_root) {
-        Ok(()) => {
-            let dir = runs_root(repo_root).join(run_id.as_str());
-            fs::create_dir_all(&dir)?;
-            Some(dir)
-        }
+    let run_dir = match ensure_journal_ignored(repo_root).and_then(|()| {
+        let dir = runs_root(repo_root).join(run_id.as_str());
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }) {
+        Ok(dir) => Some(dir),
         Err(err) => {
             debug!(
                 error = %err,
@@ -579,13 +589,17 @@ fn ensure_run_context(
         .display()
         .to_string();
 
+    let process_started_at = process_started_at(std::process::id()).unwrap_or_else(|error| {
+        debug!(%error, "Exec process evidence unavailable; recording command history only");
+        None
+    });
     let context = RunContext {
         run_id,
         process_id,
         parent_process_id,
         agent_caller,
-        started_at: process_started_at(std::process::id())?
-            .ok_or_else(|| std::io::Error::other("current process start time is unavailable"))?,
+        started_at: OffsetDateTime::now_utc().unix_timestamp(),
+        process_started_at,
         command: fields
             .command
             .as_ref()
@@ -761,12 +775,17 @@ fn current_context() -> Option<RunContext> {
 }
 
 pub(crate) fn current_process_identity() -> Option<crate::durable::TaskWorkerOwner> {
-    current_context().map(|context| crate::durable::TaskWorkerOwner {
+    let context = current_context()?;
+    Some(crate::durable::TaskWorkerOwner {
         trace_id: context.run_id,
         exec_id: context.process_id,
         pid: std::process::id(),
-        started_at: context.started_at,
+        started_at: context.process_started_at?,
     })
+}
+
+pub(crate) fn current_exec_id() -> Option<ExecId> {
+    current_context().map(|context| context.process_id)
 }
 
 pub(crate) fn task_worker_owner_evidence(
@@ -923,6 +942,9 @@ pub(crate) fn remove_exec_process_receipt_at(
 }
 
 fn write_exec_process_receipt(context: &RunContext) -> Result<(), std::io::Error> {
+    let Some(started_at) = context.process_started_at else {
+        return Ok(());
+    };
     let root = crate::store::lf_home_dir().join(EXEC_PROCESS_ROOT);
     fs::create_dir_all(&root)?;
     let pid = std::process::id();
@@ -931,7 +953,7 @@ fn write_exec_process_receipt(context: &RunContext) -> Result<(), std::io::Error
         trace_id: context.run_id.to_string(),
         exec_id: context.process_id.to_string(),
         pid,
-        started_at: context.started_at,
+        started_at,
     };
     let bytes = serde_json::to_vec(&receipt).map_err(std::io::Error::other)?;
     let path = root.join(format!("{pid}.json"));

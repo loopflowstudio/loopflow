@@ -3194,12 +3194,40 @@ mod tests {
     }
 
     #[test]
+    fn completion_without_admission_retains_observed_process_start_and_missing_event() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let mut row = event_row("process", 1, "run", "completed");
+        row.ts = 20;
+        store
+            .insert_run_event(&row, 10, None, None, Some(0))
+            .unwrap();
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let times: (i64, i64) = connection
+            .query_row(
+                "SELECT started_at,completed_at FROM execs WHERE id='process'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(times, (10, 20));
+        let events = store.list_run_events_since(0).unwrap();
+        assert_eq!(
+            events.len(),
+            1,
+            "a missed start receipt must remain missing"
+        );
+        assert_eq!(events[0].event, "completed");
+    }
+
+    #[test]
     fn a_closed_vocabulary_rejects_an_unknown_node() {
         let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let store = SqliteStore::new(&db_path).expect("store should open");
         let row = event_row("bad-node", 0, "task", "started");
         let error = store
-            .insert_run_event(&row, None, None, None)
+            .insert_run_event(&row, row.ts, None, None, None)
             .expect_err("unknown node must violate the ledger contract");
         assert!(error.to_string().contains("CHECK constraint failed"));
     }

@@ -2188,6 +2188,12 @@ fn launch_skill_agent(
             work: None,
         },
         &context,
+        Some(crate::run_record::RunLaunchRequest::from_prepared(
+            &prepared.config,
+            &AgentCapabilities {
+                chrome: config.chrome,
+            },
+        )),
     )?;
     capture.record_input("initial", &prepared.config.task_prompt);
 

@@ -1351,10 +1351,11 @@ impl CaptureHandle {
         parent: Option<RunId>,
     ) -> StoreResult<RunId> {
         let id = RunId::new();
-        let capture =
-            RunCapture::begin(home, spec, id.clone(), parent, None, None).map_err(record_error)?;
-        write_private_exclusive(&capture.dir.join("prepared"), b"").map_err(record_error)?;
-        sync_dir(&capture.dir).map_err(record_error)?;
+        let (manifest, _) =
+            prepare_manifest(spec, id.clone(), parent, None, None).map_err(record_error)?;
+        let dir = publish_manifest(home, &manifest, None).map_err(record_error)?;
+        write_private_exclusive(&dir.join("prepared"), b"").map_err(record_error)?;
+        sync_dir(&dir).map_err(record_error)?;
         // This is not a CaptureHandle: dropping preparation must not settle a
         // Run whose provider has never been launched.
         Ok(id)
@@ -1418,8 +1419,9 @@ impl CaptureHandle {
     pub(crate) fn begin_with_context(
         spec: RunSpec,
         context: &crate::trace::PreparedTurnContext,
+        launch: Option<RunLaunchRequest>,
     ) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, None, Some(context))
+        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, launch, Some(context))
     }
 
     pub(crate) fn begin_reserved_with_context(
@@ -1534,10 +1536,14 @@ impl CaptureHandle {
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
         let work = spec.work.clone();
-        let capture = RunCapture::begin(lf_home, spec, run_id, parent_run_id, launch, context)
-            .map_err(record_error)?;
-        capture.record_row(work);
-        Ok(Self(Arc::new(Mutex::new(capture))))
+        let (manifest, context_bytes) =
+            prepare_manifest(spec, run_id, parent_run_id, launch, context).map_err(record_error)?;
+        let dir =
+            publish_manifest(lf_home, &manifest, context_bytes.as_deref()).map_err(record_error)?;
+        RunCapture::record_row(&manifest, &dir, work)?;
+        Ok(Self(Arc::new(Mutex::new(RunCapture::from_manifest(
+            manifest, dir,
+        )))))
     }
 
     pub(crate) fn run_id(&self) -> RunId {
@@ -1560,7 +1566,7 @@ impl CaptureHandle {
     /// Claim an admitted conversation and retain the exact provider provenance
     /// used by its tools. A later driver transfer never rewrites this launch.
     pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
-        let Some(exec) = crate::journal::current_process_identity() else {
+        let Some(exec_id) = crate::journal::current_exec_id() else {
             // Library callers outside an actual lf process have no Exec to name.
             return Ok(());
         };
@@ -1581,10 +1587,17 @@ impl CaptureHandle {
                 "Conversation already has a driver; connect to it".into(),
             ));
         }
-        let driver =
-            store.claim_session_driver(&session.id, expected.as_ref(), &exec.exec_id, true)?;
+        let driver = store.claim_session_driver(&session.id, expected.as_ref(), &exec_id, true)?;
         capture.driver = Some((session.id, driver));
         Ok(())
+    }
+
+    pub(crate) fn session_driver(&self) -> Option<(String, crate::exec::SessionDriver)> {
+        self.0
+            .lock()
+            .expect("Run capture mutex poisoned")
+            .driver
+            .clone()
     }
 
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
@@ -1741,30 +1754,18 @@ struct RunCapture {
 }
 
 impl RunCapture {
-    fn begin(
-        lf_home: &Path,
-        spec: RunSpec,
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-        launch: Option<RunLaunchRequest>,
-        context: Option<&crate::trace::PreparedTurnContext>,
-    ) -> std::io::Result<Self> {
-        let (manifest, context_bytes) =
-            prepare_manifest(spec, run_id, parent_run_id, launch, context)?;
-        let dir = publish_manifest(lf_home, &manifest, context_bytes.as_deref())?;
-        Ok(Self::from_manifest(manifest, dir))
-    }
-
-    /// Every Run is a row. A Flow step's row is reserved by its driver and a
-    /// Session's by its reservation; every other launch stores it here.
-    /// Bookkeeping never refuses the launch.
-    fn record_row(&self, work: Option<crate::session::RunWork>) {
-        let manifest = &self.manifest;
+    /// Independent agent launches, including helpers, admit their conversation
+    /// before provider work. Flow reservations have their own fenced publisher.
+    fn record_row(
+        manifest: &RunManifest,
+        dir: &Path,
+        work: Option<crate::session::RunWork>,
+    ) -> StoreResult<()> {
         let invocation_id = match &manifest.flow {
             Some(RunFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
             Some(RunFlowMembership::Independent) | None => None,
         };
-        let run = crate::session::Run {
+        let mut run = crate::session::Run {
             id: manifest.run_id.clone(),
             session_id: None,
             node: None,
@@ -1783,9 +1784,31 @@ impl RunCapture {
             caller_run_id: manifest.parent_run_id.clone(),
             ended: None,
         };
-        if let Err(error) = row_store(&self.dir).and_then(|store| store.create_run(run)) {
-            eprintln!("warning: this Run is not recorded and will not list: {error}");
+        let store = row_store(dir)?;
+        if manifest.harness != "loopflow" && run.invocation_id.is_none() {
+            let id = format!("session_{}", Uuid::new_v4().simple());
+            run.session_id = Some(id.clone());
+            let session = crate::session::Session {
+                id,
+                current_run_id: run.id.clone(),
+                kind: crate::session::SessionKind::Conversation,
+                interactive: manifest.surface != "headless",
+                repo: None,
+                title: run
+                    .skill
+                    .clone()
+                    .unwrap_or_else(|| crate::engine::naming::word_pair(run.id.as_str())),
+                title_source: crate::session::TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: run.created_at,
+            };
+            store.create_session(session, run, None)?;
+        } else {
+            store.create_run(run)?;
         }
+        Ok(())
     }
 
     fn from_manifest(manifest: RunManifest, dir: PathBuf) -> Self {
@@ -2488,6 +2511,40 @@ mod tests {
         std::env::remove_var(super::TASK_ORIGIN_ENV);
         std::env::set_var(super::RUN_ID_ENV, "run_missing");
         assert!(super::task_origin());
+    }
+
+    #[test]
+    fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let home = tempfile::tempdir().unwrap();
+        let launch = RunLaunchRequest::from_prepared(
+            &AgentConfig {
+                task_prompt: "repair the failed operation".into(),
+                ..Default::default()
+            },
+            &AgentCapabilities::default(),
+        );
+        let capture =
+            CaptureHandle::begin_at_with_launch(home.path(), spec(home.path()), launch).unwrap();
+        let store = super::row_store(&capture.artifact_dir()).unwrap();
+        let (session, run) = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+        assert!(!session.interactive);
+        assert_eq!(session.kind, crate::session::SessionKind::Conversation);
+        assert_eq!(session.title, "implement");
+        assert_eq!(run.provider.as_deref(), Some("proof"));
+        assert_eq!(
+            super::read_manifest(&capture.artifact_dir())
+                .unwrap()
+                .launch
+                .unwrap()
+                .task_prompt,
+            "repair the failed operation"
+        );
+        capture.finish("failed").unwrap();
+        let (after, run) = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+        assert_eq!(after.id, session.id);
+        assert_eq!(run.ended.unwrap().outcome, "failed");
+        assert!(after.completed_at.is_none());
     }
 
     #[test]

@@ -103,6 +103,8 @@ Kickoff draft under review: commit `0381a195f`.
 - On Infrastructure's objective: "ok for Infra's goal to include subgoals of
   release. However *KRS and TASKS* should not mention subwave's stuff".
 
+- Softened at once: "mention is a bit strong, but shouldnt focus on?"
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

@@ -32,9 +32,11 @@ A Wave has an id, a name, and a parent.
 
 A subwave is a Wave. It has its own objective, plan, Tasks and schedule.
 
-A parent's objective may include its subwaves' goals. Its KRs and Tasks do
-not: release's KRs and Tasks belong to release's plan, and Infrastructure's
-plan does not mention them. Jack Heart, 2026-09-28.
+A parent's objective may include its subwaves' goals. Its KRs and Tasks
+should not focus on a subwave's work: work that is mainly about release
+belongs in release's plan. Mentioning release is fine. Jack Heart,
+2026-09-28. This is guidance for whoever writes the plan, and nothing
+enforces it.
 
 A Wave's directory sits inside its parent's. Release lives in
 `wave/infrastructure/` only because its parent is Infrastructure. Jack Heart,
@@ -91,9 +93,8 @@ accessible guidance, without bugs, through a smart and recoverable rollout.
 ```
 
 The objective is Jack's sentence, lightly edited at his request.
-Infrastructure's objective keeps "delivers verified releases". Release KRs
-and open release Tasks in Infrastructure's plan move to release's at the
-split. The split creates a Linear Initiative and
+Infrastructure's objective keeps "delivers verified releases". KRs and open Tasks that are mainly about release move to release's plan at
+the split. The split creates a Linear Initiative and
 moves a live schedule, so it runs from the installed `lf` after the code
 lands.
 

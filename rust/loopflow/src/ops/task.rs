@@ -2541,12 +2541,9 @@ async fn stop_task_worker(
             crate::journal::ProcessIdentityEvidence::Dead => {
                 // Release only the captured claim. A concurrent replacement is
                 // rejected by the same transaction used by worker settlement.
-                return if current
-                    .as_ref()
-                    .is_some_and(|current| current.claim.is_some())
-                {
+                return if let Some(current) = current.as_ref().filter(|flow| flow.claim.is_some()) {
                     store
-                        .release_flow(&claim.invocation_id, claim.position_version, Some(claim))
+                        .release_flow(&claim.invocation_id, current.version, Some(claim))
                         .await
                         .map(Some)
                         .map_err(task_error)
@@ -5466,6 +5463,26 @@ mod tests {
             .unwrap();
         let position = claim_stop_fixture(&fixture, child.id().unwrap()).await;
         record_stop_process(ledger.home(), &position);
+        let mut cursor = position.cursor.clone();
+        cursor.progress.direction = Some("Continue with the revised direction".into());
+        fixture
+            .store
+            .checkpoint_flow(
+                position.id(),
+                position.version,
+                &cursor,
+                position.claim.as_ref(),
+                None,
+            )
+            .await
+            .unwrap();
+        let position = fixture
+            .store
+            .task_flow(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(position.version > position.claim.as_ref().unwrap().position_version);
         let (stopped, exit) = tokio::join!(
             super::stop_task_worker(&fixture.store, &fixture.task),
             child.wait(),

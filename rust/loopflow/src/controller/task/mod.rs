@@ -3026,6 +3026,41 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    async fn shared_driver_parks_after_releasing_its_claim_at_a_review() {
+        let guard = super::TestLfBinGuard::pin();
+        let (store, task, _) =
+            human_task_fixture_at(&guard.ledger.home().join("loopflow.db")).await;
+        let flow_dir = task.worktree.join(".lf/flows");
+        std::fs::create_dir_all(&flow_dir).unwrap();
+        std::fs::write(
+            flow_dir.join("op-then-review.yaml"),
+            "- op: rebase --plan\n- step:\n    name: review-design\n    id: review\n    human: true\n",
+        )
+        .unwrap();
+        let flow = super::start_task_flow(&task, "op-then-review").unwrap();
+        let flow = store.start_task_flow(&task.id, flow).await.unwrap();
+        let held = claim(&store, &task, &flow, 404).await;
+        let create: crate::harness::CreateHarness =
+            Box::new(|_, _, _| panic!("parking a review starts no provider"));
+        super::drive_task(store.clone(), task.id.clone(), held, create)
+            .await
+            .unwrap();
+
+        let parked = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert!(parked.is_human());
+        assert!(parked.claim.is_none() && parked.failure.is_none());
+        let (session, run) = store
+            .session(parked.pending_session_id.as_ref().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(run.task_id, Some(task.id));
+        assert_eq!(run.invocation_id.as_deref(), Some(flow.id()));
+        assert_eq!(session.current_run_id, run.id);
+        assert!(!run.published);
+    }
+
+    #[tokio::test]
     async fn selecting_another_flow_replaces_only_the_managed_invocation() {
         let (store, task, _) = human_task_fixture().await;
         let original = super::ensure_flow_position(&store, &task.id, Some("code"))

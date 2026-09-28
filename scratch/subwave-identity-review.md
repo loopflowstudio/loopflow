@@ -117,6 +117,10 @@ Kickoff draft under review: commit `0381a195f`.
   was rebased onto main during the session and this branch followed it to
   `ce97003cf`.
 
+- "realign at parent definitely *should* read its children (but not
+  autoinclude in *all* requests)".
+- "GOAL.md i think instead of <name>,md".
+
 ## Earlier design changes (superseded where noted)
 
 The table below records the first half of the review. The second half

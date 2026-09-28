@@ -1,0 +1,175 @@
+{
+  "date": "2026-09-28",
+  "repository_revision": "a11a6567d",
+  "claude_version": "2.1.284",
+  "evidence_kind": "installed CLI print-mode loader and lifecycle; not Loopflow TUI acceptance",
+  "loader_directory": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-session-loader-yb7rtnqx",
+  "loader": [
+    {
+      "case": "missing",
+      "session_id": "5717a4b7-4ae1-42fa-8e2e-2409c6f2fe82",
+      "exit": 1,
+      "missing_history": true,
+      "login_required": false,
+      "output_bytes": 76,
+      "history_bytes": null
+    },
+    {
+      "case": "empty",
+      "session_id": "e1d4b3f3-2a1d-4ede-a733-fe3667276782",
+      "exit": 1,
+      "missing_history": true,
+      "login_required": false,
+      "output_bytes": 76,
+      "history_bytes": 0
+    },
+    {
+      "case": "metadata",
+      "session_id": "13ba09c2-c676-4cb1-871c-ff789f106f1c",
+      "exit": 1,
+      "missing_history": true,
+      "login_required": false,
+      "output_bytes": 76,
+      "history_bytes": 203
+    },
+    {
+      "case": "user",
+      "session_id": "65f135a0-23bd-4fe6-9479-e2e49ff34a1f",
+      "exit": 0,
+      "missing_history": false,
+      "login_required": false,
+      "output_bytes": 43,
+      "history_bytes": 8890
+    },
+    {
+      "case": "user_assistant",
+      "session_id": "6a624156-ce5f-44ab-b3ba-fd64fa9ff185",
+      "exit": 1,
+      "missing_history": true,
+      "login_required": false,
+      "output_bytes": 76,
+      "history_bytes": 885
+    },
+    {
+      "case": "partial_user",
+      "session_id": "2a7cf096-913b-47f8-9a82-13f45a5e0df3",
+      "exit": 1,
+      "missing_history": true,
+      "login_required": false,
+      "output_bytes": 76,
+      "history_bytes": 80
+    },
+    {
+      "case": "user_partial_tail",
+      "session_id": "368b7118-0a6b-4d3e-a361-dfd6aaddadd3",
+      "exit": 0,
+      "missing_history": false,
+      "login_required": false,
+      "output_bytes": 43,
+      "history_bytes": 9053
+    },
+    {
+      "case": "fresh_exit",
+      "session_id": "9effb791-419a-443a-a31d-0bdaee8ce2ec",
+      "exit": 0,
+      "missing_history": false,
+      "login_required": false,
+      "output_bytes": 43,
+      "history_bytes": 7182
+    }
+  ],
+  "loader_followups": [
+    {
+      "case": "native_exit_resume",
+      "session_id": "f2c17e4d-19c2-4b80-8b86-133c7569f6e1",
+      "exit": 0,
+      "missing_history": false,
+      "output_bytes": 43,
+      "history_exists": true
+    },
+    {
+      "case": "assistant_with_timestamp",
+      "session_id": "2e1ea6dc-5345-47a5-bbce-2d1b17cb360f",
+      "exit": 0,
+      "missing_history": false,
+      "output_bytes": 43,
+      "history_exists": true
+    },
+    {
+      "case": "native_in_other_directory",
+      "session_id": "e974ebb0-cf62-49f2-a4e1-f836810f3602",
+      "exit": 1,
+      "missing_history": true,
+      "output_bytes": 76,
+      "history_exists": true
+    },
+    {
+      "case": "native_empty",
+      "session_id": "f036d124-2666-4fc7-87f7-ae8e80a12fda",
+      "exit": 1,
+      "missing_history": false,
+      "output_bytes": 34,
+      "history_exists": true
+    }
+  ],
+  "cross_directory_followups": [
+    {
+      "case": "user_other_project",
+      "session_id": "46306337-d7e1-4999-a180-397b11888f2b",
+      "exit": 0,
+      "missing_history": false
+    },
+    {
+      "case": "native_command_records_same_project",
+      "session_id": "714d607b-c981-4ef1-bcef-5b32d73dad11",
+      "exit": 0,
+      "missing_history": false
+    },
+    {
+      "case": "native_empty_resume",
+      "session_id": "f036d124-2666-4fc7-87f7-ae8e80a12fda",
+      "exit": 0,
+      "missing_history": false
+    }
+  ],
+  "lifecycle_directory": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-session-lifecycle-uli75zgi",
+  "lifecycle_session_id": "be081662-746a-41cd-9fdd-673ca295f717",
+  "lifecycle": [
+    {
+      "phase": "premature_exit",
+      "was_alive": true,
+      "exit": 143,
+      "history_exists": false
+    },
+    {
+      "phase": "missing_resume",
+      "exit": 1,
+      "missing_history": true,
+      "history_exists": false,
+      "local_command_unavailable": false
+    },
+    {
+      "phase": "fresh_local_command",
+      "exit": 0,
+      "missing_history": false,
+      "history_exists": true,
+      "local_command_unavailable": true
+    },
+    {
+      "phase": "saved_resume",
+      "exit": 0,
+      "missing_history": false,
+      "history_exists": true,
+      "local_command_unavailable": true
+    }
+  ],
+  "limits": [
+    "Synthetic transcripts exercise the native loader, not native writing.",
+    "Print-mode /exit is unavailable; successful status reaches local-command handling.",
+    "No authenticated model response, Loopflow open, or desktop rendering demonstrated."
+  ],
+  "incident_recheck": {
+    "original_artifact_hashes_match": 3,
+    "restored_native_histories_exist": 3
+  }
+}

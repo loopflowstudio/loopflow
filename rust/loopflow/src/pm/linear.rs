@@ -313,13 +313,6 @@ const VIEWER_QUERY: &str = r#"query Viewer {
 
 // Register the webhook that streams issue/comment changes for this repository's
 // one Team. The caller owns the signing secret and public URL.
-const CREATE_WEBHOOK_MUTATION: &str = r#"mutation CreateWebhook($url: String!, $secret: String!, $resourceTypes: [String!]!, $teamId: String!) {
-  webhookCreate(input: { url: $url, secret: $secret, resourceTypes: $resourceTypes, teamId: $teamId }) {
-    webhook {
-      id
-    }
-  }
-}"#;
 
 const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $body: String!) {
   commentUpdate(id: $id, input: { body: $body }) {
@@ -1226,23 +1219,6 @@ impl LinearClient {
         Ok(response.viewer.id)
     }
 
-    /// Register a webhook for `Issue` and `Comment` changes, signed with `secret`.
-    /// Returns the created webhook id.
-    pub async fn create_webhook(&self, url: &str, secret: &str) -> PmResult<String> {
-        let team_id = self.require_team_id()?;
-        let response: WebhookCreateData = self
-            .graphql(
-                CREATE_WEBHOOK_MUTATION,
-                json!({
-                    "url": url,
-                    "secret": secret,
-                    "resourceTypes": ["Issue", "Comment"],
-                    "teamId": team_id,
-                }),
-            )
-            .await?;
-        Ok(response.webhook_create.webhook.id)
-    }
 
     /// Read one issue's title, description, comments, and revision marker.
     pub async fn observe_issue(&self, issue_id: &str) -> PmResult<IssueObservation> {
@@ -1437,16 +1413,7 @@ struct ViewerData {
     viewer: IdNode,
 }
 
-#[derive(Deserialize)]
-struct WebhookCreateData {
-    #[serde(rename = "webhookCreate")]
-    webhook_create: WebhookCreateNode,
-}
 
-#[derive(Deserialize)]
-struct WebhookCreateNode {
-    webhook: IdNode,
-}
 
 #[derive(Deserialize)]
 struct IssueDeletionData {
@@ -1989,42 +1956,6 @@ mod tests {
         assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
     }
 
-    #[tokio::test]
-    async fn create_webhook_registers_issue_and_comment_resources() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "webhookCreate": { "webhook": { "id": "wh-1" } } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-loo".to_string()),
-            base_url,
-        );
-
-        let id = client
-            .create_webhook("https://loopflow.example/linear/webhook", "whsec")
-            .await
-            .expect("create webhook");
-        assert_eq!(id, "wh-1");
-
-        let requests = requests.lock().await;
-        let body: Value = serde_json::from_str(&requests[0].body).expect("body is json");
-        assert_eq!(
-            body["variables"]["url"],
-            "https://loopflow.example/linear/webhook"
-        );
-        assert_eq!(
-            body["variables"]["resourceTypes"],
-            json!(["Issue", "Comment"])
-        );
-        assert_eq!(body["variables"]["teamId"], "team-loo");
-        assert!(!CREATE_WEBHOOK_MUTATION.contains("allPublicTeams"));
-        // Webhook input ids are String!, never ID! (see the position-sensitive
-        // Linear id trap).
-        assert!(CREATE_WEBHOOK_MUTATION.contains("$url: String!"));
-        assert!(!CREATE_WEBHOOK_MUTATION.contains(": ID!"));
-    }
 
     #[tokio::test]
     async fn viewer_id_reads_loopflows_own_user() {

@@ -35,7 +35,7 @@ def repo(tmp_path: Path) -> Path:
             "Process owner | Public surface | External edge |\n"
             "| --- | --- | --- | --- | --- | --- | --- |\n"
             "| **Wave** | Goal | [`Wave`](../rust/loopflow/src/wave/types.rs) | "
-            "`schema_migrations`, `waves` | `lf` | `lf wave`, `wave GET /health` | "
+            "`schema_migrations`, `waves` | `lf` | `lf wave` | "
             "`provider:linear`, `exec:git` |\n"
             """<!-- architecture-map:end -->
 
@@ -74,12 +74,6 @@ name = "lf"
 path = "src/bin/lf.rs"
 """,
     )
-    _write(
-        tmp_path,
-        "rust/loopflow/src/controller/wave/server.rs",
-        'fn router() { Router::new().route("/health", get(health)); }\n',
-    )
-    _write(tmp_path, "rust/loopflow/src/lfd/mod.rs", "fn router() {}\n")
     _write(
         tmp_path,
         "rust/loopflow/src/provider_auth/mod.rs",
@@ -183,15 +177,6 @@ path = "src/bin/keeper.rs"
 
     assert "process boundary missing from map: keeper" in _errors(repo)
 
-
-def test_new_http_route_must_name_its_process_owner(repo: Path) -> None:
-    server = repo / "rust/loopflow/src/controller/wave/server.rs"
-    server.write_text(
-        'fn router() { Router::new().route("/health", get(health))'
-        '.route("/events", get(events)); }\n'
-    )
-
-    assert "HTTP route missing from map: wave GET /events" in _errors(repo)
 
 
 def test_new_provider_must_join_an_external_edge(repo: Path) -> None:

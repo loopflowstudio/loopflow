@@ -76,14 +76,14 @@ pub struct Chapter {
 pub struct ChapterMetricEvidence {
     pub project_id: String,
     pub evaluated_at: i64,
-    pub portfolio: crate::controller::wave::metrics::MetricPortfolioDto,
+    pub portfolio: crate::work::wave::metrics::MetricPortfolioDto,
 }
 
 /// A dated chapter read. Closed chapters read their successor's frozen boundary
 /// evidence, so a Task shipping later never changes the earlier chapter's proof.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChapterSnapshot {
-    pub metrics: crate::controller::wave::metrics::MetricPortfolioDto,
+    pub metrics: crate::work::wave::metrics::MetricPortfolioDto,
     pub metrics_evaluated_at: i64,
     pub id: ChapterId,
     pub wave: String,

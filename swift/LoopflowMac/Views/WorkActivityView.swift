@@ -5,6 +5,7 @@ struct WorkActivityView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
+    @State private var turnIntentError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -222,4 +223,5 @@ struct WorkActivityView: View {
             .background(Color.statusWarning.opacity(0.10))
     }
 
+    @MainActor
 }

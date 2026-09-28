@@ -146,3 +146,41 @@ GOAL.md frontmatter as today. Whether the bridge is a cron-fired poll or a small
 standalone `lf discord serve` process is the implementer's call; either is
 independent of any resident and must not reintroduce a Wave HTTP server, journal
 reader or inbox. Basic send/receive is the bar; anything beyond is follow-up.
+
+## Implementation ledger — 2026-09-27, in progress
+
+Cut start: `5eec3a805b78003e06ba483b0668769e3bfd8fd6`; main comparison:
+`5bdcef6b65419d5db2583ee791cede2f1a95b3df`. This ledger supersedes the
+original deletion list where it conflicts with Jack's final Discord correction.
+
+- Removed the lfd binary, keeper and WaveHost, webhook receiver/registration,
+  Home landing handoff, Wave controller directory and chat/lifecycle commands.
+  Metrics and relocation moved to `work/wave`; the command journal and Task/Flow
+  executor remain. Relocation still protects unmerged authored checkout bytes
+  and excludes historical boot files; it no longer moves the old Wave journal.
+- Chosen bridge: `lf discord serve <wave>` polls the existing GOAL.md channel
+  binding. Each non-bot message launches one finite attributed Run through the
+  ordinary launch and settlement path; only its final answer is posted, with
+  mentions disabled. Cursor is in memory; startup skips old messages. No live
+  Discord request or provider execution occurred during implementation.
+- Implementation choices, not new Jack approval: delete resident-only paused
+  and fader controls. Work enablement stays. Retain `ConversationLaunch.swift`
+  and `ChatReference.swift`: Task/Session launch and ReferenceTextView still use
+  them. Delete chat-specific conversation/rendering types and panes.
+- New installs select CLI plus optional app. Retained old artifact sets still
+  decode the historical `daemon` role and verify their original digest; that
+  role cannot create an entry gate or launch a service. Historical switch input
+  keeps an optional daemon target solely for receipt identity. No old artifacts,
+  installed selection or OS service was changed.
+- New draft `drop_wave_services` drops the receiver inbox/outbox and translates
+  Home supervisor placement to local while retaining PID/heartbeat/generation.
+  Existing exact process and lock recovery still determines takeover authority.
+
+Resource preflight passed twice, latest 67.6 GiB free / 64 GiB floor. Source
+checks scrub LF_*/LOOPFLOW_*, use nice +10, four workers and a 900-second limit.
+Rust library and CLI compilation passed before fixture conversion. First
+all-target compilation identifies obsolete lifecycle/outbox tests; conversion
+is in progress. No behavioral pass, migration rehearsal, Swift pass, configured
+provider, installed Home or rendered app acceptance is claimed yet. A stray
+`#[cfg(test)]` left by fixture-module deletion initially hid the shared Flow
+module; removed it without changing H3 executor logic. Logs: `.lf/tmp/cut-i/`.

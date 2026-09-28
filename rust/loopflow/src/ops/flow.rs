@@ -381,13 +381,13 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{execute_flow_command, TelemetryScorecardEnvelope};
-    use crate::controller::wave::metrics::MetricEvidenceDto;
     use crate::engine::flow::Command as FlowCommand;
     use crate::engine::stream::StreamEvent;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
     use crate::store::{open_store, storage_config_from_env};
+    use crate::work::wave::metrics::MetricEvidenceDto;
     use crate::work::wave::Wave;
 
     #[test]

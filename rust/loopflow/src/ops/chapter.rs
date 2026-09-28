@@ -382,7 +382,7 @@ pub(crate) async fn rotate(
             .map_err(error)?
             .ok_or_else(|| error("initialize the Wave before previewing its first chapter"))?
     } else {
-        crate::controller::wave::registry::ensure_wave_row(&store, repo, &name)
+        crate::work::wave::ensure_wave_row(&store, repo, &name)
             .await
             .map_err(error)?
     };

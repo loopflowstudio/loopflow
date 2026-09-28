@@ -599,8 +599,7 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
         "--locked",
         "--bin",
         "lf",
-        "--bin",
-        "lfd",
+
         "--target-dir",
         str(target_dir),
     ]
@@ -610,7 +609,7 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
     if result.returncode != 0:
         raise RuntimeError("Failed to build bundled control binaries")
 
-    for binary in ("lf", "lfd"):
+    for binary in ("lf",):
         source = bin_dir / binary
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")
@@ -690,7 +689,7 @@ def main() -> int:
                 "--output",
                 type=lambda p: Path(p).expanduser().resolve(),
                 required=True,
-                help="Contents/MacOS directory that receives lf and lfd",
+                help="Contents/MacOS directory that receives lf",
             )
     args = parser.parse_args()
 

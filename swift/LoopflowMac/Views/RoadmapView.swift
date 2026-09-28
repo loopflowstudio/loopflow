@@ -400,6 +400,8 @@ struct RoadmapView: View {
                 selection = .wave(id: roadmap.wave.id)
                 openWave(roadmap.wave)
             },
+            onRefresh: { await refresh() },
+            onError: { controlError = $0 },
             onTaskAction: { task, action in
                 perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
             },
@@ -516,104 +518,14 @@ struct RoadmapView: View {
     }
 }
 
-/// A Wave's placed Home on its row: stable identity and current route, plus the
-/// probed liveness and the *one* contextual action the shared `HomeRuntimeDto`
-/// dictates. `lf wave probe` observes the placed Home, including remote Homes.
-/// Opening chat currently connects locally. Probed once per
-/// Wave card on appear (local reads are instant; a remote Home costs one routed
-/// probe), never once per row and never on the 15s roadmap poll.
-struct HomeControl: View {
-    let wave: WaveSnapshot
-    let onOpen: () -> Void
-
-    @Environment(\.palette) private var palette
-    @State private var runtime: HomeRuntime?
-    @State private var probeError: String?
-    @State private var isProbing = false
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: Spacing.xxs) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "house")
-                    .font(Typography.caption(9))
-                    .foregroundStyle(palette.textSecondary)
-                Text(wave.home.route == "local" ? wave.home.id : wave.home.route)
-                    .font(Typography.caption(10).weight(.medium))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                if isProbing {
-                    ProgressView().controlSize(.small)
-                } else if let runtime {
-                    stateChip(runtime.state)
-                }
-            }
-            HStack(spacing: Spacing.xs) {
-                homeAction
-            }
-        }
-        .task(id: wave.id) { await probe() }
-    }
-
-    @ViewBuilder
-    private var homeAction: some View {
-        if let runtime {
-            switch runtime.action {
-            case .attach, .connect:
-                Button("Open chat") { onOpen() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .help(runtime.endpoint.map { "Attach to \($0)" } ?? "Open the Wave")
-            case .reason(let message):
-                Text(message)
-                    .font(Typography.caption(9))
-                    .foregroundStyle(Color.statusWarning)
-                    .lineLimit(2)
-                    .textSelection(.enabled)
-            }
-        } else if let probeError {
-            Text(probeError)
-                .font(Typography.caption(9))
-                .foregroundStyle(Color.statusError)
-                .lineLimit(2)
-        }
-    }
-
-    private func stateChip(_ state: HomeState) -> some View {
-        let (label, color): (String, Color) = switch state {
-        case .running: ("running", .statusSuccess)
-        case .stopped: ("stopped", .statusNeutral)
-        case .unreachable: ("unreachable", .statusError)
-        case .unknown: ("unknown", .statusWarning)
-        }
-        return Text(label)
-            .font(Typography.caption(9).weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, 1)
-            .background(color.opacity(0.12))
-            .clipShape(Capsule())
-    }
-
-    @MainActor
-    private func probe() async {
-        isProbing = true
-        defer { isProbing = false }
-        do {
-            runtime = try await RegistryQueryLocal.shared.homeProbe(wave: wave.name, cwd: wave.repo)
-            probeError = nil
-        } catch {
-            probeError = error.localizedDescription
-        }
-    }
-
-}
-
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
     let selection: WorkReference?
     let activeControlId: String?
     let onSelect: (WorkReference) -> Void
     let onOpen: () -> Void
+    let onRefresh: () async -> Void
+    let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
@@ -624,11 +536,6 @@ private struct RoadmapWaveCard: View {
             HStack(alignment: .top, spacing: Spacing.md) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack(spacing: Spacing.sm) {
-                        Circle()
-                            .fill(
-                                roadmap.wave.live ? Color.statusSuccess : Color.statusNeutral
-                            )
-                            .frame(width: 7, height: 7)
                         Text(roadmap.wave.name)
                             .font(Typography.sectionTitle(18))
                             .foregroundStyle(palette.text)
@@ -650,10 +557,10 @@ private struct RoadmapWaveCard: View {
                     selection == .wave(id: roadmap.wave.id) ? [.isSelected] : []
                 )
                 Spacer()
-                HomeControl(
-                    wave: roadmap.wave,
-                    onOpen: onOpen
-                )
+                Text(roadmap.wave.home.route == "local" ? roadmap.wave.home.id : roadmap.wave.home.route)
+                    .font(Typography.caption(10))
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
             }
 
             if let chapter = roadmap.chapter { WaveChapterView(chapter: chapter) }

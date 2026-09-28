@@ -5,7 +5,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use crate::controller::wave::metrics::{
+use crate::work::wave::metrics::{
     compose_metric_portfolio, discover_metric_contracts, load_metric_contract,
     MetricContractDiscovery, MetricContractIssueDto, MetricObservation, MetricPortfolioDto,
     ObservationAcceptance,
@@ -215,7 +215,7 @@ impl MetricProducerObservation {
 
     fn bind(
         self,
-        contract: &crate::controller::wave::metrics::MetricContract,
+        contract: &crate::work::wave::metrics::MetricContract,
     ) -> Result<MetricObservation> {
         let mut observation = match self {
             Self::Observed {
@@ -370,7 +370,7 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::controller::wave::metrics::{
+    use crate::work::wave::metrics::{
         load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
     };
     use crate::id::WaveId;
@@ -414,7 +414,7 @@ mod tests {
     }
 
     fn observed(
-        contract: &crate::controller::wave::metrics::MetricContract,
+        contract: &crate::work::wave::metrics::MetricContract,
         end: OffsetDateTime,
     ) -> MetricObservation {
         let mut observation = MetricObservation::Observed {

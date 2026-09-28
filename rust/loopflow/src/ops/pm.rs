@@ -905,7 +905,7 @@ async fn store_pm_snapshot_with_store(
             "failed to serialize PM snapshot for wave/{wave}: {err}"
         ))
     })?;
-    let registered = crate::controller::wave::registry::ensure_wave_row(store, repo, wave)
+    let registered = crate::work::wave::ensure_wave_row(store, repo, wave)
         .await
         .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
     store
@@ -1035,7 +1035,7 @@ async fn pm_init_async(
     }
 
     let store = pm_store().await?;
-    let registered = crate::controller::wave::registry::ensure_wave_row(&store, repo, &wave)
+    let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
         .await
         .map_err(|cause| OpsError::Message(cause.to_string()))?;
     if store
@@ -1652,7 +1652,7 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
         // Retained identity must not authorize deleting an issue that moved to
         // another repository. Fresh ownership is required before the mutation.
         let (wave, _, item, _) = resolve_owned_issue(repo, &repository, issue).await?;
-        let registered = crate::controller::wave::registry::ensure_wave_row(&store, repo, &wave)
+        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
         store
@@ -1673,7 +1673,7 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
                 .await
                 .map_err(pm_to_ops)?;
         }
-        let registered = crate::controller::wave::registry::ensure_wave_row(&store, repo, &wave)
+        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
         store

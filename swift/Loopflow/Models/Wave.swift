@@ -11,8 +11,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let name: String
     public let repo: String
     public let status: WorkStatus
-    public let live: Bool
-
+    public let enabled: Bool
     public let activeTasks: Int
     public let parentWaveId: String?
     public let retiredAt: String?
@@ -24,8 +23,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         name: String,
         repo: String,
         status: WorkStatus,
-        live: Bool = false,
-
+        enabled: Bool = true,
         activeTasks: Int = 0,
         parentWaveId: String? = nil,
         retiredAt: String? = nil,
@@ -36,8 +34,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.name = name
         self.repo = repo
         self.status = status
-        self.live = live
-
+        self.enabled = enabled
         self.activeTasks = activeTasks
         self.parentWaveId = parentWaveId
         self.retiredAt = retiredAt

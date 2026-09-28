@@ -809,49 +809,9 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
             print_pm_reteam_result(&result);
             Ok(())
         }
-        RepoCommand::Webhook { cmd } => run_pm_webhook(&repo, cmd),
     }
 }
 
-/// The Linear webhook receiver and its one-time registration. The signing secret
-/// is read from the environment (sourced from Doppler), never a flag or the
-/// store, so a raw value never lands in shell history or a process listing.
-fn run_pm_webhook(repo_root: &std::path::Path, cmd: &crate::lf::RepoWebhookCommand) -> Result<()> {
-    use crate::lf::RepoWebhookCommand;
-
-    let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").unwrap_or_default();
-    if secret.is_empty() {
-        return Err(anyhow!(
-            "set LF_LINEAR_WEBHOOK_SECRET to a non-empty value (source it from Doppler: `doppler run -- lf repo webhook ...`)"
-        ));
-    }
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let client = crate::ops::pm::linear_client(repo_root).await?;
-        match cmd {
-            RepoWebhookCommand::Register { url, .. } => {
-                let id = client.create_webhook(url, &secret).await?;
-                println!("registered Linear webhook {id} → {url}");
-                Ok(())
-            }
-            RepoWebhookCommand::Serve { addr, .. } => {
-                let viewer = client.viewer_id().await?;
-                let store = std::sync::Arc::new(
-                    crate::store::open_existing_store()
-                        .await
-                        .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
-                );
-                let socket: std::net::SocketAddr = addr
-                    .parse()
-                    .map_err(|error| anyhow!("invalid --addr {addr:?}: {error}"))?;
-                println!(
-                    "lf repo webhook · serving Linear deliveries on http://{socket}/linear/webhook"
-                );
-                crate::webhook::serve(store, secret.into_bytes(), viewer, socket).await
-            }
-        }
-    })
-}
 
 fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     let verb = if result.applied { "moved" } else { "will move" };

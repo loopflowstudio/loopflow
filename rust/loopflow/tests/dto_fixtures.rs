@@ -1,4 +1,4 @@
-use loopflow::controller::wave::metrics::MetricPortfolioDto;
+use loopflow::work::wave::metrics::MetricPortfolioDto;
 use loopflow::durable::WorkStatus;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
@@ -115,10 +115,11 @@ fn wave_detail_preserves_home_and_plan() {
             .as_deref(),
         Some("task-design")
     );
+    assert!(snapshot.wave.enabled);
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
-
+    assert!(decoded.wave.enabled);
     assert_eq!(
         decoded.chapter.as_ref().unwrap().flows,
         snapshot.chapter.as_ref().unwrap().flows
@@ -147,7 +148,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     assert!(matches!(
         detail.metric_portfolio.metrics.as_slice(),
         [metric] if metric.identity.metric_id == "task-loop-trust"
-            && matches!(metric.evidence, loopflow::controller::wave::metrics::MetricEvidenceDto::Met { .. })
+            && matches!(metric.evidence, loopflow::work::wave::metrics::MetricEvidenceDto::Met { .. })
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();

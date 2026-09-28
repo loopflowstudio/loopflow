@@ -78,31 +78,6 @@ public struct RegistryQuery: Sendable {
         try Self.decode(ChapterSnapshot.self, from: await run(["wave", "status", wave, "--chapter", id, "--json"], cwd))
     }
 
-    /// Probe one Wave's Home for liveness and the single contextual action.
-    /// The app never does SSH — `lf wave probe` classifies the Home (local reads
-    /// are instant; remote routes run one `lf wave status` on the target Home)
-    /// and returns the shared `HomeRuntimeDto`. Probe on demand per
-    /// focused Wave, never once per row.
-    public func homeProbe(wave: String, cwd: String?) async throws -> HomeRuntime {
-        let stdout = try await run(["wave", "probe", wave, "--json"], cwd)
-        return try Self.decode(HomeRuntime.self, from: stdout)
-    }
-
-    /// Connect chat on the local Home and return its live status row.
-    public func connectChat(wave: String, cwd: String?) async throws -> [WaveSnapshot] {
-        let stdout = try await run(["__chat-connect", wave, "--json"], cwd)
-        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
-        guard snapshots.count == 1,
-              let snapshot = snapshots.first,
-              snapshot.name == wave,
-              snapshot.live,
-              snapshot.endpoint != nil
-        else {
-            throw RegistryQueryError("Chat connection for \(wave) returned no live Wave receipt")
-        }
-        return snapshots
-    }
-
     /// Every durable plan row across the machine, joined to the same Task
     /// references and live evidence as `lf wave status`. One subprocess reads every
     /// Wave; an optional scope filters that shared snapshot at the source.
@@ -373,54 +348,6 @@ public struct Home: Decodable, Sendable, Hashable {
     }
 }
 
-/// `HomeState` (`engine/wave_home.rs`) — a Home's observed liveness.
-public enum HomeState: String, Decodable, Sendable, Equatable {
-    case unreachable, stopped, running, unknown
-}
-
-/// `HomeActionDto` — the single contextual action a surface should offer, so the
-/// UI never branches on `HomeState` itself: Attach when connected, Connect when
-/// reachable-but-stopped, or the actionable reason otherwise.
-public enum HomeAction: Decodable, Sendable, Equatable {
-    case attach(endpoint: String)
-    case connect(homeId: String)
-    case reason(message: String)
-
-    enum CodingKeys: String, CodingKey {
-        case kind, endpoint, homeId = "home_id", message
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .kind) {
-        case "attach":
-            self = .attach(endpoint: try container.decode(String.self, forKey: .endpoint))
-        case "connect":
-            self = .connect(homeId: try container.decode(String.self, forKey: .homeId))
-        case "reason":
-            self = .reason(message: try container.decode(String.self, forKey: .message))
-        case let other:
-            throw DecodingError.dataCorruptedError(
-                forKey: .kind,
-                in: container,
-                debugDescription: "unknown home action kind \(other)"
-            )
-        }
-    }
-}
-
-/// `HomeRuntimeDto` — a Wave's Home probed for liveness: authority and route, the state
-/// with its evidence, the attach endpoint when running, and the one action.
-/// This is the shared contract the conductor renders; the app never probes SSH
-/// itself — it calls `lf wave probe --json`.
-public struct HomeRuntime: Decodable, Sendable, Equatable {
-    public let home: Home
-    public let state: HomeState
-    public let reason: String
-    public let endpoint: String?
-    public let action: HomeAction
-}
-
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
 public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
@@ -430,8 +357,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let goal: String
     public let repo: String
     public let activeTasks: Int
-    public let live: Bool
-    public let endpoint: String?
+    public let enabled: Bool
     public let createdAt: String?
     public let parentWaveId: String?
     public let retiredAt: String?
@@ -440,7 +366,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, live, endpoint, home
+        case id, name, status, goal, repo, enabled, home
         case activeTasks = "active_tasks"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
@@ -457,7 +383,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
             name: name,
             repo: repo,
             status: status,
-            live: live,
+                    enabled: enabled,
             activeTasks: activeTasks,
             parentWaveId: parentWaveId,
             retiredAt: retiredAt,
@@ -516,14 +442,12 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
-    public let loopState: String?
     public let chapter: ChapterSummary?
     public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
     public let runs: WorkEvidence<RunSnapshot>
     /// The focused Wave's Home probed for liveness and its one contextual action.
-    public let homeRuntime: HomeRuntime
 
     public var workMap: WaveWorkMap {
         WaveWorkMap(objective: wave.goal, chapter: chapter, tasks: tasks)
@@ -532,8 +456,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case wave, chapter, tasks, runs
         case metricPortfolio = "metric_portfolio"
-        case homeRuntime = "home_runtime"
-        case loopState = "loop_state"
         case unavailableTasks = "unavailable_tasks"
     }
 }

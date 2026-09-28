@@ -347,7 +347,7 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
             };
             let mut fallback_roles = vec![
                 crate::machine_install::ArtifactRole::Cli,
-                crate::machine_install::ArtifactRole::Daemon,
+
             ];
             if active
                 .selection
@@ -358,7 +358,7 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                 fallback_roles.extend([
                     crate::machine_install::ArtifactRole::App,
                     crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
-                    crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
+
                 ]);
             }
             let fallback = match active.published_fallback.verify(&fallback_roles) {

@@ -749,3 +749,15 @@ The accepted Linear-status Chapter design in `chapters.md` and Cut I remain
 later work. Existing Chapter-spec documentation still needs that later pass;
 this integration does not claim it implements the accepted H7 design. No new
 product decision or installed-Home permission was needed or obtained.
+
+## Cut I implementation choices (2026-09-27)
+
+The supervisor selected Cut I after H3 review. Paused/fader deletion follows
+its explicit deletion-consistent default; it is not newly attributed approval
+from Jack. Discord remains an independent foreground polling bridge on bounded
+Runs and the existing channel binding. Restart skips historical messages;
+offline replay, durable delivery and conversation continuity are not invented
+as a replacement Wave inbox. See the existing Cut I ledger for current evidence.
+Retained pre-cutover installation artifacts keep historical daemon digest data,
+but new installation and current runtime have no daemon lifecycle. Source
+verification uses private fixtures only; no branch command touches installed Home.

@@ -107,6 +107,26 @@ impl FlowGraph {
             steps: nodes(steps, ""),
         }
     }
+
+    /// Resolve the stored preorder ID into the existing graph wire projection.
+    /// XOR paths are already sorted in the same order as invocation node IDs.
+    pub(crate) fn node_at(&self, mut id: u32) -> Option<&FlowNode> {
+        fn find<'a>(nodes: &'a [FlowNode], remaining: &mut u32) -> Option<&'a FlowNode> {
+            for node in nodes {
+                if *remaining == 0 {
+                    return Some(node);
+                }
+                *remaining -= 1;
+                for path in &node.paths {
+                    if let Some(found) = find(&path.steps, remaining) {
+                        return Some(found);
+                    }
+                }
+            }
+            None
+        }
+        find(&self.steps, &mut id)
+    }
 }
 
 fn nodes(steps: &[ConcreteStep], prefix: &str) -> Vec<FlowNode> {

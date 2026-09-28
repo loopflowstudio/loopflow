@@ -19,9 +19,10 @@ A plan, new tables, renamed types, one passing slice or a contributor's conclusi
 alone does not reach that stop. Publication, installation and real-Home conversion
 are separate actions; no branch binary may touch the installed Home.
 Jack authorized publishing the next verified checkpoint on 2026-09-28 so
-dependent Tasks could use it. The latest repair checkpoint is `2958d289c` on
-PR #1296, based on `c512813b5`; the remote branch, GitHub head and Task record
-were independently checked. This supersedes the earlier local-only hold for
+dependent Tasks could use it. The latest published checkpoint is `705645cd1` on
+PR #1296, based on `a2b59ed50`; the remote branch, GitHub head and Task record
+were independently checked. Current proof and CI limits are in
+[the supervision ledger](parallel-work.md). This supersedes the earlier local-only hold for
 that publication, without claiming code completion or authorizing landing,
 installation or live-Home conversion. The saved 13-step
 feature invocation still contains implement → compress → review-slice →
@@ -393,6 +394,12 @@ implementation step. The in-place AgentSession/FlowSession rename has a populate
 preservation proof; its remaining Run fields are explicitly intermediate. Retain
 the later connect/handoff/history proofs in `parallel-work.md` within their stated
 limits, and complete the exact acceptance rows above, including Flow consumption,
-restart, import, usage, Desktop and indexed discovery. Repair the two current CI
-fixture executable-selection failures alongside the conversion. Update this plan
+restart, import, usage, Desktop and indexed discovery. The two hosted ad hoc/replay fixture failures now have focused local repairs:
+unplanned launches use a writable private store and inaccessible-store admission
+remains refused. Native Flow retry now reserves/reuses a conversation; engine-loss
+recovery retains its thread and old history. Driver-loss recovery still refuses
+an absent Run completion. The next dependency is exact AgentSession-history
+selection under the existing Flow claim, preserving unknown Exec outcomes and
+recorded account/native Home. See `parallel-execution.md` for failures and proof
+scope; neither native retry nor owner renaming completes this cutover. Update this plan
 when evidence changes an implementation choice; do not append another model.

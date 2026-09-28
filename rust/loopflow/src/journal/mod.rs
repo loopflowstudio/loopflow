@@ -835,7 +835,7 @@ pub(crate) fn task_worker_owner_evidence(
     }
 }
 
-fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
+pub(crate) fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "etime="])
         .output()?;

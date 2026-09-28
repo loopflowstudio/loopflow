@@ -1134,6 +1134,11 @@ pub fn launch_agent(
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
         launch.session_driver = capture.0.session_driver();
+        if launch.resume_token.is_none() {
+            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+                CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
+            })?;
+        }
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }

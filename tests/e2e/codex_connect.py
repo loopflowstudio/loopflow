@@ -29,6 +29,7 @@ class Responses(ThreadingHTTPServer):
     def __init__(self) -> None:
         super().__init__(("127.0.0.1", 0), Handler)
         self.requests: list[dict] = []
+        self.fail = False
         self.held = threading.Event()
         self.release = threading.Event()
         self.command = (
@@ -43,6 +44,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.server.requests.append(request)
+        if self.server.fail:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "error": {
+                            "type": "invalid_request_error",
+                            "code": "context_length_exceeded",
+                            "message": "Controlled Flow retry failure",
+                        }
+                    }
+                ).encode()
+            )
+            return
         last_user = max(i for i, item in enumerate(request["input"]) if item.get("role") == "user")
         outputs = [
             item
@@ -178,6 +195,8 @@ def main() -> None:
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--live-handoff", action="store_true")
+    parser.add_argument("--flow-retry", action="store_true")
+    parser.add_argument("--flow-engine-loss", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     server = Responses()
@@ -247,6 +266,16 @@ enabled = false
                     + shlex.join([str(binary), "session", "list", "--all", "--json"])
                 )
                 try:
+                    if args.flow_retry or args.flow_engine_loss:
+                        _flow_retry_contract(
+                            binary,
+                            work,
+                            env,
+                            server,
+                            results,
+                            replace_engine=args.flow_engine_loss,
+                        )
+                        return
                     _launch_contract(binary, work, env, results)
                     if args.public_connect:
                         _public_connection_contract(binary, work, env, server, results)
@@ -567,7 +596,8 @@ def _public_connection_contract(
         )
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
             driver, observed_generation, interactive = database.execute(
-                "SELECT driver_exec_id,provider_generation,interactive FROM agent_sessions WHERE id=?",
+                "SELECT driver_exec_id,provider_generation,interactive "
+                "FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
             before = {row[0] for row in database.execute("SELECT id FROM execs")}
@@ -788,7 +818,7 @@ def _command(args: list[str], work: Path, env: dict[str, str], timeout: int):
         return subprocess.CompletedProcess(args, child.returncode, stdout, stderr)
 
 
-def _launch_contract(binary: Path, work: Path, env: dict[str, str], results: dict) -> None:
+def _init_repo(work: Path, env: dict[str, str]) -> None:
     subprocess.run(["git", "init", "--quiet", str(work)], env=env, check=True)
     subprocess.run(
         [
@@ -807,6 +837,116 @@ def _launch_contract(binary: Path, work: Path, env: dict[str, str], results: dic
         env=env,
         check=True,
     )
+
+
+def _flow_retry_contract(
+    binary: Path,
+    work: Path,
+    env: dict[str, str],
+    server: Responses,
+    results: dict,
+    *,
+    replace_engine: bool,
+) -> None:
+    _init_repo(work, env)
+    for directory in ("skills", "flows"):
+        (work / ".lf" / directory).mkdir(parents=True, exist_ok=True)
+    (work / ".lf/skills/native-proof.md").write_text("Run the fixture command.")
+    (work / ".lf/flows/native-proof.yaml").write_text("- native-proof\n")
+    server.fail = True
+    failed = _command(
+        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        work=work,
+        env=env,
+        timeout=60,
+    )
+    results["first_exit"] = failed.returncode
+    results["first_stderr"] = failed.stderr
+    assert failed.returncode != 0, "controlled native failure must block the Flow"
+    with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        flow, failure = db.execute("SELECT id,failure_json FROM flow_sessions").fetchone()
+        assert failure, failed.stderr
+        before = db.execute(
+            "SELECT id,provider_endpoint,provider_thread,provider_generation,provider_exec_id "
+            "FROM agent_sessions WHERE flow_session_id=?",
+            (flow,),
+        ).fetchone()
+        assert before and before[1] and before[2], before
+        prior = db.execute("SELECT * FROM session_events ORDER BY seq").fetchall()
+        results["before"] = before
+        results["prior_history"] = prior
+        assert any(
+            row["status"] == "failed"
+            for (payload,) in db.execute(
+                "SELECT payload FROM session_events WHERE kind='completed'"
+            )
+            for row in [json.loads(payload)]
+        ), prior
+    if replace_engine:
+        engines = Path(env["LF_PROBE_ENGINES"])
+        results["stopped_engine_receipts"] = [
+            json.loads(path.read_text()) for path in engines.glob("*.json")
+        ]
+        _stop_fixture_engines(engines)
+        results["fixture_engine_stop_completed"] = True
+    server.fail = False
+    retry = _command(
+        [str(binary), "flow", "resume", flow, "--retry"], work=work, env=env, timeout=60
+    )
+    results["retry_exit"] = retry.returncode
+    results["retry_stderr"] = retry.stderr
+    assert retry.returncode == 0, retry.stderr
+    with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        after = db.execute(
+            "SELECT id,provider_endpoint,provider_thread,provider_generation,provider_exec_id "
+            "FROM agent_sessions WHERE flow_session_id=?",
+            (flow,),
+        ).fetchone()
+        results["after"] = after
+        if replace_engine:
+            assert after[0] == before[0] and after[2] == before[2], (
+                "engine recovery must retain the Session and native thread"
+            )
+            assert after[1] and after[1] != before[1]
+            assert after[3] == before[3] + 1
+            assert after[4] != before[4]
+        else:
+            assert after == before, "retry replaced the native conversation or provider"
+        assert (
+            db.execute(
+                "SELECT * FROM session_events WHERE seq<=? ORDER BY seq", (prior[-1][0],)
+            ).fetchall()
+            == prior
+        )
+        completed = db.execute(
+            "SELECT provider_turn,payload FROM session_events WHERE kind='completed' ORDER BY seq"
+        ).fetchall()
+        results["completions"] = completed
+        assert [json.loads(payload)["status"] for _, payload in completed] == [
+            "failed",
+            "completed",
+        ], completed
+        assert completed[0][0] != completed[1][0]
+        assert db.execute("SELECT state FROM flow_sessions WHERE id=?", (flow,)).fetchone() == (
+            "completed",
+        )
+        children = db.execute(
+            "SELECT caller_session_id,caller_provider_generation,parent_exec_id "
+            "FROM execs WHERE via_agent=1"
+        ).fetchall()
+        results["children"] = children
+        assert len(children) == 1 and children[0][:2] == (after[0], after[3]), children
+        assert children[0][2] != before[4], "retry child must follow its new driver"
+        if replace_engine:
+            assert children[0][2] == after[4]
+    assert len(list(Path(env["LF_PROBE_ENGINES"]).glob("*.json"))) == 1 + replace_engine, (
+        "retry must replace only the terminated engine"
+    )
+    results["flow_retry"] = "passed"
+
+
+def _launch_contract(binary: Path, work: Path, env: dict[str, str], results: dict) -> None:
+    _init_repo(work, env)
     launch = _command(
         [str(binary), "-b", "--model", "codex", ":", "Run the fixture command."],
         work=work,
@@ -847,7 +987,8 @@ def _launch_contract(binary: Path, work: Path, env: dict[str, str], results: dic
         ).fetchall()
         results["observed_agent_children"] = children
         results["observed_session_driver"] = database.execute(
-            "SELECT provider_exec_id,driver_exec_id,provider_generation FROM agent_sessions WHERE id=?",
+            "SELECT provider_exec_id,driver_exec_id,provider_generation "
+            "FROM agent_sessions WHERE id=?",
             (results["session_id"],),
         ).fetchone()
         assert len(children) == 1, children

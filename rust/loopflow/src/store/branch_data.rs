@@ -203,6 +203,8 @@ fn seed_store(source: &Path, destination: &Path) -> io::Result<()> {
                 ("driver_exec_id", "driver_exec_id=NULL"),
                 ("driver_generation", "driver_generation=driver_generation+1"),
                 ("provider_endpoint", "provider_endpoint=NULL"),
+                ("provider_pid", "provider_pid=NULL"),
+                ("provider_started_at", "provider_started_at=NULL"),
             ]
             .into_iter()
             .filter(|(column, _)| columns.iter().any(|name| name == column))
@@ -411,6 +413,9 @@ mod tests {
             .record_session_connection("conversation", &driver, "/private/original.sock", "thread")
             .unwrap();
         source
+            .record_session_provider_process("conversation", &driver, 12345, 12)
+            .unwrap();
+        source
             .record_session_turn_origin(
                 "conversation",
                 "thread",
@@ -436,6 +441,18 @@ mod tests {
             history
         );
         assert!(target.session_connection("conversation").unwrap().is_none());
+        assert!(target
+            .session_provider_process("conversation")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            target.session_thread("conversation").unwrap().as_deref(),
+            Some("thread")
+        );
+        assert_eq!(
+            source.session_provider_process("conversation").unwrap(),
+            Some((12345, 12))
+        );
         let detached = target.session_driver("conversation").unwrap().unwrap();
         assert!(detached.exec_id.is_none());
         assert_ne!(detached.generation, driver.generation);

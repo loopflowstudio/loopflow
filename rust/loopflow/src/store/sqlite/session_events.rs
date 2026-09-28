@@ -255,12 +255,33 @@ mod tests {
             .claim_session_driver("conversation", None, &first, false)
             .unwrap();
         store
+            .record_session_connection("conversation", &original, "/original.sock", "thread")
+            .unwrap();
+        store
+            .record_session_provider_process("conversation", &original, 12345, 12)
+            .unwrap();
+        store
             .record_session_turn_origin("conversation", "thread", "later", 1, &first)
             .unwrap();
         let replacement = store
             .claim_session_driver("conversation", Some(&original), &second, true)
             .unwrap();
         assert_eq!(replacement.provider_generation, 2);
+        assert!(store.session_connection("conversation").unwrap().is_none());
+        assert!(store
+            .session_provider_process("conversation")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store.session_thread("conversation").unwrap().as_deref(),
+            Some("thread")
+        );
+        assert!(store
+            .record_session_connection("conversation", &original, "/stale.sock", "wrong-thread")
+            .is_err());
+        assert!(store
+            .record_session_provider_process("conversation", &original, 12346, 13)
+            .is_err());
         store
             .record_session_event(
                 "conversation",

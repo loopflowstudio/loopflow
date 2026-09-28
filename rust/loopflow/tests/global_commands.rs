@@ -33,21 +33,107 @@ fn success(output: Output) -> String {
 }
 
 #[test]
+fn explicit_branch_data_overrides_inherited_observation_and_run_context() {
+    let home = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let store_path = home.path().join(".lf/loopflow.db");
+    SqliteStore::new(&store_path).unwrap();
+    let source_db = source.path().join("loopflow.db");
+    fs::write(&source_db, b"source must not be opened").unwrap();
+    let marker = loopflow::durable::HomeId::new();
+    for args in [
+        vec![
+            "home",
+            "observe",
+            marker.as_str(),
+            "ssh://proof@example.invalid",
+            "--json",
+        ],
+        vec!["ps", "--json"],
+    ] {
+        let output = command(home.path(), home.path(), &args)
+            .env_remove("LF_DB_PATH")
+            .env("LF_CONTROL_HOME", source.path())
+            .env("LF_CONTROL_DB_PATH", &source_db)
+            .env("LF_RUN_DIR", source.path().join("runs/parent"))
+            .env("LF_RUN_ID", "run_parent")
+            .output()
+            .unwrap();
+        success(output);
+    }
+    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    let route: String = connection
+        .query_row(
+            "SELECT route FROM homes WHERE id=?1",
+            [marker.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(route, "ssh://proof@example.invalid");
+    assert_eq!(fs::read(source_db).unwrap(), b"source must not be opened");
+    assert_eq!(fs::read_dir(source.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn task_origin_prevents_promotion_but_allows_read_only_candidate_preflight() {
+    let home = tempfile::tempdir().unwrap();
+    let store_path = home.path().join(".lf/loopflow.db");
+    SqliteStore::new(&store_path).unwrap();
+    let output = command(
+        home.path(),
+        home.path(),
+        &[
+            "install",
+            "promote",
+            "--cli-target",
+            "/unused/lf",
+            "--daemon-target",
+            "/unused/lfd",
+            "--daemon-source",
+            "/unused/candidate",
+        ],
+    )
+    .env("LF_TASK_ORIGIN", "1")
+    // A broken origin check must still stop before any machine effects.
+    .env("LF_INSTALL_PROMOTE_HOP", "6")
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("Task execution cannot change the machine installation"));
+    let output = command(
+        home.path(),
+        home.path(),
+        &[
+            "install",
+            "local-preflight",
+            "--store",
+            store_path.to_str().unwrap(),
+            "--json",
+        ],
+    )
+    .env("LF_TASK_ORIGIN", "1")
+    .output()
+    .unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&success(output)).unwrap();
+    assert!(preview.get("compatibility").is_some());
+}
+
+#[test]
 fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
     let no_tools = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink("/bin/ps", no_tools.path().join("ps")).unwrap();
     for args in [
-        vec!["list"],
-        vec!["--list"],
+        vec!["catalog"],
         vec!["flow", "show", "code"],
         vec!["flow", "validate", "code"],
         vec!["auth", "status"],
         vec!["auth", "status", "--details"],
         vec!["auth", "route", "show"],
         vec!["auth", "route", "show", "--repo", "example/project"],
-        vec!["ls", "--json"],
+        vec!["wave", "list", "--json"],
         vec!["ps", "--json"],
     ] {
         let output = command(home.path(), cwd.path(), &args)
@@ -55,7 +141,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
             .output()
             .unwrap();
         let stdout = success(output);
-        if args == ["list"] || args == ["--list"] {
+        if args == ["catalog"] {
             assert!(stdout.contains("debug"));
         }
         if args.get(1) == Some(&"route") {
@@ -129,7 +215,7 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
         (linked.as_path(), 1, true),
     ] {
         let output = success(
-            command(home.path(), cwd, &["ls", "--json"])
+            command(home.path(), cwd, &["wave", "list", "--json"])
                 .output()
                 .unwrap(),
         );
@@ -140,7 +226,7 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
             "cwd: {}",
             cwd.display()
         );
-        let catalog = success(command(home.path(), cwd, &["list"]).output().unwrap());
+        let catalog = success(command(home.path(), cwd, &["catalog"]).output().unwrap());
         assert_eq!(catalog.contains("checkout-marker"), local_catalog);
     }
     assert!(!outside.path().join(".lf").exists());
@@ -155,7 +241,7 @@ fn broken_git_metadata_is_not_treated_as_an_ordinary_folder() {
         "gitdir: /nonexistent/loopflow-test-repository",
     )
     .unwrap();
-    let output = command(home.path(), cwd.path(), &["list"])
+    let output = command(home.path(), cwd.path(), &["catalog"])
         .output()
         .unwrap();
     assert!(!output.status.success());

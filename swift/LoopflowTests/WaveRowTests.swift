@@ -57,7 +57,7 @@ struct WaveRowViewTests {
 
         // The lens is present, and its accessibility names the reason.
         let lens = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-lens")
-        #expect(try lens.accessibilityLabel().string().contains("listener answered"))
+        #expect(try lens.accessibilityLabel().string().contains("Chat connected"))
     }
 
     @Test("Row shows open-task count only when nonzero")

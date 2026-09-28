@@ -1,5 +1,5 @@
 // Repository rail, Wave list, and the selected Wave's work map + conversation.
-// Discovery is a periodic registry query (`lf ls`); live conversation and
+// Discovery is a periodic registry query (`lf wave list`); live conversation and
 // resident motion stream directly from that Wave's listener.
 
 import SwiftUI
@@ -557,7 +557,6 @@ struct WavesView: View {
         selectedWaveId = waveSelectionId(selected)
     }
 }
-
 
 /// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
 /// the Wave files through `PortfolioRepoState.createWave`.

@@ -14,7 +14,7 @@
 //! listener holds every pen; the resident holds the vendor.
 //!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
-//! - `GET /health` → `{status, loop_state, wave, turns, paused, uptime_seconds}`;
+//! - `GET /health` → `{status, loop_state, wave, turns, uptime_seconds}`;
 //!   `status` is listener liveness — always `serving` while this process
 //!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
 //!   | failed`), or null before any resident has attached; a listener whose resident died reads
@@ -233,9 +233,6 @@ struct HealthBody {
     loop_state: Option<String>,
     wave: String,
     turns: usize,
-    /// Whether the wave is paused (GOAL.md `paused: true`): the listener
-    /// refuses to start turns while set, though it keeps serving and queueing.
-    paused: bool,
     uptime_seconds: i64,
     active_epoch: ConversationEpoch,
     chat_backing_health: ChatBackingHealth,
@@ -419,7 +416,6 @@ async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
         loop_state,
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_len(),
-        paused: state.runtime.paused(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
         active_epoch,
         chat_backing_health,

@@ -1189,7 +1189,7 @@ fn unavailable(flow: &serde_json::Value, kind: &str) -> Option<String> {
 }
 
 #[test]
-fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() {
+fn task_flow_read_pins_topology_counts_both_returns_and_projects_a_blocker() {
     use loopflow::durable::{FlowPosition, TaskFlowBlocker};
     use loopflow::engine::invocation::QueuedInvocation;
 
@@ -1327,28 +1327,6 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
         .unwrap()
         .contains("already pinned"));
 
-    // A replacement that cannot load is rejected before refresh, checkpoint,
-    // or stop: the pinned position is byte-for-byte unchanged.
-    let head = repo.head_sha();
-    let rejected = run_lf(
-        repo.path(),
-        home.path(),
-        &["task", "restart", "INF-123", "--flow", "missing-flow"],
-        None,
-    );
-    assert!(!rejected.status.success());
-    assert!(
-        String::from_utf8_lossy(&rejected.stderr).contains("missing-flow"),
-        "{}",
-        String::from_utf8_lossy(&rejected.stderr)
-    );
-    let after = runtime
-        .block_on(task.store.flow_position(&task.task.id))
-        .unwrap()
-        .unwrap();
-    assert_eq!(after, pinned);
-    assert_eq!(repo.head_sha(), head, "no restart checkpoint was committed");
-
     // A durable restart-only blocker is red and cannot be resumed.
     runtime
         .block_on(task.store.set_flow_position(
@@ -1360,7 +1338,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
                     restart_required: true,
                     observed_at: time::OffsetDateTime::now_utc(),
                 }),
-                ..after
+                ..pinned
             },
         ))
         .unwrap();

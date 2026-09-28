@@ -4,7 +4,7 @@
 /// Beyond identity and lifecycle status, the row carries the few shared facts
 /// the Mac surface spends space on: whether a body is `live`, how much work is
 /// active, and the `parentWaveId` that future ancestry will indent under. All
-/// come straight from `WaveSnapshot` (`lf ls --json`); this is an app model, not
+/// come straight from `WaveSnapshot` (`lf wave list --json`); this is an app model, not
 /// a wire DTO, so the defaults keep non-registry call sites terse.
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
@@ -12,8 +12,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let repo: String
     public let status: WorkStatus
     public let live: Bool
-    public let paused: Bool
-    public let enabled: Bool
+
     public let activeTasks: Int
     public let parentWaveId: String?
     public let retiredAt: String?
@@ -26,8 +25,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         repo: String,
         status: WorkStatus,
         live: Bool = false,
-        paused: Bool = false,
-        enabled: Bool = true,
+
         activeTasks: Int = 0,
         parentWaveId: String? = nil,
         retiredAt: String? = nil,
@@ -39,8 +37,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.repo = repo
         self.status = status
         self.live = live
-        self.paused = paused
-        self.enabled = enabled
+
         self.activeTasks = activeTasks
         self.parentWaveId = parentWaveId
         self.retiredAt = retiredAt

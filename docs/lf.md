@@ -25,9 +25,8 @@ lf <skill>: args                  # run with arguments
 lf <namespace>/<skill>            # run a repo-local or installed namespaced skill
 lf npx/<owner>/<repo>            # fetch any Claude Skill live via npx skills
 lf : "inline prompt"             # no skill file, just prompt
-lf list                          # show skills and flows, including flow expansions
-lf -l                            # short form of `lf list`
-lf ls                            # list Waves in the local registry
+lf catalog                          # show skills and flows, including flow expansions
+lf wave list                            # list Waves in the local registry
 ```
 
 ## Examples
@@ -39,7 +38,7 @@ lf team/review                    # run .lf/skills/team/review.md
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf task prepare DES-123           # tracked Work + worktree, no execution
+lf task checkout DES-123           # tracked Work + worktree, no execution
 lf --task DES-123 design "Revise the discovery design"
 lf --task DES-123 code "Implement the accepted slice"
 lf --task DES-123 research \
@@ -91,7 +90,7 @@ Names resolve in this order:
 1. `.lf/skills/<skill>.md` or `.lf/skills/<ns>/<skill>.md` — repo-local (also overrides builtins)
 2. `.claude/commands/<skill>.md` — Claude Code compatible
 3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
-4. Core built-in skills, grouped by Task, Wave, and Ops (`lf list` shows the live catalog)
+4. Core built-in skills, grouped by Task, Wave, and Ops (`lf catalog` shows the live catalog)
 5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
 Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
@@ -109,7 +108,7 @@ Inside skill files, `{args}` is replaced with whatever comes after the colon.
 ### Builtin Catalog
 
 Skills and flows share one catalog organized by the thing they act on:
-**task**, **project**, **wave**, and **ops**. `lf list` shows each flow both as
+**task**, **project**, **wave**, and **ops**. `lf catalog` shows each flow both as
 written and collapsed into the skills and operations that execute.
 
 Task skills — concrete implementation, investigation, review, and delivery:
@@ -317,12 +316,8 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 ## Running Waves and Tasks
 
 ```bash
-lf start designer                                  # serve it on this machine
-lf wave serve designer                                   # foreground development mode
-lf pause designer                                  # keep listening; queue new turn starts
-lf resume designer                                 # enable queued and future turns
-lf stop designer                                   # stop it; leave the Home keeper running
-lf task prepare DES-123                             # Task Work + worktree, no execution
+lf chat --follow -w designer                         # connect to the Wave conversation
+lf task checkout DES-123                             # Task Work + worktree, no execution
 lf task create --wave designer --title "Dark mode" --notes "Keep contrast readable"
 lf task create --run --wave <wave> --title "fix the flaky chord-timeout test"
 pbpaste | lf task create --run --wave incidents
@@ -332,7 +327,7 @@ lf task run DES-125 --flow incident
 lf -m claude task run DES-126    # retain this agent for every Flow step
 lf task status                 # Task on the checked-out branch
 lf task status DES-123
-lf task advance DES-123                              # drive the saved Flow
+lf task run DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
 lf ask "Review this proof with me"                    # block on a human session
 lf session list --json                                # unresolved human Sessions
@@ -344,7 +339,7 @@ lf task comment DES-123 "take the smaller approach"
 lf task comment DES-123 --json                       # read the complete thread
 lf task interrupt DES-123                             # end the active turn
 lf task wait DES-123
-lf task resume DES-123 --reason "provider credentials repaired"
+lf task run DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
 lf task restart DES-123 --flow build                 # replace the pinned Flow; rejected before any checkpoint if unusable
 lf flow list --json                                  # every Flow with the topology it would pin
@@ -352,24 +347,23 @@ lf task status task_... --json                  # stable Work projection
 lf wave place wave_... home_...                 # move idle Wave Work to a Home
 lf wave relocate wave_... --name platform       # rename a stopped Wave
 lf wave relocate wave_... --repo ../moved-repo  # repair or move its repository
-lf task enable task_...                         # restore Task eligibility
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-`lf start <name>` asks this machine's shared keeper to serve the Wave and
-records this machine as its Home. It enables the Wave in this Home's registry
-and never follows a remote placement record.
-Bare `lf start` is the automatic form: it starts only repo Waves whose optional
-`owner` and `home` fields in `GOAL.md` match this machine and whose recorded
-placement is local and enabled. The named form is the explicit override.
-`lf wave serve <name>` runs the Wave listener in the foreground for development.
+Wave chat connects automatically when opened in the app or through `lf chat`.
+The local connection respects the assigned Home and never moves Work. For a remote
+Home, connect explicitly with `lf ssh HOME chat --follow -w WAVE`; this change
+does not add remote chat transport to the app.
 `lf --wave <wave> wave/operate` makes one finite planning pass over the chapter
 and Tasks. A Wave has exactly one current chapter, resolved internally.
 Task Work has stable identities and small state:
 `ready`, `done`, or `abandoned`. Process liveness, Task condition, Sessions,
-PR state, Flow position, and Run evidence stay separate. `task prepare` ensures the
+PR state, Flow position, and Run evidence stay separate. `task checkout` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
-identity without starting execution. `task run` uses that same substrate,
+identity without starting execution. Checkout works from a dirty feature checkout
+without changing it or canonical main. Repeating it restores an absent Task
+checkout at its recorded path from retained branch history; occupied paths and
+missing committed history remain explicit errors. `task run` uses that same substrate,
 selects a Flow when none is active, and starts its mechanical driver.
 `task restart` waits for its captured worker to exit before replacing the Flow.
 Unknown process identity, a worker that remains live, or a concurrent replacement
@@ -392,12 +386,12 @@ filesystem or snapshot operation fails, the error names the retained issue and
 its recovery command. Placement uses the validated base commit even if a later
 fetch advances the remote branch. An unconfirmed creation reports the uncertainty
 and directs a retry of the same command to look up its marker.
-`task advance` drives an existing Flow until human input, a blocker, interruption,
+`task run` continues an existing Flow until human input, a blocker, interruption,
 or completion; repeated calls report the active driver. A human review waits
 for its exact Session to be completed. Each autonomous boundary starts a fresh provider Run from durable
 Task facts; no provider transcript or resident Task process is required.
-`resume` preserves the Work, selected Flow, Steers, worktree, branch, and PR
-while starting a fresh worker.
+Continuation preserves the Work, selected Flow, Steers, worktree, branch, and PR.
+An explicit `--flow` cannot replace a saved invocation; use `task restart` for that.
 `task comment ISSUE TEXT` posts a Linear Task comment and never starts a worker. Direct Linear
 comments enter the same delivery path. Only Task advancers consume steering;
 independent `--task` or `--as` Runs do not. `task run` selects the Flow when
@@ -421,11 +415,11 @@ design review, then implement → compress → review-slice → loop-decide.
 Iterate returns to implement; Advance reaches `demo human:true`. Completing demo
 passes its feedback to a second loop-decide whose explicit edge also targets
 implement. This outer loop can apply a revised design and demonstrate it again.
-A Task retains `-m` supplied to `task run`, `start`, `resume`, or `restart`.
+A Task retains `-m` supplied to `task run`, `create --run`, or `restart`.
 The chosen agent overrides every step's frontmatter. With no Task choice, the
 step's agent/default_agent applies, then checkout configuration. Omitting `-m`
 keeps the saved choice; `task status` shows the saved choice (`null` in JSON means default). A live Run keeps
-its captured agent; changing it immediately uses interrupt then resume with `-m`.
+its captured agent; changing it immediately uses interrupt then `task run` with `-m`.
 
 `pursue` starts at implementation. `task-design` finishes when its interactive
 design review is completed. Existing pinned invocations retain their definition;
@@ -440,7 +434,7 @@ lf feature                         # start an ordinary invocation
 lf flow resume <invocation>         # continue its saved position
 lf flow resume <invocation> --retry  # retry a recorded failure at the same step
 lf task run DES-123 --flow feature  # start the Task's managed invocation
-lf task advance DES-123             # continue that Task's saved Flow
+lf task run DES-123             # continue that Task's saved Flow
 ```
 
 A **loopflow** is a Flow with one or more backward edges. Each edge names an
@@ -491,7 +485,7 @@ unblock Session still shows Blocked. Observation never authorizes termination.
 If a Task decision Run exits without a valid verdict, its saved Flow becomes
 Blocked, retains that Run and failure reason, and opens the same keyed unblock
 Session. CLI status and the desktop use that shared projection. After completing
-the Session, run `lf task resume TASK`; its feedback seeds reassessment at the
+the Session, run `lf task run TASK`; its feedback seeds reassessment at the
 failed decision, without choosing Advance or Iterate. Retrying Session launch
 reuses its record, including after a launcher failure.
 A candidate decision takes effect only after its Run succeeds. Inspect any
@@ -555,7 +549,7 @@ network command failure, Loopflow records the exact command blocker as a
 non-resumable Task failure. Status assigns the next move to the User with
 `no_action`; missing-process reconciliation and automatic recovery do not
 replace or repeat it. Correct the capability, then run
-`lf task resume ID --reason "<what changed>"` to create a fresh input boundary.
+`lf task run ID --reason "<what changed>"` to create a fresh input boundary.
 
 Worktree safety comes from short OS-held mutation locks and prepared Git state,
 not Run identity. Commit, restart checkpointing, rebase, and land serialize
@@ -632,40 +626,23 @@ Tmux remains process containment, not product identity or advancement authority.
 
 ## Placing Work and Reaching Homes
 
+A Home is an execution destination, such as a laptop or Mac mini. Placing a
+Wave there expresses "do work for this Wave on this machine." The Home's stable
+identity is separate from its network route and from the directory holding its
+local data. Placement alone neither starts a Wave process nor routes an ordinary
+local command to another machine; use `lf ssh` to execute remotely.
+
 ```bash
 lf home id --json
 lf home observe <home-id> ssh://jack@mini.local
 lf wave place <wave-id> <home-id>
-lf start shipper --json
-lf pause shipper --json
-lf resume shipper --json
-lf stop shipper
-lf ssh <home-id> status shipper --json
-lf ssh <home-id> start shipper --json
-lf ssh <home-id> pause shipper --json
+lf chat --follow -w shipper
+lf ssh <home-id> wave status shipper --json
+lf ssh <home-id> chat --follow -w shipper
 ```
 
-`lf start` returns the same Wave rows as `lf ls --json`; it does not define a
-second launch-result model. With no names it starts every eligible Wave in the
-current repo on this machine. `lfd` starts the same eligible set across all
-repositories known to its local store and reconciles it every 30 seconds.
-`lf stop` stops the selected Wave on this machine while `lfd` and sibling Waves
-continue. It disables the Wave in this Home's SQLite registry, so the Home
-leaves that Wave off across daemon and machine restarts without changing the
-repository. An explicit `lf start <name>` enables it again. Bare `lf start`
-does not start disabled Waves.
-
-`lf wave enable|disable <wave>` and `lf task enable|disable <issue>` change
-the same default-on machine control for the selected Wave or Task. Disabling
-a Wave does not prohibit invoking an enabled Task directly, and it does not
-stop an already-running descendant.
-
-`lf pause` and `lf resume` change turn intent, not process residency. A paused
-listener keeps serving and queues messages while refusing message, heartbeat,
-and cron turn starts. `lf ls` reports that authored intent as the required
-`paused` field and the `TURNS` column, independently from `live`. The commands
-preserve the GOAL body and unrelated frontmatter; resume removes the key because
-enabled turns are the default.
+Wave placement, scheduled work, and Task execution are independent of an open
+chat. There are no Wave enable, start, stop, pause, or resume controls.
 
 `lf ssh <HomeId>` resolves the Home's current observed route and makes the
 target prove that identity. The remote `lf` is implicit, so everything after
@@ -709,9 +686,9 @@ Waves sharing `main`.
 ## Reading This Home
 
 ```bash
-lf ls --json                    # every durable Wave and its Home/runtime evidence
-lf ls --current --json          # current Waves, including stopped ones
-lf status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
+lf wave list --json                    # every durable Wave and its Home/runtime evidence
+lf wave list --current --json          # current Waves, including stopped ones
+lf wave status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
 lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
@@ -756,7 +733,7 @@ for an in-flight launcher to publish its client before inspecting it. A Task
 with confirmed deletion cannot start an Ask or resume a native Session. Exact
 `runs --active --task ISSUE` still inspects its retained process evidence.
 
-`lf ls` reads the local Wave registry. `--current` excludes abandoned and retired
+`lf wave list` reads the local Wave registry. `--current` excludes abandoned and retired
 registrations. `lf roadmap --all` spans repositories without inheriting the
 launching process's Wave; an explicit `--wave` still scopes the query.
 
@@ -765,12 +742,47 @@ lf wave forget <wave-id> --dry-run --json
 lf wave forget <wave-id> --json
 ```
 
-Forget an abandoned, disabled, empty registration after removing its authored
+Forget an abandoned, empty registration after removing its authored
 `GOAL.md`. The command leaves repository files alone and refuses registrations
 with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
-Use the installed Home's `lf`; development binaries operate on their own Home.
+Use installed `lf` to change installed data; development binaries use private
+branch data directories.
 
-`lf status` focuses one Wave's local
+When a source build inherits the installed data directory from a Session, it
+reports and uses `~/.lf-dev/worktrees/<source-identity>` instead. Its first database open
+starts from a SQLite snapshot of the installed store, including committed WAL
+data. Later invocations keep branch writes; they never copy them back. Explicit
+disposable data directories still work. The snapshot does not copy Run bundles
+or account files, and does not transfer the launching Session's execution authority.
+An explicit private `LF_HOME` also selects the observation and Run destination,
+even when the Session supplied installed control paths. Child processes use
+that same data directory; re-entering it preserves its own Run context.
+`LF_HOME` is the data-directory setting, not a Home placement selector. The
+snapshot retains recorded Home IDs and placements; it does not register a new
+execution Home or move work to another machine.
+
+```bash
+target/debug/lf task run LOO-321       # reports the installed executable and data directory
+target/debug/lf task status LOO-321    # reads the independent branch copy
+```
+
+When an installation exists, managed Task operations use its CLI and store from
+the start: `run`, `create --run`, `restart`, and Task review Session completion.
+Preparation, issue creation, checkpoints and worker claims happen there.
+The returned Task state comes from the installed database. Non-launching data
+commands keep using the branch copy. A Task that exists only in the branch is preserved there;
+these commands do not register it in installation. Review completion names the
+exact invocation boundary and consumes the installed Session's readiness, without
+copying branch feedback. Direct branch workers are refused while an installation
+owns execution. With no installation, the source build runs workers against its
+own branch data directory; installation is not a prerequisite for development.
+Later `target/debug/lf task status` reads still show the private branch copy.
+Follow managed execution with the installed executable and data directory reported
+by the operation; the two data copies do not synchronize.
+A private data copy does not isolate external effects such
+as provider issue deletion or shared worktree edits.
+
+`lf wave status` focuses one Wave's local
 planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, Run, Task PR, and Steer facts; it reuses
@@ -1201,7 +1213,16 @@ complete release skips asset downloads; missing or stale artifacts are repaired.
 Use `lf rebase` for checkout updates and your project's own tools for dependency
 setup.
 
-To restore a retained development Home while promoting a local build:
+Published installation selects the published data directory. When this differs
+from the current selection, promotion prints both database paths and the retained
+installation ID. Tasks and history in the previous database stay there;
+installation does not transfer them. Use the retained development restoration below to return.
+
+Run installation outside Task execution. Tasks and their descendants cannot
+promote, update, roll back, or recover the machine installation, including after
+switching to private branch data. Read-only candidate preflight remains usable.
+
+To restore retained development data while promoting a local build:
 
 ```bash
 local-bin/lf install promote --from-build local-bin/lf --reuse-home local-<id> \
@@ -1210,14 +1231,22 @@ local-bin/lf install promote --from-build local-bin/lf --reuse-home local-<id> \
 ```
 
 Remove `--preview` to apply. `--reuse-home` reads the prior installation receipt
-and preserves that Home's chapter bindings, Tasks and Runs. `--fresh` instead
-forks published data into a new development Home; it does not carry history from
-another development installation.
+and preserves that installation's chapter bindings, Tasks and Runs. `--fresh`
+instead forks published data into a new development data directory; it does not
+carry history from another development installation.
 
-When a release contains the exact draft SQL already applied in a retained Home,
-local promotion preserves that Home's data and adopts the release receipt without
+When a release contains the exact draft SQL already applied in a retained database,
+local promotion preserves that data and adopts the release receipt without
 rerunning the SQL. Its preview checks the draft order, checksums and resulting
 schema. Changed or unmatched drafts still require explicit recovery.
+
+An incompatible development database reports its path and applied draft names,
+IDs and checksums. Keep that database and its WAL. Recovery advice verifies
+retained artifact bytes and runs the retained CLI's read-only exact-store
+preflight before naming a compatible executable/database pair. If none passes, the
+error names the missing evidence. A retained database preserves its own history;
+switching to it does not transfer or repair private branch writes. Perform any
+installation change outside Task execution.
 
 For an older `lf` whose install command requires a source checkout, upgrade once
 with the external installer, then use `lf install` for subsequent updates:
@@ -1241,10 +1270,10 @@ launchd coalesces sleeping calendar intervals into one run at wake. Rerun
 dependency. Failed downloads or promotion remain nonzero and can be retried.
 Linux supports `lf install`; automatic scheduling currently requires macOS.
 
-`lf list`, authentication, Home identity, and machine inspection also
+`lf catalog`, authentication, Home identity, and machine inspection also
 work outside repositories. `lf auth route show` displays defaults there;
 `lf auth route set --repo owner/name` selects a repository explicitly. Inside a
-repository, catalog and listing commands use its context. Outside, `lf ls`,
+repository, catalog and listing commands use its context. Outside, `lf wave list`,
 `lf roadmap`, and `lf session list` show machine-wide records.
 
 ## lf wt
@@ -1260,7 +1289,7 @@ lf wt create next --plan      # preview placement without fetching or writing
 lf wt switch bugs             # by directory name, identity leaf, or full branch
 lf wt list                    # worktrees as a tree; --format json
 lf wt list --sync             # refresh main before listing
-lf wt ci                      # CI status for the current branch
+lf pr checks                      # CI status for the current branch
 lf wt prune --dry-run         # show terminal or week-stale worktrees
 lf wt prune                   # remove them and their local branches
 ```
@@ -1321,17 +1350,17 @@ Linear Initiative, its one current chapter uses an internal Linear Project, and 
 refreshes the local SQLite read model used by every other read surface.
 
 ```bash
-lf ls                                # linked waves and task counts
+lf wave list                                # linked waves and task counts
 lf wave connect --wave designer --team-key DSG   # connect Wave; establish repo Team once
 lf wave sync --wave designer                  # refresh SQLite from Linear
 lf doctor --planning                           # report drift without writing
-lf status designer                  # read shared planning
-lf status designer --no-sync        # cache-only agent/app read
+lf wave status designer                  # read shared planning
+lf wave status designer --no-sync        # cache-only agent/app read
 lf wave update-plan --wave designer --plan plan.json
 lf wave new-chapter --wave designer --chapter 2026-09 --plan plan.json --dry-run --json
 lf wave new-chapter --wave designer --chapter 2026-09 --plan plan.json --json
 lf wave history --wave designer --json
-lf status designer --chapter 2026-08 --json
+lf wave status designer --chapter 2026-08 --json
 lf task create --wave designer --title "Dark mode"
 lf task edit 1207... --title "Refine dark mode"
 lf task comment 1207... --json       # read the complete comment thread
@@ -1379,8 +1408,8 @@ Linear's Projects view is flat, so provider titles use
 `<canonical Wave path> — <Project>`; nested Waves remain legible as
 `Survival / Infrastructure — Gmail`. Loopflow resolves ownership from stable
 Initiative and Project ids, then strips that presentation prefix and keeps the
-canonical slug. `lf status WAVE` reads cached planning without contacting Linear.
-Use `lf status WAVE --sync` to refresh before reading; the refresh has a
+canonical slug. `lf wave status WAVE` reads cached planning without contacting Linear.
+Use `lf wave status WAVE --sync` to refresh before reading; the refresh has a
 five-second deadline and reports failure when fresh planning is unavailable.
 
 Fresh PM operations renew expiring Linear credentials automatically and store

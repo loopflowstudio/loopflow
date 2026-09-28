@@ -306,19 +306,26 @@ fn repository_team_matrix() {
     }
 
     for (wave, issue) in [("survival", "LOO-1"), ("survival/infrastructure", "LOO-2")] {
-        let show = run_lf(&home, &repo, &["status", wave, "--no-sync", "--json"]);
+        let show = run_lf(
+            &home,
+            &repo,
+            &["wave", "status", wave, "--no-sync", "--json"],
+        );
         let stdout = assert_success(&show, "Wave status");
         assert!(stdout.contains(issue), "{wave} snapshot lost {issue}");
 
-        let run = run_lf(&home, &repo, &["task", "run", issue]);
-        let error = String::from_utf8_lossy(&run.stderr);
-        assert!(!run.status.success());
+        let checkout = run_lf(&home, &repo, &["task", "checkout", issue]);
+        let error = String::from_utf8_lossy(&checkout.stderr);
+        assert!(!checkout.status.success());
         assert!(
             error.contains("terminal and cannot start execution"),
             "unexpected task result: {error}"
         );
     }
-    let status = assert_success(&run_lf(&home, &repo, &["ls", "--json"]), "Wave list");
+    let status = assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     assert!(status.contains("survival"));
     assert!(status.contains("survival/infrastructure"));
     // An unreadable snapshot remains visible as unavailable evidence for its
@@ -348,13 +355,16 @@ fn repository_team_matrix() {
         ),
     );
     drop(reopened);
-    let duplicate = run_lf(&home, &repo, &["task", "run", "LOO-1"]);
+    let duplicate = run_lf(&home, &repo, &["task", "checkout", "LOO-1"]);
     let error = String::from_utf8_lossy(&duplicate.stderr);
     assert!(error.contains("belongs to both"), "{error}");
     // Registry discovery remains available; planning reads reject ambiguity.
-    assert_success(&run_lf(&home, &repo, &["ls", "--json"]), "Wave list");
+    assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     for args in [
-        &["status", "survival", "--json"][..],
+        &["wave", "status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
         &["roadmap", "--wave", "survival", "--json"][..],
     ] {
@@ -435,7 +445,7 @@ fn repository_team_matrix() {
         &run_lf(
             &home,
             &legacy_repo,
-            &["status", "product", "--no-sync", "--json"],
+            &["wave", "status", "product", "--no-sync", "--json"],
         ),
         "legacy cached read",
     );

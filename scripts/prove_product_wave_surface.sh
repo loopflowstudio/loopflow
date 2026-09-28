@@ -13,7 +13,7 @@ OUT="$REPO/.lf/tmp/wave-surface/product-live"
 STATUS="$OUT/status.json"
 
 mkdir -p "$OUT"
-( cd "$TARGET_REPO" && lf status product --json ) >"$STATUS"
+( cd "$TARGET_REPO" && lf wave status product --json ) >"$STATUS"
 
 uv run python - "$STATUS" <<'PY'
 import json
@@ -22,7 +22,7 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text())
 if payload["wave"]["name"] != "product":
-    raise SystemExit("FAIL — lf status did not return the Product Wave")
+    raise SystemExit("FAIL — lf wave status did not return the Product Wave")
 if not payload["wave"]["goal"].strip():
     raise SystemExit("FAIL — Product has no objective")
 chapter = payload["chapter"]

@@ -211,7 +211,7 @@ private actor RunSource {
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
         case ("roadmap", _): return roadmap
-        case ("ls", _): return "[]"
+        case ("wave", "list"): return "[]"
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return session
         case ("flow", "list"): return "[]"

@@ -1,8 +1,8 @@
 # Planning
 
 ```bash
-lf start product
-lf task prepare INF-124
+lf chat --follow -w product
+lf task checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
 lf wave new-chapter --wave product --chapter 2026-09 --plan plan.json --dry-run --json

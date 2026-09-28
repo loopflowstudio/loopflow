@@ -231,7 +231,7 @@ See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. Ten proof jobs run in parallel and feed the
+See `.github/workflows/ci.yml`. These proof jobs run in parallel and feed the
 aggregate `tests-result` check:
 
 | Job | Runner | Command |
@@ -244,10 +244,11 @@ aggregate `tests-result` check:
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
+| `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
-All ten must pass for `tests-result` to pass. `.github/workflows/architecture-drift.yml`
+All must pass for `tests-result` to pass. `.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.
 
@@ -447,6 +448,75 @@ Fresh-store coverage exercises the live SQLite schema. Populated historical
 fixtures exercise the migration chain and verify retained facts. A fresh-store
 pass alone does not prove that an existing Home can upgrade without losing work.
 
+Prove branch data isolation against the real installed CLI after building `lf`:
+
+```bash
+uv run python scripts/verify_branch_data.py --output scratch/branch-data-proof.json
+```
+
+This opts into seeding the source-specific data directory from the current
+installation.
+It writes a synthetic remote Home observation only in that copy, proves that a
+repeat invocation retains it, and checks that the installed CLI still opens its
+store with identical schema and migration receipts. It performs no SSH calls,
+Task launch or promotion. The observation remains in the branch database. This is
+database-isolation evidence, not the complete Task-worker demo for LOO-321.
+
+`ops::task_destination::tests::managed_operations_move_before_branch_effects`
+uses paired disposable stores and a simulated installed subprocess. It proves
+operation routing before branch effects, returned installed snapshots, rejection
+of branch-only Task identities, and preservation of private writes after installed
+failure. Its test-only installation root cannot redirect production installation
+authority. It does not launch an actual Task worker or
+prove installed Session readiness, tmux, or daemon execution.
+
+Run the real CLI resume regressions with isolated installation authority:
+
+```bash
+uv run python scripts/test_task_installation.py
+```
+
+This copies source into a disposable Linux container and creates an OS account
+whose installation records select the compiled CLI/daemon. An ELF trailer gives
+the installed CLI a distinct identity: byte-identical copies are installed too,
+regardless of path. No host Home, credentials or installation is mounted.
+These installation tests run only through
+this harness (`task-installation` in CI); ordinary Rust runs mark them ignored.
+They prove Task continuation’s auto-merge revocation and review continuity, agent
+selection read from the installed database while branch reads remain private, and direct-open
+refusal without changing the owned development database/WAL bytes. Review
+completion rejects branch-only feedback and a stale readiness token, resolves
+both boundary and Run selectors, records the exact installed feedback once,
+and preserves the branch Flow and events. The same review scenario proves agent
+persistence and repeated `task run` retaining its invocation, cursor and prepared
+review Run. It also rejects a missing replacement Flow before changing the installed
+review or committing a restart checkpoint. Managed-operation CLI assertions belong
+in this disposable account: overriding `HOME` or `LF_HOME` does not remove the
+host account's installation authority. Read-only Flow projections stay in the
+ordinary suite.
+
+The recovery proof adds a draft unknown to the branch, preserves both
+databases and independent private writes, recommends the
+installed executable/database pair only after its real exact-store preflight,
+and refuses
+that recommendation after the installed schema changes or executable disappears.
+The focused `incompatible_seed_preserves_source_receipts_and_private_writes`
+unit proof covers a newer source snapshot, its WAL, and reseeding without replacing
+private work. GitHub is
+simulated and review Runs are prepared without launching a provider. These are
+real current-CLI operation proofs, not older-version compatibility, promotion
+or configured worker acceptance.
+The harness keeps Docker build/registry caches, serializes use of its build
+cache, and destroys the account and installation after each attempt.
+
+The `store::branch_data::tests` private-data subprocess fixture checks ordinary
+storage, observation, Run artifacts, and child context with stale control pins,
+including a relative custom database and malformed inherited control path.
+`global_commands` has focused real-CLI proofs for explicit data-directory
+reads/writes and
+Task-origin promotion refusal with read-only candidate preflight. These use
+disposable stores; they do not prove installed worker routing or a live demo.
+
 After rebasing across a release cut, run the installed-development migration
 tests as well as the new migration's tests. Adoption fixtures must include the
 draft receipts for every pending release; a fixture pinned to one released
@@ -552,7 +622,7 @@ public release-channel demo. Discard the container afterward.
 ```bash
 package-smoke/lf --version
 package-smoke/lf --help
-package-smoke/lf --list
+package-smoke/lf catalog
 ```
 
 Nightly package artifacts are verification only. They are uploaded for 14 days and not deployed.

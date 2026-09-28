@@ -25,7 +25,7 @@ Reply plainly and directly — the answer itself, usually a sentence or two, to 
 person. Read what you already have: the Wave's identity and memory, the recent
 chat in front of you, and only if it helps answer *this* exchange,
 `lf roadmap --wave <exact-wave> --json` for the plan or
-`lf status <exact-wave> --json` for live execution. If a reader fails, say so in
+`lf wave status <exact-wave> --json` for live execution. If a reader fails, say so in
 one line and answer from what you have.
 
 ## Launch work only when asked

@@ -68,49 +68,11 @@ public struct WaveLens: Sendable, Hashable {
         return WaveLens(color: .black, reason: "Off · no active work")
     }
 
-    /// Wave lens (list context): derived only from the shared runtime `lf ls`
-    /// carries for every row — liveness, lifecycle status, and active-work counts.
-    /// Per-Task condition is a focused `lf status` read, never fetched per row, so
-    /// the list projects from the coarse runtime facts. An unregistered Wave has
-    /// no such reading; see `WaveViewModel.lens`, which shows it as unknown rather
-    /// than guessing from a local session probe.
-    ///
-    /// - green: canonical Work is advancing and the Wave listener answered, or
-    ///   the listener answered while Work claims no current body.
-    /// - blue: authored policy pauses new turns; listener evidence stays in the reason.
-    /// - red: enabled and observed liveness have not converged.
-    /// - black: disabled and no listener remains.
-    public static func forWave(
-        live: Bool,
-        paused: Bool = false,
-        enabled: Bool = true,
-        activeTasks: Int
-    ) -> WaveLens {
-        if !enabled {
-            return live
-                ? WaveLens(color: .red, reason: "Disabled · listener still answered")
-                : WaveLens(color: .black, reason: "Disabled on this Home")
-        }
-        if paused {
-            return WaveLens(
-                color: .blue,
-                reason: live
-                    ? "Paused · listener is serving and queueing input"
-                    : "Paused · listener is stopped"
-            )
-        }
-        if live {
-            return WaveLens(color: .green, reason: "Listening · Wave listener answered")
-        }
-        let outstanding = activeTasks
-        if outstanding > 0 {
-            let noun = outstanding == 1 ? "item" : "items"
-            return WaveLens(
-                color: .red,
-                reason: "Stopped · \(outstanding) active \(noun) still expect work"
-            )
-        }
-        return WaveLens(color: .red, reason: "Expected live · Wave listener did not answer")
+    /// Chat availability does not decide whether a Wave's Tasks can advance.
+    public static func forWave(live: Bool) -> WaveLens {
+        live
+            ? WaveLens(color: .green, reason: "Chat connected")
+            : WaveLens(color: .black, reason: "Chat connects when opened")
     }
 
     /// Fold Task conditions into the parent's single reading. Priority is

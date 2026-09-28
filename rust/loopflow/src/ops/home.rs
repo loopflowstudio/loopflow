@@ -48,6 +48,7 @@ async fn probe_remote(wave: &str, home: &Home, _route: &HomeRoute, repo: &Path) 
     let wave = wave.to_string();
     let cmd = vec![
         "lf".to_string(),
+        "wave".to_string(),
         "status".to_string(),
         wave,
         "--json".to_string(),
@@ -63,7 +64,7 @@ async fn probe_remote(wave: &str, home: &Home, _route: &HomeRoute, repo: &Path) 
         Ok(Err(SshCaptureError::Command { code, stderr })) => HomeRuntimeDto::new(
             home,
             HomeState::Unknown,
-            format!("Home answered but `lf status` exited {code}: {stderr}"),
+            format!("Home answered but `lf wave status` exited {code}: {stderr}"),
             None,
         ),
         Ok(Err(SshCaptureError::Local(reason))) => {

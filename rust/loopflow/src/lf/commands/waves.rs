@@ -1,11 +1,11 @@
-//! `lf ls`, `lf status`, and `lf roadmap` — read the wave registry (`store`).
+//! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
 //!
-//! `lf ls` lists every durable Wave registry row and projects authored policy
-//! from `GOAL.md` plus current listener presence. `lf status [wave]` adds the
+//! `lf wave list` lists every durable Wave registry row and projects authored policy
+//! from `GOAL.md` plus current listener presence. `lf wave status [wave]` adds the
 //! Wave's current chapter and Tasks, the runs it has produced, what is waiting on
 //! somebody, and live loop state; with no argument it reports the Wave this
 //! process is running inside. Both are read-only; `--json` is the dashboard
-//! contract. A stopped Wave remains visible, inert, and restartable.
+//! contract. A Wave remains visible when its chat is disconnected.
 //!
 //! Evidence the machine could not read stays [`Evidence::Unavailable`] — an
 //! audit surface that renders "I could not look" as "nothing happened" is worse
@@ -38,8 +38,8 @@ use crate::work::task::{
 };
 use crate::work::wave::Wave;
 
-/// One wave's registry snapshot — the `lf ls` row and the `wave` field of
-/// `lf status`. Wire type consumed by Loopflow: every field is required or
+/// One wave's registry snapshot — the `lf wave list` row and the `wave` field of
+/// `lf wave status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveSnapshot {
@@ -54,10 +54,6 @@ pub struct WaveSnapshot {
     pub active_tasks: u32,
     /// Whether a wave server answered `/health` at the discovery endpoint.
     pub live: bool,
-    /// Whether authored policy currently refuses new turn starts.
-    pub paused: bool,
-    /// Whether this Home is allowed to keep the Wave running.
-    pub enabled: bool,
     /// Loopback endpoint of the live server, `null` when stopped.
     pub endpoint: Option<String>,
     /// RFC3339 creation time, `null` when the row predates the column.
@@ -72,7 +68,7 @@ pub struct WaveSnapshot {
     pub home: Home,
 }
 
-/// `lf status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
+/// `lf wave status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
 /// when a server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
@@ -92,7 +88,7 @@ pub struct WaveDetailSnapshot {
     pub runs: Evidence<RunSnapshot>,
     /// The Wave's Home probed for liveness: state, evidence, attach endpoint, and
     /// the one contextual action a conductor surface should offer. Probed for the
-    /// focused Wave only — `lf ls` stays placement-only.
+    /// focused Wave only — `lf wave list` stays placement-only.
     pub home_runtime: HomeRuntimeDto,
 }
 
@@ -228,7 +224,7 @@ pub struct TaskConditionSnapshot {
     pub local_progress: LocalProgressEvidence,
 }
 
-/// Stable references for one Task, shared verbatim by `lf status` and
+/// Stable references for one Task, shared verbatim by `lf wave status` and
 /// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
 /// from the durable Task and outlives its execution and final PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -502,7 +498,7 @@ pub struct RoadmapTask {
     pub section: RoadmapSection,
 }
 
-/// `lf ls` — every wave the registry knows, running and stopped alike.
+/// `lf wave list` — every wave the registry knows, running and stopped alike.
 /// Keep only Waves whose repository matches the current working directory,
 /// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
 /// repo, where there is nothing to scope to) returns every Wave unchanged.
@@ -551,7 +547,7 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
     wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
-/// `lf status [wave]` — one Wave's Work hierarchy, Runs, and loop.
+/// `lf wave status [wave]` — one Wave's Work hierarchy, Runs, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -604,7 +600,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one runtime observation for the whole
-/// read, bounded Git probes for Task Work, and no network. `lf status`
+/// read, bounded Git probes for Task Work, and no network. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
@@ -783,7 +779,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     }
 }
 
-/// The wave `lf status` is about: the name the caller typed, else the wave this
+/// The wave `lf wave status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
     // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
@@ -816,17 +812,6 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     let repo = wave.repo().to_string();
     let goal_repo = crate::engine::worktrees::main_repo_root(Path::new(&repo))
         .unwrap_or_else(|_| Path::new(&repo).to_path_buf());
-    let paused = if wave.is_retired() {
-        false
-    } else {
-        match crate::work::wave::config::try_read_wave_config(&goal_repo, wave.name()) {
-            Ok(config) => config.and_then(|config| config.paused).unwrap_or(false),
-            Err(error) => {
-                tracing::warn!(wave = wave.name(), %error, "Wave policy is unavailable");
-                false
-            }
-        }
-    };
     let endpoint = if repo.is_empty() || wave.is_retired() {
         None
     } else {
@@ -867,8 +852,6 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         repo,
         active_tasks,
         live: endpoint.is_some(),
-        paused,
-        enabled: placement.enabled,
         endpoint,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
@@ -903,7 +886,7 @@ fn snapshot_task_runtime(
 
 /// The wave's local PM snapshot, or `None` when none has been synced. `None` is
 /// a real, readable state ("no plan on this machine yet") — a caller that must
-/// tell it apart from "the plan is empty" keeps the `Option`; `lf status`
+/// tell it apart from "the plan is empty" keeps the `Option`; `lf wave status`
 /// and `lf roadmap` both render it as unavailable.
 async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmSnapshot>> {
     let Some(row) = store
@@ -1238,7 +1221,7 @@ async fn snapshot_task_detail(
         prs: prs
             .iter()
             .map(|pr| {
-                // PR emptiness is an execution-plane fact (`lf status`); it costs
+                // PR emptiness is an execution-plane fact (`lf wave status`); it costs
                 // an additional Git comparison, so `lf roadmap` opts out. The
                 // Task condition already carries the progress evidence it needs.
                 let empty = match (task, active) {
@@ -1575,7 +1558,7 @@ fn next_move_for_task(
 }
 
 /// The invoking context's wave id: `LF_WAVE_ID`, else `None` (the caller
-/// errors). Kept minimal — `lf status` with no arg is a convenience, not the
+/// errors). Kept minimal — `lf wave status` with no arg is a convenience, not the
 /// resolution surface `lf chat` owns.
 fn ambient_wave() -> Option<String> {
     std::env::var(crate::work::wave::context::WAVE_ID_ENV)
@@ -1608,7 +1591,7 @@ fn format_time(ts: time::OffsetDateTime) -> Option<String> {
         .ok()
 }
 
-/// With no registry on this machine, `lf ls`/`status` have nothing to read —
+/// With no registry on this machine, `lf wave list`/`status` have nothing to read —
 /// emit the empty snapshot (`[]`/`null`) or a User note, and succeed.
 fn no_registry(json: bool, empty: &str) -> Result<()> {
     if json {
@@ -1626,26 +1609,23 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {home:<16}  ENDPOINT{reset}",
+        "{bold}{name:<16}  {repo:<28}  {status:<8}  {live:<5}  {tasks:>5}  {home:<16}  ENDPOINT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
         repo = "REPOSITORY",
         status = "STATUS",
-        enabled = "ENABLED",
-        turns = "TURNS",
+
         live = "LIVE",
         tasks = "TASKS",
         home = "HOME",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {home:<16}  {endpoint}",
+            "{name:<16}  {repo:<28}  {status:<8}  {live:<5}  {tasks:>5}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
             status = wave.status.label(),
-            enabled = if wave.enabled { "yes" } else { "no" },
-            turns = if wave.paused { "paused" } else { "enabled" },
             live = if wave.live { "yes" } else { "no" },
             tasks = wave.active_tasks,
             home = truncate(&wave.home.route, 16),
@@ -1682,7 +1662,7 @@ fn home_state_label(state: HomeState) -> &'static str {
 fn home_action_label(action: &HomeActionDto) -> String {
     match action {
         HomeActionDto::Attach { endpoint } => format!("Attach ({endpoint})"),
-        HomeActionDto::Start { home_id } => format!("Start on {home_id}"),
+        HomeActionDto::Connect { home_id } => format!("Open chat on {home_id}"),
         HomeActionDto::Reason { message } => message.clone(),
     }
 }
@@ -1714,11 +1694,6 @@ fn print_status(status: &WaveDetailSnapshot) {
         );
     }
     println!("  goal      {}", wave.goal);
-    println!(
-        "  turns     {}",
-        if wave.paused { "paused" } else { "enabled" }
-    );
-    println!("  enabled   {}", wave.enabled);
     println!(
         "  home      {} ({})  [{}]",
         wave.home.id,

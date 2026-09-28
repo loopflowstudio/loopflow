@@ -36,7 +36,7 @@ pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
     match crate::engine::load_flow(name, repo) {
         Ok(flow) => Ok(Target::Flow(flow)),
         Err(LoadError::FlowNotFound(_)) => Err(anyhow::anyhow!(
-            "skill or flow not found: {name}. Run `lf list` to see the catalog."
+            "skill or flow not found: {name}. Run `lf catalog` to see the catalog."
         )),
         Err(err) => Err(err.into()),
     }

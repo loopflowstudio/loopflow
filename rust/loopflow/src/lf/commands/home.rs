@@ -1,9 +1,4 @@
-//! Inspect durable Homes and run Waves on this machine.
-//!
-//! `lf` is machine-local: `lf start shipper` starts shipper here. To choose a
-//! different machine, make that boundary explicit with
-//! `lf ssh <target> start shipper`. Durable Home placement records where the
-//! Wave is running; it does not silently reroute ordinary commands.
+//! Inspect Home identity and connect local Wave chat without changing placement.
 
 use std::path::Path;
 
@@ -13,7 +8,7 @@ use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::HomeCommand;
 use crate::work::wave::context::resolve_managed_wave_sync;
 
-/// `lf home <id|observe|probe>` — inspect durable Home identity and reachability.
+/// `lf home <id|observe>` — inspect durable Home identity and reachability.
 pub fn run(cmd: &HomeCommand) -> anyhow::Result<()> {
     match cmd {
         HomeCommand::Id { json } => id_cmd(*json),
@@ -22,10 +17,6 @@ pub fn run(cmd: &HomeCommand) -> anyhow::Result<()> {
             route,
             json,
         } => observe_cmd(home_id, route, *json),
-        HomeCommand::Probe { wave, json } => {
-            let repo = crate::repo::discover_repo_root(&std::env::current_dir()?)?;
-            probe_cmd(wave.as_deref(), *json, repo.as_deref())
-        }
     }
 }
 
@@ -73,14 +64,14 @@ fn observe_cmd(home_id: &crate::durable::HomeId, route: &str, json: bool) -> any
     Ok(())
 }
 
-fn probe_cmd(wave: Option<&str>, json: bool, repo: Option<&Path>) -> anyhow::Result<()> {
+pub fn probe_cmd(wave: Option<&str>, json: bool, repo: Option<&Path>) -> anyhow::Result<()> {
     let selected = resolve_managed_wave_sync(repo, wave).map_err(|err| anyhow!("{err}"))?;
     let wave_id = selected.id().clone();
     let rt = tokio::runtime::Runtime::new()?;
     let (wave, runtime) = rt.block_on(async {
         let store = crate::store::open_existing_store()
             .await
-            .ok_or_else(|| anyhow!("lf home probe needs an initialized local store"))?;
+            .ok_or_else(|| anyhow!("lf wave probe needs an initialized local store"))?;
         let wave = store
             .get_wave(&wave_id)
             .await?
@@ -104,9 +95,14 @@ fn probe_cmd(wave: Option<&str>, json: bool, repo: Option<&Path>) -> anyhow::Res
     Ok(())
 }
 
-pub fn start(waves: &[String], wave_ids: &[String], json: bool, repo: &Path) -> anyhow::Result<()> {
+pub fn connect_chat(
+    waves: &[String],
+    wave_ids: &[String],
+    json: bool,
+    repo: &Path,
+) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let responses = runtime.block_on(start_inner(waves, wave_ids, repo))?;
+    let responses = runtime.block_on(connect_chat_inner(waves, wave_ids, repo))?;
     if json {
         println!("{}", serde_json::to_string(&responses)?);
         return Ok(());
@@ -118,44 +114,7 @@ pub fn start(waves: &[String], wave_ids: &[String], json: bool, repo: &Path) -> 
     Ok(())
 }
 
-pub fn stop(name: &str, repo: &Path) -> anyhow::Result<()> {
-    let name = crate::ops::util::normalize_wave_name(name)
-        .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, &name)?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let stopped = runtime.block_on(async {
-        let store = crate::store::open_existing_store()
-            .await
-            .ok_or_else(|| anyhow!("lf stop needs an initialized local store"))?;
-        let wave = store
-            .get_wave_at(&locator)
-            .await?
-            .ok_or_else(|| anyhow!("Wave '{name}' was not found"))?;
-        let local = store.local_home().await?;
-        let work = crate::durable::WorkRef::Wave(wave.id().clone());
-        let placement = store.placement(&work).await?;
-        if placement.home_id != local.id {
-            return Err(anyhow!(
-                "Wave {name} is placed on {}, not local Home {}",
-                placement.home_id,
-                local.id
-            ));
-        }
-        if let Some(stopped) = crate::lfd::stop_wave(&local.id, wave.id()).await? {
-            return Ok(stopped);
-        }
-        store.set_work_enabled(&work, false).await?;
-        crate::controller::wave::request_stop(Path::new(wave.repo()), wave.name()).await
-    })?;
-    if stopped {
-        println!("stopped wave {name}");
-    } else {
-        println!("wave {name} is already stopped");
-    }
-    Ok(())
-}
-
-async fn start_inner(
+pub(crate) async fn connect_chat_inner(
     names: &[String],
     raw_wave_ids: &[String],
     repo: &Path,
@@ -163,7 +122,7 @@ async fn start_inner(
     let store = std::sync::Arc::new(
         crate::store::open_store(&crate::store::storage_config_from_env()?)
             .await
-            .map_err(|error| anyhow!("lf start cannot open this Home registry: {error}"))?,
+            .map_err(|error| anyhow!("chat cannot open this Home registry: {error}"))?,
     );
     let local = store.local_home().await?;
     validate_expected_home(&local.id)?;
@@ -180,14 +139,13 @@ async fn start_inner(
         .iter()
         .collect::<std::collections::BTreeSet<_>>();
     if unique_names.len() != normalized_names.len() {
-        return Err(anyhow!("duplicate Wave name in start request"));
+        return Err(anyhow!("duplicate Wave name in chat connection"));
     }
     for name in wave_ids.keys() {
         if !normalized_names.contains(name) {
             return Err(anyhow!("--wave-id names unselected Wave '{name}'"));
         }
     }
-    crate::lfd::ensure(&local.id, repo.as_path()).await?;
     let selected = if names.is_empty() {
         if !wave_ids.is_empty() {
             return Err(anyhow!("--wave-id requires explicit Wave names"));
@@ -196,17 +154,16 @@ async fn start_inner(
         let known = store.list_waves(Some(&repo_name)).await?;
         if known.is_empty() {
             return Err(anyhow!(
-                "no Waves found in {}; create one with `lf wave create <name>`",
+                "no Waves found in {}; author one in wave/<name>/GOAL.md",
                 repo
             ));
         }
         crate::wave_host::waves_for_home(&store, &local.id, Some(&repo_name))
             .await?
             .into_iter()
-            .map(|wave| StartSelection {
+            .map(|wave| ChatSelection {
                 wave,
                 created: false,
-                prior_home: Some(local.id.clone()),
             })
             .collect()
     } else {
@@ -223,10 +180,13 @@ async fn start_inner(
                 ),
                 None => None,
             };
-            candidates.push((name.clone(), existing_wave, prior_home));
+            if let Some(home_id) = prior_home.as_ref().filter(|id| **id != local.id) {
+                return Err(anyhow!("Wave {name} belongs to Home {home_id}; connect there with `lf ssh {home_id} chat --follow -w {name}`"));
+            }
+            candidates.push((name.clone(), existing_wave));
         }
         let mut selected = Vec::with_capacity(candidates.len());
-        for (name, existing_wave, prior_home) in candidates {
+        for (name, existing_wave) in candidates {
             let created = existing_wave.is_none();
             let wave_result = match wave_ids.get(&name) {
                 Some(id) => {
@@ -259,11 +219,7 @@ async fn start_inner(
                     };
                 }
             };
-            selected.push(StartSelection {
-                wave,
-                created,
-                prior_home,
-            });
+            selected.push(ChatSelection { wave, created });
         }
         selected
     };
@@ -275,22 +231,9 @@ async fn start_inner(
         .iter()
         .map(|selection| selection.wave.id().clone())
         .collect::<Vec<_>>();
-    for selection in &selected {
-        if let Err(error) = store
-            .place_work(
-                &crate::durable::WorkRef::Wave(selection.wave.id().clone()),
-                &local.id,
-            )
-            .await
-        {
-            let rollback = rollback_selections(&store, &selected).await;
-            return match rollback {
-                Ok(()) => Err(error.into()),
-                Err(rollback) => Err(anyhow!(
-                    "Wave placement failed: {error}; registry rollback failed: {rollback}"
-                )),
-            };
-        }
+    if let Err(error) = crate::lfd::ensure(&local.id, repo.as_path()).await {
+        rollback_selections(&store, &selected).await?;
+        return Err(error);
     }
     let outcomes = match crate::lfd::start_waves(&local.id, wave_ids).await {
         Ok(outcomes) => outcomes,
@@ -369,32 +312,24 @@ async fn start_inner(
     Ok(responses)
 }
 
-struct StartSelection {
+struct ChatSelection {
     wave: crate::work::wave::Wave,
     created: bool,
-    prior_home: Option<crate::durable::HomeId>,
 }
 
 async fn rollback_selection(
     store: &crate::store::Store,
-    selection: &StartSelection,
+    selection: &ChatSelection,
 ) -> anyhow::Result<()> {
     if selection.created {
         store.delete_wave(selection.wave.id()).await?;
-    } else if let Some(home_id) = &selection.prior_home {
-        store
-            .place_work(
-                &crate::durable::WorkRef::Wave(selection.wave.id().clone()),
-                home_id,
-            )
-            .await?;
     }
     Ok(())
 }
 
 async fn rollback_selections(
     store: &crate::store::Store,
-    selections: &[StartSelection],
+    selections: &[ChatSelection],
 ) -> anyhow::Result<()> {
     let mut failures = Vec::new();
     for selection in selections.iter().rev() {
@@ -451,7 +386,7 @@ fn print_runtime(name: &str, runtime: &HomeRuntimeDto) {
     };
     let action = match &runtime.action {
         HomeActionDto::Attach { endpoint } => format!("Attach ({endpoint})"),
-        HomeActionDto::Start { home_id } => format!("Start on {home_id}"),
+        HomeActionDto::Connect { home_id } => format!("Open chat on {home_id}"),
         HomeActionDto::Reason { message } => message.clone(),
     };
     println!(

@@ -61,7 +61,7 @@ enum MockWaveFixture {
             Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
                  live: false, activeTasks: 2),
             Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
-                 live: false, enabled: false, activeTasks: 0),
+                 live: false, activeTasks: 0),
             Wave(id: "wave-4", name: "cadenza", repo: repoPath,
                  status: .ready,
                  live: true, activeTasks: 0, parentWaveId: "wave-1"),
@@ -91,7 +91,7 @@ enum MockWaveFixture {
     }
 
     /// The selected Wave's populated detail, decoded from the same wire shape
-    /// `lf status --json` emits (the round-tripped `wave_detail.json` fixture).
+    /// `lf wave status --json` emits (the round-tripped `wave_detail.json` fixture).
     static func selectedWaveDetail() -> WaveDetailSnapshot? {
         try? JSONDecoder().decode(WaveDetailSnapshot.self, from: Data(detailJSON.utf8))
     }
@@ -130,8 +130,7 @@ enum MockWaveFixture {
             "repo": "/src/loopflow",
             "active_tasks": 1,
             "live": true,
-            "paused": false,
-            "enabled": true,
+
             "endpoint": "127.0.0.1:7777",
             "created_at": "2026-07-01T00:00:00Z",
             "parent_wave_id": null,

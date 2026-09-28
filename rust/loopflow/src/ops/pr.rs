@@ -1824,7 +1824,7 @@ mod tests {
         let mut context = task_pr_context();
         let mut copy = PrCopy {
             title: "Understand what merging this PR will do".to_string(),
-            body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewers can see what work remains.\n\n\n    lf status example\n\n## Evaluate\n\nRecorded proof.".to_string(),
+            body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewers can see what work remains.\n\n\n    lf wave status example\n\n## Evaluate\n\nRecorded proof.".to_string(),
         };
         for (lifecycle, expected) in [
             (
@@ -1849,7 +1849,7 @@ mod tests {
                 .starts_with("Reviewers can see what work remains.\n\n<!--"));
             assert!(copy
                 .body
-                .ends_with("    lf status example\n\n## Evaluate\n\nRecorded proof."));
+                .ends_with("    lf wave status example\n\n## Evaluate\n\nRecorded proof."));
             assert_eq!(
                 copy.body.matches("loopflow:task-pr-context:start").count(),
                 1

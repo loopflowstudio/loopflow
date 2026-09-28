@@ -20,7 +20,8 @@ first, then the engineering words it borrows.
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **Session** | One open conversation with the AI, shown as a terminal inside the app. |
 | **Run** | A record of one time the AI coding tool was started: what it was told and what happened. |
-| **Home** | One computer running Loopflow, with its own records. |
+| **Home** | A stable execution destination on a machine, where work for a Wave can be assigned. |
+| **Data directory** | Local Loopflow state selected by `LF_HOME`; a branch data copy preserves recorded Home identities without creating another execution destination. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, or OpenCode. |
 | **Scratch** | The `scratch/` folder, for working notes. It is cleared when the work lands. |

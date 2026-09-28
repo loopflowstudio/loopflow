@@ -1,3 +1,5 @@
+#[path = "support/installation.rs"]
+mod installation;
 mod support;
 
 use std::fs;
@@ -6,7 +8,7 @@ use std::process::Command;
 
 use loopflow::durable::{FlowPosition, WorkStatus};
 use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
+use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
 use loopflow::ops::{
     arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
     CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
@@ -973,6 +975,7 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
 }
 
 #[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let home = tempfile::TempDir::new().expect("temp home");
     let log_path = home.path().join("gh.log");
@@ -1029,7 +1032,21 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
 
-    task_resume("INF-123", None, None).expect("resume Task authored work");
+    let installation = installation::Installation::new(home.path());
+    let output = Command::new(&installation.cli)
+        .args(["task", "run", "INF-123", "--json"])
+        .env("LF_DB_PATH", home.path().join("loopflow.db"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: loopflow::ops::task::TaskSnapshot = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result.task_id, task.task.id.to_string());
     let resumed = runtime
         .block_on(task.store.flow_position(&task.task.id))
         .unwrap()

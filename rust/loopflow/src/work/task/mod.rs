@@ -589,7 +589,7 @@ pub enum PmWritebackState {
 /// The durable attempt metadata lives on `TaskPr`; this derived view tells one
 /// caller whether it read GitHub, reused a recent reading, or opened a degraded
 /// circuit while preserving the cached PR fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Observation {
     /// No remote read applies, as for an unpublished working PR.

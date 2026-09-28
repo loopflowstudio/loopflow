@@ -608,7 +608,7 @@ public final class WaveChatConnection {
         loop = nil
     }
 
-    /// Rediscover immediately after `lf start` has published a live endpoint.
+    /// Rediscover immediately after the chat connection has published a live endpoint.
     public func reconnect() {
         stop()
         currentEndpoint = nil

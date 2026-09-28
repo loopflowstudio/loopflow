@@ -1,12 +1,12 @@
 # Waves
 
-A wave is a named agent with a goal. Start one, steer it, and inspect the work
-it chose:
+A Wave owns an enduring responsibility, its current plan, and a conversation.
+Open its chat or run a bounded planning pass:
 
 ```bash
-lf start shipper
+lf chat --follow -w shipper
 lf --wave <wave> wave/operate "invoices first"
-lf status shipper
+lf wave status shipper
 ```
 
 The Wave remembers what it learns, works the next blocker, spins off durable
@@ -27,17 +27,13 @@ put its conversation beside its work map. The same controls exist from the
 CLI:
 
 ```bash
-lf start shipper                       # explicitly start the Wave on this machine
-lf --wave <wave> wave/operate "invoices first"
-lf status shipper                      # its current chapter and Tasks
-lf pause shipper                       # refuse new turns; keep listening and queueing
-lf resume shipper                      # start the next queued turn
-lf stop shipper                        # stop this Wave; sibling Waves keep running
+lf chat --follow -w shipper            # connect to its conversation
+lf --wave shipper wave/operate "invoices first"
+lf wave status shipper                  # current chapter and Tasks
 ```
 
-(`lf wave serve shipper` runs one Wave listener in the foreground until Ctrl-C. Use
-it while developing a goal; `lf start` normally asks the Home's shared keeper
-to serve the Wave.)
+Opening chat connects its internal service. Task execution and scheduled work
+do not depend on keeping a chat window open.
 
 ## The planning model
 
@@ -99,28 +95,13 @@ radius crosses storage, auth, or public APIs.
 `owner` and `home` are independent, optional automatic-start filters. `owner`
 names the OS user that should run the Wave. `home` accepts this machine's
 HomeId, hostname, or IP address. Omit either field to leave that dimension
-unrestricted. Locally placed Waves are enabled by default. `lf stop <name>`
-disables the Wave in this Home's registry; an explicit `lf start <name>` enables
-and starts it here. Neither command edits the goal.
-
-Pause turn execution without stopping the listener:
-
-```bash
-lf pause shipper --json    # {"wave":"shipper","paused":true}
-lf ls                      # TURNS shows paused independently from LIVE
-lf resume shipper
-```
-
-Pause writes `paused: true` into the canonical `GOAL.md` frontmatter; resume
-removes it because enabled turns are the default. Messages continue to queue,
-and heartbeat and cron turn starts wait. For a Wave served from another Home,
-run the same command there: `lf ssh <home-id> pause shipper`.
+unrestricted. Home placement remains explicit; opening chat does not move it.
 
 Builtin goals resolve by name, so the five Viable System Model charters ship
 as `s1`…`s5`:
 
 ```bash
-lf wave serve s3            # the s3 (control) charter
+lf chat --follow -w s3            # the s3 (control) charter
 ```
 
 Writing a goal well — the weight of each section, frontmatter fields, KR
@@ -164,13 +145,12 @@ Change the current plan with `lf wave update-plan --wave <wave> --plan plan.json
 An omitted metric has no target in that chapter; its observations remain visible
 without a pass/fail verdict. Changing a target preserves instrument identity,
 revision, and measurement history. Rotation freezes the previous targets and
-dated readings for `lf status <wave> --chapter <id> --json`. The Wave objective
+dated readings for `lf wave status <wave> --chapter <id> --json`. The Wave objective
 stays in `GOAL.md`; chapter plans have no second objective.
 
-
 ```bash
-lf status <wave>            # owner, value, target, window, freshness, reason
-lf status <wave> --json     # the shared metric_portfolio DTO
+lf wave status <wave>            # owner, value, target, window, freshness, reason
+lf wave status <wave> --json     # the shared metric_portfolio DTO
 lf roadmap --json           # the same DTO on every Wave row
 ```
 
@@ -207,23 +187,18 @@ chat:
 ```
 
 Store the bot token in the Home daemon repository's Doppler config, reload the
-service, then start the Wave:
+service, then open chat:
 
 ```bash
 doppler secrets set LF_DISCORD_TOKEN > /dev/null
 doppler run -- lfd install
-lf start product
+lf chat --follow -w product
 ```
 
 The service file retains only the non-secret Doppler project and config names.
 `lfd` resolves the token from Doppler once at boot and keeps it inside the
 trusted Home process. The Wave resident and its provider children never
-inherit it. Reload the service after changing or rotating the token. For a
-foreground listener without `lfd`, inject the same secret for that process:
-
-```bash
-doppler run -- lf wave serve product
-```
+inherit it. Reload the service after changing or rotating the token.
 
 The bot needs **View Channel**, **Read Message History**, **Send Messages**, and
 **Add Reactions**, with Message Content enabled in the Discord developer portal.
@@ -284,26 +259,13 @@ that identity, and the record never opens SSH by itself.
 
 ```bash
 lf home id                    # this machine's stable HomeId
-lf ls --json                  # Wave ids and their current Homes
-lf start shipper              # start one Wave on this machine
-lf start                      # start eligible repo Waves on this machine
-lf pause shipper              # keep serving but refuse new turns
-lf resume shipper             # enable queued and future turns
-lf stop shipper               # stop this machine's Wave
-lf task disable task_... # exclude one Task from automatic pursuit
-lf task enable task_...  # restore eligibility
-```
-
-With a name, `lf start` is an explicit instruction: it records this machine as
-the Wave's Home, enables it in the local registry, and starts it. Without names,
-it starts only enabled Waves whose optional `owner` and `home` policy matches
-this process and whose recorded placement is already local. New Project or Task
-Work inherits its parent's recorded Home once. Record a different Wave Home
-directly:
-
-```bash
+lf wave list --json                  # Wave ids and their current Homes
+lf chat --follow -w shipper    # connect to chat on this Home
 lf wave place <wave-id> <home-id>
 ```
+
+New Project and Task Work inherit their parent’s recorded Home once. Placement
+expresses where work belongs; it is separate from chat availability.
 
 Placement is planning state. Run records do not own it or prove that a process
 can be signaled; only an exact runtime owner may stop its process.
@@ -334,11 +296,7 @@ sibling Waves.
 chooses no work. Each hosted Wave body is the agent with a goal, memory, and
 conversation.
 
-`lf stop <wave>` records `enabled = false` in this Home's SQLite registry. A new
-`lfd` process reads the same control and leaves the Wave off. `lf start <wave>`
-enables it again. Change `owner`, `home`, or placement to move ownership; use
-`lf wave enable|disable` to control otherwise assigned Work without producing a
-repository diff.
+Chat has no enablement or pause switch. Its listener is managed internally.
 
 `home: localhost`, `home: 127.0.0.1`, and `home: ::1` always match the current
 machine. Loopflow also matches its stable HomeId, hostname and short hostname,
@@ -354,23 +312,23 @@ the route locally and start the Wave there:
 lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
 lf wave place <wave-id> <home-id>    # record origin-side planning state
-lf ssh <home-id> start shipper
+lf ssh <home-id> chat --follow -w shipper
 ```
 
 After bootstrap, address the authority rather than its current hostname. Every
 HomeId-addressed hop makes the target prove its identity:
 
 ```bash
-lf ssh <home-id> status shipper --json
-lf home probe shipper
+lf ssh <home-id> wave status shipper --json
+lf wave probe shipper
 ```
 
-`lf start shipper` starts here; `lf ssh <home-id> start shipper` starts there.
+Use `lf ssh <home-id> chat --follow -w shipper` to chat on the selected machine.
 Foreground SSH work can use origin and target subscription accounts. Durable
 residents shed forwarded authority before detaching and use credentials
 installed on their machine.
 
-Observation follows the same rule. `lf status`, `lf runs`, and `lf usage` read
+Observation follows the same rule. `lf wave status`, `lf runs`, and `lf usage` read
 this Home; prefix them with `lf ssh <home-id>` to read another one. Homes do not
 silently replicate or aggregate Run records.
 
@@ -380,7 +338,7 @@ See [Get Started → Go Remote](getting-started.md#go-remote) and
 ## Chapter plans and KRs
 
 ```bash
-lf status infra --json
+lf wave status infra --json
 lf wave update-plan --wave infra --plan plan.json
 ```
 
@@ -406,7 +364,7 @@ namespace. Don't paste ids by hand.
 lf wave connect --wave infra --team-key LOO     # first Wave establishes the repo Team
 lf wave connect --all                           # all nested Waves reuse it
 lf wave sync --wave infra                    # refresh the local SQLite snapshot
-lf status infra --no-sync          # deterministic cache-only read
+lf wave status infra --no-sync          # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
 lf task complete 1207... --summary "Dark mode delivered"
 ```
@@ -424,7 +382,7 @@ durable Task Work in its own stable sibling worktree:
 ```bash
 lf task create --run --wave <wave> --title "add retry to token refresh"
 pbpaste | lf task create --run --wave incidents
-lf task prepare INF-123
+lf task checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
@@ -491,7 +449,7 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The Wave reads its chapter and Tasks with `lf status --no-sync`, judges the
+The Wave reads its chapter and Tasks with `lf wave status --no-sync`, judges the
 KR evidence, and starts Task Work for every independent
 file-writing change. Each shipped PR folds into memory and closes its task.
 

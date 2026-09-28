@@ -44,7 +44,8 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmap
-            case "ls", "session": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return "[]"
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
@@ -161,7 +162,7 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmap
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return await source.list()
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
@@ -295,7 +296,7 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
             case ("roadmap", _): return roadmap
-            case ("ls", _): return "[]"
+            case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.list()
             case ("session", "rename"): return try await named.rename(args)
@@ -501,7 +502,7 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return sessionJSON
             default: throw RegistryQueryError("Local row must focus its existing shell")
             }
@@ -586,7 +587,7 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return records
             case "session" where args.dropFirst().first == "complete":
                 if rejected { throw RegistryQueryError("Completion rejected") }
@@ -811,7 +812,7 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, cwd in
             switch args.first {
             case "roadmap": return roadmap
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list":
                 return cwd == "/src/context" ? otherRecords : records
             case "session" where args == ["session", "complete", "navigation-split"]:

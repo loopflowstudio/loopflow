@@ -325,6 +325,20 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
     })
 }
 
+fn development_open_error(conn: &Connection, error: StoreError) -> StoreError {
+    let error = super::migrations::development_store_diagnostic(conn, error);
+    match error {
+        StoreError::IncompatibleDevelopment(reason) => {
+            StoreError::IncompatibleDevelopment(format!(
+                "{reason}\nData directory: {}\n{}",
+                super::lf_home_dir().display(),
+                crate::lf::commands::install::development_store_recovery()
+            ))
+        }
+        error => error,
+    }
+}
+
 impl SqliteStore {
     /// Open the store for ordinary use. This never advances the shared release
     /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
@@ -421,18 +435,31 @@ impl SqliteStore {
             .map_err(|error| {
                 StoreError::InvalidData(format!("resolve machine install selection: {error}"))
             })?;
-        let installed_development = match installed_selection {
+        let store_installation = match installed_selection {
             Some(selection)
-                if selection.source == crate::machine_install::InstallSource::Development =>
+                if super::same_database_file(path, &selection.store).map_err(|error| {
+                    StoreError::InvalidData(format!("resolve installed store identity: {error}"))
+                })? =>
             {
-                super::same_database_file(path, &selection.store).map_err(|error| {
-                    StoreError::InvalidData(format!(
-                        "resolve installed development store identity: {error}"
-                    ))
-                })?
+                Some(selection)
             }
-            _ => false,
+            _ => None,
         };
+        if advance == super::FrontierAdvance::Forbidden && store_installation.is_none() {
+            let stores = super::branch_data::owned_stores()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            if super::branch_data::is_owned_store(path, &stores)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            {
+                return Err(StoreError::InvalidData(format!(
+                    "store {} belongs to another installation; use its installed lf or this build's branch data directory",
+                    path.display()
+                )));
+            }
+        }
+        let installed_development = store_installation.is_some_and(|selection| {
+            selection.source == crate::machine_install::InstallSource::Development
+        });
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
         // before create_dir_all/Connection::open would leave an empty
@@ -449,7 +476,6 @@ impl SqliteStore {
         let initializes_private_development = !installed_development
             && !shared_database
             && may_apply_migrations
-            && !crate::build_info::migration_draft_manifest().is_empty()
             && crate::build_info::provenance() == crate::build_info::BuildProvenance::Development;
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
@@ -475,12 +501,14 @@ impl SqliteStore {
             super::migrations::validate_installed_development_sqlite(
                 &conn,
                 crate::build_info::migration_draft_manifest(),
-            )?;
+            )
+            .map_err(|error| development_open_error(&conn, error))?;
         } else if initializes_private_development {
             super::migrations::apply_installed_development_sqlite(
                 &conn,
                 crate::build_info::migration_draft_manifest(),
-            )?;
+            )
+            .map_err(|error| development_open_error(&conn, error))?;
         } else if !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
             // and store-ahead errors), then refuse if this binary knows a migration
@@ -1824,10 +1852,6 @@ impl SqliteStore {
             if let Some(collision) = &update.retire_collision {
                 let retired_at = now_unix();
                 tx.execute(
-                    "UPDATE work_placements SET enabled = 0 WHERE wave_id = ?1",
-                    params![collision],
-                )?;
-                tx.execute(
                     "UPDATE waves
                      SET retired_at = ?2,
                          superseded_by_wave_id = ?3,
@@ -1934,16 +1958,6 @@ impl SqliteStore {
         if state != "abandoned" {
             return Err(StoreError::InvalidData(
                 "only an abandoned Wave registration can be forgotten".to_string(),
-            ));
-        }
-        let enabled: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM work_placements WHERE wave_id = ?1 AND enabled = 1)",
-            params![wave_id],
-            |row| row.get(0),
-        )?;
-        if enabled {
-            return Err(StoreError::InvalidData(
-                "disable the Wave before forgetting its registration".to_string(),
             ));
         }
         let mut blockers = Self::wave_retirement_blockers_in(&tx, wave_id)?;

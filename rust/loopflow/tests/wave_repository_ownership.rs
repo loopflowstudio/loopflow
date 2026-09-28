@@ -244,9 +244,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         Err(WaveResolveError::RepositoryMismatch { .. })
     ));
 
-    // `lf ls` is scoped to the invoking repository: from repo_a only alpha's
+    // `lf wave list` is scoped to the invoking repository: from repo_a only alpha's
     // infrastructure Wave is listed, not repo_b's same-named beta.
-    let scoped = lf(&home, &repo_a, &["ls", "--json"]);
+    let scoped = lf(&home, &repo_a, &["wave", "list", "--json"]);
     let scoped_infra: Vec<_> = scoped
         .as_array()
         .unwrap()
@@ -257,7 +257,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert_eq!(scoped_infra[0]["id"], alpha.id().as_str());
 
     // `--all` restores the machine-wide view: both same-named Waves appear.
-    let all = lf(&home, &repo_a, &["ls", "--all", "--json"]);
+    let all = lf(&home, &repo_a, &["wave", "list", "--all", "--json"]);
     assert_eq!(
         all.as_array()
             .unwrap()
@@ -267,14 +267,23 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         2
     );
     assert_eq!(
-        lf(&home, &repo_a, &["status", "infrastructure", "--json"])["wave"]["id"],
+        lf(
+            &home,
+            &repo_a,
+            &["wave", "status", "infrastructure", "--json"]
+        )["wave"]["id"],
         alpha.id().as_str()
     );
     assert_eq!(
-        lf(&home, &repo_b, &["status", "infrastructure", "--json"])["wave"]["id"],
+        lf(
+            &home,
+            &repo_b,
+            &["wave", "status", "infrastructure", "--json"]
+        )["wave"]["id"],
         beta.id().as_str()
     );
-    let human_list = String::from_utf8(lf_output(&home, &repo_a, &["ls"]).stdout).unwrap();
+    let human_list =
+        String::from_utf8(lf_output(&home, &repo_a, &["wave", "list"]).stdout).unwrap();
     assert!(human_list.contains("REPOSITORY"));
     assert!(human_list
         .lines()
@@ -284,7 +293,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
     // `--all` brings beta's repository back into the readable listing.
-    let human_all = String::from_utf8(lf_output(&home, &repo_a, &["ls", "--all"]).stdout).unwrap();
+    let human_all =
+        String::from_utf8(lf_output(&home, &repo_a, &["wave", "list", "--all"]).stdout).unwrap();
     assert!(human_all
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
@@ -526,7 +536,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert_eq!(preserved_task.project_id, project.id);
     assert!(journal::journal_path(&repo_d, "platform").is_file());
 
-    let status = lf(&home, &repo_d, &["status", "platform", "--json"]);
+    let status = lf(&home, &repo_d, &["wave", "status", "platform", "--json"]);
     assert_eq!(status["wave"]["id"], alpha.id().as_str());
 
     let error = relocate_wave(&store, alpha.id(), &repo_b, None, Some("hijacked"))
@@ -568,13 +578,6 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
     store.create_wave(&wave).await.unwrap();
 
     std::fs::remove_dir_all(&source).unwrap();
-    let disabled = lf(
-        &home,
-        &target,
-        &["wave", "disable", wave.id().as_str(), "--json"],
-    );
-    assert!(!disabled["enabled"].as_bool().unwrap());
-
     let relocated = lf(
         &home,
         &target,
@@ -595,13 +598,6 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
             .unwrap()
             .display()
             .to_string()
-    );
-    assert!(
-        !store
-            .placement(&WorkRef::Wave(wave.id().clone()))
-            .await
-            .unwrap()
-            .enabled
     );
 }
 
@@ -668,13 +664,6 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
                 .unwrap(),
             WorkStatus::Abandoned
         );
-        assert!(
-            !store
-                .placement(&WorkRef::Wave(shadow.id().clone()))
-                .await
-                .unwrap()
-                .enabled
-        );
 
         let historical = resolve_managed_wave(
             Some(&store),
@@ -686,9 +675,10 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
         .unwrap();
         assert_eq!(historical.id(), shadow.id());
         assert!(historical.is_retired());
-        let historical_status =
-            String::from_utf8(lf_output(&home, &target, &["status", shadow.id().as_str()]).stdout)
-                .unwrap();
+        let historical_status = String::from_utf8(
+            lf_output(&home, &target, &["wave", "status", shadow.id().as_str()]).stdout,
+        )
+        .unwrap();
         assert!(historical_status.contains("retired at"));
         assert!(historical_status.contains(established.id().as_str()));
     }

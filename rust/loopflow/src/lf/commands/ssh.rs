@@ -138,7 +138,7 @@ pub fn run(
 ) -> anyhow::Result<()> {
     reject_nested_ssh(lf_args)?;
     let target = resolve_target(target)?;
-    let lf_args = bind_home_start_wave_ids(&target, lf_args)?;
+    let lf_args = bind_chat_wave_ids(&target, lf_args)?;
     let cmd = std::iter::once("lf".to_string())
         .chain(lf_args)
         .collect::<Vec<_>>();
@@ -158,7 +158,7 @@ pub fn run(
     )
 }
 
-fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::Result<Vec<String>> {
+fn bind_chat_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::Result<Vec<String>> {
     if target.home_id.is_none() {
         return Ok(lf_args.to_vec());
     }
@@ -166,7 +166,7 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
         std::iter::once("lf".to_string()).chain(lf_args.iter().cloned()),
     );
     let Ok(crate::lf::Cli {
-        command: Some(crate::lf::Commands::Start {
+        command: Some(crate::lf::Commands::ChatConnect {
             waves, wave_ids, ..
         }),
         ..

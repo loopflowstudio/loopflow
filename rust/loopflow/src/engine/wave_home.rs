@@ -233,7 +233,7 @@ pub enum HomeActionDto {
     /// Running: open/attach to the resident at `endpoint`.
     Attach { endpoint: String },
     /// Reachable but stopped: start the Wave on its stable Home identity.
-    Start { home_id: crate::durable::HomeId },
+    Connect { home_id: crate::durable::HomeId },
     /// Unreachable or unknown: show `message`, the actionable reason.
     Reason { message: String },
 }
@@ -264,7 +264,7 @@ impl HomeRuntimeDto {
             (HomeState::Running, Some(endpoint)) => HomeActionDto::Attach {
                 endpoint: endpoint.clone(),
             },
-            (HomeState::Stopped, _) => HomeActionDto::Start {
+            (HomeState::Stopped, _) => HomeActionDto::Connect {
                 home_id: home.id.clone(),
             },
             // Running-without-endpoint is a state we could not fully read.
@@ -383,7 +383,7 @@ mod tests {
         );
         assert_eq!(
             stopped.action,
-            HomeActionDto::Start {
+            HomeActionDto::Connect {
                 home_id: h.id.clone()
             }
         );

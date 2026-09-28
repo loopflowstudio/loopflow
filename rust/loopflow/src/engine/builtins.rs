@@ -196,13 +196,13 @@ mod tests {
         let scan_waves = get_builtin_skill("scan").expect("scan prompt");
 
         // The roadmap lives in Linear, reached via `lf wave sync` — no local N-*.md files.
-        assert!(update_wave.contains("lf status"));
+        assert!(update_wave.contains("lf wave status"));
         assert!(update_wave.contains("MEMORY.md"));
         assert!(!update_wave.contains("1-fix-broken-build.md"));
-        assert!(design.contains("lf status"));
+        assert!(design.contains("lf wave status"));
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
-        assert!(scan_waves.contains("lf status"));
+        assert!(scan_waves.contains("lf wave status"));
         assert!(WAVES_DOC.contains("GOAL.md"));
         assert!(WAVES_DOC.contains("Linear"));
         assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
@@ -255,7 +255,7 @@ mod tests {
             "Keep that core in this Task",
             "lf task create --run",
             "--flow <chosen-flow>",
-            "lf task prepare <issue> --json",
+            "lf task checkout <issue> --json",
             "lf task run <issue> --flow <chosen-flow>",
             "Use the Flow the user selected",
         ] {
@@ -319,12 +319,12 @@ mod tests {
             "lf auth status",
             "lf auth route show",
             "lf home id --json",
-            "lf ls --json",
-            "lf status <wave> --json",
+            "lf wave list --json",
+            "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
             "lf home observe <home-id>",
-            "lf home probe <wave> --json",
+            "lf wave probe <wave> --json",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }
@@ -451,7 +451,7 @@ mod tests {
         for name in ["wave/operate", "scan", "assess", "wave-report"] {
             let skill = get_builtin_skill(name).expect("multi-Task output skill");
             assert!(skill.contains("lf roadmap"));
-            assert!(skill.contains("lf status"));
+            assert!(skill.contains("lf wave status"));
             assert!(skill.contains("task.identifier"));
             assert!(skill.contains("reference.issue_url"));
             assert!(skill.contains("active_pr.slug"));

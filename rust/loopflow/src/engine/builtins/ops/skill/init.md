@@ -37,7 +37,7 @@ lf auth status                   # cached; no provider request
 lf auth status --verify --json    # inspect accepted managed evidence
 lf auth route show
 lf home id --json
-lf ls --json
+lf wave list --json
 command -v claude
 command -v codex
 command -v opencode
@@ -47,7 +47,7 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 ```
 
 Do not reconstruct distributed state from processes, worktrees, or provider
-web pages. `lf ls`, `lf status`, and `lf roadmap` are the shared read surfaces.
+web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
 If `lf home id` says the local store is not initialized, record that plainly
 and continue; do not invent a Home identity.
 
@@ -160,9 +160,9 @@ when Linear is absent; do not block that path on PM setup.
 Read its `wave/<name>/GOAL.md`, then verify its shared state:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf roadmap --wave <wave> --json
-lf status <wave> --no-sync
+lf wave status <wave> --no-sync
 ```
 
 If PM is not bound and Linear is connected, offer the explicit binding command:
@@ -215,7 +215,7 @@ Offer the lightweight path without pretending it is the whole product:
 ```bash
 lf debug -c
 lf design
-lf list
+lf catalog
 ```
 
 These are next commands, not setup probes; do not run them automatically.
@@ -235,10 +235,10 @@ lf ssh <host> home id --json
 lf home observe <home-id> ssh://<user>@<host>
 lf ssh <home-id> auth status
 lf ssh <home-id> route show
-lf ls --json
+lf wave list --json
 lf wave place <wave-id> <home-id>
-lf home probe <wave> --json
-lf ssh <home-id> start <wave>
+lf wave probe <wave> --json
+lf ssh <home-id> chat --follow -w <wave>
 ```
 
 `lf ssh` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
@@ -248,9 +248,9 @@ secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf home observe` records the
 mutable SSH route for the stable HomeId. Placement is allowed only while no Run
-is live. `lf start <wave>` starts on the current machine; use `lf ssh <home-id>
-start <wave>` to start on the remote Home. Ask before observing a route,
-changing placement, or starting a Wave; each changes durable execution state.
+is live. `lf chat --follow -w <wave>` starts on the current machine; use `lf ssh <home-id>
+chat --follow -w <wave>` to connect remotely. Ask before observing a route or
+changing placement; each changes durable execution state.
 
 ## 6. Prove the result
 
@@ -261,12 +261,12 @@ lf auth status                   # cached; no provider request
 lf auth status --verify --json    # inspect accepted managed evidence
 lf auth route show
 lf home id --json
-lf ls --json
+lf wave list --json
 ```
 
-For a selected Wave, also run `lf status <wave> --json` and
+For a selected Wave, also run `lf wave status <wave> --json` and
 `lf roadmap --wave <wave> --json`. After placement, use
-`lf home probe <wave> --json`. For a selected Task, run
+`lf wave probe <wave> --json`. For a selected Task, run
 `lf task status <ISSUE-ID> --json`. Do not run the machine-wide roadmap or
 doctor as routine setup: both can be large, and doctor can surface unrelated
 historical problems. Do not start work as a setup test.
@@ -283,7 +283,7 @@ Accounts     GitHub + Linear connected
 Wave         designer stopped on home_...
 Planning     Linear bound; 1 current chapter / 7 open Tasks
 
-Next         lf start designer
+Next         lf chat --follow -w designer
 Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
 ```
 

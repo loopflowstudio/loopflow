@@ -15,6 +15,7 @@ use crate::lf::InstallFrequency;
 const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 
 pub fn latest() -> Result<()> {
+    super::guard_task_origin()?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let response = client
         .head(format!("{RELEASES}/latest"))

@@ -81,7 +81,7 @@ pub(crate) async fn task_execution_and_flow(
             "Only Stop & restart can clear this blocker".to_string()
         } else {
             let task = store.get_task(task_id).await?.ok_or(StoreError::NotFound)?;
-            format!("Complete the unblock Session, then run `lf task resume {}`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
+            format!("Complete the unblock Session, then run `lf task run {}`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
         };
         snapshot.reason.push_str(&format!(". {recovery}"));
     }

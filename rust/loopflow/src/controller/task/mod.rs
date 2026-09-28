@@ -50,6 +50,9 @@ pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
             .transpose()
             .map_err(|error| anyhow!("invalid Task worker claim: {error}"))?
             .ok_or_else(|| anyhow!("Task boundary launch is missing its worker claim"))?;
+    // Consuming the launch capability must not erase the restriction on Task
+    // descendants changing the machine installation, including operation steps.
+    std::env::set_var(crate::run_record::TASK_ORIGIN_ENV, "1");
     drive_task(
         store,
         task_id,
@@ -168,6 +171,7 @@ async fn drive_task(
 }
 
 pub async fn run_worker(task_id: TaskId) -> Result<()> {
+    crate::ops::task_destination::require_worker_destination()?;
     let store = std::sync::Arc::new(
         crate::store::open_existing_store()
             .await
@@ -2069,7 +2073,7 @@ mod planning_tests {
                 assert!(feedback.is_none());
                 assert_eq!(crate::ops::human_session::task_unblock(&store, &task, &blocked).await.unwrap().0, session);
                 assert_eq!(sessions[0].id, session);
-                let error = crate::ops::task::resume_task_async(&task.plan.identifier, None, None).await.unwrap_err();
+                let error = crate::ops::task::continue_task_async(&task.plan.identifier, None, None, None).await.unwrap_err();
                 assert!(error.to_string().contains("Complete unblock Session"), "{error}");
                 assert_eq!(store.flow_position(&task.id).await.unwrap().unwrap(), blocked);
                 std::env::set_var(crate::durable::RUN_ID_ENV, sessions[0].run_id.as_str());
@@ -2086,7 +2090,7 @@ mod planning_tests {
                 let reason = "Keep the published API while replacing the reader";
                 let error = crate::ops::linear_observe::tests::with_posted_comment(
                     &store, &task, reason,
-                    crate::ops::task::resume_task_async(&task.plan.identifier, Some(reason.into()), None),
+                    crate::ops::task::continue_task_async(&task.plan.identifier, Some(reason.into()), None, None),
                 ).await.unwrap_err();
                 assert!(error.to_string().contains("active PR expects branch"), "{error}");
                 let retried = store.flow_position(&task.id).await.unwrap().unwrap();
@@ -2120,7 +2124,7 @@ mod planning_tests {
                 let resumed = std::sync::Arc::new(tokio::sync::Notify::new());
                 let resume = async {
                     let result = crate::ops::TEST_TASK_LAUNCH.scope(launch_tx,
-                        crate::ops::task::resume_task_async(&task.plan.identifier, None, None)).await;
+                        crate::ops::task::continue_task_async(&task.plan.identifier, None, None, None)).await;
                     resumed.notify_one();
                     result
                 };

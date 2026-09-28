@@ -23,7 +23,7 @@ prompt.
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.
 Add `--all` to see every repository's review steps on this machine. The same
-repository scope governs `lf ls` and `lf roadmap` (both take `--all`); `lf
+repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf
 status` is already single-Wave and repo-resolved.
 
 When the User selects a Session, run `lf session open <session-id> --json`.
@@ -79,7 +79,7 @@ when the catalog or CLI version is unclear.
 For an existing invocation or an exact review:
 
 ```bash
-lf task advance <issue>
+lf task run <issue>
 lf session complete <session-id>
 ```
 
@@ -107,7 +107,7 @@ its maturity, and open questions. Do not invent ownership.
 
 ```bash
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf task prepare <issue> --json
+lf task checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue> --flow <chosen-flow>
 ```
@@ -138,18 +138,18 @@ a competing implementation. No automatic scratch-transfer flag is available.
 
 ## Placement and bounded contributions
 
-Use shared readers: `lf ls --json` for the repository, `lf status <wave> --json`
+Use shared readers: `lf wave list --json` for the repository, `lf wave status <wave> --json`
 for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. `owner`/`home` in GOAL only filter automatic
 startup; placement is changed through `lf wave place <wave-id> <home-id>`.
-Use `lf home id`, then `lf start <wave>` locally or
-`lf ssh <home-id> start <wave>` at its placement. `lf ssh` runs the target's `lf`;
+Use `lf home id`, then `lf chat --follow -w <wave>` locally or
+`lf ssh <home-id> chat --follow -w <wave>` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
-Prepare a Task without launching it with `lf task prepare <issue> --json`.
+Prepare a Task without launching it with `lf task checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
 selects one skill or inline prompt, never a multi-step Flow. Inside a Run it

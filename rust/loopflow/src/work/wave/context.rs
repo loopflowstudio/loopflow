@@ -106,7 +106,7 @@ pub enum WaveResolveError {
     /// `--wave` named a wave this machine's registry has no row for.
     #[error(
         "wave '{0}' is not registered on this machine; \
-         run `lf ls` to list known waves, or pass --wave <known-name>"
+         run `lf wave list` to list known waves, or pass --wave <known-name>"
     )]
     UnknownExplicit(String),
     /// More than one repository owns the requested slug and the caller

@@ -47,7 +47,7 @@ struct DTOFixtureTests {
     func planUsesChapterSnapshot() async throws {
         let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            #expect(args == ["status", "infrastructure", "--json"])
+            #expect(args == ["wave", "status", "infrastructure", "--json"])
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
@@ -123,8 +123,7 @@ struct DTOFixtureTests {
 
         #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
-        #expect(!detail.wave.paused)
-        #expect(detail.wave.enabled)
+
         // The Home runtime evidence carries the state and the one contextual action.
         #expect(detail.homeRuntime.state == .running)
         #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))
@@ -162,23 +161,15 @@ struct DTOFixtureTests {
             sourceWindowEnd: "2026-08-20T18:00:00Z"
         ))
 
-        var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var legacyWave = try #require(legacy["wave"] as? [String: Any])
-        legacyWave.removeValue(forKey: "paused")
-        legacy["wave"] = legacyWave
-        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        var missingHome = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var wave = try #require(missingHome["wave"] as? [String: Any])
+        wave.removeValue(forKey: "home")
+        missingHome["wave"] = wave
+        let missingHomeData = try JSONSerialization.data(withJSONObject: missingHome)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: legacyData)
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingHomeData)
         }
 
-        var missingEnabled = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var waveWithoutEnabled = try #require(missingEnabled["wave"] as? [String: Any])
-        waveWithoutEnabled.removeValue(forKey: "enabled")
-        missingEnabled["wave"] = waveWithoutEnabled
-        let missingEnabledData = try JSONSerialization.data(withJSONObject: missingEnabled)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingEnabledData)
-        }
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -191,9 +182,9 @@ struct DTOFixtureTests {
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
         #expect(product.chapter?.flows.recommended == nil)
-        #expect(product.wave.paused)
+
         #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
-        #expect(product.wave.enabled)
+
         #expect(product.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(product.unavailableTasks[0].status == .ready)
         #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
@@ -207,7 +198,7 @@ struct DTOFixtureTests {
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
         #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf wave sync") == true)
-        #expect(!roadmap.waves[1].wave.enabled)
+
     }
 
     @Test("metric portfolio fixture preserves every closed evidence payload")

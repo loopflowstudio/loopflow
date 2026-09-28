@@ -57,7 +57,7 @@ not the objective. Trust worker summaries; do not reread transcripts.
 - Keep coordination and small read-only decisions in the Wave.
 
 When reporting more than one Task, read `lf roadmap --wave <exact-wave> --json`
-and `lf status <exact-wave> --json` and render operational rows as
+and `lf wave status <exact-wave> --json` and render operational rows as
 `[identifier · Task title](provider URL) — status; next action/owner`.
 
 Use this ID-first form in operational lists. In prose, use
@@ -76,7 +76,7 @@ readable title and available status without inventing a URL.
 
 ## Recover or contribute to existing work
 
-Use `lf task prepare <issue> --json` to prepare without starting execution.
+Use `lf task checkout <issue> --json` to prepare without starting execution.
 A bounded `lf --task <issue> research "<question>"` runs in its existing worktree
 without advancing the Task Flow or acquiring a mutation lease. Give independent
 contributors distinct scratch paths, wait for the needed artifacts and inspect
@@ -93,9 +93,9 @@ Task keeps one active PR. Honor explicitly selected Flows.
 
 When execution seems stuck, inspect `lf top` or `lf ps --json` before guessing.
 Idle time alone is not failure; never kill an unclaimed provider PID. Placement
-is durable: inspect `lf status <wave> --json`, change it through
+is durable: inspect `lf wave status <wave> --json`, change it through
 `lf wave place <wave-id> <home-id>` only when that is the intended action,
-and use `lf ssh <home-id> start <wave>` to start at a remote placement. Do not
+and use `lf ssh <home-id> chat --follow -w <wave>` to start at a remote placement. Do not
 launch a competing local worker to work around an unavailable Home.
 
 ## Uncertainty selects the flow, it never blocks

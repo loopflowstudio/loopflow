@@ -175,30 +175,6 @@ impl SqliteStore {
         placement_in(&conn, work)
     }
 
-    pub fn set_work_enabled(&self, work: &WorkRef, enabled: bool) -> StoreResult<Placement> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        placement_in(&tx, work)?;
-        let enabled = if enabled { 1_i64 } else { 0_i64 };
-        match work {
-            WorkRef::Wave(id) => tx.execute(
-                "UPDATE work_placements SET enabled=?2 WHERE wave_id=?1",
-                params![id.as_str(), enabled],
-            )?,
-            WorkRef::Project(id) => tx.execute(
-                "UPDATE work_placements SET enabled=?2 WHERE project_id=?1",
-                params![id.as_str(), enabled],
-            )?,
-            WorkRef::Task(id) => tx.execute(
-                "UPDATE work_placements SET enabled=?2 WHERE task_id=?1",
-                params![id.as_str(), enabled],
-            )?,
-        };
-        let placement = placement_in(&tx, work)?;
-        tx.commit()?;
-        Ok(placement)
-    }
-
     pub(crate) fn place_work(&self, work: &WorkRef, home_id: &HomeId) -> StoreResult<Placement> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -796,45 +772,26 @@ fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
 fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Placement>> {
     let row = match work {
         WorkRef::Wave(id) => conn.query_row(
-            "SELECT home_id, enabled, placed_at FROM work_placements WHERE wave_id=?1",
+            "SELECT home_id, placed_at FROM work_placements WHERE wave_id=?1",
             [id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, bool>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         ),
         WorkRef::Project(id) => conn.query_row(
-            "SELECT home_id, enabled, placed_at FROM work_placements WHERE project_id=?1",
+            "SELECT home_id, placed_at FROM work_placements WHERE project_id=?1",
             [id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, bool>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         ),
         WorkRef::Task(id) => conn.query_row(
-            "SELECT home_id, enabled, placed_at FROM work_placements WHERE task_id=?1",
+            "SELECT home_id, placed_at FROM work_placements WHERE task_id=?1",
             [id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, bool>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         ),
     }
     .optional()?;
-    row.map(|(home_id, enabled, placed_at)| {
+    row.map(|(home_id, placed_at)| {
         Ok(Placement {
             work: work.clone(),
             home_id: HomeId::parse(&home_id).map_err(invalid_durable)?,
-            enabled,
             placed_at: OffsetDateTime::from_unix_timestamp(placed_at).map_err(invalid_durable)?,
         })
     })
@@ -920,15 +877,7 @@ pub(super) fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResu
 
 fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     require_ready_work(conn, work)?;
-    require_current_task_chapter(conn, work)?;
-    if !placement_in(conn, work)?.enabled {
-        return Err(StoreError::InvalidAuthority(format!(
-            "{} {} is paused",
-            work.kind(),
-            work.id()
-        )));
-    }
-    Ok(())
+    require_current_task_chapter(conn, work)
 }
 
 pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
@@ -2081,6 +2030,49 @@ mod durable_store_tests {
                 claim == claimed[0],
             TaskWorkerClaimOutcome::Stale { .. } => false,
         }));
+    }
+
+    #[test]
+    fn previously_disabled_tasks_can_launch_and_recover() {
+        let (_dir, store, task_id) = store_with_task();
+        let position = store
+            .set_flow_position(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE work_placements SET enabled=0 WHERE task_id=?1",
+                [task_id.as_str()],
+            )
+            .unwrap();
+        let claim = match store
+            .claim_task_worker(
+                &task_id,
+                &position.invocation.id,
+                position.version,
+                &owner(201),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let replacement = store
+            .reclaim_task_worker(
+                &task_id,
+                &claim,
+                &owner(202),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap();
+        let recovered = store.flow_position(&task_id).unwrap().unwrap();
+        assert_eq!(recovered.invocation, position.invocation);
+        assert_eq!(recovered.cursor, position.cursor);
+        assert_eq!(replacement.generation, claim.generation + 1);
+        assert_eq!(recovered.claim, Some(replacement));
     }
 
     #[test]

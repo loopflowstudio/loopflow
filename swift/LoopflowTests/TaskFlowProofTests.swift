@@ -307,11 +307,11 @@ private actor FlowSource {
         switch (args.first, args.dropFirst().first) {
         case ("roadmap", _):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
-        case ("ls", _): return "[]"
+        case ("wave", "list"): return "[]"
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return session
         case ("flow", "list"): return catalog
-        case ("task", "run"), ("task", "resume"):
+        case ("task", "run"):
             controls.append(args)
             return ""
         case ("task", "restart"):

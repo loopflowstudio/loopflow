@@ -99,8 +99,8 @@ credential-free build box.
 Work that continues after SSH returns is different:
 
 ```bash
-lf start shipper                     # start it on this machine
-lf ssh shipper-home start shipper    # run the same local operation there
+lf chat --follow -w shipper
+lf ssh shipper-home chat --follow -w shipper
 ```
 
 The foreground control command can borrow origin authority. The resident it
@@ -110,8 +110,8 @@ durable configuration.
 
 Wave `owner` and `home` fields are automatic-start policy, not an authorization
 boundary. They stop a Home daemon from volunteering for somebody else's Wave;
-a user who can write the repository or local registry can still run an
-explicit `lf start <name>`.
+a user who can write the repository or local registry can still change
+placement explicitly.
 
 See [Subscription Management](/docs/subscriptions) for connecting identities,
 repository routes, account selectors, and the exact merged selection order.
@@ -228,7 +228,7 @@ Wave start and stop require a random per-process control capability stored in
 the local endpoint record with owner-only permissions; the capability is never
 logged or sent to agents.
 
-The detached development fallback that `lf start` launches when no lfd service
+The detached development fallback that a chat connection launches when no lfd service
 is live is deliberately scrubbed. It can host Waves, but it does not retain
 webhook secrets from the invoking shell. Install lfd as the Home service for
 durable webhook ingress.

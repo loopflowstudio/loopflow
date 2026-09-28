@@ -14,10 +14,6 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// List the skill and flow catalog
-    #[arg(short, long)]
-    pub list: bool,
-
     /// Docs paths, globs, or directories to include in context
     #[arg(long = "docs", value_delimiter = ',')]
     pub docs: Vec<String>,
@@ -133,7 +129,6 @@ impl Cli {
     pub(crate) fn launch_options(&self) -> Self {
         Self {
             command: None,
-            list: self.list,
             docs: self.docs.clone(),
             clipboard: self.clipboard,
             model: self.model.clone(),
@@ -346,8 +341,9 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
-    /// Start one or more Waves on this machine.
-    Start {
+    /// Internal: connect chat through the owning Home.
+    #[command(name = "__chat-connect", hide = true)]
+    ChatConnect {
         /// Wave names. With none, starts eligible Waves in the current repo.
         waves: Vec<String>,
         /// Internal identity bindings carried by an explicit Home SSH hop.
@@ -356,29 +352,8 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Stop a served wave gracefully
-    Stop {
-        /// Wave name
-        name: String,
-    },
-    /// Pause new turns while keeping the Wave listener available.
-    Pause {
-        /// Wave name
-        name: String,
-        /// Emit the resulting turn intent as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resume new turns for a paused Wave.
-    Resume {
-        /// Wave name
-        name: String,
-        /// Emit the resulting turn intent as JSON
-        #[arg(long)]
-        json: bool,
-    },
     /// Internal: the resident body a listener spawns for its own wave. Never
-    /// booted by hand — `lf wave` owns the listener half.
+    /// booted by hand — the Home daemon owns the listener half.
     #[command(name = "__resident", hide = true)]
     Resident {
         /// Wave name
@@ -470,39 +445,7 @@ pub enum Commands {
         json: bool,
     },
     /// List available skills and flows, including authored and collapsed flows
-    List,
-    /// List every wave in the registry (running and stopped), marking which
-    /// have a live server. Local-only query over the shared ledger.
-    Ls {
-        /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
-        #[arg(long)]
-        json: bool,
-        /// List Waves from every repository on this machine, not just the
-        /// current repository (worktrees collapse to their main checkout).
-        #[arg(long)]
-        all: bool,
-        /// Exclude abandoned and retired registrations from current navigation.
-        #[arg(long)]
-        current: bool,
-    },
-    /// Show one Wave's chapter, Tasks, Runs, and live loop
-    /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
-    Status {
-        /// Wave name (default: the ambient wave)
-        wave: Option<String>,
-        /// Read a dated chapter snapshot instead of current execution
-        #[arg(long)]
-        chapter: Option<String>,
-        /// Emit the status snapshot as JSON
-        #[arg(long)]
-        json: bool,
-        /// Refresh planning from Linear before reading
-        #[arg(long, conflicts_with = "no_sync")]
-        sync: bool,
-        /// Read cached planning
-        #[arg(long = "no-sync")]
-        no_sync: bool,
-    },
+    Catalog,
     /// Show the current repository's roadmap: every open Task across the repo's
     /// Waves, joined to live evidence and bucketed into Now / Waiting /
     /// Available / Later. `--wave` scopes it; `--all` spans every repository on
@@ -820,6 +763,50 @@ pub struct WaveTargetArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// List every wave in the registry (running and stopped), marking which
+    /// have a live server. Local-only query over the shared ledger.
+    List {
+        /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
+        #[arg(long)]
+        json: bool,
+        /// List Waves from every repository on this machine, not just the
+        /// current repository (worktrees collapse to their main checkout).
+        #[arg(long)]
+        all: bool,
+        /// Exclude abandoned and retired registrations from current navigation.
+        #[arg(long)]
+        current: bool,
+    },
+    /// Show one Wave's chapter, Tasks, Runs, and live loop
+    /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
+    Status {
+        /// Wave name (default: the ambient wave)
+        wave: Option<String>,
+        /// Read a dated chapter snapshot instead of current execution
+        #[arg(long)]
+        chapter: Option<String>,
+        /// Emit the status snapshot as JSON
+        #[arg(long)]
+        json: bool,
+        /// Refresh planning from Linear before reading
+        #[arg(long, conflicts_with = "no_sync")]
+        sync: bool,
+        /// Read cached planning
+        #[arg(long = "no-sync")]
+        no_sync: bool,
+    },
+    /// Probe a Wave's Home for liveness and the one contextual action.
+    ///
+    /// Prints the Home route, its state (unreachable/stopped/running/unknown)
+    /// with the evidence, the attach endpoint when running, and the action to
+    /// offer. `--json` emits the `HomeRuntimeDto` a UI consumes.
+    Probe {
+        /// Wave name; defaults to the ambient wave.
+        wave: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)
@@ -876,18 +863,6 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Allow local execution
-    Enable {
-        name: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Prevent new local execution
-    Disable {
-        name: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Retire the Wave, retaining history
     Retire {
         name: String,
@@ -897,12 +872,6 @@ pub enum WaveCommand {
         json: bool,
     },
 
-    /// Run the Wave listener in the foreground
-    Serve {
-        name: String,
-        #[arg(long)]
-        force: bool,
-    },
     /// Inspect historical Wave Flow work, or explicitly cancel its saved continuation
     Recover {
         name: String,
@@ -944,29 +913,11 @@ pub enum WaveCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Allow local execution
-    Enable {
-        issue: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Prevent new local execution
-    Disable {
-        issue: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Continue the saved Task Flow; complete an interactive review through its Session
-    Advance {
-        issue: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Internal: drive a Task Flow from its claimed boundary
     #[command(name = "__worker", hide = true)]
     Worker { task_id: crate::work::task::TaskId },
     /// Ensure tracked Task Work and its worktree without starting a worker
-    Prepare {
+    Checkout {
         issue: String,
         #[arg(long)]
         name: Option<String>,
@@ -978,7 +929,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Start a worker for an existing Task
+    /// Start or continue a Task through its saved Flow
     Run {
         issue: String,
         #[arg(long)]
@@ -991,6 +942,9 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
+        /// Explain what changed after an execution blocker
+        #[arg(long)]
+        reason: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1088,15 +1042,6 @@ pub enum TaskCommand {
         until: String,
         #[arg(long)]
         timeout: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resume Task advancement from its durable Flow position
-    Resume {
-        issue: String,
-        /// Explain what changed after a durable execution blocker
-        #[arg(long)]
-        reason: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1225,6 +1170,14 @@ pub enum InstallCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PrCommand {
+    /// Show CI status for current branch
+    Checks {
+        #[arg(short = 'w', long = "watch")]
+        watch: bool,
+        #[arg(short = 'l', long = "logs")]
+        logs: bool,
+    },
+
     /// Show current branch's PR state
     Status,
     /// After an out-of-band merge, rotate this Task to its next serial PR,
@@ -1457,17 +1410,6 @@ pub enum HomeCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Probe a Wave's Home for liveness and the one contextual action.
-    ///
-    /// Prints the Home route, its state (unreachable/stopped/running/unknown)
-    /// with the evidence, the attach endpoint when running, and the action to
-    /// offer. `--json` emits the `HomeRuntimeDto` a UI consumes.
-    Probe {
-        /// Wave name; defaults to the ambient wave.
-        wave: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1655,13 +1597,6 @@ pub enum WtCommand {
         #[arg(short = 'f', long = "force")]
         force: bool,
     },
-    /// Show CI status for current branch
-    Ci {
-        #[arg(short = 'w', long = "watch")]
-        watch: bool,
-        #[arg(short = 'l', long = "logs")]
-        logs: bool,
-    },
 }
 
 #[cfg(test)]
@@ -1675,11 +1610,23 @@ mod tests {
         let command = Cli::command();
         assert!(command.find_subcommand("pm").is_none());
         assert!(command.find_subcommand("work").is_none());
+        for verb in ["start", "stop", "pause", "resume", "list", "ls", "status"] {
+            assert!(
+                command.find_subcommand(verb).is_none(),
+                "removed root command {verb}"
+            );
+        }
+        for verb in ["enable", "disable", "serve"] {
+            assert!(Cli::try_parse_from(["lf", "wave", verb, "product"]).is_err());
+        }
         for args in [
+            vec!["lf", "catalog"],
+            vec!["lf", "wave", "list", "--json"],
+            vec!["lf", "wave", "probe", "product", "--json"],
+            vec!["lf", "pr", "checks"],
             vec!["lf", "wave", "sync", "product"],
             vec!["lf", "wave", "sync", "--all"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
-            vec!["lf", "task", "disable", "LOO-1"],
             vec![
                 "lf",
                 "wave",
@@ -1689,15 +1636,17 @@ mod tests {
             ],
             vec!["lf", "repo", "webhook", "serve"],
             vec!["lf", "doctor", "--planning", "--json"],
-            vec!["lf", "status", "product", "--sync"],
-            vec!["lf", "status", "product", "--no-sync"],
+            vec!["lf", "wave", "status", "product", "--sync"],
+            vec!["lf", "wave", "status", "product", "--no-sync"],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
-        for verb in ["abandon", "recover"] {
+        for verb in [
+            "abandon", "recover", "enable", "disable", "prepare", "resume", "advance",
+        ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
-        assert!(Cli::try_parse_from(["lf", "status", "--sync", "--no-sync"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wave", "status", "--sync", "--no-sync"]).is_err());
     }
 
     #[test]
@@ -1754,22 +1703,25 @@ mod tests {
     }
 
     #[test]
-    fn catalog_accepts_command_and_flag_forms_without_claiming_ls() {
-        let command = Cli::try_parse_from(["lf", "list"]).expect("parse list command");
-        assert!(matches!(command.command, Some(Commands::List)));
-
-        let flag = Cli::try_parse_from(["lf", "-l"]).expect("parse list flag");
-        assert!(flag.list);
-
-        let waves = Cli::try_parse_from(["lf", "ls", "--json"]).expect("parse wave list");
+    fn catalog_and_wave_reads_have_distinct_owners() {
+        let command = Cli::try_parse_from(["lf", "catalog"]).unwrap();
+        assert!(matches!(command.command, Some(Commands::Catalog)));
+        assert!(Cli::try_parse_from(["lf", "--list"]).is_err());
+        let waves = Cli::try_parse_from(["lf", "wave", "list", "--json"]).unwrap();
         assert!(matches!(
             waves.command,
-            Some(Commands::Ls {
-                json: true,
-                all: false,
-                current: false
+            Some(Commands::Wave {
+                cmd: WaveCommand::List {
+                    json: true,
+                    all: false,
+                    current: false
+                }
             })
         ));
+        assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "pr", "checks", "--logs"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "home", "probe", "product"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "ci"]).is_err());
     }
 
     #[test]
@@ -2265,11 +2217,11 @@ mod tests {
     }
 
     #[test]
-    fn task_prepare_accepts_worktree_options_without_starting_a_worker() {
+    fn task_checkout_accepts_worktree_options_without_starting_a_worker() {
         let cli = Cli::try_parse_from([
             "lf",
             "task",
-            "prepare",
+            "checkout",
             "INF-123",
             "--name",
             "runtime-research",
@@ -2279,10 +2231,10 @@ mod tests {
             "collect both reports",
             "--json",
         ])
-        .expect("parse task prepare");
+        .expect("parse task checkout");
         let Some(Commands::Task {
             cmd:
-                TaskCommand::Prepare {
+                TaskCommand::Checkout {
                     issue,
                     name,
                     stack_on,
@@ -2291,7 +2243,7 @@ mod tests {
                 },
         }) = cli.command
         else {
-            panic!("expected task prepare command");
+            panic!("expected task checkout command");
         };
         assert_eq!(issue, "INF-123");
         assert_eq!(name.as_deref(), Some("runtime-research"));
@@ -2611,11 +2563,11 @@ mod tests {
     }
 
     #[test]
-    fn task_resume_advances_without_provider_handoff() {
+    fn task_run_accepts_blocker_feedback() {
         let task = Cli::try_parse_from([
             "lf",
             "task",
-            "resume",
+            "run",
             "W2-135",
             "--reason",
             "credential repaired",
@@ -2625,7 +2577,7 @@ mod tests {
         assert!(matches!(
             task.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Resume {
+                cmd: TaskCommand::Run {
                     issue,
                     reason: Some(reason),
                     json: true,
@@ -2634,9 +2586,7 @@ mod tests {
             }) if issue == "W2-135" && reason == "credential repaired"
         ));
 
-        assert!(
-            Cli::try_parse_from(["lf", "task", "resume", "W2-135", "--model", "codex",]).is_err()
-        );
+        assert!(Cli::try_parse_from(["lf", "task", "run", "W2-135", "--model", "codex",]).is_err());
     }
 
     #[test]
@@ -2666,14 +2616,14 @@ mod tests {
     #[test]
     fn navigation_belongs_to_flow_decisions() {
         for args in [
-            vec!["lf", "task", "advance", "LOO-1", "--session", "review"],
-            vec!["lf", "task", "advance", "LOO-1", "--summary", "approved"],
+            vec!["lf", "task", "run", "LOO-1", "--session", "review"],
+            vec!["lf", "task", "run", "LOO-1", "--summary", "approved"],
             vec!["lf", "session", "advance", "review", "approved"],
             vec!["lf", "session", "iterate", "review", "revise"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
-        assert!(Cli::try_parse_from(["lf", "task", "advance", "LOO-1"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "task", "run", "LOO-1"]).is_ok());
         assert!(
             Cli::try_parse_from(["lf", "flow", "decide", "iterate", "revise implementation"])
                 .is_ok()

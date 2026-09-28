@@ -40,14 +40,14 @@ at once; `lf ssh` is how you ask a different one.
 ## See everything
 
 ```bash
-lf ls                  # every wave, running and stopped, live servers marked
-lf status <wave>       # one wave's Project → Task hierarchy, Runs, conditions
+lf wave list                  # every wave, running and stopped, live servers marked
+lf wave status <wave>       # one wave's Project → Task hierarchy, Runs, conditions
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf activity            # what changed, newest first, with durable evidence
 ```
 
-`lf status` and every `lf roadmap --json` Wave row carry the same
+`lf wave status` and every `lf roadmap --json` Wave row carry the same
 Project-owned `metric_portfolio`: current Met/Missed evidence, explicit
 Unknown or Unavailable states, candidate instruments, and contract issues.
 The Mac Wave detail renders that Rust-derived evidence without recomputing
@@ -151,7 +151,7 @@ work with new direction; closing or provider exit never advances it.
 
 ```bash
 lf top                      # live Loopflow process activity
-lf status shipper           # work and its current conditions
+lf wave status shipper           # work and its current conditions
 lf session open <id>        # start or resume the selected conversation
 ```
 

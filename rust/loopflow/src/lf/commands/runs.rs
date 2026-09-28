@@ -59,7 +59,7 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
 }
 
 /// The Runs matching a filter, newest first, capped. One reader behind
-/// `lf runs`, its Work drills, and `lf status`'s Runs evidence, so the surfaces
+/// `lf runs`, its Work drills, and `lf wave status`'s Runs evidence, so the surfaces
 /// can never disagree on what a run is.
 pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<RunSnapshot>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;

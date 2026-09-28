@@ -28,7 +28,7 @@ available token / cost usage so s3 can judge capacity from real signals.
 
 ## Workflow
 
-1. Read each member Wave's live state with `lf status <wave> --json` and its curated MEMORY.md. Use `lf ps --json` for process ownership evidence.
+1. Read each member Wave's live state with `lf wave status <wave> --json` and its curated MEMORY.md. Use `lf ps --json` for process ownership evidence.
 2. Read recent run history for throughput, completion times, and retries.
 3. Read token / cost usage data when available.
 4. Read algedonic history, repair chains, and escalation patterns.

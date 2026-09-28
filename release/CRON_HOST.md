@@ -6,7 +6,7 @@ document is not.
 
 ```bash
 lf home id
-lf status infrastructure --json | jq -r '.wave.home.id'
+lf wave status infrastructure --json | jq -r '.wave.home.id'
 scripts/bootstrap-cron-host.sh infrastructure
 lf cron history --wave infrastructure --days 35
 ```

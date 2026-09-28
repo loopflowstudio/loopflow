@@ -114,9 +114,6 @@ struct WorkSurfaceView: View {
                             .font(Typography.display)
                             .foregroundStyle(palette.text)
                             .accessibilityIdentifier("wave-title")
-                        if roadmap.wave.paused {
-                            pausedChip(roadmap.wave.id)
-                        }
                         Spacer()
                     }
                     if !roadmap.wave.goal.isEmpty {

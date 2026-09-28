@@ -59,7 +59,7 @@ struct SessionChromeProofTests {
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
             case ("roadmap", _): return roadmap
-            case ("ls", _): return "[]"
+            case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return sessions
             default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
@@ -157,7 +157,7 @@ struct SessionChromeProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return "[]"
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")

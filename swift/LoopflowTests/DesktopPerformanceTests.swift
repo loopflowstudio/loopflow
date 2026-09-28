@@ -409,7 +409,7 @@ struct DesktopPerformanceTests {
         let query = RegistryQuery(watchActiveRuns: { try await feed.open(initial: activeJSON) }) { args, _ in
             switch args.first {
             case "roadmap": return await planning.read()
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return sessionJSON
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")

@@ -145,7 +145,7 @@ struct WaveDetailReadingTests {
     // The populated detail-pane hierarchy can't be driven live in every
     // environment (a Wave whose registry carries W2-123 lens data needs a
     // schema-current `lf` + populated store). This walks the real populated
-    // `lf status --json` fixture through the exact projections the detail-pane
+    // `lf wave status --json` fixture through the exact projections the detail-pane
     // Project and Task rows render (`WaveLens.forTasks` / `.forTask`,
     // open-task count, KR list) — the mockup hierarchy proven at the data layer.
     @Test("the populated detail hierarchy renders objective, chapter KRs, Tasks, and shared lenses")

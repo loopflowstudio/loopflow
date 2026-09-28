@@ -38,7 +38,18 @@ use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
 
 mod published;
+mod recovery;
 pub use published::{latest, schedule};
+pub(crate) use recovery::development_store_recovery;
+
+pub(crate) fn guard_task_origin() -> Result<()> {
+    if crate::run_record::task_origin() {
+        return Err(anyhow!(
+            "Task execution cannot change the machine installation. Keep this build on its branch data copy; run installation separately outside the Task. An unverified inherited Run is also restricted."
+        ));
+    }
+    Ok(())
+}
 
 /// Bounds re-exec depth in the local-promotion delegation chain.
 ///
@@ -509,7 +520,8 @@ fn _local_store_is_exact(store_path: &Path) -> Result<String> {
     migrations::validate_installed_development_sqlite(
         &connection,
         build_info::migration_draft_manifest(),
-    )?;
+    )
+    .map_err(|error| migrations::development_store_diagnostic(&connection, error))?;
     Ok(migrations::latest_applied_version_sqlite(&connection)?
         .unwrap_or_else(|| "uninitialized".to_string()))
 }
@@ -605,8 +617,8 @@ fn build_local_preview(store_path: &Path) -> PromotionPreview {
     let executable_compatibility = _read_local_executable_compatibility(store_path);
     let compatibility = match (_local_store_is_exact(store_path), &executable_compatibility) {
         (Ok(frontier), _) => Compatibility::Exact { frontier },
-        (Err(_), ExecutableCompatibility::Unreadable { reason }) => Compatibility::Incompatible {
-            reason: reason.clone(),
+        (Err(error), ExecutableCompatibility::Unreadable { .. }) => Compatibility::Incompatible {
+            reason: error.to_string(),
         },
         (Err(_), _) => Compatibility::AheadPending {
             applied_frontier: migrations::latest_known_version(),
@@ -2958,6 +2970,7 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
 }
 
 pub fn advance_switch(switch_id: &str) -> Result<()> {
+    guard_task_origin()?;
     crate::promotion_lock::require_exclusive_holder()
         .context("verify the receipt-pinned promotion coordinator")?;
     let root = crate::machine_install::root()?;
@@ -3150,6 +3163,7 @@ fn settle_switch(
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
+    guard_task_origin()?;
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
     let root = crate::machine_install::root()?;
@@ -3329,6 +3343,16 @@ fn promote_published_from_machine_install(
         ));
     }
     render_human(&preview);
+    if let Some(prior) = &prior {
+        if prior.selection.store != store_path {
+            eprintln!(
+                "Published installation would select database {} in place of {}. Tasks and history in the previous database remain there; they are not transferred. Retained installation: {}.",
+                store_path.display(),
+                prior.selection.store.display(),
+                prior.selection.installation_id,
+            );
+        }
+    }
     if let Verdict::Reject { reasons } = &preview.verdict {
         return Err(anyhow!(
             "published return refused; every target is unchanged:\n  - {}",
@@ -3517,6 +3541,7 @@ pub fn promote(
             "--fresh and --reuse-home require --from-build during local promotion"
         ));
     }
+    guard_task_origin()?;
     guard_promote_hop()?;
     let root = crate::machine_install::root()?;
     let state = crate::machine_install::read_state(&root)?;
@@ -3674,6 +3699,7 @@ pub fn rollback(
     daemon_target: &Path,
     daemon_candidate: &Path,
 ) -> Result<()> {
+    guard_task_origin()?;
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     match crate::machine_install::read_state(&crate::machine_install::root()?)? {

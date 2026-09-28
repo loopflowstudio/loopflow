@@ -856,7 +856,7 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared after review completion", token.task_id))?;
     let launch = if store.flow_position(&task.id).await?.is_some() {
-        crate::ops::task::relaunch_inactive_process(store, &mut task)
+        crate::ops::task::launch_task_process(store, &mut task, None)
             .await
             .map_err(|error| anyhow!(error.to_string()))
     } else {
@@ -865,7 +865,7 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowPosition
     stop_flow_run(store, &task, position).await;
     launch.with_context(|| {
         format!(
-            "Review feedback saved; continue with `lf task advance {}`",
+            "Review feedback saved; continue with `lf task run {}`",
             task.plan.identifier
         )
     })
@@ -1200,6 +1200,19 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     let session = session_surface(store, &target).await?;
+    if matches!(&target, SessionTarget::Flow { .. }) {
+        if let Some(destination) = super::task_destination::destination()? {
+            // The full boundary id includes Task, invocation, node and iteration.
+            // The installed operation reads its own readiness/feedback; none is copied.
+            super::task_destination::execute(
+                &destination,
+                &std::env::current_dir()?,
+                &["session".into(), "complete".into(), session.id.clone()],
+                None,
+            )?;
+            return Ok(session);
+        }
+    }
     require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
     match &target {
         SessionTarget::Interactive { dir, manifest } => {

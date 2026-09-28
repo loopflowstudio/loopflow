@@ -2,12 +2,8 @@
 import SwiftUI
 import Loopflow
 
-/// WaveChat: the live conversation with a running `lf wave <name>`. Discovers the
-/// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
-/// thread over SSE, and posts messages back through the composer. The composer is
-/// offers Send, or Interrupt while a turn runs and the composer is empty. When the wave isn't running (no
-/// pointer file, or the server refuses), it shows a clear not-running state and
-/// keeps polling so it attaches the moment the wave comes up.
+/// Connects local Wave chat, discovers its `.wave-endpoint`, and streams the
+/// conversation over SSE. Failed connections retain history and offer a retry.
 struct WaveChatView: View {
     let repoPath: String
     let waveName: String
@@ -21,17 +17,15 @@ struct WaveChatView: View {
     @State private var connection: WaveChatConnection?
     @State private var composerText = ""
     @State private var sendError: String?
-    @State private var startState: WaveStartState = .idle
-    @State private var isStopping = false
-    @State private var confirmStop = false
+    @State private var connectionState: ChatConnectionState = .idle
     @State private var isFollowingLatest = true
     @State private var isNearTranscriptBottom = true
     @State private var githubBase: URL?
     @FocusState private var composerFocused: Bool
 
-    enum WaveStartState: Equatable {
+    enum ChatConnectionState: Equatable {
         case idle
-        case starting
+        case connecting
         case failed(String)
     }
 
@@ -79,9 +73,7 @@ struct WaveChatView: View {
         .task(id: identity) {
             connection?.stop()
             sendError = nil
-            startState = .idle
-            isStopping = false
-            confirmStop = false
+            connectionState = .idle
             isFollowingLatest = true
             isNearTranscriptBottom = true
             let query = RegistryQueryLocal.shared
@@ -100,6 +92,7 @@ struct WaveChatView: View {
             )
             connection = conn
             conn.start()
+            connectChat()
         }
         .onDisappear { connection?.stop() }
         .onChange(of: prefill) { _, value in
@@ -110,16 +103,7 @@ struct WaveChatView: View {
         .onChange(of: connection?.turns.last?.activity?.id) { _, activityId in
             if activityId != nil { onChildActivity() }
         }
-        .confirmationDialog(
-            "Stop \(waveName)?",
-            isPresented: $confirmStop,
-            titleVisibility: .visible
-        ) {
-            Button("Stop wave", role: .destructive) { stopWave() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Stops this Wave conversation. Project and Task Work continues independently; its observations remain durable.")
-        }
+
     }
 
     // MARK: - Transcript
@@ -219,24 +203,6 @@ struct WaveChatView: View {
 
             Spacer()
 
-            if isLive {
-                Button {
-                    confirmStop = true
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        if isStopping {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(isStopping ? "Stopping…" : "Stop")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .foregroundStyle(Color.statusError)
-                .disabled(isStopping)
-                .accessibilityIdentifier("wave-chat-stop")
-            }
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
@@ -329,24 +295,6 @@ struct WaveChatView: View {
     private var activeBackingName: String {
         guard let backing = connection?.activeEpoch?.backing else { return "Chat" }
         return backingName(backing)
-    }
-
-    private func stopWave() {
-        guard !isStopping else { return }
-        isStopping = true
-        sendError = nil
-        let repoPath = repoPath
-        let waveName = waveName
-        Task {
-            do {
-                try await Task.detached {
-                    try LocalWaveAgentLauncher.stopWave(repoPath: repoPath, waveName: waveName)
-                }.value
-            } catch {
-                sendError = "Stop failed: \(error.localizedDescription)"
-            }
-            isStopping = false
-        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -450,21 +398,17 @@ struct WaveChatView: View {
         .padding()
     }
 
-    // MARK: - Not running (start the wave)
-    //
-    // The app and terminal share `lf start <name>`. lfd owns the detached
-    // listener, so quitting Loopflow never touches it. A successful command is
-    // the startup receipt; reconnecting only attaches the already-live chat.
+    // MARK: - Chat connection
 
     private var notRunningState: some View {
         VStack(spacing: Spacing.md) {
             Image(systemName: "moon.zzz")
                 .font(Typography.heroTitle(28))
                 .foregroundStyle(palette.textSecondary.opacity(0.5))
-            Text("Wave isn't running")
+            Text(connectionState == .connecting ? "Connecting chat…" : "Chat unavailable")
                 .font(Typography.sectionTitle())
                 .foregroundStyle(palette.text)
-            Text(waveStartHint(waveName: waveName))
+            Text("Chat connects automatically for Waves assigned to this machine.")
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
                 .multilineTextAlignment(.center)
@@ -475,48 +419,49 @@ struct WaveChatView: View {
                     .frame(maxWidth: 340)
             }
             Button {
-                startWave()
+                connectChat()
             } label: {
                 HStack(spacing: Spacing.xs) {
-                    if startState == .starting {
+                    if connectionState == .connecting {
                         ProgressView()
                             .controlSize(.small)
                     }
-                    Text(startState == .starting ? "Starting…" : "Start wave")
+                    Text(connectionState == .connecting ? "Connecting…" : "Retry connection")
                 }
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(startState == .starting)
-            .accessibilityIdentifier("wave-chat-start")
-            if case .failed(let message) = startState {
+            .disabled(connectionState == .connecting)
+            .accessibilityIdentifier("wave-chat-connect")
+            if case .failed(let message) = connectionState {
                 Text(message)
                     .font(Typography.caption())
                     .foregroundStyle(Color.statusError)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
-                    .accessibilityIdentifier("wave-chat-start-error")
+                    .accessibilityIdentifier("wave-chat-connect-error")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
     }
 
-    /// Start through the synchronous Home lifecycle, then attach immediately.
-    private func startWave() {
-        guard startState != .starting else { return }
-        startState = .starting
+    /// Wait for the local listener's receipt, then attach immediately.
+    private func connectChat() {
+        guard connectionState != .connecting else { return }
+        connectionState = .connecting
         let repoPath = repoPath
         let waveName = waveName
         Task {
             do {
-                _ = try await RegistryQueryLocal.shared.start(wave: waveName, cwd: repoPath)
+                _ = try await RegistryQueryLocal.shared.connectChat(wave: waveName, cwd: repoPath)
             } catch {
-                startState = .failed(error.localizedDescription)
+                guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
+                connectionState = .failed(error.localizedDescription)
                 return
             }
             guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
             conn.reconnect()
-            startState = .idle
+            connectionState = .idle
         }
     }
 
@@ -635,8 +580,6 @@ struct WaveChatView: View {
                 .onSubmit { perform(verbs.primary) }
                 .accessibilityIdentifier("wave-chat-composer")
 
-
-
             Button(label(for: verbs.primary)) { perform(verbs.primary) }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(DarkButtonStyle())
@@ -646,7 +589,7 @@ struct WaveChatView: View {
     }
 
     private var composerPlaceholder: String {
-        isLive ? "Message \(waveName)" : "Wave isn't running"
+        isLive ? "Message \(waveName)" : "Chat isn't connected"
     }
 
     private func label(for verb: ComposerVerb) -> String {
@@ -804,15 +747,6 @@ private struct ChildControlActivityCard: View {
         case .stateChanged: "circle.dotted"
         }
     }
-}
-
-/// The not-running hint, with the launch command as inline code so `lf` can't
-/// be misread as "If". Plain-string fallback only if markdown parsing fails.
-func waveStartHint(waveName: String) -> AttributedString {
-    let markdown = "Start it here, or run `lf start \(waveName)` in a terminal — "
-        + "its conversation appears here live."
-    return (try? AttributedString(markdown: markdown))
-        ?? AttributedString(markdown.replacingOccurrences(of: "`", with: ""))
 }
 
 #endif

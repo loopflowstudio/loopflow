@@ -109,9 +109,9 @@ const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────
     Cmd {
-        id: "status",
-        path: &["status"],
-        base_args: &["status", "--json"],
+        id: "wave status",
+        path: &["wave", "status"],
+        base_args: &["wave", "status", "--json"],
         wave_form: WaveForm::Positional,
         kind: Kind::Read,
         special: Special::NONE,
@@ -136,9 +136,9 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
-        id: "home probe",
-        path: &["home", "probe"],
-        base_args: &["home", "probe", "--json"],
+        id: "wave probe",
+        path: &["wave", "probe"],
+        base_args: &["wave", "probe", "--json"],
         wave_form: WaveForm::Positional,
         kind: Kind::Read,
         special: Special::NONE,
@@ -302,8 +302,10 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
-    // Creation flows may name the Wave being registered.
-    if env.id == "explicit-unknown" && matches!(cmd.id, "wave connect" | "wave new-chapter") {
+    // Creation and explicit chat connection may register the selected Wave.
+    if env.id == "explicit-unknown"
+        && matches!(cmd.id, "chat post" | "wave connect" | "wave new-chapter")
+    {
         return Outcome::Resolved;
     }
 
@@ -374,14 +376,16 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
 
-    // Task start may reach an authored flow after successful Wave resolution. Keep this resolution test hermetic instead of invoking the
-    // developer's real provider CLI.
+    // Resolution may reach chat connection. Keep process startup outside this
+    // matrix; wave_start_tests owns the real daemon path and its cleanup.
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
-    let codex = bin.join("codex");
-    std::fs::write(&codex, "#!/bin/sh\nexit 1\n").expect("fake codex");
-    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755))
-        .expect("fake codex permissions");
+    for name in ["tmux", "codex", "claude", "opencode"] {
+        let executable = bin.join(name);
+        std::fs::write(&executable, "#!/bin/sh\nexit 79\n").expect("fake executable");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .expect("fake executable permissions");
+    }
 
     // Task start requires a clean repository before reaching Wave resolution.
     let git = |args: &[&str]| {

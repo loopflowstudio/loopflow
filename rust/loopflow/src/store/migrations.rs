@@ -3736,6 +3736,52 @@ mod tests {
     }
 
     #[test]
+    fn auth_browser_bindings_preserve_populated_profiles_accounts_and_routes() {
+        let conn = open();
+        apply_before_current_draft(&conn, "auth_browser_bindings");
+        conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, created_at, updated_at)
+            VALUES ('codex', 'primary', '/account', 'person@example.com', 'connected', 'explicit_only', 1, 2);
+            INSERT INTO access_profiles VALUES ('Work', 'Profile 3', 'person@example.com', 1, 2), ('Personal', 'Default', 'other@example.com', 3, 4);
+            INSERT INTO account_access_profiles VALUES ('codex', 'primary', 0, 'Work'), ('codex', 'primary', 1, 'Personal');
+            INSERT INTO provider_routes VALUES ('default', '', 'codex', 0, 'primary', 1, 2);").unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql("auth_browser_bindings"))
+            .unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        assert_eq!(conn.query_row("SELECT group_concat(profile_id, ',') FROM (SELECT profile_id FROM auth_browser_bindings WHERE account_id = 'primary' ORDER BY position)", [], |row| row.get::<_, String>(0)).unwrap(), "Work,Personal");
+        assert_eq!(
+            conn.query_row(
+                "SELECT expected_login FROM access_profiles WHERE profile_id = 'Work'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "person@example.com"
+        );
+        assert_eq!(
+            conn.query_row("SELECT account_id FROM provider_routes", [], |row| row
+                .get::<_, String>(
+                0
+            ))
+            .unwrap(),
+            "primary"
+        );
+        conn.execute_batch(
+            "INSERT INTO access_profiles VALUES ('Unsigned', 'Profile 9', NULL, 5, 5);
+            INSERT INTO auth_browser_bindings VALUES ('linear', NULL, 0, 'Work');",
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO auth_browser_bindings VALUES ('linear', NULL, 0, 'Personal')",
+                []
+            )
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn accounts_first_migration_preserves_asymmetric_routes_venues_and_session_pins() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
@@ -3794,7 +3840,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
+        apply_through(&conn, "accounts_first");
 
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM access_profiles", [], |row| row

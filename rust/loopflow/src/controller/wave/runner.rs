@@ -871,7 +871,7 @@ impl WaveLoop {
             return;
         }
         let session_id = harness.provider_session_id();
-        capture.set_provider_session_id(session_id.clone());
+        capture.observe_provider(session_id.clone(), harness.provider_account_id());
         if let Some(session_id) = &session_id {
             self.provider_session = Some(ProviderSessionRef {
                 harness: prepared.harness.clone(),
@@ -936,7 +936,7 @@ impl WaveLoop {
                         tokio::task::yield_now().await;
                         if let Some(session_id) = harness.provider_session_id() {
                             body_session_id = Some(session_id.clone());
-                            capture.set_provider_session_id(Some(session_id.clone()));
+                            capture.observe_provider(Some(session_id.clone()), harness.provider_account_id());
                             self.provider_session = Some(ProviderSessionRef {
                                 harness: prepared.harness.clone(),
                                 session_id: session_id.clone(),

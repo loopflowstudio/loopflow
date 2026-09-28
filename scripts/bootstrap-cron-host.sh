@@ -63,9 +63,9 @@ step "unattended tool path"
   exit "$missing"
 '
 step "host-local provider authority"
-auth_status="$("${minimal_env[@]}" lf auth accounts --verify)"
+auth_status="$("${minimal_env[@]}" lf auth status --verify --json)"
 printf '%s\n' "$auth_status"
-if ! grep -q 'live active' <<<"$auth_status"; then
+if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
   printf 'no managed provider account verified live from the Home store\n' >&2
   exit 1
 fi

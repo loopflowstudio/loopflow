@@ -317,7 +317,7 @@ mod tests {
 
         for command in [
             "lf auth status",
-            "lf route show",
+            "lf auth route show",
             "lf home id --json",
             "lf ls --json",
             "lf status <wave> --json",

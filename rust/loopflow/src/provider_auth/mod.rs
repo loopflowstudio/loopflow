@@ -2,12 +2,12 @@
 //! providers, token extraction from vendor CLI artifacts, and store-direct
 //! persistence into store provider tokens.
 //!
-//! Shared home — called in-process by `lf auth`. Auth lifecycle notifications
-//! go through [`AuthEventSink`]. Auth is poll-only in the base
-//! wave model (see `scratch/eventing.md` §5), so both the CLI and the HTTP
-//! routes pass [`no_event_sink`] — the store write is the record; a caller
-//! reads it back by querying the provider list.
+//! Called in-process by `lf auth`. Each attempt retains its completion until
+//! consumed, including credential persistence failure. Stored tokens own durable
+//! credential state; they do not establish whether a new attempt succeeded.
 
+#[cfg(unix)]
+mod browser_handoff;
 pub mod credential_socket;
 
 use std::collections::{HashMap, HashSet};
@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -62,8 +62,6 @@ const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
 const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
 const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
 #[cfg(target_os = "macos")]
-const CLAUDE_BROWSER_AUTH_TIMEOUT: Duration = Duration::from_secs(120);
-#[cfg(target_os = "macos")]
 const CLAUDE_KEYCHAIN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "macos")]
 const LEGACY_CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
@@ -78,11 +76,6 @@ static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static ANSI_ESCAPE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
-#[cfg(any(target_os = "macos", test))]
-static CLAUDE_AUTHORIZATION_CODE_SEARCH_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"[A-Za-z0-9_-]{20,}#[A-Za-z0-9_-]{20,}")
-        .expect("Claude authorization code search regex")
-});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -145,7 +138,7 @@ impl Provider {
 
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
-            Self::Linear => Some("Linear requires OAuth. Run 'lf auth linear' to connect."),
+            Self::Linear => Some("Linear requires OAuth. Run 'lf auth connect linear' to connect."),
             _ => None,
         }
     }
@@ -213,8 +206,25 @@ impl AuthStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// How the provider completes authorization after the browser opens.
+#[derive(Clone, PartialEq, Eq)]
+pub enum AuthCompletion {
+    Browser { manual_uri: Option<String> },
+    Manual,
+}
+
+impl std::fmt::Debug for AuthCompletion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Browser { .. } => f.write_str("Browser"),
+            Self::Manual => f.write_str("Manual"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct AuthFlowResponse {
+    pub completion: AuthCompletion,
     pub provider: Provider,
     pub verification_uri: String,
     pub verification_uri_complete: Option<String>,
@@ -222,33 +232,14 @@ pub struct AuthFlowResponse {
     pub expires_in: Option<u64>,
 }
 
-/// Auth lifecycle notifications. Base callers pass [`no_event_sink`] and rely
-/// on the store write; the type is retained as the sink a future narrow auth
-/// SSE (see `scratch/eventing.md` §5b) would feed.
-#[derive(Debug, Clone)]
-pub enum AuthEvent {
-    FlowStarted {
-        provider: Provider,
-        verification_uri: String,
-        verification_uri_complete: Option<String>,
-    },
-    Connected {
-        provider: Provider,
-        login: Option<String>,
-    },
-    Failed {
-        provider: Provider,
-        error: String,
-    },
-    Disconnected {
-        provider: Provider,
-    },
-}
-
-pub type AuthEventSink = Arc<dyn Fn(AuthEvent) + Send + Sync>;
-
-pub fn no_event_sink() -> AuthEventSink {
-    Arc::new(|_| {})
+impl std::fmt::Debug for AuthFlowResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthFlowResponse")
+            .field("provider", &self.provider)
+            .field("completion", &self.completion)
+            .field("expires_in", &self.expires_in)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,7 +286,11 @@ impl AuthFlowHandle {
         }
     }
 
-    pub fn requires_authorization_code(&self) -> bool {
+    pub(crate) fn code_input(&self) -> Option<AuthorizationCodeInput> {
+        self.authorization_code_input.clone()
+    }
+
+    pub fn supports_authorization_code(&self) -> bool {
         self.authorization_code_input.is_some()
     }
 
@@ -317,8 +312,8 @@ impl AuthFlowHandle {
     }
 }
 
-#[derive(Clone)]
-struct AuthorizationCodeInput {
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizationCodeInput {
     provider: Provider,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
 }
@@ -331,7 +326,7 @@ impl AuthorizationCodeInput {
         }
     }
 
-    async fn submit(&self, code: &str) -> Result<(), AuthError> {
+    pub(crate) async fn submit(&self, code: &str) -> Result<(), AuthError> {
         let code = code.trim();
         if code.is_empty() {
             return Err(AuthError::CommandFailed {
@@ -738,6 +733,7 @@ impl AuthBroker for LinearOAuthBroker {
         ));
 
         let response = AuthFlowResponse {
+            completion: AuthCompletion::Browser { manual_uri: None },
             provider: Provider::Linear,
             verification_uri_complete: Some(verification_uri.clone()),
             verification_uri,
@@ -866,6 +862,7 @@ pub struct ProviderAuthService {
 
 struct PendingAuth {
     lifecycle: JoinHandle<()>,
+    completion: Option<tokio::sync::oneshot::Receiver<Result<(), AuthError>>>,
     authorization_code_input: Option<AuthorizationCodeInput>,
 }
 
@@ -912,7 +909,6 @@ impl ProviderAuthService {
     }
 
     pub async fn list_statuses(&self) -> Result<Vec<ProviderAuthSnapshot>, AuthError> {
-        self.prune_finished_pending().await;
         let pending_providers = self.pending_providers().await;
         let mut snapshots = Vec::with_capacity(Provider::all().len());
 
@@ -934,7 +930,6 @@ impl ProviderAuthService {
     }
 
     pub async fn status(&self, provider: Provider) -> Result<ProviderAuthSnapshot, AuthError> {
-        self.prune_finished_pending().await;
         if self.is_pending(provider).await {
             return Ok(ProviderAuthSnapshot {
                 provider,
@@ -946,6 +941,20 @@ impl ProviderAuthService {
         }
 
         self.resolve_snapshot(provider).await
+    }
+
+    /// Read only the stored local credential; absence leaves ambient auth uninspected.
+    pub(crate) async fn cached_status(
+        &self,
+        provider: Provider,
+    ) -> Result<Option<ProviderAuthSnapshot>, AuthError> {
+        let Some(store) = &self.store else {
+            return Ok(None);
+        };
+        store
+            .provider_auth_snapshot(provider)
+            .await
+            .map_err(|_| AuthError::Filesystem("read local credential metadata failed".into()))
     }
 
     async fn resolve_snapshot(
@@ -1016,11 +1025,7 @@ impl ProviderAuthService {
         })
     }
 
-    pub async fn start_auth(
-        &self,
-        provider: Provider,
-        events: AuthEventSink,
-    ) -> Result<AuthFlowResponse, AuthError> {
+    pub async fn start_auth(&self, provider: Provider) -> Result<AuthFlowResponse, AuthError> {
         self.prune_finished_pending().await;
         if self.is_pending(provider).await {
             return Err(AuthError::FlowAlreadyPending(provider));
@@ -1033,77 +1038,72 @@ impl ProviderAuthService {
             authorization_code_input,
         } = broker.start_auth().await?;
 
-        events(AuthEvent::FlowStarted {
-            provider,
-            verification_uri: response.verification_uri.clone(),
-            verification_uri_complete: response.verification_uri_complete.clone(),
-        });
-
-        let pending = self.pending.clone();
-        let broker_for_task = broker.clone();
-        let events_for_task = events.clone();
         let store_for_task = self.store.clone();
 
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        let mut pending_guard = self.pending.lock().await;
         let lifecycle = tokio::spawn(async move {
-            let monitor_result = monitor.wait(provider).await;
-
-            match monitor_result {
-                Ok(()) => match broker_for_task.check_status().await {
-                    Ok(AuthStatus::Active { login }) => {
-                        // Extract and persist the token (always as OAuth)
-                        if let Some(store) = &store_for_task {
-                            // Check if switching from apikey to oauth
-                            if let Ok(Some(existing)) =
-                                store.get_provider_token(provider.as_str()).await
-                            {
-                                if existing.credential_type == CredentialType::ApiKey {
-                                    tracing::info!(
-                                        provider = %provider,
-                                        "switched from API key to OAuth (subscription billing)"
-                                    );
-                                }
-                            }
-                            if let Some(token) = broker_for_task.extract_token().await {
-                                if let Err(err) = store.upsert_provider_token(&token).await {
-                                    warn!(provider = %provider, error = %err, "failed to persist provider token");
-                                }
-                            }
-                        }
-                        events_for_task(AuthEvent::Connected { provider, login });
-                    }
-                    Ok(status) => {
-                        events_for_task(AuthEvent::Failed {
-                            provider,
-                            error: format!("completed with status {}", status.as_str()),
-                        });
-                    }
-                    Err(err) => {
-                        events_for_task(AuthEvent::Failed {
-                            provider,
-                            error: err.to_string(),
-                        });
-                    }
-                },
-                Err(err) => {
-                    events_for_task(AuthEvent::Failed {
+            let result = async {
+                monitor.wait(provider).await?;
+                let status = broker.check_status().await?;
+                let AuthStatus::Active { .. } = status else {
+                    return Err(AuthError::CommandFailed {
                         provider,
-                        error: err.to_string(),
+                        message: format!(
+                            "credential capture ended with status {}",
+                            status.as_str()
+                        ),
                     });
+                };
+                if let Some(store) = &store_for_task {
+                    if let Some(token) = broker.extract_token().await {
+                        store.upsert_provider_token(&token).await.map_err(|_| {
+                            AuthError::CommandFailed {
+                                provider,
+                                message: "credential persistence failed".to_string(),
+                            }
+                        })?;
+                    }
                 }
+                Ok(())
             }
-
-            let mut pending = pending.lock().await;
-            pending.remove(&provider);
+            .await;
+            let _ = completion_tx.send(result);
+            // Keep completion available until its caller consumes it or a later
+            // start prunes it. Finished tasks no longer represent pending auth.
         });
 
-        self.pending.lock().await.insert(
+        pending_guard.insert(
             provider,
             PendingAuth {
                 lifecycle,
+                completion: Some(completion_rx),
                 authorization_code_input,
             },
         );
         Ok(response)
+    }
+
+    /// Consume this attempt's completion, including credential persistence errors.
+    ///
+    /// Call once after `start_auth`; dropping this future consumes the result too.
+    /// Cached status does not establish whether this attempt succeeded.
+    ///
+    /// # Errors
+    /// Returns the attempt's authorization or persistence error, or `NoPendingFlow`
+    /// when its completion has already been consumed or no attempt was started.
+    pub async fn wait_for_auth(&self, provider: Provider) -> Result<(), AuthError> {
+        let completion = self
+            .pending
+            .lock()
+            .await
+            .get_mut(&provider)
+            .and_then(|pending| pending.completion.take())
+            .ok_or(AuthError::NoPendingFlow(provider))?;
+        completion.await.map_err(|_| AuthError::CommandFailed {
+            provider,
+            message: "authorization completion unavailable".to_string(),
+        })?
     }
 
     pub async fn complete_auth(&self, provider: Provider, code: &str) -> Result<(), AuthError> {
@@ -1119,11 +1119,7 @@ impl ProviderAuthService {
         self.broker(provider)?.complete_auth(code).await
     }
 
-    pub async fn disconnect(
-        &self,
-        provider: Provider,
-        events: AuthEventSink,
-    ) -> Result<(), AuthError> {
+    pub async fn disconnect(&self, provider: Provider) -> Result<(), AuthError> {
         self.abort_pending(provider).await;
         self.broker(provider)?.disconnect().await?;
         if let Some(store) = &self.store {
@@ -1131,11 +1127,10 @@ impl ProviderAuthService {
                 warn!(provider = %provider, error = %err, "failed to delete provider token");
             }
         }
-        events(AuthEvent::Disconnected { provider });
         Ok(())
     }
 
-    async fn abort_pending(&self, provider: Provider) {
+    pub(crate) async fn abort_pending(&self, provider: Provider) {
         let pending = self.pending.lock().await.remove(&provider);
         if let Some(pending) = pending {
             pending.lifecycle.abort();
@@ -1148,10 +1143,14 @@ impl ProviderAuthService {
     }
 
     async fn is_pending(&self, provider: Provider) -> bool {
-        self.pending.lock().await.contains_key(&provider)
+        self.pending
+            .lock()
+            .await
+            .get(&provider)
+            .is_some_and(|pending| !pending.lifecycle.is_finished())
     }
 
-    pub async fn pending_requires_authorization_code(&self, provider: Provider) -> bool {
+    pub async fn pending_supports_authorization_code(&self, provider: Provider) -> bool {
         self.pending
             .lock()
             .await
@@ -1160,7 +1159,13 @@ impl ProviderAuthService {
     }
 
     async fn pending_providers(&self) -> HashSet<Provider> {
-        self.pending.lock().await.keys().copied().collect()
+        self.pending
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, pending)| !pending.lifecycle.is_finished())
+            .map(|(provider, _)| *provider)
+            .collect()
     }
 
     fn broker(&self, provider: Provider) -> Result<Arc<dyn AuthBroker>, AuthError> {
@@ -1208,6 +1213,7 @@ fn socket_auth_flow_handle(
         .min(SOCKET_AUTH_MAX_TIMEOUT);
     let provider_name = provider.as_str().to_string();
     let flow_response = AuthFlowResponse {
+        completion: AuthCompletion::Browser { manual_uri: None },
         provider,
         verification_uri: response.verification_uri,
         verification_uri_complete: response.verification_uri_complete,
@@ -1395,9 +1401,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = self.login_command();
-        command.env("BROWSER", "echo");
-        command.env("CLAUDE_BROWSER", "echo");
+        let command = self.login_command();
 
         start_auth_command(
             Provider::Claude,
@@ -1614,6 +1618,44 @@ pub async fn disconnect_provider_account_auth(
         .await
 }
 
+/// Offline evidence from the managed provider's own credential format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CredentialPresence {
+    Present,
+    Missing,
+    Unreadable,
+    Uninspected,
+}
+
+pub(crate) fn provider_account_credential_presence(
+    provider: Provider,
+    home: &Path,
+) -> CredentialPresence {
+    let file = match provider {
+        Provider::Claude => ".credentials.json",
+        Provider::Codex => "auth.json",
+        _ => return CredentialPresence::Uninspected,
+    };
+    let raw = match fs::read_to_string(home.join(file)) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return CredentialPresence::Missing
+        }
+        Err(_) => return CredentialPresence::Unreadable,
+    };
+    let token = match provider {
+        Provider::Claude => claude_token_from_credentials_json(&raw),
+        Provider::Codex => serde_json::from_str(&raw)
+            .ok()
+            .and_then(|json| codex_token_from_credentials_json(&json)),
+        _ => None,
+    };
+    match token {
+        Some(token) if !token.access_token.is_empty() => CredentialPresence::Present,
+        _ => CredentialPresence::Unreadable,
+    }
+}
+
 pub(crate) async fn prepare_provider_account_access_token(
     provider: Provider,
     provider_home: &Path,
@@ -1657,6 +1699,7 @@ impl AuthBroker for DopplerAuthBroker {
         // a pre-completed handle so the lifecycle task picks it up immediately.
         if let Ok(AuthStatus::Active { .. }) = self.check_status().await {
             let response = AuthFlowResponse {
+                completion: AuthCompletion::Browser { manual_uri: None },
                 provider: Provider::Doppler,
                 verification_uri: String::new(),
                 verification_uri_complete: None,
@@ -1761,6 +1804,7 @@ impl AuthBroker for OpenCodeZenBroker {
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
         let response = AuthFlowResponse {
+            completion: AuthCompletion::Browser { manual_uri: None },
             provider: Provider::OpenCodeZen,
             verification_uri: OPENCODE_AUTH_URL.to_string(),
             verification_uri_complete: Some(OPENCODE_AUTH_URL.to_string()),
@@ -1816,126 +1860,6 @@ struct AuthFlowBuilder {
     expects_user_code: bool,
 }
 
-/// Read Claude's one-time handoff from its Chrome page on macOS.
-///
-/// Polling only checks for the matching window. Once it appears, Loopflow
-/// copies the addressed tab without activating Chrome or synthesizing input,
-/// restores the clipboard inside the same AppleScript command, and keeps the
-/// handoff only in process memory.
-///
-/// # Errors
-///
-/// Returns an error for an untrusted authorization URL or browser-control I/O
-/// failure. `Ok(None)` means native Chrome control is unavailable or timed out.
-pub async fn capture_claude_authorization_code_from_chrome(
-    verification_url: &str,
-    _browser_profile_label: &str,
-) -> Result<Option<SecretString>, AuthError> {
-    validate_claude_authorization_url(verification_url)?;
-
-    #[cfg(target_os = "macos")]
-    {
-        let deadline = Instant::now() + CLAUDE_BROWSER_AUTH_TIMEOUT;
-        while Instant::now() < deadline {
-            let output = ProcessCommand::new("osascript")
-                .args(["-e", CLAUDE_AUTH_WINDOW_SCRIPT, _browser_profile_label])
-                .output()
-                .map_err(|source| AuthError::CommandIo {
-                    provider: Provider::Claude,
-                    source,
-                })?;
-            if !output.status.success() {
-                return Ok(None);
-            }
-            if String::from_utf8_lossy(&output.stdout).trim() == "ready" {
-                let output = ProcessCommand::new("osascript")
-                    .args(["-e", CLAUDE_PAGE_HARVEST_SCRIPT, _browser_profile_label])
-                    .output()
-                    .map_err(|source| AuthError::CommandIo {
-                        provider: Provider::Claude,
-                        source,
-                    })?;
-                if !output.status.success() {
-                    return Ok(None);
-                }
-                let page = String::from_utf8_lossy(&output.stdout);
-                return Ok(claude_authorization_code_from_page(&page));
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-        Ok(None)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(None)
-    }
-}
-
-#[cfg(target_os = "macos")]
-const CLAUDE_AUTH_WINDOW_SCRIPT: &str = r#"
-on run argv
-    set profileLabel to item 1 of argv
-    tell application "System Events"
-        if not (exists process "Google Chrome") then return ""
-        tell process "Google Chrome"
-            set authWindows to every window whose name contains "Authentication code | Claude Platform"
-            repeat with authWindow in authWindows
-                if name of authWindow contains "(" & profileLabel & ")" then return "ready"
-            end repeat
-        end tell
-    end tell
-    return ""
-end run
-"#;
-
-#[cfg(target_os = "macos")]
-const CLAUDE_PAGE_HARVEST_SCRIPT: &str = r#"
-on run argv
-    set savedClipboard to the clipboard
-    try
-        set profileLabel to item 1 of argv
-        tell application "Google Chrome"
-            set authWindows to every window whose name contains "Authentication code | Claude Platform"
-            set pageText to ""
-            repeat with authWindow in authWindows
-                if name of authWindow contains "(" & profileLabel & ")" then
-                    select all active tab of authWindow
-                    copy selection active tab of authWindow
-                    set pageText to the clipboard as text
-                    exit repeat
-                end if
-            end repeat
-        end tell
-        set the clipboard to savedClipboard
-        return pageText
-    on error
-        set the clipboard to savedClipboard
-        error
-    end try
-end run
-"#;
-
-#[cfg(any(target_os = "macos", test))]
-fn claude_authorization_code_from_page(page: &str) -> Option<SecretString> {
-    CLAUDE_AUTHORIZATION_CODE_SEARCH_RE
-        .find(page)
-        .map(|value| SecretString::new(value.as_str().to_string()))
-}
-
-fn validate_claude_authorization_url(verification_url: &str) -> Result<(), AuthError> {
-    let url = Url::parse(verification_url).map_err(|_| AuthError::CommandFailed {
-        provider: Provider::Claude,
-        message: "browser controller received an invalid authorization URL".to_string(),
-    })?;
-    if url.scheme() != "https" || url.host_str() != Some("claude.com") {
-        return Err(AuthError::CommandFailed {
-            provider: Provider::Claude,
-            message: "browser controller refused a non-Claude authorization URL".to_string(),
-        });
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AuthCommandInput {
     None,
@@ -1949,6 +1873,16 @@ async fn start_auth_command(
     input: AuthCommandInput,
     mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder),
 ) -> Result<AuthFlowHandle, AuthError> {
+    #[cfg(unix)]
+    let mut handoff =
+        if provider == Provider::Claude && input == AuthCommandInput::AuthorizationCode {
+            Some(
+                browser_handoff::BrowserHandoff::new(&mut command)
+                    .map_err(|source| AuthError::CommandIo { provider, source })?,
+            )
+        } else {
+            None
+        };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     match input {
         AuthCommandInput::None => command.stdin(Stdio::null()),
@@ -2004,75 +1938,102 @@ async fn start_auth_command(
             message: "missing stderr pipe".to_string(),
         })?;
 
-    let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+    let (line_tx, mut line_rx) = mpsc::channel::<String>(32);
     let stdout_task = spawn_line_reader(stdout, line_tx.clone());
     let stderr_task = spawn_line_reader(stderr, line_tx);
-
+    let readers = AuthReaders(vec![stdout_task, stderr_task]);
     let started_at = Instant::now();
     let mut builder = AuthFlowBuilder::default();
-
-    loop {
-        if started_at.elapsed() >= AUTH_URL_TIMEOUT {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            drop(process_group);
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+    let mut callback_url = None;
+    let response = loop {
+        // Read queued bytes before judging a fast-exiting provider. Closing both
+        // pipes, not child exit alone, establishes that all output was received.
+        for _ in 0..32 {
+            let Ok(line) = line_rx.try_recv() else {
+                break;
+            };
+            parse_line(&strip_ansi_escape_codes(&line), &mut builder);
+        }
+        #[cfg(unix)]
+        if let Some(handoff) = handoff.as_mut() {
+            callback_url = handoff
+                .read_url()
+                .map_err(|source| AuthError::CommandIo { provider, source })?;
+        }
+        let expired = started_at.elapsed() >= AUTH_URL_TIMEOUT;
+        let exited = child
+            .try_wait()
+            .map_err(|source| AuthError::CommandIo { provider, source })?;
+        let drained = exited.is_some() && line_rx.is_closed() && line_rx.is_empty();
+        let capture_pending = cfg!(unix)
+            && provider == Provider::Claude
+            && input == AuthCommandInput::AuthorizationCode;
+        if callback_url.is_some() || !capture_pending || expired || drained {
+            let manual = builder.verification_uri_complete.clone();
+            if let Some(url) = &callback_url {
+                builder.verification_uri = Some(strip_query(url).to_string());
+                builder.verification_uri_complete = Some(url.clone());
+            }
+            if let Some(mut response) = build_flow_response(provider, &builder) {
+                if input == AuthCommandInput::AuthorizationCode {
+                    response.completion = if callback_url.is_some() {
+                        AuthCompletion::Browser { manual_uri: manual }
+                    } else {
+                        AuthCompletion::Manual
+                    };
+                }
+                break response;
+            }
+        }
+        if drained {
+            return Err(AuthError::CommandFailed {
+                provider,
+                message: format!(
+                    "URL discovery: provider exited before emitting an authorization URL ({})",
+                    exited.expect("drained output requires child exit")
+                ),
+            });
+        }
+        if expired {
             return Err(AuthError::MissingVerificationUrl {
                 provider,
                 timeout_secs: AUTH_URL_TIMEOUT.as_secs(),
             });
         }
-
-        if let Some(status) = child.try_wait().map_err(|err| AuthError::CommandIo {
-            provider,
-            source: err,
-        })? {
-            if let Some(response) = build_flow_response(provider, &builder) {
-                let monitor = tokio::spawn(async move {
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
-                    process_group.disarm();
-                    command_exit_result(provider, status)
-                });
-                return Ok(match authorization_code_input {
-                    Some(input) => {
-                        AuthFlowHandle::with_authorization_code_input(response, monitor, input)
-                    }
-                    None => AuthFlowHandle::new(response, monitor),
-                });
-            }
-
-            drop(process_group);
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
-            return Err(AuthError::CommandFailed {
-                provider,
-                message: format!("auth command exited before emitting verification URL: {status}"),
-            });
+        if line_rx.is_closed() {
+            tokio::time::sleep(AUTH_URL_POLL_INTERVAL).await;
+        } else if let Ok(Some(line)) =
+            tokio::time::timeout(AUTH_URL_POLL_INTERVAL, line_rx.recv()).await
+        {
+            parse_line(&strip_ansi_escape_codes(&line), &mut builder);
         }
+    };
+    let monitor = tokio::spawn(async move {
+        let _readers = readers;
+        // The private FIFO and helper live exactly as long as the provider.
+        #[cfg(unix)]
+        let _handoff = handoff;
+        let status = child
+            .wait()
+            .await
+            .map_err(|source| AuthError::CommandIo { provider, source })?;
+        if status.success() {
+            process_group.disarm();
+        }
+        command_exit_result(provider, status)
+    });
+    Ok(match authorization_code_input {
+        Some(input) => AuthFlowHandle::with_authorization_code_input(response, monitor, input),
+        None => AuthFlowHandle::new(response, monitor),
+    })
+}
 
-        if let Ok(Some(line)) = tokio::time::timeout(AUTH_URL_POLL_INTERVAL, line_rx.recv()).await {
-            let normalized_line = strip_ansi_escape_codes(&line);
-            parse_line(&normalized_line, &mut builder);
-            if let Some(response) = build_flow_response(provider, &builder) {
-                let monitor = tokio::spawn(async move {
-                    let status = child.wait().await.map_err(|err| AuthError::CommandIo {
-                        provider,
-                        source: err,
-                    })?;
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
-                    process_group.disarm();
-                    command_exit_result(provider, status)
-                });
-                return Ok(match authorization_code_input {
-                    Some(input) => {
-                        AuthFlowHandle::with_authorization_code_input(response, monitor, input)
-                    }
-                    None => AuthFlowHandle::new(response, monitor),
-                });
-            }
+struct AuthReaders(Vec<JoinHandle<()>>);
+
+impl Drop for AuthReaders {
+    fn drop(&mut self) {
+        for reader in &self.0 {
+            reader.abort();
         }
     }
 }
@@ -2091,16 +2052,35 @@ fn command_exit_result(
     }
 }
 
-fn spawn_line_reader<R>(reader: R, tx: mpsc::UnboundedSender<String>) -> JoinHandle<()>
+fn spawn_line_reader<R>(mut reader: R, tx: mpsc::Sender<String>) -> JoinHandle<()>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     tokio::spawn(async move {
-        let mut lines = BufReader::new(reader).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if tx.send(line).is_err() {
-                return;
+        let mut buffer = Vec::new();
+        let mut chunk = [0; 4096];
+        let mut oversized = false;
+        loop {
+            let count = match reader.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(count) => count,
+            };
+            for byte in &chunk[..count] {
+                if *byte == b'\n' {
+                    if !oversized {
+                        let _ = tx.send(String::from_utf8_lossy(&buffer).into_owned()).await;
+                    }
+                    buffer.clear();
+                    oversized = false;
+                } else if buffer.len() < 64 * 1024 {
+                    buffer.push(*byte);
+                } else {
+                    oversized = true;
+                }
             }
+        }
+        if !oversized && !buffer.is_empty() {
+            let _ = tx.send(String::from_utf8_lossy(&buffer).into_owned()).await;
         }
     })
 }
@@ -2194,6 +2174,7 @@ fn build_flow_response(provider: Provider, builder: &AuthFlowBuilder) -> Option<
     }
 
     Some(AuthFlowResponse {
+        completion: AuthCompletion::Browser { manual_uri: None },
         provider,
         verification_uri,
         verification_uri_complete,
@@ -2217,7 +2198,17 @@ fn extract_url(line: &str) -> Option<String> {
 }
 
 fn strip_ansi_escape_codes(line: &str) -> String {
-    ANSI_ESCAPE_RE.replace_all(line, "").to_string()
+    static OSC_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)").expect("OSC regex"));
+    let decoded = OSC_RE.replace_all(line, |captures: &regex::Captures<'_>| {
+        captures[1]
+            .strip_prefix("8;")
+            .and_then(|link| link.split_once(';'))
+            .filter(|(_, url)| !url.is_empty())
+            .map(|(_, url)| format!(" {url} "))
+            .unwrap_or_else(|| " ".to_string())
+    });
+    ANSI_ESCAPE_RE.replace_all(&decoded, "").to_string()
 }
 
 fn strip_query(url: &str) -> &str {
@@ -2466,7 +2457,7 @@ fn claude_keychain_service(config_dir: &Path) -> String {
     format!("Claude Code-credentials-{}", &suffix[..8])
 }
 
-fn write_claude_profile_credentials(
+pub(crate) fn write_claude_profile_credentials(
     config_dir: &Path,
     credential: &SecretString,
 ) -> Result<(), AuthError> {
@@ -2647,6 +2638,10 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
     let auth_path = codex_home.join("auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    codex_token_from_credentials_json(&json)
+}
+
+fn codex_token_from_credentials_json(json: &serde_json::Value) -> Option<ProviderToken> {
     // Store OAuth access tokens only.
     // Never capture manual API keys from Codex auth state.
     let token = json
@@ -2658,7 +2653,7 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
                 .and_then(|v| v.as_str())
         })?;
     let expires_at = read_json_expires_at(
-        &json,
+        json,
         &[
             "expires_at",
             "expiresAt",
@@ -2667,7 +2662,7 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
         ],
     )
     .or_else(|| jwt_claims(token)?.get("exp")?.as_i64());
-    let login = codex_login_from_auth(&json);
+    let login = codex_login_from_auth(json);
     Some(ProviderToken {
         provider: "codex".to_string(),
         access_token: token.to_string(),
@@ -3997,7 +3992,8 @@ mod tests {
         .await
         .expect("start fake auth command");
 
-        assert!(handle.requires_authorization_code());
+        assert!(handle.supports_authorization_code());
+        assert_eq!(handle.response.completion, AuthCompletion::Manual);
         handle
             .submit_authorization_code("expected-code")
             .await
@@ -4005,51 +4001,152 @@ mod tests {
         handle.wait().await.expect("auth command should complete");
     }
 
-    #[test]
-    fn visible_claude_page_parser_extracts_only_a_complete_handoff() {
-        let expected = "abcdefghijklmnopqrstuvwxyz#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let page = format!("Authorization complete\n{expected}\nCopy this code");
-
-        let code = claude_authorization_code_from_page(&page).expect("authorization handoff");
-
-        assert_eq!(code.expose_secret(), expected);
-        assert!(claude_authorization_code_from_page("short#code").is_none());
+    #[tokio::test]
+    async fn discovery_timeout_kills_only_the_owned_provider_group() {
+        let tmp = tempdir().unwrap();
+        let pid_path = tmp.path().join("pid");
+        let mut unrelated = Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut command = Command::new("sh");
+        command
+            .env("AUTH_PID_PATH", &pid_path)
+            .args(["-c", "echo $$ > \"$AUTH_PID_PATH\"; sleep 30"]);
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            start_auth_command(
+                Provider::Claude,
+                "sh",
+                command,
+                AuthCommandInput::AuthorizationCode,
+                parse_generic_auth_line,
+            ),
+        )
+        .await;
+        assert!(result.is_err());
+        let pid: i32 = fs::read_to_string(pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                // SAFETY: signal zero probes only this recorded fixture pid.
+                if unsafe { libc::kill(pid, 0) } != 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(unrelated.try_wait().unwrap().is_none());
+        unrelated.kill().await.unwrap();
+        unrelated.wait().await.unwrap();
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn claude_browser_automation_compiles_without_focus_or_keyboard_control() {
-        for script in [CLAUDE_AUTH_WINDOW_SCRIPT, CLAUDE_PAGE_HARVEST_SCRIPT] {
-            assert!(!script.contains("activate"));
-            assert!(!script.contains("AXRaise"));
-            assert!(!script.contains("keystroke"));
+    fn terminal_links_preserve_targets_without_escape_bytes() {
+        let expected = "https://example.com/authorize?state=synthetic";
+        for ending in ["\x07", "\x1b\\"] {
+            for label in ["Sign in", expected] {
+                let line =
+                    format!("\x1b[32m\x1b]8;;{expected}{ending}{label}\x1b]8;;{ending}\x1b[0m");
+                // The base CSI-only decoder leaves OSC bytes on the token.
+                assert!(extract_url(&ANSI_ESCAPE_RE.replace_all(&line, "")).is_none());
+                assert_eq!(
+                    extract_url(&strip_ansi_escape_codes(&line)).as_deref(),
+                    Some(expected)
+                );
+            }
         }
-        assert!(!CLAUDE_AUTH_WINDOW_SCRIPT.contains("clipboard"));
-        assert!(CLAUDE_PAGE_HARVEST_SCRIPT.contains("select all active tab"));
-        assert!(CLAUDE_PAGE_HARVEST_SCRIPT.contains("copy selection active tab"));
+    }
 
-        let compiled = tempdir().expect("AppleScript compile output");
-        for (name, script) in [
-            ("window", CLAUDE_AUTH_WINDOW_SCRIPT),
-            ("harvest", CLAUDE_PAGE_HARVEST_SCRIPT),
-        ] {
-            // Resolve the installed app by path so this headless test can load
-            // Chrome's scripting dictionary without launching Chrome.
-            let script = script.replace(
-                "tell application \"Google Chrome\"",
-                "tell application \"/Applications/Google Chrome.app\"",
-            );
-            let output = ProcessCommand::new("/usr/bin/osacompile")
-                .args(["-e", &script, "-o"])
-                .arg(compiled.path().join(format!("{name}.scpt")))
-                .output()
-                .expect("compile Claude Chrome AppleScript");
-            assert!(
-                output.status.success(),
-                "{name} script did not compile: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_browser_handoff_wins_over_earlier_manual_link_and_needs_no_input() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            r#"
+            printf '\033]8;;https://example.com/manual?state=synthetic\007Sign in\033]8;;\007\n'
+            sleep 0.05
+            "$BROWSER" 'https://example.com/native?redirect_uri=http%3A%2F%2Flocalhost%3A19222'
+        "#,
+        ]);
+        let handle = start_auth_command(
+            Provider::Claude,
+            "sh",
+            command,
+            AuthCommandInput::AuthorizationCode,
+            parse_generic_auth_line,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            handle.response.completion,
+            AuthCompletion::Browser {
+                manual_uri: Some("https://example.com/manual?state=synthetic".to_string())
+            }
+        );
+        assert!(handle
+            .response
+            .verification_uri_complete
+            .as_ref()
+            .unwrap()
+            .contains("/native?"));
+        assert!(!format!("{handle:?}").contains("https://"));
+        tokio::time::timeout(Duration::from_secs(2), handle.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn fragmented_hyperlink_survives_immediate_provider_exit() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            r#"
+            printf '\033]8;;https://example.com/author'
+            sleep 0.05
+            printf 'ize\033\\Sign in\033]8;;\033\\'
+        "#,
+        ]);
+        let handle = start_auth_command(
+            Provider::Codex,
+            "sh",
+            command,
+            AuthCommandInput::None,
+            parse_generic_auth_line,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            handle.response.verification_uri_complete.as_deref(),
+            Some("https://example.com/authorize")
+        );
+        handle.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fast_provider_failure_drains_output_but_does_not_claim_success() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo https://example.com/authorize; exit 7"]);
+        let handle = start_auth_command(
+            Provider::Codex,
+            "sh",
+            command,
+            AuthCommandInput::None,
+            parse_generic_auth_line,
+        )
+        .await
+        .unwrap();
+        let error = handle.wait().await.unwrap_err().to_string();
+        assert!(error.contains('7'));
+        assert!(!error.contains("https://"));
     }
 
     #[test]
@@ -4309,6 +4406,7 @@ attributes:
 
             async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
                 let response = AuthFlowResponse {
+                    completion: AuthCompletion::Browser { manual_uri: None },
                     provider: Provider::GitHub,
                     verification_uri: "https://github.com/login/device".to_string(),
                     verification_uri_complete: None,
@@ -4335,7 +4433,7 @@ attributes:
 
         let service = ProviderAuthService::with_brokers(vec![Arc::new(FakeBroker)]);
         service
-            .start_auth(Provider::GitHub, no_event_sink())
+            .start_auth(Provider::GitHub)
             .await
             .expect("start auth");
 
@@ -4343,7 +4441,7 @@ attributes:
         assert_eq!(status.status, AuthStatus::Pending);
         assert!(
             !service
-                .pending_requires_authorization_code(Provider::GitHub)
+                .pending_supports_authorization_code(Provider::GitHub)
                 .await
         );
     }
@@ -4363,7 +4461,7 @@ attributes:
                 let mut command = Command::new("sh");
                 command.args([
                     "-c",
-                    "echo https://example.com/oauth/authorize; IFS= read -r code; test \"$code\" = expected-code",
+                    r#"echo https://example.com/oauth/authorize; "$BROWSER" https://example.com/native; IFS= read -r code; test "$code" = expected-code"#,
                 ]);
                 start_auth_command(
                     Provider::Claude,
@@ -4386,12 +4484,12 @@ attributes:
 
         let service = ProviderAuthService::with_brokers(vec![Arc::new(CommandBroker)]);
         service
-            .start_auth(Provider::Claude, no_event_sink())
+            .start_auth(Provider::Claude)
             .await
             .expect("start auth");
         assert!(
             service
-                .pending_requires_authorization_code(Provider::Claude)
+                .pending_supports_authorization_code(Provider::Claude)
                 .await
         );
         service
@@ -4404,6 +4502,18 @@ attributes:
             assert!(Instant::now() < deadline, "auth lifecycle did not finish");
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        service.wait_for_auth(Provider::Claude).await.unwrap();
+        service.start_auth(Provider::Claude).await.unwrap();
+        service
+            .complete_auth(Provider::Claude, "rejected-code")
+            .await
+            .unwrap();
+        assert!(service.wait_for_auth(Provider::Claude).await.is_err());
+        // An independently active credential cannot turn this failed attempt green.
+        assert!(matches!(
+            service.status(Provider::Claude).await.unwrap().status,
+            AuthStatus::Active { .. }
+        ));
     }
 
     #[derive(Debug, Clone)]
@@ -4420,6 +4530,7 @@ attributes:
 
         async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
             let response = AuthFlowResponse {
+                completion: AuthCompletion::Browser { manual_uri: None },
                 provider: self.provider,
                 verification_uri: "https://github.com/login/device".to_string(),
                 verification_uri_complete: None,
@@ -4456,7 +4567,7 @@ attributes:
     }
 
     #[tokio::test]
-    async fn start_auth_persists_extracted_token_and_reports_events() {
+    async fn start_auth_completes_after_persisting_extracted_token() {
         let store = temp_sqlite_store().await;
         let token = ProviderToken {
             provider: "github".to_string(),
@@ -4477,26 +4588,17 @@ attributes:
             Some(store.clone()),
         );
 
-        let events: Arc<StdMutex<Vec<AuthEvent>>> = Arc::new(StdMutex::new(Vec::new()));
-        let events_for_sink = events.clone();
-        let sink: AuthEventSink = Arc::new(move |event| {
-            events_for_sink.lock().expect("events mutex").push(event);
-        });
-
         service
-            .start_auth(Provider::GitHub, sink)
+            .start_auth(Provider::GitHub)
             .await
             .expect("start auth");
-
-        // Wait for the background lifecycle to persist the token.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if !service.is_pending(Provider::GitHub).await {
-                break;
-            }
-            assert!(Instant::now() < deadline, "auth lifecycle did not finish");
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            service.wait_for_auth(Provider::GitHub),
+        )
+        .await
+        .expect("auth lifecycle should finish")
+        .expect("login and persistence should succeed");
 
         let stored = store
             .get_provider_token("github")
@@ -4506,15 +4608,6 @@ attributes:
         assert_eq!(stored.access_token, "gho_flow123");
         assert_eq!(stored.login.as_deref(), Some("jackdanger"));
         assert_eq!(stored.credential_type, CredentialType::OAuth);
-
-        let events = events.lock().expect("events mutex");
-        assert!(matches!(
-            events.first(),
-            Some(AuthEvent::FlowStarted { .. })
-        ));
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, AuthEvent::Connected { .. })));
     }
 
     #[tokio::test]
@@ -4795,7 +4888,7 @@ attributes:
         assert!(!Provider::Linear.api_key_bills_per_token());
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf auth linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf auth connect linear' to connect.")
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
         assert!(pm_oauth_endpoint(Provider::Linear).is_some());
@@ -4807,7 +4900,10 @@ attributes:
         let has_linear = default_brokers(None)
             .iter()
             .any(|broker| broker.provider() == Provider::Linear);
-        assert!(has_linear, "`lf auth linear` needs a registered broker");
+        assert!(
+            has_linear,
+            "`lf auth connect linear` needs a registered broker"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -5211,7 +5307,7 @@ printf '{"id":2,"result":{"account":null}}\n'
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf auth linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf auth connect linear' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }
@@ -5331,5 +5427,46 @@ mod linear_oauth_config_tests {
                 .unwrap_err(),
             LinearRefreshError::ConfigurationLookupFailed
         );
+    }
+}
+
+#[cfg(test)]
+mod credential_presence_tests {
+    use super::{provider_account_credential_presence, CredentialPresence, Provider};
+
+    #[test]
+    fn managed_credential_presence_distinguishes_missing_unreadable_and_present() {
+        for (provider, filename, contents) in [
+            (
+                Provider::Claude,
+                ".credentials.json",
+                r#"{"claudeAiOauth":{"accessToken":"fixture"}}"#,
+            ),
+            (
+                Provider::Codex,
+                "auth.json",
+                r#"{"tokens":{"access_token":"fixture"}}"#,
+            ),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            assert_eq!(
+                provider_account_credential_presence(provider, home.path()),
+                CredentialPresence::Missing
+            );
+            std::fs::write(home.path().join(filename), "malformed fixture").unwrap();
+            assert_eq!(
+                provider_account_credential_presence(provider, home.path()),
+                CredentialPresence::Unreadable
+            );
+            std::fs::write(home.path().join(filename), contents).unwrap();
+            assert_eq!(
+                provider_account_credential_presence(provider, home.path()),
+                CredentialPresence::Present
+            );
+            assert_eq!(
+                std::fs::read_to_string(home.path().join(filename)).unwrap(),
+                contents
+            );
+        }
     }
 }

@@ -311,16 +311,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: AuthCommand,
     },
-    /// Chrome access venues used during provider login ceremonies
-    Profile {
-        #[command(subcommand)]
-        cmd: ProfileCommand,
-    },
-    /// Route providers through ordered managed accounts
-    Route {
-        #[command(subcommand)]
-        cmd: RouteCommand,
-    },
     /// Release operations (run, check, notes, bump, tag, status)
     Release {
         #[command(subcommand)]
@@ -1482,165 +1472,85 @@ pub enum HomeCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Show authentication status for local credentials
+    /// Inspect cached credentials and subscription windows; verify explicitly
     Status {
-        /// Provider name (optional)
         provider: Option<String>,
-    },
-    /// Disconnect a provider from local lf credentials
-    Disconnect {
-        /// Provider name
-        provider: String,
-        /// Disconnect one managed OAuth login
-        #[arg(long)]
-        email: Option<String>,
-    },
-    /// Store an API key from the provider's environment variable
-    Configure {
-        /// Provider name
-        provider: String,
-    },
-    /// Start a provider auth flow explicitly
-    Connect {
-        /// Provider name
-        provider: String,
-        /// Login email or an unambiguous prefix
-        email: Option<String>,
-        /// Bootstrap through this Chrome directory, name, or signed-in email
-        #[arg(long, requires = "email")]
-        chrome_profile: Option<String>,
-    },
-    /// Adopt an existing Claude login
-    Import {
-        provider: String,
-        /// Verified login email
-        #[arg(long)]
-        email: String,
-        /// Chrome profile directory, name, or signed-in email
-        #[arg(long)]
-        chrome_profile: Option<String>,
-    },
-    /// Manage the ordered Chrome venues that can log in an account
-    Access {
-        #[command(subcommand)]
-        cmd: AuthAccessCommand,
-    },
-    /// List managed Claude and Codex OAuth accounts
-    Accounts {
-        /// Provider name (optional)
-        provider: Option<String>,
-        /// Ask each provider now instead of reporting only cached state
         #[arg(long)]
         verify: bool,
+        #[arg(long)]
+        details: bool,
+        #[arg(long)]
+        json: bool,
     },
-    /// Record provider-specific account identity, routing, and billing state
+    /// Disconnect local credentials or one managed login
+    Disconnect {
+        provider: String,
+        email: Option<String>,
+    },
+    /// Connect local credentials or a managed login using a remembered browser
+    Connect {
+        provider: String,
+        email: Option<String>,
+        #[arg(long, conflicts_with_all = ["import", "api_key"])]
+        chrome_profile: Option<String>,
+        /// Adopt an existing Claude login
+        #[arg(long = "import", requires = "email", conflicts_with = "api_key")]
+        import: bool,
+        /// Read the provider's API key environment variable
+        #[arg(long, conflicts_with = "email")]
+        api_key: bool,
+    },
+    /// Edit account configuration or remembered browser choices
     Set {
         provider: String,
-        /// Login email or an unambiguous prefix
-        email: String,
-        #[arg(long)]
+        email: Option<String>,
+        #[arg(long, requires = "email")]
         login_email: Option<String>,
-        /// automatic, explicit-only, or disabled
-        #[arg(long)]
+        #[arg(long, requires = "email")]
         routing: Option<String>,
-        #[arg(long, conflicts_with = "clear_plan")]
+        #[arg(long, requires = "email", conflicts_with = "clear_plan")]
         plan: Option<String>,
-        #[arg(long)]
+        #[arg(long, requires = "email")]
         clear_plan: bool,
-        /// Last paid day, as YYYY-MM-DD
-        #[arg(long, conflicts_with = "clear_paid_through")]
+        #[arg(long, requires = "email", conflicts_with = "clear_paid_through")]
         paid_through: Option<String>,
-        #[arg(long)]
+        #[arg(long, requires = "email")]
         clear_paid_through: bool,
-    },
-    /// Clear observed utilization and cooldown for an account
-    Reset {
-        provider: String,
-        /// Login email or an unambiguous prefix
-        email: String,
-    },
-    /// External: provider name (so `lf auth linear` works)
-    #[command(external_subcommand)]
-    External(Vec<String>),
-}
-
-#[derive(Debug, Subcommand)]
-pub enum ProfileCommand {
-    /// Record a Chrome access venue
-    Create {
-        /// Chrome profile directory, name, or signed-in email on this host
+        #[arg(long, requires = "email")]
+        clear_cooldown: bool,
+        /// Replace the ordered browser choices (repeat for fallback profiles)
+        #[arg(long, conflicts_with = "clear_chrome_profiles")]
+        chrome_profile: Vec<String>,
         #[arg(long)]
-        chrome_profile: String,
-        /// Stable venue name; defaults to the Chrome directory
-        #[arg(long = "as")]
-        name: Option<String>,
-        /// Expected signed-in email; defaults to Chrome's current login
-        #[arg(long)]
-        expects: Option<String>,
+        clear_chrome_profiles: bool,
     },
-    /// List Chrome venues and the accounts that reference them
-    List,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum AuthAccessCommand {
-    /// Atomically replace an account's ordered access venues
-    Set {
-        provider: String,
-        /// Login email or an unambiguous prefix
-        email: String,
-        #[arg(long = "profile", required = true)]
-        profiles: Vec<String>,
-    },
-    /// Append one access venue
-    Add {
-        provider: String,
-        /// Login email or an unambiguous prefix
-        email: String,
-        #[arg(long = "profile")]
-        profile: String,
-    },
-    /// Remove one access venue
-    Rm {
-        provider: String,
-        /// Login email or an unambiguous prefix
-        email: String,
-        #[arg(long = "profile")]
-        profile: String,
+    /// Configure and inspect managed account routing
+    Route {
+        #[command(subcommand)]
+        cmd: RouteCommand,
     },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum RouteCommand {
-    /// Atomically replace one provider's route for a repository
+    /// Replace a provider's ordered route
     Set {
         provider: String,
         #[arg(required = true)]
         accounts: Vec<String>,
-        /// Repository owner/name; defaults to the current repository
-        #[arg(long)]
+        #[arg(long, conflicts_with = "default")]
         repo: Option<String>,
+        #[arg(long)]
+        default: bool,
     },
-    /// Configure the store-wide fallback route
-    Default {
-        #[command(subcommand)]
-        cmd: DefaultRouteCommand,
-    },
-    /// Show repo routes or the defaults they fall back to
+    /// Explain configured and automatic account selection
     Show {
-        /// Repository owner/name; defaults to the current repository
-        #[arg(long)]
+        #[arg(long, conflicts_with = "default")]
         repo: Option<String>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub enum DefaultRouteCommand {
-    /// Atomically replace one provider's store-wide route
-    Set {
-        provider: String,
-        #[arg(required = true)]
-        accounts: Vec<String>,
+        #[arg(long)]
+        default: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -2023,54 +1933,39 @@ mod tests {
     }
 
     #[test]
-    fn auth_help_exposes_managed_account_flows() {
+    fn auth_has_six_leaves_and_rejects_retired_paths() {
         let command = Cli::command();
-        let auth = command
-            .find_subcommand("auth")
-            .expect("auth subcommand exists");
-
-        for flow in [
-            "connect",
-            "import",
-            "accounts",
-            "set",
-            "reset",
-            "disconnect",
-        ] {
-            assert!(
-                auth.find_subcommand(flow).is_some(),
-                "auth help is missing {flow}"
-            );
+        let auth = command.find_subcommand("auth").unwrap();
+        for name in ["status", "connect", "disconnect", "set", "route"] {
+            assert!(auth.find_subcommand(name).is_some());
         }
-        let connect = auth
-            .find_subcommand("connect")
-            .expect("connect flow exists");
-        assert!(connect
-            .get_arguments()
-            .any(|argument| argument.get_id() == "email"));
-        assert!(connect
-            .get_arguments()
-            .any(|argument| argument.get_long() == Some("chrome-profile")));
-        assert!(!connect
-            .get_arguments()
-            .any(|argument| argument.get_long() == Some("profile")));
-    }
-
-    #[test]
-    fn route_accepts_a_provider_specific_account_order() {
-        let cli = Cli::try_parse_from(["lf", "route", "set", "claude", "loopflow", "primary"])
-            .expect("parse account route");
-
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Route {
-                cmd: RouteCommand::Set {
-                    provider,
-                    accounts,
-                    repo: None,
-                }
-            }) if provider == "claude" && accounts == vec!["loopflow", "primary"]
-        ));
+        for args in [
+            vec!["auth", "accounts"],
+            vec!["auth", "import", "claude"],
+            vec!["auth", "configure", "codex"],
+            vec!["auth", "reset", "claude", "a"],
+            vec!["auth", "access", "set"],
+            vec!["auth", "linear"],
+        ] {
+            assert!(Cli::try_parse_from(std::iter::once("lf").chain(args)).is_err());
+        }
+        assert!(command.find_subcommand("profile").is_none());
+        assert!(command.find_subcommand("route").is_none());
+        assert!(
+            Cli::try_parse_from(["lf", "auth", "route", "set", "claude", "a", "--default"]).is_ok()
+        );
+        assert!(Cli::try_parse_from([
+            "lf",
+            "auth",
+            "route",
+            "set",
+            "claude",
+            "a",
+            "--default",
+            "--repo",
+            "a/b"
+        ])
+        .is_err());
     }
 
     #[test]
@@ -2182,65 +2077,22 @@ mod tests {
     }
 
     #[test]
-    fn profile_create_accepts_a_host_local_chrome_profile() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "profile",
-            "create",
-            "--chrome-profile",
-            "Profile 8",
-            "--as",
-            "engineering",
-            "--expects",
-            "engineering@example.com",
-        ])
-        .expect("parse profile Chrome binding");
-
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Profile {
-                cmd: ProfileCommand::Create {
-                    chrome_profile,
-                    name: Some(name),
-                    expects: Some(expects),
-                }
-            }) if chrome_profile == "Profile 8"
-                && name == "engineering"
-                && expects == "engineering@example.com"
-        ));
-    }
-
-    #[test]
-    fn auth_access_set_accepts_ordered_profiles() {
+    fn auth_set_accepts_ordered_service_profiles() {
         let cli = Cli::try_parse_from([
             "lf",
             "auth",
-            "access",
             "set",
-            "claude",
-            "operator@",
-            "--profile",
-            "personal",
-            "--profile",
-            "engineering",
+            "linear",
+            "--chrome-profile",
+            "Work",
+            "--chrome-profile",
+            "Personal",
         ])
-        .expect("parse account access order");
-
-        assert!(cli.account.is_empty());
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Auth {
-                cmd: AuthCommand::Access {
-                    cmd: AuthAccessCommand::Set {
-                        provider,
-                        email,
-                        profiles,
-                    }
-                }
-            }) if provider == "claude"
-                && email == "operator@"
-                && profiles == vec!["personal", "engineering"]
-        ));
+        .unwrap();
+        assert!(matches!(cli.command, Some(Commands::Auth {
+            cmd: AuthCommand::Set { email: None, chrome_profile, .. }
+        }) if chrome_profile == ["Work", "Personal"]));
+        assert!(Cli::try_parse_from(["lf", "auth", "set", "linear", "--clear-cooldown"]).is_err());
     }
 
     #[test]
@@ -2264,6 +2116,7 @@ mod tests {
                     provider,
                     email: Some(email),
                     chrome_profile: Some(chrome_profile),
+                    ..
                 }
             }) if provider == "claude"
                 && email == "operator@"
@@ -2272,32 +2125,46 @@ mod tests {
     }
 
     #[test]
-    fn auth_import_accepts_managed_account_and_chrome_profile() {
+    fn service_auth_accepts_a_remembered_chrome_profile() {
         let cli = Cli::try_parse_from([
             "lf",
             "auth",
-            "import",
-            "claude",
-            "--email",
-            "jack@example.com",
+            "connect",
+            "linear",
             "--chrome-profile",
-            "jack@example.com",
+            "Work",
         ])
-        .expect("parse existing login import");
+        .unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::Auth { cmd: AuthCommand::Connect {
+            provider, email: None, chrome_profile: Some(profile), ..
+        } }) if provider == "linear" && profile == "Work")
+        );
+    }
 
-        assert!(cli.account.is_empty());
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Auth {
-                cmd: AuthCommand::Import {
-                    provider,
-                    email,
-                    chrome_profile: Some(chrome_profile),
-                }
-            }) if provider == "claude"
-                && email == "jack@example.com"
-                && chrome_profile == "jack@example.com"
-        ));
+    #[test]
+    fn auth_connect_sources_are_exclusive() {
+        assert!(Cli::try_parse_from([
+            "lf",
+            "auth",
+            "connect",
+            "claude",
+            "a@example.com",
+            "--import"
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from(["lf", "auth", "connect", "codex", "--api-key"]).is_ok());
+        for flags in [
+            vec!["--import", "--api-key"],
+            vec!["--import", "--chrome-profile", "Work"],
+        ] {
+            assert!(Cli::try_parse_from(
+                ["lf", "auth", "connect", "claude", "a@example.com"]
+                    .into_iter()
+                    .chain(flags)
+            )
+            .is_err());
+        }
     }
 
     #[test]
@@ -2325,13 +2192,14 @@ mod tests {
             Some(Commands::Auth {
                 cmd: AuthCommand::Set {
                     provider,
-                    email,
+                    email: Some(email),
                     login_email: Some(login_email),
                     routing: Some(routing),
                     plan: Some(plan),
                     paid_through: Some(paid_through),
                     clear_plan: false,
                     clear_paid_through: false,
+                    ..
                 }
             }) if provider == "codex"
                 && email == "loopflow-eng@"

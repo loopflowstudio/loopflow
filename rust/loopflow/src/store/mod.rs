@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::id::WaveId;
 use crate::profile::{
-    AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
+    AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
@@ -284,9 +284,6 @@ fn resolve_database_path(
         home_dir.join(candidate)
     };
     guard_development_database(&path, crate::build_info::provenance(), &machine_home_dir())?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     Ok(path)
 }
 
@@ -646,6 +643,16 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn provider_auth_snapshot(
+        &self,
+        provider: Provider,
+    ) -> StoreResult<Option<crate::provider_auth::ProviderAuthSnapshot>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_auth_snapshot(provider)
+        })
+        .await
+    }
+
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
         let provider = provider.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -734,6 +741,19 @@ impl Store {
         .await
     }
 
+    pub async fn clear_provider_account_cooldown(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.clear_provider_account_cooldown(&provider, &account_id)
+        })
+        .await
+    }
+
     pub async fn reset_provider_account_health(
         &self,
         provider: &str,
@@ -743,6 +763,20 @@ impl Store {
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reset_provider_account_health(&provider, &account_id)
+        })
+        .await
+    }
+
+    pub async fn update_provider_account_credential_state(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        state: CredentialState,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_provider_account_credential_state(&provider, &account_id, state)
         })
         .await
     }
@@ -836,28 +870,28 @@ impl Store {
         run_sqlite(&self.sqlite, |store| store.list_access_profiles()).await
     }
 
-    pub async fn set_account_access_profiles(
+    pub async fn set_auth_browser_profiles(
         &self,
         provider: Provider,
-        account_id: &ProviderAccountId,
+        account_id: Option<&ProviderAccountId>,
         profile_ids: &[ProfileId],
     ) -> StoreResult<()> {
-        let account_id = account_id.clone();
+        let account_id = account_id.cloned();
         let profile_ids = profile_ids.to_vec();
         run_sqlite(&self.sqlite, move |store| {
-            store.set_account_access_profiles(provider, &account_id, &profile_ids)
+            store.set_auth_browser_profiles(provider, account_id.as_ref(), &profile_ids)
         })
         .await
     }
 
-    pub async fn list_account_access_profiles(
+    pub async fn list_auth_browser_profiles(
         &self,
         provider: Option<Provider>,
         account_id: Option<&ProviderAccountId>,
-    ) -> StoreResult<Vec<AccountAccessProfile>> {
+    ) -> StoreResult<Vec<AuthBrowserBinding>> {
         let account_id = account_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.list_account_access_profiles(provider, account_id.as_ref())
+            store.list_auth_browser_profiles(provider, account_id.as_ref())
         })
         .await
     }

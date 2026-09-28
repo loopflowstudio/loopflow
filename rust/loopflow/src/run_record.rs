@@ -89,37 +89,13 @@ pub struct RunFlowStep {
 }
 
 impl RunFlowStep {
-    pub(crate) fn of(
-        position: &crate::durable::FlowPosition,
-        task_pr_id: Option<crate::work::task::TaskPrId>,
-    ) -> Self {
-        Self {
-            task_id: Some(position.task_id.clone()),
-            task_pr_id,
-            invocation_id: position.invocation.id.clone(),
-            flow: position.invocation.flow.clone(),
-            step: position.current().step,
-            node: Some(position.cursor.node_key()),
-            iterations: Some(crate::engine::flow_graph::flow_iterations(
-                &position.invocation.steps,
-                &position.cursor,
-            )),
-        }
-    }
-
-    pub(crate) fn of_flow(flow: &crate::durable::FlowInvocation) -> anyhow::Result<Self> {
-        let step = match flow
-            .current_step()
-            .ok_or_else(|| anyhow::anyhow!("saved Flow position has no current step"))?
-        {
-            crate::engine::ConcreteStep::Skill(skill) => skill.skill.name.clone(),
-            crate::engine::ConcreteStep::Op(op) => op.item.display_name(),
-            crate::engine::ConcreteStep::Xor(branch) => branch.router.name.clone(),
-        };
-        // A saved Flow's step is not a managed Task step, even when the Flow
-        // names a Task; its Run takes the Task from the Flow's declared Work.
+    /// The step an invocation's cursor selects; its Task is the invocation's.
+    pub(crate) fn of(flow: &crate::durable::FlowInvocation) -> anyhow::Result<Self> {
+        let step = flow
+            .step_name()
+            .ok_or_else(|| anyhow::anyhow!("Flow position has no current step"))?;
         Ok(Self {
-            task_id: None,
+            task_id: flow.task_id.clone(),
             task_pr_id: None,
             invocation_id: flow.invocation.id.clone(),
             flow: flow.invocation.flow.clone(),
@@ -1780,13 +1756,12 @@ impl RunCapture {
         Ok(Self::from_manifest(manifest, dir))
     }
 
-    /// Every Run is a row. A Task step's row is stored with its worker claim
-    /// and a Session's with its reservation; every other launch stores it
-    /// here. Bookkeeping never refuses the launch.
+    /// Every Run is a row. A Flow step's row is reserved by its driver and a
+    /// Session's by its reservation; every other launch stores it here.
+    /// Bookkeeping never refuses the launch.
     fn record_row(&self, work: Option<crate::session::RunWork>) {
         let manifest = &self.manifest;
         let invocation_id = match &manifest.flow {
-            Some(RunFlowMembership::Step(step)) if step.task_id.is_some() => return,
             Some(RunFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
             Some(RunFlowMembership::Independent) | None => None,
         };

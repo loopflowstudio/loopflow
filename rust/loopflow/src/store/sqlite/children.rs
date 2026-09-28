@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
-use crate::durable::{Author, FlowPosition, TaskFlowBlocker, TaskWorkerClaim};
+use crate::durable::Author;
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
@@ -22,12 +22,13 @@ use crate::work::project::{
     ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
-    CiObservation, GithubObservation, GithubPr, LinearObservationApply, LinearObservationOutcome,
-    PmWritebackState, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
+    PmWritebackState, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
+    LinearObservationOutcome, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
+    TaskEvent, TaskEventKind, TaskId, TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
+    TaskPrRepairKind,
 };
 
-use super::durable::{create_project_work, create_task_work, TASK_INVOCATION};
+use super::durable::{create_project_work, create_task_work};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -120,250 +121,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn settle_task_worker(
-        &self,
-        task: &Task,
-        expected: &TaskWorkerClaim,
-        next: &FlowPosition,
-        progress: Option<&str>,
-    ) -> StoreResult<FlowPosition> {
-        validate_task(task)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, task)?;
-        update_task_timestamp_in(&transaction, task)?;
-        let position =
-            super::durable::settle_task_worker_in(&transaction, &task.id, expected, next)?;
-        if let Some(summary) = progress.filter(|summary| !summary.is_empty()) {
-            insert_task_event_in(
-                &transaction,
-                task,
-                &TaskEventKind::Progress {
-                    summary: summary.to_string(),
-                },
-            )?;
-        }
-        transaction.commit()?;
-        Ok(position)
-    }
-
-    pub fn finish_task_flow(
-        &self,
-        task: &Task,
-        expected: &TaskWorkerClaim,
-        progress: Option<&str>,
-    ) -> StoreResult<()> {
-        validate_task(task)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, task)?;
-        update_task_timestamp_in(&transaction, task)?;
-        let position = super::durable::flow_position_in(&transaction, &task.id)?
-            .ok_or(StoreError::NotFound)?;
-        super::durable::finish_task_flow_in(&transaction, &task.id, expected)?;
-        insert_task_event_in(
-            &transaction,
-            task,
-            &TaskEventKind::FlowFinished {
-                invocation_id: position.invocation.id,
-                flow: position.invocation.flow,
-                summary: progress.unwrap_or_default().to_string(),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn block_task_flow(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-        failure: &TaskFlowBlocker,
-    ) -> StoreResult<FlowPosition> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = matching_claim_in(&transaction, task_id, expected)?;
-        let position =
-            super::durable::block_task_flow_in(&transaction, task_id, &current, failure)?;
-        let task = task_on(&transaction, task_id)?.ok_or(StoreError::NotFound)?;
-        insert_task_event_in(
-            &transaction,
-            &task,
-            &TaskEventKind::Failed {
-                error: failure.reason.clone(),
-                resumable: !failure.restart_required,
-            },
-        )?;
-        transaction.commit()?;
-        Ok(position)
-    }
-
-    pub fn release_task_worker(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-    ) -> StoreResult<FlowPosition> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = matching_claim_in(&transaction, task_id, expected)?;
-        let position = super::durable::release_task_worker_in(&transaction, task_id, &current)?;
-        transaction.commit()?;
-        Ok(position)
-    }
-
-    pub fn complete_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        next: &FlowPosition,
-        summary: &str,
-    ) -> StoreResult<FlowPosition> {
-        validate_task(task)?;
-        if expected.task_id != task.id
-            || !expected.is_human()
-            || expected.claim.is_some()
-            || expected.failure.is_some()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "human Task settlement requires its exact unclaimed position".to_string(),
-            ));
-        }
-        if next.version != expected.version {
-            return Err(StoreError::InvalidAuthority(
-                "human Task settlement has a stale position version".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::durable::flow_position_in(&transaction, &task.id)?
-            .ok_or(StoreError::NotFound)?;
-        if current != *expected {
-            return Err(StoreError::InvalidAuthority(
-                "human Task position changed before settlement".to_string(),
-            ));
-        }
-        super::sessions::complete_review_in(&transaction, expected)?;
-        validate_task_project(&transaction, task)?;
-        update_task_timestamp_in(&transaction, task)?;
-        let position = super::durable::set_flow_position_in(&transaction, &task.id, next)?;
-        insert_task_event_in(
-            &transaction,
-            task,
-            &TaskEventKind::Progress {
-                summary: summary.to_string(),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(position)
-    }
-
-    pub fn finish_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        summary: &str,
-    ) -> StoreResult<()> {
-        validate_task(task)?;
-        if expected.task_id != task.id
-            || !expected.is_human()
-            || expected.claim.is_some()
-            || expected.failure.is_some()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task review completion requires its exact unclaimed position".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::durable::flow_position_in(&transaction, &task.id)?
-            .ok_or(StoreError::NotFound)?;
-        if current != *expected {
-            return Err(StoreError::InvalidAuthority(
-                "Task review position changed before completion".to_string(),
-            ));
-        }
-        super::sessions::complete_review_in(&transaction, expected)?;
-        validate_task_project(&transaction, task)?;
-        if transaction.execute(
-            &format!(
-                "UPDATE flow_invocations SET state='completed', ended_at=?3
-                 WHERE {TASK_INVOCATION} AND position_version=?2"
-            ),
-            params![
-                task.id.as_str(),
-                i64::try_from(expected.version)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-                now_unix()
-            ],
-        )? != 1
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task review position changed before completion".to_string(),
-            ));
-        }
-        transaction.execute(
-            "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
-            [task.id.as_str()],
-        )?;
-        insert_task_event_in(
-            &transaction,
-            task,
-            &TaskEventKind::FlowFinished {
-                invocation_id: expected.invocation.id.clone(),
-                flow: expected.invocation.flow.clone(),
-                summary: summary.to_string(),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn retry_task_flow(
-        &self,
-        task_id: &TaskId,
-        expected: &FlowPosition,
-        feedback: Option<&str>,
-    ) -> StoreResult<FlowPosition> {
-        if expected.task_id != *task_id || expected.claim.is_some() || expected.failure.is_none() {
-            return Err(StoreError::InvalidAuthority(
-                "Task retry requires its exact failed Flow position".to_string(),
-            ));
-        }
-        if expected
-            .failure
-            .as_ref()
-            .is_some_and(|failure| failure.restart_required)
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task failure requires an explicit Flow restart".to_string(),
-            ));
-        }
-        let mut next = expected.clone();
-        next.failure = None;
-        if let Some(feedback) = feedback {
-            next.cursor.leaf_mut().progress.direction = Some(feedback.to_string());
-        }
-        next.cursor.leaf_mut().progress.verdict = None;
-        next.cursor.leaf_mut().route = None;
-        next.updated_at = OffsetDateTime::now_utc();
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current =
-            super::durable::flow_position_in(&transaction, task_id)?.ok_or(StoreError::NotFound)?;
-        if current != *expected {
-            return Err(StoreError::InvalidAuthority(
-                "Task failure changed before retry".to_string(),
-            ));
-        }
-        let position = super::durable::set_flow_position_in(&transaction, task_id, &next)?;
-        transaction.commit()?;
-        Ok(position)
-    }
-
     pub(crate) fn restart_task_flow(
         &self,
         task: &Task,
-        expected: Option<&FlowPosition>,
+        expected: Option<&crate::durable::FlowInvocation>,
         checkpoint_head: &str,
     ) -> StoreResult<()> {
         validate_task(task)?;
@@ -378,7 +139,7 @@ impl SqliteStore {
             &transaction,
             &crate::durable::WorkRef::Task(task.id.clone()),
         )?;
-        let current = super::durable::flow_position_in(&transaction, &task.id)?;
+        let current = super::flows::task_flow_in(&transaction, &task.id)?;
         if current.as_ref() != expected
             || current
                 .as_ref()
@@ -393,7 +154,8 @@ impl SqliteStore {
         let task_work = task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?;
         transaction.execute(
             &format!(
-                "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE {TASK_INVOCATION}"
+                "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE {}",
+                super::flows::TASK_INVOCATION
             ),
             params![task.id.as_str(), now_unix()],
         )?;
@@ -861,6 +623,28 @@ impl SqliteStore {
     /// signal the body observation reads: a live body that has written nothing to
     /// its event log past the stall deadline is stalled, not working. `None` means
     /// no events yet (the status change is the only progress the caller can use).
+    /// Project first assignment into chat without storing a second Started fact.
+    pub fn started_task_observations(&self, wave: &WaveId) -> StoreResult<Vec<TaskObservation>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT t.id, t.issue_identifier,
+                COALESCE((SELECT MIN(e.id) FROM task_events e WHERE e.task_id=t.id
+                    AND json_extract(e.kind_json,'$.kind')='started'), 0)
+             FROM tasks t JOIN projects p ON p.id=t.project_id
+             WHERE p.wave_id=?1 AND t.started_at IS NOT NULL
+             ORDER BY t.started_at, t.id",
+        )?;
+        let rows = statement.query_map([wave.as_str()], |row| {
+            Ok(TaskObservation {
+                task_id: TaskId::from_raw(row.get::<_, String>(0)?),
+                issue_identifier: row.get(1)?,
+                event_id: row.get(2)?,
+                event: TaskEventKind::Started,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn latest_task_event_at(&self, task_id: &TaskId) -> StoreResult<Option<OffsetDateTime>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let seconds: Option<i64> = conn.query_row(
@@ -1124,38 +908,6 @@ impl SqliteStore {
 fn validate_task(task: &Task) -> StoreResult<()> {
     task.validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
-}
-
-fn update_task_timestamp_in(conn: &Connection, task: &Task) -> StoreResult<()> {
-    if conn.execute(
-        "UPDATE tasks SET updated_at=?2 WHERE id=?1",
-        params![task.id.as_str(), task.updated_at.unix_timestamp()],
-    )? != 1
-    {
-        return Err(StoreError::NotFound);
-    }
-    Ok(())
-}
-
-fn matching_claim_in(
-    conn: &Connection,
-    task_id: &TaskId,
-    expected: &TaskWorkerClaim,
-) -> StoreResult<TaskWorkerClaim> {
-    let current = super::durable::flow_position_in(conn, task_id)?
-        .and_then(|position| position.claim)
-        .ok_or_else(|| {
-            StoreError::InvalidAuthority(format!("Task {task_id} has no active worker"))
-        })?;
-    if current.invocation_id != expected.invocation_id
-        || current.position_version != expected.position_version
-        || current.generation != expected.generation
-    {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Task {task_id} worker changed"
-        )));
-    }
-    Ok(current)
 }
 
 fn update_task_pm_writeback_in(

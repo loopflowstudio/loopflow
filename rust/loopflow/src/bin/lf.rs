@@ -1836,8 +1836,7 @@ fn main() -> anyhow::Result<()> {
                 json,
             }) => {
                 if matches!(name.as_str(), "decide" | "route" | "blocked" | "resume") {
-                    let directory = loopflow::repo::working_directory()?;
-                    return loopflow::lf::commands::flow::control(name, rest, &cli, &directory);
+                    return loopflow::lf::commands::flow::control(name, rest, &cli);
                 }
                 if name == "list" {
                     if !rest.is_empty() {

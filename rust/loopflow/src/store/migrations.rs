@@ -4737,7 +4737,6 @@ mod tests {
                     pid: 123,
                     started_at: 100,
                 },
-                worker_run_id: Some(run.clone()),
                 claimed_at: time::OffsetDateTime::from_unix_timestamp(100).unwrap(),
             });
             let cursor = crate::engine::ExecutionCursor {
@@ -4953,6 +4952,71 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn shared_flow_driver_preserves_claim_authority_and_current_attempt() {
+        let conn = open();
+        let name = "one_flow_driver";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES('wave','wave','/repo',1);
+             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','project',1);
+             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('task','project','task','INF-1','/repo',1);
+             INSERT INTO flow_invocations(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,
+                position_version,worker_generation,updated_at,state)
+                VALUES('managed','task','wave','/old-cwd','{\"id\":\"managed\"}',0,0,9,4,100,'current');
+             UPDATE tasks SET current_invocation_id='managed';
+             INSERT INTO runs(id,invocation_id,task_id,wave_id,created_at,published,cwd)
+                VALUES('run_owned','managed','task','wave',100,1,'/repo');
+             UPDATE flow_invocations SET current_run_id='run_owned';",
+        ).unwrap();
+        let claim = crate::durable::TaskWorkerClaim {
+            invocation_id: "managed".into(),
+            generation: 4,
+            position_version: 9,
+            owner: crate::durable::TaskWorkerOwner {
+                trace_id: crate::id::TraceId::new(),
+                exec_id: crate::id::ExecId::new(),
+                pid: 123,
+                started_at: 100,
+            },
+            claimed_at: time::OffsetDateTime::from_unix_timestamp(100).unwrap(),
+        };
+        let expected = serde_json::to_string(&claim).unwrap();
+        let old_claim = format!(
+            "{},\"worker_run_id\":\"run_owned\"}}",
+            expected.strip_suffix('}').unwrap()
+        );
+        conn.execute("UPDATE flow_invocations SET claim_json=?1", [old_claim])
+            .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let (stored, run, version, generation, cwd): (Option<String>, String, i64, i64, Option<String>) = conn.query_row(
+            "SELECT claim_json,current_run_id,position_version,worker_generation,cwd FROM flow_invocations",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))
+        ).unwrap();
+        assert_eq!(
+            stored,
+            Some(expected),
+            "the serialized claim still satisfies compare-and-set"
+        );
+        assert_eq!(
+            (run.as_str(), version, generation, cwd),
+            ("run_owned", 9, 4, None)
+        );
+        assert!(conn
+            .execute("UPDATE flow_invocations SET cwd='/other'", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
     }
 
     #[test]

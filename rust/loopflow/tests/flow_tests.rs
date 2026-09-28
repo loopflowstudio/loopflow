@@ -728,8 +728,242 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 }
 
 #[test]
+fn historical_start_evidence_still_prevents_backlog_retirement() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let task = support::register_unrun_task(
+        home.path(),
+        repo.path(),
+        "historical-start",
+        &repo.head_sha(),
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',1)", [task.task.id.as_str()]).unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    assert!(!runtime
+        .block_on(task.store.task_started(&task.task.id))
+        .unwrap());
+    assert!(
+        runtime
+            .block_on(task.store.chapter_task_evidence(&task.task.id))
+            .unwrap()
+            .begun
+    );
+    assert!(!runtime
+        .block_on(task.store.retire_chapter_backlog(&task.task.id))
+        .unwrap());
+}
+
+#[test]
+fn task_claim_starts_before_real_worker_publishes_its_run() {
+    use loopflow::durable::{FlowInvocation, TaskWorkerClaimOutcome, TaskWorkerOwner};
+    use loopflow::engine::invocation::QueuedInvocation;
+    let repo = loopflow_test_support::TestRepo::new();
+    repo.create_branch("task-claim");
+    let home = TempDir::new().unwrap();
+    let _env = support::EnvGuard::with_lf_home(&[], home.path());
+    let task =
+        support::register_unrun_task(home.path(), repo.path(), "task-claim", &repo.head_sha());
+    write_flow(repo.path(), "claim-proof", "- op: rebase --plan\n");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let project = runtime
+        .block_on(task.store.get_project(&task.task.project_id))
+        .unwrap()
+        .unwrap();
+    runtime
+        .block_on(task.store.save_chapter(
+            &chapter::current_chapter(
+                &task.task.wave_id,
+                "task-pr-tests",
+                project.plan.id.as_str(),
+            ),
+            true,
+        ))
+        .unwrap();
+    let flow = runtime
+        .block_on(task.store.start_task_flow(
+            &task.task.id,
+            FlowInvocation {
+                invocation: QueuedInvocation::load(repo.path(), "claim-proof").unwrap(),
+                cursor: Default::default(),
+                version: 0,
+                task_id: Some(task.task.id.clone()),
+                wave_id: Some(task.task.wave_id.clone()),
+                cwd: repo.path().to_owned(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                finished: false,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        ))
+        .unwrap();
+    let owner = TaskWorkerOwner {
+        trace_id: loopflow::id::TraceId::new(),
+        exec_id: loopflow::id::ExecId::new(),
+        pid: std::process::id(),
+        started_at: 1,
+    };
+    let TaskWorkerClaimOutcome::Claimed(claim) = runtime
+        .block_on(task.store.claim_task_worker(
+            &task.task.id,
+            flow.id(),
+            flow.version,
+            &owner,
+            time::OffsetDateTime::now_utc(),
+        ))
+        .unwrap()
+    else {
+        panic!("claim")
+    };
+    let reserved = runtime
+        .block_on(task.store.flow(flow.id()))
+        .unwrap()
+        .unwrap();
+    let attempt = reserved.current_attempt.as_ref().unwrap();
+    assert!(!attempt.published);
+    assert!(runtime
+        .block_on(task.store.task_started(&task.task.id))
+        .unwrap());
+    let starts = runtime
+        .block_on(task.store.started_task_observations(&task.task.wave_id))
+        .unwrap();
+    assert_eq!(starts.len(), 1);
+    assert_eq!(
+        loopflow::chat::turns::ChildControlActivity::from_task(&starts[0]).title,
+        "Task started"
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='started'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    let read = run_lf(repo.path(), home.path(), &["roadmap", "--json"], None);
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    let roadmap: serde_json::Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(
+        roadmap["waves"][0]["tasks"]["items"][0]["runtime"]["started"], true,
+        "{roadmap}"
+    );
+    // The worker resumes the captured graph after its template has gone.
+    fs::remove_file(repo.path().join(".lf/flows/claim-proof.yaml")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["task", "__worker", task.task.id.as_str()])
+        .current_dir(repo.path())
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("LF_DB_PATH", home.path().join("loopflow.db"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env(
+            loopflow::durable::TASK_WORKER_CLAIM_ENV,
+            serde_json::to_string(&claim).unwrap(),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let run = runtime
+        .block_on(task.store.run(&attempt.run_id))
+        .unwrap()
+        .unwrap();
+    assert!(run.published);
+    assert_eq!(run.ended.unwrap().outcome, "completed");
+    let read = run_lf(
+        repo.path(),
+        home.path(),
+        &["runs", "--task", "INF-123", "--json"],
+        None,
+    );
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    let runs: serde_json::Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(runs[0]["id"], attempt.run_id.as_str());
+    assert!(
+        runtime
+            .block_on(task.store.flow(flow.id()))
+            .unwrap()
+            .unwrap()
+            .finished
+    );
+    assert!(runtime
+        .block_on(task.store.task_flow(&task.task.id))
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        runtime
+            .block_on(task.store.started_task_observations(&task.task.wave_id))
+            .unwrap(),
+        starts
+    );
+    // Invocation-addressed resume retains the Task's recovery policy, even
+    // with --retry: a restart-only failure must not reach a provider.
+    let retry = runtime
+        .block_on(task.store.start_task_flow(
+            &task.task.id,
+            FlowInvocation {
+                invocation:
+                    QueuedInvocation::new("restart-proof", flow.invocation.steps.clone()).unwrap(),
+                ..flow.clone()
+            },
+        ))
+        .unwrap();
+    let blocked = runtime
+        .block_on(task.store.fail_flow(
+            retry.id(),
+            retry.version,
+            None,
+            &loopflow::durable::TaskFlowBlocker {
+                run_id: None,
+                reason: "explicit restart required".into(),
+                restart_required: true,
+                observed_at: time::OffsetDateTime::now_utc(),
+            },
+        ))
+        .unwrap();
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["flow", "resume", retry.id(), "--retry"],
+        None,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("lf task restart INF-123"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow(retry.id()))
+            .unwrap()
+            .unwrap(),
+        blocked
+    );
+}
+
+#[test]
 fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone() {
-    use loopflow::durable::FlowPosition;
+    use loopflow::durable::FlowInvocation;
     use loopflow::engine::invocation::QueuedInvocation;
     use loopflow_test_support::TestRepo;
 
@@ -762,22 +996,28 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let original_head = repo.head_sha();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let position = runtime
-        .block_on(task.store.set_flow_position(
+        .block_on(task.store.start_task_flow(
             &task.task.id,
-            FlowPosition {
-                task_id: task.task.id.clone(),
+            FlowInvocation {
                 invocation: QueuedInvocation::load(repo.path(), "code").unwrap(),
-                session_run_id: None,
-                ready_summary: None,
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,
                     iteration: 4,
                     ..Default::default()
                 },
                 version: 0,
+                task_id: Some(task.task.id.clone()),
+                wave_id: Some(task.task.wave_id.clone()),
+                cwd: task.task.worktree.clone(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
                 worker_generation: 0,
                 claim: None,
                 failure: None,
+                finished: false,
                 updated_at: time::OffsetDateTime::now_utc(),
             },
         ))
@@ -838,7 +1078,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         assert_eq!(repo.head_sha(), original_head);
         assert_eq!(
             runtime
-                .block_on(task.store.flow_position(&task.task.id))
+                .block_on(task.store.task_flow(&task.task.id))
                 .unwrap(),
             Some(position.clone())
         );
@@ -970,7 +1210,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     assert!(!home.path().join("prompts").exists());
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap(),
         Some(position)
     );
@@ -1188,8 +1428,8 @@ fn unavailable(flow: &serde_json::Value, kind: &str) -> Option<String> {
 }
 
 #[test]
-fn task_flow_read_pins_topology_counts_both_returns_and_projects_a_blocker() {
-    use loopflow::durable::{FlowPosition, TaskFlowBlocker};
+fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() {
+    use loopflow::durable::{FlowInvocation, TaskFlowBlocker};
     use loopflow::engine::invocation::QueuedInvocation;
 
     let repo = loopflow_test_support::TestRepo::new();
@@ -1258,13 +1498,10 @@ fn task_flow_read_pins_topology_counts_both_returns_and_projects_a_blocker() {
 
     // Pin the definition at iteration three with independent return counts.
     let pinned = runtime
-        .block_on(task.store.set_flow_position(
+        .block_on(task.store.start_task_flow(
             &task.task.id,
-            FlowPosition {
-                task_id: task.task.id.clone(),
+            FlowInvocation {
                 invocation: QueuedInvocation::load(repo.path(), "two-loops").unwrap(),
-                session_run_id: None,
-                ready_summary: None,
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,
                     iteration: 3,
@@ -1278,9 +1515,18 @@ fn task_flow_read_pins_topology_counts_both_returns_and_projects_a_blocker() {
                     ..Default::default()
                 },
                 version: 0,
+                task_id: Some(task.task.id.clone()),
+                wave_id: Some(task.task.wave_id.clone()),
+                cwd: task.task.worktree.clone(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
                 worker_generation: 0,
                 claim: None,
                 failure: None,
+                finished: false,
                 updated_at: time::OffsetDateTime::now_utc(),
             },
         ))
@@ -1326,18 +1572,39 @@ fn task_flow_read_pins_topology_counts_both_returns_and_projects_a_blocker() {
         .unwrap()
         .contains("already pinned"));
 
+    // A replacement that cannot load is rejected before refresh, checkpoint,
+    // or stop: the pinned position is byte-for-byte unchanged.
+    let head = repo.head_sha();
+    let rejected = run_lf(
+        repo.path(),
+        home.path(),
+        &["task", "restart", "INF-123", "--flow", "missing-flow"],
+        None,
+    );
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("missing-flow"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    let after = runtime
+        .block_on(task.store.task_flow(&task.task.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(after, pinned);
+    assert_eq!(repo.head_sha(), head, "no restart checkpoint was committed");
+
     // A durable restart-only blocker is red and cannot be resumed.
     runtime
-        .block_on(task.store.set_flow_position(
-            &task.task.id,
-            FlowPosition {
-                failure: Some(TaskFlowBlocker {
-                    run_id: None,
-                    reason: "Release target is unavailable".into(),
-                    restart_required: true,
-                    observed_at: time::OffsetDateTime::now_utc(),
-                }),
-                ..pinned
+        .block_on(task.store.fail_flow(
+            &after.invocation.id,
+            after.version,
+            None,
+            &TaskFlowBlocker {
+                run_id: None,
+                reason: "Release target is unavailable".into(),
+                restart_required: true,
+                observed_at: time::OffsetDateTime::now_utc(),
             },
         ))
         .unwrap();

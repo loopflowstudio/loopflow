@@ -9,6 +9,10 @@ What is still open: [subwave-questions.md](subwave-questions.md).
 Companions: Product [LOO-330](https://linear.app/loopflow/issue/LOO-330),
 Intelligence [LOO-331](https://linear.app/loopflow/issue/LOO-331).
 
+This branch records the accepted design and preserves it in Wave memory.
+It has not implemented the build steps below or run their disposable-Home
+proof. The inherited LOO-298 implementation is outside this branch's changes.
+
 ## The dream
 
 You say `infrastructure/release` and every part of Loopflow means the same
@@ -68,6 +72,8 @@ skipped  wave/product/, …               other Waves
 - The Wave comes from the Task the Run belongs to, or from `--wave`. How the
   Run was started does not matter: scheduled and ad hoc Runs follow the same
   rule. Jack Heart, 2026-09-28.
+- The Wave file stays `GOAL.md`. Jack Heart considered `<NAME>.md` and chose
+  `GOAL.md`, 2026-09-28.
 - Memory is one of those files, not a special case.
 - No children, no siblings, in ordinary Runs.
 - `realign` at a parent reads its children's files. It is the one exception,

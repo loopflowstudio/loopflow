@@ -3,11 +3,18 @@
 Design: [Subwaves](define-durable-subwave-identity-and.md).
 LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
+## Gate scope (2026-09-28)
+
+Gate treats the delta from the recorded stack base `ce97003cf` as this work:
+design/evidence notes and two Wave memory files. It does not implement the
+accepted feature or claim the inherited LOO-298 code is verified. No decision
+on the open product questions is needed to review this documentation.
+
 ## For Jack Heart
 
 - The wording of the short note that rides with Wave files.
-- `GOAL.md` or `<NAME>.md`.
-- May `realign` at a parent read its children when asked?
+- How deep `realign` at a parent reads: direct children, or every
+  descendant.
 
 ## Skills cleanup, delivered separately
 

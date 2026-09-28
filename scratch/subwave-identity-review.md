@@ -1,6 +1,7 @@
 # Review-design notes: subwave identity (LOO-329)
 
-2026-09-28, interactive review with Jack Heart. In progress.
+2026-09-28, interactive review with Jack Heart. Chronological notes;
+the linked design holds the accepted model, with remaining questions listed below.
 Design: [define-durable-subwave-identity-and.md](define-durable-subwave-identity-and.md).
 Kickoff draft under review: commit `0381a195f`.
 
@@ -116,14 +117,14 @@ Kickoff draft under review: commit `0381a195f`.
   was rebased onto main during the session and this branch followed it to
   `ce97003cf`.
 
-## Design changes made
+## Earlier design changes (superseded where noted)
 
 The table below records the first half of the review. The second half
 withdrew name-as-identity: ids are kept, a Wave stores its parent's id, and
 its name is one segment. The design document holds the current model.
 
 
-| Kickoff | Now |
+| Kickoff | First-half proposal |
 |---|---|
 | Wave identity is a UUID; name is a mutable address | Name is the identity |
 | Rename preserves identity through `wave/moves.jsonl` | No identity-preserving rename; ledger removed |
@@ -132,8 +133,9 @@ its name is one segment. The design document holds the current model.
 | Promotion and demotion semantics | Removed with held scopes |
 | Cron `scope:` field | Removed; a subwave owns its crons |
 
-Kept from kickoff: ancestry computed from the path, `parent_wave_id` dropped.
-Jack confirmed it.
+At that stage Jack confirmed ancestry computed from the path and dropping
+`parent_wave_id`. His later feedback above superseded that choice: keep ids
+and stored parentage, with directory discovery reconciling the parent.
 
 ## Evidence gathered in the session
 

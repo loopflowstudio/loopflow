@@ -387,3 +387,84 @@ Exact remaining gaps for review-slice:
 No H4 or later implementation, Ask, publication, installation, live service
 mutation, new worker or new worktree was performed. This is a local checkpoint
 for separate review-slice, not Task completion or permission to deploy.
+
+### Independent review — 2026-09-28
+
+**Disposition: coherent Cut I source replacement; acceptance gaps remain.**
+Reviewed H3 `5eec3a805b78003e06ba483b0668769e3bfd8fd6` through Cut I
+`71496d5da4f729ffc34ca1f9881e9598a5e67606`, under the current design at
+`30dc0253e`. No plan/specification changes or new execution-model work.
+Listeners, residents, lfd, webhook receivers/outbox and their UI readers are
+removed, with direct Wave operations, Task steering, cron, placement and metrics
+retained. Task/common Flow execution retains its claims and current-attempt
+fences. Foreground landing retains process/lock recovery and rerun semantics;
+no background replacement is needed. H3 replaced execution ownership and Cut I
+removes service ownership: these are not two passes replacing nothing.
+
+Reused the preceding executed Rust, Python, Swift, DTO, Xcode and three canonical
+proofs only within their recorded limits. Review repairs remove orphan service
+comments, two obsolete HTTP/SSE testing instructions, and `wave forget`'s demand
+to stop a deleted service. No lifecycle or storage logic changed.
+
+**Fleet proof: canonical pass; draft performance gap diagnosed.** The unchanged
+51-writer, 20-events-each test passed in **4.540 s** after all 14 drafts were
+materialized as hypothetical 0.12.24 in a fresh source copy outside this checkout.
+It asserts 1,020 stored receipts, zero failures and 1,020 distinct identities.
+The draft build was still running at **376.234 s** when the reviewer interrupted
+only its verified fixture process group. A two-second `sample` captured
+`SqliteStore::new → apply_installed_development_sqlite →
+_validate_development_schema`: each open reconstructs the full expected schema
+in a private in-memory database. That unchanged development path explains CPU
+work; the sample does not establish every delay or explain the earlier clock
+discrepancy. Neither workload nor deadlines/retries were relaxed. Draft-build
+performance remains unresolved; its SIGTERM is not a receipt assertion failure
+or pass. The release-shaped receipt boundary now has executed proof.
+
+Exact new commands (runner clears inherited LF/LOOPFLOW authority, supplies a
+private Home, nice +10, four build workers and a 900-second phase bound):
+
+```sh
+uv run python .lf/tmp/cut-i/run.py review-fleet-corrected cargo nextest run -p loopflow --test store_contention --test-threads 4 --no-fail-fast
+# In the disposable source copy only:
+uv run python scripts/canonicalize_migrations.py 0.12.23 --materialize-for-tests
+uv run python .lf/tmp/cut-i/run.py review-fleet-canonical uv run python .lf/tmp/cut-i/review-canonical-command.py
+uv run python .lf/tmp/cut-i/run.py review-final-clippy cargo clippy --all-targets -j 4 -- -D warnings
+uv run python .lf/tmp/cut-i/run.py review-formatted cargo fmt --all --check
+uv run python .lf/tmp/cut-i/run.py review-final-architecture uv run python scripts/check_architecture.py
+```
+
+The canonical wrapper runs the identical nextest command with the disposable
+copy as cwd; `review-canonical-root.txt` records its path. Logs, process sample,
+interruption identity and materialization receipt are under `.lf/tmp/cut-i/review-*`.
+An initial nextest invocation rejected duplicate `-j`/`--test-threads` options
+before running tests. The shortened error initially failed formatting; `cargo
+fmt --all` repaired it. Final formatting, all-target Clippy and whitespace pass.
+
+**Architecture: actual checkout passes**, all seven inventories, 33/33 tables.
+The ignored research archive was moved intact to
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-cut-i-review-archive-9vdt78qi/research-execution-records`.
+All **452 file hashes** match; `.lf/tmp/cut-i/review-archive.json` records both
+locations and hashes. No checker exemption, observation deletion or edit to the
+supervisor-owned research/design files was made.
+
+**Count correction:** the preceding script used rename detection and omitted
+2,057 old-path lines despite claiming both move sides. It also excluded the
+production functions after `engine/process.rs`'s test module. Using
+`git diff --no-renames` and retaining that suffix, Cut I vs H3 is Rust/Swift
+**+2,302 / −22,780, net −20,478**; Python/shell **+19 / −48**; SQL **+11 / −0**.
+Metrics is a 1,175→1,175-line move; relocation is 882→784. Neither move is
+claimed as a deleted owner. Review changes are **+2 / −13** Rust/Swift production
+lines; final vs H3 **+2,304 / −22,793, net −20,489**. Test files/directories,
+trailing Rust test modules, docs and generated artifacts are excluded; inline
+helpers before the boundary remain counted, matching the earlier method.
+`uv run python .lf/tmp/cut-i/review-measure.py` reproduces the corrected receipt.
+
+**Remaining:** preserve the inherited unwritable-store test unchanged as a
+new-model writer obligation. Its obsolete interactive expectation proves nothing
+about headless admission. No full-green draft Rust suite, configured Discord /
+provider round trip, loaded-service retirement, released/installed migration or
+rendered desktop acceptance follows. Next verification is the corrected writer
+admission contract and those configured/deployment proofs under their own
+authorization; development schema-open cost needs a focused repair outside this
+service deletion. No publication, installation, live-Home access or navigation
+was performed. The supervisor owns the next instruction.

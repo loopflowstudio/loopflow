@@ -18,6 +18,9 @@ def main() -> None:
         raise SystemExit(
             "Docker did not respond within 10 seconds; no proof container was created."
         ) from None
+    # A cold runner downloads the image before it can create a container.
+    # Keep that network transfer outside the short local startup deadline.
+    subprocess.run(["docker", "pull", args.image], check=True, timeout=300)
     container = subprocess.check_output(
         [
             "docker",

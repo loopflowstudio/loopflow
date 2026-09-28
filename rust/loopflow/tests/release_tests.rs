@@ -117,6 +117,7 @@ case "$1 $2" in
       printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
     fi
     exit 0;;
+  'pr checks') echo '[]'; exit 0;;
   'api graphql') echo 'false'; exit 0;;
   'pr merge') : > "$armed"; exit 0;;
   'run download') exit 0;;
@@ -164,6 +165,7 @@ case "$1 $2" in
       printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
     fi
     exit 0;;
+  'pr checks') echo '[]'; exit 0;;
   'api graphql')
     if [ -f "$armed" ]; then echo 'true'; else echo 'false'; fi
     exit 0;;
@@ -221,6 +223,7 @@ case "$1 $2" in
       printf '{{"state":"OPEN","mergeStateStatus":"%s","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n' "$merge_state"
     fi
     exit 0;;
+  'pr checks') echo '[]'; exit 0;;
   'api graphql') echo 'false'; exit 0;;
   'pr merge')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
@@ -939,6 +942,7 @@ case "$1 $2" in
       *) branch=$(git branch --show-current) ;;
     esac ;;
   'pr create'|'pr edit'|'pr ready') exit 0 ;;
+  'pr checks') echo '[]'; exit 0 ;;
   'api graphql') echo false; exit 0 ;;
   'release view') echo '{{"isDraft":false}}'; exit 0 ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 1 ;;
@@ -1530,6 +1534,100 @@ fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
     assert!(log.contains(&format!(
         "pr merge 1176 --squash --auto --match-head-commit {head}"
     )));
+}
+
+#[test]
+fn release_run_repairs_failed_checks_before_tagging() {
+    let state = tempfile::tempdir().unwrap();
+    let repaired = state.path().join("repaired");
+    let gh = format!(
+        r#"#!/bin/sh
+repaired='{}'
+head=$(git rev-parse HEAD)
+case "$1 $2" in
+  '--version ') echo 'gh fixture';;
+  'release view') exit 1;;
+  'run list') echo '[]';;
+  'pr list')
+    case " $* " in
+      *' --head '*) printf '[{{"number":1309,"state":"OPEN","mergeCommit":null,"url":"https://github.com/loopflowstudio/release-fixture/pull/1309","headRefOid":"%s"}}]\n' "$head";;
+      *) echo '[]';;
+    esac;;
+  'pr view')
+    if [ -f "$repaired" ]; then
+      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}}}}\n' "$head"
+    else
+      echo '{{"state":"OPEN","mergeStateStatus":"BLOCKED","mergeCommit":null}}'
+    fi;;
+  'api graphql') echo true;;
+  'api -H')
+    if [ -f "$repaired" ]; then merged=true; else merged=false; fi
+    printf '{{"number":1309,"state":"open","merged":%s,"html_url":"https://github.com/loopflowstudio/release-fixture/pull/1309","merge_commit_sha":"%s","head":{{"sha":"%s"}},"mergeable_state":"blocked"}}\n' "$merged" "$head" "$head";;
+  'pr checks')
+    case " $* " in *' --required '*) name=tests-result;; *) name=swift-test;; esac
+    printf '[{{"name":"%s","bucket":"fail","link":"https://example.com/swift-job"}}]\n' "$name"
+    exit 1;;
+  *) echo "unexpected gh: $*" >&2; exit 1;;
+esac
+"#,
+        repaired.display()
+    );
+    let codex = support::codex_app_server_script(
+        r#"{"status":"published","summary":"Reran the failed Swift job; the exact release head is green and merged."}"#,
+        &format!("touch '{}'", repaired.display()),
+    );
+    let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex)]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(repo.path().join(".lf/config.yaml"), "agent: codex\n").unwrap();
+    fs::write(repo.path().join("feature.txt"), "release me").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-m", "Release fixture"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let head = git_output(&repo, &["rev-parse", "HEAD"]);
+    let branch = format!(
+        "{}/release-default-v0-9-2",
+        loopflow::engine::naming::git_user(repo.path()).unwrap()
+    );
+    git(
+        &repo,
+        &["push", "origin", &format!("HEAD:refs/heads/{branch}")],
+    );
+    let local_remote = git_output(&repo, &["remote", "get-url", "origin"]);
+    let github_remote = "https://github.com/loopflowstudio/release-fixture.git";
+    git(
+        &repo,
+        &[
+            "config",
+            &format!("url.{local_remote}.insteadOf"),
+            github_remote,
+        ],
+    );
+    git(&repo, &["remote", "set-url", "origin", github_remote]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("release did not settle")
+    };
+    assert!(
+        repaired.exists(),
+        "the failed required check must receive repair"
+    );
+    assert_eq!(receipt.commit, head);
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        head
+    );
+    assert_eq!(
+        git_output(&repo, &["worktree", "list", "--porcelain"])
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count(),
+        1
+    );
 }
 
 #[test]

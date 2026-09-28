@@ -1241,10 +1241,32 @@ fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
 }
 
 fn cron_target_kind(repo: &Path, name: &str) -> Result<CronTargetKind> {
+    // A cron declaration names a Flow. A repository can replace a one-shot
+    // skill with deterministic operations without changing its schedule/name.
+    match crate::engine::load_flow(name, repo) {
+        Ok(_) => return Ok(CronTargetKind::Flow),
+        Err(crate::engine::LoadError::FlowNotFound(_)) => {}
+        Err(error) => return Err(error.into()),
+    }
     match discover_target(repo, name)? {
         Target::Flow(_) => Ok(CronTargetKind::Flow),
         Target::Skill(_) => Ok(CronTargetKind::Skill),
     }
+}
+
+#[test]
+fn scheduled_release_prefers_its_operation_flow_over_the_builtin_skill() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/flows/release-run.yaml"),
+        "- op: release run patch\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cron_target_kind(repo.path(), "release-run").unwrap(),
+        CronTargetKind::Flow
+    );
 }
 
 fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {

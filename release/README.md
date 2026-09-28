@@ -55,6 +55,12 @@ repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
 
+Failed release-PR checks enter the same watched CI repair as `lf pr land`.
+Release preparation still rebuilds version metadata when main advances.
+Blocked repairs retain their checkout so `lf release run` can resume the work.
+The scheduled `release-run` Flow executes the release operation directly;
+its failed result cannot be hidden by a successful agent report.
+
 The repository names the logical `loopflow-release-publisher` command. The
 maintained Home supplies that executable on PATH and keeps its credential
 provider and selectors untracked. `lf release run` invokes its read-only

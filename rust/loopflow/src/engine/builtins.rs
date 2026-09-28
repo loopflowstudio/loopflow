@@ -191,14 +191,10 @@ mod tests {
 
     #[test]
     fn wave_model_is_embedded_in_prompts_and_docs() {
-        let update_wave = get_builtin_skill("update-wave").expect("update-wave prompt");
         let design = get_builtin_skill("design").expect("design prompt");
         let scan_waves = get_builtin_skill("scan").expect("scan prompt");
 
         // The roadmap lives in Linear, reached via `lf wave sync` — no local N-*.md files.
-        assert!(update_wave.contains("lf wave status"));
-        assert!(update_wave.contains("MEMORY.md"));
-        assert!(!update_wave.contains("1-fix-broken-build.md"));
         assert!(design.contains("lf wave status"));
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
@@ -530,7 +526,9 @@ mod tests {
     }
 
     #[test]
-    fn retired_export_memory_skill_is_not_registered() {
-        assert!(get_builtin_skill("export-memory").is_none());
+    fn retired_memory_skills_are_not_registered() {
+        for name in ["export-memory", "update-wave", "record-learnings"] {
+            assert!(get_builtin_skill(name).is_none(), "{name}");
+        }
     }
 }

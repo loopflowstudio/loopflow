@@ -1288,7 +1288,7 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
-        for expected in ["compress", "update-wave", "gate", "pr land -c"] {
+        for expected in ["compress", "rebase", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished =
                 super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();

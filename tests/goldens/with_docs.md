@@ -100,9 +100,9 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`, `update-wave`,
-or `record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
-maintainer instructions into customer skills.
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
+skills.
 
 </lf:loopflow>
 
@@ -130,25 +130,18 @@ Wave context is included in docs below.
 
 Persistent memory at wave/rust/MEMORY.md. Read it before every iteration; its current
 contents, when any, ride this prompt's wave-memory section.
-Keep it compact enough to include every iteration: correct stale entries,
-add durable observations, and delete session-specific notes.
+Edit it through the ordinary repository workflow; no live Wave is required.
+`realign` reconciles memory with the plan and code. Keep durable observations,
+correct or remove stale entries, and drop session-specific notes. Use absolute dates.
 
-Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.
+Organize as useful, for example:
 - Patterns: codebase conventions, architecture, how things connect
 - Preferences: user workflow, tool choices, communication norms
 - Learnings: what worked, what failed, surprises
 
-What belongs elsewhere:
-- architectural decisions → wave docs or explicit docs
-- design rationale → scratch/ or wave plan
-- session-specific notes → nowhere (let them die)
-
-How to update:
-- Edit the file through the ordinary repository workflow; no live Wave is required.
-- `update-wave` owns deliberate end-of-work curation.
-- Correct or remove entries that are wrong or stale.
-- Use absolute dates, not "today" or "recently".
-- When a section grows large, promote stable entries to wave docs or explicit docs and trim.
+Keep memory compact enough for every iteration. Put architectural decisions
+in wave docs or explicit docs, and design rationale in scratch/ or the wave plan.
+As sections grow, promote stable entries to wave docs or explicit docs and trim.
 </lf:wave>
 
 <lf:wave-memory>

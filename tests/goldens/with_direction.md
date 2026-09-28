@@ -249,8 +249,8 @@ releases the caller with that summary. Declared Task FlowSteps use the same
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it
-curated rather than appending a transcript. `update-wave` owns deliberate
-end-of-work memory curation; no live Wave is required.
+curated rather than appending a transcript. `realign` reconciles memory with
+the plan and code; no live Wave is required.
 
 `lf chat` is the User conversation surface. `lf task steer` posts a Linear Task
 comment; direct Linear comments also reach the advancing worker. Steering does

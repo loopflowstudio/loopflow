@@ -334,7 +334,7 @@ lf design: plan infrastructure hardening for the runtime
 
 Seed `MEMORY.md` with the load-bearing context a first run needs. After that,
 agents edit the same reviewed file through the ordinary repository workflow;
-`update-wave` owns deliberate end-of-work curation.
+`realign` reconciles memory with the plan and code.
 
 ## Adaptation
 

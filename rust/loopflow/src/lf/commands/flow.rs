@@ -702,7 +702,11 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     /// An operation is an attempt like a skill launch: its Run row is the
     /// receipt recovery reads, so an interrupted operation blocks for
     /// inspection instead of replaying its side effect.
-    async fn run_op(&self, ops: &crate::engine::ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
+    async fn run_op(
+        &self,
+        ops: &crate::engine::ConcreteOp,
+        _ctx: ExecutionContext,
+    ) -> Result<SkillOutcome> {
         let flow = self.reserve(self.begin().await?).await?;
         let name = ops.item.display_name();
         eprintln!("op: {name}");
@@ -711,7 +715,9 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
             .as_ref()
             .ok_or_else(|| anyhow!("op: {name} has no reserved Run"))?;
         if attempt.completed() {
-            return Ok(());
+            return Ok(landing_outcome(
+                self.store.operation_landing(&attempt.run_id).await?,
+            ));
         }
         let claim = self.claim();
         let store = self.store.clone();
@@ -749,12 +755,32 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         })
         .await
         .map_err(|error| anyhow!("op: {name} worker failed: {error}"))?;
+        if let Ok(Some(landing)) = &result {
+            self.store
+                .sqlite
+                .bind_operation_landing(&attempt.run_id, landing)?;
+        }
         capture.finish(if result.is_ok() {
             "completed"
         } else {
             "failed"
         })?;
-        result.map_err(|error| anyhow!("op: {name} failed: {error}"))
+        result.map_err(|error| anyhow!("op: {name} failed: {error}"))?;
+        Ok(landing_outcome(
+            self.store.operation_landing(&attempt.run_id).await?,
+        ))
+    }
+}
+
+fn landing_outcome(landing: Option<crate::pr_landing::PrLanding>) -> SkillOutcome {
+    use crate::pr_landing::PrLandingState;
+    match landing.map(|landing| landing.state) {
+        None | Some(PrLandingState::Merged) => SkillOutcome::Completed { feedback: None },
+        Some(PrLandingState::Closed) => SkillOutcome::Blocked("PR closed without merging".into()),
+        // Preserve the handoff and its exact landing binding while delivery recovers.
+        Some(PrLandingState::Blocked | PrLandingState::Watching | PrLandingState::Repairing) => {
+            SkillOutcome::Waiting
+        }
     }
 }
 
@@ -912,6 +938,174 @@ mod tests {
     use crate::engine::{ConcreteStep, Flow};
     use std::fs;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn handed_off_landing_keeps_the_saved_flow_before_its_next_review() {
+        use crate::durable::{FlowInvocation, TaskWorkerClaim};
+        use crate::engine::flow::Op;
+        use crate::engine::invocation::QueuedInvocation;
+        use crate::engine::{
+            ConcreteOp, ConcreteSkill, ExecutionContext, ExecutionCursor, FlowOutcome,
+            OccurrencePolicy, Skill,
+        };
+        use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        struct Review(AtomicUsize);
+        #[async_trait::async_trait]
+        impl super::StepLauncher for Review {
+            async fn review(
+                &self,
+                _: &FlowInvocation,
+                _: &ConcreteSkill,
+            ) -> anyhow::Result<Option<String>> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(None)
+            }
+            async fn launch(
+                &self,
+                _: &FlowInvocation,
+                _: &ConcreteSkill,
+                _: &ExecutionContext,
+                _: Option<&TaskWorkerClaim>,
+            ) -> anyhow::Result<Option<String>> {
+                panic!("the next review must never launch an autonomous provider")
+            }
+        }
+        let directory = tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let flow = store
+            .create_flow(FlowInvocation {
+                invocation: QueuedInvocation::new(
+                    "delivery",
+                    vec![
+                        ConcreteStep::Op(ConcreteOp {
+                            item: Op {
+                                command: "pr".into(),
+                                args: vec!["land".into()],
+                            },
+                            flow_parents: vec![],
+                        }),
+                        ConcreteStep::Skill(ConcreteSkill {
+                            skill: Skill::named("review"),
+                            policy: OccurrencePolicy {
+                                id: Some("review".into()),
+                                human: true,
+                                ..OccurrencePolicy::default()
+                            },
+                            flow_parents: vec![],
+                        }),
+                    ],
+                )
+                .unwrap(),
+                cursor: ExecutionCursor::default(),
+                version: 0,
+                task_id: None,
+                wave_id: None,
+                cwd: directory.path().into(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                finished: false,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        let flow = store
+            .reserve_attempt(flow.id(), flow.version, None)
+            .await
+            .unwrap();
+        let run = flow.current_attempt.as_ref().unwrap().run_id.clone();
+        store
+            .sqlite
+            .publish_attempt(flow.id(), flow.version, &run, None, "loopflow", None)
+            .unwrap();
+        let landing = PrLanding::new(
+            NewPrLanding {
+                repo: "owner/repo".into(),
+                pr_number: 1,
+                worktree: directory.path().into(),
+                branch: "feature".into(),
+                task_id: None,
+                requested_head_sha: "head".into(),
+                after_merge: None,
+                next_slug: None,
+            },
+            now,
+        )
+        .unwrap();
+        let mut landing = store.start_or_join_pr_landing(&landing).await.unwrap();
+        store
+            .sqlite
+            .bind_operation_landing(&run, &landing.id)
+            .unwrap();
+        store
+            .sqlite
+            .end_run(
+                &run,
+                &crate::session::RunEnd {
+                    outcome: "completed".into(),
+                    at: now.unix_timestamp(),
+                },
+            )
+            .unwrap();
+        let review = Review(AtomicUsize::new(0));
+        for _ in 0..2 {
+            assert_eq!(
+                super::drive(store.clone(), flow.clone(), None, &review)
+                    .await
+                    .unwrap(),
+                FlowOutcome::Waiting
+            );
+            let saved = store.flow(flow.id()).await.unwrap().unwrap();
+            assert_eq!(saved.cursor.index, 0);
+            assert_eq!(saved.current_attempt.unwrap().run_id, run);
+            assert_eq!(review.0.load(Ordering::SeqCst), 0);
+        }
+        landing = store
+            .claim_pr_landing(
+                &landing.id,
+                landing.generation,
+                &crate::pr_landing::LandingSupervisor {
+                    placement: crate::pr_landing::LandingPlacement::Local,
+                    process_id: std::process::id(),
+                    heartbeat_at: now,
+                },
+                now - time::Duration::minutes(2),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        landing.state = PrLandingState::Merged;
+        landing.merge_commit = Some("merge".into());
+        assert!(store.update_pr_landing(&landing).await.unwrap());
+        assert_eq!(
+            super::drive(store.clone(), flow.clone(), None, &review)
+                .await
+                .unwrap(),
+            FlowOutcome::Waiting
+        );
+        assert_eq!(
+            store.flow(flow.id()).await.unwrap().unwrap().cursor.index,
+            1
+        );
+        assert_eq!(review.0.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn render_pipeline_lines_expands_xor_paths_on_separate_lines() {

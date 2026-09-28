@@ -119,7 +119,7 @@ exit 0
     )
 }
 
-fn gh_watched_land_script(log_path: &str) -> String {
+fn gh_finite_land_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -1443,7 +1443,7 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 }
 
 #[test]
-fn lf_pr_land_waits_for_authoritative_merged_observation() {
+fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
     for (repair, blocked) in [(false, false), (true, false), (true, true)] {
         let repo = TestRepo::new();
         let github_remote = "https://github.com/loopflowstudio/loopflow.git";
@@ -1465,7 +1465,7 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
             .unwrap();
         assert!(status.success());
         let log_path = repo.bare_path().join("watched-gh.log");
-        let script = gh_watched_land_script(log_path.to_string_lossy().as_ref());
+        let script = gh_finite_land_script(log_path.to_string_lossy().as_ref());
         let codex = codex_app_server_script(
             if blocked {
                 r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
@@ -1509,36 +1509,54 @@ fi"#,
         let repair_proof = repo.path().join(".git/landing-repair-proof");
         let rebase_log = repo.bare_path().join("repair-rebase.log");
         let repair_launches = repo.bare_path().join("repair-launches.log");
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        let command = || {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            command
+                .current_dir(&worktree)
+                .env_remove("LF_GIT_OPERATION_ID")
+                .env_remove("LF_TRACE_ID")
+                .env_remove("LF_PROCESS_ID")
+                .env("LF_HOME", &lf_home)
+                .env("LF_DB_PATH", &database)
+                .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("LF_TEST_REBASE_LOG", &rebase_log)
+                .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
+                .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
+                .env(
+                    "LF_TEST_REPAIR_PROOF",
+                    if repair {
+                        repair_proof.as_os_str()
+                    } else {
+                        std::ffi::OsStr::new("")
+                    },
+                );
+            command
+        };
+        let handed_off = command()
             .args([
                 "pr",
                 "land",
                 "--strict",
                 "--title",
-                "watched landing",
+                "finite landing",
                 "--body",
-                "Observe GitHub before returning.",
+                "Retain delivery for later checks.",
             ])
-            .current_dir(&worktree)
-            .env_remove("LF_GIT_OPERATION_ID")
-            .env_remove("LF_TRACE_ID")
-            .env_remove("LF_PROCESS_ID")
-            .env("LF_HOME", &lf_home)
-            .env("LF_DB_PATH", &database)
-            .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env("LF_TEST_REBASE_LOG", &rebase_log)
-            .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
-            .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
-            .env(
-                "LF_TEST_REPAIR_PROOF",
-                if repair {
-                    repair_proof.as_os_str()
-                } else {
-                    std::ffi::OsStr::new("")
-                },
-            )
             .output()
             .unwrap();
+        assert!(
+            handed_off.status.success(),
+            "{}",
+            String::from_utf8_lossy(&handed_off.stderr)
+        );
+        assert!(String::from_utf8_lossy(&handed_off.stdout).contains("handed off"));
+        assert!(!repair_launches.exists());
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        let state: String = conn
+            .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(state, "watching");
+        let mut output = command().args(["pr", "reconcile"]).output().unwrap();
         if blocked {
             assert!(!output.status.success());
             assert!(String::from_utf8_lossy(&output.stderr)
@@ -1555,15 +1573,25 @@ fi"#,
         }
         assert!(
             output.status.success(),
-            "lf pr land failed: {}\nNested rebase: {}",
-            String::from_utf8_lossy(&output.stderr),
-            fs::read_to_string(&rebase_log).unwrap_or_default(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
         );
-        assert!(
-            String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
-            "land returned without merged evidence: {}",
-            String::from_utf8_lossy(&output.stdout)
-        );
+        if repair {
+            let state: String = conn
+                .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(state, "watching");
+            output = command().args(["pr", "reconcile"]).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let state: String = conn
+            .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(state, "merged");
         if repair {
             let repaired_head =
                 fs::read_to_string(&repair_proof).expect("repair wrote shared Git metadata");
@@ -1576,7 +1604,13 @@ fi"#,
                 repaired_head.trim(),
                 String::from_utf8_lossy(&head.stdout).trim()
             );
-            assert!(String::from_utf8_lossy(&output.stderr).contains("Rebased the linked worktree"));
+            assert_eq!(
+                fs::read_to_string(&repair_launches)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
         }
         let gh_log = fs::read_to_string(log_path).unwrap();
         assert!(

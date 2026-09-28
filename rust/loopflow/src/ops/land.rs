@@ -34,8 +34,7 @@ pub struct LandOptions {
 /// marked ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Finalize {
-    /// Arm GitHub auto-merge so the PR merges itself once checks pass. `arm`
-    /// returns here; `land` continues into the watched lifecycle.
+    /// Request auto-merge and retain delivery for later finite checks.
     AutoMerge,
     /// Assign the PR to the current user and leave it for a required, manual
     /// merge click. Used by `submit` — nothing merges without that one click.
@@ -270,13 +269,17 @@ pub fn arm(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(
+    let pr = prepare_pr(
         repo,
         options,
         Finalize::AutoMerge,
         Integration::Required,
         progress,
-    )
+    )?;
+    if let Some(pr) = &pr {
+        crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
+    }
+    Ok(pr)
 }
 
 /// Continue land after owned recovery already verified and pushed integration.
@@ -285,13 +288,17 @@ pub(crate) fn finish_arm_after_rebase(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(
+    let pr = prepare_pr(
         repo,
         options,
         Finalize::AutoMerge,
         Integration::Completed,
         progress,
-    )
+    )?;
+    if let Some(pr) = &pr {
+        crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
+    }
+    Ok(pr)
 }
 
 /// Prepare a PR to land without arming auto-merge: commit, rebase onto main,

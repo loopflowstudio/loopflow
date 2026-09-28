@@ -1764,7 +1764,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.commit("bound basis");
         let cli = Cli {
             interactive: true,
-            repo: None,
             ..Cli::default()
         };
 

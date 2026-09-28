@@ -19,6 +19,17 @@ while preserving the accepted behavior and human review boundaries.
 Settled: one repository-wide `vsm-operate`, alongside per-Task task-operate and
 per-Wave wave-operate. Projects are part of Waves and have no operator.
 
+Implementation assumptions on 2026-09-28 (not additional decisions by Jack):
+`lf pr reconcile` is the finite repository delivery entry point. Existing landing
+rows and claims own it; the scheduler will call shared operations rather than
+parse command output. Mechanical `pr land` binds its operation Run to that exact
+landing so a successful handoff cannot advance merge-dependent Flow steps.
+Blocked delivery stays at that occurrence and remains observable on later ticks.
+The first pass suppresses an already-responded unchanged incident; explicit
+same-head rerun/retry identity is still to implement, not silently approved as
+permanent refusal. Task admission and detached launch remain unfinished, so no
+live schedule or safe automatic Task-wide repair is claimed by this pass.
+
 VSM is recursive; Jack explicitly places S1–S5 within each Wave. Identity is
 determined through the whole graph; repository vsm-operate is not its exclusive
 owner. task-operate selects and runs the right Flow and carries work through to

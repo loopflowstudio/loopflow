@@ -2646,11 +2646,35 @@ pub(crate) async fn settle_task_landing(
         .await
         .map_err(|error| task_error(format!("failed to read landing Task: {error}")))?
         .ok_or_else(|| task_error(format!("landing Task {task_id} disappeared")))?;
-    let pr =
-        reconcile_task_pr_observation(store, &mut task, crate::ops::pr::PrReadFreshness::Fresh)
-            .await?
-            .ok_or_else(|| task_error("landing Task PR disappeared during merge settlement"))?;
-    apply_merged_task_landing(store, &mut task, &pr, landing).await
+    // A previous check may have rotated to the next PR before it exited.
+    // Reconcile the delivery's PR, not whichever successor is active now.
+    let settled = store
+        .task_prs(task_id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .into_iter()
+        .find(|pr| {
+            pr.phase() == PrPhase::Merged
+                && pr.github().map(|github| github.number) == Some(landing.pr_number)
+        });
+    let pr = match settled {
+        Some(pr) => pr,
+        None => {
+            reconcile_task_pr_observation(store, &mut task, crate::ops::pr::PrReadFreshness::Fresh)
+                .await?
+                .ok_or_else(|| task_error("landing Task PR disappeared during merge settlement"))?
+        }
+    };
+    apply_merged_task_landing(store, &mut task, &pr, landing).await?;
+    if landing.after_merge == Some(AfterMerge::CompleteTask) {
+        if let PmWritebackState::Pending { error, .. } = &task.pm_writeback {
+            return Err(task_error(format!("Linear completion pending: {error}")));
+        }
+        if task_work_status(store, &task).await? != WorkStatus::Done {
+            return Err(task_error("Task completion gate is not yet satisfied"));
+        }
+    }
+    Ok(())
 }
 
 async fn apply_merged_task_landing(
@@ -5463,7 +5487,10 @@ mod tests {
         // A parked human boundary keeps its Session's reserved Run without
         // launching a provider; everything else about the position is untouched.
         let stored = store.task_flow(&task.id).await.unwrap().unwrap();
-        let sessions = store.sessions(&crate::session::SessionFilter::default()).await.unwrap();
+        let sessions = store
+            .sessions(&crate::session::SessionFilter::default())
+            .await
+            .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].1.task_id, Some(task.id.clone()));
         assert!(!sessions[0].1.published);

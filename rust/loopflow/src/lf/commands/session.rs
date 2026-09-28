@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
-use crate::ops::human_session::{OpenMode, SessionKind, SessionRecord, SessionState};
+use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
 use crate::run_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 

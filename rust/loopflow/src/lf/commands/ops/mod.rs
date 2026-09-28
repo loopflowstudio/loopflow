@@ -39,6 +39,10 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         None | Some(PrCommand::Status) => pr_status(),
+        Some(PrCommand::Reconcile) => {
+            crate::ops::pr_landing::reconcile_repository(&find_repo_root()?, &progress)?;
+            Ok(())
+        }
         Some(PrCommand::Publish { model, title, body }) => publish_pr(
             title.clone(),
             body.clone(),
@@ -84,22 +88,8 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        }) => arm_current(
-            &LandOptions {
-                strict: *strict,
-                local: *local,
-                create_pr: true,
-                complete: *complete,
-                next_slug: next.clone(),
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
-            },
-            &progress,
-        ),
-        Some(PrCommand::Land {
+        })
+        | Some(PrCommand::Land {
             strict,
             local,
             complete,
@@ -503,20 +493,11 @@ pub(crate) fn land_repo(
         }
     })?;
     if let Some(pr) = pr {
-        crate::ops::pr_landing::watch_armed_pr(repo_root, options, pr, progress)?;
+        progress.status(&format!(
+            "PR #{} handed off; lf pr reconcile checks delivery.",
+            pr.number
+        ));
     }
-    Ok(())
-}
-
-fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    with_rebase_retry(&repo_root, "arm", progress, |repo, integrated| {
-        if integrated {
-            finish_arm_after_rebase(repo, options, progress)
-        } else {
-            arm(repo, options, progress)
-        }
-    })?;
     Ok(())
 }
 

@@ -1,8 +1,8 @@
 ---
 requires: code on branch
-produces: landed PR
+produces: recorded PR delivery with auto-merge requested
 ---
-Land the current branch. Prepare the exact head, watch CI, repair, and finish merged.
+Prepare the current branch and hand off delivery through verified merge.
 
 ## Orientation
 
@@ -22,23 +22,22 @@ re-derive what these already record.
 ## API
 
 `lf pr land` stages uncommitted changes, rebases, creates or updates the PR,
-requests exact-head auto-merge, and watches GitHub. Failing required checks get
-`ci-fix` repairs until resolved. The agent rebases, repairs, verifies,
-then publishes and enables auto-merge with the original Task disposition. The
-watcher only observes and launches repairs; it returns after merge or an
-actionable durable block. Rerun `lf pr land` after resolving a blocker; the same
-head can resume without an empty commit. Repair conclusions are retained in
-ordinary Runs (`lf runs <run> --final`).
-In a Task worktree, bare land settles one PR and keeps the Task open.
+requests exact-head auto-merge, records its settlement intent, and returns.
+Success means handoff. `lf pr reconcile` checks this repository's recorded
+landings once, repairs actionable CI failures, and settles verified merges.
+An unchanged incident receives one repair; unresolved evidence stays visible.
+Repair conclusions remain in ordinary Runs (`lf runs <run> --final`).
+In a Task worktree, bare land keeps the Task open; `-c` requests completion
+only after verified merge and local/Linear settlement. `--next` retains rotation.
 
-Use `lf pr arm` for the one-shot prepare/request/return operation.
+`lf pr arm` uses the same handoff. Neither command waits for CI or merge.
 
 ```
 lf pr land [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
 **Do not run git commit, git push, gh pr create, or gh pr merge directly.**
-`lf pr land` owns those mutations and the watched repair loop.
+`lf pr land` owns those mutations and the durable delivery handoff.
 
 ## Workflow
 
@@ -81,7 +80,8 @@ Inside a Task, choose the disposition explicitly:
 lf pr land -c    # this merge completes the Task
 ```
 
-Task completion happens only after GitHub authoritatively reports the merge.
+Task completion happens only after a later reconciliation verifies the merge.
+Run `lf pr reconcile` for a finite check; do not report handoff as a merged PR.
 
 If you wrote title/body manually, include them:
 

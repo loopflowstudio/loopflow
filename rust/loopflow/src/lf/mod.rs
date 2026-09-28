@@ -1132,6 +1132,8 @@ pub enum InstallCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PrCommand {
+    /// Check recorded repository landings once, repair CI, and settle verified merges.
+    Reconcile,
     /// Show current branch's PR state
     Status,
     /// After an out-of-band merge, rotate this Task to its next serial PR,
@@ -1200,7 +1202,7 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Arm and watch a PR through CI repair and authoritative merge.
+    /// Request auto-merge, retain settlement intent, and return.
     Land {
         #[arg(long)]
         strict: bool,

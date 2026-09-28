@@ -844,43 +844,37 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             all,
             team_key,
             team_name,
-        } => {
-            return loopflow::lf::commands::ops::connect_wave(
-                repo,
-                wave.as_deref().or(wave_flag.as_deref()),
-                *all,
-                team_key.as_deref(),
-                team_name.as_deref(),
-            )
-        }
+        } => loopflow::lf::commands::ops::connect_wave(
+            repo,
+            wave.as_deref().or(wave_flag.as_deref()),
+            *all,
+            team_key.as_deref(),
+            team_name.as_deref(),
+        ),
         WaveCommand::Sync {
             wave,
             wave_flag,
             all,
-        } => {
-            return loopflow::lf::commands::ops::sync_planning(
-                repo,
-                wave.as_deref().or(wave_flag.as_deref()),
-                *all,
-                false,
-                false,
-            )
-        }
+        } => loopflow::lf::commands::ops::sync_planning(
+            repo,
+            wave.as_deref().or(wave_flag.as_deref()),
+            *all,
+            false,
+            false,
+        ),
         WaveCommand::Rename { wave, title } => {
-            return loopflow::lf::commands::ops::rename_wave(repo, wave, title)
+            loopflow::lf::commands::ops::rename_wave(repo, wave, title)
         }
         WaveCommand::Forget { .. }
         | WaveCommand::Place { .. }
         | WaveCommand::Relocate { .. }
         | WaveCommand::Enable { .. }
         | WaveCommand::Disable { .. }
-        | WaveCommand::Retire { .. } => {
-            return loopflow::lf::commands::placement::wave(repo, command)
-        }
+        | WaveCommand::Retire { .. } => loopflow::lf::commands::placement::wave(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             let content = serde_json::from_slice(&std::fs::read(plan)?)?;
             update_plan(repo, wave.as_deref(), &content)?;
-            return Ok(());
+            Ok(())
         }
     }
 }
@@ -1542,6 +1536,7 @@ fn dispatch(
                     },
                 };
                 loopflow::ops::execute_flow_ops(repo, &item, &loopflow::ops::NullProgress)
+                    .map(|_| ())
                     .map_err(Into::into)
             }),
             Some(Commands::Ci {

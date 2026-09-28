@@ -163,3 +163,111 @@ it was aborted intact. Prepare this core directly stacked on LOO-298 through
 `lf task prepare --stack-on`; record the actual inherited commit before launch.
 No implementation or live schedule activation was performed by launch-plan.
 Implementation should append dated proof here while preserving the full scope.
+
+### 2026-09-28 — finite landing handoff, first implementation pass
+
+Compared with `0f5ff18c8e1095c33f9e376d43de5cbd78441661` in this checkout.
+Jack's complete scope above remains in force. This pass is retained working
+code, not completion of LOO-332 or an installed demonstration. No commit,
+publication, live job, real provider request, or installed-Home migration was made.
+
+**Switched consumers.** Both CLI `pr land` and `pr arm` now prepare through the
+same existing arm operation, retain the existing landing intent, and return.
+`pr reconcile` reads the repository's pending landing rows and performs one
+observation, at most one confirmation, and at most one CI repair. Taskless
+requests use this same path. The former `watch_armed_pr`, `watch_armed`,
+`wait_for_landing`, `supervise_pr_landing`, sleep-between-observations, and
+watcher-only repair-output scan are deleted. A repair still runs in the calling
+process until that finite provider invocation finishes; detached admission is
+not yet implemented.
+
+The existing landing generation and worktree lock now cover one check. A
+contending check returns immediately, and a canceled asynchronous repair retains
+the lock until its blocking worker exits. Release fences the generation. CI
+response admission updates only an incident with no prior response; repeated
+unchanged failures stay blocked instead of launching the previous unbounded
+repair loop. Blocked deliveries remain observable, including a later merge.
+
+Mechanical Flow `pr land` stores its exact landing ID on its operation Run.
+The common executor can return Waiting for an operation, preserving the same
+captured position and handoff receipt across invocations. Only that landing's
+settlement releases the next step. This uses one new nullable FK on `runs`,
+in the `link_landing_operation` draft; it creates no second cursor or delivery
+owner. The returned process status means handoff, not merge.
+
+**Review corrections.** Landing persists verified merge evidence before Task
+settlement. Settlement reuses the exact already-merged Task PR if an earlier
+check rotated the active pointer. A still-unsatisfied completion gate or pending
+Linear writeback is reported as closure pending, retaining the landing for retry.
+The earlier helper could return success after local completion with pending
+writeback. These source corrections still need a dedicated interrupted
+local/Linear settlement test; the retained Task test proves only the merged
+evidence prerequisite and local completion.
+
+**Observed proof.** All Rust commands used a disposable default Home/database,
+cleared inherited `LF_*`/`LOOPFLOW_*`, four workers, nice +10, a 900-second bound,
+and no incremental build (`CARGO_PROFILE_DEV_DEBUG=0`). Providers/GitHub were
+stand-ins. Resource preflight first failed at 63.8 GiB; supported recovery
+restored the floor by removing an inactive checkout's allowlisted build output.
+It retained active builds. The uv-cache prune timed out on its lock and removed
+nothing; later preflights passed.
+
+- `cargo test -p loopflow --lib -- ops::pr_landing::tests handed_off_landing
+  store::sqlite::pr_landings::tests store::sqlite::ci_incidents::tests
+  watched_landing_completes --test-threads=4`: 11 passed, one new fixture failed
+  because its human review lacked a stable ID. The corrected fixture next failed
+  because it attempted an unclaimed landing update. It now uses the real claim.
+  Final focused repeat of landing and Flow behavior: **8 passed**. The three
+  existing landing-store tests and local Task-completion test passed earlier;
+  the CI-incidents filter selected no tests.
+- `cargo test -p loopflow --test land_tests lf_pr_land_returns --
+  --test-threads=1`: **1 passed**, covering three actual-CLI scenarios:
+  immediate merge, repair then later merge, and blocked repair. Each initiating
+  `land` process had exited before a separate `reconcile` process ran. This
+  test is taskless; it does not prove `-c` with a live Linear provider.
+- The saved-Flow proof resumes the same operation twice while pending, verifies
+  its Run and cursor remain unchanged, then records a claimed merge and reaches
+  the following human review without launching an autonomous provider.
+- `cargo clippy --all-targets -- -D warnings`: **passed** after fixing an
+  inherited unused Session import and five needless Wave-command returns.
+  The first test compile also required deleting an inherited removed `Cli.repo`
+  test initializer. These are local integration fixes, not parent acceptance.
+- The retained disposition and revoked-auto-merge checks were also run. The
+  disposition assertion first omitted the existing shell quoting around `--next`;
+  that fixture expectation was corrected without changing production quoting.
+  Final results: **both passed**, with only the failing disposition test repeated.
+- `uv run --project website --extra test pytest
+  website/tests/test_readme_index_sync.py -q`: **1 passed**.
+- `git diff --check`: passed. Changed Rust files were formatted. Global
+  `cargo fmt --all -- --check` still reports inherited formatting in
+  `ops/flow_session.rs`, `store/sqlite/durable.rs`, and four integration tests;
+  formatting-only edits in unrelated files were restored.
+- `uv run python scripts/check_migrations.py`: **blocked** because
+  `0.12.24.001_release.sql` exists on `origin/main` but is absent from this
+  LOO-298-stacked branch. No released migration was copied, rewritten, or applied
+  to the installed Home. Integration against the parent's final schema remains
+  required before delivery.
+
+**Comparable size.** Rust production changes: **+431 / −451, net −20** lines
+against the initial HEAD. Counted changed `src/**/*.rs` before their test module;
+`lf/commands/ops/mod.rs` was counted whole because its unchanged test modules are
+interspersed with production. Excluded integration tests, test-only changes,
+Markdown, generated files, and SQL. The new draft adds **6 SQL lines** separately.
+Most deletion is the persistent watcher; the finite reconciler and Flow binding
+take its place. The large overall test deletion replaces watcher-loop tests with
+separate-invocation behavior; disposition and revoked-request proofs remain.
+
+**Still required in this slice and the complete design.** Durable CI deadlines,
+explicit rerun identity and retry policy, green-but-needs-rebase observation,
+and interrupted local/Linear closure proof remain. Task-wide admission is not yet
+connected: the current PR claim serializes competing landing checks, not Task
+Flows or independent Sessions. Do not activate scheduling or treat this branch
+as ready to ship before that shared admission boundary, detached repair launch,
+Desktop management, and the human installed-path demo are implemented and proven.
+
+Compression (2026-09-28): removed unused repair-continuation/result plumbing,
+CI repaired-head writers, terminal predicate, and duplicate CLI land/arm dispatch;
+confirmation now precedes one action dispatch, and the Flow outcome is infallible.
+Focused landing/Flow/store proof: 14 passed; CLI land/arm proof: 2 passed (private
+Homes and provider stand-ins). Clippy and global format check passed; formatting
+also normalized six inherited files. Full Task and installed-demo gaps above remain.

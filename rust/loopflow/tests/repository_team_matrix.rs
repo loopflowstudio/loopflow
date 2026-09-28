@@ -1,6 +1,5 @@
 //! PRD-43: one repository Team, stable Project ownership, and a fail-closed migration.
 
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 

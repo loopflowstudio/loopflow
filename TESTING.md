@@ -466,6 +466,9 @@ no child is launched; an installed `lf` on PATH can hide this missing fixture.
 Fixtures selecting a private `LF_HOME` must also clear and restore
 `LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
 control authority, and Run lookup otherwise reads outside the fixture's Home.
+Clearing inherited authority alone does not isolate a process that falls back
+to its development Home. Give each proof phase a disposable default `LF_HOME`
+and `LF_DB_PATH`; individual fixtures can override those with their own stores.
 Reproduce executable-resolution failures with the compiled test
 binary, `LF_BIN`, `LF_CONTROL_BIN`, and `CARGO_BIN_EXE_lf` unset, and a PATH
 containing Git but no `lf`.

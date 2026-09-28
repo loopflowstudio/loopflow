@@ -171,6 +171,14 @@ struct DTOFixtureTests {
             try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingHomeData)
         }
 
+        var missingEnabled = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var waveWithoutEnabled = try #require(missingEnabled["wave"] as? [String: Any])
+        waveWithoutEnabled.removeValue(forKey: "enabled")
+        missingEnabled["wave"] = waveWithoutEnabled
+        let missingEnabledData = try JSONSerialization.data(withJSONObject: missingEnabled)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingEnabledData)
+        }
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")

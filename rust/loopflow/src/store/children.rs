@@ -1,9 +1,7 @@
-//! Durable Project and Task compatibility rows and their observation outbox.
+//! Durable Project and Task rows and their events.
 
 use crate::id::WaveId;
-use crate::work::project::{
-    Project, ProjectEvent, ProjectEventKind, ProjectId,
-};
+use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
     LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
     TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
@@ -158,7 +156,6 @@ impl Store {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_prs(&task_id)).await
     }
-
 
     pub async fn latest_task_event_at(
         &self,
@@ -412,7 +409,4 @@ impl Store {
         })
         .await
     }
-
-
-
 }

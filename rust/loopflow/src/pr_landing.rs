@@ -82,7 +82,6 @@ impl LandingPlacement {
             Self::Local => "local",
         }
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

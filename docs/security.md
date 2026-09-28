@@ -159,7 +159,7 @@ Nested `lf ssh` is rejected so borrowed authority cannot cross a second SSH
 hop. Obvious detached forms such as `tmux`, `screen`, `nohup`, `systemd-run`,
 and `--detach` are rejected when they would retain borrowed authority. Durable
 Loopflow spawns scrub forwarded handles and singleton credentials before the
-resident starts.
+child starts.
 
 ### What crosses SSH for other credentials
 

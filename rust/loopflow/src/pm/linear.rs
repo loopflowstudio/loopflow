@@ -1219,7 +1219,6 @@ impl LinearClient {
         Ok(response.viewer.id)
     }
 
-
     /// Read one issue's title, description, comments, and revision marker.
     pub async fn observe_issue(&self, issue_id: &str) -> PmResult<IssueObservation> {
         let response: IssueObservationData = self
@@ -1412,8 +1411,6 @@ struct IdNode {
 struct ViewerData {
     viewer: IdNode,
 }
-
-
 
 #[derive(Deserialize)]
 struct IssueDeletionData {
@@ -1955,7 +1952,6 @@ mod tests {
         assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
         assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
     }
-
 
     #[tokio::test]
     async fn viewer_id_reads_loopflows_own_user() {

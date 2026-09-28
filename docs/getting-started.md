@@ -179,22 +179,22 @@ branch and Task PR record when present; they do not require a live Task worker.
 ## Scale with Waves
 
 ```bash
-lf ps --json          # live processes and their ownership evidence
-lf wave status shipper     # Wave work, Runs, and Task conditions
-lf session list       # conversations waiting for a person
+lf --wave shipper wave/operate "Review the release blockers"
+lf wave status shipper
+lf ps --json
 ```
 
-Use `lf session list`, then `lf session open <session-id>`, for every unresolved
-interactive Run, Ask, or Task FlowStep. Finish it with the kind-specific action
-shown in the [Sessions lifecycle](../README.md#sessions).
+Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
+`crons:` schedules recurring Runs; `pm:` connects shared planning. Each
+`wave/operate` invocation reviews the plan and takes a bounded next action.
+Tasks own implementation in stable worktrees; `lf pr land` watches CI and repair
+through merge.
 
-Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
-`lf design` to explore an uncertain operating context, or write it by hand.
-Once `wave/` files exist, open the Wave’s chat in Loopflow.
+Open the repository in Loopflow on macOS to read Waves, Tasks and Runs.
+`lf session list` finds conversations, Asks and Flow reviews; open one with
+`lf session open <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
-
----
 
 ## Go Remote
 
@@ -207,19 +207,18 @@ lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
 lf wave list --json
 lf wave place <wave-id> <home-id>    # record origin-side planning state
-lf ssh <home-id> chat --follow -w shipper
+lf ssh <home-id> --wave shipper wave/operate
 ```
 
-Remote commands run on the named Home, which proves its identity. One Home
-keeper manages its internal chat listeners. Placement does not silently reroute
-ordinary local commands.
+The target Home proves its identity before running the command and keeps the
+resulting Run locally.
 
 Reads follow the same rule: `lf runs`, `lf usage`, `lf wave list`, and `lf wave status`
 read the executing Home. Prefix the command with `lf ssh <home-id>` to read
 another Home. Loopflow does not silently aggregate or replicate Run records.
 
 Foreground `lf ssh` commands can choose from subscription accounts installed on
-the origin and target. A resident that outlives SSH sheds forwarded credentials
+the origin and target. A detached process sheds forwarded credentials
 and uses authority installed on its own machine. See
 [Subscription Management](subscriptions.md#use-subscriptions-over-ssh).
 

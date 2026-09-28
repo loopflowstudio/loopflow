@@ -1,7 +1,7 @@
-use loopflow::work::wave::metrics::MetricPortfolioDto;
 use loopflow::durable::WorkStatus;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
+use loopflow::work::wave::metrics::MetricPortfolioDto;
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
@@ -94,7 +94,7 @@ fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
 }
 
 #[test]
-fn wave_detail_preserves_home_and_plan() {
+fn wave_detail_preserves_flow_and_requires_enablement() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     let Evidence::Ok { items: runs, .. } = &snapshot.runs else {
         panic!("fixture contains recorded Runs");
@@ -128,6 +128,13 @@ fn wave_detail_preserves_home_and_plan() {
     let mut missing_home: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
     missing_home["wave"].as_object_mut().unwrap().remove("home");
     assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_home).is_err());
+    let mut missing_enabled: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
+    missing_enabled["wave"]
+        .as_object_mut()
+        .unwrap()
+        .remove("enabled");
+    let error = serde_json::from_value::<WaveDetailSnapshot>(missing_enabled).unwrap_err();
+    assert!(error.to_string().contains("enabled"));
 }
 
 #[test]

@@ -1430,7 +1430,6 @@ fn validate_staged_app_helper(
     Ok(())
 }
 
-
 fn validate_rollback_verdict(verdict: &Verdict) -> Result<()> {
     match verdict {
         Verdict::Promote => Ok(()),

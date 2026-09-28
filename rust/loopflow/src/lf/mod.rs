@@ -1382,7 +1382,6 @@ pub enum HomeCommand {
         #[arg(long)]
         json: bool,
     },
-
 }
 
 #[derive(Debug, Subcommand)]
@@ -1621,6 +1620,7 @@ mod tests {
                 "product",
                 "home_00000000000000000000000000000001",
             ],
+            vec!["lf", "discord", "serve", "product"],
             vec!["lf", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
             vec!["lf", "wave", "status", "product", "--no-sync"],

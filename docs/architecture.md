@@ -90,7 +90,7 @@ one Skill run
 | Area | What it adds | Start here |
 | --- | --- | --- |
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
-| Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps, resident loops | [Planning](architecture/planning.md) |
+| Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
 | Homes | Placement, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
@@ -100,8 +100,8 @@ The source tree makes the planning boundary literal:
 
 ```text
 work/                          controller/
-wave/{mod,config,context,      wave/{runner,resident,server,
-      memory}                       placement,...}
+wave/{mod,config,context,
+      memory,metrics,relocate}
 project                       task/mod
 task                          Task worker
 
@@ -280,14 +280,13 @@ lf --wave <wave> wave/operate "ship invoices first"
 lf wave status product
 ```
 
-The Home keeper may start the placed Wave listener and resident. Task motion
-does not depend on either: Task commands claim the Task's current Flow
+Task commands claim the Task's current Flow
 invocation for one worker. Chapter rotation is a deterministic
 repository-wide operation that gives every Wave a new Project at once.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
 A Task review FlowStep starts the persisted Skill as a provider Run and remains
-parked until its exact decision arrives. Daemon and app triggers are later work.
+parked until its exact decision arrives.
 
 ### Another machine
 

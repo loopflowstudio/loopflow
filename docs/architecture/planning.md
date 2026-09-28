@@ -166,9 +166,8 @@ The Task worker lives under
 [`controller/task/`](../../rust/loopflow/src/controller/task/) and drives successive
 claimed boundaries until human input, a blocker, interruption, or Flow completion.
 Deterministic chapter rotation lives in
-[`ops/chapter.rs`](../../rust/loopflow/src/ops/chapter.rs). Wave listener,
-runtime, and optional service behavior lives under
-[`controller/wave/`](../../rust/loopflow/src/controller/wave/).
+[`ops/chapter.rs`](../../rust/loopflow/src/ops/chapter.rs). Wave metrics and
+relocation live under [`work/wave/`](../../rust/loopflow/src/work/wave/).
 
 ## Work state
 
@@ -204,7 +203,7 @@ the authored direction. Publication, seed inclusion, and provider transport
 acceptance are separate evidence, none proving application by the model.
 
 Wave guidance is extra input to `wave/operate`.
-Wave chat sends ordinary channel messages.
+Wave conversations use ordinary Sessions.
 
 ## Questions and sessions
 
@@ -235,8 +234,7 @@ lf session complete <flow-session-id>
 
 ## Author and discover executable targets
 
-The Wave listener and resident are not prerequisites for Task
-motion. The exact Task-position claim admits one worker. Other agent
+The exact Task invocation claim admits one worker. Other agent
 perspectives remain ordinary attributed Runs, and human sessions reuse either
 their originating Run or the Task/ordinary Flow's persisted position. Each Wave
 operation refreshes its definition, KRs, metrics, and Tasks before deciding.
@@ -245,7 +243,8 @@ and claims the next eligible position. It stops at a human boundary, a blocker,
 interruption, or Flow completion. No resident provider conversation decides what happens next.
 
 The deciding occurrence's `repeat` policy belongs to the pinned invocation.
-In pursue, implement → compress → refresh updates the work and its evidence; loop-decide owns the navigation judgment:
+In pursue, implement → compress → review-slice supplies the
+work and review evidence; loop-decide owns the navigation judgment:
 
 ```bash
 lf flow decide iterate "remaining work, direction and evidence"
@@ -267,10 +266,8 @@ ordinary Flow records retain the active boundary and Run receipt. This does not
 make external command effects exactly once: an interrupted ordinary operation without
 a completion receipt remains blocked for inspection.
 
-The Wave resident's Playhead interpreter and queue still exist. Their removal
-is separate work; ordinary Flows attributed to Waves do not require extending
-that interpreter. These descriptions follow current source. They do not claim
-live provider recovery, human handoff, or end-to-end Ask reassessment was verified.
+These descriptions follow source behavior. Configured provider recovery and
+end-to-end Ask reassessment require separate live evidence.
 
 ## Boundary contracts
 

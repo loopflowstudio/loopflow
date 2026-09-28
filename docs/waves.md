@@ -215,11 +215,6 @@ don't drop.
 
 ### Home
 
-A **Home** is a stable machine identity. Work records its execution placement;
-the Home records its currently observed route and keeps its own process,
-journal, and Run evidence. Changing a hostname or SSH route does not change
-that identity, and the record never opens SSH by itself.
-
 ```bash
 lf home id
 lf home observe <home-id> ssh://jack@mini.local

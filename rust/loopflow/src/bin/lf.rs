@@ -2025,6 +2025,7 @@ mod tests {
             "task",
             "flow",
             "skill",
+            "discord",
             "usage",
             "top",
             "list",

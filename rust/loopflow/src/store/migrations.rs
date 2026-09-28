@@ -588,9 +588,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
     failures.extend(validate_json_column::<
         crate::work::project::ProjectEventKind,
     >(conn, "project_events", "id", "kind_json")?);
-    failures.extend(validate_json_column::<
-        crate::work::project::ChildEventPayload,
-    >(conn, "observation_outbox", "id", "payload_json")?);
     failures.extend(validate_json_column::<Vec<String>>(
         conn,
         "ci_incidents",
@@ -4964,6 +4961,81 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn removing_wave_services_preserves_execution_metrics_and_landing_claims() {
+        let conn = open();
+        let name = "drop_wave_services";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO waves(id,name,repo,created_at) VALUES('wave','wave','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','project',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('task','project','task','INF-1','/repo',1);
+            INSERT INTO flow_invocations(id,task_id,wave_id,invocation_json,step_index,iteration,
+                position_version,worker_generation,updated_at,state,claim_json)
+                VALUES('managed','task','wave','{"id":"managed"}',0,0,9,4,100,'current','{"claim":"retained"}');
+            UPDATE tasks SET current_invocation_id='managed';
+            INSERT INTO runs(id,invocation_id,task_id,wave_id,created_at,published,cwd)
+                VALUES('run_owned','managed','task','wave',100,1,'/repo');
+            UPDATE flow_invocations SET current_run_id='run_owned';
+            INSERT INTO metric_instruments VALUES('wave','latency','probe',1);
+            INSERT INTO metric_observations VALUES('observation','wave','latency','revision','probe',1,0,1,1,'{"value":42}');
+            INSERT INTO provider_deliveries(delivery_id,provider,received_at) VALUES('delivery','linear',1);
+            INSERT INTO observation_outbox(recipient_kind,recipient_id,source_kind,source_id,event_id,payload_json,created_at)
+                VALUES('wave','wave','task','task',1,'{}',1);
+            INSERT INTO pr_landings(id,repo,pr_number,worktree,branch,task_id,requested_head_sha,
+                observed_head_sha,state,generation,supervisor_placement,supervisor_home_id,
+                supervisor_process_id,supervisor_heartbeat_at,created_at,updated_at)
+                SELECT 'landing','/repo',1,'/repo','branch','task','head','head','watching',7,
+                    'home',id,123,456,1,2 FROM homes LIMIT 1;
+        "#).unwrap();
+        let snapshot = || {
+            [
+                "tasks",
+                "flow_invocations",
+                "runs",
+                "metric_instruments",
+                "metric_observations",
+                "homes",
+            ]
+            .map(|table| {
+                let mut statement = conn
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                    .unwrap();
+                let columns = statement.column_count();
+                statement
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+        };
+        let before = snapshot();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        assert_eq!(snapshot(), before);
+        let landing: (String, Option<String>, i64, i64, i64, String) = conn.query_row(
+            "SELECT supervisor_placement,supervisor_home_id,supervisor_process_id,supervisor_heartbeat_at,generation,requested_head_sha FROM pr_landings",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))
+        ).unwrap();
+        assert_eq!(landing, ("local".into(), None, 123, 456, 7, "head".into()));
+        let retired: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('provider_deliveries','observation_outbox')", [], |row| row.get(0)).unwrap();
+        assert_eq!(retired, 0);
+        validate_foreign_keys(&conn).unwrap();
+        validate_persisted_json(&conn).unwrap();
     }
 
     #[test]

@@ -19,8 +19,7 @@ pub(crate) enum WaveConfigError {
 }
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// The wave's resident loop reads these and opens a system pass when a
-/// schedule comes due (`crate::controller::wave::runner`) — no daemon poller, no table.
+/// `lf cron sync` installs these schedules on the placed Home.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,
@@ -57,11 +56,6 @@ pub enum WaveChatConfig {
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
-    /// OS user allowed to start this Wave automatically. Absent means any user.
-    pub owner: Option<String>,
-    /// Machine allowed to start this Wave automatically. Accepts a HomeId,
-    /// hostname, or IP address. Absent means any Home.
-    pub home: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
@@ -69,7 +63,6 @@ pub struct WaveConfig {
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.
     pub chat: Option<WaveChatConfig>,
-
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
@@ -100,6 +93,38 @@ pub(crate) fn try_read_wave_config(
             .map_err(|source| WaveConfigError::Parse { path, source })?,
         None => WaveConfig::default(),
     }))
+}
+
+/// Read only the external chat binding, so malformed unrelated Wave policy
+/// cannot prevent an independent bridge from reading its binding.
+pub(crate) fn try_read_wave_chat_config(
+    repo: &Path,
+    name: &str,
+) -> Result<Option<WaveChatConfig>, WaveConfigError> {
+    let path = goal_path(repo, name);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(WaveConfigError::Read { path, source }),
+    };
+    let Some((frontmatter, _)) = split_frontmatter(&content) else {
+        return Ok(None);
+    };
+    let value = serde_yaml_ng::from_str::<Value>(&frontmatter).map_err(|source| {
+        WaveConfigError::Parse {
+            path: path.clone(),
+            source,
+        }
+    })?;
+    let Some(chat) = value
+        .as_mapping()
+        .and_then(|mapping| mapping.get(Value::String("chat".to_string())))
+    else {
+        return Ok(None);
+    };
+    serde_yaml_ng::from_value(chat.clone())
+        .map(Some)
+        .map_err(|source| WaveConfigError::Parse { path, source })
 }
 
 /// One-line Wave objective for status, PM, and API projections.
@@ -279,11 +304,6 @@ pub fn update_wave_agent_config(
     })
 }
 
-/// Set authored Wave turn intent, preserving unrelated frontmatter and body.
-///
-/// Enabled turns are the default, so resuming removes `paused` rather than
-/// persisting a redundant `paused: false` field.
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,8 +322,6 @@ mod tests {
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.owner.as_deref(), Some("jack"));
-        assert_eq!(config.home.as_deref(), Some("build.example.com"));
         assert_eq!(config.agent.as_deref(), Some("codex"));
     }
 
@@ -340,6 +358,74 @@ mod tests {
         assert_eq!(pm.provider.as_deref(), Some("linear"));
         assert_eq!(pm.linear_initiative.as_deref(), Some("lin-123"));
         assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
+    }
+
+    #[test]
+    fn discord_chat_config_is_typed_and_invalid_bindings_fail_closed() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+        )
+        .expect("write");
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        assert!(matches!(
+            config.chat,
+            Some(WaveChatConfig::Discord { guild_id, channel_id })
+                if guild_id == "guild" && channel_id == "channel"
+        ));
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Ok(Some(WaveChatConfig::Discord { guild_id, channel_id }))
+                if guild_id == "guild" && channel_id == "channel"
+        ));
+
+        // The binding is local: `home_id` is no longer a Discord-config field.
+        // `deny_unknown_fields` rejects it, so a stale GOAL.md fails closed.
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  home_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+        )
+        .expect("write stale home_id");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Err(WaveConfigError::Parse { .. })
+        ));
+
+        // A missing required field still fails closed.
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  guild_id: guild\n---\nDrive the work.\n",
+        )
+        .expect("write missing channel");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Err(WaveConfigError::Parse { .. })
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: local\n---\nDrive the work.\n",
+        )
+        .expect("write local chat");
+        assert!(matches!(
+            try_read_wave_config(temp.path(), "scan")
+                .expect("local config")
+                .and_then(|config| config.chat),
+            Some(WaveChatConfig::Local)
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nowner: [not-a-string]\n---\nDrive the work.\n",
+        )
+        .expect("write unrelated invalid policy");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Ok(None)
+        ));
     }
 
     /// Crons live in GOAL.md frontmatter — the resident loop's schedule
@@ -424,5 +510,4 @@ mod tests {
         assert!(config.agent.is_none());
         assert!(config.skill_agents.is_none());
     }
-
 }

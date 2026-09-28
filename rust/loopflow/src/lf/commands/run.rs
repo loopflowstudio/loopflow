@@ -35,7 +35,8 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
             &bound,
             &binding,
             crate::session::WorkSource::Checkout,
-        ).map(|_| ());
+        )
+        .map(|_| ());
     }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -92,13 +93,24 @@ pub fn run_bound(
         cli,
         binding,
         crate::session::WorkSource::Declared,
-    ).map(|_| ())
+    )
+    .map(|_| ())
 }
 
 /// Run a channel request through the ordinary attributed launch and settlement path.
-pub(crate) fn answer_bound(message: &str, cli: &Cli, binding: &crate::ops::WorkBinding) -> Result<Option<String>> {
-    launch_bound(None, Some(message), cli, binding, crate::session::WorkSource::Declared)
-        .map(|answer| answer.map(|answer| answer.text))
+pub(crate) fn answer_bound(
+    message: &str,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+) -> Result<Option<String>> {
+    launch_bound(
+        None,
+        Some(message),
+        cli,
+        binding,
+        crate::session::WorkSource::Declared,
+    )
+    .map(|answer| answer.map(|answer| answer.text))
 }
 
 fn launch_bound(
@@ -699,7 +711,9 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<crate::run_rec
         }
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Run completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(crate::run_record::read_final_answer(&capture.artifact_dir())?),
+        (Ok(()), Ok(())) => Ok(crate::run_record::read_final_answer(
+            &capture.artifact_dir(),
+        )?),
     }
 }
 

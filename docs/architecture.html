@@ -2138,7 +2138,7 @@ operations available to helpers without becoming resident Work identities.</p>
 </tr>
 <tr>
 <td>Planning</td>
-<td>Flow composition, Wave/Task Work, Steer, questions, review FlowSteps, resident loops</td>
+<td>Flow composition, Wave/Task Work, Steer, questions, review FlowSteps</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>
@@ -2165,8 +2165,8 @@ operations available to helpers without becoming resident Work identities.</p>
 </table>
 <p>The source tree makes the planning boundary literal:</p>
 <pre tabindex="0"><code class="language-text">work/                          controller/
-wave/{mod,config,context,      wave/{runner,resident,server,
-      memory}                       placement,...}
+wave/{mod,config,context,
+      memory,metrics,relocate}
 project                       task/mod
 task                          Task worker
 
@@ -2374,14 +2374,13 @@ lf task run INF-123
 lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
 lf wave status product
 </code></pre>
-<p>The Home keeper may start the placed Wave listener and resident. Task motion
-does not depend on either: Task commands claim the Task's current Flow
+<p>Task commands claim the Task's current Flow
 invocation for one worker. Chapter rotation is a deterministic
 repository-wide operation that gives every Wave a new Project at once.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
 A Task review FlowStep starts the persisted Skill as a provider Run and remains
-parked until its exact decision arrives. Daemon and app triggers are later work.</p>
+parked until its exact decision arrives.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf ssh build-home runs --json
 lf ssh build-home start product

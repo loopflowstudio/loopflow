@@ -6,10 +6,6 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{empty_plan, read_chapter, rotate, NewChapterRequest};
-use crate::work::wave::metrics::{
-    load_metric_contract, MetricContractIssueDto, MetricEvidenceDto, MetricObservation,
-    MetricTarget,
-};
 use crate::id::WaveId;
 use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
 use crate::planning::{LinearIssueId, TaskPlan};
@@ -18,6 +14,10 @@ use crate::pm::{PmKr, ProjectContent};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::chapter::{ChapterId, ChapterPhase, TaskDisposition};
 use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use crate::work::wave::metrics::{
+    load_metric_contract, MetricContractIssueDto, MetricEvidenceDto, MetricObservation,
+    MetricTarget,
+};
 use crate::work::wave::Wave;
 use time::{Duration, OffsetDateTime};
 

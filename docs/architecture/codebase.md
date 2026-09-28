@@ -48,7 +48,7 @@ subprocess edge to one concept.
 | Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` Run |
 | Task boundary executor | [`controller/task/`](../../rust/loopflow/src/controller/task/) | one claimed Flow boundary |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
-| Wave automation | [`controller/wave/`](../../rust/loopflow/src/controller/wave/) | listener, resident, placement policy, runtime |
+| Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
 | machine install | [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) | artifact set and switch receipt |
 | Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow/) | required-field DTOs from `lf --json` |
@@ -75,7 +75,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wt`, `commit`, `rebase`, `pr`, `ci` | worktree and delivery operations |
 | `lf runs`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf home`, `start`, `stop`, `pause`, `resume`, `ssh` | Home identity, placement, service routing |
+| `lf home`, `lf ssh` | Home identity, placement, command routing |
 | `lf auth` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
@@ -106,16 +106,11 @@ the Task worker joins them with the exact `FlowInvocation` worker claim.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 
-## HTTP boundaries
+## External transport
 
-The Home daemon exposes Home-scoped health, status, Wave start/stop/reconcile,
-webhook, and landing-claim routes. A Wave listener exposes only that Wave's
-channel, conversation, events, messages, observations, stop, and
-resident attachment/context routes.
-
-HTTP is a local supervision and presentation transport. It does not centralize
-Run records, provider credentials, or cross-Home process control. Remote access
-reaches the target Home explicitly; see [Homes and processes](homes.md).
+The CLI talks to planning and model providers. The independent Discord bridge
+uses outbound REST requests. Remote execution reaches the target Home through
+`lf ssh`; see [Homes and processes](homes.md).
 
 ## Add a provider
 

@@ -1,16 +1,8 @@
 # Homes and processes
 
-A Home is a durable Loopflow execution destination on a machine. It owns local
-processes, credentials, planning storage, Run records, service managers, and OS
-locks. Its SSH route may change without changing its identity. A Wave's Home
-expresses where work for that Wave belongs; placement does not require the Wave
-itself to have a resident process.
-
-A data directory holds local state. `LF_HOME` selects that directory; it does
-not select a remote execution destination. A branch data copy preserves the
-database's recorded Home identities and placements without registering another
-Home or acquiring process-control authority. Installed data and branch data can
-therefore describe the same Home while retaining independent writes.
+A Home is one machine's stable Loopflow authority. It owns local processes,
+credentials, planning storage, Run records, and OS locks.
+Its SSH route may change without changing its identity.
 
 ```bash
 lf home id
@@ -47,8 +39,7 @@ not whether a process exists. `lf wave place` changes placement. It does not lau
 ```text
 shell / automation / Loopflow.app
                |
-               v
-              lf ---------------- Linear / GitHub / provider auth
+               lf ---- Linear / GitHub / provider auth
                |
       local store + repository/Git
 
@@ -64,9 +55,10 @@ The process that directly spawns a child owns that child handle and may cancel
 it. Project and Task execution authority comes from the exact Flow-position
 claim, not from a deterministic tmux name.
 
-None of those local facts becomes generic cross-process Run control. A PID,
-tmux name, parent Run, Work identity, or telemetry row cannot prove that a
-later process may send a signal.
+The process that directly spawns a child owns its child handle. Cross-process
+recovery requires exact saved process identity and the applicable claim or
+lock. A PID, tmux name, parent Run, Work identity or telemetry row alone grants
+no signal authority.
 
 ## Observe processes
 
@@ -98,8 +90,7 @@ A bare slug may be ambiguous across repositories and is not mutation authority.
 lf wave relocate <wave-id> --repo <target> --name <slug>
 ```
 
-Relocation fences the Wave listener and locator, moves authored files and the
-journal, commits the new locator transactionally, and keeps PM, Work, and Home
+Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM, Work, and Home
 placement joined to the unchanged UUID. A local receipt bridges the filesystem
 and SQLite commit boundary so retry can finish verified cleanup after a crash.
 
@@ -146,7 +137,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Home.
 - Direct child handles are local capability; inferred process ownership is not.
-- Promotion owns artifact selection and known service replacement, not Run
+- Promotion owns artifact selection and app replacement, not Run
   lifecycle.
 - A schema clone protects preview and recovery; it can also leave old writers
   authoring the prior, now-unselected store.

@@ -54,7 +54,7 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .ready)
         #expect(waves[0].repo == "/tmp/repo-a")
-
+        #expect(waves[0].enabled)
     }
 
     @Test("lf wave list can be decoded once for every repo")
@@ -118,9 +118,7 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": false,
-
-            "endpoint": null,
+            "enabled": true,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -130,7 +128,6 @@ struct RegistryQueryTests {
               "observed_at": "1970-01-01T00:00:00Z"
             }
           },
-          "loop_state": "turning",
           "runs": {
             "state": "ok",
             "truncated": false,
@@ -178,21 +175,6 @@ struct RegistryQueryTests {
           "metric_portfolio": {
             "metrics": [],
             "contract_issues": []
-          },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "connect",
-              "home_id": "home_00000000000000000000000000000001"
-            }
           },
           "chapter": {
             "id": "current",
@@ -367,21 +349,6 @@ struct RegistryQueryTests {
           "metric_portfolio": {
             "metrics": [],
             "contract_issues": []
-          },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "connect",
-              "home_id": "home_00000000000000000000000000000001"
-            }
           },
           "chapter": null,
           "tasks": {

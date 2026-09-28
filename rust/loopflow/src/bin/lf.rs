@@ -1411,6 +1411,25 @@ fn main() -> anyhow::Result<()> {
         };
     }
 
+    let directory = loopflow::repo::working_directory()?;
+    with_runtime(&directory, &args, || {
+        dispatch(
+            cli,
+            &args,
+            explicit_wave,
+            account_selection,
+            inherited_account_lease,
+        )
+    })
+}
+
+fn dispatch(
+    mut cli: Cli,
+    args: &[String],
+    explicit_wave: Option<loopflow::work::wave::Wave>,
+    account_selection: loopflow::provider_account::lease::AccountSelection,
+    inherited_account_lease: bool,
+) -> anyhow::Result<()> {
     // Every HomeId-addressed SSH hop proves it reached the intended authority
     // before reads or mutations dispatch. Raw-host bootstrap carries no
     // expectation and falls through.
@@ -1472,7 +1491,7 @@ fn main() -> anyhow::Result<()> {
         match &cli.command {
             Some(Commands::Inline { prompt }) => {
                 let text = prompt.join(" ");
-                in_directory_runtime(&args, |_| match direct_binding.as_ref() {
+                in_directory_runtime(args, |_| match direct_binding.as_ref() {
                     Some(binding) => {
                         loopflow::lf::commands::run::run_bound(None, Some(&text), &cli, binding)
                     }
@@ -1496,11 +1515,11 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Ask { ask }) => loopflow::lf::commands::ask::run(ask),
             Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
-            Some(Commands::Pr { cmd }) => in_repo_runtime(&args, |_| {
+            Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
                 loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
             }),
             Some(Commands::Wt { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_wt(cmd))
+                in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
             }
             Some(Commands::Rebase {
                 plan,
@@ -1512,7 +1531,7 @@ fn main() -> anyhow::Result<()> {
             }) => {
                 let repo =
                     loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
-                with_runtime(&repo, &args, || {
+                with_runtime(&repo, args, || {
                     loopflow::lf::commands::ops::run_rebase(
                         onto.as_deref(),
                         *plan,
@@ -1527,7 +1546,7 @@ fn main() -> anyhow::Result<()> {
                 message,
                 push,
                 no_add,
-            }) => in_repo_runtime(&args, |_| {
+            }) => in_repo_runtime(args, |_| {
                 loopflow::lf::commands::ops::run_commit(
                     message.as_deref(),
                     *push,
@@ -1537,10 +1556,10 @@ fn main() -> anyhow::Result<()> {
             }),
             Some(Commands::Auth { cmd }) => loopflow::lf::commands::auth::run(cmd),
             Some(Commands::Release { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_release(cmd))
+                in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
             }
             Some(Commands::Repo { cmd }) => {
-                in_directory_runtime(&args, |_| loopflow::lf::commands::ops::run_repo(cmd))
+                in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
             Some(Commands::Home { cmd }) => loopflow::lf::commands::home::run(cmd),
             Some(Commands::SyncSkills { yes, no_prune }) => {
@@ -1552,7 +1571,7 @@ fn main() -> anyhow::Result<()> {
                     | loopflow::lf::CronCommand::Remove { .. }),
             }) => loopflow::lf::commands::ops::cron_cmd(cmd),
             Some(Commands::Cron { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
+                in_repo_runtime(args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
             Some(Commands::Wave {
                 cmd: WaveCommand::List { json, all, current },
@@ -1624,13 +1643,13 @@ fn main() -> anyhow::Result<()> {
                     | WaveCommand::Place { .. }
                     | WaveCommand::Relocate { .. }
                     | WaveCommand::Retire { .. }),
-            }) => in_directory_runtime(&args, |repo| run_wave_command(repo, cmd)),
+            }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
             Some(Commands::Wave { cmd }) => {
-                in_repo_runtime(&args, |repo| run_wave_command(repo, cmd))
+                in_repo_runtime(args, |repo| run_wave_command(repo, cmd))
             }
             Some(Commands::Task {
                 cmd: TaskCommand::Worker { task_id },
-            }) => in_repo_runtime(&args, |_| {
+            }) => in_repo_runtime(args, |_| {
                 tokio::runtime::Runtime::new()?
                     .block_on(loopflow::controller::task::run_worker(task_id.clone()))
             }),
@@ -1643,7 +1662,7 @@ fn main() -> anyhow::Result<()> {
                     | TaskCommand::File { .. }
                     | TaskCommand::Save { .. }),
             }) => run_task_command(&std::env::current_dir()?, cmd, cli.model.as_deref()),
-            Some(Commands::Task { cmd }) => in_repo_runtime(&args, |repo| {
+            Some(Commands::Task { cmd }) => in_repo_runtime(args, |repo| {
                 run_task_command(repo, cmd, cli.model.as_deref())
             }),
             Some(Commands::Tokens { json, days }) => {
@@ -1662,7 +1681,7 @@ fn main() -> anyhow::Result<()> {
                 project.as_deref(),
                 task.as_deref(),
             ),
-            Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(&args, |repo| {
+            Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
                 let item = loopflow::engine::flow::Op {
                     command: "__telemetry-scorecard".to_string(),
                     args: if *json {
@@ -1742,7 +1761,7 @@ fn main() -> anyhow::Result<()> {
             },
             Some(Commands::Discord {
                 cmd: loopflow::lf::DiscordCommand::Serve { wave },
-            }) => in_repo_runtime(&args, |repo| {
+            }) => in_repo_runtime(args, |repo| {
                 loopflow::lf::commands::discord::serve(repo, wave)
             }),
             Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
@@ -1804,7 +1823,7 @@ fn main() -> anyhow::Result<()> {
                     Some(TargetKind::Flow),
                     message.as_deref(),
                     &cli,
-                    &args,
+                    args,
                     direct_binding.as_ref(),
                 )
             }
@@ -1815,7 +1834,7 @@ fn main() -> anyhow::Result<()> {
                     Some(TargetKind::Skill),
                     message.as_deref(),
                     &cli,
-                    &args,
+                    args,
                     direct_binding.as_ref(),
                 )
             }
@@ -1828,14 +1847,14 @@ fn main() -> anyhow::Result<()> {
                             None,
                             message.as_deref(),
                             &cli,
-                            &args,
+                            args,
                             direct_binding.as_ref(),
                         )
                     }
                     Err(err) => Err(err),
                 }
             }
-            None => run_default_agent(&cli, &args),
+            None => run_default_agent(&cli, args),
         }
     };
 

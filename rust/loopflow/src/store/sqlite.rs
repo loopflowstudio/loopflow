@@ -23,6 +23,7 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
+mod execs;
 mod flows;
 mod metrics;
 mod pr_landings;
@@ -2024,9 +2025,46 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn insert_run_event(&self, row: &RunEventRow) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+    pub fn insert_run_event(
+        &self,
+        row: &RunEventRow,
+        caller: Option<&crate::exec::AgentCaller>,
+        signal: Option<&str>,
+        exit_code: Option<i32>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_provider_generation)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(id) DO NOTHING",
+            params![
+                row.process_id,
+                row.run_id,
+                row.parent_process_id,
+                row.command,
+                row.repo,
+                row.worktree,
+                row.ts,
+                caller.is_some(),
+                caller.map(|caller| &caller.session_id),
+                caller.map(|caller| caller.provider_generation)
+            ],
+        )?;
+        let outcome = match (row.node.as_str(), row.event.as_str()) {
+            ("run", "completed") => Some("succeeded"),
+            ("run", "errored") => Some("failed"),
+            ("run", "escalated") => Some("interrupted"),
+            _ => None,
+        };
+        if let Some(outcome) = outcome {
+            tx.execute(
+                "UPDATE execs SET completed_at=?2,outcome=?3,signal=?4,exit_code=?5
+                 WHERE id=?1 AND completed_at IS NULL",
+                params![row.process_id, row.ts, outcome, signal, exit_code],
+            )?;
+        }
+        tx.execute(
             "INSERT INTO run_events (
                 run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                 flow, skill, step_index, error
@@ -2049,6 +2087,7 @@ impl SqliteStore {
                 row.error,
             ],
         )?;
+        tx.commit()?;
         Ok(())
     }
 

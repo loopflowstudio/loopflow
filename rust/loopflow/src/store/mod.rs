@@ -3197,7 +3197,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).expect("store should open");
         let row = event_row("bad-node", 0, "task", "started");
         let error = store
-            .insert_run_event(&row)
+            .insert_run_event(&row, None, None, None)
             .expect_err("unknown node must violate the ledger contract");
         assert!(error.to_string().contains("CHECK constraint failed"));
     }

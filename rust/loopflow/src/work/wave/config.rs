@@ -69,6 +69,7 @@ pub struct WaveConfig {
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.
     pub chat: Option<WaveChatConfig>,
+
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
@@ -310,6 +311,11 @@ pub fn update_wave_agent_config(
     })
 }
 
+/// Set authored Wave turn intent, preserving unrelated frontmatter and body.
+///
+/// Enabled turns are the default, so resuming removes `paused` rather than
+/// persisting a redundant `paused: false` field.
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,4 +524,5 @@ mod tests {
         assert!(config.agent.is_none());
         assert!(config.skill_agents.is_none());
     }
+
 }

@@ -3,8 +3,10 @@
 pub mod config;
 pub mod context;
 pub mod memory;
+pub mod metrics;
+pub mod relocate;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
@@ -52,25 +54,7 @@ impl WaveLocator {
     }
 }
 
-/// The one-time typed wake derived from a child Wave's durable promotion occurrence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct PromotionWake {
-    pub(crate) parent_wave_id: WaveId,
-    pub(crate) parent: String,
-}
 
-impl PromotionWake {
-    pub(crate) fn inbox_id(&self) -> String {
-        format!("promotion:{}", self.parent_wave_id)
-    }
-
-    pub(crate) fn prompt(&self) -> String {
-        format!(
-            "Promotion from parent Wave '{}' is complete. Begin the first child-Wave pass and report what this Wave now owns.",
-            self.parent
-        )
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Wave {
@@ -241,4 +225,27 @@ mod tests {
             assert!(WaveLocator::new(repo.clone(), unsafe_slug).is_err());
         }
     }
+}
+
+pub async fn ensure_wave_row(store: &crate::store::Store, main_repo: &std::path::Path, name: &str) -> crate::store::StoreResult<Wave> {
+    let locator = WaveLocator::discover(main_repo, name)
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+    let existing = store.get_wave_at(&locator).await?;
+    let is_new = existing.is_none();
+    let wave = existing.unwrap_or_else(|| {
+        Wave::new(
+            WaveId::new(),
+            locator.slug().to_string(),
+            locator.repo().to_string(),
+        )
+    });
+    store.create_wave(&wave).await?;
+    if is_new {
+        tracing::info!(
+            wave = name,
+            wave_id = %wave.id(),
+            "wave was not in the registry; created its row"
+        );
+    }
+    Ok(wave)
 }

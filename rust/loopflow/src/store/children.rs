@@ -1,13 +1,12 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
-use crate::child::ObservationRecipient;
 use crate::id::WaveId;
 use crate::work::project::{
-    ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
+    Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
 use crate::work::task::{
     LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskObservation, TaskPr, TaskPrId,
+    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 
@@ -160,16 +159,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_prs(&task_id)).await
     }
 
-    pub async fn started_task_observations(
-        &self,
-        wave: &WaveId,
-    ) -> StoreResult<Vec<TaskObservation>> {
-        let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.started_task_observations(&wave)
-        })
-        .await
-    }
 
     pub async fn latest_task_event_at(
         &self,
@@ -338,30 +327,9 @@ impl Store {
             store.append_task_event(&write_task_id, &write_kind)
         })
         .await?;
-        self.nudge_task_event(&task_id, &kind, &event).await?;
         Ok(event)
     }
 
-    async fn nudge_task_event(
-        &self,
-        task_id: &TaskId,
-        kind: &TaskEventKind,
-        event: &TaskEvent,
-    ) -> StoreResult<()> {
-        if kind.is_wave_observable() {
-            if let Some(task) = self.get_task(task_id).await? {
-                if let Some(wave) = self.get_wave(&task.wave_id).await? {
-                    if let Err(error) =
-                        crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                    {
-                        tracing::debug!(%error, %task_id, event_id = event.id,
-                            "Task delivery failed; the Wave observer will retry its durable outbox");
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
 
     pub async fn task_events_after(
         &self,
@@ -431,30 +399,6 @@ impl Store {
             store.append_project_event(&write_project_id, &write_kind)
         })
         .await?;
-        if kind.is_wave_observable() {
-            if let Some(project) = self.get_project(&project_id).await? {
-                match self.get_wave(&project.wave_id).await? {
-                    Some(wave) => {
-                        if let Err(error) =
-                            crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                        {
-                            tracing::debug!(
-                                %error,
-                                %project_id,
-                                event_id = event.id,
-                                "live Project observation delivery failed; Wave observer will retry"
-                            );
-                        }
-                    }
-                    None => tracing::error!(
-                        wave_id = %project.wave_id,
-                        %project_id,
-                        event_id = event.id,
-                        "Project observation cannot nudge its missing owning Wave"
-                    ),
-                }
-            }
-        }
         Ok(event)
     }
 
@@ -470,32 +414,6 @@ impl Store {
         .await
     }
 
-    pub async fn pending_observations(
-        &self,
-        recipient: &ObservationRecipient,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let recipient = recipient.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_observations(&recipient)
-        })
-        .await
-    }
 
-    pub async fn pending_project_observations(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_project_observations(&project_id)
-        })
-        .await
-    }
 
-    pub async fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_observation_delivered(id)
-        })
-        .await
-    }
 }

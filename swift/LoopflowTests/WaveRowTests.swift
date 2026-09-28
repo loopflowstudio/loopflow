@@ -52,7 +52,7 @@ struct WaveRowViewTests {
 
     @Test("Row renders an operational lens")
     func showsLens() throws {
-        let wave = makeWave(status: .ready, live: true)
+        let wave = makeWave(status: .ready, )
         let row = makeRow(wave: wave)
 
         // The lens is present, and its accessibility names the reason.

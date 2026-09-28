@@ -21,15 +21,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.get_pr_landing(&landing_id)).await
     }
 
-    pub async fn recoverable_pr_landings(
-        &self,
-        stale_before: OffsetDateTime,
-    ) -> StoreResult<Vec<PrLanding>> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.recoverable_pr_landings(stale_before)
-        })
-        .await
-    }
 
     pub async fn claim_pr_landing(
         &self,

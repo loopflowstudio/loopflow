@@ -854,14 +854,6 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
     assert!(runtime
         .block_on(task.store.task_started(&task.task.id))
         .unwrap());
-    let starts = runtime
-        .block_on(task.store.started_task_observations(&task.task.wave_id))
-        .unwrap();
-    assert_eq!(starts.len(), 1);
-    assert_eq!(
-        loopflow::chat::turns::ChildControlActivity::from_task(&starts[0]).title,
-        "Task started"
-    );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         db.query_row(
@@ -933,12 +925,7 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
         .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_none());
-    assert_eq!(
-        runtime
-            .block_on(task.store.started_task_observations(&task.task.wave_id))
-            .unwrap(),
-        starts
-    );
+    assert!(runtime.block_on(task.store.task_started(&task.task.id)).unwrap());
     // Invocation-addressed resume retains the Task's recovery policy, even
     // with --retry: a restart-only failure must not reach a provider.
     let retry = runtime

@@ -331,35 +331,21 @@ pub enum Commands {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
+    /// Bridge new Discord messages to finite Wave Runs
+    Discord {
+        #[command(subcommand)]
+        cmd: DiscordCommand,
+    },
     /// Local launchd jobs that run lf commands on a schedule
     Cron {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// Serve a Wave or rotate its chapter plan
+    /// Manage Wave identity, placement and planning
     Wave {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
-    /// Internal: connect chat through the owning Home.
-    #[command(name = "__chat-connect", hide = true)]
-    ChatConnect {
-        /// Wave names. With none, starts eligible Waves in the current repo.
-        waves: Vec<String>,
-        /// Internal identity bindings carried by an explicit Home SSH hop.
-        #[arg(long = "wave-id", value_name = "NAME=ID", hide = true)]
-        wave_ids: Vec<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Internal: the resident body a listener spawns for its own wave. Never
-    /// booted by hand — the Home daemon owns the listener half.
-    #[command(name = "__resident", hide = true)]
-    Resident {
-        /// Wave name
-        name: String,
-    },
-
     /// Linear-backed Task work and bounded workers
     Task {
         #[command(subcommand)]
@@ -534,44 +520,6 @@ pub enum Commands {
     Replay {
         /// Full Run id or an unambiguous displayed prefix
         run: String,
-    },
-    /// Observe wave-chat message(s) and print a reply only if one is warranted.
-    /// A direct capability: no listener, resident, or governance loop.
-    Reply {
-        /// Wave name
-        wave: String,
-        /// Recent message text (reads stdin when omitted)
-        #[arg(trailing_var_arg = true)]
-        text: Vec<String>,
-        /// Override the provider (e.g. `claude`, `codex`); default is configured
-        #[arg(long)]
-        agent: Option<String>,
-        /// Cap provider turns for the reply
-        #[arg(long)]
-        max_turns: Option<u32>,
-    },
-    /// Converse with a Wave; --follow replays its thread.
-    Chat {
-        /// Message text (reads stdin when omitted unless --follow or --history)
-        #[arg(trailing_var_arg = true)]
-        text: Vec<String>,
-        /// Replay and follow the thread while typed lines post into it.
-        #[arg(long, conflicts_with_all = ["text", "history", "json", "limit"])]
-        follow: bool,
-        /// Read the latest durable turns without requiring a live listener.
-        #[arg(long, conflicts_with = "text")]
-        history: bool,
-        /// Emit the durable history snapshot as JSON.
-        #[arg(long, requires = "history")]
-        json: bool,
-        /// Maximum durable turns to return (default: 12).
-        #[arg(long, requires = "history")]
-        limit: Option<usize>,
-        /// Select one immutable conversation epoch.
-        #[arg(long, requires = "history")]
-        epoch: Option<String>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
     },
     // architecture-shim: retired-op
     // Same reservation for the retired `lf op` namespace, which held every
@@ -889,15 +837,6 @@ pub enum WaveCommand {
         json: bool,
     },
 
-    /// Inspect historical Wave Flow work, or explicitly cancel its saved continuation
-    Recover {
-        name: String,
-        /// Cancel exactly this journal source sequence without executing its work
-        #[arg(long, requires = "reason")]
-        cancel: Option<u64>,
-        #[arg(long, requires = "cancel")]
-        reason: Option<String>,
-    },
     /// Replace the plan, carry started Tasks, and retire unopened backlog
     NewChapter {
         #[arg(short = 'w', long)]
@@ -1144,12 +1083,6 @@ pub enum InstallCommand {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
         cli_target: PathBuf,
-        /// The staged lfd built from the same candidate source.
-        #[arg(long)]
-        daemon_source: PathBuf,
-        /// The global lfd symlink to replace (e.g. ~/.local/bin/lfd).
-        #[arg(long)]
-        daemon_target: PathBuf,
         /// A staged Loopflow.app bundle to install alongside the CLI.
         #[arg(long)]
         app_source: Option<PathBuf>,
@@ -1176,12 +1109,6 @@ pub enum InstallCommand {
         /// The immutable content-addressed prior executable to activate.
         #[arg(long)]
         candidate: PathBuf,
-        /// The global lfd symlink to restore with the CLI.
-        #[arg(long)]
-        daemon_target: PathBuf,
-        /// The retained immutable lfd binary paired with the CLI candidate.
-        #[arg(long)]
-        daemon_candidate: PathBuf,
     },
 }
 
@@ -1387,29 +1314,7 @@ pub enum RepoCommand {
         #[arg(long)]
         apply: bool,
     },
-    /// Register or serve Linear webhooks
-    Webhook {
-        #[command(subcommand)]
-        cmd: RepoWebhookCommand,
-    },
-}
 
-#[derive(Subcommand, Debug)]
-pub enum RepoWebhookCommand {
-    /// Run the receiver that turns Linear edits into Task direction. Reads the
-    /// signing secret from LF_LINEAR_WEBHOOK_SECRET (source it from Doppler).
-    Serve {
-        /// Address to bind (a reverse proxy gives Linear the public HTTPS URL)
-        #[arg(long, default_value = "127.0.0.1:8899")]
-        addr: String,
-    },
-    /// Register the Issue/Comment webhook with Linear (one-time). Reads the
-    /// signing secret from LF_LINEAR_WEBHOOK_SECRET.
-    Register {
-        /// Public HTTPS URL Linear will POST deliveries to
-        #[arg(long)]
-        url: String,
-    },
 }
 
 /// Inspect and observe durable Homes.
@@ -1427,6 +1332,7 @@ pub enum HomeCommand {
         #[arg(long)]
         json: bool,
     },
+
 }
 
 #[derive(Debug, Subcommand)]
@@ -2877,104 +2783,6 @@ mod tests {
         assert!(apply);
     }
 
-    #[test]
-    fn chat_parses_text_and_targeting() {
-        let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
-        let Some(Commands::Chat {
-            text,
-            follow,
-            target,
-            ..
-        }) = cli.command
-        else {
-            panic!("expected chat command");
-        };
-        assert_eq!(text, vec!["shipped", "the", "parser"]);
-        assert!(!follow);
-        assert_eq!(target.wave, None);
-        assert!(!target.parent);
-
-        // No text: stdin is the body. Flags come before the trailing text.
-        let cli = Cli::try_parse_from(["lf", "chat", "--parent"]).expect("parse");
-        let Some(Commands::Chat { text, target, .. }) = cli.command else {
-            panic!("expected chat command");
-        };
-        assert!(text.is_empty());
-        assert!(target.parent);
-
-        let cli = Cli::try_parse_from(["lf", "chat", "--wave", "goals", "hi"]).expect("parse");
-        let Some(Commands::Chat { text, target, .. }) = cli.command else {
-            panic!("expected chat command");
-        };
-        assert_eq!(text, vec!["hi"]);
-        assert_eq!(target.wave.as_deref(), Some("goals"));
-
-        assert!(Cli::try_parse_from(["lf", "chat", "--steer", "change course"]).is_err());
-
-        // --wave and --parent are mutually exclusive.
-        assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());
-
-        let cli = Cli::try_parse_from(["lf", "chat", "--follow", "--wave", "goals"])
-            .expect("parse follow");
-        let Some(Commands::Chat {
-            text,
-            follow,
-            target,
-            ..
-        }) = cli.command
-        else {
-            panic!("expected chat command");
-        };
-        assert!(text.is_empty());
-        assert!(follow);
-        assert_eq!(target.wave.as_deref(), Some("goals"));
-
-        assert!(Cli::try_parse_from(["lf", "chat", "--follow", "hello"]).is_err());
-
-        let cli = Cli::try_parse_from([
-            "lf",
-            "chat",
-            "--history",
-            "--json",
-            "--limit",
-            "20",
-            "--epoch",
-            "chat-epoch-2",
-            "--wave",
-            "goals",
-        ])
-        .expect("parse durable history");
-        let Some(Commands::Chat {
-            history,
-            json,
-            limit,
-            epoch,
-            target,
-            ..
-        }) = cli.command
-        else {
-            panic!("expected chat command");
-        };
-        assert!(history);
-        assert!(json);
-        assert_eq!(limit, Some(20));
-        assert_eq!(epoch.as_deref(), Some("chat-epoch-2"));
-        assert_eq!(target.wave.as_deref(), Some("goals"));
-
-        assert!(Cli::try_parse_from(["lf", "chat", "--json", "--wave", "goals"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "chat", "--epoch", "chat-epoch-2"]).is_err());
-        assert!(Cli::try_parse_from([
-            "lf",
-            "chat",
-            "--history",
-            "--json",
-            "--follow",
-            "--wave",
-            "goals"
-        ])
-        .is_err());
-        assert!(Cli::command().find_subcommand("wavechat").is_none());
-    }
 
     #[test]
     fn radio_is_not_a_first_class_command() {
@@ -3025,4 +2833,10 @@ mod tests {
         assert_eq!(title, None);
         assert_eq!(body, None);
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DiscordCommand {
+    /// Poll a configured channel and post each Run's final answer
+    Serve { wave: String },
 }

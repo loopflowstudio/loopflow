@@ -1,6 +1,4 @@
-// Launches local Wave contributions and Task work.
-//
-// Chat connects through the Home daemon; quitting the app leaves it available.
+// Launch Tasks and local sessions through the CLI.
 
 #if os(macOS)
 import Foundation
@@ -21,13 +19,6 @@ private struct DevelopmentControlConfig: Decodable {
 }
 
 enum LocalWaveAgentLauncher {
-    /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
-    /// The server performs resident, registry, and discovery-file cleanup.
-
-    static func waveStopCommand(lfPath: String, waveName: String) -> [String] {
-        [lfPath, "stop", waveName]
-    }
-
     /// Start a filed Task through the same bounded worker command as the CLI.
     /// `lf task run` owns Project lookup, worktree placement, Flow selection,
     /// and the Task worker; the app does not reproduce those decisions.

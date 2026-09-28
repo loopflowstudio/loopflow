@@ -891,28 +891,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         | WaveCommand::Retire { .. } => {
             return loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::Recover {
-            name,
-            cancel,
-            reason,
-        } => {
-            let repo = loopflow::engine::worktrees::main_repo_root(repo)?;
-            let wave = loopflow::ops::normalize_wave_name(name)
-                .ok_or_else(|| anyhow::anyhow!("invalid wave name: '{name}'"))?;
-            let report = match cancel {
-                Some(seq) => loopflow::controller::wave::recovery::cancel(
-                    &repo,
-                    &wave,
-                    *seq,
-                    reason
-                        .as_deref()
-                        .expect("Clap requires a cancellation reason"),
-                )?,
-                None => loopflow::controller::wave::recovery::inspect(&repo, &wave)?,
-            };
-            println!("{}", serde_json::to_string_pretty(&report)?);
-            return Ok(());
-        }
         WaveCommand::NewChapter {
             wave,
             chapter,
@@ -1370,8 +1348,8 @@ fn main() -> anyhow::Result<()> {
                 fresh,
                 reuse_home,
                 cli_target,
-                daemon_source,
-                daemon_target,
+
+
                 app_source,
                 app_target,
                 legacy_app_target,
@@ -1380,8 +1358,8 @@ fn main() -> anyhow::Result<()> {
             }) => loopflow::lf::commands::install::promote(
                 loopflow::lf::commands::install::PromotionArtifacts {
                     cli_target,
-                    daemon_source,
-                    daemon_target,
+
+
                     app_source: app_source.as_deref(),
                     app_target: app_target.as_deref(),
                     legacy_app_target: legacy_app_target.as_deref(),
@@ -1396,13 +1374,13 @@ fn main() -> anyhow::Result<()> {
             Some(InstallCommand::Rollback {
                 cli_target,
                 candidate,
-                daemon_target,
-                daemon_candidate,
+
+
             }) => loopflow::lf::commands::install::rollback(
                 cli_target,
                 candidate,
-                daemon_target,
-                daemon_candidate,
+
+
             ),
         };
     }
@@ -1624,16 +1602,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Wave { cmd }) => {
                 in_repo_runtime(&args, |repo| run_wave_command(repo, cmd))
             }
-            Some(Commands::ChatConnect {
-                waves,
-                wave_ids,
-                json,
-            }) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::home::connect_chat(waves, wave_ids, *json, repo)
-            }),
-            Some(Commands::Resident { name }) => {
-                in_repo_runtime(&args, |_| loopflow::controller::wave::resident::run(name))
-            }
             Some(Commands::Task {
                 cmd: TaskCommand::Worker { task_id },
             }) => in_repo_runtime(&args, |_| {
@@ -1737,32 +1705,8 @@ fn main() -> anyhow::Result<()> {
                     parent.as_deref(),
                 ),
             },
+            Some(Commands::Discord { cmd: loopflow::lf::DiscordCommand::Serve { wave } }) => in_repo_runtime(&args, |repo| loopflow::lf::commands::discord::serve(repo, wave)),
             Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
-            Some(Commands::Reply {
-                wave,
-                text,
-                agent,
-                max_turns,
-            }) => loopflow::lf::commands::reply::run(wave, text, agent.clone(), *max_turns),
-            Some(Commands::Chat {
-                text,
-                follow,
-                history,
-                json,
-                limit,
-                epoch,
-                target,
-            }) => loopflow::lf::commands::chat::run(
-                text,
-                loopflow::lf::commands::chat::ChatOptions {
-                    follow: *follow,
-                    history: *history,
-                    json: *json,
-                    limit: *limit,
-                    epoch: epoch.as_deref(),
-                },
-                target,
-            ),
             Some(Commands::Install { .. }) => {
                 unreachable!("install dispatches before home routing")
             }
@@ -2101,58 +2045,7 @@ mod tests {
 
     /// Serving a mind is its own command. Nothing about the ambient
     /// environment can turn one of these into the other.
-    #[test]
-    fn wave_and_resident_are_distinct_entrypoints() {
-        // The listener's own body — hidden, but spellable, because the
-        // listener spawns it by name rather than by leaking env.
-        let body = Cli::try_parse_from(["lf", "__resident", "goals"]).unwrap();
-        assert!(matches!(
-            body.command,
-            Some(Commands::Resident { name }) if name == "goals"
-        ));
-    }
 
-    #[test]
-    fn start_accepts_local_and_home_bound_waves() {
-        let start =
-            Cli::try_parse_from(["lf", "__chat-connect", "product", "intelligence", "--json"])
-                .unwrap();
-        assert!(matches!(
-            start.command,
-            Some(Commands::ChatConnect { waves, wave_ids, json })
-                if waves == ["product", "intelligence"] && wave_ids.is_empty() && json
-        ));
-
-        let remote_start = Cli::try_parse_from([
-            "lf",
-            "__chat-connect",
-            "product",
-            "--wave-id",
-            "product=wave_00000000000000000000000000000001",
-            "--json",
-        ])
-        .unwrap();
-        assert!(matches!(
-            remote_start.command,
-            Some(Commands::ChatConnect { waves, wave_ids, json })
-                if waves == ["product"]
-                    && wave_ids == ["product=wave_00000000000000000000000000000001"]
-                    && json
-        ));
-
-        let ssh = Cli::try_parse_from([
-            "lf",
-            "ssh",
-            "home_00000000000000000000000000000001",
-            "__chat-connect",
-            "product",
-        ])
-        .unwrap();
-        assert!(matches!(
-            ssh.command,
-            Some(Commands::Ssh { lf_args, .. }) if lf_args == ["__chat-connect", "product"]
-        ));
-    }
 
     #[test]
     fn ssh_help_prefers_home_identity() {

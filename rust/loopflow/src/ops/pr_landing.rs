@@ -917,11 +917,6 @@ async fn watch_armed(repo: &Path, options: &LandOptions, pr: PrInfo) -> OpsResul
         };
     }
 
-    let local_home = store
-        .local_home()
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let _ = crate::lfd::claim_pr_landing(&local_home.id, &landing.id, landing.generation).await;
     wait_for_landing(&store, &landing.id).await
 }
 

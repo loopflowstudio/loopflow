@@ -14,7 +14,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
 
 pub(crate) const SSH_CONNECT_TIMEOUT_SECS: u32 = 10;
 const SSH_SERVER_ALIVE_INTERVAL_SECS: u32 = 10;
@@ -212,78 +211,6 @@ impl FromStr for HomeRoute {
 /// [`HomeRuntimeDto::reason`]. `Unreachable` and `Unknown` are different facts:
 /// the Home did not answer at all versus it answered but its state could not be
 /// read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HomeState {
-    /// The Home could not be reached over its address.
-    Unreachable,
-    /// The Home is reachable but no resident is serving the Wave.
-    Stopped,
-    /// A resident is serving the Wave on the Home.
-    Running,
-    /// The Home answered but its state could not be determined.
-    Unknown,
-}
-
-/// The one contextual action a surface should offer for a Home, derived from its
-/// state so the UI never has to branch on `HomeState` itself.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum HomeActionDto {
-    /// Running: open/attach to the resident at `endpoint`.
-    Attach { endpoint: String },
-    /// Reachable but stopped: start the Wave on its stable Home identity.
-    Connect { home_id: crate::durable::HomeId },
-    /// Unreachable or unknown: show `message`, the actionable reason.
-    Reason { message: String },
-}
-
-/// A Wave's Home plus the evidence of what is happening there — the shared
-/// contract a conductor surface renders. `home` carries authority and route; `state`+`reason`
-/// are the probe's evidence; `endpoint` is the attach identity when running; and
-/// `action` is the single button to show.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HomeRuntimeDto {
-    pub home: crate::durable::Home,
-    pub state: HomeState,
-    pub reason: String,
-    /// Attach identity when running (the resident endpoint), else `null`.
-    pub endpoint: Option<String>,
-    pub action: HomeActionDto,
-}
-
-impl HomeRuntimeDto {
-    /// Assemble the runtime evidence and derive the single contextual action.
-    pub fn new(
-        home: &crate::durable::Home,
-        state: HomeState,
-        reason: String,
-        endpoint: Option<String>,
-    ) -> Self {
-        let action = match (state, &endpoint) {
-            (HomeState::Running, Some(endpoint)) => HomeActionDto::Attach {
-                endpoint: endpoint.clone(),
-            },
-            (HomeState::Stopped, _) => HomeActionDto::Connect {
-                home_id: home.id.clone(),
-            },
-            // Running-without-endpoint is a state we could not fully read.
-            (HomeState::Running, None) | (HomeState::Unknown, _) | (HomeState::Unreachable, _) => {
-                HomeActionDto::Reason {
-                    message: reason.clone(),
-                }
-            }
-        };
-        Self {
-            home: home.clone(),
-            state,
-            reason,
-            endpoint,
-            action,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,52 +280,4 @@ mod tests {
         assert_eq!(home("local").ssh_destination(), None);
     }
 
-    #[test]
-    fn runtime_action_follows_state() {
-        let now = time::OffsetDateTime::UNIX_EPOCH;
-        let h = crate::durable::Home {
-            id: crate::durable::HomeId::parse("home_00000000000000000000000000000001").unwrap(),
-            route: "ssh://jack@host".into(),
-            created_at: now,
-            observed_at: now,
-        };
-        let running = HomeRuntimeDto::new(
-            &h,
-            HomeState::Running,
-            "resident serving".into(),
-            Some("127.0.0.1:7777".into()),
-        );
-        assert_eq!(
-            running.action,
-            HomeActionDto::Attach {
-                endpoint: "127.0.0.1:7777".into()
-            }
-        );
-
-        let stopped = HomeRuntimeDto::new(
-            &h,
-            HomeState::Stopped,
-            "reachable, no resident".into(),
-            None,
-        );
-        assert_eq!(
-            stopped.action,
-            HomeActionDto::Connect {
-                home_id: h.id.clone()
-            }
-        );
-
-        let unreachable = HomeRuntimeDto::new(
-            &h,
-            HomeState::Unreachable,
-            "ssh could not connect".into(),
-            None,
-        );
-        assert_eq!(
-            unreachable.action,
-            HomeActionDto::Reason {
-                message: "ssh could not connect".into()
-            }
-        );
-    }
 }

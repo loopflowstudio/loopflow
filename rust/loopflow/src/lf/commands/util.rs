@@ -49,19 +49,6 @@ pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDate
 
 /// Message text from the args (joined) or stdin (heredoc-friendly). The
 /// Message commands take text arguments or read stdin when omitted.
-pub(crate) fn message_text(args: &[String], mut stdin: impl Read) -> Result<String> {
-    let joined = args.join(" ").trim().to_string();
-    if !joined.is_empty() {
-        return Ok(joined);
-    }
-    let mut buffer = String::new();
-    stdin.read_to_string(&mut buffer)?;
-    let text = buffer.trim().to_string();
-    if text.is_empty() {
-        bail!("no message text: pass TEXT or pipe it on stdin");
-    }
-    Ok(text)
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionCommand {
@@ -1236,17 +1223,6 @@ mod tests {
             .is_empty());
     }
 
-    #[test]
-    fn message_text_prefers_args_then_stdin_then_errors() {
-        let text = message_text(&["hello".into(), "world".into()], std::io::empty()).unwrap();
-        assert_eq!(text, "hello world");
-
-        let text = message_text(&[], std::io::Cursor::new("from stdin\n")).unwrap();
-        assert_eq!(text, "from stdin");
-
-        let err = message_text(&[], std::io::empty()).unwrap_err();
-        assert!(err.to_string().contains("no message text"));
-    }
 
     #[cfg(unix)]
     #[test]
@@ -2109,4 +2085,8 @@ mod tests {
         assert_eq!(elapsed_seconds("01:02:03"), Some(3_723));
         assert_eq!(elapsed_seconds("2-01:02:03"), Some(176_523));
     }
+}
+
+pub(crate) fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }

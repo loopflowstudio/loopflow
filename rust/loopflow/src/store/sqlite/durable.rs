@@ -1793,7 +1793,9 @@ mod durable_store_tests {
             .unwrap();
         }
         assert_eq!(
-            store.sessions(&crate::session::SessionFilter::default()).unwrap(),
+            store
+                .sessions(&crate::session::SessionFilter::default())
+                .unwrap(),
             vec![(session.clone(), current)]
         );
         assert!(store
@@ -1815,7 +1817,10 @@ mod durable_store_tests {
         assert!(completed.completed_at.is_some());
         assert_eq!(completed.ready_summary, session.ready_summary);
         assert_eq!(store.session_runs(&session_id).unwrap(), history);
-        assert!(store.sessions(&crate::session::SessionFilter::default()).unwrap().is_empty());
+        assert!(store
+            .sessions(&crate::session::SessionFilter::default())
+            .unwrap()
+            .is_empty());
         let events = store.task_events_after(&task_id, 0).unwrap();
         assert_eq!(
             events
@@ -1844,7 +1849,10 @@ mod durable_store_tests {
             .start_task_flow(&task_id, &autonomous_position(&task_id))
             .unwrap();
         assert_eq!(replacement.version, 1);
-        assert!(store.sessions(&crate::session::SessionFilter::default()).unwrap().is_empty());
+        assert!(store
+            .sessions(&crate::session::SessionFilter::default())
+            .unwrap()
+            .is_empty());
         assert_eq!(
             retained_invocation(&store, &original.invocation.id),
             (ended(&original), "replaced".into())
@@ -1896,7 +1904,10 @@ mod durable_store_tests {
             .unwrap();
 
         assert!(store.task_flow(&task_id).unwrap().is_none());
-        assert!(store.sessions(&crate::session::SessionFilter::default()).unwrap().is_empty());
+        assert!(store
+            .sessions(&crate::session::SessionFilter::default())
+            .unwrap()
+            .is_empty());
         assert_eq!(
             retained_invocation(&store, &position.invocation.id),
             (ended(&position), "completed".into())
@@ -2194,7 +2205,10 @@ mod durable_store_tests {
     fn review_discovery_follows_the_captured_nested_step() {
         let (_dir, store, task_id) = store_with_task();
         let mut position = autonomous_position(&task_id);
-        assert!(store.sessions(&crate::session::SessionFilter::default()).unwrap().is_empty());
+        assert!(store
+            .sessions(&crate::session::SessionFilter::default())
+            .unwrap()
+            .is_empty());
         let review = crate::durable::test_flow_invocation(
             "captured",
             0,
@@ -2226,7 +2240,9 @@ mod durable_store_tests {
         let saved = store
             .reserve_task_review(saved.id(), saved.version)
             .unwrap();
-        let sessions = store.sessions(&crate::session::SessionFilter::default()).unwrap();
+        let sessions = store
+            .sessions(&crate::session::SessionFilter::default())
+            .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(
             Some(&sessions[0].1.id),
@@ -2248,7 +2264,10 @@ mod durable_store_tests {
         let next = store.task_flow(&task_id).unwrap().unwrap();
         assert_eq!(next.current().step, "implement");
         assert!(next.pending_session_id.is_none());
-        assert!(store.sessions(&crate::session::SessionFilter::default()).unwrap().is_empty());
+        assert!(store
+            .sessions(&crate::session::SessionFilter::default())
+            .unwrap()
+            .is_empty());
         assert!(store
             .checkpoint_flow(saved.id(), saved.version, &saved.cursor, None, None)
             .is_err());

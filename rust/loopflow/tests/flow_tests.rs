@@ -213,13 +213,31 @@ fn prepared_task_selects_parent_without_rewriting_work_or_publication() {
     // A successful publication observed from an older snapshot must survive,
     // while the dedicated parent writer retains the newer dependency.
     let mut publication = before.clone();
-    publication.publication.as_mut().unwrap().github.as_mut().unwrap().head_sha = Some("published-after-selection".into());
+    publication
+        .publication
+        .as_mut()
+        .unwrap()
+        .github
+        .as_mut()
+        .unwrap()
+        .head_sha = Some("published-after-selection".into());
     publication.linear_attachment_id = Some("linked-after-selection".into());
-    runtime.block_on(child.store.update_task_pr(&publication)).unwrap();
-    let recorded = runtime.block_on(child.store.get_task_pr(&before.id)).unwrap().unwrap();
-    assert_eq!(recorded.parent_pr_id, selected.as_ref().unwrap().parent_pr_id);
+    runtime
+        .block_on(child.store.update_task_pr(&publication))
+        .unwrap();
+    let recorded = runtime
+        .block_on(child.store.get_task_pr(&before.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        recorded.parent_pr_id,
+        selected.as_ref().unwrap().parent_pr_id
+    );
     assert_eq!(recorded.publication, publication.publication);
-    assert_eq!(recorded.linear_attachment_id, publication.linear_attachment_id);
+    assert_eq!(
+        recorded.linear_attachment_id,
+        publication.linear_attachment_id
+    );
     assert_eq!(repo.head_sha(), head);
     assert_eq!(
         fs::read_to_string(repo.path().join("committed.txt")).unwrap(),

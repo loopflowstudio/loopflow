@@ -152,6 +152,7 @@ pub fn prepare_launch_prompt(
         .as_ref()
         .and_then(|skill| skill.action_style.as_deref());
     let launch = AgentConfig {
+        session_driver: None,
         system_prompt,
         task_prompt,
         agent: Some(agent),

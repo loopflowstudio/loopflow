@@ -28,6 +28,7 @@ mod flows;
 mod metrics;
 mod pr_landings;
 mod runs;
+mod session_events;
 pub use runs::ListedRun;
 pub(crate) mod sessions;
 
@@ -35,6 +36,23 @@ pub(crate) mod sessions;
 /// default while every process opens and records its first receipt. Durable
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The first rollback-to-WAL transition can return BUSY immediately even with
+/// a busy handler: two readers cannot both upgrade their journal lock. Reuse
+/// migration exclusion only for that transition; ordinary WAL opens stay reads.
+fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()> {
+    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+    let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+    if mode != "wal" {
+        let _lock = super::migrations::migration_lock(path)?;
+        let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+        if mode != "wal" {
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+        }
+    }
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -378,8 +396,7 @@ impl SqliteStore {
             })?;
         }
         let conn = Connection::open(path)?;
-        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        configure_write_connection(&conn, path)?;
         super::migrations::apply_installed_development_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
@@ -404,8 +421,7 @@ impl SqliteStore {
             })?;
         }
         let conn = Connection::open(path)?;
-        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        configure_write_connection(&conn, path)?;
         super::migrations::apply_installed_development_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
@@ -501,8 +517,7 @@ impl SqliteStore {
         let mut conn = Connection::open(path)?;
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        configure_write_connection(&conn, path)?;
 
         if installed_development {
             super::migrations::validate_installed_development_sqlite(
@@ -2061,6 +2076,7 @@ impl SqliteStore {
     pub fn insert_run_event(
         &self,
         row: &RunEventRow,
+        process_started_at: i64,
         caller: Option<&crate::exec::AgentCaller>,
         signal: Option<&str>,
         exit_code: Option<i32>,
@@ -2078,7 +2094,7 @@ impl SqliteStore {
                 row.command,
                 row.repo,
                 row.worktree,
-                row.ts,
+                process_started_at,
                 caller.is_some(),
                 caller.map(|caller| &caller.session_id),
                 caller.map(|caller| caller.provider_generation)

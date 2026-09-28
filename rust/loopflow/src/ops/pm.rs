@@ -2431,15 +2431,7 @@ async fn pm_sync_async(
                 let expected_name = format!("{title_path} — {canonical_name}");
                 if project.name != expected_name {
                     client
-                        .update_project(
-                            &project.id,
-                            &expected_name,
-                            &ProjectContent {
-                                metric_targets: project.metric_targets.clone(),
-                                flow: project.flow.clone(),
-                                krs: project.krs.clone(),
-                            },
-                        )
+                        .rename_project(&project.id, &expected_name)
                         .await
                         .map_err(pm_to_ops)?;
                 }

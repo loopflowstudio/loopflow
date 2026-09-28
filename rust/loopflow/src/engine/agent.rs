@@ -161,6 +161,9 @@ pub struct AgentConfig {
     pub directive_relay: Option<std::path::PathBuf>,
     /// Environment scoped to this provider process and its descendants.
     pub env: BTreeMap<String, String>,
+    /// Exact conversational driver selected before provider launch. Never
+    /// inherited by provider tools or serialized into replay input.
+    pub session_driver: Option<(String, crate::exec::SessionDriver)>,
 }
 
 impl AgentConfig {
@@ -1127,6 +1130,10 @@ pub fn launch_agent(
         process.capture = Some(capture.clone());
     }
     if let Some(capture) = &process.capture {
+        capture.0.claim_conversation_driver().map_err(|error| {
+            CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
+        })?;
+        launch.session_driver = capture.0.session_driver();
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
@@ -1473,7 +1480,7 @@ fn _begin_implicit_capture(
             &system_prompt_with_structured_replies(launch),
             &launch.task_prompt,
         );
-        CaptureHandle::begin_with_context(spec, &context)
+        CaptureHandle::begin_with_context(spec, &context, None)
     };
     capture
         .map(|capture| {
@@ -2912,6 +2919,7 @@ trust_level = "trusted"
     #[test]
     fn build_claude_session_turn_args_minimal() {
         let config = AgentConfig {
+            session_driver: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -2942,6 +2950,7 @@ trust_level = "trusted"
     #[test]
     fn build_claude_session_turn_args_full() {
         let config = AgentConfig {
+            session_driver: None,
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
@@ -2972,6 +2981,7 @@ trust_level = "trusted"
     #[test]
     fn build_claude_session_turn_args_appends_loopflow_guidance() {
         let config = AgentConfig {
+            session_driver: None,
             system_prompt: "Base prompt".to_string(),
             task_prompt: "task".to_string(),
             agent: None,

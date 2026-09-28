@@ -556,6 +556,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
+            session_driver: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -610,6 +611,7 @@ mod tests {
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
+            session_driver: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: None,

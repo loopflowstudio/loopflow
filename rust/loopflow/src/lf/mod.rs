@@ -672,6 +672,17 @@ pub struct AskArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Read this conversation's native start, usage and completion receipts
+    History {
+        id: String,
+        #[arg(long)]
+        json: bool,
+        /// Continue after an observed event sequence
+        #[arg(long, default_value_t = 0)]
+        after: i64,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
     /// List Sessions
     List {
         #[arg(long)]
@@ -695,7 +706,8 @@ pub enum SessionCommand {
         #[arg(long)]
         search: Option<String>,
     },
-    /// Open or resume one session in this terminal
+    /// Connect to the live conversation, or resume its saved history
+    #[command(name = "connect", alias = "open")]
     Open {
         id: String,
         #[arg(long)]

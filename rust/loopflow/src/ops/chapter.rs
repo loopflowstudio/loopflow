@@ -765,10 +765,33 @@ async fn apply_rotation(
             "another In Progress Project appeared during rotation; reconcile it in Linear",
         ));
     }
-    ctx.client
-        .set_project_status(&predecessor.id, ProjectStatus::Completed)
-        .await
-        .map_err(error)?;
+    let current_successor = current
+        .iter()
+        .find(|project| project.id == entry.successor_id)
+        .ok_or_else(|| error("successor is missing from the final Project inventory"))?;
+    if current_successor.status != ProjectStatus::Started || current_successor.name != name {
+        return Err(error(
+            "successor is no longer the intended In Progress Project; reconcile it in Linear",
+        ));
+    }
+    let current_predecessor = current
+        .iter()
+        .find(|project| project.id == predecessor.id)
+        .ok_or_else(|| error("predecessor is missing from the final Project inventory"))?;
+    match current_predecessor.status {
+        ProjectStatus::Started => {
+            ctx.client
+                .set_project_status(&predecessor.id, ProjectStatus::Completed)
+                .await
+                .map_err(error)?;
+        }
+        ProjectStatus::Completed => {}
+        _ => {
+            return Err(error(
+                "predecessor status changed during rotation; reconcile it in Linear",
+            ));
+        }
+    }
     let mut completed = ctx
         .client
         .project_ownership(&predecessor.id)

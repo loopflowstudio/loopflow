@@ -1,5 +1,305 @@
 # LOO-298 parallel work
 
+## Fixed-checkpoint measurement — 2026-09-28
+
+At `d07e569330c8dedceb5dd238ce9b22a7b6137006`, versus retained merge base
+`5bdcef6b65419d5db2583ee791cede2f1a95b3df`, the comparable production-prefix
+method reports Rust/Swift **+11,288 / −29,763 = −18,475**. Python/shell is
+**+19 / −48 = −29**; SQL is **+595 / −0**. Compared with `03330279f`, this
+checkpoint adds a net 302 production Rust/Swift lines and 79 SQL lines.
+Receipt: `.lf/tmp/execution-model/branch-counts-d07e56933.json`.
+The method uses no rename detection and excludes test paths and trailing Rust
+test modules while retaining the known trailing production block. It does not
+count moved files as net deletions, excludes current dirty edits, and is neither
+the final delta nor evidence that the Run owner has been removed.
+
+## Current independent reviews — 2026-09-28
+
+New Session-history source review retains a provider-replacement counterexample:
+`codex_history::record` labels every `thread/tokenUsage/updated` with its
+observing driver's provider generation. Resume after replacement can replay the
+last usage for an older turn; if that receipt was missed earlier, first insertion
+would label old work with the new provider generation. Completion snapshots
+already retain unknown generation. Main owns preserving the recorded turn
+origin when available and missingness otherwise, with a gen1-start/missed-usage/
+gen2-resume regression. This is source evidence, not an executed restart failure;
+the earlier same-engine generation-1 probes do not distinguish it.
+
+Supervisor extended the public connect fixture in a private script to exercise
+provider completion after both `lf` clients exit. Candidate SHA-256
+`e883464af7f572506acf79388ee5332144bd0cd6e27dfa0c7942207878a8604c`
+passes: a third held turn starts, both CLI clients terminate with 130, the real
+Codex engine completes with no Loopflow receiver, and a later public connect
+records one completion. The original starting Exec remains interrupted/130;
+earlier Session history and replay stay unchanged. A passive native observer
+remained connected to inspect the engine; this is not a zero-native-client test.
+Receipt: `.lf/tmp/execution-model/supervisor-driverless-history-2/results.json`;
+reproduction: `.lf/tmp/execution-model/supervisor-driverless-history.py`.
+The first probe retained only a count of recovered usage events. That observed
+one event, so the second explicitly verifies its payload: lifetime totals are
+120 input/30 output after prior 80/20, with the third turn's original starting
+Exec retained. Although Thread/Turn snapshots have no usage field, native
+resume supplies a separate usage notification. Do not generalize the schema
+observation into inability to recover this measured usage. Aggregate `lf usage`,
+Flow consumption, missed multiple turns, restart and rendered UI remain unproven.
+
+The native approval proof also passes the opposite connection order. The private
+variant `.lf/tmp/approval-no-client-probe/probe.py` closes A, waits, then creates
+B. Raw timestamps show 302ms without a selected-thread client; B resumes the
+same pending request, answers once and completes one marker write. The sibling
+remains active and later completes; owned engine cleanup exits 0. Receipt:
+`.lf/tmp/approval-no-client-probe/candidate-1/results.json`. This extends the
+original report's ordering limit without rewriting its observation. The sibling
+client remains connected, so it does not prove that every engine connection may
+disappear. Both supervisor probes use synthetic localhost responses, explicit
+private Homes and no source edit/build. All probe processes are terminal.
+
+Main's `conversation-history-focused.log` records two passing Rust checks
+(1.308s; compile29.95s): Session-history DTO preservation and recovered completion
+with missing start/usage plus conflicting evidence rejection. Supervisor also
+inspected `public-connect-history-1/results.json`: two native completions,
+nonzero usage, original turn starters, exact selected child ancestry and replay
+deduplication pass through public commands. These are scoped receipts, not the
+physical AgentSession/FlowSession conversion or removal of Run.
+
+Control-path selection changed during supervision at 13:09 PDT. Machine
+`active.json` now selects published 0.12.24, CLI `lf-d7bf7c66843517e437c870e2dea0beb52717f4633f73441eedba01ff5e7bc401`,
+store `/Users/jack/.lf/loopflow.db`. Bare `lf task status LOO-298` reports no
+Task, and bare Run reads report the wrong-Home absence. This does not establish
+worker death. The live worker's retained manifest names its captured installed
+runtime `/Users/jack/.lf/bin/lf-f5ef8d640340e9f8b9e36d17d84de83e14e905305c43e959fd00c49a322a527f`;
+its Home is `/Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea`.
+That runtime with explicit ordinary and control Home/DB overrides reads the same
+running Task, invocation and worker Run. Supervisor now uses this supported
+pinned path for control. No authority bypass, restart, installation or store
+conversion occurred. The actor causing the installation selection is unknown.
+
+Approval contributor `run_e87c4b72f77e486e930ae264fbba2698` is terminal and its
+final report was read in full. Preserve its precise ordering: the replay arrived
+during B's resume, before A disconnected. An interval with no connected client
+is not proven by this case. All bounded contributors are terminal again; main
+continues executable ownership and the build slot.
+
+Native pending-approval replay passes. Supervisor inspected
+`.lf/tmp/approval-replay-probe/candidate-1/results.json`, both client transcripts,
+the exact once-only marker, and the probe's assertion/cleanup path. Actual Codex
+0.157.1 (SHA-256 `27ceb5f9b957b43a519efe4eaa3816a0bffb0a531a2c89af18840c0a3c016a7d`)
+replays `item/commandExecution/requestApproval` on the second client's
+`thread/resume`, retaining request ID 0 and the same thread/turn/item. Client A
+never answers and disconnects; B answers once afterward. The selected turn
+completes, the private file contains one `approved-once` line, and a held sibling
+remains active before completing when separately released. The 1.086-second
+experiment uses a synthetic localhost upstream and private Codex Home. Exact
+owned engine PID/start/group cleanup exits 0. This resolves native replay
+feasibility; public Loopflow stale-approval fencing, UI and completion/usage
+ingestion still need their own proof. The report/reproduction belong to
+`parallel-approval-probe.md` and `.lf/tmp/approval-replay-probe/probe.py`.
+
+Failed ordinary Wave resolution is repaired on candidate SHA-256
+`e224799dd21357a78af82d707bd3ea926d1d51fb6bdd1331fbd924e740b73931`.
+Supervisor repeated the same two commands in a fresh private Home: inventory
+records one succeeded Exec; the unchanged unknown-Wave error exits 1 and records
+its own failed Exec with exit code 1. The copied binary stayed unchanged.
+Receipt: `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-entry-observation-repaired-1wsanv2y/receipt.json`.
+The prior failing receipt remains below. `entry-and-native-safety.log` additionally
+records four assertion passes in 4.827 seconds, with Nextest marking
+`exact_process_evidence_distinguishes_a_live_exec_from_its_completion` LEAK.
+That qualifier is unresolved; four assertion passes do not establish clean
+process settlement. No additional build or behavioral rerun was requested.
+
+Handoff-history contributor `run_28487ba852f6426cba061d64e7ac6437` finished.
+Supervisor read `parallel-handoff-history-review.md` in full and passed its two
+findings to main: native turns after reconnect have no completion/usage recorder
+after the old receiver exits, and pending native approval replay is unproven.
+The report separates the source counterexample from uncertain provider behavior,
+names exact consumers and proposes one successful completion reference instead
+of another Run/attempt product. No code or runtime proof occurred in that review.
+A bounded native-protocol approval probe, `run_e87c4b72f77e486e930ae264fbba2698`, owns only
+`parallel-approval-probe.md` and `.lf/tmp/approval-replay-probe/`, using a real
+Codex engine with synthetic localhost responses and disposable Homes. It may
+run no build or main-Home operation. Main retains all executable files.
+
+`public-connect-2/results.json` passes at candidate SHA-256
+`2bc50fcea68f2c8bda13c6d1089a751d9129c69a2861efd0267bf7f262119c69`.
+Supervisor inspected the receipt and fixture: two actual public `lf session
+connect` processes relay to the real Codex engine through controlled protocol
+clients. The old client's interrupt is rejected, the selected turn and a sibling
+remain active, and provider generation stays 1. This is public dispatch proof,
+not rendered native UI, restart, old headless-driver teardown, or history/usage
+preservation. Provenance currently checks the latest agent-issued Exec after
+releasing both turns; both use the same synthetic tool command. Main must
+distinguish the sibling command or correlate the selected turn's exact child
+before claiming that particular post-handoff child. The narrower passing result
+stands; no new product defect is established by this fixture ambiguity.
+
+Actual ordinary-command failure remains unrecorded when explicit Wave resolution
+fails before `with_runtime`. Supervisor copied candidate SHA-256
+`f6f65c692cb3cdbee4db2fe3c350441cac13f19e91dda2b68efb2a9466e02129`
+into a disposable directory, cleared inherited LF authority, and selected a
+private Home/database. `session list --all --json` returned `[]`/0 and created
+one succeeded Exec. `--wave fixture-wave-does-not-exist session list --all --json`
+then returned the correct unknown-Wave error/1, but no second Exec existed.
+The copied binary remained unchanged. Receipt:
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-entry-observation-kudhtuj3/receipt.json`.
+Source matches: `bin/lf.rs` resolves explicit Wave and account selection before
+entering the outer process lifecycle. Main owns moving ordinary fallible setup
+inside the existing lifecycle. Installation/preflight and screenshot dispatch
+have explicit independence requirements; do not make them require an ordinary
+store merely to satisfy the logging rule. Their observation disposition must be
+stated explicitly before claiming every command is covered.
+
+Supervisor confirmed `native-socket-admission-2.log`: four focused tests pass
+in 6.379 seconds, covering helper admission, exact authored Project content on
+sync, conflicting statuses at the final Chapter inventory, and both directory
+and append obstructions of the file journal. The compile reported an unused
+`TempDir::keep` result; current source handles that result, but this receipt is
+not a fresh Clippy pass. The earlier failed fixture receipts below remain valid
+history and are superseded only for these exact repaired assertions.
+
+`public-socket-parent/results.json` passes against candidate SHA-256
+`4a869f0ab8bb6cabc5dc7e4da3ef3f29330a4e3e3d4c581de53bc1150fe7d444`:
+normal socket launch, headless discovery, unchanged conversation on rename,
+and nested `lf` ancestry under real Codex with synthetic local Responses.
+Session `session_deacf009f1424cf5a50a254dfca135b8` retains provider generation 1;
+child `3b4333d3-8aa7-46ee-ae09-4fde0a29277b` names its actual parent Exec.
+This remains fresh-launch proof, not public connect/restart or Desktop evidence.
+
+The previous stop/transfer race is being removed by detaching an established
+managed engine at driver teardown. The source now puts startup termination under
+the driver fence and omits the managed-engine signal hook. Actual race coverage,
+startup failure cleanup, and completion after driver departure still need proof.
+Read-only contributor `run_28487ba852f6426cba061d64e7ac6437` owns only
+`parallel-handoff-history-review.md`, reviewing completion, usage, approvals and
+Flow settlement across transfer. Main retains every executable file and the
+sole build slot; the contributor runs no provider or build.
+
+Supervisor reviewed the in-progress normal Codex WebSocket path. Its `stop()`
+reads the current driver, awaits interruption, then kills the engine group;
+the interrupt hook similarly checks before signaling without holding the transfer
+fence. A replacement can claim between check and effect. This is a source-level
+race, not an executed failure. Main must serialize the termination effect with
+driver transfer while avoiding nested database locking through the interrupt RPC.
+Keep the actual old-driver-stop/transfer and shared-engine-sibling proof in the
+public lifecycle acceptance; a fenced socket send alone does not cover signals.
+
+The supervisor replayed the exact file-journal directory obstruction after
+repair, on candidate `9572e8e0b34c2737c284a699d2698c38eb54df3a50d6ba6c5f3fd12d6d027557`.
+The command returned `[]`/0, stored one succeeded Exec with both start/completion
+events, preserved the obstructing file and reported the unavailable journal.
+Receipt: `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-exec-journal-repaired-56z30yfy/receipt.json`.
+This proves directory setup failure only; the authored append-failure case
+remains part of main's integration batch.
+
+`journal-h7-repair-2.log` ran six of eight selected tests: five passed, the
+explicit-sync fixture failed after its exact provider-content comparison on
+KR text (`Keep this KR Retain this closing note.` versus `Keep this KR`). The
+unheaded closing paragraph is parsed as a KR continuation. Two cases did not run
+because fail-fast canceled them. Do not claim eight passes or loss of the raw
+authored content from that assertion. Main owns the fixture correction and the
+remaining checks; retained two-Home mutation and legacy-adoption retries passed.
+
+H7 repair contributor `run_e86b670c177442d3a8c9b4e5f8c0c3af` has returned.
+`parallel-h7-repair.md/.patch` is ready, SHA-256
+`ea77b0d35f74157b430472701033520cbea60b978574fa53de2b3ceb8d17900b`.
+Supervisor reviewed production changes and all three regression setups; patch
+applicability passes. Main must apply once and execute the regressions plus
+affected retained retry coverage. Syntax/format and GraphQL shape passed in
+private copies, not behavioral tests. All bounded contributors are now terminal;
+main retains all executable files and the build slot.
+
+Supervisor's next actual CLI counterexample retained the same `3847c4c3` binary
+in a disposable Git repository and made `.lf/journal/runs` a regular file.
+`session list --all --json` returned `[]`/0; debug output reported `Not a directory`
+at Started, and the initialized writable database contained zero Execs. The
+obstruction remained byte-identical. Receipt:
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-exec-journal-jon7jbqa/receipt.json`.
+File-journal setup still precedes context/SQL admission; `append_event` also
+precedes `ledger_insert`. Main must preserve error/input evidence while removing
+this dependency from the database-owned lifecycle. A private fixture is not
+installed acceptance, and the passing public-child proof does not close this
+distinct file-failure case.
+
+Public nested-command replay now passes at `public-headless-parent-6` with CLI
+SHA-256 `3847c4c353b38841c70f23214667594b47f36a4057e0a80c7a54ebf01d25f451`.
+Supervisor inspected its receipt: one actual agent-issued child, correct parent
+Exec, unchanged AgentSession, provider generation 1, released driver after
+completion, and successful rename. Native Codex is real; upstream Responses are
+synthetic; Home is disposable. Parent-5 directly observed sandbox refusal of
+`ps`, confirming why journal admission stopped. Command-entry time is now separate
+from nullable OS process-start evidence; no missing process identity can grant
+signaling authority. The sandbox was not widened. Public connect/handoff/restart,
+physical owner conversion and import still remain; this pass closes only the
+public fresh-launch/provenance portion.
+
+Publication integration now has executed proof: `publication-preservation-3.log`
+records both acknowledged-create/failed-read/retry and existing-PR/readiness
+regressions passing in 3.284 seconds. The readiness case retains a differing
+head-pinned request and proves it is cleared before saving the changed head.
+The preceding failures were retained: the new fixtures still supplied old PM
+snapshot shape without required `flow`. This is simulated GitHub/Linear failure
+evidence, not a reproduced historical cause of PR #1296 or live publication.
+
+Public nested-command proof remains failing at `public-headless-parent-3`.
+Supervisor inspected its synthetic response output: `LF_AGENT_CALLER` is present,
+and Home/DB name the private fixture, but SQL has no child Exec at all. That
+narrows the missing row beyond a mere `via_agent` flag error. The source's new
+required `process_started_at` query and file-journal append precede SQL writes;
+workspace sandbox denial is a hypothesis to distinguish with exact debug output,
+not an established cause. The successful direct native fixture explicitly used
+a broader sandbox. Main must retain the public permission context while proving
+admission, rather than change the fixture's sandbox to make it pass.
+
+Both reviewers returned. Import mapping is in `parallel-import-review.md`;
+main retains physical conversion and import implementation. H7 review is in
+`parallel-h7-review.md`; the supervisor confirmed its two source counterexamples
+(name normalization replaces authored content; final observed cancellations are
+ignored before predecessor completion). A new bounded Codex contributor owns
+only `parallel-h7-repair.md` and `.patch`, preparing a repair and focused tests
+without touching executable files or using the build slot. Main keeps all source
+ownership and must integrate/review/test the returned patch. The archived-Project
+fixture's existing persisted-timestamp correction must survive integration.
+
+Supervisor found a counterexample in the first per-thread Codex environment
+change. `launch.env.clone()` followed by a `get_envs()` loop that ignores removed
+values recreates explicitly supplied values that `configure_agent_env` or
+`set_vendor_std_env` removed: bridge token, legacy writer identity, directive
+path, and stale ordinary Home overrides on the release path. The existing
+bridge-token regression demonstrates the explicit-config case. No real token
+exposure was observed. Main was instructed to derive intended thread launch
+values from the sanitized command changes, including removals and fresh
+overrides, without copying account credentials wholesale. Public child provenance
+and retained environment-removal behavior both need proof.
+
+All previous implementation contributors have returned; main owns all executable
+files and the sole build slot. Two new bounded Codex reviews run without builds
+or patches: `parallel-import-review.md` maps historical evidence to the accepted
+Exec/AgentSession/FlowSession model; `parallel-h7-review.md` checks the completed
+Chapter/adoption source against retry and preservation counterexamples. Each
+reviewer owns only its named note. Neither may modify implementation, duplicate
+the schema work, invoke providers or inspect an installed Home.
+
+Supervisor inspected `integrated-admission.log`: seven focused admission,
+repository-before-pagination and Exec lifecycle checks passed in 17.144 seconds.
+The later WAL repair passed three focused checks and the actual CLI replay at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo298-first-home-execs-1dmf_kwt/receipt.json`.
+That receipt pins CLI SHA-256
+`d29d1d2573435a7271ca016b6d85756c54c40dccba6ff85dc0f2e0a7505d9c13`;
+all six commands across three fresh Homes have start/completion events, success
+rows, no warnings and no agent Runs. Earlier failing receipts remain retained.
+This is isolated CLI proof, not general load or installed-Home acceptance.
+
+Main integrated the publication patch with the reviewed ordering correction:
+invalidate a known identity's stale merge request before changing its head;
+persist acknowledged identity before Linear linkage. The supervisor inspected
+that correction in source. Behavioral publication checks remain pending.
+
+HEAD advanced to `d07e56933` (`lf pr open: prepare branch`) during supervision.
+It checkpointed the integrated source and removed the prior supervisor note
+`scratch/execution-model-review.md`, retained at `03330279f`. The supervisor did
+not invoke that command; the commit title does not establish who invoked it or
+whether remote publication occurred. Main was notified. The local-only review
+boundary remains in force; current source history preserves the older evidence.
+
 2026-09-28 · Jack authorized parallelizing as much as possible without reducing
 quality. This allocation supersedes the earlier one-code-writer implementation
 sequence, preserves the full accepted scope, and creates no second Task or
@@ -113,6 +413,16 @@ populated SQL replay, eight GraphQL shape checks and patch checks passed in the
 contributor; Rust behavior remains unexecuted. The build hold is released once
 main integrates this last shared patch and passes resource preflight. The
 publication contributor is patch-only and does not hold source or the build slot.
+
+Combined initialization verification passed: `integrated-init-3.log` records
+seven selected migration/cache/backup tests passing in 2.997 seconds after
+28.95 seconds compilation. This includes all three new initialization regressions,
+both expected-schema reuse regressions, backup transaction preservation and the
+current-schema no-writer-lock check. Supervisor inspected the terminal Nextest
+summary. Earlier invocation failed argument parsing (`-j` duplicated
+`--test-threads`); the next compile exposed repaired shared fixture/import errors.
+These are retained failed attempts, not passing tests. Actual CLI concurrent
+admission replay, broader migrations/contention and materialized proof remain due.
 
 The incident audit returned successfully. Its source-grounded handoff is
 `parallel-incidents.md`: PR #1296 association has historical recovery evidence
@@ -298,3 +608,74 @@ Codex and a synthetic localhost Responses server in a private Home. The receipt
 lives at `.lf/tmp/execution-model/public-headless-admission/results.json`.
 It predates repository-filter edits, and proves neither continuation/connect,
 Flow settlement, final integrated bytes nor configured-model acceptance.
+
+## Publication patch review — 2026-09-28
+
+The patch contributor returned with `parallel-publication.md/.patch`; no working
+executable files were changed. Its two proposed provider-failure regressions are
+unexecuted. The supervisor found an integration issue in the proposed early
+write: `attach_task_github_pr` replaces `publication.github.head_sha`, calls
+`update_task_pr`, and only afterward invalidates a stale merge request. However,
+`TaskPr::_validate` requires that request to name the current stored GitHub head.
+A differing or unknown head with a retained merge request therefore fails the
+new early save before reconciliation can run. This is a source counterexample,
+not an executed failure or the historical cause of PR #1296.
+
+Preserve acknowledged identity early without storing an invalid head/request
+pair or relaxing the validator. Distinguish first acknowledged attachment from
+enrichment of an already-recorded identity; retain the exact-head merge and
+remote auto-merge revocation ordering. Main owns this repair while integrating
+the patch and must add/retain the differing-head pinned-request proof alongside
+the new read/readiness failure cases. The patch is not accepted as-is.
+
+
+## 2026-09-28 — Public approval handoff proof
+
+Supervisor private script `.lf/tmp/execution-model/supervisor-public-approval.py`
+passes (handle 2848 terminal 0). Receipt:
+`.lf/tmp/execution-model/supervisor-public-approval-1/results.json`, copied CLI
+SHA d6ef27459f35fefa6e8540c7242fae373ce1c80bd47a61b26af7bd4bd7f8d317.
+Actual Codex 0.157.1, private Homes, synthetic credential-free Responses and a
+controlled native-protocol client through actual `lf session connect`.
+Codex itself emits the escalated-command approval. A new public connection
+receives the pending request. The old client's accept response followed by an
+ordered read leaves waitingOnApproval and no marker; the new client's accept
+runs the command once (`approved-once\n`). The held sibling stays active and
+finishes after release. Public Session history contains exactly one successful
+completion for the selected turn. Existing connect/provenance/history checks
+also pass. No source files or installed Home changed; private script replaces
+the separate driverless case with this approval case. This does not prove native
+UI rendering, restart, Flow consumption or physical owner conversion.
+
+Jack repeated the regular-rebase request. Main acknowledged checkpoint then
+`lf rebase --plan` / `lf rebase` before the next owner conversion. At the read,
+HEAD d07e56933 still lacked five commits from local origin/main; completion of
+the rebase remains unobserved. Main alone owns integration.
+
+## 2026-09-28 — Paginated native recovery and local rebase correction
+
+Private supervisor script `.lf/tmp/execution-model/supervisor-pagination.py`
+passed (handle90916 terminal0). Receipt:
+`.lf/tmp/execution-model/supervisor-pagination-1/results.json`; copied CLI SHA
+`d6ef27459f35fefa6e8540c7242fae373ce1c80bd47a61b26af7bd4bd7f8d317`.
+After one normal headless turn, a direct native client executed 103 additional
+synthetic turns while no lf receiver was connected. SQL still contained only
+the first completion. Native `thread/turns/list` returned100 and a nextCursor.
+Actual public `lf session connect` recovered all104 exact completion IDs;
+103 recovered origins remained unknown, the original history stayed byte-equivalent,
+and a second public connect produced identical history. No branch source/build
+or installed Home changed. Real Codex/private Homes/synthetic Responses/controlled
+protocol UI; this does not establish rendered UI, restart, Flow settlement or
+configured-provider acceptance.
+
+Observed usage boundary: reconnect produced ONE usage receipt for the latest of
+103 missed turns, last20/5 and lifetime2100/525. The other102 turns had no usage
+receipt. The last counter cannot become the last turn's whole spend, nor prove
+per-turn cost for the gap. Preserve this counterexample in the usage conversion;
+if recovering from additional native evidence, test it explicitly.
+
+Supervisor corrected the earlier rebase spelling: installed `lf rebase --help`
+says `--manual` keeps integration local; default rebase has a push path. Task
+comment ed2223c9 directs `lf rebase --plan`, `lf rebase --manual`, then owned
+`--continue` as needed. Regular rebases are authorized; publication is not.
+Main remains sole integration owner. No rebase was performed by supervisor.

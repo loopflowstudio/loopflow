@@ -67,6 +67,7 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
                 let recorded = SqliteStore::new(Path::new(&path)).and_then(|store| {
                     store.insert_run_event(
                         &run_event(&format!("run_{writer}"), seq as i64),
+                        0,
                         None,
                         None,
                         None,

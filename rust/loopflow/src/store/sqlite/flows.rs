@@ -1279,25 +1279,28 @@ mod tests {
 
     fn attempt(store: &SqliteStore, invocation: &str, skill: Option<&str>, provider: &str) -> Run {
         store
-            .create_run(Run {
-                id: RunId::new(),
-                session_id: None,
-                invocation_id: Some(invocation.to_string()),
-                node: None,
-                iterations: None,
-                attempt: None,
-                task_id: None,
-                wave_id: None,
-                work_source: None,
-                created_at: 1,
-                published: true,
-                cwd: "/repo".into(),
-                skill: skill.map(str::to_owned),
-                provider: Some(provider.into()),
-                model: None,
-                caller_run_id: None,
-                ended: None,
-            })
+            .create_run(
+                Run {
+                    id: RunId::new(),
+                    session_id: None,
+                    invocation_id: Some(invocation.to_string()),
+                    node: None,
+                    iterations: None,
+                    attempt: None,
+                    task_id: None,
+                    wave_id: None,
+                    work_source: None,
+                    created_at: 1,
+                    published: true,
+                    cwd: "/repo".into(),
+                    skill: skill.map(str::to_owned),
+                    provider: Some(provider.into()),
+                    model: None,
+                    caller_run_id: None,
+                    ended: None,
+                },
+                None,
+            )
             .unwrap()
     }
 

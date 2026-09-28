@@ -406,6 +406,11 @@ impl Import<'_> {
             ended: None,
         };
         let session = AgentSession {
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
             id: file.id,
             current_run_id: run.id.clone(),
             kind: SessionKind::Ask,
@@ -472,6 +477,11 @@ impl Import<'_> {
             ended: None,
         };
         let session = AgentSession {
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
             id,
             current_run_id: run.id.clone(),
             kind: SessionKind::FlowReview,
@@ -548,6 +558,11 @@ impl Import<'_> {
             ended: None,
         };
         let session = AgentSession {
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
             id,
             current_run_id: run.id.clone(),
             kind: SessionKind::Conversation,

@@ -601,3 +601,65 @@ review-executable-pins.log passes4/4 (31.53s compile,1.572s tests). No productio
 executable fallback was introduced. Shared mock transport is synthetic evidence,
 not a new live provider result. This remains an intermediate checkpoint; the
 next owner conversion moves ancestry and prospective bind off historical Runs.
+
+Ancestry work is unfinished. The first compile found a typed ID conversion and
+a breadcrumb fixture still taking Run; both were repaired. The supervisor
+identified an incorrect new test assumption: first bind DOES start a Task, per
+Jack's retained decision, even when usage binding is prospective. Corrected the
+new Session assignment triggers and test to set Started once at bind without
+rewriting old Run/event attribution. No passing proof or product approval follows
+from the withdrawn future-work-only expectation. Native child/Ask inheritance
+now carries the admitted Exec into the database transaction (not thread-local
+context read after spawn_blocking); current provider generation is checked.
+
+conversation-ancestry.log passes3/3 (32.06s compile,16.340s tests): first bind
+starts once without changing prior work; native pre-bind/active-turn receipts
+retain attribution; actual CLI child launch and Ask inherit current assignment
+from synthetic admitted provider provenance, including a done Task. Stale
+provider launch is rejected before reaching the stand-in; a separate untouched
+Task remains unstarted after observation. This is not a live-engine bind proof.
+
+The broader migration/Session check stopped at a malformed populated fixture and
+five old Ask fixtures whose caller directory was outside Home/runs. Branch
+isolation correctly scrubbed those callers. They now use a canonical fixture
+Run directory with inherited LF authority cleared. The first Task-worktree
+fixture repair was insufficient: the Flow stores NULL cwd (Task owns it), and
+its capture needs an id plus positive position_version. All three fixture setup
+failures remain in ancestry-migration-and-sessions*.log / ancestry-upgrade.log;
+no production validation was weakened. The corrected populated upgrade now
+passes inside ancestry-upgrade-and-remaining.log; remaining affected tests are
+running without fail-fast so later counterexamples remain visible.
+
+The remaining reader assertions now pass: ancestry-readers-repair.log retains
+one pass plus the next stale import kind expectation; ancestry-import-repair.log
+then passes the complete imported identity/name/capture/outcome proof (8.343s).
+The earlier wider run finished21/23. No preservation assertion was removed:
+headless conversations now have Sessions, macOS paths compare canonically, and
+the public conversation kind is explicit.
+
+canonical-ancestry.log passes4/4 on an isolated materialized source copy
+(27.24s compilation,2.053s tests): populated ancestry and Started preservation,
+owner rename preservation, prospective usage binding with first-bind Started,
+and canonical empty-draft initialization/upgrade. The source hash inventory is
+.lf/tmp/cut-i/canonical-ancestry-source.json. Released migration history passes;
+portable HTML/freshness passes1/1. These are disposable fixture proofs, not an
+installed migration or complete historical import acceptance.
+
+Checkpoint review: Session list/bind/breadcrumbs now consume AgentSession
+assignment directly; bind_session_runs_in and its historical Run rewrite are
+deleted. New independent child launches/Asks resolve current assignment from
+admitted caller Session/provider generation inside admission, while earlier
+native events retain their original attribution. New ancestry SQL adds ownership
+validation and first-assignment Started without a synthetic Run. Relative to
+d8665a753, production Rust prefixes before cfg(test) plus SQL initially measured
++372/-60 (integration tests, test tails, docs/generated/scratch excluded).
+Clippy then found the larger AgentSession made SessionTarget unbalanced; its
+existing row variant now boxes the Session alongside Run. No policy changed.
+Run/current_run_id and headless Flow admission remain unfinished; this checkpoint
+is explicitly not a completed owner cutover.
+
+Final ancestry formatting and all-target Clippy pass (ancestry-clippy-2.log,
+14.71s). Fresh remote inspection observes main a2b59ed50666a433c97cb9002476e74351723759
+and the Task branch2958d289c. Jack's standing checkpoint publication request
+applies; local commit then manual rebase precede publication. No landing,
+installation or saved-Flow replacement is selected.

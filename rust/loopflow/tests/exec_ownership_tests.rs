@@ -368,6 +368,11 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
     store
         .create_session(
             AgentSession {
+                task_id: None,
+                wave_id: None,
+                flow_session_id: None,
+                work_source: None,
+                bound_at: None,
                 id: session_id.into(),
                 current_run_id: run_id.clone(),
                 kind: SessionKind::Conversation,
@@ -399,6 +404,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 caller_run_id: None,
                 ended: None,
             },
+            None,
             None,
         )
         .unwrap();

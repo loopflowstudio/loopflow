@@ -1822,6 +1822,11 @@ impl RunCapture {
             let id = format!("session_{}", Uuid::new_v4().simple());
             run.session_id = Some(id.clone());
             let session = crate::session::AgentSession {
+                task_id: None,
+                wave_id: None,
+                flow_session_id: None,
+                work_source: None,
+                bound_at: None,
                 id,
                 current_run_id: run.id.clone(),
                 kind: crate::session::SessionKind::Conversation,
@@ -1837,9 +1842,14 @@ impl RunCapture {
                 completed_at: None,
                 created_at: run.created_at,
             };
-            store.create_session(session, run, None)?;
+            store.create_session(
+                session,
+                run,
+                None,
+                crate::journal::current_exec_id().as_ref(),
+            )?;
         } else {
-            store.create_run(run)?;
+            store.create_run(run, crate::journal::current_exec_id().as_ref())?;
         }
         Ok(())
     }

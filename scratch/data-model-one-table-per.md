@@ -220,7 +220,11 @@ Desktop confirms it. Bind cannot change Flow membership to satisfy a mismatch.
 
 Deleting Run changes the implementation of Started, not its purpose. Reserve the
 first actual Task work (agent conversation or mechanical Flow boundary) and set
-`tasks.started_at` once in that transaction. Merely recording `lf task status`
+`tasks.started_at` once in that transaction. First bind of an existing agent
+conversation also sets Started at assignment time, retaining any existing value;
+preserving earlier usage does not postpone Started until another launch. This
+retains Jack's first-assignment decision and the current architecture-reference
+contract. Merely recording `lf task status`
 or another observational Exec never starts a Task. Preserve existing timestamps
 and recorded historical Started evidence. Import reports inferred timestamps as
 inferred; it does not fabricate successful work.

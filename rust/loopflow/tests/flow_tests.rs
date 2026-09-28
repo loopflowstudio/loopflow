@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::{FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
+use loopflow::durable::{FlowInvocation, TaskWorkerClaimOutcome, TaskWorkerOwner};
 use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::engine::transitions::FlowDecision;
@@ -123,12 +123,18 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         write_skill(repo.path(), "identity-proof", "Prove checkout identity.");
         write_flow(repo.path(), "identity-proof", "- step:\n    id: work\n    name: identity-proof\n- step:\n    id: decide\n    name: identity-proof\n    repeat:\n      from: work\n");
         let position = runtime
-            .block_on(child.store.set_flow_position(
+            .block_on(child.store.start_task_flow(
                 &child.task.id,
-                FlowPosition {
-                    task_id: child.task.id.clone(),
+                FlowInvocation {
+                    task_id: Some(child.task.id.clone()),
+                    wave_id: Some(child.task.wave_id.clone()),
+                    cwd: child.task.worktree.clone(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    finished: false,
                     invocation: QueuedInvocation::load(repo.path(), "identity-proof").unwrap(),
-                    session_run_id: None,
+                    pending_session_id: None,
                     ready_summary: None,
                     cursor: loopflow::engine::ExecutionCursor {
                         index: 1,
@@ -165,13 +171,20 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             TaskWorkerClaimOutcome::Claimed(claim) => claim,
             other => panic!("unexpected claim: {other:?}"),
         };
-        let reviewer = RunId::new();
+        let claimed = runtime
+            .block_on(child.store.task_flow(&child.task.id))
+            .unwrap()
+            .unwrap();
+        let reviewer = claimed.current_attempt.as_ref().unwrap().run_id.clone();
         runtime
-            .block_on(
-                child
-                    .store
-                    .bind_task_worker_run(&child.task.id, &claim, &reviewer, &owner),
-            )
+            .block_on(child.store.publish_attempt(
+                claimed.id(),
+                claimed.version,
+                &reviewer,
+                Some(&claim),
+                "codex",
+                None,
+            ))
             .unwrap();
         let decision = lf_command(
             repo.path(),
@@ -180,6 +193,10 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             None,
         )
         .env("LF_RUN_ID", reviewer.as_str())
+        .env(
+            "LF_FLOW_STEP",
+            serde_json::json!({"invocation": claimed.id(), "version": claimed.version}).to_string(),
+        )
         .output()
         .unwrap();
         assert!(
@@ -188,7 +205,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             String::from_utf8_lossy(&decision.stderr)
         );
         let position = runtime
-            .block_on(child.store.flow_position(&child.task.id))
+            .block_on(child.store.task_flow(&child.task.id))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -196,7 +213,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             FlowDecision::Iterate
         );
         assert!(runtime
-            .block_on(child.store.flow_position(&parent.id))
+            .block_on(child.store.task_flow(&parent.id))
             .unwrap()
             .is_none());
 

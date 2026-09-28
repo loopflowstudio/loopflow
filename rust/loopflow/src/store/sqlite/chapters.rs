@@ -67,7 +67,7 @@ impl SqliteStore {
             let executing: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
                  WHERE p.wave_id=?1 AND t.external_issue_id=?2 AND (t.work_state='ready'
-                   OR EXISTS(SELECT 1 FROM task_flow_positions f WHERE f.task_id=t.id AND f.claim_json IS NOT NULL)))",
+                   OR EXISTS(SELECT 1 FROM flow_invocations f WHERE f.id=t.current_invocation_id AND f.task_id=t.id AND f.claim_json IS NOT NULL)))",
                 params![chapter.wave_id.as_str(), issue_id], |row| row.get(0),
             )?;
             if executing {

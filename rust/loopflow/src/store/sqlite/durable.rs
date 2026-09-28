@@ -12,7 +12,6 @@ use crate::store::{StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEventKind};
 use crate::work::task::{Task, TaskEventKind};
 
-use super::flows::TASK_INVOCATION;
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -1561,7 +1560,13 @@ mod durable_store_tests {
 
         // Restart closes the Task's Flow and clears the pointer; the other Flow
         // stays current, and the pointer accepts only an invocation naming X.
-        store.restart_task_flow(&task, "checkpoint").unwrap();
+        store
+            .restart_task_flow(
+                &task,
+                store.task_flow(&task.id).unwrap().as_ref(),
+                "checkpoint",
+            )
+            .unwrap();
         assert_eq!(store.task_flow(&task_id).unwrap(), None);
         assert_eq!(
             retained_invocation(&store, &managed.invocation.id).1,
@@ -1919,10 +1924,15 @@ mod durable_store_tests {
             .is_err());
         assert_eq!(
             store.task_flow(&task_id).unwrap().unwrap().claim,
-            Some(held)
+            Some(held.clone())
         );
 
-        store.restart_task_flow(&task, "checkpoint").unwrap();
+        let stopped = store
+            .release_flow(replacement.id(), held.position_version, Some(&held))
+            .unwrap();
+        store
+            .restart_task_flow(&task, Some(&stopped), "checkpoint")
+            .unwrap();
         assert!(store.task_flow(&task_id).unwrap().is_none());
         assert_eq!(
             retained_invocation(&store, &original.invocation.id),

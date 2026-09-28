@@ -89,6 +89,9 @@ Kickoff draft under review: commit `0381a195f`.
 - On the objective: "with accessible guidance instead of clear meaning
   maybe?" and "a light editing touch would be appreciated".
 
+- On parent and directory: "No. It can only live in infrastructure if
+  parent_id is infra's".
+
 ## Design changes made
 
 The table below records the first half of the review. The second half

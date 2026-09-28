@@ -5,7 +5,6 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 ## For Jack Heart
 
-1. May a Wave's parent ever differ from the directory it sits in?
 2. How should a Task know its Wave? Jack said he is unsure of the API.
 3. Should scheduled Runs stop reading `wave/` from main?
 4. Does Infrastructure's objective keep "delivers verified releases" once
@@ -13,6 +12,10 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 5. The wording of the short note that rides with Wave files.
 6. `GOAL.md` or `<NAME>.md`.
 7. May `update-wave` at a parent read its children when asked?
+
+## Settled
+
+- A Wave's parent is the Wave whose directory it sits in.
 
 ## Owed to LOO-330 and LOO-331
 

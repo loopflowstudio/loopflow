@@ -32,6 +32,11 @@ A Wave has an id, a name, and a parent.
 
 A subwave is a Wave. It has its own objective, plan, Tasks and schedule.
 
+A Wave's directory sits inside its parent's. Release lives in
+`wave/infrastructure/` only because its parent is Infrastructure. Jack Heart,
+2026-09-28. The directory is what you edit; the parent is recorded from it,
+and moving the directory is how a Wave changes parent.
+
 The id is what records point at, so renaming `infrastructure` to `infra`
 changes one row and release is untouched. Release is then reached as
 `infra/release`, because the path is worked out from names and stored nowhere.
@@ -105,9 +110,9 @@ leaves release's row alone.
 ## Watch for
 
 - **Two hierarchies.** Directories and the parent field both say who the
-  parent is. The kickoff audit found the field empty everywhere, which is why
-  nesting did nothing. The directory should be what you edit and the field
-  what gets recorded from it.
+  parent is, and they must agree. The kickoff audit found the field empty
+  everywhere, which is why nesting did nothing. Step 2 makes discovery write
+  it, so a moved directory is re-recorded and nothing has to refuse.
 - **Release files are missing on this base.** LOO-298 branched before main
   gained release memory and the `release-run` Flow file
   ([#1311](https://github.com/loopflowstudio/loopflow/pull/1311)).

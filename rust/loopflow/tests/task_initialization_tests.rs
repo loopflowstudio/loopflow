@@ -13,7 +13,7 @@ use support::{register_unrun_task, EnvGuard};
 
 #[test]
 fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
-    use loopflow::durable::{FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
+    use loopflow::durable::{FlowInvocation, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use sha2::{Digest, Sha256};
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -50,34 +50,32 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         )
         .unwrap();
         let owner: TaskWorkerOwner = serde_json::from_value(receipt).unwrap();
-        let position = FlowPosition {
-            task_id: task.task.id.clone(),
+        let position = FlowInvocation {
             invocation: loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "pursue")
                 .unwrap(),
-            session_run_id: None,
-            ready_summary: None,
             cursor: loopflow::engine::ExecutionCursor {
                 index: 3,
                 ..Default::default()
             },
             version: 0,
+            task_id: Some(task.task.id.clone()),
+            wave_id: Some(task.task.wave_id.clone()),
+            cwd: task.task.worktree.clone(),
+            message: None,
+            model: None,
+            current_attempt: None,
+            pending_session_id: None,
+            ready_summary: None,
             worker_generation: 0,
             claim: None,
             failure: None,
+            finished: false,
             updated_at: time::OffsetDateTime::now_utc(),
         };
-        let run = RunId::new();
-        let run_dir = home.path().join("runs").join(&run.as_str()[4..6]).join(run.as_str());
-        std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(run_dir.join("events.jsonl"), format!("{}\n", serde_json::json!({
-            "schema_version": 1, "seq": 0,
-            "observed_at": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
-            "type": "text", "text": "Fixture decision is active"
-        }))).unwrap();
-        let before = runtime.block_on(async {
+        let (before, run) = runtime.block_on(async {
             let position = task
                 .store
-                .set_flow_position(&task.task.id, position)
+                .start_task_flow(&task.task.id, position)
                 .await
                 .unwrap();
             let TaskWorkerClaimOutcome::Claimed(claim) = task
@@ -94,18 +92,42 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             else {
                 panic!("fixture claim")
             };
+            // The claim reserved the deciding Run; its launch publishes it.
+            let reserved = task
+                .store
+                .task_flow(&task.task.id)
+                .await
+                .unwrap()
+                .unwrap();
+            let run = reserved.current_attempt.as_ref().unwrap().run_id.clone();
             task.store
-                .bind_task_worker_run(&task.task.id, &claim, &run, &owner)
+                .publish_attempt(
+                    &position.invocation.id,
+                    reserved.version,
+                    &run,
+                    Some(&claim),
+                    "claude",
+                    Some("sonnet"),
+                )
                 .await
                 .unwrap();
-            task.store
-                .flow_position(&task.task.id)
+            let before = task
+                .store
+                .task_flow(&task.task.id)
                 .await
                 .unwrap()
-                .unwrap()
+                .unwrap();
+            (before, run)
         });
+        let run_dir = home.path().join("runs").join(&run.as_str()[4..6]).join(run.as_str());
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(run_dir.join("events.jsonl"), format!("{}\n", serde_json::json!({
+            "schema_version": 1, "seq": 0,
+            "observed_at": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
+            "type": "text", "text": "Fixture decision is active"
+        }))).unwrap();
         // The deciding Run and its recovery share one keyed unblock Session.
-        let keyed = |position: &FlowPosition| {
+        let keyed = |position: &FlowInvocation| {
             format!(
                 "ask_once_{}",
                 hex::encode(Sha256::digest(position.blocker_key().unwrap().as_bytes()))
@@ -204,7 +226,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         assert_eq!(read(&status_args)["execution"]["state"], "running");
         assert_eq!(
             runtime
-                .block_on(task.store.flow_position(&task.task.id))
+                .block_on(task.store.task_flow(&task.task.id))
                 .unwrap()
                 .unwrap(),
             before
@@ -254,7 +276,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         assert_eq!(flow["record"]["execution"], "stalled");
         assert_eq!(flow["record"]["reason"], stalled["execution"]["reason"]);
         assert!(flow["controls"].as_array().unwrap().iter().find(|control| control["kind"] == "resume").unwrap()["unavailable"].as_str().unwrap().contains("Interrupt"));
-        assert_eq!(runtime.block_on(task.store.flow_position(&task.task.id)).unwrap().unwrap(), before);
+        assert_eq!(runtime.block_on(task.store.task_flow(&task.task.id)).unwrap().unwrap(), before);
         Ok(())
     })
     .unwrap();
@@ -273,28 +295,42 @@ fn task_agent_cli_resume_persists_choice_and_reports_it_on_later_reads() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let position = loopflow::durable::FlowPosition {
-        task_id: task.task.id.clone(),
+    let position = loopflow::durable::FlowInvocation {
         invocation: loopflow::engine::invocation::QueuedInvocation::load(
             repo.path(),
             "task-design",
         )
         .unwrap(),
-        session_run_id: None,
-        ready_summary: None,
         cursor: loopflow::engine::ExecutionCursor {
             index: 1,
             ..Default::default()
         },
         version: 0,
+        task_id: Some(task.task.id.clone()),
+        wave_id: Some(task.task.wave_id.clone()),
+        cwd: task.task.worktree.clone(),
+        message: None,
+        model: None,
+        current_attempt: None,
+        pending_session_id: None,
+        ready_summary: None,
         worker_generation: 0,
         claim: None,
         failure: None,
+        finished: false,
         updated_at: time::OffsetDateTime::now_utc(),
     };
-    runtime
-        .block_on(task.store.set_flow_position(&task.task.id, position))
-        .unwrap();
+    runtime.block_on(async {
+        let parked = task
+            .store
+            .start_task_flow(&task.task.id, position)
+            .await
+            .unwrap();
+        task.store
+            .reserve_task_review(parked.id(), parked.version)
+            .await
+            .unwrap();
+    });
     let run = |args: &[&str]| {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)

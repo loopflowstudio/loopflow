@@ -2,7 +2,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::{FlowInvocation, FlowPosition, RunId, TaskId};
+use crate::durable::{FlowInvocation, RunId, TaskId};
 use crate::engine::ExecutionCursor;
 use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
@@ -77,11 +77,13 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<(Ses
 }
 
 impl SqliteStore {
-    pub fn reserve_review_run(&self, expected: &FlowPosition) -> StoreResult<(FlowPosition, Run)> {
+    pub fn reserve_review_run(
+        &self,
+        expected: &FlowInvocation,
+    ) -> StoreResult<(FlowInvocation, Run)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::durable::flow_position_in(&tx, &expected.task_id)?
-            .ok_or(StoreError::NotFound)?;
+        let current = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
         if current != *expected || current.claim.is_some() || current.failure.is_some() {
             return Err(StoreError::InvalidAuthority(
                 "review changed before Run reservation".into(),
@@ -94,11 +96,6 @@ impl SqliteStore {
         }
         if run.published {
             let replacement = RunId::new();
-            let cwd: String = tx.query_row(
-                "SELECT worktree FROM tasks WHERE id=?1",
-                [expected.task_id.as_str()],
-                |row| row.get(0),
-            )?;
             super::runs::insert_run_in(
                 &tx,
                 Run {
@@ -106,7 +103,7 @@ impl SqliteStore {
                     node: None,
                     iterations: None,
                     attempt: None,
-                    cwd: cwd.into(),
+                    cwd: expected.cwd.clone(),
                     published: false,
                     created_at: crate::store::rows::now_unix(),
                     work_source: Some(WorkSource::Inherited),
@@ -119,15 +116,15 @@ impl SqliteStore {
             )?;
             tx.execute(
                 "UPDATE flow_invocations SET position_version=position_version+1 WHERE id=?1",
-                [&expected.invocation.id],
+                [expected.id()],
             )?;
         }
-        let position = super::durable::flow_position_in(&tx, &expected.task_id)?
-            .ok_or(StoreError::NotFound)?;
+        let flow = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
         let (_, run) = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
-        super::runs::select_attempt_in(&tx, &position.invocation.id, position.version, &run.id)?;
+        super::runs::select_attempt_in(&tx, flow.id(), flow.version, &run.id)?;
+        let flow = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
-        Ok((position, run))
+        Ok((flow, run))
     }
 
     pub(crate) fn publish_review_run(
@@ -330,18 +327,6 @@ impl SqliteStore {
         .transpose()
     }
 
-    /// A saved Flow ended; its reviews stay as history.
-    pub fn end_flow(&self, invocation: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE flow_invocations SET state='completed', ended_at=?2
-             WHERE id=?1 AND state='current'
-             AND NOT EXISTS(SELECT 1 FROM tasks WHERE current_invocation_id=?1)",
-            params![invocation, crate::store::rows::now_unix()],
-        )?;
-        Ok(())
-    }
-
     /// Completion closes the Session; its Runs and provider history remain.
     /// An Ask or review closes only with the feedback its caller waits for.
     /// A Task review closes inside its invocation's transaction instead.
@@ -427,8 +412,12 @@ impl SqliteStore {
     }
 }
 
-pub(super) fn review_id(position: &FlowPosition) -> StoreResult<String> {
-    let step = position
+pub(super) fn review_id(flow: &FlowInvocation) -> StoreResult<String> {
+    let task = flow
+        .task_id
+        .as_ref()
+        .ok_or_else(|| invalid("review belongs to no Task"))?;
+    let step = flow
         .current_checked()
         .ok_or_else(|| invalid("review has no captured step"))?;
     let node = step
@@ -437,124 +426,81 @@ pub(super) fn review_id(position: &FlowPosition) -> StoreResult<String> {
         .ok_or_else(|| invalid("review has no captured node"))?;
     Ok(format!(
         "{}:{}:{}:{}:{}",
-        position.task_id, position.invocation.id, step.flow, node, position.cursor.iteration
+        task, flow.invocation.id, step.flow, node, flow.cursor.iteration
     ))
 }
 
-/// Called only inside the already fenced invocation mutation transaction.
-pub(super) fn save_review_in(conn: &Transaction<'_>, position: &FlowPosition) -> StoreResult<()> {
-    if !position.is_human() {
-        conn.execute(
-            "UPDATE flow_invocations SET pending_session_id=NULL WHERE id=?1",
-            [&position.invocation.id],
-        )?;
-        conn.execute(
-            "UPDATE flow_invocations SET current_run_id=NULL WHERE id=?1 AND NOT EXISTS(
-                SELECT 1 FROM runs r WHERE r.id=current_run_id AND r.node=?2 AND r.iterations=?3)",
-            params![
-                position.invocation.id,
-                position
-                    .invocation
-                    .node_id(&position.cursor)
-                    .map_err(invalid)?,
-                serde_json::to_string(&crate::engine::flow_graph::flow_iterations(
-                    &position.invocation.steps,
-                    &position.cursor
-                ))?
-            ],
-        )?;
-        return Ok(());
+/// Store the review Session a Task's Flow parks at, with its first Run
+/// reserved. Parking at the same review again finds the Session it left.
+pub(super) fn reserve_task_review_in(
+    conn: &Transaction<'_>,
+    flow: &FlowInvocation,
+) -> StoreResult<()> {
+    if !flow.is_human() {
+        return Err(StoreError::InvalidAuthority(
+            "only a review position reserves a review Session".into(),
+        ));
     }
-    let id = review_id(position)?;
-    if let Some((session, _)) = session_in(conn, &id)? {
-        if session.completed_at.is_some() {
+    let id = review_id(flow)?;
+    match session_in(conn, &id)? {
+        Some((session, _)) if session.completed_at.is_some() => {
             return Err(StoreError::InvalidAuthority(
                 "completed review cannot be reopened by a cursor write".into(),
             ));
         }
-    } else {
-        let run_id = position.session_run_id.clone().unwrap_or_default();
-        let title: String = conn.query_row(
-            "SELECT issue_title FROM tasks WHERE id=?1",
-            [position.task_id.as_str()],
-            |row| row.get(0),
-        )?;
-        conn.execute(
-            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,ready_summary,created_at)
-            VALUES(?1,?2,'flow_review',?3,'generated',?4,?5)",
-            params![
-                id,
-                run_id.as_str(),
-                title,
-                position.ready_summary,
-                position.updated_at.unix_timestamp()
-            ],
-        )?;
-        insert_review_run_in(
-            conn,
-            &run_id,
-            &id,
-            position,
-            position.session_run_id.is_some(),
-        )?;
+        Some(_) => {}
+        None => {
+            let run_id = RunId::new();
+            let title: String = conn.query_row(
+                "SELECT issue_title FROM tasks WHERE id=?1",
+                [flow.task_id.as_ref().map(TaskId::as_str)],
+                |row| row.get(0),
+            )?;
+            conn.execute(
+                "INSERT INTO sessions(id,current_run_id,kind,title,title_source,created_at)
+                VALUES(?1,?2,'flow_review',?3,'generated',?4)",
+                params![id, run_id.as_str(), title, crate::store::rows::now_unix()],
+            )?;
+            super::runs::insert_run_in(
+                conn,
+                Run {
+                    id: run_id,
+                    session_id: Some(id.clone()),
+                    invocation_id: Some(flow.id().to_owned()),
+                    node: None,
+                    iterations: None,
+                    attempt: None,
+                    task_id: flow.task_id.clone(),
+                    wave_id: flow.wave_id.clone(),
+                    work_source: Some(WorkSource::Inherited),
+                    created_at: crate::store::rows::now_unix(),
+                    published: false,
+                    cwd: flow.cwd.clone(),
+                    skill: Some(flow.current().step),
+                    provider: None,
+                    model: None,
+                    caller_run_id: None,
+                    ended: None,
+                },
+            )?;
+        }
     }
-    conn.execute(
-        "UPDATE flow_invocations SET pending_session_id=?2 WHERE id=?1",
-        params![position.invocation.id, id],
-    )?;
+    if conn.execute(
+        "UPDATE flow_invocations SET pending_session_id=?2
+         WHERE id=?1 AND state='current' AND position_version=?3 AND claim_json IS NULL",
+        params![flow.id(), id, i64::try_from(flow.version).map_err(invalid)?],
+    )? != 1
+    {
+        return Err(StoreError::InvalidAuthority(
+            "review position changed before its Session was reserved".into(),
+        ));
+    }
     let (_, run) = session_in(conn, &id)?.ok_or(StoreError::NotFound)?;
-    let version: i64 = conn.query_row(
-        "SELECT position_version FROM flow_invocations WHERE id=?1",
-        [&position.invocation.id],
-        |row| row.get(0),
-    )?;
-    super::runs::select_attempt_in(
-        conn,
-        &position.invocation.id,
-        u64::try_from(version).map_err(invalid)?,
-        &run.id,
-    )?;
+    super::runs::select_attempt_in(conn, flow.id(), flow.version, &run.id)?;
     Ok(())
 }
 
-fn insert_review_run_in(
-    conn: &Transaction<'_>,
-    id: &RunId,
-    session_id: &str,
-    position: &FlowPosition,
-    published: bool,
-) -> StoreResult<()> {
-    let cwd: String = conn.query_row(
-        "SELECT worktree FROM tasks WHERE id=?1",
-        [position.task_id.as_str()],
-        |row| row.get(0),
-    )?;
-    super::runs::insert_run_in(
-        conn,
-        Run {
-            id: id.clone(),
-            session_id: Some(session_id.to_owned()),
-            invocation_id: Some(position.invocation.id.clone()),
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id: Some(position.task_id.clone()),
-            wave_id: None,
-            work_source: Some(WorkSource::Inherited),
-            created_at: position.updated_at.unix_timestamp(),
-            published,
-            cwd: cwd.into(),
-            skill: Some(position.current().step),
-            provider: None,
-            model: None,
-            caller_run_id: None,
-            ended: None,
-        },
-    )?;
-    Ok(())
-}
-
-pub(super) fn complete_review_in(conn: &Connection, expected: &FlowPosition) -> StoreResult<()> {
+pub(super) fn complete_review_in(conn: &Connection, expected: &FlowInvocation) -> StoreResult<()> {
     let id = review_id(expected)?;
     let summary = expected
         .ready_summary
@@ -562,10 +508,9 @@ pub(super) fn complete_review_in(conn: &Connection, expected: &FlowPosition) -> 
         .filter(|summary| !summary.trim().is_empty())
         .ok_or_else(|| StoreError::InvalidAuthority("review is not ready".into()))?;
     let run_id = expected
-        .session_run_id
-        .as_ref()
+        .session_run_id()
         .ok_or_else(|| StoreError::InvalidAuthority("review has no published Run".into()))?;
-    super::runs::require_attempt_in(conn, &expected.invocation.id, run_id)?;
+    super::runs::require_attempt_in(conn, expected.id(), run_id)?;
     if conn.execute(
         "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
         AND completed_at IS NULL AND ready_summary IS ?4",

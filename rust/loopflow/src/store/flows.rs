@@ -1,4 +1,9 @@
-use crate::durable::{FlowInvocation, RunId};
+use time::OffsetDateTime;
+
+use crate::durable::{
+    FlowInvocation, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
+    TaskWorkerOwner,
+};
 use crate::engine::transitions::FlowVerdict;
 use crate::engine::ExecutionCursor;
 
@@ -9,9 +14,26 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.create_flow(&flow)).await
     }
 
+    pub async fn start_task_flow(
+        &self,
+        task_id: &TaskId,
+        flow: FlowInvocation,
+    ) -> StoreResult<FlowInvocation> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.start_task_flow(&task_id, &flow)
+        })
+        .await
+    }
+
     pub async fn flow(&self, id: &str) -> StoreResult<Option<FlowInvocation>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.flow(&id)).await
+    }
+
+    pub async fn task_flow(&self, task_id: &TaskId) -> StoreResult<Option<FlowInvocation>> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_flow(&task_id)).await
     }
 
     pub async fn recover_flow(&self, id: &str) -> StoreResult<FlowInvocation> {
@@ -19,9 +41,72 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.recover_flow(&id)).await
     }
 
-    pub async fn retry_flow(&self, id: &str) -> StoreResult<FlowInvocation> {
+    pub async fn reserve_attempt(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowInvocation> {
         let id = id.to_string();
-        run_sqlite(&self.sqlite, move |store| store.retry_flow(&id)).await
+        let claim = claim.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_attempt(&id, version, claim.as_ref())
+        })
+        .await
+    }
+
+    pub async fn publish_attempt(
+        &self,
+        id: &str,
+        version: u64,
+        run: &RunId,
+        claim: Option<&TaskWorkerClaim>,
+        provider: &str,
+        model: Option<&str>,
+    ) -> StoreResult<()> {
+        let id = id.to_string();
+        let run = run.clone();
+        let claim = claim.cloned();
+        let provider = provider.to_string();
+        let model = model.map(str::to_owned);
+        run_sqlite(&self.sqlite, move |store| {
+            store.publish_attempt(
+                &id,
+                version,
+                &run,
+                claim.as_ref(),
+                &provider,
+                model.as_deref(),
+            )
+        })
+        .await
+    }
+
+    pub async fn retry_flow(
+        &self,
+        id: &str,
+        direction: Option<&str>,
+    ) -> StoreResult<FlowInvocation> {
+        let id = id.to_string();
+        let direction = direction.map(str::to_owned);
+        run_sqlite(&self.sqlite, move |store| {
+            store.retry_flow(&id, direction.as_deref())
+        })
+        .await
+    }
+
+    pub async fn release_flow(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowInvocation> {
+        let id = id.to_string();
+        let claim = claim.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.release_flow(&id, version, claim.as_ref())
+        })
+        .await
     }
 
     pub async fn checkpoint_flow(
@@ -29,20 +114,108 @@ impl Store {
         id: &str,
         version: u64,
         cursor: &ExecutionCursor,
+        claim: Option<&TaskWorkerClaim>,
+        progress: Option<&str>,
     ) -> StoreResult<u64> {
         let id = id.to_string();
         let cursor = cursor.clone();
+        let claim = claim.cloned();
+        let progress = progress.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.checkpoint_flow(&id, version, &cursor)
+            store.checkpoint_flow(&id, version, &cursor, claim.as_ref(), progress.as_deref())
         })
         .await
     }
 
-    pub async fn fail_flow(&self, id: &str, version: u64, reason: &str) -> StoreResult<()> {
+    pub async fn fail_flow(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+        failure: &TaskFlowBlocker,
+    ) -> StoreResult<FlowInvocation> {
         let id = id.to_string();
-        let reason = reason.to_string();
+        let claim = claim.cloned();
+        let failure = failure.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.fail_flow(&id, version, &reason)
+            store.fail_flow(&id, version, claim.as_ref(), &failure)
+        })
+        .await
+    }
+
+    pub async fn end_flow(
+        &self,
+        id: &str,
+        claim: Option<&TaskWorkerClaim>,
+        summary: &str,
+    ) -> StoreResult<()> {
+        let id = id.to_string();
+        let claim = claim.cloned();
+        let summary = summary.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.end_flow(&id, claim.as_ref(), &summary)
+        })
+        .await
+    }
+
+    pub async fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowInvocation> {
+        let id = id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_task_review(&id, version)
+        })
+        .await
+    }
+
+    pub async fn complete_task_review(
+        &self,
+        task_id: &TaskId,
+        expected: &FlowInvocation,
+        summary: &str,
+    ) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        let summary = summary.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_task_review(&task_id, &expected, &summary)
+        })
+        .await
+    }
+
+    pub async fn claim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected_invocation: &str,
+        expected_version: u64,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaimOutcome> {
+        let task_id = task_id.clone();
+        let expected_invocation = expected_invocation.to_string();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_task_worker(
+                &task_id,
+                &expected_invocation,
+                expected_version,
+                &owner,
+                claimed_at,
+            )
+        })
+        .await
+    }
+
+    pub async fn reclaim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reclaim_task_worker(&task_id, &expected, &owner, claimed_at)
         })
         .await
     }

@@ -76,31 +76,32 @@ execution. `lf flow route PATH` records a selection under the active Run's exact
 authority; successful settlement enters the captured path. Recovery does not
 reload the catalog or read a shared scratch routing file.
 
-Task and ordinary drivers share
+Task and ordinary Flows use the same `CliFlowExecutor` and
 [`ExecutionCursor::finish`](../../rust/loopflow/src/engine/execution.rs) for
 navigation, selected-path entry and parent return. `RepeatPolicy` contains only
 `from`: Iterate follows that edge, Advance moves forward, and descriptive pass
 counts impose no limit. Direction persists through implicit forward movement
 until an explicit Advance clears it.
 
-The persistence owners remain separate:
+`FlowInvocation` reads the captured definition, cursor, launch facts, current
+attempt and failure from `flow_invocations`. `position_version` fences the cursor,
+`current_run_id` the attempt, and a managed Task's `claim_json` its worker.
+`flows/<UUID>/driver.lock` serializes drivers. A Task invocation stores no cwd;
+the joined reader uses `tasks.worktree`. Other invocations store their launch cwd.
 
-| Invocation | Saved position | Settlement authority |
-| --- | --- | --- |
-| Managed Task Flow | `FlowPosition` holds the captured invocation and full cursor; SQLite `review_json` stores the cursor tree, with root `step_index`/`iteration` projections | Versioned Task claim and existing domain transactions |
-| Saved Flow, optionally attributed to Work | The same `flow_invocations` row, read as `FlowInvocation`: definition, cursor, launch facts (`cwd`, `message`, `model`, `task_id`, `wave_id`), current attempt Run and failure | `position_version` fences the cursor, `current_run_id` the attempt; `flows/<UUID>/driver.lock` serializes drivers |
+Resume an invocation with `lf flow resume <UUID>`. For the invocation a Task
+points at, this uses Task resume, preserving agent choice and unblock feedback.
+A helper Flow attributed to a Task keeps its own cursor. Selecting a different
+Flow with `lf task run --flow` replaces the managed invocation once its worker
+has stopped. Completion retains the finished invocation, clears the Task's
+pointer and records `FlowFinished`; it selects no successor and does not mark
+Task Work done.
 
-Resume an ordinary invocation with `lf flow resume <UUID>`. A helper Flow
-attributed to a Task keeps its own position; attribution cannot move the managed
-Task cursor. Task Flow completion removes the active position and records
-`FlowFinished`; ordinary completion retains its finished record. Neither selects
-another Flow or marks Task Work done.
-
-Both adapters expose durable human Flow Sessions, including in headless runs.
-Complete ends the exact review and carries its saved feedback to the next step.
-A following loop-decide chooses Advance or Iterate through its authored edge.
-Agent readiness and provider exit leave the review waiting. Source inspection
-establishes this implementation path, not a live desktop/provider handoff proof.
+Human Flow Sessions use the same invocation record. Complete ends the exact
+review and carries its saved feedback to the next step. A following loop-decide
+chooses Advance or Iterate through its authored edge. Agent readiness and provider
+exit leave the review waiting. Source inspection establishes this path, not a
+live desktop/provider handoff proof.
 
 ## Run one Work boundary
 
@@ -164,7 +165,7 @@ make Work “running.” Reopen returns the same stable Work to `Ready` after
 clearing transient input defined by that domain.
 
 The Task Flow version prevents an older worker from rolling progress backward.
-Domain-specific races use narrower fences: exact review FlowPosition tokens, PR
+Domain-specific races use narrower fences: exact review invocation snapshots, PR
 heads, landing generations, or OS locks.
 
 ## Steer
@@ -199,8 +200,7 @@ a decision from the user: it blocks the originating Run while a durable TUI agen
 its checkout. Agent readiness leaves the session visible. Complete closes that
 conversation and resumes the originating Run with the ready summary.
 
-A human FlowStep uses the position already owned by Task `FlowPosition` or a
-saved Flow's `FlowInvocation` row. Its Session opens the captured Skill and
+A human FlowStep uses its `FlowInvocation` row. Its Session opens the captured Skill and
 binds the provider Run to that exact step. A saved Flow's review Session has an
 opaque `session_<uuid>` id and is linked through `pending_session_id` on the
 invocation row; Task tokens retain their Task/invocation/node/skill/iteration
@@ -216,7 +216,7 @@ Review completion persists before successor launch and provider teardown.
 Its feedback reaches the next step through the cursor's direction. The following
 loop-decide chooses Advance or Iterate using its own explicit edge. Readiness
 and provider exit do not complete a review; Ask Complete returns to the blocked
-caller. Both Flow adapters and
+caller. Flow reviews and
 Asks project through `SessionRecord`, using `flow` and `ask` kinds. The Mac app
 uses the shared Session surface and provider-native history; it owns no second
 Session state. A thin detached PTY cradle keeps the initial provider client

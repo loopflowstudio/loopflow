@@ -106,7 +106,7 @@ work      ⇏ task worker
 ```
 
 Keep these directions literal. Work types own Project/Task domain progression;
-the Task worker joins them with the exact `FlowPosition` claim.
+the Task worker joins them with the exact `FlowInvocation` worker claim.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 

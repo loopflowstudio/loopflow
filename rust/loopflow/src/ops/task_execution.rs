@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{FlowPosition, RunId, TaskId};
+use crate::durable::{FlowInvocation, RunId, TaskId};
 use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
 use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
@@ -40,7 +40,7 @@ pub(crate) async fn task_execution_and_flow(
     store: &SharedStore,
     task_id: &TaskId,
 ) -> StoreResult<(TaskExecutionSnapshot, TaskFlowRecord)> {
-    let position = store.flow_position(task_id).await?;
+    let position = store.task_flow(task_id).await?;
     let evidence = position
         .as_ref()
         .and_then(|position| position.claim.as_ref())
@@ -103,7 +103,7 @@ pub(crate) async fn task_execution_and_flow(
 }
 
 fn project_execution(
-    position: Option<&FlowPosition>,
+    position: Option<&FlowInvocation>,
     evidence: Option<ProcessIdentityEvidence>,
 ) -> TaskExecutionSnapshot {
     let Some(position) = position else {
@@ -115,17 +115,12 @@ fn project_execution(
         };
     };
     let step = position.current();
-    let run_id = position
-        .claim
-        .as_ref()
-        .and_then(|claim| claim.worker_run_id.clone())
-        .or_else(|| {
-            position
-                .failure
-                .as_ref()
-                .and_then(|failure| failure.run_id.clone())
-        })
-        .or_else(|| position.session_run_id.clone());
+    let run_id = position.session_run_id().cloned().or_else(|| {
+        position
+            .failure
+            .as_ref()
+            .and_then(|failure| failure.run_id.clone())
+    });
     let (state, reason) = if let Some(failure) = &position.failure {
         (
             TaskExecutionState::Blocked,
@@ -184,7 +179,8 @@ fn project_execution(
 mod tests {
     use super::{project_execution, TaskExecutionSnapshot, TaskExecutionState};
     use crate::durable::{
-        test_flow_invocation, FlowPosition, RunId, TaskId, TaskWorkerClaim, TaskWorkerOwner,
+        test_flow_invocation, FlowAttempt, FlowInvocation, RunId, TaskId, TaskWorkerClaim,
+        TaskWorkerOwner,
     };
     use crate::id::{ExecId, TraceId};
     use crate::journal::ProcessIdentityEvidence;
@@ -192,21 +188,26 @@ mod tests {
 
     #[test]
     fn worker_liveness_is_separate_from_durable_ready_work() {
-        let mut position = FlowPosition {
-            task_id: TaskId::new(),
+        let mut position = FlowInvocation {
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
-            session_run_id: None,
-            ready_summary: None,
             cursor: crate::engine::ExecutionCursor {
                 index: 0,
                 iteration: 0,
                 ..Default::default()
             },
             version: 1,
+            task_id: Some(TaskId::new()),
+            wave_id: None,
+            cwd: "/repo".into(),
+            message: None,
+            model: None,
+            current_attempt: None,
+            pending_session_id: None,
+            ready_summary: None,
             worker_generation: 0,
             claim: None,
             failure: None,
-
+            finished: false,
             updated_at: OffsetDateTime::now_utc(),
         };
         assert_eq!(
@@ -227,8 +228,12 @@ mod tests {
                 pid: 123,
                 started_at: 1,
             },
-            worker_run_id: Some(RunId::new()),
             claimed_at: OffsetDateTime::now_utc(),
+        });
+        position.current_attempt = Some(FlowAttempt {
+            run_id: RunId::new(),
+            published: true,
+            outcome: None,
         });
         assert_eq!(
             project_execution(Some(&position), Some(ProcessIdentityEvidence::Live)).state,

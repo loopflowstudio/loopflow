@@ -696,3 +696,39 @@ unblock Session, as on main.
 
 **Verdict message.** The shared verdict writer says main's "review evidence
 cannot be empty"; H2's "decision requires evidence or direction" went.
+
+## H3 recovery choices (2026-09-27)
+
+Jack requested Codex finish the stopped H3 worker's useful edits in the same
+checkout, checkpoint locally with `lf commit`, and leave rebase/review-slice to
+the supervisor. The ignored backup and exact proof are recorded in
+[the H3 ledger](cutover/cut-h-one-flow-driver.md#2026-09-27--h3--one-tasksaved-flow-executor).
+These implementation choices are Codex's, not new approval attributed to Jack:
+
+- Keep exact existing claims across the new draft; remove only their redundant
+  `worker_run_id` field. The stopped draft's blanket claim release failed a
+  populated preservation test and is withdrawn.
+- Task invocations store NULL cwd and read the Task worktree through the common
+  SELECT. `lf flow resume` for the pointed-at invocation routes through Task
+  resume so agent selection, feedback and restart-only blockers remain owned
+  by the Task; `--retry` grants no bypass.
+- Selecting a different Flow replaces the unclaimed managed root. A held claim
+  requires stopping the worker first. Choosing the same Flow resumes it. Other
+  attributed invocations survive. Runtime child invocation trees are still a
+  full-design obligation, not implemented or claimed by H3.
+- Started observations are projected from the column into chat, with stable
+  deduplication identity and no governance wake, including on replay. Historical
+  Started events remain readable and protect Chapter retirement; they do not
+  redefine current Started or justify inventing a Run.
+- The real CLI proof uses a mechanical Task step and private Home. It proves
+  reservation, Started projection, source-independent execution and Task resume
+  policy; it does not prove a configured provider or installed acceptance.
+- `runs` continues to list published launches. Reservations count as Task
+  Started before publication; the new proof checks that fact through roadmap.
+
+The migration checker now sees a released 0.12.23 batch on origin/main that is
+absent here. Preserve the branch's draft and let the supervisor reconcile it by
+rebase; the hypothetical canonical test batch is not that released file. The
+known `wave_chapters` architecture gap remains H7, whose accepted design is
+[chapters.md](chapters.md). No install, publication, Cut I or H4 is authorized by
+this H3 checkpoint.

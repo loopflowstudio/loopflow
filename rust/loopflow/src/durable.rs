@@ -127,91 +127,6 @@ pub struct Placement {
     pub placed_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowPosition {
-    pub task_id: TaskId,
-    pub invocation: QueuedInvocation,
-    pub session_run_id: Option<RunId>,
-    pub ready_summary: Option<String>,
-    pub cursor: crate::engine::ExecutionCursor,
-    pub version: u64,
-    pub worker_generation: u64,
-    pub claim: Option<TaskWorkerClaim>,
-    pub failure: Option<TaskFlowBlocker>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub updated_at: OffsetDateTime,
-}
-
-impl FlowPosition {
-    pub fn is_decision(&self) -> bool {
-        matches!(self.current_plan(), ConcreteStep::Xor(_))
-            || self.current().policy.repeat.is_some()
-    }
-
-    pub fn has_pending_decision(&self) -> bool {
-        let leaf = self.cursor.leaf();
-        (self.current().policy.repeat.is_some() && leaf.progress.verdict.is_some())
-            || (matches!(self.current_plan(), crate::engine::ConcreteStep::Xor(_))
-                && leaf.route.is_some())
-    }
-
-    pub fn work(&self) -> WorkRef {
-        WorkRef::Task(self.task_id.clone())
-    }
-
-    /// The unblock Ask key of this position's decision (`flow:<invocation>:…`).
-    pub fn blocker_key(&self) -> anyhow::Result<String> {
-        self.invocation.blocker_key(&self.cursor)
-    }
-
-    pub fn current_plan(&self) -> &crate::engine::ConcreteStep {
-        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
-        steps
-            .get(cursor.index)
-            .expect("a persisted Flow position always selects a validated step")
-    }
-
-    pub fn current_checked(&self) -> Option<crate::engine::invocation::StepRef> {
-        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
-        let (step, kind, policy) = match steps.get(cursor.index)? {
-            ConcreteStep::Skill(skill) => (
-                skill.skill.name.clone(),
-                StepKind::Skill,
-                skill.policy.clone(),
-            ),
-            ConcreteStep::Op(op) => (
-                op.item.display_name(),
-                StepKind::Op,
-                OccurrencePolicy::default(),
-            ),
-            ConcreteStep::Xor(branch) => (
-                branch.router.name.clone(),
-                StepKind::Xor,
-                OccurrencePolicy::default(),
-            ),
-        };
-        Some(StepRef {
-            invocation_id: self.invocation.id.clone(),
-            flow: self.invocation.flow.clone(),
-            step,
-            kind,
-            policy,
-            index: u32::try_from(self.cursor.index).ok()?,
-            total: u32::try_from(self.invocation.steps.len()).ok()?,
-            iteration: self.cursor.iteration,
-        })
-    }
-
-    pub fn current(&self) -> crate::engine::invocation::StepRef {
-        self.current_checked()
-            .expect("a persisted Flow position always selects a validated step")
-    }
-
-    pub fn is_human(&self) -> bool {
-        self.current().policy.human
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn test_flow_invocation(
     flow: &str,
@@ -256,7 +171,6 @@ pub struct TaskWorkerClaim {
     pub generation: u64,
     pub position_version: u64,
     pub owner: TaskWorkerOwner,
-    pub worker_run_id: Option<RunId>,
     #[serde(with = "time::serde::rfc3339")]
     pub claimed_at: OffsetDateTime,
 }
@@ -281,18 +195,26 @@ impl TaskFlowBlocker {
     }
 }
 
-/// The current attempt at an invocation's cursor: its Run and, once the Run
-/// settled, the Run's outcome.
+/// The current attempt at an invocation's cursor: its Run, whether the launch
+/// published it, and once the Run settled, its outcome. A reserved attempt
+/// is a row with `published=0`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowAttempt {
     pub run_id: RunId,
+    pub published: bool,
     pub outcome: Option<String>,
 }
 
+impl FlowAttempt {
+    pub fn completed(&self) -> bool {
+        self.outcome.as_deref() == Some("completed")
+    }
+}
+
 /// One Flow invocation as its row holds it: the captured graph, the cursor,
-/// the launch facts, the current attempt and the failure. A saved Flow is
-/// driven from this record alone; a Task's own invocation is read through
-/// [`FlowPosition`].
+/// the launch facts, the current attempt, the worker claim and the failure. A
+/// Task's own invocation and a saved Flow are the same record driven by the
+/// same executor; a Task's `cwd` is its worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowInvocation {
     pub invocation: QueuedInvocation,
@@ -305,8 +227,13 @@ pub struct FlowInvocation {
     pub model: Option<String>,
     pub current_attempt: Option<FlowAttempt>,
     pub pending_session_id: Option<String>,
+    /// The pending review's feedback once its agent ran `lf session ready`.
+    pub ready_summary: Option<String>,
+    pub worker_generation: u64,
+    pub claim: Option<TaskWorkerClaim>,
     pub failure: Option<TaskFlowBlocker>,
     pub finished: bool,
+    pub updated_at: OffsetDateTime,
 }
 
 impl FlowInvocation {
@@ -319,8 +246,68 @@ impl FlowInvocation {
         steps.get(cursor.index)
     }
 
+    pub fn current_plan(&self) -> &ConcreteStep {
+        self.current_step()
+            .expect("a persisted Flow position always selects a validated step")
+    }
+
+    pub fn current_checked(&self) -> Option<StepRef> {
+        let (step, kind, policy) = match self.current_step()? {
+            ConcreteStep::Skill(skill) => (
+                skill.skill.name.clone(),
+                StepKind::Skill,
+                skill.policy.clone(),
+            ),
+            ConcreteStep::Op(op) => (
+                op.item.display_name(),
+                StepKind::Op,
+                OccurrencePolicy::default(),
+            ),
+            ConcreteStep::Xor(branch) => (
+                branch.router.name.clone(),
+                StepKind::Xor,
+                OccurrencePolicy::default(),
+            ),
+        };
+        Some(StepRef {
+            invocation_id: self.invocation.id.clone(),
+            flow: self.invocation.flow.clone(),
+            step,
+            kind,
+            policy,
+            index: u32::try_from(self.cursor.index).ok()?,
+            total: u32::try_from(self.invocation.steps.len()).ok()?,
+            iteration: self.cursor.iteration,
+        })
+    }
+
+    pub fn current(&self) -> StepRef {
+        self.current_checked()
+            .expect("a persisted Flow position always selects a validated step")
+    }
+
     pub fn is_human(&self) -> bool {
         matches!(self.current_step(), Some(ConcreteStep::Skill(skill)) if skill.policy.human)
+    }
+
+    pub fn is_decision(&self) -> bool {
+        match self.current_step() {
+            Some(ConcreteStep::Xor(_)) => true,
+            Some(ConcreteStep::Skill(skill)) => skill.policy.repeat.is_some(),
+            _ => false,
+        }
+    }
+
+    /// A decision or route its Run recorded that the driver has not settled.
+    pub fn has_pending_decision(&self) -> bool {
+        let leaf = self.cursor.leaf();
+        match self.current_step() {
+            Some(ConcreteStep::Skill(skill)) => {
+                skill.policy.repeat.is_some() && leaf.progress.verdict.is_some()
+            }
+            Some(ConcreteStep::Xor(_)) => leaf.route.is_some(),
+            _ => false,
+        }
     }
 
     /// The name a step is reported by.
@@ -330,6 +317,19 @@ impl FlowInvocation {
             ConcreteStep::Op(op) => format!("op: {}", op.item.display_name()),
             ConcreteStep::Xor(branch) => branch.router.name.clone(),
         })
+    }
+
+    /// The unblock Ask key of this position's decision (`flow:<invocation>:…`).
+    pub fn blocker_key(&self) -> anyhow::Result<String> {
+        self.invocation.blocker_key(&self.cursor)
+    }
+
+    /// The Run a pending review's agent is running in, once launched.
+    pub fn session_run_id(&self) -> Option<&RunId> {
+        self.current_attempt
+            .as_ref()
+            .filter(|attempt| attempt.published)
+            .map(|attempt| &attempt.run_id)
     }
 
     /// The Work the Flow was launched with, as its Runs declare it.

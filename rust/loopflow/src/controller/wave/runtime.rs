@@ -48,7 +48,7 @@ use crate::controller::wave::journal::{
 use crate::controller::wave::state::{can_transition, LoopState};
 use crate::controller::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
 use crate::work::project::ProjectObservation;
-use crate::work::task::TaskObservation;
+use crate::work::task::{TaskEventKind, TaskObservation};
 use crate::work::wave::config::read_wave_config;
 use crate::work::wave::PromotionWake;
 
@@ -1040,10 +1040,13 @@ impl WaveRuntime {
             crate::chat::turns::ChildControlActivity::from_task(&observation),
         );
         self.commit_locked(&mut inner, turn);
-        inner.messages.insert(pending.id.clone(), pending.clone());
         inner.tasks.insert(pending.id.clone(), observation.clone());
-        inner.pending_messages.push(pending);
-        let _ = self.inbox_tx.send(InboxItem::Task(observation));
+        // First assignment is display evidence, not a governance wake.
+        if !matches!(observation.event, TaskEventKind::Started) {
+            inner.messages.insert(pending.id.clone(), pending.clone());
+            inner.pending_messages.push(pending);
+            let _ = self.inbox_tx.send(InboxItem::Task(observation));
+        }
         true
     }
 
@@ -1911,6 +1914,33 @@ mod tests {
         assert_eq!(msg.id, MessageId(msg_id(&turn)));
         // Chat is observed via the live broadcast, not queued as pending input.
         assert!(rt.pending_messages().is_empty());
+    }
+
+    #[test]
+    fn projected_task_start_renders_once_without_scheduling_work_on_replay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rt = open_runtime(tmp.path());
+        let mut inbox = rt.subscribe_inbox();
+        let observation = crate::work::task::TaskObservation {
+            task_id: crate::work::task::TaskId::from_raw("task_started"),
+            issue_identifier: "INF-123".into(),
+            event_id: 0,
+            event: crate::work::task::TaskEventKind::Started,
+        };
+        assert!(rt.deliver_task_observation(observation.clone()));
+        assert!(!rt.deliver_task_observation(observation.clone()));
+        assert!(inbox.try_recv().is_err());
+        assert!(rt.pending_messages().is_empty());
+        drop(rt);
+        let replayed = open_runtime(tmp.path());
+        assert!(!replayed.deliver_task_observation(observation));
+        let snapshot = replayed.subscribe_with_snapshot(None);
+        assert!(snapshot.pending.is_empty());
+        assert_eq!(snapshot.turns.len(), 1);
+        assert_eq!(
+            snapshot.turns[0].activity.as_ref().unwrap().title,
+            "Task started"
+        );
     }
 
     #[test]

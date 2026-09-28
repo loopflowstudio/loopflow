@@ -1134,7 +1134,7 @@ fn session_list_reads_a_taskless_review_from_sql() {
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
 fn import_stores_each_old_session_once_with_its_name() {
-    use loopflow::durable::{FlowPosition, RunId};
+    use loopflow::durable::{FlowInvocation, RunId};
     use loopflow::engine::invocation::QueuedInvocation;
     use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
     use serde_json::json;
@@ -1236,24 +1236,69 @@ fn import_stores_each_old_session_once_with_its_name() {
     ));
 
     let task_review = record("Task review", "human", Value::Null, json!([]));
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(task.store.set_flow_position(
-            &task.task.id,
-            FlowPosition {
-                task_id: task.task.id.clone(),
-                invocation: QueuedInvocation::new("captured", vec![review]).unwrap(),
-                session_run_id: Some(RunId::parse(&task_review).unwrap()),
-                ready_summary: None,
-                cursor: ExecutionCursor::default(),
-                version: 0,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
-        ))
-        .unwrap();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let parked = task
+            .store
+            .start_task_flow(
+                &task.task.id,
+                FlowInvocation {
+                    invocation: QueuedInvocation::new("captured", vec![review]).unwrap(),
+                    cursor: ExecutionCursor::default(),
+                    version: 0,
+                    task_id: Some(task.task.id.clone()),
+                    wave_id: Some(task.task.wave_id.clone()),
+                    cwd: task.task.worktree.clone(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    ready_summary: None,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    finished: false,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        // The review Session the old Home kept, with the Run it launched.
+        let review_id = format!("{}:{}:captured:review:0", task.task.id, parked.id());
+        let run = loopflow::session::Run {
+            id: RunId::parse(&task_review).unwrap(),
+            session_id: Some(review_id.clone()),
+            invocation_id: Some(parked.id().to_owned()),
+            node: None,
+            iterations: None,
+            attempt: None,
+            task_id: Some(task.task.id.clone()),
+            wave_id: Some(task.task.wave_id.clone()),
+            work_source: Some(loopflow::session::WorkSource::Inherited),
+            created_at: 1,
+            published: true,
+            cwd: task.task.worktree.clone(),
+            skill: Some("review-design".into()),
+            provider: Some("opencode".into()),
+            model: None,
+            caller_run_id: None,
+            ended: None,
+        };
+        let session = loopflow::session::Session {
+            id: review_id,
+            current_run_id: run.id.clone(),
+            kind: loopflow::session::SessionKind::FlowReview,
+            title: task.task.plan.title.clone(),
+            title_source: loopflow::session::TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 1,
+        };
+        task.store
+            .create_session(session, run, Some(parked))
+            .await
+            .unwrap();
+    });
     // Old Runs outside any Session had no rows: a settled headless Run a
     // conversation launched, and an earlier step of a Flow.
     let settled = |flow: Value, subjects: Value, parent: Value| -> String {

@@ -4949,7 +4949,100 @@ mod tests {
     }
 
     #[test]
-    fn native_human_session_schema_uses_flow_invocations() {
+    fn renamed_session_owners_preserve_captures_claims_and_native_history() {
+        let conn = open();
+        let name = "name_conversation_and_flow_owners";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(
+            r#"
+            BEGIN;
+            INSERT INTO execs(id,trace_id,command,started_at,outcome,completed_at,exit_code)
+                VALUES('process','trace','lf fixture',100,'interrupted',110,130);
+            INSERT INTO flow_invocations(id,invocation_json,cwd,step_index,iteration,
+                position_version,worker_generation,updated_at,state,claim_json)
+                VALUES('flow','{"id":"flow","captured":"retained"}','/repo',0,2,9,4,100,
+                    'current','{"claim":"retained"}');
+            INSERT INTO runs(id,session_id,invocation_id,created_at,published,cwd)
+                VALUES('run_retained','conversation','flow',100,1,'/repo');
+            INSERT INTO sessions(id,current_run_id,title,title_source,created_at,kind,
+                interactive,ready_summary,repo,driver_exec_id,driver_generation,
+                provider_generation,provider_exec_id,provider_thread,provider_endpoint)
+                VALUES('conversation','run_retained','Retained title','human',100,
+                    'conversation',0,'Retained feedback','/repo','process',4,2,'process',
+                    'native-thread','/private/native.sock');
+            UPDATE flow_invocations SET current_run_id='run_retained',
+                pending_session_id='conversation';
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,
+                receipt_key,provider_generation,exec_id,observed_at,payload)
+                VALUES('conversation','native-thread','turn','completed','terminal',2,
+                    'process',120,'{"status":"completed"}');
+            COMMIT;
+        "#,
+        )
+        .unwrap();
+        let rows = |table: &str| {
+            let mut statement = conn
+                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                .unwrap();
+            let columns = statement.column_count();
+            statement
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let before = [
+            "sessions",
+            "flow_invocations",
+            "runs",
+            "execs",
+            "session_events",
+        ]
+        .map(rows);
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let after = [
+            "agent_sessions",
+            "flow_sessions",
+            "runs",
+            "execs",
+            "session_events",
+        ]
+        .map(rows);
+        assert_eq!(after, before);
+        for retired in ["sessions", "flow_invocations"] {
+            assert!(!user_tables(&conn)
+                .unwrap()
+                .iter()
+                .any(|name| name == retired));
+        }
+        validate_foreign_keys(&conn).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET title='Renamed' WHERE id='conversation'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT title FROM agent_sessions", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            "Renamed"
+        );
+    }
+
+    #[test]
+    fn native_human_session_schema_uses_flow_sessions() {
         let conn = open();
         apply_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
             .unwrap();
@@ -4968,7 +5061,7 @@ mod tests {
         for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
-        let position_columns = columns(&conn, "flow_invocations");
+        let position_columns = columns(&conn, "flow_sessions");
         for present in [
             "id",
             "state",

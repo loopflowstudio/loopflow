@@ -215,7 +215,7 @@ impl FlowAttempt {
 /// Task's own invocation and a saved Flow are the same record driven by the
 /// same executor; a Task's `cwd` is its worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlowInvocation {
+pub struct FlowSession {
     pub invocation: QueuedInvocation,
     pub cursor: crate::engine::ExecutionCursor,
     pub version: u64,
@@ -235,7 +235,7 @@ pub struct FlowInvocation {
     pub updated_at: OffsetDateTime,
 }
 
-impl FlowInvocation {
+impl FlowSession {
     pub fn id(&self) -> &str {
         &self.invocation.id
     }

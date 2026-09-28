@@ -97,7 +97,7 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
     if let Some(invocation) = &run.invocation_id {
         let (task, wave): (Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT task_id, wave_id FROM flow_invocations WHERE id=?1",
+                "SELECT task_id, wave_id FROM flow_sessions WHERE id=?1",
                 [invocation],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -272,9 +272,9 @@ pub(super) fn select_attempt_in(
     let (node, iterations) = location_in(conn, invocation)?;
     let iterations = serde_json::to_string(&iterations)?;
     if conn.execute(
-        "UPDATE flow_invocations SET current_run_id=?3 WHERE id=?1 AND state='current' AND position_version=?2
+        "UPDATE flow_sessions SET current_run_id=?3 WHERE id=?1 AND state='current' AND position_version=?2
          AND EXISTS(SELECT 1 FROM runs r WHERE r.id=?3 AND r.invocation_id=?1 AND ((r.node=?4 AND r.iterations=?5) OR (r.node IS NULL AND r.id=current_run_id)))
-         AND (pending_session_id IS NULL OR EXISTS(SELECT 1 FROM sessions s
+         AND (pending_session_id IS NULL OR EXISTS(SELECT 1 FROM agent_sessions s
              WHERE s.id=pending_session_id AND s.current_run_id=?3))",
         params![invocation, i64::try_from(version).map_err(invalid)?, run.as_str(), node, iterations],
     )? != 1 {
@@ -289,7 +289,7 @@ pub(super) fn require_attempt_in(
     run: &RunId,
 ) -> StoreResult<()> {
     let current: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE id=?1 AND current_run_id=?2 AND state='current')",
+        "SELECT EXISTS(SELECT 1 FROM flow_sessions WHERE id=?1 AND current_run_id=?2 AND state='current')",
         params![invocation, run.as_str()], |row| row.get(0),
     )?;
     if !current {
@@ -336,7 +336,7 @@ impl super::SqliteStore {
         }
         let run = insert_run_in(&tx, run)?;
         tx.execute(
-            "UPDATE flow_invocations SET current_run_id=?2
+            "UPDATE flow_sessions SET current_run_id=?2
              WHERE id=?1 AND state='current' AND pending_session_id IS NULL",
             params![run.invocation_id, run.id.as_str()],
         )?;

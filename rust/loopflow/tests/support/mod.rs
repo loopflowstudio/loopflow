@@ -110,6 +110,11 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
     r#"#!/bin/sh
+if [ -z "$LF_TEST_CODEX_STDIO" ]; then
+    case "$*" in
+        *--listen*) exec python3 '__SOCKET_BRIDGE__' "$0" "$@" ;;
+    esac
+fi
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
@@ -121,8 +126,14 @@ echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
 echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
+    .replace(
+        "__SOCKET_BRIDGE__",
+        &concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_socket.py")
+            .replace('\'', r#"'"'"'"#),
+    )
     .replace("__SETUP__", setup)
     .replace("__OUTPUT__", &output)
 }

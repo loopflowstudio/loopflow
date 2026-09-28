@@ -191,29 +191,28 @@ fn seed_store(source: &Path, destination: &Path) -> io::Result<()> {
         drop(backup);
         // Copy history, never a socket or a live driver's write capability.
         // Installed schemas may predate these columns; the snapshot is not a migration.
-        let columns = target
-            .prepare("PRAGMA table_info(sessions)")
-            .map_err(io::Error::other)?
-            .query_map([], |row| row.get::<_, String>(1))
-            .map_err(io::Error::other)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(io::Error::other)?;
-        let assignments = [
-            ("driver_exec_id", "driver_exec_id=NULL"),
-            ("driver_generation", "driver_generation=driver_generation+1"),
-            ("provider_endpoint", "provider_endpoint=NULL"),
-        ]
-        .into_iter()
-        .filter(|(column, _)| columns.iter().any(|name| name == column))
-        .map(|(_, assignment)| assignment)
-        .collect::<Vec<_>>();
-        if !assignments.is_empty() {
-            target
-                .execute(
-                    &format!("UPDATE sessions SET {}", assignments.join(",")),
-                    [],
-                )
+        for table in ["agent_sessions", "sessions"] {
+            let columns = target
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .map_err(io::Error::other)?
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(io::Error::other)?
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(io::Error::other)?;
+            let assignments = [
+                ("driver_exec_id", "driver_exec_id=NULL"),
+                ("driver_generation", "driver_generation=driver_generation+1"),
+                ("provider_endpoint", "provider_endpoint=NULL"),
+            ]
+            .into_iter()
+            .filter(|(column, _)| columns.iter().any(|name| name == column))
+            .map(|(_, assignment)| assignment)
+            .collect::<Vec<_>>();
+            if !assignments.is_empty() {
+                target
+                    .execute(&format!("UPDATE {table} SET {}", assignments.join(",")), [])
+                    .map_err(io::Error::other)?;
+            }
         }
     }
     temporary.as_file().sync_all()?;
@@ -395,7 +394,7 @@ mod tests {
         {
             let conn = Connection::open(&source_path).unwrap();
             conn.execute_batch("PRAGMA foreign_keys=OFF;
-                INSERT INTO sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
+                INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
                 VALUES('conversation','run_fixture','Retained','human',1,'conversation',1);
                 INSERT INTO runs(id,session_id,created_at,cwd,published)
                 VALUES('run_fixture','conversation',1,'/fixture',1);").unwrap();

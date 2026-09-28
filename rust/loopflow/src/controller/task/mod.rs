@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child::ChildRef;
-use crate::durable::{FlowInvocation, Steer, TaskWorkerClaim, WorkRef};
+use crate::durable::{FlowSession, Steer, TaskWorkerClaim, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteSkill, ExecutionContext};
 use crate::harness::{drain_turn_failure_reason, ApprovalPolicy, Harness};
@@ -162,7 +162,7 @@ fn task_run_spec(
     project: &Project,
     harness: String,
     model: Option<String>,
-    flow: &FlowInvocation,
+    flow: &FlowSession,
     task_pr_id: TaskPrId,
 ) -> Result<crate::run_record::RunSpec> {
     let step = flow.current();
@@ -251,11 +251,7 @@ impl TaskLauncher {
 
 #[async_trait]
 impl StepLauncher for TaskLauncher {
-    async fn review(
-        &self,
-        flow: &FlowInvocation,
-        _skill: &ConcreteSkill,
-    ) -> Result<Option<String>> {
+    async fn review(&self, flow: &FlowSession, _skill: &ConcreteSkill) -> Result<Option<String>> {
         let task = load_task(&self.store, &self.task_id).await?;
         park_at_review(&self.store, &task, flow).await?;
         Ok(None)
@@ -263,7 +259,7 @@ impl StepLauncher for TaskLauncher {
 
     async fn launch(
         &self,
-        flow: &FlowInvocation,
+        flow: &FlowSession,
         skill: &ConcreteSkill,
         _ctx: &ExecutionContext,
         claim: Option<&TaskWorkerClaim>,
@@ -501,7 +497,7 @@ async fn prepare_task_flow_step(
     store: &SharedStore,
     task: &Task,
     wave_name: &str,
-    flow: &FlowInvocation,
+    flow: &FlowSession,
 ) -> Result<PreparedTaskStep> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
@@ -581,7 +577,7 @@ async fn prepare_task_flow_step(
 pub(crate) async fn complete_human_flow_step(
     store: &SharedStore,
     token: &crate::ops::human_session::FlowSessionToken,
-    expected: &FlowInvocation,
+    expected: &FlowSession,
 ) -> Result<()> {
     if !crate::ops::human_session::token_is_current(store, token).await? {
         anyhow::bail!("review session is stale");
@@ -619,7 +615,7 @@ pub(crate) async fn ensure_flow_position(
     store: &SharedStore,
     task_id: &TaskId,
     selected_flow: Option<&str>,
-) -> Result<FlowInvocation> {
+) -> Result<FlowSession> {
     let task = load_task(store, task_id).await?;
     let current = match (store.task_flow(&task.id).await?, selected_flow) {
         (Some(current), Some(selected)) if current.invocation.flow != selected => {
@@ -659,8 +655,8 @@ pub(crate) async fn ensure_flow_position(
 async fn park_at_review(
     store: &SharedStore,
     task: &Task,
-    flow: &FlowInvocation,
-) -> Result<FlowInvocation> {
+    flow: &FlowSession,
+) -> Result<FlowSession> {
     let flow = store.reserve_task_review(flow.id(), flow.version).await?;
     let node_id = flow
         .current()
@@ -695,8 +691,8 @@ async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
 }
 
 /// A fresh invocation of `selected_flow` for the Task, at its first step.
-fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowInvocation> {
-    Ok(FlowInvocation {
+fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
+    Ok(FlowSession {
         invocation: QueuedInvocation::load(&task.worktree, selected_flow)?,
         cursor: crate::engine::ExecutionCursor::default(),
         version: 0,
@@ -881,7 +877,7 @@ mod planning_tests {
     };
     use crate::chat::types::Lifecycle;
     use crate::durable::{
-        Author, FlowInvocation, RunId, TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner,
+        Author, FlowSession, RunId, TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner,
         WorkRef,
     };
     use crate::engine::agent::AgentConfig;
@@ -899,12 +895,12 @@ mod planning_tests {
     use crate::work::wave::Wave;
 
     /// Settle one completed step of a position in memory: the engine's traversal.
-    fn finish(position: &mut FlowInvocation) -> anyhow::Result<bool> {
+    fn finish(position: &mut FlowSession) -> anyhow::Result<bool> {
         position.cursor.finish(&position.invocation.steps)
     }
 
     /// An interrupted step keeps its position and discards its candidate.
-    fn interrupt(position: &mut FlowInvocation) -> bool {
+    fn interrupt(position: &mut FlowSession) -> bool {
         let leaf = position.cursor.leaf_mut();
         leaf.progress.verdict = None;
         leaf.route = None;
@@ -914,7 +910,7 @@ mod planning_tests {
     async fn claim(
         store: &SharedStore,
         task: &Task,
-        flow: &FlowInvocation,
+        flow: &FlowSession,
         pid: u32,
     ) -> TaskWorkerClaim {
         let owner = TaskWorkerOwner {
@@ -952,7 +948,7 @@ mod planning_tests {
     }
 
     /// Start `flow` as the Task's Flow and park it when its first step is a review.
-    async fn parked(store: &SharedStore, task: &Task, flow: FlowInvocation) -> FlowInvocation {
+    async fn parked(store: &SharedStore, task: &Task, flow: FlowSession) -> FlowSession {
         let flow = store.start_task_flow(&task.id, flow).await.unwrap();
         if flow.is_human() {
             return super::park_at_review(store, task, &flow).await.unwrap();
@@ -1305,7 +1301,7 @@ mod planning_tests {
         }
     }
 
-    fn pursue_decision(task: &Task) -> FlowInvocation {
+    fn pursue_decision(task: &Task) -> FlowSession {
         let mut flow = super::start_task_flow(task, "pursue").unwrap();
         while !flow.is_decision() {
             assert!(!finish(&mut flow).unwrap());
@@ -2319,21 +2315,19 @@ mod planning_tests {
         }
     }
 
-    async fn human_task_fixture() -> (SharedStore, Task, FlowInvocation) {
+    async fn human_task_fixture() -> (SharedStore, Task, FlowSession) {
         let (store, task, position, _) = human_task_fixture_with_database().await;
         (store, task, position)
     }
 
     async fn human_task_fixture_with_database(
-    ) -> (SharedStore, Task, FlowInvocation, std::path::PathBuf) {
+    ) -> (SharedStore, Task, FlowSession, std::path::PathBuf) {
         let database = tempfile::tempdir().unwrap().keep().join("registry.db");
         let (store, task, position) = human_task_fixture_at(&database).await;
         (store, task, position, database)
     }
 
-    async fn human_task_fixture_at(
-        database: &std::path::Path,
-    ) -> (SharedStore, Task, FlowInvocation) {
+    async fn human_task_fixture_at(database: &std::path::Path) -> (SharedStore, Task, FlowSession) {
         let repository =
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
@@ -3162,7 +3156,7 @@ mod planning_tests {
     async fn park_human_task(
         store: &SharedStore,
         task: &Task,
-        flow: &FlowInvocation,
+        flow: &FlowSession,
     ) -> crate::ops::human_session::FlowSessionToken {
         if store.task_flow(&task.id).await.unwrap().is_none() {
             parked(store, task, flow.clone()).await;
@@ -3187,7 +3181,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Serializes fixture executable and Home.
     async fn restarting_a_human_node_reuses_the_same_task_position() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, task, flow) = human_task_fixture().await;
         let original = park_human_task(&store, &task, &flow).await;
         ready_review(&store, &task, "ready").await;
@@ -3703,7 +3699,7 @@ mod planning_tests {
             }
             let corrupt = serde_json::json!({"id": broken.invocation.id, "flow": "broken", "steps": "unreadable"}).to_string();
             conn.execute(
-                "UPDATE flow_invocations SET invocation_json=?2 WHERE task_id=?1",
+                "UPDATE flow_sessions SET invocation_json=?2 WHERE task_id=?1",
                 rusqlite::params![broken_id.as_str(), corrupt],
             )
             .unwrap();
@@ -3740,7 +3736,7 @@ mod planning_tests {
             }
             let retained: String = conn
                 .query_row(
-                    "SELECT invocation_json FROM flow_invocations WHERE task_id=?1",
+                    "SELECT invocation_json FROM flow_sessions WHERE task_id=?1",
                     [broken_id.as_str()],
                     |row| row.get(0),
                 )
@@ -3750,7 +3746,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Serializes fixture executable and Home.
     async fn stale_human_decisions_cannot_target_a_replacement_invocation() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, task, flow) = human_task_fixture().await;
         let stale = park_human_task(&store, &task, &flow).await;
         let mut replacement = store.task_flow(&task.id).await.unwrap().unwrap();
@@ -4013,7 +4011,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // serializes the fixture executable and Home
     async fn completing_a_final_review_finishes_the_flow() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, task, flow) = human_task_fixture().await;
         let token = park_human_task(&store, &task, &flow).await;
         ready_review(&store, &task, "design clarified").await;
@@ -4031,7 +4031,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // serializes the fixture executable and Home
     async fn concurrent_review_completions_settle_once() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, task, flow) = human_task_fixture().await;
         let token = park_human_task(&store, &task, &flow).await;
         ready_review(&store, &task, "review feedback").await;

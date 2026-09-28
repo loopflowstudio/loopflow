@@ -1,7 +1,7 @@
 use time::OffsetDateTime;
 
 use crate::durable::{
-    FlowInvocation, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
+    FlowSession, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
     TaskWorkerOwner,
 };
 use crate::engine::transitions::FlowVerdict;
@@ -10,15 +10,15 @@ use crate::engine::ExecutionCursor;
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn create_flow(&self, flow: FlowInvocation) -> StoreResult<FlowInvocation> {
+    pub async fn create_flow(&self, flow: FlowSession) -> StoreResult<FlowSession> {
         run_sqlite(&self.sqlite, move |store| store.create_flow(&flow)).await
     }
 
     pub async fn start_task_flow(
         &self,
         task_id: &TaskId,
-        flow: FlowInvocation,
-    ) -> StoreResult<FlowInvocation> {
+        flow: FlowSession,
+    ) -> StoreResult<FlowSession> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.start_task_flow(&task_id, &flow)
@@ -26,12 +26,12 @@ impl Store {
         .await
     }
 
-    pub async fn flow(&self, id: &str) -> StoreResult<Option<FlowInvocation>> {
+    pub async fn flow(&self, id: &str) -> StoreResult<Option<FlowSession>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.flow(&id)).await
     }
 
-    pub async fn task_flow(&self, task_id: &TaskId) -> StoreResult<Option<FlowInvocation>> {
+    pub async fn task_flow(&self, task_id: &TaskId) -> StoreResult<Option<FlowSession>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_flow(&task_id)).await
     }
@@ -40,7 +40,7 @@ impl Store {
         &self,
         id: &str,
         claim: Option<&TaskWorkerClaim>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let id = id.to_string();
         let claim = claim.cloned();
         run_sqlite(&self.sqlite, move |store| {
@@ -54,7 +54,7 @@ impl Store {
         id: &str,
         version: u64,
         claim: Option<&TaskWorkerClaim>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let id = id.to_string();
         let claim = claim.cloned();
         run_sqlite(&self.sqlite, move |store| {
@@ -90,11 +90,7 @@ impl Store {
         .await
     }
 
-    pub async fn retry_flow(
-        &self,
-        id: &str,
-        direction: Option<&str>,
-    ) -> StoreResult<FlowInvocation> {
+    pub async fn retry_flow(&self, id: &str, direction: Option<&str>) -> StoreResult<FlowSession> {
         let id = id.to_string();
         let direction = direction.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
@@ -108,7 +104,7 @@ impl Store {
         id: &str,
         version: u64,
         claim: Option<&TaskWorkerClaim>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let id = id.to_string();
         let claim = claim.cloned();
         run_sqlite(&self.sqlite, move |store| {
@@ -124,7 +120,7 @@ impl Store {
         cursor: &ExecutionCursor,
         claim: Option<&TaskWorkerClaim>,
         progress: Option<&str>,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let id = id.to_string();
         let cursor = cursor.clone();
         let claim = claim.cloned();
@@ -141,7 +137,7 @@ impl Store {
         version: u64,
         claim: Option<&TaskWorkerClaim>,
         failure: &TaskFlowBlocker,
-    ) -> StoreResult<FlowInvocation> {
+    ) -> StoreResult<FlowSession> {
         let id = id.to_string();
         let claim = claim.cloned();
         let failure = failure.clone();
@@ -166,7 +162,7 @@ impl Store {
         .await
     }
 
-    pub async fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowInvocation> {
+    pub async fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowSession> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_task_review(&id, version)
@@ -177,7 +173,7 @@ impl Store {
     pub async fn complete_task_review(
         &self,
         task_id: &TaskId,
-        expected: &FlowInvocation,
+        expected: &FlowSession,
         summary: &str,
     ) -> StoreResult<()> {
         let task_id = task_id.clone();
@@ -274,7 +270,7 @@ impl Store {
         .await
     }
 
-    pub async fn waiting_review(&self, session_id: &str) -> StoreResult<FlowInvocation> {
+    pub async fn waiting_review(&self, session_id: &str) -> StoreResult<FlowSession> {
         let session_id = session_id.to_string();
         run_sqlite(&self.sqlite, move |store| store.waiting_review(&session_id)).await
     }

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{FlowInvocation, RunId, TaskId};
+use crate::durable::{FlowSession, RunId, TaskId};
 use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
 use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
@@ -103,7 +103,7 @@ pub(crate) async fn task_execution_and_flow(
 }
 
 fn project_execution(
-    position: Option<&FlowInvocation>,
+    position: Option<&FlowSession>,
     evidence: Option<ProcessIdentityEvidence>,
 ) -> TaskExecutionSnapshot {
     let Some(position) = position else {
@@ -179,7 +179,7 @@ fn project_execution(
 mod tests {
     use super::{project_execution, TaskExecutionSnapshot, TaskExecutionState};
     use crate::durable::{
-        test_flow_invocation, FlowAttempt, FlowInvocation, RunId, TaskId, TaskWorkerClaim,
+        test_flow_invocation, FlowAttempt, FlowSession, RunId, TaskId, TaskWorkerClaim,
         TaskWorkerOwner,
     };
     use crate::id::{ExecId, TraceId};
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn worker_liveness_is_separate_from_durable_ready_work() {
-        let mut position = FlowInvocation {
+        let mut position = FlowSession {
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
             cursor: crate::engine::ExecutionCursor {
                 index: 0,

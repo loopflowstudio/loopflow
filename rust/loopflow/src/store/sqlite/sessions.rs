@@ -2,9 +2,9 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::{FlowInvocation, RunId, TaskId};
+use crate::durable::{FlowSession, RunId, TaskId};
 use crate::engine::ExecutionCursor;
-use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, Run, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -14,9 +14,9 @@ const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_so
     r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
     r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt,
     r.provider, r.model, r.caller_run_id, r.outcome, r.ended_at
-    FROM sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
+    FROM agent_sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
 
-fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Session, Run)>> {
+fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(AgentSession, Run)>> {
     let id: String = row.get(0)?;
     let run_id: String = row.get(1)?;
     let title = row.get(2)?;
@@ -30,7 +30,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(Sessio
     Ok((|| {
         let run_id = RunId::parse(&run_id).map_err(invalid)?;
         Ok((
-            Session {
+            AgentSession {
                 id: id.clone(),
                 current_run_id: run_id.clone(),
                 kind: match kind.as_str() {
@@ -68,7 +68,7 @@ fn title_source(source: TitleSource) -> &'static str {
     }
 }
 
-pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<(Session, Run)>> {
+pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<(AgentSession, Run)>> {
     conn.query_row(
         &format!("{SESSION_SELECT} WHERE s.id=?1"),
         [id],
@@ -95,8 +95,10 @@ fn inventory_query(
         ));
     }
     if !filter.history {
-        sql.push_str(" AND s.completed_at IS NULL AND (s.kind!='flow_review' OR EXISTS(
-            SELECT 1 FROM flow_invocations f WHERE f.pending_session_id=s.id AND f.state='current'))");
+        sql.push_str(
+            " AND s.completed_at IS NULL AND (s.kind!='flow_review' OR EXISTS(
+            SELECT 1 FROM flow_sessions f WHERE f.pending_session_id=s.id AND f.state='current'))",
+        );
     }
     if let Some(repo) = &filter.repo {
         sql.push_str(&format!(" AND s.repo={}", bind(Value::Text(repo.clone()))));
@@ -130,10 +132,7 @@ fn inventory_query(
 }
 
 impl SqliteStore {
-    pub fn reserve_review_run(
-        &self,
-        expected: &FlowInvocation,
-    ) -> StoreResult<(FlowInvocation, Run)> {
+    pub fn reserve_review_run(&self, expected: &FlowSession) -> StoreResult<(FlowSession, Run)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
@@ -164,11 +163,11 @@ impl SqliteStore {
                 },
             )?;
             tx.execute(
-                "UPDATE sessions SET current_run_id=?2 WHERE id=?1",
+                "UPDATE agent_sessions SET current_run_id=?2 WHERE id=?1",
                 params![id, replacement.as_str()],
             )?;
             tx.execute(
-                "UPDATE flow_invocations SET position_version=position_version+1 WHERE id=?1",
+                "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
                 [expected.id()],
             )?;
         }
@@ -190,9 +189,9 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if tx.execute("UPDATE flow_invocations SET position_version=position_version+1
+        if tx.execute("UPDATE flow_sessions SET position_version=position_version+1
             WHERE state='current' AND pending_session_id=?1 AND position_version=?3
-            AND claim_json IS NULL AND EXISTS(SELECT 1 FROM sessions s JOIN runs r ON r.id=s.current_run_id
+            AND claim_json IS NULL AND EXISTS(SELECT 1 FROM agent_sessions s JOIN runs r ON r.id=s.current_run_id
                 WHERE s.id=?1 AND r.id=?2 AND r.published=0 AND s.completed_at IS NULL)",
             params![session_id, run_id.as_str(), i64::try_from(version).map_err(invalid)?])? != 1 {
             return Err(StoreError::InvalidAuthority("review Run reservation is stale".into()));
@@ -205,12 +204,12 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn session(&self, id: &str) -> StoreResult<Option<(Session, Run)>> {
+    pub fn session(&self, id: &str) -> StoreResult<Option<(AgentSession, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         session_in(&conn, id)
     }
 
-    pub fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<(Session, Run)>> {
+    pub fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<(AgentSession, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM runs WHERE id=?1)"),
@@ -226,14 +225,14 @@ impl SqliteStore {
     /// the import stores a Flow it meets for the first time here.
     pub fn create_session(
         &self,
-        mut session: Session,
+        mut session: AgentSession,
         run: Run,
-        review: Option<&FlowInvocation>,
-    ) -> StoreResult<(Session, Run)> {
+        review: Option<&FlowSession>,
+    ) -> StoreResult<(AgentSession, Run)> {
         if run.session_id.as_deref() != Some(session.id.as_str())
             || run.id != session.current_run_id
             || review.is_some() != (session.kind == SessionKind::FlowReview)
-            || review.map(FlowInvocation::id) != run.invocation_id.as_deref()
+            || review.map(FlowSession::id) != run.invocation_id.as_deref()
         {
             return Err(invalid(
                 "a Session is reserved with its first Run, a review with its invocation",
@@ -257,7 +256,7 @@ impl SqliteStore {
             super::flows::insert_flow_in(&tx, flow)?;
         }
         tx.execute(
-            "INSERT INTO sessions(id,current_run_id,kind,title,title_source,request,created_at,
+            "INSERT INTO agent_sessions(id,current_run_id,kind,title,title_source,request,created_at,
                 ready_summary,completed_at,interactive,repo)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             params![
@@ -280,7 +279,7 @@ impl SqliteStore {
         )?;
         let run = super::runs::insert_run_in(&tx, run)?;
         tx.execute(
-            "UPDATE flow_invocations SET pending_session_id=?2, current_run_id=?3 WHERE id=?1",
+            "UPDATE flow_sessions SET pending_session_id=?2, current_run_id=?3 WHERE id=?1",
             params![run.invocation_id, session.id, run.id.as_str()],
         )?;
         let created = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
@@ -299,7 +298,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = super::runs::insert_run_in(&tx, run)?;
         if tx.execute(
-            "UPDATE sessions SET current_run_id=?3 WHERE id=?1 AND current_run_id=?2
+            "UPDATE agent_sessions SET current_run_id=?3 WHERE id=?1 AND current_run_id=?2
              AND completed_at IS NULL AND NOT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id
                  WHERE r.id=?2 AND t.current_invocation_id=r.invocation_id)",
             params![id, expected_run.as_str(), run.id.as_str()],
@@ -310,7 +309,7 @@ impl SqliteStore {
             ));
         }
         tx.execute(
-            "UPDATE flow_invocations SET current_run_id=?2
+            "UPDATE flow_sessions SET current_run_id=?2
              WHERE pending_session_id=?1 AND state='current'",
             params![id, run.id.as_str()],
         )?;
@@ -350,7 +349,7 @@ impl SqliteStore {
     }
 
     /// Assign a Task to the Session's Runs. Closed Sessions bind too.
-    pub fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(Session, Run)> {
+    pub fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(AgentSession, Run)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
@@ -364,7 +363,7 @@ impl SqliteStore {
     pub fn sessions(
         &self,
         filter: &crate::session::SessionFilter,
-    ) -> StoreResult<Vec<(Session, Run)>> {
+    ) -> StoreResult<Vec<(AgentSession, Run)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (sql, values) = inventory_query(filter)?;
         let mut query = conn.prepare(&sql)?;
@@ -377,9 +376,9 @@ impl SqliteStore {
     pub fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT json_extract(invocation_json,'$.flow'), review_json FROM flow_invocations
+            "SELECT json_extract(invocation_json,'$.flow'), review_json FROM flow_sessions
              WHERE pending_session_id=?1 AND state='current'
-             AND NOT EXISTS(SELECT 1 FROM tasks WHERE current_invocation_id=flow_invocations.id)",
+             AND NOT EXISTS(SELECT 1 FROM tasks WHERE current_invocation_id=flow_sessions.id)",
             [session_id],
             |row| Ok((row.get(0)?, row.get::<_, String>(1)?)),
         )
@@ -397,7 +396,7 @@ impl SqliteStore {
     pub fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
-            "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
+            "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
              AND completed_at IS NULL AND (kind='conversation' OR ready_summary IS NOT NULL)
              AND NOT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id
                  WHERE r.id=?2 AND t.current_invocation_id=r.invocation_id)",
@@ -440,7 +439,7 @@ impl SqliteStore {
             ));
         }
         tx.execute(
-            "UPDATE sessions SET title=?2, title_source=?3
+            "UPDATE agent_sessions SET title=?2, title_source=?3
              WHERE id=?1 AND (title_source='generated' OR ?3='human')",
             params![id, title.trim(), title_source(source)],
         )?;
@@ -455,9 +454,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
-            "UPDATE sessions SET ready_summary=?3 WHERE id=?1 AND current_run_id=?2
+            "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND current_run_id=?2
              AND completed_at IS NULL AND (kind='ask' OR EXISTS(SELECT 1 FROM runs r
-                 JOIN flow_invocations f ON f.id=r.invocation_id
+                 JOIN flow_sessions f ON f.id=r.invocation_id
                  WHERE r.id=?2 AND r.published=1 AND f.pending_session_id=?1 AND f.state='current'
                  AND f.claim_json IS NULL))",
             params![id, expected_run.as_str(), summary.trim()],
@@ -467,7 +466,7 @@ impl SqliteStore {
         }
         // Readiness invalidates an in-flight completion's snapshot as well.
         tx.execute(
-            "UPDATE flow_invocations SET position_version=position_version+1
+            "UPDATE flow_sessions SET position_version=position_version+1
             WHERE pending_session_id=?1 AND state='current'",
             [id],
         )?;
@@ -476,7 +475,7 @@ impl SqliteStore {
     }
 }
 
-pub(super) fn review_id(flow: &FlowInvocation) -> StoreResult<String> {
+pub(super) fn review_id(flow: &FlowSession) -> StoreResult<String> {
     let task = flow
         .task_id
         .as_ref()
@@ -498,7 +497,7 @@ pub(super) fn review_id(flow: &FlowInvocation) -> StoreResult<String> {
 /// reserved. Parking at the same review again finds the Session it left.
 pub(super) fn reserve_task_review_in(
     conn: &Transaction<'_>,
-    flow: &FlowInvocation,
+    flow: &FlowSession,
 ) -> StoreResult<()> {
     if !flow.is_human() {
         return Err(StoreError::InvalidAuthority(
@@ -521,7 +520,7 @@ pub(super) fn reserve_task_review_in(
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO sessions(id,current_run_id,kind,title,title_source,created_at,repo)
+                "INSERT INTO agent_sessions(id,current_run_id,kind,title,title_source,created_at,repo)
                 VALUES(?1,?2,'flow_review',?3,'generated',?4,
                     (SELECT w.repo FROM waves w JOIN projects p ON p.wave_id=w.id
                         JOIN tasks t ON t.project_id=p.id WHERE t.id=?5))",
@@ -558,7 +557,7 @@ pub(super) fn reserve_task_review_in(
         }
     }
     if conn.execute(
-        "UPDATE flow_invocations SET pending_session_id=?2
+        "UPDATE flow_sessions SET pending_session_id=?2
          WHERE id=?1 AND state='current' AND position_version=?3 AND claim_json IS NULL",
         params![flow.id(), id, i64::try_from(flow.version).map_err(invalid)?],
     )? != 1
@@ -572,7 +571,7 @@ pub(super) fn reserve_task_review_in(
     Ok(())
 }
 
-pub(super) fn complete_review_in(conn: &Connection, expected: &FlowInvocation) -> StoreResult<()> {
+pub(super) fn complete_review_in(conn: &Connection, expected: &FlowSession) -> StoreResult<()> {
     let id = review_id(expected)?;
     let summary = expected
         .ready_summary
@@ -584,7 +583,7 @@ pub(super) fn complete_review_in(conn: &Connection, expected: &FlowInvocation) -
         .ok_or_else(|| StoreError::InvalidAuthority("review has no published Run".into()))?;
     super::runs::require_attempt_in(conn, expected.id(), run_id)?;
     if conn.execute(
-        "UPDATE sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
+        "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
         AND completed_at IS NULL AND ready_summary IS ?4",
         params![id, run_id.as_str(), crate::store::rows::now_unix(), summary],
     )? != 1

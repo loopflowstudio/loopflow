@@ -83,8 +83,8 @@ navigation, selected-path entry and parent return. `RepeatPolicy` contains only
 counts impose no limit. Direction persists through implicit forward movement
 until an explicit Advance clears it.
 
-`FlowInvocation` reads the captured definition, cursor, launch facts, current
-attempt and failure from `flow_invocations`. `position_version` fences the cursor,
+`FlowSession` reads the captured definition, cursor, launch facts, current
+attempt and failure from `flow_sessions`. `position_version` fences the cursor,
 `current_run_id` the attempt, and a managed Task's `claim_json` its worker.
 `flows/<UUID>/driver.lock` serializes drivers. A Task invocation stores no cwd;
 the joined reader uses `tasks.worktree`. Other invocations store their launch cwd.
@@ -199,11 +199,11 @@ a decision from the user: it blocks the originating Run while a durable TUI agen
 its checkout. Agent readiness leaves the session visible. Complete closes that
 conversation and resumes the originating Run with the ready summary.
 
-A human FlowStep uses its `FlowInvocation` row. Its Session opens the captured Skill and
+A human FlowStep uses its `FlowSession` row. Its Session opens the captured Skill and
 binds the provider Run to that exact step. A saved Flow's review Session has an
 opaque `session_<uuid>` id and is linked through `pending_session_id` on the
 invocation row; Task tokens retain their Task/invocation/node/skill/iteration
-identity. An Ask persists its question and answer on its `sessions` row while
+identity. An Ask persists its question and answer on its `agent_sessions` row while
 its caller waits.
 
 ```bash

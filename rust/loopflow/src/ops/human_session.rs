@@ -9,10 +9,10 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::{FlowInvocation, RunId, WorkRef};
+use crate::durable::{FlowSession, RunId, WorkRef};
 use crate::engine::Skill;
 use crate::run_record::{ProviderSessionRef, RunManifest, SessionTitleSource, RUN_DIR_ENV};
-use crate::session::{Run, Session, WorkSource};
+use crate::session::{AgentSession, Run, WorkSource};
 use crate::store::SharedStore;
 use crate::work::task::{Task, TaskId};
 
@@ -251,7 +251,7 @@ pub enum SessionFlowOccurrence {
 }
 
 impl SessionFlowMembership {
-    fn of_position(position: &FlowInvocation) -> Result<Self> {
+    fn of_position(position: &FlowSession) -> Result<Self> {
         let step = crate::run_record::RunFlowStep::of(position)?;
         Ok(Self::Step {
             flow: step.flow,
@@ -269,11 +269,14 @@ impl SessionFlowMembership {
 #[derive(Debug)]
 enum SessionTarget {
     /// An interactive Session, an Ask, or a saved Flow's review.
-    Row { session: Session, run: Box<Run> },
+    Row {
+        session: AgentSession,
+        run: Box<Run>,
+    },
     /// A Task's review also settles its Task's invocation.
     Flow {
         task: Box<Task>,
-        position: Box<FlowInvocation>,
+        position: Box<FlowSession>,
         run_id: RunId,
     },
 }
@@ -312,11 +315,11 @@ pub(crate) async fn ask_once(
 
 /// Open the keyed Session once: the first caller stores it, every caller
 /// launches it if no launcher holds it, and a completed one is returned as is.
-async fn launch_keyed_ask<F: Future<Output = Result<(Session, Run)>>>(
+async fn launch_keyed_ask<F: Future<Output = Result<(AgentSession, Run)>>>(
     store: &SharedStore,
     id: String,
     reserve: impl FnOnce(String) -> F,
-) -> Result<(Session, Run)> {
+) -> Result<(AgentSession, Run)> {
     // The server holds this lock through provider publication. Wait off the
     // async runtime so concurrent callers can still finish their launches.
     let lock_id = id.clone();
@@ -356,7 +359,7 @@ fn keyed_ask_id(key: &str) -> Result<String> {
 pub(crate) async fn task_unblock(
     store: &SharedStore,
     task: &Task,
-    position: &FlowInvocation,
+    position: &FlowSession,
 ) -> Result<(String, Option<String>)> {
     let failure = position
         .failure
@@ -409,14 +412,14 @@ pub(crate) async fn task_unblock(
     Ok((session.id, feedback))
 }
 
-pub(crate) fn task_unblock_key(position: &FlowInvocation) -> Result<String> {
+pub(crate) fn task_unblock_key(position: &FlowSession) -> Result<String> {
     position.blocker_key()
 }
 
 /// The unblock Session the current decision Run waits on, if one is open.
 pub(crate) async fn task_waiting_unblock(
     store: &SharedStore,
-    position: &FlowInvocation,
+    position: &FlowSession,
 ) -> Result<Option<String>> {
     if !position.is_decision() {
         return Ok(None);
@@ -455,7 +458,7 @@ async fn reserve_ask(
     id: String,
     question: &str,
     skill: Option<&str>,
-) -> Result<(Session, Run)> {
+) -> Result<(AgentSession, Run)> {
     let question = question.trim();
     if question.is_empty() {
         bail!("question cannot be empty");
@@ -523,10 +526,10 @@ async fn store_ask(
     title: String,
     request: String,
     run: Run,
-) -> Result<(Session, Run)> {
+) -> Result<(AgentSession, Run)> {
     // An Ask is a human boundary requested by a Run, never a Flow step.
     let run = prepare_run(run, crate::run_record::RunFlowMembership::Independent)?;
-    let session = Session {
+    let session = AgentSession {
         id,
         current_run_id: run.id.clone(),
         kind: crate::session::SessionKind::Ask,
@@ -574,7 +577,7 @@ pub(crate) fn prepare_run(run: Run, flow: crate::run_record::RunFlowMembership) 
 pub(crate) async fn prepare(
     store: &SharedStore,
     task: &Task,
-    position: &FlowInvocation,
+    position: &FlowSession,
 ) -> Result<SessionRecord> {
     validate_task_position(task, position)?;
     let placement = store.placement(&WorkRef::Task(task.id.clone())).await?;
@@ -598,7 +601,7 @@ pub(crate) async fn prepare(
 pub(crate) async fn select_review_agent(
     store: &SharedStore,
     task: &Task,
-    position: &FlowInvocation,
+    position: &FlowSession,
 ) -> Result<String> {
     let task = store.get_task(&task.id).await?.ok_or_else(|| {
         anyhow!(
@@ -626,7 +629,7 @@ pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Ta
     if let Some(position) = store
         .task_flow(&task.id)
         .await?
-        .filter(FlowInvocation::is_human)
+        .filter(FlowSession::is_human)
     {
         select_review_agent(store, task, &position).await?;
     }
@@ -638,7 +641,7 @@ pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Ta
 async fn managed_review(
     store: &SharedStore,
     run: &Run,
-) -> crate::store::StoreResult<Option<(crate::durable::TaskId, FlowInvocation)>> {
+) -> crate::store::StoreResult<Option<(crate::durable::TaskId, FlowSession)>> {
     let (Some(task_id), Some(invocation)) = (&run.task_id, &run.invocation_id) else {
         return Ok(None);
     };
@@ -692,7 +695,7 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
 async fn owned_target(
     store: &SharedStore,
     selector: &str,
-    session: crate::session::Session,
+    session: crate::session::AgentSession,
     current: crate::session::Run,
 ) -> Result<SessionTarget> {
     if selector != session.id && selector != current.id.as_str() {
@@ -749,7 +752,7 @@ struct NativeRun {
 }
 
 impl NativeRun {
-    fn of(session: &crate::session::Session, run: &crate::session::Run) -> Result<Self> {
+    fn of(session: &crate::session::AgentSession, run: &crate::session::Run) -> Result<Self> {
         Ok(Self {
             dir: local_session_run_dir(&run.id)
                 .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?,
@@ -764,7 +767,7 @@ impl NativeRun {
         crate::lf::commands::util::active_provider_clients(&self.dir, &self.provider)
     }
 
-    fn history(&self, session: &crate::session::Session) -> Result<ProviderSessionRef> {
+    fn history(&self, session: &crate::session::AgentSession) -> Result<ProviderSessionRef> {
         crate::run_record::read_provider_session(&self.dir)?
             .ok_or_else(|| anyhow!("Session {} has no provider history yet", session.id))
     }
@@ -801,7 +804,7 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     Ok(())
 }
 
-async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowInvocation) -> Result<()> {
+async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowSession) -> Result<()> {
     let token = flow_token(task, position)?;
     let lock_id = flow_id(position)?;
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_launch(&lock_id)).await??;
@@ -829,7 +832,7 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowInvocati
 
 pub(crate) async fn require_current_review_actor(
     store: &SharedStore,
-    position: &FlowInvocation,
+    position: &FlowSession,
 ) -> Result<()> {
     let Ok(active) = active_run_id() else {
         return Ok(());
@@ -857,7 +860,7 @@ pub(crate) async fn completion_worktree(
     }
 }
 
-async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowInvocation) {
+async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowSession) {
     let Some(run_id) = position.session_run_id().cloned() else {
         return;
     };
@@ -934,7 +937,7 @@ pub(crate) async fn serve_flow(
 async fn serve_flow_locked(
     store: SharedStore,
     token: FlowSessionToken,
-    position: &FlowInvocation,
+    position: &FlowSession,
     launch_lock: File,
 ) -> Result<RunId> {
     let task = store
@@ -1002,7 +1005,7 @@ pub(crate) async fn serve_ask(store: &SharedStore, run_id: &RunId) -> Result<()>
 }
 
 /// What a waiting Session's agent carries to act on its own Session.
-fn session_token(session: &Session) -> Result<HumanSessionToken> {
+fn session_token(session: &AgentSession) -> Result<HumanSessionToken> {
     Ok(match session.kind {
         crate::session::SessionKind::FlowReview => HumanSessionToken::StandaloneFlow {
             id: session.id.clone(),
@@ -1016,7 +1019,7 @@ fn session_token(session: &Session) -> Result<HumanSessionToken> {
 /// Launch the prepared Run of an Ask or of a saved Flow's review.
 async fn serve_locked(
     store: &SharedStore,
-    session: &Session,
+    session: &AgentSession,
     run: &Run,
     launch_lock: File,
 ) -> Result<()> {
@@ -1045,7 +1048,7 @@ async fn serve_locked(
     }
 }
 
-async fn ask_launch_args(store: &SharedStore, session: &Session, run: &Run) -> Vec<String> {
+async fn ask_launch_args(store: &SharedStore, session: &AgentSession, run: &Run) -> Vec<String> {
     let mut args = vec![
         "--tui".to_string(),
         "--model".to_string(),
@@ -1224,7 +1227,7 @@ pub(crate) async fn open(
 #[cfg(unix)]
 async fn connect_live_codex(
     store: &SharedStore,
-    session: &Session,
+    session: &AgentSession,
     run: &Run,
     dir: &Path,
     provider: &crate::run_record::ProviderSessionRef,
@@ -1409,7 +1412,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<RunId> {
 async fn open_flow_locked(
     store: &SharedStore,
     task: &Task,
-    position: &FlowInvocation,
+    position: &FlowSession,
     launch_lock: File,
 ) -> Result<RunId> {
     let previous = position.session_run_id().cloned();
@@ -1470,7 +1473,7 @@ pub(crate) fn stop_run(run_id: &RunId) -> Result<()> {
 }
 
 /// A Session as its row and its current Run describe it.
-async fn surface(store: &SharedStore, session: &Session, run: &Run) -> Result<SessionRecord> {
+async fn surface(store: &SharedStore, session: &AgentSession, run: &Run) -> Result<SessionRecord> {
     let kind = match session.kind {
         crate::session::SessionKind::Conversation => SessionKind::Conversation,
         crate::session::SessionKind::Ask => SessionKind::Ask,
@@ -1834,7 +1837,7 @@ pub(crate) async fn token_is_current(
 async fn flow_surface(
     store: &SharedStore,
     task: &Task,
-    position: &FlowInvocation,
+    position: &FlowSession,
 ) -> Result<SessionRecord> {
     validate_task_position(task, position)?;
     let id = flow_id(position)?;
@@ -1874,7 +1877,7 @@ pub(crate) fn human_open_argv(
     Ok(argv)
 }
 
-fn validate_task_position(task: &Task, position: &FlowInvocation) -> Result<()> {
+fn validate_task_position(task: &Task, position: &FlowSession) -> Result<()> {
     if position.task_id.as_ref() != Some(&task.id) || !position.is_human() {
         return Err(anyhow!("session does not belong to Task {}", task.id));
     }
@@ -1898,7 +1901,7 @@ async fn validate_token(store: &SharedStore, token: &FlowSessionToken) -> Result
     }
 }
 
-fn flow_token(task: &Task, position: &FlowInvocation) -> Result<FlowSessionToken> {
+fn flow_token(task: &Task, position: &FlowSession) -> Result<FlowSessionToken> {
     validate_task_position(task, position)?;
     let step = position.current();
     let crate::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
@@ -1917,7 +1920,7 @@ fn flow_token(task: &Task, position: &FlowInvocation) -> Result<FlowSessionToken
     })
 }
 
-fn token_matches(token: &FlowSessionToken, position: &FlowInvocation) -> bool {
+fn token_matches(token: &FlowSessionToken, position: &FlowSession) -> bool {
     let step = position.current();
     position.task_id.as_ref() == Some(&token.task_id)
         && position.invocation.id == token.invocation_id
@@ -1943,7 +1946,7 @@ fn ask_message(request: &str) -> String {
     )
 }
 
-async fn launch_flow(task: &Task, position: &FlowInvocation) -> Result<()> {
+async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
     let step = position.current();
     let node_id = step
         .policy
@@ -1966,7 +1969,7 @@ async fn launch_flow(task: &Task, position: &FlowInvocation) -> Result<()> {
 }
 
 /// Hand the conversation to a durable terminal, as a child of the asking Run.
-async fn launch_ask(session: &Session, run: &Run) -> Result<()> {
+async fn launch_ask(session: &AgentSession, run: &Run) -> Result<()> {
     let lf = crate::engine::process::resolve_current_home_lf_binary();
     let argv = vec![
         lf.to_string_lossy().to_string(),
@@ -2051,7 +2054,7 @@ async fn start_durable_session(
     Ok(())
 }
 
-pub(crate) fn flow_id(position: &FlowInvocation) -> Result<String> {
+pub(crate) fn flow_id(position: &FlowSession) -> Result<String> {
     let step = position.current();
     let node_id = step
         .policy
@@ -2091,7 +2094,7 @@ pub(crate) fn lock_session_launch(id: &str) -> Result<File> {
     Ok(file)
 }
 
-fn flow_background_name(position: &FlowInvocation) -> Result<String> {
+fn flow_background_name(position: &FlowSession) -> Result<String> {
     let step = position.current();
     Ok(flow_token_background_name(&FlowSessionToken {
         task_id: position
@@ -2236,11 +2239,11 @@ mod tests {
         serve_ask, session_run_is_resumable, token_matches, wait_for_ask, FlowSessionToken,
         HumanSessionToken, HUMAN_SESSION_ENV,
     };
-    use crate::durable::{FlowInvocation, RunId};
+    use crate::durable::{FlowSession, RunId};
     use crate::engine::{prepare_launch_prompt, Config, LaunchPromptInput, Surface};
     use crate::lf::{Cli, Commands};
     use crate::run_record::RunManifest;
-    use crate::session::{Run, Session, SessionKind};
+    use crate::session::{AgentSession, Run, SessionKind};
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
 
@@ -2328,7 +2331,7 @@ mod tests {
         }
     }
 
-    async fn open_asks(store: &SharedStore) -> Vec<(Session, Run)> {
+    async fn open_asks(store: &SharedStore) -> Vec<(AgentSession, Run)> {
         let mut open = store
             .sessions(&crate::session::SessionFilter::default())
             .await
@@ -2337,7 +2340,7 @@ mod tests {
         open
     }
 
-    async fn wait_until_asks(store: &SharedStore, count: usize) -> Vec<(Session, Run)> {
+    async fn wait_until_asks(store: &SharedStore, count: usize) -> Vec<(AgentSession, Run)> {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let sessions = open_asks(store).await;
@@ -2351,7 +2354,7 @@ mod tests {
         .unwrap()
     }
 
-    async fn answer(store: &SharedStore, session: &Session, run: &Run, summary: &str) {
+    async fn answer(store: &SharedStore, session: &AgentSession, run: &Run, summary: &str) {
         store
             .ready_session(&session.id, &run.id, summary)
             .await
@@ -2367,7 +2370,7 @@ mod tests {
     }
 
     /// A stored Ask whose launch was consumed without provider history.
-    async fn consumed_ask(store: &SharedStore, id: String, question: &str) -> (Session, Run) {
+    async fn consumed_ask(store: &SharedStore, id: String, question: &str) -> (AgentSession, Run) {
         let stored = reserve_ask(store, id, question, None).await.unwrap();
         std::fs::remove_file(run_dir(&stored.1).join("prepared")).unwrap();
         stored
@@ -2804,8 +2807,8 @@ mod tests {
         );
     }
 
-    fn position() -> FlowInvocation {
-        FlowInvocation {
+    fn position() -> FlowSession {
+        FlowSession {
             invocation: crate::durable::test_flow_invocation(
                 "review",
                 1,
@@ -3012,7 +3015,7 @@ mod tests {
             caller_run_id: Some(RunId::new()),
             ended: None,
         };
-        let session = Session {
+        let session = AgentSession {
             id: "ask_skill_proof".to_string(),
             current_run_id: run.id.clone(),
             kind: SessionKind::Ask,

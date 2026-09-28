@@ -3,15 +3,15 @@
 //! waits on it through `pending_session_id`.
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
-use crate::durable::FlowInvocation;
+use crate::durable::FlowSession;
 use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
 use crate::ops::flow_run::{self, ActiveStep};
 use crate::ops::human_session;
 use crate::run_record::{RunFlowMembership, RunFlowStep};
-use crate::session::{Run, Session, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, Run, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
-fn current_skill(flow: &FlowInvocation) -> Result<&ConcreteSkill> {
+fn current_skill(flow: &FlowSession) -> Result<&ConcreteSkill> {
     match flow.current_step() {
         Some(ConcreteStep::Skill(skill)) if skill.policy.human => Ok(skill),
         _ => bail!("saved Flow position is not a human skill"),
@@ -39,7 +39,7 @@ pub(crate) async fn membership(store: &SharedStore, session_id: &str) -> Result<
 
 /// Store the review the Flow waits at, with its first Run prepared. Returns
 /// the feedback once the review is complete.
-pub(crate) async fn reserve(store: &SharedStore, flow: &FlowInvocation) -> Result<Option<String>> {
+pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<Option<String>> {
     let session = match &flow.pending_session_id {
         Some(id) => {
             store
@@ -77,7 +77,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowInvocation) -> Resul
                 },
                 RunFlowMembership::Step(RunFlowStep::of(flow)?),
             )?;
-            let session = Session {
+            let session = AgentSession {
                 id,
                 current_run_id: run.id.clone(),
                 kind: SessionKind::FlowReview,
@@ -100,7 +100,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowInvocation) -> Resul
 }
 
 /// Close the review and hand its feedback to the Flow's next step.
-pub(crate) async fn complete(store: &SharedStore, session: &Session, run: &Run) -> Result<()> {
+pub(crate) async fn complete(store: &SharedStore, session: &AgentSession, run: &Run) -> Result<()> {
     let flow = store.waiting_review(&session.id).await?;
     ensure!(
         flow.failure.is_none(),
@@ -119,7 +119,7 @@ pub(crate) async fn complete(store: &SharedStore, session: &Session, run: &Run) 
     })
 }
 
-fn review_message(flow: &FlowInvocation, session_id: &str) -> String {
+fn review_message(flow: &FlowSession, session_id: &str) -> String {
     let mut message = flow.message.clone().unwrap_or_default();
     if let Some(direction) = &flow.cursor.leaf().progress.direction {
         message.push_str(&format!("\n\nPrevious direction:\n{direction}"));
@@ -166,7 +166,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{complete, pinned_skill, reserve, review_message};
-    use crate::durable::{FlowInvocation, RunId};
+    use crate::durable::{FlowSession, RunId};
     use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor};
     use crate::engine::invocation::QueuedInvocation;
     use crate::engine::{ExecutionCursor, NestedCursor, OccurrencePolicy, Skill};
@@ -214,7 +214,7 @@ mod tests {
                     .unwrap(),
             );
             let flow = store
-                .create_flow(FlowInvocation {
+                .create_flow(FlowSession {
                     invocation: QueuedInvocation::new("review", steps).unwrap(),
                     cursor: ExecutionCursor {
                         child: Some(Box::new(NestedCursor::Xor {

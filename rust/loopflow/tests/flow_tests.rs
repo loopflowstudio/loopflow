@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::{FlowInvocation, TaskWorkerClaimOutcome, TaskWorkerOwner};
+use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
 use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::engine::transitions::FlowDecision;
@@ -297,7 +297,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let position = runtime
             .block_on(child.store.start_task_flow(
                 &child.task.id,
-                FlowInvocation {
+                FlowSession {
                     task_id: Some(child.task.id.clone()),
                     wave_id: Some(child.task.wave_id.clone()),
                     cwd: child.task.worktree.clone(),
@@ -952,7 +952,7 @@ fn historical_start_evidence_still_prevents_backlog_retirement() {
 
 #[test]
 fn task_claim_starts_before_real_worker_publishes_its_run() {
-    use loopflow::durable::{FlowInvocation, TaskWorkerClaimOutcome, TaskWorkerOwner};
+    use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use loopflow::engine::invocation::QueuedInvocation;
     let repo = loopflow_test_support::TestRepo::new();
     repo.create_branch("task-claim");
@@ -965,7 +965,7 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
     let flow = runtime
         .block_on(task.store.start_task_flow(
             &task.task.id,
-            FlowInvocation {
+            FlowSession {
                 invocation: QueuedInvocation::load(repo.path(), "claim-proof").unwrap(),
                 cursor: Default::default(),
                 version: 0,
@@ -1091,7 +1091,7 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
     let retry = runtime
         .block_on(task.store.start_task_flow(
             &task.task.id,
-            FlowInvocation {
+            FlowSession {
                 invocation:
                     QueuedInvocation::new("restart-proof", flow.invocation.steps.clone()).unwrap(),
                 ..flow.clone()
@@ -1134,7 +1134,7 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
 
 #[test]
 fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone() {
-    use loopflow::durable::FlowInvocation;
+    use loopflow::durable::FlowSession;
     use loopflow::engine::invocation::QueuedInvocation;
     use loopflow_test_support::TestRepo;
 
@@ -1169,7 +1169,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let position = runtime
         .block_on(task.store.start_task_flow(
             &task.task.id,
-            FlowInvocation {
+            FlowSession {
                 invocation: QueuedInvocation::load(repo.path(), "code").unwrap(),
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,
@@ -1600,7 +1600,7 @@ fn unavailable(flow: &serde_json::Value, kind: &str) -> Option<String> {
 
 #[test]
 fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() {
-    use loopflow::durable::{FlowInvocation, TaskFlowBlocker};
+    use loopflow::durable::{FlowSession, TaskFlowBlocker};
     use loopflow::engine::invocation::QueuedInvocation;
 
     let repo = loopflow_test_support::TestRepo::new();
@@ -1657,7 +1657,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     let pinned = runtime
         .block_on(task.store.start_task_flow(
             &task.task.id,
-            FlowInvocation {
+            FlowSession {
                 invocation: QueuedInvocation::load(repo.path(), "two-loops").unwrap(),
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,

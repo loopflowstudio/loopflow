@@ -1260,7 +1260,7 @@ mod tests {
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
     use crate::durable::{
-        Author, FlowInvocation, TaskFlowBlocker, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
+        Author, FlowSession, TaskFlowBlocker, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
     };
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -1480,8 +1480,8 @@ mod tests {
         task: &Task,
         invocation: crate::engine::invocation::QueuedInvocation,
         cursor: crate::engine::ExecutionCursor,
-    ) -> FlowInvocation {
-        FlowInvocation {
+    ) -> FlowSession {
+        FlowSession {
             invocation,
             cursor,
             version: 0,

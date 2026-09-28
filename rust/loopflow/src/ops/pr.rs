@@ -39,6 +39,8 @@ pub struct PrInfo {
     pub merged_at: Option<String>,
     /// The PR's current head commit (`headRefOid`), when GitHub reports one.
     pub head_sha: Option<String>,
+    /// GitHub's mergeability classification, when observed through REST.
+    pub merge_state: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -197,6 +199,7 @@ pub fn create_or_update_pr(
                 merge_commit: None,
                 merged_at: None,
                 head_sha: None,
+                merge_state: None,
             }),
         };
         (PrResult { url, created: true }, info)
@@ -323,6 +326,7 @@ fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
         merge_commit: pr.merge_commit.map(|commit| commit.oid),
         merged_at: None,
         head_sha: pr.head_ref_oid,
+        merge_state: None,
     }
 }
 
@@ -583,6 +587,7 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
             merge_commit: pr.merge_commit.map(|commit| commit.oid),
             merged_at: None,
             head_sha: pr.head_ref_oid,
+            merge_state: None,
         }));
     }
 
@@ -834,6 +839,7 @@ fn classify_pr_read_failure(number: u32, stderr: &str) -> String {
 /// deserializes an external API response, mirroring the tolerance of `GhPr`.
 #[derive(Debug, Deserialize)]
 struct GhRestPr {
+    mergeable_state: Option<String>,
     #[serde(default)]
     merged: bool,
     state: String,
@@ -879,6 +885,7 @@ impl GhRestPr {
             },
             merged_at: if self.merged { self.merged_at } else { None },
             head_sha: self.head.sha,
+            merge_state: self.mergeable_state,
         }
     }
 }
@@ -939,7 +946,10 @@ fn parse_check_set_output(
     if let Ok(checks) = serde_json::from_slice(stdout) {
         return Ok(checks);
     }
-    if required && stderr.to_ascii_lowercase().contains("no required checks") {
+    let message = stderr.to_ascii_lowercase();
+    if message.contains("no checks reported")
+        || (required && message.contains("no required checks"))
+    {
         return Ok(Vec::new());
     }
     if !succeeded {
@@ -1188,6 +1198,7 @@ pub(crate) fn create_pr_from_pushed_branch(
         merge_commit: None,
         merged_at: None,
         head_sha: Some(rev_parse(repo, "HEAD")?),
+        merge_state: None,
     })
 }
 
@@ -1559,6 +1570,7 @@ mod tests {
 
     fn rest_pr(state: &str, merged: bool, draft: bool) -> GhRestPr {
         GhRestPr {
+            mergeable_state: None,
             merged,
             state: state.to_string(),
             draft,
@@ -1679,6 +1691,21 @@ mod tests {
         )
         .unwrap()
         .is_empty());
+    }
+
+    #[test]
+    fn new_head_without_checks_is_missing_evidence_not_a_failed_read() {
+        for required in [true, false] {
+            assert!(parse_check_set_output(
+                "jack/release",
+                required,
+                false,
+                b"",
+                "no checks reported on the 'jack/release' branch",
+            )
+            .unwrap()
+            .is_empty());
+        }
     }
 
     #[test]

@@ -487,7 +487,14 @@ impl SkillExecutor for CliFlowExecutor<'_> {
             return Ok(());
         }
         eprintln!("{name}");
-        let result = crate::ops::execute_flow_ops(&self.repo, &ops.item, &NullProgress);
+        let repo = self.repo.clone();
+        let item = ops.item.clone();
+        // Operations own blocking subprocesses and may enter their own async
+        // controllers (for example the release's watched PR landing).
+        let result = tokio::task::spawn_blocking(move || {
+            crate::ops::execute_flow_ops(&repo, &item, &NullProgress)
+        })
+        .await?;
         flow_run::finish_boundary(
             &token,
             result.as_ref().err().map(ToString::to_string).as_deref(),

@@ -55,6 +55,13 @@ crons:
     schedule: "0 0 10 * * *"
 ```
 
+`release-run` resolves to `.lf/flows/release-run.yaml`, whose single operation
+is `release run patch`. The release command's error reaches the cron receipt;
+an agent's successful report cannot turn a blocked release into success.
+Release notes still use the agent stage inside that command. After updating an
+existing host, run `lf cron sync --wave infrastructure` to replace the old skill
+target with this Flow target, then inspect `lf cron list --wave infrastructure`.
+
 `lf cron sync --wave infrastructure` validates both targets and both fixed
 daily schedules before it writes a plist. It captures the non-secret host path,
 Home id, Home/store paths, authoritative checkout, installed binary, exact

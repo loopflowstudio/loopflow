@@ -179,6 +179,17 @@ fn classify_github_observation(landing: &PrLanding, pr: PrInfo) -> OpsResult<Lan
             })
         }
         "closed" => Ok(LandingObservation::Closed { head_sha }),
+        _ if matches!(pr.merge_state.as_deref(), Some("behind" | "dirty")) => {
+            Ok(LandingObservation::Degraded {
+                reason: format!(
+                    "pull request #{} needs integration ({}); rebase and resume landing",
+                    pr.number,
+                    pr.merge_state
+                        .as_deref()
+                        .expect("integration state matched")
+                ),
+            })
+        }
         _ => match merge_gate_state(&landing.worktree, &landing.branch) {
             Ok(Some(reading)) if reading.failing => Ok(LandingObservation::Failing {
                 head_sha,

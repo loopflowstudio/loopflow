@@ -197,6 +197,9 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
         {"flow": "telemetry-daily", "schedule": "0 0 9 * * *"},
         {"flow": "release-run", "schedule": "0 0 10 * * *"},
     ]
+    assert yaml.safe_load((ROOT / ".lf/flows/release-run.yaml").read_text()) == [
+        {"op": "release run patch"}
+    ]
 
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
     assert config["release"]["targets"]["default"]["publisher"] == [

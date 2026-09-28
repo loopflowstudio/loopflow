@@ -1016,6 +1016,45 @@ fn ops_item_parses_and_expands() {
 }
 
 #[test]
+fn scheduled_release_flow_propagates_the_operation_failure() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let bin = home.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    write_executable(&bin.join("gh"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &bin.join("release-publisher"),
+        "#!/bin/sh\necho 'fixture publisher unavailable' >&2\nexit 27\n",
+    );
+    write_flow(
+        repo.path(),
+        "release-run",
+        include_str!("../../../.lf/flows/release-run.yaml"),
+    );
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [release-publisher]\n",
+    )
+    .unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["--batch", "flow", "release-run"],
+        Some(&path),
+    );
+
+    assert!(
+        !output.status.success(),
+        "a failed release must fail its scheduled target"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("fixture publisher unavailable"), "{stderr}");
+    assert!(!stderr.contains("launching agent"), "{stderr}");
+}
+
+#[test]
 fn expand_flow_tracks_parents() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

@@ -2,6 +2,8 @@
 
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
+Release-specific findings live in [release memory](release/MEMORY.md).
+
 ## Branch data and command ownership (LOO-321, branch evidence 2026-09-28)
 
 [Branch data isolation · LOO-321](https://linear.app/loopflow/issue/LOO-321)

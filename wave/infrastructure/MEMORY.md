@@ -4,6 +4,38 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dep
 
 Release-specific findings live in [release memory](release/MEMORY.md).
 
+## Review continuity across installation selection (2026-09-28)
+
+The [review-launch RCA and transferred hardening design](https://github.com/loopflowstudio/loopflow/blob/eecdd7c62fb426dc2f7e2db18e1d0aed07b19623/scratch/jack-heart/discord.md)
+requested by Jack remain in local checkpoint `eecdd7c62`; remote availability
+was not checked.
+At Jack's request, implementation moved to `loopflow.session-launch-hardening`,
+based directly on main. The source checkout retains history only. Integrate
+against [the execution-model work · LOO-298](https://linear.app/loopflow/issue/LOO-298)
+without adding another Session registry or launch-attempt owner.
+
+- A selection-scoped lookup miss does not prove deletion. LOO-332 and LOO-333
+  remained in the retained development store after installation selection changed
+  both executable and database. The switch receipt established that transition,
+  not who requested it or why. Compatible executable/store pairs must preserve
+  access to existing reviews without merging private databases or selecting a
+  divergent copy by newest timestamp.
+- The reported `unexpected argument '--tui'` exit proved early CLI failure;
+  it did not identify the executable that rejected it. Current help checks
+  accepted the flag. Later provider metadata cannot reconstruct that earlier
+  child's executable or arguments. Capture sanitized child identity, owning
+  store, cwd and operation before spawning, then record failure through existing
+  execution evidence and retain it across successful retry. Do not log prompts
+  or secrets.
+- Preparing a Session through JSON, opening a terminal window and obtaining a
+  provider ID are separate from reaching or completing the pending review.
+  Required proof prepares under installation A, selects B with another store,
+  then opens the same review through its compatible owner. Inject early argument
+  rejection and retry; retain both stores and the failed evidence, start no
+  competing Task driver, and leave the review pending until explicitly completed.
+  A real Ghostty open/resume remains owed. The successful restoration preview
+  was not applied and establishes neither recovery nor review acceptance.
+
 ## Branch data and command ownership (LOO-321, branch evidence 2026-09-28)
 
 [Branch data isolation · LOO-321](https://linear.app/loopflow/issue/LOO-321)

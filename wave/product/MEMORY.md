@@ -5,6 +5,62 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Finite Task operation and recursive VSM (2026-09-28)
+
+Jack selected Product ownership for
+[Keep Tasks progressing to landing without a resident or watcher · LOO-332](https://linear.app/loopflow/issue/LOO-332/keep-tasks-progressing-to-landing-without-a-resident-or-watcher)
+and [Operate Waves recursively and assess the repository with VSM · LOO-333](https://linear.app/loopflow/issue/LOO-333/operate-waves-recursively-and-assess-the-repository-with-vsm).
+Both build on [Data model: one table per user object · LOO-298](https://linear.app/loopflow/issue/LOO-298),
+using its accepted Exec / AgentSession / FlowSession direction and shared
+execution authority. Older Run/resident descriptions below are dated history;
+these decisions describe the target, not an installed capability.
+
+- **Carry selected Tasks through their intended Flow to verified landing.**
+  Desktop manages OS scheduling through shared `lf` operations, so work can
+  progress with the app closed. Finite checks preserve captured order and review
+  gates. Active Sessions, Flow drivers, repairs and unresolved human reviews
+  prevent competing admission; unknown liveness does not establish idle work.
+  Unselected backlog stays queued. Overlapping ticks share authoritative claims.
+- **Landing handoff and merge are different results.** `pr land -c` should
+  record completion-on-merge intent and return; later finite checks repair CI or
+  rebase, then retry existing local/Linear closure after authoritative merge.
+  Bare land keeps the Task open, PR-chain disposition survives, and a closed
+  unmerged PR never becomes successful completion. Steps requiring merge still
+  wait for it. Taskless landing also needs finite reconciliation.
+- **Bound repair admission.** Failed CI and required rebases are actionable,
+  including rebase with green checks. Pending, queued or absent expected checks
+  need a persistent deadline; unchanged evidence cannot launch repairs forever.
+  One repository tick per minute, a 30-minute CI deadline and one automatic
+  timeout-only rerun are design defaults, not additional decisions by Jack.
+- **VSM is recursive.** Each Wave considers S1 delivery, S2 coordination,
+  S3 capacity, S4 changed conditions and S5 purpose. One repository-wide
+  `vsm-operate` considers those questions across Waves. Identity is determined
+  through the whole graph: Task findings can challenge Wave or repository
+  premises, and resolved direction returns to work. Preserve disagreement;
+  no operator silently rewrites another owner's objective. Projects belong to
+  Waves and have no operator. Each pass takes one or two useful moves and exits;
+  no five-agent reporting cycle or governance prerequisite for Task progress.
+- **Chat continuity is a separate outcome.** Jack selected a channel per
+  Wave/subwave and a thread per Task. Discord messages and Linear comments must
+  reach every Task-registered noninteractive Session, including independent
+  helpers; interactive Sessions are excluded. Preserve source authorship and
+  per-recipient progress across restart and late attachment. One recipient
+  cannot consume another's input; retries must avoid duplicate replies and
+  outbound echo loops. Fixed lookback or startup-skipping polling does not prove
+  catch-up. Provisioning, archival and Task-transfer semantics remain open.
+
+The [source discussion and transfer receipt](https://github.com/loopflowstudio/loopflow/blob/eecdd7c62fb426dc2f7e2db18e1d0aed07b19623/scratch/discord.md)
+and its linked designs survive in local checkpoint `eecdd7c62`; remote
+availability was not checked. Ongoing designs belong to the dedicated
+`loopflow.scheduled-task-operation` and `loopflow.recursive-vsm-operation`
+checkouts. Recorded worker startup proves neither completed implementation nor
+demo acceptance. No live job or Discord provisioning was performed here.
+LOO-332 still owes the app-closed installed scheduling/repair/closure path;
+LOO-333 owes useful finite Wave and repository passes with human review.
+Discord continuity and subsequent Wave/VSM scheduling integration remain named,
+unfiled follow-ups until the core contract settles. Do not duplicate these Tasks
+or treat the archived source designs as competing active plans.
+
 ## Named participants and review feedback (curated 2026-09-25)
 
 Curated from the retired [name-attribution record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/name-attribution.md)

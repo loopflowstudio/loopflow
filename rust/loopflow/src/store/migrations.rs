@@ -174,6 +174,22 @@ pub(crate) fn apply_installed_development_sqlite(
     if current {
         return Ok(());
     }
+    // A canonical-only upgrade still needs its previous-generation backup.
+    // Prepare WAL before the transaction so that backup can read its committed
+    // snapshot while the one migration transaction excludes other writers.
+    let _lock = if drafts.is_empty() {
+        conn.path()
+            .filter(|path| !path.is_empty())
+            .map(|path| {
+                conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+                let lock = migration_lock(Path::new(path))?;
+                conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+                Ok::<_, StoreError>(lock)
+            })
+            .transpose()?
+    } else {
+        None
+    };
     _migration_transaction(conn, |conn| _apply_development_in(conn, drafts))
 }
 
@@ -185,13 +201,11 @@ fn _apply_development_in(
         .iter()
         .any(|table| table == DEVELOPMENT_MIGRATIONS_TABLE);
     if !has_draft_ledger && drafts.is_empty() {
-        // Ordinary private stores share the canonical migration fast path.
-        // A retained draft ledger still requires validation, even without drafts
-        // in this build, so removing a draft cannot silently reopen its store.
-        return match conn.path().filter(|path| !path.is_empty()) {
-            Some(path) => apply_sqlite_with_backup(conn, Path::new(path)),
-            None => apply_sqlite(conn),
-        };
+        // Already inside the migration transaction. Recheck the previous
+        // generation under this lock; do not enter another transaction owner.
+        if let Some(path) = conn.path().filter(|path| !path.is_empty()) {
+            backup_before_migration(conn, Path::new(path))?;
+        }
     }
     if has_draft_ledger {
         adopt_released_development_drafts(conn, drafts)?;
@@ -4452,6 +4466,54 @@ mod tests {
             latest_version_sqlite(&conn).unwrap(),
             latest_known_version()
         );
+    }
+
+    #[test]
+    fn empty_draft_initialization_and_upgrade_preserve_canonical_history() {
+        let memory = open();
+        apply_installed_development_sqlite(&memory, &[]).unwrap();
+        validate_installed_development_sqlite(&memory, &[]).unwrap();
+        for existing in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("loopflow.db");
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            if existing {
+                apply_set(&conn, &MIGRATIONS[..1]).unwrap();
+                conn.execute(
+                    "INSERT INTO blob_tokens(sha,lines,bytes,tokens) VALUES('retained',1,2,3)",
+                    [],
+                )
+                .unwrap();
+            }
+            apply_installed_development_sqlite(&conn, &[]).unwrap();
+            validate_installed_development_sqlite(&conn, &[]).unwrap();
+            assert_eq!(
+                latest_version_sqlite(&conn).unwrap(),
+                latest_known_version()
+            );
+            apply_installed_development_sqlite(&conn, &[]).unwrap();
+            if existing {
+                let backup = rusqlite::Connection::open(find_backup(
+                    directory.path(),
+                    "loopflow.db.backup-0.10.001_initial-",
+                ))
+                .unwrap();
+                assert_eq!(
+                    latest_applied_version_sqlite(&backup).unwrap().as_deref(),
+                    Some("0.10.001_initial")
+                );
+                for connection in [&conn, &backup] {
+                    let tokens: i64 = connection
+                        .query_row(
+                            "SELECT tokens FROM blob_tokens WHERE sha='retained'",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(tokens, 3);
+                }
+            }
+        }
     }
 
     #[test]

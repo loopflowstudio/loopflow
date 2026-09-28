@@ -2,6 +2,80 @@
 
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
+## Branch data and command ownership (LOO-321, branch evidence 2026-09-28)
+
+[Branch data isolation · LOO-321](https://linear.app/loopflow/issue/LOO-321)
+addresses the installed-database incident recorded under LOO-305 below;
+[Branch data and command cleanup · PR #1308](https://github.com/loopflowstudio/loopflow/pull/1308)
+carries the implementation. The retained
+[design and proof ledger](https://github.com/loopflowstudio/loopflow/blob/5f10576bd8e060e20c6aeb9addca8a462bc838b6/scratch/branch-build-own-home.md),
+[Jack's review decisions](https://github.com/loopflowstudio/loopflow/blob/5f10576bd8e060e20c6aeb9addca8a462bc838b6/scratch/branch-home-interactive-demo.md),
+and [demo handoff](https://github.com/loopflowstudio/loopflow/blob/5f10576bd8e060e20c6aeb9addca8a462bc838b6/scratch/branch-build-demo.md)
+preserve local history before scratch clearing; remote availability was not checked.
+Current mechanics belong in [CLI docs](../../docs/lf.md) and
+[Homes and processes](../../docs/architecture/homes.md).
+
+- **Home means execution destination.** Jack retained machine placement and the
+  need to reach Mac mini work through the same app. `LF_HOME` selects a data
+  directory. A branch snapshot preserves Home IDs and placement without creating
+  another Home or acquiring process authority. The earlier local-only proposal
+  is superseded; removing resident Wave controls does not remove remote placement.
+- **Installation receipts own stores.** Source execution redirects inherited
+  installation-owned data to a source-specific directory and seeds it once.
+  Retained stores and filesystem aliases remain owned; repeated commands preserve
+  private writes. Explicit private data overrides stale control pins. Foreign
+  execution context is cleared, while Task origin survives only as an installation
+  restriction. Tasks cannot promote themselves; read-only preflight remains usable.
+- **Move the whole managed operation before effects.** A selected installation
+  supplies both executable and database before `create --run`, Flow changes or claims.
+  Return its Task snapshot instead of rereading branch data. Without an installation,
+  source execution uses private data; the earlier installed-only prerequisite is
+  superseded. Exact review completion consumes installed readiness and feedback,
+  never copied readiness. Private and installed writes do not synchronize, and
+  branch-only Task identity is not transferred implicitly. Database isolation
+  does not isolate provider mutations or shared checkout edits.
+- **Continue saved work; replace it explicitly.** Jack selected `task run` for
+  start and continuation, retaining captured definitions, review waits and failed
+  decision feedback. Retry revokes pending merge intent; `task restart` explicitly
+  replaces the invocation. `task checkout` allocates without execution and restores
+  a missing checkout from retained Task/PR/branch identity. Dirty invoking or
+  canonical checkouts are valid; occupied paths, other owners and branch history
+  remain protected. A failed first allocation can retry its pinned base.
+- **Remove controls across their consumers.** Task/Wave enablement and Wave
+  start/stop/pause/resume/serve are removed from CLI, runtime, app and current DTOs.
+  Released enablement columns and old paused frontmatter are inert historical
+  bytes. Chat connects automatically through the local daemon without moving
+  remote placement; schedules survive. Reads now belong to `catalog`, `wave list`,
+  `wave status`, `wave probe`, and `pr checks`, without aliases. Other command-catalog
+  proposals remain unselected, including PR viewing/abandonment and cron editing.
+- **Recovery preserves evidence.** Incompatible-data diagnostics name the database
+  and applied draft names, IDs and checksums. A retained executable/database pair
+  is advice only after artifact verification and exact-store read-only preflight;
+  missing evidence stays explicit. Returning to another preserved directory does
+  not repair or merge private writes. Published promotion reports both database
+  paths and the retained installation ID; it does not transfer Task history.
+
+Recorded local proofs cover snapshot preservation, ownership, checkout recovery,
+saved continuation, command/DTO agreement and fixture chat. All four disposable
+Linux installation proofs passed after Docker recovered, including inactive
+retained-pair recovery and installed readiness/agent persistence; the stranded
+fixture container was removed. These supersede the earlier unrun-recovery and
+cleanup gaps. The harness uses authored installation records and current binaries,
+not Jack's installation. Fixture chat uses simulated tmux/provider executables
+and two concurrent callers; the earlier twenty-caller deadline failure remains
+outside that proof. Final compression records focused Rust/Swift and static passes.
+This memory curation reruns no behavioral suite and establishes no hosted CI result.
+
+The real installed-Session/new-draft Task-write and configured installed-worker
+demonstrations remain unproven. A prepared review Run is not worker execution;
+the worker proof needs executable, data directory, Home, claim and Run evidence
+under stale branch pins. Jack has not accepted the new app behavior. Remote app
+chat transport is not implemented here. Seeded usable demo context, private-draft
+repair, redirected-daemon children, local OS death evidence and demo write-back
+remain deferred; the reported Linux oversized-prompt defect is outside this scope.
+Readiness, fixture success and publication authorize neither demo acceptance nor
+Flow navigation, Task completion, provider mutation or installation promotion.
+
 ## Account auth consolidation (LOO-320, branch evidence 2026-09-27)
 
 [Make account login, usage, and auth output clear and reliable · LOO-320](https://linear.app/loopflow/issue/LOO-320)
@@ -92,6 +166,7 @@ those edits and is not reusable for the final tree. These results establish
 neither installed acceptance nor the four live proofs. Swift, app/UI and slow
 end-to-end checks remain with CI. No delivery or Task disposition follows from
 this evidence alone.
+
 
 ## Task deletion and command ownership (LOO-305, branch evidence 2026-09-27)
 
@@ -692,9 +767,11 @@ launch lock nor establishes a deployed execution cutover.
   The 2026-09-24 read repeated the three-Run result and excluded all six live
   Execs from dry-run prune (12 live nodes at that sample). Source builds default
   to a development Home: an empty result there says nothing about installed
-  history. Select the intended Home explicitly for read-only incident checks;
-  clear `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH`, `LF_HOME`, and `LF_DB_PATH` for
-  isolated tests. Neither sample proves the older installed Flow schema works.
+  history. Use the owning executable/database pair for installed incident reads;
+  a branch executable may redirect an explicit installed directory to private data
+  under LOO-321's isolation contract above. For isolated tests, clear
+  `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH`, `LF_HOME`, and `LF_DB_PATH`.
+  Neither sample proves the older installed Flow schema works.
 - **Isolate launch tests from ambient authority.** A research fixture inherited
   the live control database, and a Session fixture failed to publish its fake
   client during the initial broad suite. Isolated reruns passed after clearing
@@ -895,16 +972,17 @@ local configuration, optional provider connection and later PM setup. Today's
   deleted. Authored input is a durable Work Steer. Observation delivery must
   preserve input without requiring a resident Project. Automatic dispatch policy
   remains open; a nudge must not invent a second execution authority.
-- **Supported Wave startup is one event-driven Home lifecycle** (decided
-  2026-07-21). `lf start` opens the selected Home registry and uses its current
-  `lf`/`lfd` control pair without promoting or replacing binaries. Daemon boot
+- **Wave chat connection retains one event-driven Home lifecycle** (reconciled
+  2026-09-28). LOO-321 removes the explicit start/stop surface; opening chat
+  connects through the local Home's `lf`/`lfd` pair without promoting or
+  replacing binaries or moving remote placement. Daemon boot
   publishes one attempt-scoped durable `live | failed` receipt and uses a
   private socket only as the wake edge; `lfd` owns listeners and shares each
   listener's `starting | live | failed` transition with concurrent callers.
   Success drains the durable observation outbox before returning. Failure
   compensates only registry state introduced by that attempt, and one failed
-  Wave never terminates successful siblings. The Mac app uses the same
-  `RegistryQuery.start` receipt path. Reconciliation polling remains recovery,
+  Wave never terminates successful siblings. The Mac app uses the shared
+  connection path. Reconciliation polling remains recovery,
   never startup acknowledgement.
 - **Controller evidence is not an agent Run** (learned 2026-07-20). When a
   merged PR or another controller fact completes a Task, persist the Task

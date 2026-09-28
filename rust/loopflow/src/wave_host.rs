@@ -131,25 +131,6 @@ impl WaveHost {
     pub(crate) async fn start_waves(&self, wave_ids: Vec<WaveId>) -> Vec<WaveStartOutcome> {
         let mut outcomes = Vec::with_capacity(wave_ids.len());
         for wave_id in wave_ids {
-            let state = match self.set_wave_enabled(&wave_id, true).await {
-                Ok(_) => match self.start_wave(&wave_id).await {
-                    Ok(endpoint) => WaveStartState::Live { endpoint },
-                    Err(error) => WaveStartState::Failed {
-                        reason: error.to_string(),
-                    },
-                },
-                Err(error) => WaveStartState::Failed {
-                    reason: error.to_string(),
-                },
-            };
-            outcomes.push(WaveStartOutcome { wave_id, state });
-        }
-        outcomes
-    }
-
-    pub(crate) async fn reconcile_waves(&self, wave_ids: Vec<WaveId>) -> Vec<WaveStartOutcome> {
-        let mut outcomes = Vec::with_capacity(wave_ids.len());
-        for wave_id in wave_ids {
             let state = match self.start_wave(&wave_id).await {
                 Ok(endpoint) => WaveStartState::Live { endpoint },
                 Err(error) => WaveStartState::Failed {
@@ -159,31 +140,6 @@ impl WaveHost {
             outcomes.push(WaveStartOutcome { wave_id, state });
         }
         outcomes
-    }
-
-    pub(crate) async fn stop_wave(&self, wave_id: &WaveId) -> Result<bool> {
-        let wave = self.set_wave_enabled(wave_id, false).await?;
-        self.stop_wave_runtime(&wave).await
-    }
-
-    async fn set_wave_enabled(&self, wave_id: &WaveId, enabled: bool) -> Result<Wave> {
-        let wave = self
-            .store
-            .get_wave(wave_id)
-            .await?
-            .ok_or_else(|| anyhow!("Wave {wave_id} was not found"))?;
-        let work = WorkRef::Wave(wave_id.clone());
-        let placement = self.store.placement(&work).await?;
-        if placement.home_id != self.home_id {
-            return Err(anyhow!(
-                "Wave {} is placed on {}, not resident Home {}",
-                wave.name(),
-                placement.home_id,
-                self.home_id
-            ));
-        }
-        self.store.set_work_enabled(&work, enabled).await?;
-        Ok(wave)
     }
 
     async fn stop_wave_runtime(&self, wave: &Wave) -> Result<bool> {
@@ -218,7 +174,6 @@ impl WaveHost {
                 self.home_id
             ));
         }
-        ensure_wave_enabled(&wave, &placement)?;
 
         let repo = PathBuf::from(wave.repo());
         if let Some(endpoint) = wave::server::live_endpoint(&repo, wave.name()).await {
@@ -237,7 +192,13 @@ impl WaveHost {
             .store
             .placement(&WorkRef::Wave(wave_id.clone()))
             .await?;
-        ensure_wave_enabled(&wave, &placement)?;
+        if placement.home_id != self.home_id {
+            return Err(anyhow!(
+                "Wave {} moved to Home {}",
+                wave.name(),
+                placement.home_id
+            ));
+        }
         if let Some(hosted) = tasks
             .get(wave_id)
             .filter(|hosted| !hosted.task.is_finished())
@@ -364,13 +325,6 @@ impl WaveHost {
     }
 }
 
-fn ensure_wave_enabled(wave: &Wave, placement: &crate::durable::Placement) -> Result<()> {
-    if !placement.enabled {
-        return Err(anyhow!("Wave {} is disabled on this Home", wave.name()));
-    }
-    Ok(())
-}
-
 async fn wait_for_startup(mut startup: watch::Receiver<WaveStartup>, name: &str) -> Result<String> {
     tokio::time::timeout(STARTUP_TIMEOUT, async {
         loop {
@@ -446,10 +400,6 @@ pub(crate) async fn waves_for_home(
             );
             continue;
         }
-        if !placement.enabled {
-            tracing::info!(wave = wave.name(), "skipping disabled Wave");
-            continue;
-        }
         assigned.push(wave);
     }
     Ok(assigned)
@@ -464,7 +414,7 @@ mod tests {
 
     use crate::durable::{HomeId, WorkRef};
     use crate::id::WaveId;
-    use crate::store::StorageConfig;
+    use crate::store::{StorageConfig, WaveLocatorUpdate};
     use crate::work::wave::{Wave, WaveLocator};
 
     use super::{waves_for_home, HostedWave, WaveHost, WaveStartState, WaveStartup};
@@ -580,15 +530,8 @@ mod tests {
             .observe_home(&HomeId::new(), "ssh://operator@remote.example.com")
             .await
             .expect("observe remote Home");
-        let off_wave = store
-            .get_wave_at(&crate::work::wave::WaveLocator::discover(&repo, "off").unwrap())
-            .await
-            .expect("read disabled Wave")
-            .expect("disabled Wave exists");
-        store
-            .set_work_enabled(&WorkRef::Wave(off_wave.id().clone()), false)
-            .await
-            .expect("disable Wave on this Home");
+        rusqlite::Connection::open(directory.path().join("registry.db")).unwrap()
+            .execute("UPDATE work_placements SET enabled=0 WHERE wave_id IN (SELECT id FROM waves WHERE name='off')", []).unwrap();
         let remote_wave = store
             .get_wave_at(
                 &crate::work::wave::WaveLocator::discover(&repo, "remote-placement").unwrap(),
@@ -607,12 +550,12 @@ mod tests {
 
         assert_eq!(
             selected.iter().map(|wave| wave.name()).collect::<Vec<_>>(),
-            vec!["matching"]
+            vec!["matching", "off"]
         );
     }
 
     #[tokio::test]
-    async fn stopped_wave_remains_off_for_a_fresh_home_reconciler() {
+    async fn reconciliation_stops_a_hosted_wave_after_retirement() {
         let directory = tempfile::tempdir().expect("create temp directory");
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join("wave/assigned")).expect("create Wave directory");
@@ -626,73 +569,53 @@ mod tests {
             .expect("open store"),
         );
         let local = store.local_home().await.expect("read local Home");
+        let target = WaveLocator::discover(&repo, "assigned").expect("discover Wave locator");
         let wave = Wave::new(
             WaveId::new(),
             "assigned".to_string(),
-            repo.display().to_string(),
+            target.repo().to_string(),
         );
         store.create_wave(&wave).await.expect("create Wave");
-        let host = WaveHost::new(local.id.clone(), store.clone(), None);
-        assert!(!host.stop_wave(wave.id()).await.expect("stop Wave"));
-
-        let placement = store
-            .placement(&WorkRef::Wave(wave.id().clone()))
-            .await
-            .expect("read stopped Wave control");
-        assert!(!placement.enabled);
-        assert_eq!(
-            std::fs::read_to_string(repo.join("wave/assigned/GOAL.md"))
-                .expect("read unchanged goal"),
-            "Assigned here.\n"
-        );
-
-        let restarted = WaveHost::new(local.id, store, None);
-        restarted.reconcile().await;
-
-        assert_eq!(restarted.active_count().await, 0);
-        assert!(
-            crate::controller::wave::server::live_endpoint(&repo, wave.name())
-                .await
-                .is_none()
-        );
-    }
-
-    #[tokio::test]
-    async fn reconciliation_stops_a_hosted_wave_after_it_is_disabled() {
-        let directory = tempfile::tempdir().expect("create temp directory");
-        let repo = directory.path().join("repo");
-        std::fs::create_dir_all(repo.join("wave/assigned")).expect("create Wave directory");
-        std::fs::write(repo.join("wave/assigned/GOAL.md"), "Assigned here.\n")
-            .expect("write Wave goal");
-        let store = Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                directory.path().join("registry.db"),
-            ))
-            .await
-            .expect("open store"),
-        );
-        let local = store.local_home().await.expect("read local Home");
-        let wave = Wave::new(
+        let replacement = Wave::new(
             WaveId::new(),
-            "assigned".to_string(),
-            repo.display().to_string(),
+            "replacement".to_string(),
+            target.repo().to_string(),
         );
-        store.create_wave(&wave).await.expect("create Wave");
+        store
+            .create_wave(&replacement)
+            .await
+            .expect("create replacement Wave");
+        let remote = store
+            .observe_home(&HomeId::new(), "ssh://operator@remote.example.com")
+            .await
+            .expect("observe replacement Home");
+        store
+            .place_work(&WorkRef::Wave(replacement.id().clone()), &remote.id)
+            .await
+            .expect("place replacement Wave remotely");
         let host = WaveHost::new(local.id, store.clone(), None);
         let (_startup_tx, startup) =
             tokio::sync::watch::channel(WaveStartup::Live("127.0.0.1:1".to_string()));
-        let task = tokio::spawn(async {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        });
+        let task = tokio::spawn(std::future::pending());
         host.waves
             .lock()
             .await
             .insert(wave.id().clone(), HostedWave { task, startup });
         store
-            .set_work_enabled(&WorkRef::Wave(wave.id().clone()), false)
+            .relocate_waves(vec![WaveLocatorUpdate {
+                wave_id: replacement.id().clone(),
+                expected_repo: replacement.repo().to_string(),
+                expected_slug: replacement.name().to_string(),
+                target,
+                retire_collision: Some(wave.id().clone()),
+            }])
             .await
-            .expect("disable Wave");
+            .expect("retire destination Wave during relocation");
 
+        assert!(waves_for_home(&store, host.home_id(), None)
+            .await
+            .expect("select assigned Waves after retirement")
+            .is_empty());
         host.reconcile().await;
 
         assert_eq!(host.active_count().await, 0);
@@ -701,7 +624,7 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn explicit_start_reports_the_listener_failure_and_stays_enabled() {
+    async fn chat_connection_reports_the_listener_failure() {
         let _env_lock = crate::journal::test_env_lock();
         let _restore =
             EnvRestore::capture(&["LF_BIN", crate::controller::wave::discord::TOKEN_ENV]);
@@ -734,10 +657,6 @@ mod tests {
             locator.repo().to_string(),
         );
         store.create_wave(&wave).await.expect("create Wave");
-        store
-            .set_work_enabled(&WorkRef::Wave(wave.id().clone()), false)
-            .await
-            .expect("disable Wave before explicit start");
         let host = WaveHost::new(local.id, store.clone(), None);
 
         let outcomes = host.start_waves(vec![wave.id().clone()]).await;
@@ -748,14 +667,6 @@ mod tests {
         assert!(
             reason.contains(crate::controller::wave::discord::TOKEN_ENV),
             "startup should preserve the actionable listener error: {reason}"
-        );
-        assert!(
-            store
-                .placement(&WorkRef::Wave(wave.id().clone()))
-                .await
-                .expect("read start intent")
-                .enabled,
-            "an explicit start remains enabled even when the runtime fails"
         );
     }
 }

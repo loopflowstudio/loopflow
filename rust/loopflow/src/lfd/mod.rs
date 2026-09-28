@@ -20,7 +20,6 @@
 //!   │ /health          → liveness probe              │
 //!   │ /status          → wave count + delivery count │
 //!   │ /waves/start     → local capability → start    │
-//!   │ /waves/stop      → local capability → stop     │
 //!   │ /landings/claim  → claim watched PR generation │
 //!   │ /linear/webhook  → verify → inbox → ingest     │
 //!   │ /github/webhook  → verify → prune worktree     │
@@ -179,8 +178,7 @@ pub fn router(state: LfdState) -> Router {
         .route("/health", get(health_handler))
         .route("/status", get(status_handler))
         .route("/waves/start", post(start_waves_handler))
-        .route("/waves/reconcile", post(reconcile_waves_handler))
-        .route("/waves/stop", post(stop_wave_handler))
+        .route("/waves/reconcile", post(start_waves_handler))
         .route("/landings/claim", post(claim_landing_handler))
         .route(
             "/linear/webhook",
@@ -249,42 +247,6 @@ async fn start_waves_handler(
 ) -> Result<Json<Vec<WaveStartOutcome>>, (StatusCode, String)> {
     authorize_wave_control(&state, &headers)?;
     Ok(Json(state.wave_host.start_waves(request.wave_ids).await))
-}
-
-async fn reconcile_waves_handler(
-    State(state): State<LfdState>,
-    headers: HeaderMap,
-    Json(request): Json<StartWavesRequest>,
-) -> Result<Json<Vec<WaveStartOutcome>>, (StatusCode, String)> {
-    authorize_wave_control(&state, &headers)?;
-    Ok(Json(
-        state.wave_host.reconcile_waves(request.wave_ids).await,
-    ))
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StopWaveRequest {
-    wave_id: WaveId,
-}
-
-async fn stop_wave_handler(
-    State(state): State<LfdState>,
-    headers: HeaderMap,
-    Json(request): Json<StopWaveRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    authorize_wave_control(&state, &headers)?;
-    state
-        .wave_host
-        .stop_wave(&request.wave_id)
-        .await
-        .map(|requested| {
-            if requested {
-                StatusCode::ACCEPTED
-            } else {
-                StatusCode::NO_CONTENT
-            }
-        })
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
 }
 
 fn authorize_wave_control(
@@ -1361,28 +1323,6 @@ pub(crate) async fn claim_pr_landing(
     }
 }
 
-pub(crate) async fn stop_wave(home_id: &HomeId, wave_id: &WaveId) -> anyhow::Result<Option<bool>> {
-    let Some(client) = live_endpoint(home_id).await else {
-        return Ok(None);
-    };
-    let response = reqwest::Client::new()
-        .post(format!("http://{}/waves/stop", client.endpoint))
-        .bearer_auth(&client.token)
-        .json(&StopWaveRequest {
-            wave_id: wave_id.clone(),
-        })
-        .send()
-        .await?;
-    match response.status() {
-        StatusCode::ACCEPTED => Ok(Some(true)),
-        StatusCode::NO_CONTENT => Ok(Some(false)),
-        status => Err(anyhow::anyhow!(
-            "lfd refused Wave stop with HTTP {status}: {}",
-            response.text().await.unwrap_or_default()
-        )),
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct LfdClientEndpoint {
     endpoint: String,
@@ -1755,38 +1695,40 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.ok() });
 
-        let unauthorized = reqwest::Client::new()
-            .post(format!("http://{addr}/waves/start"))
-            .json(&StartWavesRequest {
-                wave_ids: vec![first.clone(), second.clone()],
-            })
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        for path in ["/waves/start", "/waves/reconcile"] {
+            let unauthorized = reqwest::Client::new()
+                .post(format!("http://{addr}{path}"))
+                .json(&StartWavesRequest {
+                    wave_ids: vec![first.clone(), second.clone()],
+                })
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
-        let response = reqwest::Client::new()
-            .post(format!("http://{addr}/waves/start"))
-            .bearer_auth(control_token)
-            .json(&StartWavesRequest {
-                wave_ids: vec![first.clone(), second.clone()],
-            })
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let outcomes = response.json::<Vec<WaveStartOutcome>>().await.unwrap();
-        assert_eq!(outcomes.len(), 2);
-        assert_eq!(outcomes[0].wave_id, first);
-        assert!(matches!(
-            outcomes[0].state,
-            crate::wave_host::WaveStartState::Failed { .. }
-        ));
-        assert_eq!(outcomes[1].wave_id, second);
-        assert!(matches!(
-            outcomes[1].state,
-            crate::wave_host::WaveStartState::Failed { .. }
-        ));
+            let response = reqwest::Client::new()
+                .post(format!("http://{addr}{path}"))
+                .bearer_auth(&control_token)
+                .json(&StartWavesRequest {
+                    wave_ids: vec![first.clone(), second.clone()],
+                })
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let outcomes = response.json::<Vec<WaveStartOutcome>>().await.unwrap();
+            assert_eq!(outcomes.len(), 2);
+            assert_eq!(outcomes[0].wave_id, first);
+            assert!(matches!(
+                outcomes[0].state,
+                crate::wave_host::WaveStartState::Failed { .. }
+            ));
+            assert_eq!(outcomes[1].wave_id, second);
+            assert!(matches!(
+                outcomes[1].state,
+                crate::wave_host::WaveStartState::Failed { .. }
+            ));
+        }
     }
 
     #[tokio::test]

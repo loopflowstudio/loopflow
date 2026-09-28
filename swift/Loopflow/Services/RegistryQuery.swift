@@ -4,7 +4,8 @@
 // observation per window so native receipt discovery survives between samples.
 // Wave conversations retain their per-wave SSE stream (`WaveChatConnection`).
 //
-// This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
+// This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
+// readers with `--json` as subprocesses and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it execs the `lf` shipped inside the app. There is no
@@ -19,10 +20,10 @@ public struct RegistryQueryError: LocalizedError, Sendable {
     public var errorDescription: String? { message }
 }
 
-/// Runs an `lf` argv (already including the subcommand, e.g. `["ls","--json"]`)
+/// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
 /// and returns captured stdout. Throws on a non-zero exit or spawn failure.
-/// `cwd` seeds ambient resolution for verbs that want it (`lf status` with no
-/// wave); the machine-wide reads (`lf ls`, `lf runs`) ignore it.
+/// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
+/// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 public struct RegistryQuery: Sendable {
@@ -42,7 +43,7 @@ public struct RegistryQuery: Sendable {
     /// Current Waves across the machine, including stopped Waves. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await run(["ls", "--all", "--current", "--json"], nil)
+        let stdout = try await run(["wave", "list", "--all", "--current", "--json"], nil)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }
@@ -60,7 +61,7 @@ public struct RegistryQuery: Sendable {
     /// is answering.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
-        let stdout = try await run(["status", wave, "--json"], cwd)
+        let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
@@ -69,22 +70,22 @@ public struct RegistryQuery: Sendable {
     }
 
     public func chapter(wave: String, id: String, cwd: String?) async throws -> ChapterSnapshot {
-        try Self.decode(ChapterSnapshot.self, from: await run(["status", wave, "--chapter", id, "--json"], cwd))
+        try Self.decode(ChapterSnapshot.self, from: await run(["wave", "status", wave, "--chapter", id, "--json"], cwd))
     }
 
     /// Probe one Wave's Home for liveness and the single contextual action.
-    /// The app never does SSH — `lf home probe` classifies the Home (local reads
-    /// are instant; remote routes run one `lf status` on the target Home)
+    /// The app never does SSH — `lf wave probe` classifies the Home (local reads
+    /// are instant; remote routes run one `lf wave status` on the target Home)
     /// and returns the shared `HomeRuntimeDto`. Probe on demand per
     /// focused Wave, never once per row.
     public func homeProbe(wave: String, cwd: String?) async throws -> HomeRuntime {
-        let stdout = try await run(["home", "probe", wave, "--json"], cwd)
+        let stdout = try await run(["wave", "probe", wave, "--json"], cwd)
         return try Self.decode(HomeRuntime.self, from: stdout)
     }
 
-    /// Idempotently start a Wave on its placed Home and return its status row.
-    public func start(wave: String, cwd: String?) async throws -> [WaveSnapshot] {
-        let stdout = try await run(["start", wave, "--json"], cwd)
+    /// Connect chat on the local Home and return its live status row.
+    public func connectChat(wave: String, cwd: String?) async throws -> [WaveSnapshot] {
+        let stdout = try await run(["__chat-connect", wave, "--json"], cwd)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         guard snapshots.count == 1,
               let snapshot = snapshots.first,
@@ -92,24 +93,13 @@ public struct RegistryQuery: Sendable {
               snapshot.live,
               snapshot.endpoint != nil
         else {
-            throw RegistryQueryError("lf start \(wave) returned no live Wave receipt")
+            throw RegistryQueryError("Chat connection for \(wave) returned no live Wave receipt")
         }
         return snapshots
     }
 
-    /// Pause or resume new Wave turns without changing listener residency.
-    public func setWavePaused(
-        wave: String,
-        paused: Bool,
-        cwd: String?
-    ) async throws -> WaveIntentReceipt {
-        let verb = paused ? "pause" : "resume"
-        let stdout = try await run([verb, wave, "--json"], cwd)
-        return try Self.decode(WaveIntentReceipt.self, from: stdout)
-    }
-
     /// Every durable plan row across the machine, joined to the same Task
-    /// references and live evidence as `lf status`. One subprocess reads every
+    /// references and live evidence as `lf wave status`. One subprocess reads every
     /// Wave; an optional scope filters that shared snapshot at the source.
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         var args = ["roadmap"]
@@ -189,19 +179,16 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Start (preparing when needed) the Task's managed Flow.
-    public func runTaskFlow(issue: String, flow: String, cwd: String?) async throws {
-        _ = try await run(["task", "run", issue, "--flow", flow], cwd)
+    public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
+        var args = ["task", "run", issue]
+        if let flow { args += ["--flow", flow] }
+        _ = try await run(args, cwd)
     }
 
     /// Checkpoint, stop, and replace the pinned Flow. Rust validates `flow`
     /// before any side effect.
     public func restartTaskFlow(issue: String, flow: String, cwd: String?) async throws {
         _ = try await run(["task", "restart", issue, "--flow", flow], cwd)
-    }
-
-    /// Continue the pinned Flow from its saved boundary.
-    public func resumeTaskFlow(issue: String, cwd: String?) async throws {
-        _ = try await run(["task", "resume", issue], cwd)
     }
 
     /// One planning Task's complete comment thread. Read-only; works before
@@ -294,7 +281,7 @@ public struct RegistryQuery: Sendable {
         sync: Bool = false
     ) async throws -> WavePlan {
         if sync { _ = try await run(["wave", "sync", wave], cwd) }
-        let stdout = try await run(["status", wave, "--json"], cwd)
+        let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
         return WavePlan(objective: objective, chapter: snapshot.chapter)
     }
@@ -373,11 +360,11 @@ public enum HomeState: String, Decodable, Sendable, Equatable {
 }
 
 /// `HomeActionDto` — the single contextual action a surface should offer, so the
-/// UI never branches on `HomeState` itself: Attach when running, Start when
+/// UI never branches on `HomeState` itself: Attach when connected, Connect when
 /// reachable-but-stopped, or the actionable reason otherwise.
 public enum HomeAction: Decodable, Sendable, Equatable {
     case attach(endpoint: String)
-    case start(homeId: String)
+    case connect(homeId: String)
     case reason(message: String)
 
     enum CodingKeys: String, CodingKey {
@@ -389,8 +376,8 @@ public enum HomeAction: Decodable, Sendable, Equatable {
         switch try container.decode(String.self, forKey: .kind) {
         case "attach":
             self = .attach(endpoint: try container.decode(String.self, forKey: .endpoint))
-        case "start":
-            self = .start(homeId: try container.decode(String.self, forKey: .homeId))
+        case "connect":
+            self = .connect(homeId: try container.decode(String.self, forKey: .homeId))
         case "reason":
             self = .reason(message: try container.decode(String.self, forKey: .message))
         case let other:
@@ -406,7 +393,7 @@ public enum HomeAction: Decodable, Sendable, Equatable {
 /// `HomeRuntimeDto` — a Wave's Home probed for liveness: authority and route, the state
 /// with its evidence, the attach endpoint when running, and the one action.
 /// This is the shared contract the conductor renders; the app never probes SSH
-/// itself — it calls `lf home probe --json` and `lf start --json`.
+/// itself — it calls `lf wave probe --json`.
 public struct HomeRuntime: Decodable, Sendable, Equatable {
     public let home: Home
     public let state: HomeState
@@ -425,8 +412,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let repo: String
     public let activeTasks: Int
     public let live: Bool
-    public let paused: Bool
-    public let enabled: Bool
     public let endpoint: String?
     public let createdAt: String?
     public let parentWaveId: String?
@@ -436,7 +421,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, live, paused, enabled, endpoint, home
+        case id, name, status, goal, repo, live, endpoint, home
         case activeTasks = "active_tasks"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
@@ -454,8 +439,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
             repo: repo,
             status: status,
             live: live,
-            paused: paused,
-            enabled: enabled,
             activeTasks: activeTasks,
             parentWaveId: parentWaveId,
             retiredAt: retiredAt,
@@ -463,12 +446,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
             retirementReason: retirementReason
         )
     }
-}
-
-/// Receipt returned by `lf pause|resume <wave> --json`.
-public struct WaveIntentReceipt: Decodable, Sendable, Equatable {
-    public let wave: String
-    public let paused: Bool
 }
 
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
@@ -516,7 +493,7 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
     }
 }
 
-/// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
+/// `lf wave status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot

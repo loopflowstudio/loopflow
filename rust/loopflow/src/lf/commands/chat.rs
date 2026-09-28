@@ -13,8 +13,8 @@
 //!
 //! # Endpoint resolution
 //! The local `wave/<name>/.wave-endpoint` discovery file names the listener. A
-//! resolvable wave with no live server is a clear error — a dead wave's mail
-//! bounces, it doesn't vanish; queuing for offline waves is future work.
+//! chat connection starts the internal listener on the assigned local Home.
+//! Connection failure preserves the error; it never moves remote placement.
 //!
 //! # Following
 //! `--follow` composes the same post door with [`super::thread`]'s SSE replay.
@@ -53,6 +53,12 @@ pub struct ChatOptions<'a> {
 pub fn run(text_args: &[String], options: ChatOptions<'_>, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
+        if !options.history {
+            if let Some(name) = target.wave.as_ref() {
+                let repo = find_repo_root()?;
+                super::home::connect_chat_inner(std::slice::from_ref(name), &[], &repo).await?;
+            }
+        }
         let context = CliContext::detect().await;
         if options.history {
             if !options.json {
@@ -213,7 +219,7 @@ pub(crate) async fn run_with_context(
         return Ok(());
     };
     let text = message_text(text_args, std::io::stdin())?;
-    let endpoint = resolved.require_endpoint()?;
+    let endpoint = resolved.connect().await?;
     post_message(&endpoint, &text).await?;
     println!("sent to '{}'", resolved.name);
     Ok(())
@@ -230,6 +236,11 @@ async fn follow_with_context(context: &CliContext, target: &WaveTargetArgs) -> R
     .await?
     else {
         bail!("no wave here — name one with `lf chat --follow -w <wave>`");
+    };
+    let endpoint = resolved.connect().await?;
+    let resolved = ResolvedWave {
+        endpoint: Some(endpoint),
+        ..resolved
     };
     follow_thread(&resolved).await
 }
@@ -386,11 +397,29 @@ pub(crate) struct ResolvedWave {
 }
 
 impl ResolvedWave {
+    async fn connect(&self) -> Result<String> {
+        if let Some(endpoint) = &self.endpoint {
+            if get_json(endpoint, "/health").await.is_ok() {
+                return Ok(endpoint.clone());
+            }
+        }
+        let repo = self
+            .repo_root
+            .as_deref()
+            .ok_or_else(|| anyhow!("Wave {} has no local repository", self.name))?;
+        let snapshots =
+            super::home::connect_chat_inner(std::slice::from_ref(&self.name), &[], repo).await?;
+        snapshots
+            .into_iter()
+            .find(|wave| wave.name == self.name)
+            .and_then(|wave| wave.endpoint)
+            .ok_or_else(|| anyhow!("Wave {} chat connection returned no endpoint", self.name))
+    }
+
     pub fn require_endpoint(&self) -> Result<String> {
         self.endpoint.clone().ok_or_else(|| {
             anyhow!(
-                "wave '{name}' has no live listener — start one with `lf wave {name}`. \
-                 (Queuing for offline waves is not implemented yet.)",
+                "wave '{name}' has no live chat connection",
                 name = self.name
             )
         })
@@ -995,9 +1024,6 @@ mod tests {
         .expect("wave context");
         let err = resolved.require_endpoint().expect_err("no server");
         let message = err.to_string();
-        assert!(message.contains("no live listener"), "{message}");
-        // `lf wave` is the public Wave lifecycle entrypoint.
-        assert!(message.contains("lf wave ship"), "{message}");
-        assert!(message.contains("not implemented yet"), "{message}");
+        assert!(message.contains("no live chat connection"), "{message}");
     }
 }

@@ -23,7 +23,7 @@ step() { printf '\n== %s ==\n' "$1"; }
 
 step "placed Home"
 local_home="$(lf home id)"
-placed_home="$(lf status "$wave" --json | jq -er '.wave.home.id')"
+placed_home="$(lf wave status "$wave" --json | jq -er '.wave.home.id')"
 if [ "$local_home" != "$placed_home" ]; then
   printf 'Wave %s is not placed on this Home\n' "$wave" >&2
   exit 1

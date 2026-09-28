@@ -15,7 +15,7 @@ or running Wave. If existing Waves leave ownership genuinely ambiguous, ask the
 present human; headless, record the question in scratch. Never use `.lf/` as a
 fallback memory location.
 
-Use `lf status <wave> --json` when chapter or Task state matters; memory curation
+Use `lf wave status <wave> --json` when chapter or Task state matters; memory curation
 alone needs no running Wave or PM connection. Put actionable rules beside their
 code or in the skill that exercises them, and durable lessons in Wave memory.
 

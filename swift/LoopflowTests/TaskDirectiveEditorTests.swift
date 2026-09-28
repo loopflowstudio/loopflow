@@ -147,7 +147,8 @@ private actor DirectiveSource {
                 await gate.wait()
             }
             return result
-        case "ls", "session": return "[]"
+        case "wave" where args.dropFirst().first == "list": return "[]"
+        case "session": return "[]"
         case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("Unexpected directive proof operation")
         }

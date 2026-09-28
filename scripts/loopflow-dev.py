@@ -284,9 +284,9 @@ def _print_run_debug_checklist() -> None:
     """Print the manual review path for Wave Chat and work supervision."""
     print("Review checklist:")
     print("  1. Select a Wave: its conversation and work map should agree on identity.")
-    print("  2. Send while idle: Wave Chat should launch or reconnect to `lf wave serve`.")
+    print("  2. Send while idle: Wave Chat should connect automatically.")
     print("  3. Send while turning: the composer should expose Steer and Interrupt & Send.")
-    print("  4. Verify Wave KRs, Tasks, decisions, and PR delivery refresh from `lf status`.")
+    print("  4. Verify Wave KRs, Tasks, decisions, and PR delivery refresh from `lf wave status`.")
     print("  5. Switch Waves: each conversation should retain its own endpoint and playhead.")
 
 
@@ -564,9 +564,7 @@ def _write_dev_control_config(resources_dir: Path) -> None:
         state = json.loads(MACHINE_INSTALL_STATE.read_text())
         artifacts = state["selection"]["artifact_set"]["artifacts"]
         selected_cli = next(
-            artifact
-            for artifact in artifacts
-            if artifact["role"] == {"kind": "cli"}
+            artifact for artifact in artifacts if artifact["role"] == {"kind": "cli"}
         )
     except (FileNotFoundError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as error:
         raise RuntimeError(

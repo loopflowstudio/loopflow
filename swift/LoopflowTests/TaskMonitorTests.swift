@@ -234,7 +234,7 @@ struct TaskMonitorTests {
         return RegistryQuery(watchActiveRuns: { try await feed.open(initial: initial) }) { args, _ in
             switch args.first {
             case "roadmap": return text
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return sessions
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected action in Monitor proof")

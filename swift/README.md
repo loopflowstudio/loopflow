@@ -170,8 +170,8 @@ only after a successful Session read. Compact retains an empty Wave
 as an inspectable leaf; it compresses structural levels only when descendants
 can take their place.
 
-Current Wave navigation reads `lf ls --all --current --json`. The CLI excludes
-abandoned and retired registrations; unfiltered `lf ls` retains historical
+Current Wave navigation reads `lf wave list --all --current --json`. The CLI excludes
+abandoned and retired registrations; unfiltered `lf wave list` retains historical
 registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
 their first registration.
 
@@ -196,7 +196,7 @@ read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf status <wave> --json`.
+from `lf wave status <wave> --json`.
 
 Start, resume, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
@@ -218,10 +218,10 @@ codebase tree, and registry health.
   to their Wave. The internal Project retains chapter planning and history;
   it has no separate operator.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
-  Lifecycle mutations remain `lf task run/resume/interrupt`; review nodes use
+  Lifecycle mutations remain `lf task run/interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
+  `lf wave list/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
   Activity history visible.

@@ -26,7 +26,7 @@ does not become a Task by being closed.
 
 ## An existing Task needs to continue
 
-Read `lf task status <issue> --json`, then use `lf task advance <issue>`.
+Read `lf task status <issue> --json`, then use `lf task run <issue>`.
 It continues the saved Flow or reports the current driver. An interactive review
 waits for its Session's completion. A blocker needs its stated recovery,
 and completed work is not restarted. If there is no active Flow, select one using
@@ -37,9 +37,9 @@ alone is not a request to run it again.
 ## An approved design has no Task
 
 Use the owning repository, not whichever repository hosted the conversation.
-Inspect `lf ls --json` and the relevant Wave status to place the work. Reuse an
+Inspect `lf wave list --json` and the relevant Wave status to place the work. Reuse an
 existing matching Task when there is one. Otherwise create and prepare a Task
-through `lf task create` and `lf task prepare`, carrying the complete approved
+through `lf task create` and `lf task checkout`, carrying the complete approved
 scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed

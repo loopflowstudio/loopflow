@@ -27,8 +27,8 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf start <name>` → `lf chat` / `lf status` |
-| Run on another machine | `lf ssh <home-id> start <name>` ([Go Remote](#go-remote)) |
+| Steer and inspect from terminal | `lf chat --follow -w <name>` / `lf wave status` |
+| Run on another machine | `lf ssh <home-id> chat --follow -w <name>` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -186,7 +186,7 @@ frontmatter sets machine config such as `owner:`, `home:`, `crons:`, and `pm:`),
 **Loopflow** (macOS) — the home for running waves. Select the repository and
 the Wave to get its persistent conversation beside the Linear-backed
 Project → Task work map; the app starts the Wave's resident process when
-needed. From the CLI, `lf start shipper` does the same start.
+needed. From the CLI, `lf chat --follow -w shipper` opens the conversation.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
 <issue-id>`, and stays steerable while the Task runs in its stable
@@ -198,7 +198,7 @@ Inspect running work through Loopflow:
 
 ```bash
 lf ps --json          # live processes and their ownership evidence
-lf status shipper     # Wave work, Runs, and Task conditions
+lf wave status shipper     # Wave work, Runs, and Task conditions
 lf session list       # conversations waiting for a person
 ```
 
@@ -208,7 +208,7 @@ shown in the [Sessions lifecycle](../README.md#sessions).
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.
-Once `wave/` files exist, `lf wave serve <name>` runs them and Loopflow picks them up.
+Once `wave/` files exist, open the Wave’s chat in Loopflow.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
 
@@ -223,17 +223,16 @@ Bootstrap the remote identity once:
 ```bash
 lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
-lf ls --json
+lf wave list --json
 lf wave place <wave-id> <home-id>    # record origin-side planning state
-lf ssh <home-id> start shipper
+lf ssh <home-id> chat --follow -w shipper
 ```
 
-`lf start shipper` always starts shipper on the machine executing that command.
-`lf ssh <home-id> start shipper` executes the same operation on the named Home,
-which proves its identity before changing lifecycle state. One Home keeper
-serves every Wave running there.
+Remote commands run on the named Home, which proves its identity. One Home
+keeper manages its internal chat listeners. Placement does not silently reroute
+ordinary local commands.
 
-Reads follow the same rule: `lf runs`, `lf usage`, `lf ls`, and `lf status`
+Reads follow the same rule: `lf runs`, `lf usage`, `lf wave list`, and `lf wave status`
 read the executing Home. Prefix the command with `lf ssh <home-id>` to read
 another Home. Loopflow does not silently aggregate or replicate Run records.
 

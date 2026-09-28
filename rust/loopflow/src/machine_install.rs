@@ -844,6 +844,10 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
 
 /// Find a retained development Home without changing its data or machine selection.
 pub fn retained_development_home(root: &Path, id: &str) -> Result<InstallSelection> {
+    Ok(retained_development_receipt(root, id)?.target)
+}
+
+pub(crate) fn retained_development_receipt(root: &Path, id: &str) -> Result<SwitchReceipt> {
     for entry in fs::read_dir(root.join("receipts"))? {
         let path = entry?.path();
         if path.extension().is_none_or(|extension| extension != "json") {
@@ -858,7 +862,7 @@ pub fn retained_development_home(root: &Path, id: &str) -> Result<InstallSelecti
             if !receipt.target.store.is_file() {
                 return Err(anyhow!("retained Home {} is missing its store", id));
             }
-            return Ok(receipt.target);
+            return Ok(receipt);
         }
     }
     Err(anyhow!("no retained development installation named {id}"))
@@ -878,6 +882,59 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
         return Ok(MachineInstallState::Settled(Box::new(active)));
     }
     Ok(MachineInstallState::Legacy)
+}
+
+/// The executable/store pair selected for ordinary machine operations.
+pub(crate) fn current_selection(root: &Path) -> Result<Option<InstallSelection>> {
+    match read_state(root)? {
+        MachineInstallState::Legacy => Ok(None),
+        MachineInstallState::Settled(active) => Ok(Some(active.selection)),
+        MachineInstallState::Switching(receipt) => {
+            startup_selection_during_switch(&receipt).map(Some)
+        }
+    }
+}
+
+/// Stores remain installation-owned after another Home becomes current.
+pub(crate) fn owned_stores(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut stores = known_installations(root)?
+        .into_iter()
+        .map(|selection| selection.store)
+        .collect::<Vec<_>>();
+    stores.sort();
+    stores.dedup();
+    Ok(stores)
+}
+
+pub(crate) fn known_installations(root: &Path) -> Result<Vec<InstallSelection>> {
+    let mut selections = Vec::new();
+    match read_state(root)? {
+        MachineInstallState::Legacy => {}
+        MachineInstallState::Settled(active) => selections.push(active.selection),
+        MachineInstallState::Switching(receipt) => {
+            selections.push(receipt.target);
+            selections.extend(receipt.prior);
+        }
+    }
+    let receipts = match fs::read_dir(root.join("receipts")) {
+        Ok(receipts) => receipts,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(selections),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in receipts {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let receipt: SwitchReceipt = read_json(&path)?;
+        receipt.validate()?;
+        for selection in std::iter::once(receipt.target).chain(receipt.prior) {
+            if !selections.contains(&selection) {
+                selections.push(selection);
+            }
+        }
+    }
+    Ok(selections)
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1213,7 +1270,7 @@ fn file_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
-fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
+pub(crate) fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
     path.parent()
         .and_then(Path::parent)
         .and_then(Path::parent)
@@ -1904,6 +1961,10 @@ mod tests {
         settle_switch(&root, &next, &later_active).unwrap();
         let restored = retained_development_home(&root, &development.installation_id).unwrap();
         assert_eq!(restored, development);
+        let stores = owned_stores(&root).unwrap();
+        assert!(stores.contains(&published.store));
+        assert!(stores.contains(&development.store));
+        assert!(stores.contains(&later.store));
         assert_eq!(
             fs::read(&restored.store).unwrap(),
             b"retained chapter and Task history"

@@ -31,7 +31,7 @@ while `lf ask` parks the Run at a durable session in its own checkout.
 A Wave directing a task is the internal case:
 
 ```bash
-lf task prepare INF-123                              # tracked Work, no execution
+lf task checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent bounded Run
 lf task run INF-123                                  # start built-in Task automation
 lf task comment INF-123 "take the smaller approach"    # post a Linear Task comment
@@ -56,14 +56,14 @@ from an existing issue and the roadmap remains the queue.
 
 Only Task Work persists a selected Flow and advances it one exact boundary at a
 time. Project operation is a finite `wave/operate` Run over current facts.
-An agent may also compose `lf task prepare`, a `--task`/`--wave`
+An agent may also compose `lf task checkout`, a `--task`/`--wave`
 skill Run, Work input, and delivery commands itself. Attribution grants context,
 not permission to move a Task's Flow position.
 
 ## Delegate
 
 ```bash
-lf task prepare INF-123                      # ensure Work and worktree only
+lf task checkout INF-123                      # ensure Work and worktree only
 lf task run INF-123                          # run an existing Linear issue
 lf task create --run --wave <wave> --title "add passkeys"    # create the issue, then run it
 pbpaste | lf task create --run --wave <wave>         # report from stdin; first line is the title
@@ -107,7 +107,7 @@ Loopflow never guesses signal authority from a Run id, Work id, PID, or
 tmux name. Project operations are ordinary finite Runs; they have no resident
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. `lf task resume INF-123` starts a fresh
+Work survives its provider process. `lf task run INF-123` starts a fresh
 boundary without losing durable direction, the worktree, or the Task PR. `lf
 task run` never reopens terminal Work. Create a new Task for new work;
 `lf task status ISSUE` retains deliberate historical lookup.
@@ -152,8 +152,8 @@ it only when a person asked to see the PR.
 Every read the conducting surfaces offer is `--json`:
 
 ```bash
-lf ls --json                # every durable Wave and its Home/runtime evidence
-lf status <wave> --json     # hierarchy plus one Rust-derived metric_portfolio
+lf wave list --json                # every durable Wave and its Home/runtime evidence
+lf wave status <wave> --json     # hierarchy plus one Rust-derived metric_portfolio
 lf roadmap --json           # every Wave repeats that required portfolio envelope
 lf activity --task INF-123 --json
 lf runs --project parser --json
@@ -163,7 +163,7 @@ lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf ps --json                # one OS-live process frame
 ```
 
-`lf ls` is the registry plane, `lf status` is the focused operational view,
+`lf wave list` is the registry plane, `lf wave status` is the focused operational view,
 and `lf roadmap` joins the current Linear plan to that runtime truth.
 `lf activity` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its Run, Task PR, or Steer evidence. Agents consume

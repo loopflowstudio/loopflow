@@ -12,7 +12,7 @@ publication. Union the starting Wave ledger with the current roster so retired,
 unavailable, and newly added Waves remain accounted for. Preserve exact chapter
 IDs, KR claims, dates, and application receipts.
 
-Read `lf status <wave> --chapter <id> --json` for historical content and
+Read `lf wave status <wave> --chapter <id> --json` for historical content and
 membership, and `lf roadmap --json` for current Task conditions. An old chapter's
 snapshot stays true after active Tasks move and later ship. Later completion
 cannot prove a promise inside an earlier interval. Use the snapshot's frozen

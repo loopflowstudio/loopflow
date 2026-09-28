@@ -1,7 +1,6 @@
-// Starts and controls the local Wave backing a WaveChat pane.
+// Launches local Wave contributions and Task work.
 //
-// Loopflow uses the same `lf start <name>` lifecycle as the CLI. lfd owns the
-// detached listener; quitting the app never kills a wave.
+// Chat connects through the Home daemon; quitting the app leaves it available.
 
 #if os(macOS)
 import Foundation
@@ -24,11 +23,6 @@ private struct DevelopmentControlConfig: Decodable {
 enum LocalWaveAgentLauncher {
     /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
     /// The server performs resident, registry, and discovery-file cleanup.
-    static func stopWave(repoPath: String, waveName: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(waveStopCommand(lfPath: lfPath, waveName: waveName), cwd: origin)
-    }
 
     static func waveStopCommand(lfPath: String, waveName: String) -> [String] {
         [lfPath, "stop", waveName]
@@ -64,13 +58,6 @@ enum LocalWaveAgentLauncher {
         return try taskCreateReceipt(stdout)
     }
 
-    /// Resume existing Task Flow state without creating another worktree.
-    static func resumeTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
-    }
-
     /// Queue the audited Task interrupt. The Task worker decides how the live
     /// provider turn is stopped and records the receipt in the shared store.
     static func interruptTask(repoPath: String, issue: String) throws {
@@ -95,22 +82,22 @@ enum LocalWaveAgentLauncher {
 
     /// Ensure Task Work and its checkout without starting a worker; returns
     /// the authoritative worktree.
-    static func prepareTask(repoPath: String, issue: String) throws -> String {
-        let stdout = try runCheckedOutput(taskPrepareCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
-        return try taskPrepareWorktree(stdout)
+    static func checkoutTask(repoPath: String, issue: String) throws -> String {
+        let stdout = try runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+        return try taskCheckoutWorktree(stdout)
     }
 
-    static func taskPrepareCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "prepare", issue, "--json"]
+    static func taskCheckoutCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "checkout", issue, "--json"]
     }
 
-    static func taskPrepareWorktree(_ stdout: String) throws -> String {
+    static func taskCheckoutWorktree(_ stdout: String) throws -> String {
         struct Prepared: Decodable { let worktree: String }
         do {
             return try JSONDecoder().decode(Prepared.self, from: Data(stdout.utf8)).worktree
         } catch {
             throw LocalLfError(
-                errorDescription: "lf task prepare returned an invalid receipt: \(error.localizedDescription)"
+                errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"
             )
         }
     }
@@ -142,10 +129,6 @@ enum LocalWaveAgentLauncher {
                 errorDescription: "lf task create --run returned an invalid receipt: \(error.localizedDescription)"
             )
         }
-    }
-
-    static func taskResumeCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "resume", issue]
     }
 
     static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {

@@ -769,7 +769,7 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 /// Drafts are durable only in the disposable installed-development store. The
 /// release ledger adopts only byte-identical drafts packaged by a later release.
 /// Reuse otherwise accepts only an exact applied prefix; changed, unmatched or
-/// reordered SQL requires an explicit fresh fork.
+/// reordered SQL requires a compatible build, preserving the existing store.
 pub(crate) fn apply_installed_development_sqlite(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
@@ -778,6 +778,15 @@ pub(crate) fn apply_installed_development_sqlite(
     let has_draft_ledger = user_tables(conn)?
         .iter()
         .any(|table| table == DEVELOPMENT_MIGRATIONS_TABLE);
+    if !has_draft_ledger && drafts.is_empty() {
+        // Ordinary private stores share the canonical migration fast path.
+        // A retained draft ledger still requires validation, even without drafts
+        // in this build, so removing a draft cannot silently reopen its store.
+        return match conn.path().filter(|path| !path.is_empty()) {
+            Some(path) => apply_sqlite_with_backup(conn, Path::new(path)),
+            None => apply_sqlite(conn),
+        };
+    }
     if has_draft_ledger {
         adopt_released_development_drafts(conn, drafts)?;
         _validate_canonical_history_for_development(conn)?;
@@ -850,7 +859,7 @@ pub(crate) fn validate_installed_development_sqlite(
     let applied = _applied_development_migrations(conn)?;
     _validate_applied_draft_prefix(&applied, drafts)?;
     if applied.len() != drafts.len() {
-        return Err(_incompatible_development_store(format!(
+        return Err(StoreError::IncompatibleDevelopment(format!(
             "store has {} applied draft(s), candidate requires {}",
             applied.len(),
             drafts.len()
@@ -883,14 +892,14 @@ fn adopt_released_development_drafts(
     let mut consumed = 0;
     for migration in pending {
         let Some(sql) = migration.sql.strip_prefix("-- draft: ") else {
-            return Err(_incompatible_development_store(format!(
+            return Err(StoreError::IncompatibleDevelopment(format!(
                 "release {} has no draft provenance",
                 migration.version()
             )));
         };
         for block in sql.split("\n\n-- draft: ") {
             let Some((name, body)) = block.split_once('\n') else {
-                return Err(_incompatible_development_store(format!(
+                return Err(StoreError::IncompatibleDevelopment(format!(
                     "release {} has incomplete draft provenance",
                     migration.version()
                 )));
@@ -903,7 +912,7 @@ fn adopt_released_development_drafts(
                 .get(consumed)
                 .is_some_and(|draft| draft.name == name && draft.checksum == checksum)
             {
-                return Err(_incompatible_development_store(format!(
+                return Err(StoreError::IncompatibleDevelopment(format!(
                     "release {} does not match applied draft {name}",
                     migration.version()
                 )));
@@ -982,14 +991,14 @@ fn _validate_canonical_history_for_development(conn: &rusqlite::Connection) -> S
         .iter()
         .any(|table| table == "schema_migrations")
     {
-        return Err(_incompatible_development_store(
+        return Err(StoreError::IncompatibleDevelopment(
             "canonical migration ledger is missing".to_string(),
         ));
     }
     let applied = applied_versions(conn)?;
     let pending = pending_migrations(&applied, MIGRATIONS)?;
     if let Some(next) = pending.first() {
-        return Err(_incompatible_development_store(format!(
+        return Err(StoreError::IncompatibleDevelopment(format!(
             "canonical frontier changed before {}",
             next.version()
         )));
@@ -1026,7 +1035,7 @@ fn _validate_applied_draft_prefix(
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
     if applied.len() > drafts.len() {
-        return Err(_incompatible_development_store(
+        return Err(StoreError::IncompatibleDevelopment(
             "candidate removed or canonicalized an applied draft".to_string(),
         ));
     }
@@ -1035,7 +1044,7 @@ fn _validate_applied_draft_prefix(
             || applied.name != draft.name
             || applied.checksum != draft.checksum
         {
-            return Err(_incompatible_development_store(format!(
+            return Err(StoreError::IncompatibleDevelopment(format!(
                 "applied draft at position {position} no longer matches {}",
                 draft.name
             )));
@@ -1062,16 +1071,32 @@ fn _validate_development_schema(
         expected.execute_batch(draft.sql)?;
     }
     if product_schema(conn)? != product_schema(&expected)? {
-        return Err(_incompatible_development_store(
+        return Err(StoreError::IncompatibleDevelopment(
             "schema does not match the applied draft prefix".to_string(),
         ));
     }
     Ok(())
 }
 
-fn _incompatible_development_store(reason: String) -> StoreError {
-    StoreError::InvalidData(format!(
-        "installed development store is incompatible ({reason}); rerun local promotion with --fresh"
+pub(crate) fn development_store_diagnostic(
+    conn: &rusqlite::Connection,
+    error: StoreError,
+) -> StoreError {
+    let StoreError::IncompatibleDevelopment(reason) = error else {
+        return error;
+    };
+    let receipts = match _applied_development_migrations(conn) {
+        Ok(applied) if applied.is_empty() => "no applied draft receipts".to_string(),
+        Ok(applied) => applied
+            .iter()
+            .map(|draft| format!("{} [{}] sha256={}", draft.name, draft.id, draft.checksum))
+            .collect::<Vec<_>>()
+            .join("\n  "),
+        Err(error) => format!("draft receipts unreadable: {error}"),
+    };
+    StoreError::IncompatibleDevelopment(format!(
+        "{reason}\nDatabase: {}\nApplied drafts:\n  {receipts}\nPreserve this database and its WAL; use a build that recognizes these receipts. Replacing executable bytes does not reverse migrations.",
+        conn.path().unwrap_or(":memory:")
     ))
 }
 
@@ -2105,6 +2130,25 @@ mod tests {
     }
 
     #[test]
+    fn current_private_store_opens_while_another_writer_holds_the_wal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let writer = rusqlite::Connection::open(&path).unwrap();
+        writer.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
+        apply_installed_development_sqlite(&writer, &[]).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+        let reader = rusqlite::Connection::open(&path).unwrap();
+        reader.busy_timeout(Duration::ZERO).unwrap();
+        apply_installed_development_sqlite(&reader, &[]).unwrap();
+        assert_eq!(
+            latest_version_sqlite(&reader).unwrap(),
+            latest_known_version()
+        );
+        writer.execute_batch("ROLLBACK;").unwrap();
+    }
+
+    #[test]
     fn installed_development_store_appends_only_an_exact_draft_prefix() {
         let conn = open();
         let first = development_draft(
@@ -2138,7 +2182,10 @@ mod tests {
             "CREATE TABLE local_feature (id TEXT PRIMARY KEY, changed TEXT);",
         );
         let error = apply_installed_development_sqlite(&conn, &[changed]).unwrap_err();
-        assert!(error.to_string().contains("--fresh"));
+        assert!(matches!(
+            error,
+            crate::store::StoreError::IncompatibleDevelopment(_)
+        ));
     }
 
     #[test]

@@ -8,7 +8,7 @@ Review is read-only: never rotate, check KRs, close Tasks, or change Work state.
 Read the accepted start record, this Wave's GOAL.md and MEMORY.md, and:
 
 ```bash
-lf status <wave> --chapter <id> --json
+lf wave status <wave> --chapter <id> --json
 lf roadmap --wave <wave> --json
 ```
 

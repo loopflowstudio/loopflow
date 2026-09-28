@@ -71,7 +71,7 @@ impl PinnedTaskFlow {
 pub enum TaskFlowControlKind {
     /// `lf task run ISSUE --flow FLOW`
     Start,
-    /// `lf task resume ISSUE`
+    /// `lf task run ISSUE`
     Resume,
     /// `lf task restart ISSUE --flow FLOW`
     Restart,

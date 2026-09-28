@@ -40,25 +40,25 @@ def _report_wave_status(lf_binary: Path, wave: str) -> None:
     """Informational only: print what live state we know, then capture anyway."""
     try:
         result = subprocess.run(
-            [str(lf_binary), "status", wave, "--json"],
+            [str(lf_binary), "wave", "status", wave, "--json"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             timeout=STATUS_TIMEOUT,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"capture: lf status unavailable ({exc}); capturing anyway")
+        print(f"capture: lf wave status unavailable ({exc}); capturing anyway")
         return
     if result.returncode != 0:
         detail = result.stderr.strip() or "no detail"
-        print(f"capture: lf status failed ({detail}); capturing anyway")
+        print(f"capture: lf wave status failed ({detail}); capturing anyway")
         return
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
-        print("capture: lf status returned invalid JSON; capturing anyway")
+        print("capture: lf wave status returned invalid JSON; capturing anyway")
         return
-    # `lf status` prints `null` for a wave with no registry state.
+    # `lf wave status` prints `null` for a wave with no registry state.
     if not isinstance(payload, dict):
         print(f"capture: {wave} has no registry state; capturing anyway")
         return

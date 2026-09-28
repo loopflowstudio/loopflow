@@ -1,13 +1,21 @@
 # Homes and processes
 
-A Home is one machine's stable Loopflow authority. It owns local processes,
-credentials, planning storage, Run records, service managers, and OS locks.
-Its SSH route may change without changing its identity.
+A Home is a durable Loopflow execution destination on a machine. It owns local
+processes, credentials, planning storage, Run records, service managers, and OS
+locks. Its SSH route may change without changing its identity. A Wave's Home
+expresses where work for that Wave belongs; placement does not require the Wave
+itself to have a resident process.
+
+A data directory holds local state. `LF_HOME` selects that directory; it does
+not select a remote execution destination. A branch data copy preserves the
+database's recorded Home identities and placements without registering another
+Home or acquiring process-control authority. Installed data and branch data can
+therefore describe the same Home while retaining independent writes.
 
 ```bash
 lf home id
 lf wave place product <home-id>
-lf ssh <home-id> start product
+lf ssh <home-id> chat --follow -w product
 ```
 
 ## Local by default
@@ -15,10 +23,10 @@ lf ssh <home-id> start product
 ```bash
 lf runs                  # runs recorded on this Home
 lf ps --json             # OS-live processes on this Home
-lf status product        # planning and runtime view resolved here
+lf wave status product        # planning and runtime view resolved here
 
 lf ssh build-home runs   # run the same reader on build-home
-lf ssh build-home start product
+lf ssh build-home chat --follow -w product
 ```
 
 `lf ssh` is transport, not a second API. The target runs its own `lf`, verifies
@@ -40,9 +48,9 @@ origin Home                         target Home
 -----------                         -----------
 lf wave place ... home_B  ------->  Placement(Work, home_B)
 
-lf ssh home_B start product
+lf ssh home_B chat --follow -w product
         |
-        `--- SSH transport --------> target `lf start product`
+        `--- SSH transport --------> target `lf chat --follow -w product`
                                       |
                                       v
                                      lfd
@@ -51,7 +59,7 @@ lf ssh home_B start product
                                 Wave listener
 ```
 
-`lfd` starts only enabled, eligible Work placed on its Home. Placement is a
+`lfd` starts eligible Waves placed on its Home. Placement is a
 planning fact. It is not proof that a process exists and never supplies signal
 authority.
 

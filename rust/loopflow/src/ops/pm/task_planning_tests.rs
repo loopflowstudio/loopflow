@@ -410,8 +410,9 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
                 1
             );
         }
-        let (first, task) = create().unwrap();
-        assert!(task.is_none());
+        let crate::ops::task::TaskCreateResult::Created(first) = create().unwrap() else {
+            panic!("creation without --run must return the issue");
+        };
         let edit = || {
             crate::ops::task::task_edit(
                 &repo,
@@ -433,8 +434,9 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
             assert!(error.contains("Retry the same Task command"), "{error}");
         }
         edit().unwrap();
-        let (retry, task) = create().unwrap();
-        assert!(task.is_none());
+        let crate::ops::task::TaskCreateResult::Created(retry) = create().unwrap() else {
+            panic!("creation without --run must return the issue");
+        };
         assert_eq!(first.id, retry.id);
         assert_eq!(first.name, "Future work");
         assert_eq!(retry.name, "Edited future work");
@@ -446,7 +448,7 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
             .unwrap();
         assert!(retry.description.ends_with(marker));
         let snapshot = crate::ops::task_pm::load_wave(&repo, "product", PmRefresh::Never).unwrap();
-        assert_eq!(snapshot.items, vec![retry]);
+        assert_eq!(snapshot.items, vec![*retry]);
     });
     assert_eq!(
         runtime.block_on(async { state.lock().await.issues.len() }),
@@ -820,14 +822,16 @@ fi
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let (item, _) = crate::ops::task::task_create(
+        let crate::ops::task::TaskCreateResult::Created(item) = crate::ops::task::task_create(
             &repo,
             Some("product"),
             Some("Future work".into()),
             Some("A directive".into()),
             None,
         )
-        .unwrap();
+        .unwrap() else {
+            panic!("creation without --run must return the issue");
+        };
         let task = registered.then(|| {
             for args in [
                 vec!["add", "."],

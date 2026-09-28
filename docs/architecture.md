@@ -227,7 +227,7 @@ record, return.
 ### Direct Task work
 
 ```bash
-lf task prepare INF-123
+lf task checkout INF-123
 lf --task INF-123 research "write scratch/runtime.md"
 lf --task INF-123 research "write scratch/prompts.md"
 lf commit -m "Reconcile Task research"
@@ -247,10 +247,10 @@ Task worker, piecemeal helper Runs, or another system.
 ### Bounded Task advancement
 
 ```bash
-lf start product
+lf chat --follow -w product
 lf task run INF-123
 lf --wave <wave> wave/operate "ship invoices first"
-lf status product
+lf wave status product
 ```
 
 The Home keeper may start the placed Wave listener and resident. Task motion

@@ -79,7 +79,7 @@ async fn graphql(
                 vec![comment(
                     "c-3",
                     Some("2026-09-24T12:00:00Z"),
-                    Some("Third, written last.\n\n```sh\nlf status\n```"),
+                    Some("Third, written last.\n\n```sh\nlf wave status\n```"),
                     json!({"id":"person-1","displayName":"Jack","name":"Jack H"}),
                 )],
                 Some("cursor-1"),
@@ -228,7 +228,7 @@ async fn task_comments_read_and_publish_without_placement() {
                     name: Some("Jack".into())
                 }
             );
-            assert!(read.comments[3].body.ends_with("```sh\nlf status\n```"));
+            assert!(read.comments[3].body.ends_with("```sh\nlf wave status\n```"));
             assert_eq!(
                 read.comments[3].created_at.as_deref(),
                 Some("2026-09-24T12:00:00Z")

@@ -196,7 +196,7 @@ struct PodiumModelTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": fixture.roadmapJSON
-            case "ls": fixture.wavesJSON
+            case "wave" where args.dropFirst().first == "list": fixture.wavesJSON
             case "session": "[]"
             case "activity": fixture.workActivityJSON
             case "ps": try await deferred.response(args: args)
@@ -613,7 +613,7 @@ private struct PodiumTestFixture {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmapJSON
-            case "ls": return wavesJSON
+            case "wave" where args.dropFirst().first == "list": return wavesJSON
             case "ps": return processActivityJSON
             case "session": return "[]"
             case "activity":

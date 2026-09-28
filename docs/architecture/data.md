@@ -6,7 +6,7 @@ planning and execution evidence, Linear and GitHub own shared workflow truth,
 and the kernel owns live exclusion.
 
 ```bash
-lf status product --json   # joins planning and provider evidence
+lf wave status product --json   # joins planning and provider evidence
 lf runs --json             # scans this Home's Run-record files directly
 lf ps --json               # samples live OS facts
 ```

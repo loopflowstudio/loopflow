@@ -16,7 +16,7 @@ Flow positions, Wave memory, and chat survive.
 
 Read the latest merged `.lf/chapters/<id>/start.md` and its review. Run
 review-chapter when the evidence is missing or stale. Read the Wave roster,
-GOAL/MEMORY, `lf status <wave> --json`, and `lf roadmap --json`.
+GOAL/MEMORY, `lf wave status <wave> --json`, and `lf roadmap --json`.
 Lead with experienced improvements, remaining friction, active work, and gaps.
 Ask what mattered, surprised, or should become possible; reflect the user's
 language and unresolved tensions. Discuss any Wave boundary changes.

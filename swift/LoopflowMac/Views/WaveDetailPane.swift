@@ -38,7 +38,7 @@ struct WaveDetailReading {
 }
 
 /// One Wave surface: chapter plan and Tasks beside the durable conversation.
-/// `lf status` supplies the work map; the Wave listener streams ordered chat and
+/// `lf wave status` supplies the work map; the Wave listener streams ordered chat and
 /// child activity from its journal.
 struct WaveDetailPane: View {
     let wave: WaveViewModel

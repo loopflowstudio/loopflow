@@ -3,19 +3,19 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## A Wave is not running
+## Wave chat cannot connect
 
-**Symptom:** The app or `lf ls` shows the Wave stopped; `lf chat` reports no
-listener.
-
-**Cause:** No resident process is serving the Wave — nothing starts one
-automatically except the app, `lf start`, or a cron wake.
+Open chat to connect its internal listener. If connection fails, read the error
+and inspect the assigned Home:
 
 ```bash
-lf status <wave> --json    # current registry + runtime evidence
-lf home probe <wave>       # reachable? stopped? running? — with the next action
-lf start <wave>            # idempotently start the Wave on this machine
+lf wave status <wave> --json
+lf wave probe <wave>
+lf chat --follow -w <wave>
 ```
+
+For a remote placement, run chat through `lf ssh <home-id>`. Task execution and
+scheduled work remain independent of the chat listener.
 
 ## Task Work stops advancing
 
@@ -54,8 +54,8 @@ lf session open <session-id>
 lf session complete <session-id>    # return saved review or Ask feedback
 lf task comment INF-123 "address the latest feedback"
 lf task interrupt INF-123
-lf task resume INF-123
-lf task resume INF-123 --reason "provider credentials repaired"
+lf task run INF-123
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
 `resume` starts a fresh boundary from the Task Work, Steers, worktree, and
@@ -85,7 +85,7 @@ account in the grant. `--account` retains the normal route as fallback;
 After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task resume INF-123 --reason "provider credentials repaired"
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
 Project operations are finite Runs, so recovery is a fresh `project run`, not a
@@ -135,7 +135,7 @@ Inspect the focused projection instead of inferring a control state from one
 field:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf task status INF-123 --json
 ```
 

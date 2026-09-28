@@ -152,7 +152,7 @@ enum Commands {
         #[arg(long)]
         repo: Option<String>,
 
-        /// Internal one-shot id used by `lf start` to correlate daemon startup.
+        /// Internal one-shot id used by chat connection to correlate daemon startup.
         #[arg(long, hide = true, requires_all = ["startup_receipt", "startup_socket"])]
         startup_attempt: Option<String>,
 
@@ -160,7 +160,7 @@ enum Commands {
         #[arg(long, hide = true, requires_all = ["startup_attempt", "startup_socket"])]
         startup_receipt: Option<PathBuf>,
 
-        /// Internal Unix socket used to signal the waiting `lf start` process.
+        /// Internal Unix socket used to signal the waiting chat connection process.
         #[arg(long, hide = true, requires_all = ["startup_attempt", "startup_receipt"])]
         startup_socket: Option<PathBuf>,
 
@@ -200,6 +200,7 @@ fn main() -> anyhow::Result<()> {
         &loopflow::machine_install::ArtifactRole::Daemon,
         install_switch,
     )?;
+    loopflow::store::isolate_branch_data()?;
     init_tracing()?;
     let rt = tokio::runtime::Runtime::new()?;
 

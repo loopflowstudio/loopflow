@@ -42,7 +42,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert "tar czf" in commands
     assert "package-smoke/lf --version" in commands
     assert "package-smoke/lf --help" in commands
-    assert "package-smoke/lf --list" in commands
+    assert "package-smoke/lf catalog" in commands
     assert 'test "$(package-smoke/lf --version)" = "lf ${expected}"' in commands
 
     forbidden = [
@@ -210,7 +210,7 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
     assert 'local_home="$(lf home id)"' in bootstrap
-    assert 'placed_home="$(lf status "$wave" --json' in bootstrap
+    assert 'placed_home="$(lf wave status "$wave" --json' in bootstrap
     assert "--git-common-dir" in bootstrap
     assert 'lf cron preflight --wave "$wave"' in bootstrap
     assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap

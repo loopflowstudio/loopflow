@@ -2321,7 +2321,7 @@ lf gate --diff-files
 <p>These commands need the execution area only: discover, prompt, route, launch,
 record, return.</p>
 <h3 id="direct-task-work">Direct Task work<a class="anchor-link" href="#direct-task-work" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf task prepare INF-123
+<pre tabindex="0"><code class="language-bash">lf task checkout INF-123
 lf --task INF-123 research &quot;write scratch/runtime.md&quot;
 lf --task INF-123 research &quot;write scratch/prompts.md&quot;
 lf commit -m &quot;Reconcile Task research&quot;
@@ -2337,10 +2337,10 @@ Those commands act on delivery facts, not on Flow-driving authority. <code>submi
 <code>arm</code>, and <code>land</code> therefore work the same whether the Task was pursued by its
 Task worker, piecemeal helper Runs, or another system.</p>
 <h3 id="bounded-task-advancement">Bounded Task advancement<a class="anchor-link" href="#bounded-task-advancement" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf start product
+<pre tabindex="0"><code class="language-bash">lf chat --follow -w product
 lf task run INF-123
 lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
-lf status product
+lf wave status product
 </code></pre>
 <p>The Home keeper may start the placed Wave listener and resident. Task motion
 does not depend on either: Task commands claim an exact Flow boundary for one

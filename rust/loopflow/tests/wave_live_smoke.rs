@@ -1,5 +1,5 @@
-//! Live smoke for the full two-process wave topology: a real `lf wave`
-//! listener that spawns an internal resident, which runs
+//! Live smoke for Wave chat: a real Home daemon
+//! hosts the listener and spawns an internal resident, which runs
 //! the real codex app-server.
 //!
 //! Ignored by default: it needs the codex CLI on PATH, ChatGPT auth, and
@@ -68,19 +68,61 @@ async fn wave_two_process_live_smoke() {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-qm", "seed"]);
 
-    // The listener; it spawns the resident itself (keeper spawns tenant).
-    let mut listener = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wave", "serve", "demo"])
+    // Connect through the same internal path as the app, using disposable data.
+    let home = tmp.path().join("data");
+    let mut daemon = Command::new(env!("CARGO_BIN_EXE_lfd"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LF_") {
+            daemon.env_remove(name);
+        }
+    }
+    let child = daemon
+        .args(["serve", "--addr", "127.0.0.1:0", "--repo"])
+        .arg(&repo)
         .current_dir(&repo)
-        // A private registry so the smoke never touches the machine's ~/.lf.
-        .env("LF_DB_PATH", tmp.path().join("loopflow.db"))
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
+        .env("LF_HOME", &home)
+        .env("LF_DB_PATH", home.join("loopflow.db"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn lf wave");
-
+        .expect("start fixture daemon");
+    let _daemon = FixtureDaemon(child);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !std::fs::read_dir(home.join("lfd")).is_ok_and(|entries| {
+        entries.filter_map(Result::ok).any(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "endpoint")
+        })
+    }) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "fixture daemon did not start"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LF_") {
+            command.env_remove(name);
+        }
+    }
+    let connected = command
+        .args(["__chat-connect", "demo", "--json"])
+        .current_dir(&repo)
+        .env("LF_HOME", &home)
+        .env("LF_DB_PATH", home.join("loopflow.db"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CARGO_BIN_EXE_lfd", env!("CARGO_BIN_EXE_lfd"))
+        .output()
+        .expect("connect chat");
+    assert!(
+        connected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&connected.stderr)
+    );
     let endpoint_file = repo.join("wave/demo/.wave-endpoint");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let addr = loop {
@@ -136,26 +178,15 @@ async fn wave_two_process_live_smoke() {
     )
     .await;
 
-    // Teardown: SIGTERM the listener; its hooks TERM the resident (which
-    // stops codex) and remove the discovery files.
-    let pid = listener.id();
-    Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status()
-        .expect("kill runs");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        if let Ok(Some(_)) = listener.try_wait() {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "listener ignored SIGTERM"
-        );
-        tokio::time::sleep(Duration::from_millis(200)).await;
+    // The fixture daemon owns listener and resident shutdown.
+}
+
+struct FixtureDaemon(std::process::Child);
+impl Drop for FixtureDaemon {
+    fn drop(&mut self) {
+        let _ = Command::new("kill")
+            .args(["-TERM", &self.0.id().to_string()])
+            .status();
+        let _ = self.0.wait();
     }
-    assert!(
-        !endpoint_file.exists(),
-        "endpoint pointer removed on shutdown"
-    );
 }

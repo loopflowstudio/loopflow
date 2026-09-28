@@ -77,7 +77,7 @@ A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.
 
-When asked about Loopflow state, use `lf ls --json`, `lf status <wave> --json`,
+When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Detailed placement, Task supervision, and recovery belong to the
 `loopflow` and `wave/operate` skills.

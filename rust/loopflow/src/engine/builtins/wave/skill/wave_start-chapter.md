@@ -10,7 +10,7 @@ Project planning tier.
 ## Ground the proposal
 
 Read this exact Wave's GOAL.md, MEMORY.md, chapter review, and current
-`lf status <wave> --json`. The mandate and memory endure; chapter metric targets,
+`lf wave status <wave> --json`. The mandate and memory endure; chapter metric targets,
 KRs, Flow recommendations, and unopened backlog do not inherit authority.
 Use the parent's accepted direction when supplied. Return a material challenge
 to that parent instead of opening another session. In an interactive session,

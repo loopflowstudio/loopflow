@@ -1,4 +1,4 @@
-// RegistryQuery decodes the `lf ls/status/roadmap/runs --json` wire snapshots. The
+// RegistryQuery decodes the `lf wave list/status/roadmap/runs --json` wire snapshots. The
 // runner is injected, so these exercise parsing without spawning `lf`.
 
 import Foundation
@@ -7,7 +7,7 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
-    @Test("lf ls decodes and scopes to the repo")
+    @Test("lf wave list decodes and scopes to the repo")
     func wavesDecodeAndScope() async throws {
         let json = """
         [
@@ -19,8 +19,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
             "live": true,
-            "paused": true,
-            "enabled": true,
+
             "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
@@ -39,8 +38,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
             "live": false,
-            "paused": false,
-            "enabled": false,
+
             "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
@@ -54,7 +52,7 @@ struct RegistryQueryTests {
         ]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["ls", "--all", "--current", "--json"])
+            #expect(args == ["wave", "list", "--all", "--current", "--json"])
             return json
         }
 
@@ -62,11 +60,10 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .ready)
         #expect(waves[0].repo == "/tmp/repo-a")
-        #expect(waves[0].paused)
-        #expect(waves[0].enabled)
+
     }
 
-    @Test("lf ls can be decoded once for every repo")
+    @Test("lf wave list can be decoded once for every repo")
     func allWavesDecode() async throws {
         let json = """
         [
@@ -78,8 +75,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
             "live": true,
-            "paused": true,
-            "enabled": true,
+
             "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
@@ -98,8 +94,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
             "live": false,
-            "paused": false,
-            "enabled": false,
+
             "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
@@ -115,18 +110,16 @@ struct RegistryQueryTests {
         let counter = CallCounter()
         let query = RegistryQuery { args, _ in
             await counter.increment()
-            #expect(args == ["ls", "--all", "--current", "--json"])
+            #expect(args == ["wave", "list", "--all", "--current", "--json"])
             return json
         }
 
         let waves = try await query.allWaves()
         #expect(await counter.value == 1)
         #expect(waves.map(\.id) == ["goals", "other"])
-        #expect(waves.map(\.enabled) == [true, false])
     }
 
-
-    @Test("lf status maps the work hierarchy onto the wave")
+    @Test("lf wave status maps the work hierarchy onto the wave")
     func statusMapsWork() async throws {
         let json = """
         {
@@ -138,8 +131,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
             "live": false,
-            "paused": false,
-            "enabled": true,
+
             "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
@@ -210,7 +202,7 @@ struct RegistryQueryTests {
             "reason": "no resident is serving",
             "endpoint": null,
             "action": {
-              "kind": "start",
+              "kind": "connect",
               "home_id": "home_00000000000000000000000000000001"
             }
           },
@@ -293,7 +285,7 @@ struct RegistryQueryTests {
         }
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["status", "goals", "--json"])
+            #expect(args == ["wave", "status", "goals", "--json"])
             return json
         }
 
@@ -301,7 +293,7 @@ struct RegistryQueryTests {
         #expect(result.wave.id == "goals")
         #expect(result.wave.goal == "g")
         #expect(result.homeRuntime.state == .stopped)
-        #expect(result.homeRuntime.action == .start(homeId: "home_00000000000000000000000000000001"))
+        #expect(result.homeRuntime.action == .connect(homeId: "home_00000000000000000000000000000001"))
         #expect(result.loopState == "turning")
         #expect(result.workMap.chapter?.flows.recommended == "task-design")
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
@@ -381,7 +373,7 @@ struct RegistryQueryTests {
         #expect(!snapshot.truncated)
     }
 
-    @Test("lf home probe decodes the state and the one contextual action")
+    @Test("lf wave probe decodes the state and the one contextual action")
     func homeProbeDecodesStateAndAction() async throws {
         let json = #"""
         {
@@ -395,13 +387,13 @@ struct RegistryQueryTests {
           "reason": "reachable, no resident",
           "endpoint": null,
           "action": {
-            "kind": "start",
+            "kind": "connect",
             "home_id": "home_00000000000000000000000000000001"
           }
         }
         """#
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["home", "probe", "product", "--json"])
+            #expect(args == ["wave", "probe", "product", "--json"])
             #expect(cwd == "/tmp/repo")
             return json
         }
@@ -409,10 +401,10 @@ struct RegistryQueryTests {
         let runtime = try await query.homeProbe(wave: "product", cwd: "/tmp/repo")
         #expect(runtime.state == .stopped)
         #expect(runtime.endpoint == nil)
-        #expect(runtime.action == .start(homeId: "home_00000000000000000000000000000001"))
+        #expect(runtime.action == .connect(homeId: "home_00000000000000000000000000000001"))
     }
 
-    @Test("lf start returns the existing Wave status contract")
+    @Test("Chat connection for returns the existing Wave status contract")
     func startReturnsWaveStatus() async throws {
         let json = #"""
         [
@@ -424,8 +416,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo",
             "active_tasks": 1,
             "live": true,
-            "paused": false,
-            "enabled": true,
+
             "endpoint": "127.0.0.1:7777",
             "created_at": "2026-07-17T00:00:00Z",
             "parent_wave_id": null,
@@ -439,18 +430,18 @@ struct RegistryQueryTests {
         ]
         """#
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["start", "product", "--json"])
+            #expect(args == ["__chat-connect", "product", "--json"])
             #expect(cwd == "/tmp/repo")
             return json
         }
 
-        let result = try await query.start(wave: "product", cwd: "/tmp/repo")
+        let result = try await query.connectChat(wave: "product", cwd: "/tmp/repo")
         #expect(result[0].live)
         #expect(result[0].endpoint == "127.0.0.1:7777")
         #expect(result[0].home.id == "home_00000000000000000000000000000001")
     }
 
-    @Test("lf start rejects a non-live receipt")
+    @Test("Chat connection for rejects a non-live receipt")
     func startRejectsNonLiveReceipt() async {
         let json = #"""
         [
@@ -462,8 +453,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo",
             "active_tasks": 1,
             "live": false,
-            "paused": false,
-            "enabled": true,
+
             "endpoint": null,
             "created_at": "2026-07-17T00:00:00Z",
             "parent_wave_id": null,
@@ -479,18 +469,18 @@ struct RegistryQueryTests {
         let query = RegistryQuery { _, _ in json }
 
         await #expect(throws: RegistryQueryError.self) {
-            try await query.start(wave: "product", cwd: "/tmp/repo")
+            try await query.connectChat(wave: "product", cwd: "/tmp/repo")
         }
     }
 
-    @Test("lf start surfaces an actionable preflight failure")
+    @Test("Chat connection for surfaces an actionable preflight failure")
     func startSurfacesPreflightFailure() async {
         let query = RegistryQuery { _, _ in
             throw RegistryQueryError("Wave broken failed preflight: invalid chat policy")
         }
 
         do {
-            _ = try await query.start(wave: "broken", cwd: "/tmp/repo")
+            _ = try await query.connectChat(wave: "broken", cwd: "/tmp/repo")
             Issue.record("expected the preflight failure")
         } catch {
             #expect(error.localizedDescription.contains("failed preflight"))
@@ -498,38 +488,7 @@ struct RegistryQueryTests {
         }
     }
 
-    @Test("lf pause and resume return the authored turn intent")
-    func setWavePausedUsesIntentVerbs() async throws {
-        let query = RegistryQuery { args, cwd in
-            #expect(cwd == "/tmp/repo")
-            switch args {
-            case ["pause", "product", "--json"]:
-                return #"{"wave":"product","paused":true}"#
-            case ["resume", "product", "--json"]:
-                return #"{"wave":"product","paused":false}"#
-            default:
-                throw RegistryQueryError("unexpected argv: \(args)")
-            }
-        }
-
-        let paused = try await query.setWavePaused(
-            wave: "product",
-            paused: true,
-            cwd: "/tmp/repo"
-        )
-        #expect(paused == WaveIntentReceipt(wave: "product", paused: true))
-
-        let resumed = try await query.setWavePaused(
-            wave: "product",
-            paused: false,
-            cwd: "/tmp/repo"
-        )
-        #expect(resumed == WaveIntentReceipt(wave: "product", paused: false))
-    }
-
-    /// Unreadable evidence must reach the surface as its reason, never as an
-    /// empty list — a broken ledger is not a quiet wave.
-    @Test("lf status keeps unavailable evidence unavailable")
+    @Test("lf wave status keeps unavailable evidence unavailable")
     func statusKeepsUnavailableEvidence() async throws {
         let json = """
         {
@@ -541,8 +500,7 @@ struct RegistryQueryTests {
             "repo": "/tmp/repo-a",
             "active_tasks": 0,
             "live": false,
-            "paused": false,
-            "enabled": true,
+
             "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
@@ -573,7 +531,7 @@ struct RegistryQueryTests {
             "reason": "no resident is serving",
             "endpoint": null,
             "action": {
-              "kind": "start",
+              "kind": "connect",
               "home_id": "home_00000000000000000000000000000001"
             }
           },
@@ -796,7 +754,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             if args == ["wave", "sync", "infrastructure"] { return "" }
-            #expect(args == ["status", "infrastructure", "--json"])
+            #expect(args == ["wave", "status", "infrastructure", "--json"])
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Ship it.", cwd: "/tmp/repo", sync: true)

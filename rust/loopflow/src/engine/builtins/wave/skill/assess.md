@@ -72,7 +72,7 @@ be fine. Look past activity to actual progress toward finish lines.
 ## Task references
 
 When the assessment names more than one Task, preserve or refresh their rows
-from `lf roadmap --wave <wave> --json` and `lf status <wave> --json`. Render
+from `lf roadmap --wave <wave> --json` and `lf wave status <wave> --json`. Render
 operational Task lists with the shared reference:
 
 ```markdown

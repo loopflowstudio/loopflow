@@ -1,4 +1,4 @@
-//! `lf status` is an audit surface, so its contract is user-facing: the JSON it
+//! `lf wave status` is an audit surface, so its contract is user-facing: the JSON it
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
@@ -124,11 +124,11 @@ fn seed_credential_history(home: &Path) -> Project {
     project
 }
 
-/// `lf status --json` in a clean environment, optionally standing inside a wave.
+/// `lf wave status --json` in a clean environment, optionally standing inside a wave.
 fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> serde_json::Value {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
-        .arg("status")
+        .args(["wave", "status"])
         .args(args)
         .arg("--json")
         .env("LF_HOME", home)
@@ -142,10 +142,10 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         command.env("LF_WAVE_ID", id);
     }
     prepend_test_bin(&mut command, home);
-    let output = command.output().expect("lf status runs");
+    let output = command.output().expect("lf wave status runs");
     assert!(
         output.status.success(),
-        "lf status failed: {}",
+        "lf wave status failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("utf8");
@@ -154,17 +154,17 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
 
 fn status_human(home: &Path, wave: &str) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["status", wave])
+        .args(["wave", "status", wave])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .current_dir(home.join("repo"))
         .output()
-        .expect("lf status runs");
+        .expect("lf wave status runs");
     assert!(
         output.status.success(),
-        "lf status failed: {}",
+        "lf wave status failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("status is utf8")
@@ -458,7 +458,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
 }
 
 /// The reproduced break: inside a resident wave, `LF_WAVE_ID` is a wave id, and
-/// bare `lf status` read it as a name.
+/// bare `lf wave status` read it as a name.
 #[test]
 fn ambient_wave_id_resolves_the_wave_it_names() {
     let home = tempfile::tempdir().expect("tempdir");
@@ -512,7 +512,6 @@ fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let work = loopflow::durable::WorkRef::Wave(abandoned.id().clone());
     store.abandon(&work, "accidental registration").unwrap();
-    store.set_work_enabled(&work, false).unwrap();
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)
@@ -526,7 +525,7 @@ fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
             .output()
             .unwrap()
     };
-    let listing = run(&["ls", "--all", "--current", "--json"]);
+    let listing = run(&["wave", "list", "--all", "--current", "--json"]);
     assert!(
         listing.status.success(),
         "{}",
@@ -548,10 +547,6 @@ fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
         String::from_utf8_lossy(&preview.stderr)
     );
     assert!(store.get_wave(abandoned.id()).unwrap().is_some());
-    store.set_work_enabled(&work, true).unwrap();
-    assert!(store.forget_wave(abandoned.id(), false).is_err());
-    assert!(store.get_wave(abandoned.id()).unwrap().is_some());
-    store.set_work_enabled(&work, false).unwrap();
     let deleted = run(&["wave", "forget", abandoned.id().as_str(), "--json"]);
     assert!(
         deleted.status.success(),

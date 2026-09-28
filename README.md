@@ -53,7 +53,7 @@ The harness acts as a User over the same `lf` API. See
 
 ## Keep work moving
 
-Author a Wave in the repo and run it:
+Author a Wave in the repo and open its conversation:
 
 ```markdown
 <!-- wave/designer/GOAL.md -->
@@ -65,12 +65,8 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf start designer                           # serve it from this Home's one keeper
+lf chat --follow -w designer
 lf --wave designer wave/operate "ship the button audit first"
-lf pause designer                           # keep listening; queue new turn starts
-lf resume designer
-lf stop designer                            # stay off across Home restarts
-lf start designer                           # turn it back on
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -79,7 +75,7 @@ reviewed repository file, not live server state.
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf task prepare INF-123                               # durable Task Work + worktree, no controller
+lf task checkout INF-123                               # durable Task Work + worktree, no controller
 lf task run INF-123                                   # start end-to-end Task automation
 lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
@@ -103,11 +99,11 @@ lf launch-plan                                        # keep the core here; laun
 Watch this repository and the current Home:
 
 ```bash
-lf ls                  # every durable Wave and its Home/runtime evidence
+lf wave list                  # every durable Wave and its Home/runtime evidence
 lf user name           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
-lf status designer     # one Wave's current chapter and Tasks
+lf wave status designer     # one Wave's current chapter and Tasks
 lf activity            # durable Work changes with exact Run, PR, and Steer proof
 lf runs                # recent Home-local Run records
 lf runs --parent run_ab12 --json # every direct child Run, uncapped

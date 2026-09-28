@@ -7,7 +7,7 @@ Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to resume the workflow safely.
 
 ```bash
-lf task prepare INF-123
+lf task checkout INF-123
 lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
@@ -45,7 +45,7 @@ The exact landing fence is modeled in
 
 ## Create or reuse the worktree
 
-`lf task prepare` resolves one existing Linear Issue inside one Project and
+`lf task checkout` resolves one existing Linear Issue inside one Project and
 creates or reuses its managed worktree and first serial PR record. It starts no
 execution. `lf task run` uses the same substrate and additionally advances the
 declared Task flow. The repository identity—not the caller's

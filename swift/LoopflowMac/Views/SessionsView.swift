@@ -524,7 +524,7 @@ struct SessionsView: View {
         } else {
             let repo = store.repoPath
             worktree = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.prepareTask(repoPath: repo, issue: issue)
+                try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
             }.value
         }
         try launch(.task(repo: worktree, id: issue), in: origin)

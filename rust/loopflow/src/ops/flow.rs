@@ -288,7 +288,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             crate::ops::task::pr_next(repo, slug.as_deref())?;
             Ok(())
         }
-        PrCommand::Status => Err(unsupported()),
+        PrCommand::Status | PrCommand::Checks { .. } => Err(unsupported()),
     }
 }
 

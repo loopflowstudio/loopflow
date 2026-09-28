@@ -74,12 +74,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use secrecy::SecretString;
 
-use crate::engine::worktrees::{
-    ensure_agent_worktree, main_repo_root, wave_agent_segment, AgentWorktree,
-};
-use crate::ops::util::normalize_wave_name;
-use crate::repo::find_repo_root;
-use crate::store::{open_existing_store, SharedStore};
+use crate::engine::worktrees::{ensure_agent_worktree, wave_agent_segment, AgentWorktree};
 use crate::work::wave::config::{try_read_wave_chat_config, WaveChatConfig};
 use crate::work::wave::WaveLocator;
 
@@ -106,50 +101,6 @@ impl<F> ListenerSignals<F> {
     pub(crate) fn new(startup: Option<tokio::sync::oneshot::Sender<String>>, shutdown: F) -> Self {
         Self { startup, shutdown }
     }
-}
-
-/// `lf wave <name>` — boot the named mind's listener and supervise its
-/// resident. The steerable half: an endpoint, a thread, a cadence.
-///
-/// The listener spawns its resident body as `lf __resident <name>`. That is an
-/// explicit command, not an ambient one: an earlier design branched here on
-/// whether the resident endpoint/token were present in env, which meant any
-/// process holding a parent's env — a tmux child, a promoted Wave — booted
-/// the wrong half by accident.
-pub fn run(name: &str, force: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let registry_config = resolve_registry(&main_repo, &wave).await;
-        run_listener_with_startup(
-            main_repo,
-            wave,
-            registry_config,
-            force,
-            true,
-            None,
-            ListenerSignals::new(None, shutdown_signal()),
-        )
-        .await
-    })
-}
-
-/// `lf stop <name>` — ask the named wave's listener to shut down gracefully.
-/// A missing or stale endpoint is already stopped, so this is idempotent.
-pub fn stop(name: &str) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let rt = tokio::runtime::Runtime::new()?;
-    let requested = rt.block_on(request_stop(&main_repo, &wave))?;
-    if requested {
-        println!("stopped wave {wave}");
-    } else {
-        println!("wave {wave} is already stopped");
-    }
-    Ok(())
 }
 
 pub(crate) async fn request_stop(repo_root: &Path, wave: &str) -> Result<bool> {
@@ -187,31 +138,6 @@ pub(crate) async fn request_stop(repo_root: &Path, wave: &str) -> Result<bool> {
     Err(anyhow!(
         "wave '{wave}' accepted stop but is still serving at http://{endpoint}"
     ))
-}
-
-/// Open the machine's shared registry and resolve this wave's row, creating
-/// the row when the store has never seen the wave — the db IS the registry,
-/// so a reachable store always yields a registered boot (see
-/// [`registry::ensure_wave_row`]). `None` (with one warning) only when the
-/// store itself is missing or unusable: the server starts without child
-/// observations and its observer acquires the registry later. Endpoint
-/// discovery still prevents a second listener.
-async fn resolve_registry(main_repo: &Path, wave: &str) -> Option<registry::RegistryConfig> {
-    let Some(store) = open_existing_store().await else {
-        tracing::warn!(
-            wave,
-            "no local registry on this machine; running without child observations"
-        );
-        return None;
-    };
-    let store: SharedStore = Arc::new(store);
-    match registry::ensure_wave_row(&store, main_repo, wave).await {
-        Ok(row) => Some(registry::RegistryConfig { store, wave: row }),
-        Err(err) => {
-            tracing::warn!(wave, error = %err, "local registry unusable; running without child observations");
-            None
-        }
-    }
 }
 
 /// The production resident spawner: `lf __resident <wave>`, run by the
@@ -558,10 +484,6 @@ where
     server::remove_resident_token(&repo_root, &wave, &token);
 
     result.map_err(|err| anyhow!("wave server error: {err}"))
-}
-
-async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
 }
 
 #[cfg(test)]
@@ -1817,17 +1739,6 @@ mod tests {
                 panic!("listener stayed alive behind its event subscription");
             }
         }
-    }
-
-    /// No registry store on the machine: the boot degrades to unregistered
-    /// (warn-and-continue), never an error — the pre-registry status quo.
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
-    async fn resolve_registry_without_a_store_runs_unregistered() {
-        let _env = crate::journal::TestLedgerGuard::new();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let config = resolve_registry(tmp.path(), "ship").await;
-        assert!(config.is_none(), "missing store boots unregistered");
     }
 
     /// A stale pointer (its server is gone) never blocks a boot: the probe

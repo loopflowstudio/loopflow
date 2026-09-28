@@ -122,7 +122,6 @@ pub struct Home {
 pub struct Placement {
     pub work: WorkRef,
     pub home_id: HomeId,
-    pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub placed_at: OffsetDateTime,
 }

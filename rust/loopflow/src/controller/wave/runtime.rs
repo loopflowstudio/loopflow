@@ -49,7 +49,6 @@ use crate::controller::wave::state::{can_transition, LoopState};
 use crate::controller::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
 use crate::work::project::ProjectObservation;
 use crate::work::task::TaskObservation;
-use crate::work::wave::config::read_wave_config;
 use crate::work::wave::PromotionWake;
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
@@ -692,17 +691,6 @@ impl WaveRuntime {
         Ok(())
     }
 
-    /// Whether the wave is paused, from GOAL.md frontmatter (`paused: true`).
-    /// File-first by design — the flag lives with the goal, re-read live, no
-    /// restart; the registry row's `paused` column is not consulted. A paused
-    /// wave keeps serving and queueing, but the listener refuses to start
-    /// turns ([`WaveRuntime::apply_resident_delta`] drops `TurnOpened`).
-    pub fn paused(&self) -> bool {
-        read_wave_config(&self.repo_root, &self.name)
-            .and_then(|config| config.paused)
-            .unwrap_or(false)
-    }
-
     fn inner(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().expect("wave runtime lock poisoned")
     }
@@ -1205,7 +1193,6 @@ impl WaveRuntime {
     }
 
     fn resident_turn_opened(&self, answers: Vec<String>, body: Option<BodyProvenance>) {
-        let paused = self.paused();
         let mut inner = self.inner();
         if inner.open.is_some() {
             self.finish_turn_locked(
@@ -1213,16 +1200,6 @@ impl WaveRuntime {
                 Lifecycle::Failed,
                 Some("stale open turn closed".into()),
             );
-        }
-        // The safety valve: a paused wave (GOAL.md `paused: true`) refuses to
-        // start turns — nothing journaled, the queue keeps its messages for
-        // an unpaused turn, and the refused turn's deltas drop whole.
-        if paused {
-            tracing::warn!(
-                wave = self.name,
-                "wave is paused (GOAL.md frontmatter); turn refused, deltas dropped until the next TurnOpened"
-            );
-            return;
         }
         let answers = claim_answers(&mut inner, answers);
         let claims = answers.clone();
@@ -2491,50 +2468,6 @@ mod tests {
         // Idempotent: a third boot doesn't requeue twice.
         let rt2 = open_runtime(tmp.path());
         assert_eq!(rt2.pending_messages().len(), 1);
-    }
-
-    /// A paused wave (GOAL.md `paused: true`) refuses to START a turn: the
-    /// TurnOpened is dropped, its would-be claims stay pending, and the loop
-    /// settles without a thread turn. Unpausing lets the next turn through.
-    #[test]
-    fn paused_wave_refuses_to_start_turns() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let origin = tmp.path();
-        std::fs::create_dir_all(origin.join("wave/ship")).unwrap();
-        std::fs::write(
-            origin.join("wave/ship/GOAL.md"),
-            "---\npaused: true\n---\nShip it.\n",
-        )
-        .unwrap();
-        let rt = open_runtime(origin);
-        assert!(rt.paused(), "GOAL.md says paused");
-        let m = deliver_wake(&rt, 1, "go");
-
-        rt.apply_resident_delta(d_opened(&[&m.0]));
-        rt.apply_resident_delta(d_text("working"));
-        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-        // No assistant turn committed; the wake is still queued.
-        assert!(
-            rt.thread_snapshot()
-                .iter()
-                .all(|t| t.role == ChatRole::User),
-            "paused: no assistant turn started"
-        );
-        assert_eq!(rt.pending_messages().len(), 1, "the wake waits");
-
-        // Unpause: the next turn goes through.
-        std::fs::write(
-            origin.join("wave/ship/GOAL.md"),
-            "---\npaused: false\n---\nShip it.\n",
-        )
-        .unwrap();
-        assert!(!rt.paused());
-        rt.apply_resident_delta(d_opened(&[&m.0]));
-        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-        assert!(
-            rt.pending_messages().is_empty(),
-            "unpaused turn answered it"
-        );
     }
 
     /// The served Wave owns one journal for all accepted thread messages.

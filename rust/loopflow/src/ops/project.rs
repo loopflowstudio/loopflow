@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::ops::{OpsError, OpsResult};
 use crate::planning::{LinearProjectId, ProjectPlan};
 use crate::store::{open_existing_store, SharedStore};
@@ -61,79 +60,4 @@ pub(crate) fn project_plan(
         prompt_context: crate::ops::task::project_context(project),
         pm_snapshot_synced_at,
     })
-}
-
-pub(crate) fn ensure_clean_main(repo: &Path, subject: &str) -> OpsResult<std::path::PathBuf> {
-    let worktree = worktree_root(repo).map_err(|error| project_error(error.to_string()))?;
-    let main = crate::engine::worktrees::main_repo_root(repo)
-        .map_err(|error| project_error(error.to_string()))?;
-    let worktree = std::fs::canonicalize(&worktree).unwrap_or(worktree);
-    let main = std::fs::canonicalize(&main).unwrap_or(main);
-    if worktree != main {
-        return Err(project_error(format!(
-            "cannot run {subject} from {}: Wave turns require the canonical main checkout; run existing work with `lf task run <issue-id>` or file it with `lf task create --wave <wave> --title \"<title>\"`",
-            worktree.display()
-        )));
-    }
-    let default_branch =
-        get_default_branch(&main).map_err(|error| project_error(error.to_string()))?;
-    let branch = current_branch(&main).map_err(|error| project_error(error.to_string()))?;
-    if branch.as_deref() != Some(default_branch.as_str()) {
-        return Err(project_error(format!(
-            "cannot run {subject}: canonical checkout is on {}, expected {default_branch}",
-            branch.as_deref().unwrap_or("detached HEAD")
-        )));
-    }
-    if !is_clean(&main).map_err(|error| project_error(error.to_string()))? {
-        return Err(project_error(format!(
-            "cannot run {subject}: canonical {default_branch} checkout is dirty; Wave turns never edit repository files"
-        )));
-    }
-    Ok(main)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ensure_clean_main;
-    use std::process::Command;
-
-    #[test]
-    fn control_plane_requires_a_clean_canonical_main() {
-        let tmp = tempfile::tempdir().unwrap();
-        for args in [
-            vec!["init", "-b", "main"],
-            vec!["config", "user.email", "test@example.com"],
-            vec!["config", "user.name", "Test"],
-        ] {
-            assert!(Command::new("git")
-                .args(args)
-                .current_dir(tmp.path())
-                .status()
-                .unwrap()
-                .success());
-        }
-        std::fs::write(tmp.path().join("README.md"), "hello\n").unwrap();
-        assert!(Command::new("git")
-            .args(["add", "."])
-            .current_dir(tmp.path())
-            .status()
-            .unwrap()
-            .success());
-        assert!(Command::new("git")
-            .args(["commit", "-m", "initial"])
-            .current_dir(tmp.path())
-            .status()
-            .unwrap()
-            .success());
-
-        assert_eq!(
-            ensure_clean_main(tmp.path(), "Project").unwrap(),
-            std::fs::canonicalize(tmp.path()).unwrap()
-        );
-        std::fs::write(tmp.path().join("README.md"), "changed\n").unwrap();
-        let error = ensure_clean_main(tmp.path(), "Project").unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("canonical main checkout is dirty"));
-    }
 }

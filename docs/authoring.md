@@ -280,12 +280,9 @@ the repository Team and owns only its Initiative.
 `owner` and `home` say where automatic startup is wanted. Both are optional and
 independent. They are policy, not authorization or observed runtime state.
 Execution placement remains durable state: use
-`lf wave place <wave-id> <home-id>`. Bare `lf start` and `lfd` require both
-the authored policy and recorded placement to match; named `lf start <wave>` is
-an explicit local override.
-Whether this machine may pursue Work is Home-local registry state. Change it
-with `lf wave enable|disable <wave>`; these commands never edit
-the goal or another repository file.
+`lf wave place <wave-id> <home-id>`. The Home daemon observes both the authored
+policy and recorded placement. Chat connections preserve that placement;
+there is no separate Wave enablement or pause setting.
 
 ### Writing KRs
 

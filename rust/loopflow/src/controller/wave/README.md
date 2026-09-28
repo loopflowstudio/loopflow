@@ -1,17 +1,16 @@
 # Wave runtime
 
 ```bash
-lf wave product
+lf chat --follow -w product
 lf chat --wave product "What needs attention?"
 lf reply product "Should the wave answer this?"
-lf stop product
 ```
 
-`lf wave <name>` starts one resident Wave as a listener and a resident process.
-The split is runtime plumbing behind one command:
+Opening chat connects its listener and resident process through the Home daemon.
+Both are internal runtime plumbing:
 
 ```text
-lf wave <name>                     lf __resident <name>
+lfd Wave listener                 lf __resident <name>
 ┌──────────────────────┐ spawns   ┌──────────────────────┐
 │ listener             │────────▶│ resident             │
 │ journal · HTTP       │◀────────│ cadence · agent     │
@@ -50,7 +49,7 @@ endpoint and resident token exist only while the listener owns that boot and
 are removed on shutdown.
 
 Metric Markdown owns reviewed meaning and one stable Project owner. Registered
-instruments push typed observations into the local store; `lf status`,
+instruments push typed observations into the local store; `lf wave status`,
 `lf roadmap`, Wave/Project turns, and Apple clients consume one Rust-derived
 portfolio. No read executes an instrument query, and no metric completes a KR.
 

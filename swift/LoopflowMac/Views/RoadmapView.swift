@@ -400,14 +400,6 @@ struct RoadmapView: View {
                 selection = .wave(id: roadmap.wave.id)
                 openWave(roadmap.wave)
             },
-            onRefresh: { await refresh() },
-            onSetPaused: { paused in
-                try await model.setWavePaused(
-                    waveId: roadmap.wave.id,
-                    paused: paused
-                )
-            },
-            onError: { controlError = $0 },
             onTaskAction: { task, action in
                 perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
             },
@@ -497,7 +489,7 @@ struct RoadmapView: View {
                     case .run:
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     case .resume:
-                        try LocalWaveAgentLauncher.resumeTask(repoPath: repo, issue: issue)
+                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     }
                 }.value
                 await refresh()
@@ -526,22 +518,18 @@ struct RoadmapView: View {
 
 /// A Wave's placed Home on its row: stable identity and current route, plus the
 /// probed liveness and the *one* contextual action the shared `HomeRuntimeDto`
-/// dictates. The app never does SSH — `lf home probe` and `lf start` route by
-/// placement, including to remote Homes. Probed once per
+/// dictates. `lf wave probe` observes the placed Home, including remote Homes.
+/// Opening chat currently connects locally. Probed once per
 /// Wave card on appear (local reads are instant; a remote Home costs one routed
 /// probe), never once per row and never on the 15s roadmap poll.
 struct HomeControl: View {
     let wave: WaveSnapshot
     let onOpen: () -> Void
-    let onRefresh: () async -> Void
-    let onSetPaused: (Bool) async throws -> Void
-    let onError: (String) -> Void
 
     @Environment(\.palette) private var palette
     @State private var runtime: HomeRuntime?
     @State private var probeError: String?
     @State private var isProbing = false
-    @State private var isActing = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.xxs) {
@@ -560,7 +548,6 @@ struct HomeControl: View {
                 }
             }
             HStack(spacing: Spacing.xs) {
-                turnAction
                 homeAction
             }
         }
@@ -568,39 +555,14 @@ struct HomeControl: View {
     }
 
     @ViewBuilder
-    private var turnAction: some View {
-        Group {
-            if isActing {
-                ProgressView().controlSize(.small)
-            } else {
-                Button(wave.paused ? "Resume" : "Pause") {
-                    Task { await setPaused(!wave.paused) }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(
-                    wave.paused
-                        ? "Enable new turns for this Wave"
-                        : "Refuse new turns while the listener keeps serving"
-                )
-                .accessibilityIdentifier("wave-turn-control-\(wave.id)")
-            }
-        }
-    }
-
-    @ViewBuilder
     private var homeAction: some View {
-        if !isActing, let runtime {
+        if let runtime {
             switch runtime.action {
-            case .attach:
-                Button("Open") { onOpen() }
+            case .attach, .connect:
+                Button("Open chat") { onOpen() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .help(runtime.endpoint.map { "Attach to \($0)" } ?? "Open the Wave")
-            case .start(let homeId):
-                Button("Start on \(homeId)") { Task { await start() } }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
             case .reason(let message):
                 Text(message)
                     .font(Typography.caption(9))
@@ -644,30 +606,6 @@ struct HomeControl: View {
         }
     }
 
-    @MainActor
-    private func start() async {
-        isActing = true
-        defer { isActing = false }
-        do {
-            _ = try await RegistryQueryLocal.shared.start(wave: wave.name, cwd: wave.repo)
-            runtime = try await RegistryQueryLocal.shared.homeProbe(wave: wave.name, cwd: wave.repo)
-            await onRefresh()
-            onOpen()
-        } catch {
-            onError(error.localizedDescription)
-        }
-    }
-
-    @MainActor
-    private func setPaused(_ paused: Bool) async {
-        isActing = true
-        defer { isActing = false }
-        do {
-            try await onSetPaused(paused)
-        } catch {
-            onError(error.localizedDescription)
-        }
-    }
 }
 
 private struct RoadmapWaveCard: View {
@@ -676,9 +614,6 @@ private struct RoadmapWaveCard: View {
     let activeControlId: String?
     let onSelect: (WorkReference) -> Void
     let onOpen: () -> Void
-    let onRefresh: () async -> Void
-    let onSetPaused: (Bool) async throws -> Void
-    let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
@@ -691,9 +626,7 @@ private struct RoadmapWaveCard: View {
                     HStack(spacing: Spacing.sm) {
                         Circle()
                             .fill(
-                                roadmap.wave.paused
-                                    ? WaveLensColor.blue.glow
-                                    : roadmap.wave.live ? Color.statusSuccess : Color.statusNeutral
+                                roadmap.wave.live ? Color.statusSuccess : Color.statusNeutral
                             )
                             .frame(width: 7, height: 7)
                         Text(roadmap.wave.name)
@@ -702,16 +635,7 @@ private struct RoadmapWaveCard: View {
                         Text(roadmap.wave.status.label)
                             .font(Typography.caption(10))
                             .foregroundStyle(palette.textSecondary)
-                        if roadmap.wave.paused {
-                            Text("paused")
-                                .font(Typography.caption(9).weight(.semibold))
-                                .foregroundStyle(WaveLensColor.blue.glow)
-                                .padding(.horizontal, Spacing.xs)
-                                .padding(.vertical, 1)
-                                .background(WaveLensColor.blue.glow.opacity(0.12))
-                                .clipShape(Capsule())
-                                .accessibilityIdentifier("wave-paused-\(roadmap.wave.id)")
-                        }
+
                     }
                     if !roadmap.wave.goal.isEmpty {
                         Text(roadmap.wave.goal)
@@ -728,10 +652,7 @@ private struct RoadmapWaveCard: View {
                 Spacer()
                 HomeControl(
                     wave: roadmap.wave,
-                    onOpen: onOpen,
-                    onRefresh: onRefresh,
-                    onSetPaused: onSetPaused,
-                    onError: onError
+                    onOpen: onOpen
                 )
             }
 
@@ -766,7 +687,6 @@ private struct RoadmapWaveCard: View {
         .accessibilityIdentifier("podium-wave-\(roadmap.wave.id)")
     }
 }
-
 
 struct RoadmapTaskRow: View {
     let task: RoadmapTask

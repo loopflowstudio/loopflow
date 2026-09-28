@@ -72,6 +72,14 @@ jobs:
           cargo build -p loopflow --bin lf
           LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 
+  task-installation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Prove managed Tasks in a disposable installation
+        run: uv run python scripts/test_task_installation.py
+
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.
   migration-check:
@@ -211,6 +219,7 @@ jobs:
       - python-test
       - website-test
       - e2e-smoke
+      - task-installation
       - swift-test
       - loopflow-ui-test
     steps:
@@ -224,6 +233,7 @@ jobs:
           PYTHON_TEST: ${{ needs.python-test.result }}
           WEBSITE_TEST: ${{ needs.website-test.result }}
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
+          TASK_INSTALLATION: ${{ needs.task-installation.result }}
           SWIFT_TEST: ${{ needs.swift-test.result }}
           LOOPFLOW_UI_TEST: ${{ needs.loopflow-ui-test.result }}
         run: |
@@ -254,6 +264,7 @@ jobs:
           check_result "python-test" "$PYTHON_TEST"
           check_result "website-test" "$WEBSITE_TEST"
           check_result "e2e-smoke" "$E2E_SMOKE"
+          check_result "task-installation" "$TASK_INSTALLATION"
           check_result "swift-test" "$SWIFT_TEST"
           check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST"
 

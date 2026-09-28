@@ -39,6 +39,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         None | Some(PrCommand::Status) => pr_status(),
+        Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
         Some(PrCommand::Publish { model, title, body }) => publish_pr(
             title.clone(),
             body.clone(),
@@ -1490,7 +1491,6 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
-        WtCommand::Ci { watch, logs } => wt_ci(*watch, *logs),
     }
 }
 
@@ -1954,7 +1954,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
     Ok(protected)
 }
 
-fn wt_ci(watch: bool, logs: bool) -> Result<()> {
+fn pr_checks(watch: bool, logs: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let branch = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
 

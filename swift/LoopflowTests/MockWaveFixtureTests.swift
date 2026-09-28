@@ -17,7 +17,7 @@ struct MockWaveFixtureTests {
         #expect(AppTestMode.emptyWorkspaces.bypassesRegistry)
     }
 
-    @Test("the stable list carries one Wave per lens state, plus a child")
+    @Test("the stable list shows chat availability independently of active Tasks")
     func listLensStates() {
         let byName = Dictionary(uniqueKeysWithValues: MockWaveFixture.waves.map { ($0.name, $0) })
 
@@ -25,9 +25,9 @@ struct MockWaveFixtureTests {
             WaveViewModel(api: byName[name]!, isRegistered: true).lens
         }
 
-        #expect(lens("infrastructure").color == .green)   // a live body
-        #expect(lens("intelligence").color == .red)       // stopped with active work
-        #expect(lens("feedback").color == .black)          // off and clean
+        #expect(lens("infrastructure").color == .green)
+        #expect(lens("intelligence").color == .black)     // disconnected with active work
+        #expect(lens("feedback").color == .black)         // disconnected without active work
         #expect(lens("cadenza").color == .green)
         #expect(byName["cadenza"]?.parentWaveId == "wave-1")  // future-ancestry indentation
     }

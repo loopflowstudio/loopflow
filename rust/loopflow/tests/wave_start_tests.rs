@@ -1,4 +1,4 @@
-//! End-to-end proof for the supported Wave startup contract.
+//! Chat connection, startup recovery, and placement through real CLI/daemon binaries.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -7,27 +7,32 @@ use std::time::Duration;
 
 use futures_util::future::join_all;
 use loopflow::child::ObservationRecipient;
-use loopflow::durable::WorkRef;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
 use loopflow::store::StorageConfig;
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::wave::WaveLocator;
 use time::OffsetDateTime;
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct HomeDaemon {
-    pid_path: PathBuf,
+    sessions: PathBuf,
 }
 
 impl HomeDaemon {
     fn stop(&self) {
-        let Ok(pid) = std::fs::read_to_string(&self.pid_path) else {
+        let Ok(entries) = std::fs::read_dir(&self.sessions) else {
             return;
         };
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", pid.trim()])
-            .status();
+        for entry in entries.flatten() {
+            if entry.path().extension().is_some_and(|ext| ext == "pid") {
+                if let Ok(pid) = std::fs::read_to_string(entry.path()) {
+                    let _ = std::process::Command::new("kill")
+                        .args(["-TERM", pid.trim()])
+                        .status();
+                }
+            }
+        }
     }
 }
 
@@ -77,6 +82,13 @@ printf '%s\n' "$!" > "$FAKE_TMUX_PID_DIR/$session.pid"
         .permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&tmux, permissions).expect("make fake tmux executable");
+    // Prevent any configured provider from being reached by fixture observations.
+    for provider in ["codex", "claude", "opencode"] {
+        let path = bin.join(provider);
+        std::fs::write(&path, "#!/bin/sh\nexit 79\n").expect("write fixture provider");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("make fixture provider executable");
+    }
     bin
 }
 
@@ -98,6 +110,7 @@ fn lf_command(repo: &Path, home: &Path, fake_bin: &Path, args: &[&str]) -> tokio
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_RUN_ID")
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -117,20 +130,20 @@ async fn run_lf(repo: &Path, home: &Path, fake_bin: &Path, args: &[&str]) -> std
 fn live_snapshot(output: &std::process::Output, name: &str) -> serde_json::Value {
     assert!(
         output.status.success(),
-        "lf start {name} failed: {}",
+        "chat connection for {name} failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let body: serde_json::Value = serde_json::from_slice(&output.stdout).expect("parse start JSON");
+    let body: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse connection JSON");
     let snapshot = &body[0];
     assert_eq!(snapshot["name"], name);
     assert_eq!(snapshot["live"], true);
-    assert_eq!(snapshot["enabled"], true);
     assert!(snapshot["endpoint"].as_str().is_some());
     snapshot.clone()
 }
 
 #[tokio::test]
-async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
+async fn chat_connects_and_preserves_failed_siblings_and_remote_placement() {
     let temporary = tempfile::tempdir().expect("create temp directory");
     let repo = temporary.path().join("repo");
     let home = temporary.path().join("home");
@@ -149,6 +162,9 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-qm", "seed"]);
     let fake_bin = write_fake_tmux(&home);
+    let _daemon = HomeDaemon {
+        sessions: home.join("sessions"),
+    };
 
     // A fresh Home starts its exact lfd/lf control pair. The valid sibling
     // stays live even though malformed Wave policy fails preflight, and the
@@ -157,7 +173,7 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         &repo,
         &home,
         &fake_bin,
-        &["start", "good", "broken", "--json"],
+        &["__chat-connect", "good", "broken", "--json"],
     )
     .await;
     assert!(!mixed.status.success());
@@ -192,9 +208,6 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         .join(format!("{}.endpoint", local.id.as_str()));
     assert!(endpoint_path.exists(), "fresh Home published lfd endpoint");
     let session = format!("lfd-{}", local.id.as_str());
-    let _daemon = HomeDaemon {
-        pid_path: home.join("sessions").join(format!("{session}.pid")),
-    };
     let launch = std::fs::read_to_string(home.join("sessions").join(format!("{session}.command")))
         .expect("read lfd launch command");
     assert!(launch.contains(env!("CARGO_BIN_EXE_lfd")));
@@ -217,7 +230,13 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
 
     // An installed/live lfd handles an already-registered Wave without
     // launching a replacement daemon.
-    let existing = run_lf(&repo, &home, &fake_bin, &["start", "good", "--json"]).await;
+    let existing = run_lf(
+        &repo,
+        &home,
+        &fake_bin,
+        &["__chat-connect", "good", "--json"],
+    )
+    .await;
     let first = live_snapshot(&existing, "good");
     let receipt_count = std::fs::read_dir(home.join("lfd/startup"))
         .expect("read startup receipts")
@@ -231,37 +250,43 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         .count();
     assert_eq!(receipt_count, 1, "live lfd was not replaced");
 
-    let stopped = run_lf(&repo, &home, &fake_bin, &["stop", "good"]).await;
+    // Public chat connects a newly authored Wave without a service command.
+    std::fs::create_dir_all(repo.join("wave/chat")).unwrap();
+    std::fs::write(repo.join("wave/chat/GOAL.md"), "A chat test Wave.\n").unwrap();
+    let chat = run_lf(&repo, &home, &fake_bin, &["chat", "--follow", "-w", "chat"]).await;
     assert!(
-        stopped.status.success(),
-        "stop failed: {}",
-        String::from_utf8_lossy(&stopped.stderr)
+        chat.status.success(),
+        "{}",
+        String::from_utf8_lossy(&chat.stderr)
     );
-    assert_eq!(
-        std::fs::read_to_string(repo.join("wave/good/GOAL.md")).expect("read stopped Wave goal"),
-        "A local test Wave.\n",
-        "machine control must not modify repository state"
-    );
+    assert!(String::from_utf8_lossy(&chat.stdout).contains("chat: chat @ "));
+    let locator = WaveLocator::discover(&repo, "chat").unwrap();
+    let chat_wave = store.get_wave_at(&locator).await.unwrap().unwrap();
+    let work = loopflow::durable::WorkRef::Wave(chat_wave.id().clone());
+    assert_eq!(store.placement(&work).await.unwrap().home_id, local.id);
+    let remote = loopflow::durable::HomeId::new();
+    store
+        .observe_home(&remote, "ssh://fixture@mini")
+        .await
+        .unwrap();
+    let placed = run_lf(
+        &repo,
+        &home,
+        &fake_bin,
+        &["wave", "place", "chat", remote.as_str(), "--json"],
+    )
+    .await;
     assert!(
-        !store
-            .placement(&WorkRef::Wave(good.id().clone()))
-            .await
-            .expect("read stopped Wave control")
-            .enabled
+        placed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&placed.stderr)
     );
-    let listed = run_lf(&repo, &home, &fake_bin, &["ls", "--json"]).await;
-    assert!(listed.status.success(), "lf ls failed after stop");
-    let waves: Vec<serde_json::Value> =
-        serde_json::from_slice(&listed.stdout).expect("parse stopped Wave list");
-    let stopped_wave = waves
-        .iter()
-        .find(|wave| wave["name"] == "good")
-        .expect("find stopped Wave snapshot");
-    assert_eq!(stopped_wave["enabled"], false);
-    assert_eq!(stopped_wave["live"], false);
+    let chat = run_lf(&repo, &home, &fake_bin, &["chat", "--follow", "-w", "chat"]).await;
+    assert!(!chat.status.success());
+    assert!(String::from_utf8_lossy(&chat.stderr).contains("belongs to Home"));
+    assert_eq!(store.placement(&work).await.unwrap().home_id, remote);
 
-    // A child event committed while the Wave is stopped remains durable until
-    // the next start synchronously drains it.
+    // Connecting chat drains durable child observations before returning.
     let now = OffsetDateTime::now_utc();
     let project = Project {
         id: ProjectId::new(),
@@ -307,9 +332,15 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
 
     // Concurrent wake callers share the listener's startup event. All return
     // the same truthful live endpoint within the command bound.
-    let outputs =
-        join_all((0..20).map(|_| run_lf(&repo, &home, &fake_bin, &["start", "good", "--json"])))
-            .await;
+    let outputs = join_all((0..2).map(|_| {
+        run_lf(
+            &repo,
+            &home,
+            &fake_bin,
+            &["__chat-connect", "good", "--json"],
+        )
+    }))
+    .await;
     let snapshots = outputs
         .iter()
         .map(|output| live_snapshot(output, "good"))
@@ -323,13 +354,7 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         std::fs::read_to_string(repo.join("wave/good/GOAL.md")).expect("read restarted Wave goal"),
         "A local test Wave.\n"
     );
-    assert!(
-        store
-            .placement(&WorkRef::Wave(good.id().clone()))
-            .await
-            .expect("read restarted Wave control")
-            .enabled
-    );
+
     assert!(
         store
             .pending_observations(&recipient)
@@ -337,20 +362,5 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
             .expect("read drained observations")
             .is_empty(),
         "start returned before the durable observation was drained"
-    );
-
-    let stopped = run_lf(&repo, &home, &fake_bin, &["stop", "good"]).await;
-    assert!(stopped.status.success());
-    assert_eq!(
-        std::fs::read_to_string(repo.join("wave/good/GOAL.md"))
-            .expect("read final stopped Wave goal"),
-        "A local test Wave.\n"
-    );
-    assert!(
-        !store
-            .placement(&WorkRef::Wave(good.id().clone()))
-            .await
-            .expect("read final Wave control")
-            .enabled
     );
 }

@@ -537,7 +537,8 @@ struct WorkspaceNavigationTests {
         let model = PodiumModel(query: RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return planning
-            case "session", "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return "[]"
             case "ps": return #"{"schema_version":1,"observed_at":1,"nodes":[],"provider_processes":[]}"#
             default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             }
@@ -567,7 +568,7 @@ struct WorkspaceNavigationTests {
             switch args.first {
             case "roadmap": await gate.wait(); return snapshot
             case "session": return records
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             }
         }, repoPath: "/src/loopflow")
@@ -657,7 +658,7 @@ private actor ReadingSource {
         switch args.first {
         case "roadmap": return roadmap
         case "session": return sessions
-        case "ls": return "[]"
+        case "wave" where args.dropFirst().first == "list": return "[]"
         case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")
         }

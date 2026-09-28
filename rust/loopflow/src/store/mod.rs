@@ -10,6 +10,7 @@ use crate::profile::{
 };
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
+mod branch_data;
 mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
@@ -21,6 +22,8 @@ pub mod provider_deliveries;
 pub mod rows;
 pub mod sqlite;
 mod token_crypto;
+
+pub use branch_data::isolate_branch_data;
 
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
 /// for a run, flow, or skill, written directly by `lf` into the local store.
@@ -75,6 +78,8 @@ pub enum StoreError {
     NotFound,
     #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("development store is incompatible: {0}")]
+    IncompatibleDevelopment(String),
     #[error("invalid control authority: {0}")]
     InvalidAuthority(String),
 }
@@ -122,7 +127,8 @@ pub(crate) fn production_database_path() -> PathBuf {
 ///
 /// Development builds normally isolate writes under `.lf-dev/worktrees`.
 /// Observability is different: it must describe the Home that launched the
-/// process, and opening it through `open_run_ledger_read_only` cannot migrate
+/// process (after source CLI startup redirects installed Homes), and opening it
+/// through `open_run_ledger_read_only` cannot migrate
 /// or otherwise mutate its schema. Explicit control authority wins, followed
 /// by an ordinary override, then the installed Home.
 pub(crate) fn authority_home_dir() -> PathBuf {

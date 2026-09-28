@@ -34,13 +34,13 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 1. **Read wave configs.** For each member wave directory in the area:
    - `GOAL.md` — objective, cadence, policy, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
-   - `lf status <wave> --json` — current chapter, KRs, and Tasks from SQLite
-   - `lf status <wave> --json` — the Wave-owned live metric portfolio
+   - `lf wave status <wave> --json` — current chapter, KRs, and Tasks from SQLite
+   - `lf wave status <wave> --json` — the Wave-owned live metric portfolio
 
    Linear is the source of truth; there are no local Project or Task lists.
 
 2. **Read runtime state.** For each member wave:
-   - `lf status <wave-name> --json` — Wave presence, resident state, current chapter, Tasks, next owners, worktrees, PRs, and conditions
+   - `lf wave status <wave-name> --json` — Wave presence, resident state, current chapter, Tasks, next owners, worktrees, PRs, and conditions
    - `lf task status <issue-id> --json` only when the Wave snapshot needs
      deeper inspection
 
@@ -77,7 +77,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 ## Task references
 
 When the scan names more than one Task, read `lf roadmap --wave <wave> --json`
-for plan-wide rows and `lf status <wave> --json` for live execution. Render
+for plan-wide rows and `lf wave status <wave> --json` for live execution. Render
 operational Task lists with the shared reference:
 
 ```markdown

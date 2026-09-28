@@ -902,7 +902,9 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
-        WaveCommand::List { .. } | WaveCommand::Status { .. } => unreachable!("read commands dispatch separately"),
+        WaveCommand::List { .. } | WaveCommand::Status { .. } => {
+            unreachable!("read commands dispatch separately")
+        }
         WaveCommand::Connect {
             wave,
             wave_flag,
@@ -1593,47 +1595,14 @@ fn execute_command(
             cmd: WaveCommand::List { json, all, current },
         }) => loopflow::lf::commands::waves::ls(*json, *all, *current),
         Some(Commands::Wave {
-            cmd:
-                WaveCommand::Status {
-                    wave,
-                    chapter,
-                    json,
-                    sync,
-                    no_sync: _,
-                },
-        }) => {
-            if let Some(chapter) = chapter {
-                let id = loopflow::work::chapter::ChapterId::parse(chapter)
-                    .map_err(anyhow::Error::msg)?;
-                let repo = loopflow::repo::find_repo_root()?;
-                let snapshot =
-                    loopflow::ops::chapter::chapter_snapshot(&repo, wave.as_deref(), Some(&id))?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&snapshot)?);
-                } else {
-                    println!(
-                        "{} · chapter {} · observed {}",
-                        snapshot.wave,
-                        snapshot.id.as_str(),
-                        snapshot.observed_at
-                    );
-                    for kr in &snapshot.content.krs {
-                        println!("[{}] {}", if kr.holds { "x" } else { " " }, kr.text);
-                    }
-                    println!("Metrics evaluated at {}", snapshot.metrics_evaluated_at);
-                    print!(
-                        "{}",
-                        loopflow::lf::commands::waves::metric_portfolio_text(&snapshot.metrics)
-                    );
-                    for task in snapshot.tasks {
-                        println!(
-                            "{}  {:?}  {}",
-                            task.task.identifier, task.disposition, task.reason
-                        );
-                    }
-                }
-                Ok(())
-            } else {
+                cmd:
+                    WaveCommand::Status {
+                        wave,
+                        json,
+                        sync,
+                        no_sync: _,
+                    },
+            }) => {
                 let refreshed = if *sync {
                     Some(loopflow::lf::commands::ops::refresh_status(
                         wave.as_deref(),
@@ -1646,8 +1615,8 @@ fn execute_command(
                     *json,
                 )
             }
-        }
-        Some(Commands::Wave {
+
+            Some(Commands::Wave {
             cmd:
                 cmd @ (WaveCommand::Connect { .. }
                 | WaveCommand::Sync { .. }

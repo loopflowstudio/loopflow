@@ -60,19 +60,21 @@ pub(crate) fn require_worker_destination() -> Result<()> {
 /// branch-only Task (including a locally recovered successor) is not a transfer.
 pub(super) fn check_task(context: &ChildExecutionContext, issue: &str) -> Result<()> {
     let ids = |path: &Path| -> Result<BTreeSet<String>> {
-        Ok(WorkCatalog::load_at(path)?
-            .owners
-            .values()
-            .filter(|owner| {
-                owner.work.kind() == "task"
-                    && owner.matches(WorkFilter {
-                        task: Some(issue),
-                        wave: None,
-                        project: None,
-                    })
-            })
-            .map(|owner| owner.work.id().to_string())
-            .collect())
+        Ok(WorkCatalog::new(
+            crate::store::sqlite::SqliteStore::open_read_only(path)?.work_identities()?,
+        )?
+        .owners
+        .values()
+        .filter(|owner| {
+            owner.work.kind() == "task"
+                && owner.matches(WorkFilter {
+                    task: Some(issue),
+                    wave: None,
+                    project: None,
+                })
+        })
+        .map(|owner| owner.work.id().to_string())
+        .collect())
     };
     let local = ids(&crate::store::observability_database_path()?)?;
     if !local.is_empty() && local != ids(&context.db_path)? {

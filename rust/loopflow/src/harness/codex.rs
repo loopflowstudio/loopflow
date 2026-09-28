@@ -1122,6 +1122,8 @@ impl CodexHarness {
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
         let authority = self.session_driver.clone();
         let writer_events = self.events.clone();
+        let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
+        let writer_history = native_history.clone();
         let writer_task = tokio::spawn(async move {
             while let Some(message) = outbound_rx.recv().await {
                 let payload = match message {
@@ -1135,6 +1137,10 @@ impl CodexHarness {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
                 };
+                writer_history
+                    .lock()
+                    .expect("codex history lock poisoned")
+                    .request(&payload);
                 let message = Message::Text(payload.to_string().into());
                 let outcome = if let Some((store, session, expected)) = authority.clone() {
                     let runtime = tokio::runtime::Handle::current();
@@ -1217,8 +1223,10 @@ impl CodexHarness {
                     continue;
                 };
                 if let Some((store, session, driver)) = &history {
-                    if let Err(error) =
-                        super::codex_history::record(store, session, Some(driver), None, &value)
+                    if let Err(error) = native_history
+                        .lock()
+                        .expect("codex history lock poisoned")
+                        .record(store, session, Some(driver), None, &value)
                     {
                         let _ = event_tx.send(ConversationEvent::Error {
                             code: "conversation_history_unavailable".into(),

@@ -91,7 +91,7 @@ fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
 }
 
 #[test]
-fn wave_detail_preserves_flow_and_requires_enablement() {
+fn wave_detail_preserves_flow_and_requires_home() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     let Evidence::Ok { items: runs, .. } = &snapshot.runs else {
         panic!("fixture contains recorded Runs");
@@ -107,11 +107,9 @@ fn wave_detail_preserves_flow_and_requires_enablement() {
     };
     assert_eq!(items[0].flow, "task-design");
     assert_eq!(items[0].status, loopflow::pm::ProjectStatus::Started);
-    assert!(snapshot.wave.enabled);
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
-    assert!(decoded.wave.enabled);
     assert_eq!(
         serde_json::to_value(&decoded.projects).unwrap(),
         serde_json::to_value(&snapshot.projects).unwrap()
@@ -120,17 +118,10 @@ fn wave_detail_preserves_flow_and_requires_enablement() {
     let mut missing_home: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
     missing_home["wave"].as_object_mut().unwrap().remove("home");
     assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_home).is_err());
-    let mut missing_enabled: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    missing_enabled["wave"]
-        .as_object_mut()
-        .unwrap()
-        .remove("enabled");
-    let error = serde_json::from_value::<WaveDetailSnapshot>(missing_enabled).unwrap_err();
-    assert!(error.to_string().contains("enabled"));
 }
 
 #[test]
-fn status_preserves_stranded_tasks_without_a_project_layer() {
+fn status_preserves_stranded_tasks_alongside_project_history() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     assert_eq!(snapshot.unavailable_tasks[0].status, WorkStatus::Ready);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
@@ -138,7 +129,7 @@ fn status_preserves_stranded_tasks_without_a_project_layer() {
     };
     assert_eq!(items[0].runtime.as_ref().unwrap().reason, "ready");
     let encoded = serde_json::from_str::<serde_json::Value>(WAVE_DETAIL).unwrap();
-    assert!(encoded.get("projects").is_none());
+    assert_eq!(encoded["projects"]["items"][0]["status"], "started");
 }
 
 #[test]

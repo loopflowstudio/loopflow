@@ -86,7 +86,6 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .ready)
         #expect(waves[0].repo == "/tmp/repo-a")
-        #expect(waves[0].enabled)
     }
 
     @Test("lf wave list can be decoded once for every repo")
@@ -150,7 +149,6 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "enabled": true,
             "created_at": null,
             "parent_wave_id": null,
             "home": {

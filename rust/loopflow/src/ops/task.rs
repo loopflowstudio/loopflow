@@ -481,7 +481,7 @@ fn prepare_task(
         }
         Ok(existing)
     })?;
-    if let Some(mut existing) = existing {
+    if let Some(existing) = existing {
         if let Some(parent) = stack_on.as_deref() {
             block_on_task(async {
                 stack_existing_task(&task_store().await?, &existing, parent).await
@@ -5071,31 +5071,6 @@ async fn restart_task_async(
     Ok(task)
 }
 
-pub fn task_verdict(
-    repo: &Path,
-    decision: crate::engine::transitions::FlowDecision,
-    summary: &str,
-) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    let verdict = crate::engine::transitions::FlowVerdict {
-        decision,
-        summary: summary.trim().to_string(),
-    };
-    block_on_task(async move {
-        let store = task_store().await?;
-        let task = task_for_checkout(&store, &repo)
-            .await?
-            .ok_or_else(|| task_error("this checkout has no Task"))?;
-        let run = std::env::var(crate::durable::RUN_ID_ENV)
-            .map_err(|_| task_error("a verdict requires the active loop review Run"))?;
-        let run = crate::durable::RunId::parse(&run).map_err(task_error)?;
-        store
-            .record_flow_verdict(&task.id, &run, &verdict)
-            .await
-            .map_err(task_error)
-    })
-}
-
 /// Continue the saved invocation, including review and failed-boundary recovery.
 /// The public run operation resolves its executable and data before entering here.
 pub(crate) async fn continue_task_async(
@@ -5110,7 +5085,7 @@ pub(crate) async fn continue_task_async(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-    let saved = store.flow_position(&task.id).await.map_err(task_error)?;
+    let saved = store.task_flow(&task.id).await.map_err(task_error)?;
     let selected_flow = match saved.as_ref() {
         Some(position) => {
             if let Some(flow) = requested_flow

@@ -69,7 +69,10 @@ skipped  wave/product/, …               other Waves
   Run was started does not matter: scheduled and ad hoc Runs follow the same
   rule. Jack Heart, 2026-09-28.
 - Memory is one of those files, not a special case.
-- No children, no siblings.
+- No children, no siblings, in ordinary Runs.
+- `realign` at a parent reads its children's files. It is the one exception,
+  and it is how a child's findings reach the parent's memory. Jack Heart,
+  2026-09-28.
 - There is no single Wave memory. It is whatever this checkout holds, and an
   edit is an ordinary change that lands with the PR.
 - `scratch/` stays recursive.

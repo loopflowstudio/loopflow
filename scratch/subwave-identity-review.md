@@ -58,7 +58,21 @@ Kickoff draft under review: commit `0381a195f`.
 - "im not sure on the right API. rebase on to 298." Done; effects recorded in
   the design's Base section.
 
+- On Run history at rename: "for now, dont change history. maybe we add
+  migrations later."
+
+- "Maybe I'm wrong about no Wave UUID ... I think maybe we should keep them".
+- "I still think parentage needs to be implicit from the name", then
+  withdrawn: "actually no thats wrong to. release shoudlnt need to switch to
+  infra/release if infrastructure changes to infra".
+- "Ok, i guess we need raw parent id, with fast input / syntax or something".
+
 ## Design changes made
+
+The table below records the first half of the review. The second half
+withdrew name-as-identity: ids are kept, a Wave stores its parent's id, and
+its name is one segment. The design document holds the current model.
+
 
 | Kickoff | Now |
 |---|---|

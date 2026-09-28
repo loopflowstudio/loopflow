@@ -242,8 +242,9 @@ even for older Runs. It never moves earlier, later, or back to null.
 The write validator checks `started_at IS NOT NULL` exactly when a Run with
 that Task exists; it does not compare timestamps with `MIN(created_at)`. Offline
 import sets it for every Task with imported Runs and leaves other Tasks null.
-The sidebar and roadmap read this column through one Started reader. This
-replaces the Started event writer once all readers use the validated column.
+The sidebar and roadmap read this column through one Started reader. Wave chat
+projects the same column into its existing observation stream; historical Started
+event IDs remain readable, but no new Started event is stored.
 Write-once binding keeps the evidence monotonic; usage and history never move
 between Tasks. Chapter retirement also examines authored work, PRs and active
 invocation claims: absence of a Run alone never proves untouched backlog.

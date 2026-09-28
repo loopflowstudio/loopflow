@@ -35,7 +35,7 @@ use crate::controller::wave::chat::{ChatBacking, ConversationEpoch};
 use crate::controller::wave::playhead::{Playhead, PlayheadEvent};
 use crate::controller::wave::state::LoopState;
 use crate::work::project::ProjectObservation;
-use crate::work::task::TaskObservation;
+use crate::work::task::{TaskEventKind, TaskObservation};
 use crate::work::wave::PromotionWake;
 
 /// Current journal format version, stamped on every line.
@@ -1288,11 +1288,13 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     crate::chat::turns::ChildControlActivity::from_task(observation),
                 );
                 turns.push(turn);
-                if !consumed_messages.contains(&message.id) {
-                    pending_messages.push(message.clone());
-                }
                 tasks.insert(message.id.clone(), observation.clone());
-                messages.insert(message.id.clone(), message);
+                if !matches!(observation.event, TaskEventKind::Started) {
+                    if !consumed_messages.contains(&message.id) {
+                        pending_messages.push(message.clone());
+                    }
+                    messages.insert(message.id.clone(), message);
+                }
             }
             EventKind::ProjectObserved { observation } => {
                 let message = project_observation_message(observation);

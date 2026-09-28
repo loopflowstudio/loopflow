@@ -139,7 +139,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
             > previous_interrupt
     );
     assert!(runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_none());
     let cached = task_status(Some("INF-123")).expect("cached status succeeds");

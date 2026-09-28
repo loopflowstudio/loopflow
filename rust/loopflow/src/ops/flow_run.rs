@@ -17,6 +17,19 @@ pub(crate) struct ActiveStep {
     pub version: u64,
 }
 
+impl ActiveStep {
+    pub(crate) fn of(flow: &crate::durable::FlowInvocation) -> Self {
+        Self {
+            invocation: flow.id().to_owned(),
+            version: flow.version,
+        }
+    }
+
+    pub(crate) fn env_value(&self) -> Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+}
+
 pub(crate) fn driver_lock(id: &str) -> Result<File> {
     uuid::Uuid::parse_str(id).context("invalid Flow invocation id")?;
     let dir = crate::store::current_home_lf_home_dir()
@@ -40,13 +53,23 @@ pub(crate) fn token() -> Result<Option<ActiveStep>> {
         .transpose()
 }
 
-/// The Flow step a launch executes, from the row. A review's Run is prepared
-/// with its Session, and a launch inside a step that already has its Run is
-/// a helper: both are independent.
-pub(crate) fn capture_membership() -> Result<crate::run_record::RunFlowMembership> {
+/// The step a launch inside a Flow executes and the Run its driver reserved
+/// for it. A launch that finds the step's attempt already published is a
+/// helper inside the step, and a review's Run is prepared with its Session:
+/// both are independent.
+pub(crate) struct StepLaunch {
+    pub membership: crate::run_record::RunFlowMembership,
+    pub reserved: Option<(ActiveStep, crate::durable::RunId)>,
+}
+
+pub(crate) fn capture_membership() -> Result<StepLaunch> {
     use crate::run_record::{RunFlowMembership, RunFlowStep};
+    let independent = StepLaunch {
+        membership: RunFlowMembership::Independent,
+        reserved: None,
+    };
     let Some(token) = token()? else {
-        return Ok(RunFlowMembership::Independent);
+        return Ok(independent);
     };
     let store =
         crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
@@ -57,10 +80,16 @@ pub(crate) fn capture_membership() -> Result<crate::run_record::RunFlowMembershi
         flow.version == token.version && !flow.finished,
         "stale Flow step launch"
     );
-    if flow.pending_session_id.is_some() || flow.current_attempt.is_some() || flow.is_human() {
-        return Ok(RunFlowMembership::Independent);
-    }
-    Ok(RunFlowMembership::Step(RunFlowStep::of_flow(&flow)?))
+    let reserved = match &flow.current_attempt {
+        Some(attempt) if !attempt.published && flow.pending_session_id.is_none() => {
+            attempt.run_id.clone()
+        }
+        _ => return Ok(independent),
+    };
+    Ok(StepLaunch {
+        membership: RunFlowMembership::Step(RunFlowStep::of(&flow)?),
+        reserved: Some((token, reserved)),
+    })
 }
 
 /// Request the existing Home process supervisor to continue this saved invocation.

@@ -35,7 +35,8 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
             &bound,
             &binding,
             crate::session::WorkSource::Checkout,
-        ).map(|_| ());
+        )
+        .map(|_| ());
     }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -92,13 +93,24 @@ pub fn run_bound(
         cli,
         binding,
         crate::session::WorkSource::Declared,
-    ).map(|_| ())
+    )
+    .map(|_| ())
 }
 
 /// Run a channel request through the ordinary attributed launch and settlement path.
-pub(crate) fn answer_bound(message: &str, cli: &Cli, binding: &crate::ops::WorkBinding) -> Result<Option<String>> {
-    launch_bound(None, Some(message), cli, binding, crate::session::WorkSource::Declared)
-        .map(|answer| answer.map(|answer| answer.text))
+pub(crate) fn answer_bound(
+    message: &str,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+) -> Result<Option<String>> {
+    launch_bound(
+        None,
+        Some(message),
+        cli,
+        binding,
+        crate::session::WorkSource::Declared,
+    )
+    .map(|answer| answer.map(|answer| answer.text))
 }
 
 fn launch_bound(
@@ -232,7 +244,6 @@ pub(crate) fn prepare_harness_turn_from_skill_at(
         Some(skill.clone()),
     )
 }
-
 
 fn prepare_runner_turn_at(
     skill: &str,
@@ -697,7 +708,9 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<crate::run_rec
         }
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Run completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(crate::run_record::read_final_answer(&capture.artifact_dir())?),
+        (Ok(()), Ok(())) => Ok(crate::run_record::read_final_answer(
+            &capture.artifact_dir(),
+        )?),
     }
 }
 
@@ -1225,8 +1238,8 @@ mod tests {
     use super::{
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
-        prepare_harness_turn_from_skill_at, should_launch_via_skill,
-        skill_launch_seed, split_skill_args, PromptBuild, PromptLaunchContext,
+        prepare_harness_turn_from_skill_at, should_launch_via_skill, skill_launch_seed,
+        split_skill_args, PromptBuild, PromptLaunchContext,
     };
     use crate::durable::RunId;
     use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1708,7 +1721,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .task_prompt
             .contains("handoff evidence bytes"));
     }
-
 
     #[test]
     fn worktree_harness_preloads_committed_and_untracked_scratch_with_provenance() {

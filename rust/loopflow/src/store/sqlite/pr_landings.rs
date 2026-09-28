@@ -220,7 +220,6 @@ impl super::SqliteStore {
         .map_err(StoreError::from)
     }
 
-
     pub fn claim_pr_landing(
         &self,
         landing_id: &PrLandingId,

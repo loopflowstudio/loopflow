@@ -810,7 +810,6 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     }
 }
 
-
 fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     let verb = if result.applied { "moved" } else { "will move" };
     println!(

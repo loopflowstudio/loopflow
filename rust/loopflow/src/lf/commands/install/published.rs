@@ -296,11 +296,9 @@ mod tests {
     }
 
     #[test]
-    fn installed_release_must_have_both_published_binaries() {
+    fn installed_release_needs_only_the_verified_cli() {
         let temp = tempfile::tempdir().unwrap();
         binary(&temp.path().join("lf"), "lf", "published");
-        assert!(!is_current(temp.path(), "v9.9.9", None));
-        binary(&temp.path().join("lfd"), "lfd", "published");
         assert!(is_current(temp.path(), "v9.9.9", None));
         assert!(!is_current(temp.path(), "v9.9.10", None));
         binary(&temp.path().join("lf"), "lf", "validation_only");
@@ -350,7 +348,6 @@ mod tests {
     fn current_cli_does_not_hide_a_missing_stale_or_incomplete_app() {
         let temp = tempfile::tempdir().unwrap();
         binary(&temp.path().join("lf"), "lf", "published");
-        binary(&temp.path().join("lfd"), "lfd", "published");
         let applications = temp.path().join("Applications");
         let current = || is_current(temp.path(), "v9.9.9", Some(&applications));
         assert!(!current());

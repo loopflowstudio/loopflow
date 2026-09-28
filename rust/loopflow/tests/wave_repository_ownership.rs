@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::work::wave::relocate::relocate_wave;
 use loopflow::durable::{HomeId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -9,6 +8,7 @@ use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
+use loopflow::work::wave::relocate::relocate_wave;
 use loopflow::work::wave::{Wave, WaveLocator};
 use time::OffsetDateTime;
 
@@ -403,7 +403,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(divergence.to_string().contains("diverges"));
     assert!(repo_a.join("wave/infrastructure").is_dir());
     std::fs::remove_dir_all(repo_a.join("wave/platform")).unwrap();
-    std::fs::remove_dir_all(repo_a.join(".lf/journal/waves/platform")).unwrap();
     commit(&repo_a, "remove divergent target");
 
     rusqlite::Connection::open(&database)

@@ -4,7 +4,6 @@ import Loopflow
 
 
 struct WaveWorkSelection: Equatable {
-    let kind: ChildActivitySubject
     let id: String
 }
 
@@ -33,9 +32,7 @@ struct WaveDetailReading {
     }
 }
 
-/// One Wave surface: chapter plan and Tasks beside the durable conversation.
-/// `lf status` supplies the work map; the Wave listener streams ordered chat and
-/// child activity from its journal.
+/// The Wave's chapter plan, Tasks and metrics, supplied by `lf status`.
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
@@ -724,12 +721,12 @@ private struct WaveTaskWorkView: View {
         .contentShape(Rectangle())
         .accessibilityIdentifier("wave-task")
         .onTapGesture {
-            selection = WaveWorkSelection(kind: .task, id: task.task.identifier)
+            selection = WaveWorkSelection(id: task.task.identifier)
         }
     }
 
     private var isSelected: Bool {
-        selection == WaveWorkSelection(kind: .task, id: task.task.identifier)
+        selection == WaveWorkSelection(id: task.task.identifier)
     }
 }
 
@@ -787,7 +784,6 @@ private struct WaveWorkInspector: View {
     }
 
     private var task: WaveTaskWork? {
-        guard selection.kind == .task else { return nil }
         return workMap.tasks.items
             .first { $0.task.identifier == selection.id || $0.task.id == selection.id }
     }

@@ -19,8 +19,7 @@ pub(crate) enum WaveConfigError {
 }
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// The wave's resident loop reads these and opens a system pass when a
-/// schedule comes due (`crate::controller::wave::runner`) — no daemon poller, no table.
+/// `lf cron sync` installs these schedules on the placed Home.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,
@@ -57,11 +56,6 @@ pub enum WaveChatConfig {
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
-    /// OS user allowed to start this Wave automatically. Absent means any user.
-    pub owner: Option<String>,
-    /// Machine allowed to start this Wave automatically. Accepts a HomeId,
-    /// hostname, or IP address. Absent means any Home.
-    pub home: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
@@ -69,7 +63,6 @@ pub struct WaveConfig {
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.
     pub chat: Option<WaveChatConfig>,
-
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
@@ -103,7 +96,7 @@ pub(crate) fn try_read_wave_config(
 }
 
 /// Read only the external chat binding, so malformed unrelated Wave policy
-/// cannot turn listener startup into a new validation boundary.
+/// cannot prevent an independent bridge from reading its binding.
 pub(crate) fn try_read_wave_chat_config(
     repo: &Path,
     name: &str,
@@ -311,11 +304,6 @@ pub fn update_wave_agent_config(
     })
 }
 
-/// Set authored Wave turn intent, preserving unrelated frontmatter and body.
-///
-/// Enabled turns are the default, so resuming removes `paused` rather than
-/// persisting a redundant `paused: false` field.
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,8 +322,6 @@ mod tests {
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.owner.as_deref(), Some("jack"));
-        assert_eq!(config.home.as_deref(), Some("build.example.com"));
         assert_eq!(config.agent.as_deref(), Some("codex"));
     }
 
@@ -524,5 +510,4 @@ mod tests {
         assert!(config.agent.is_none());
         assert!(config.skill_agents.is_none());
     }
-
 }

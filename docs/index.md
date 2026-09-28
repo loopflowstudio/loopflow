@@ -38,10 +38,9 @@ below print, so anything you see in the app you can also ask for in a
 terminal.
 
 ```bash
-lf start engbot                                   # start a Wave you wrote at wave/engbot/GOAL.md
+lf --wave engbot wave/operate        # one finite planning pass
 lf --wave engbot wave/operate "ship the parser fix first"
 lf status engbot                                  # where it stands
-lf stop engbot
 ```
 
 ## Read by area

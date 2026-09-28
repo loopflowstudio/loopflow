@@ -1,5 +1,5 @@
-use std::fs::{File, OpenOptions};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -427,12 +427,10 @@ fn ensure_no_shadow_relocation_receipts(moves: &[PlannedWaveMove]) -> Result<()>
 fn ensure_move_paths_do_not_overlap(planned: &PlannedWaveMove) -> Result<()> {
     let source_repo = Path::new(planned.wave.repo());
     let target_repo = planned.target.repo().as_path();
-    for (source, target) in [
-        (
-            authored_path(source_repo, planned.wave.name()),
-            authored_path(target_repo, planned.target.slug()),
-        ),
-    ] {
+    for (source, target) in [(
+        authored_path(source_repo, planned.wave.name()),
+        authored_path(target_repo, planned.target.slug()),
+    )] {
         if source != target && (source.starts_with(&target) || target.starts_with(&source)) {
             return Err(anyhow!(
                 "Wave relocation paths overlap; choose a sibling locator: {} -> {}",
@@ -448,12 +446,9 @@ fn is_strict_descendant(candidate: &str, parent: &str) -> bool {
     candidate != parent && Path::new(candidate).starts_with(parent)
 }
 
-
-
 fn authored_path(repo: &Path, slug: &str) -> PathBuf {
     repo.join("wave").join(slug)
 }
-
 
 fn stage_wave_paths(planned: &PlannedWaveMove) -> Result<()> {
     let source_repo = Path::new(planned.wave.repo());
@@ -630,13 +625,11 @@ fn remove_boot_files(path: &Path) -> Result<()> {
 fn remove_old_paths(path: &RelocationPath) -> Result<()> {
     let source_repo = Path::new(&path.from_repo);
     let target_repo = Path::new(&path.to_repo);
-    for (source, target, skip_boot_files) in [
-        (
-            authored_path(source_repo, &path.from_name),
-            authored_path(target_repo, &path.to_name),
-            true,
-        ),
-    ] {
+    for (source, target, skip_boot_files) in [(
+        authored_path(source_repo, &path.from_name),
+        authored_path(target_repo, &path.to_name),
+        true,
+    )] {
         if source != target && source.exists() {
             if !target.exists()
                 || tree_contents(&source, skip_boot_files)?
@@ -908,8 +901,11 @@ mod tests {
     #[test]
     fn relocation_preserves_unmerged_authored_work_then_syncs_merged_bytes() {
         let (root, repo, planned) = relocation_repo();
-        let resident =
-            crate::engine::worktrees::ensure_agent_worktree(&repo, crate::engine::worktrees::wave_agent_segment("infrastructure").unwrap()).unwrap();
+        let resident = crate::engine::worktrees::ensure_agent_worktree(
+            &repo,
+            crate::engine::worktrees::wave_agent_segment("infrastructure").unwrap(),
+        )
+        .unwrap();
         std::fs::write(
             resident.path.join("wave/infrastructure/MEMORY.md"),
             "Curated.\n",

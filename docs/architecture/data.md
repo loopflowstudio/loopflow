@@ -19,8 +19,6 @@ different evidence for different questions.
 ```text
 repository files + Git        authored goals, memory, Skills, Flows, code
 planning SQLite               local planning, delivery, Flow invocations and Sessions
-human Ask files               waiting conversations and completion summaries
-Wave journal JSONL            conversation and resident event history
 Run record files              one Home's provider-launch evidence
 provider-native homes         model credentials and resumable sessions
 Linear / GitHub               shared planning and delivery truth
@@ -34,7 +32,7 @@ kernel locks                  live local exclusion authority
 | What Projects and Tasks exist? | Linear, through the bounded PM projection |
 | What Task boundary should resume? | Work domain state joined to its exact `flow_invocations` row |
 | What saved Flow step should resume? | its `flow_invocations` row: cursor, current attempt Run and failure |
-| What human input is pending? | Session projections of Task/ordinary Flow boundaries and human Ask records |
+| What human input is pending? | `sessions` rows joined to their current Runs |
 | Which Runs worked on this Wave or Task? | `runs` rows |
 | What did one provider launch emit? | the Run record on the Home that launched it |
 | Is a local process moving now? | the OS process table joined to local command receipts |
@@ -49,11 +47,10 @@ authority between them.
 
 The durable store keeps facts needed to resume planning, delivery, placement,
 credentials, and provider observations. Task invocations retain their captured
-execution and settlement history. Task review Sessions own their title, feedback,
+execution and settlement history. Sessions of every kind own their title, feedback,
 completion and current Run in SQLite; earlier Runs stay in indexed history.
-Interactive, Ask and ordinary Flow ownership still await the complete model
-cutover in the architecture reference. The file paths below remain current
-implementation facts; this intermediate branch is not ready for installation.
+Task and taskless Flows share the invocation owner and executor. Installed-Home
+cutover remains a separate acceptance obligation.
 
 The current application tables group by owner:
 
@@ -64,11 +61,11 @@ The current application tables group by owner:
 | Conversations and execution | `sessions`, `runs` | stable conversation identity, current Run, title and saved feedback; every Run's Session, invocation, Task, Wave, caller, provider, times and end |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
-| Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current human Ask Sessions use files |
-| PM projection | `pm_snapshots`, `observation_outbox` | bounded Linear reads and deferred publication |
+| Historical Ask exchange | `ask_exchanges`, `ask_linear_comment_outbox` | retained earlier request/publication facts; current Ask Sessions use `sessions` |
+| PM projection | `pm_snapshots` | bounded Linear reads |
 | Metrics | `metric_instruments`, `metric_observations` | registered producers and accepted evidence |
 | PR landing | `pr_landings`, `ci_incidents` | exact-head supervision and bounded repair |
-| Home and provider | `homes`, `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens`, `provider_deliveries` | routes, credentials, selection, limits, receipts |
+| Home and provider | `homes`, `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | routes, credentials, selection, limits, receipts |
 | Local observation/cache | `run_events`, `blob_tokens` | outer command history and deterministic Git-blob token counts |
 | Schema | `schema_migrations` | applied migration identity and checksum frontier |
 
@@ -127,7 +124,6 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | --- | --- | --- |
 | `.lf/skills/`, `.lf/flows/`, `.lf/config.yaml` | repository-owned execution definitions | ordinary reviewed file edits |
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | authored Wave intent and evidence contracts | ordinary reviewed file edits |
-| `.lf/journal/waves/<name>/journal.jsonl` | conversation and resident events | append-only with crash-tail repair |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | provider-launch manifest, streams, terminal | publish once, append, settle once |
 | current Home `flows/<invocation-id>/driver.lock` | saved Flow driver exclusion only; the Flow's definition, cursor, launch facts, current attempt, failure and completion are its `flow_invocations` row | kernel-held lock, no contents |
 | current Home `human-sessions/.<hash>.launch.lock` | Session launch exclusion only; an Ask's question, caller, readiness and answer are its `sessions` row and its Runs | kernel-held lock, no contents |
@@ -155,9 +151,7 @@ following loop-decide owns any navigation verdict.
 
 Blocked opens a keyed Ask running `unblock`. Calls at the same invocation,
 occurrence and pass join the same Ask or recover its saved completion summary.
-Keyed completion remains on disk but leaves the unresolved Session list;
-ordinary prompt-only Ask records are removed after the caller receives the
-answer. Ask completion supplies evidence for reassessment, never a navigation verdict.
+Completed Asks retain their answers in SQLite and leave the open Session list. Ask completion supplies evidence for reassessment, never a navigation verdict.
 The Session projection and provider Run do not become additional cursor owners.
 
 Older unresolved XOR definitions lack captured router or branch content.

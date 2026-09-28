@@ -21,7 +21,7 @@ second client, store, or transport.
 ## Two caller authorities
 
 An external harness opened by a person is a Loopflow **User**, the same caller
-kind as the Mac app. It may inspect status and use `lf chat` when the person
+kind as the Mac app. It may inspect status and start a Session when the person
 asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.

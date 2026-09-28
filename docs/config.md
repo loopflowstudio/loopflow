@@ -35,10 +35,9 @@ already know or the configured name; no reconciliation is required. Opening a
 session does not approve a review.
 
 `lf user name --json` resolves the name without provider or PM access.
-The Mac chat composer uses this local query when sending a message; CLI chat
-captures the caller's name before posting to a listener. The name travels with
-the message and survives replay. Old messages without names stay anonymous.
-Bare interrupts do not load a name, so a preference-read failure cannot block them.
+Session prompts carry the selected participant name. Stored transcripts retain
+their original wording; unnamed historical messages remain anonymous.
+
 Discord and Linear retain their provider author IDs alongside display names;
 a shared publisher account never substitutes for an explicitly named requester.
 

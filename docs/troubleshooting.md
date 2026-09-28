@@ -3,19 +3,18 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## A Wave is not running
+## A Wave has no active Run
 
-**Symptom:** The app or `lf ls` shows the Wave stopped; `lf chat` reports no
-listener.
-
-**Cause:** No resident process is serving the Wave — nothing starts one
-automatically except the app, `lf start`, or a cron wake.
+Wave operations are finite. Read its plan and invoke the next pass explicitly,
+or inspect its cron schedule:
 
 ```bash
-lf status <wave> --json    # current registry + runtime evidence
-lf home probe <wave>       # reachable? stopped? running? — with the next action
-lf start <wave>            # idempotently start the Wave on this machine
+lf status <wave> --json
+lf --wave <wave> wave/operate
+lf cron list
 ```
+
+A quiet Wave needs no service restart.
 
 ## Task Work stops advancing
 

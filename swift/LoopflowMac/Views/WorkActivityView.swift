@@ -232,5 +232,4 @@ struct WorkActivityView: View {
             .background(Color.statusWarning.opacity(0.10))
     }
 
-    @MainActor
 }

@@ -18,10 +18,7 @@ struct RegistryQueryTests {
             "goal": "ship the roadmap",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": true,
-            "paused": true,
             "enabled": true,
-            "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -38,10 +35,7 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
-            "live": false,
-            "paused": false,
             "enabled": false,
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -62,7 +56,6 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .ready)
         #expect(waves[0].repo == "/tmp/repo-a")
-        #expect(waves[0].paused)
         #expect(waves[0].enabled)
     }
 
@@ -77,10 +70,7 @@ struct RegistryQueryTests {
             "goal": "ship the roadmap",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": true,
-            "paused": true,
             "enabled": true,
-            "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -97,10 +87,7 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
-            "live": false,
-            "paused": false,
             "enabled": false,
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -137,10 +124,7 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": false,
-            "paused": false,
             "enabled": true,
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -150,7 +134,6 @@ struct RegistryQueryTests {
               "observed_at": "1970-01-01T00:00:00Z"
             }
           },
-          "loop_state": "turning",
           "runs": {
             "state": "ok",
             "truncated": false,
@@ -198,21 +181,6 @@ struct RegistryQueryTests {
           "metric_portfolio": {
             "metrics": [],
             "contract_issues": []
-          },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "start",
-              "home_id": "home_00000000000000000000000000000001"
-            }
           },
           "chapter": {
             "id": "current",
@@ -361,31 +329,6 @@ struct RegistryQueryTests {
         #expect(result.items[0].subject == "W2-144")
     }
 
-    @Test("Wave Chat history uses the backing-aware DTO")
-    func chatHistoryUsesBackingAwareDTO() async throws {
-        let query = RegistryQuery { args, cwd in
-            #expect(args == [
-                "chat", "--history", "--json", "--limit", "12", "--wave", "product",
-            ])
-            #expect(cwd == "/tmp/repo")
-            return #"{"epochs":[],"selected_epoch_id":null,"state":"missing","detail":"No durable Wave Chat history exists yet.","messages":[],"truncated":false}"#
-        }
-
-        let snapshot = try await query.chatHistory(
-            wave: "product",
-            limit: 12,
-            cwd: "/tmp/repo"
-        )
-        #expect(snapshot.state == .missing)
-        #expect(snapshot.messages.isEmpty)
-        #expect(!snapshot.truncated)
-    }
-
-
-
-
-
-
     /// Unreadable evidence must reach the surface as its reason, never as an
     /// empty list — a broken ledger is not a quiet wave.
     @Test("lf status keeps unavailable evidence unavailable")
@@ -399,10 +342,7 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-a",
             "active_tasks": 0,
-            "live": false,
-            "paused": false,
             "enabled": true,
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -412,7 +352,6 @@ struct RegistryQueryTests {
               "observed_at": "1970-01-01T00:00:00Z"
             }
           },
-          "loop_state": null,
           "runs": {
             "state": "unavailable",
             "reason": "run ledger unavailable: disk is gone"
@@ -420,21 +359,6 @@ struct RegistryQueryTests {
           "metric_portfolio": {
             "metrics": [],
             "contract_issues": []
-          },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "start",
-              "home_id": "home_00000000000000000000000000000001"
-            }
           },
           "chapter": null,
           "tasks": {

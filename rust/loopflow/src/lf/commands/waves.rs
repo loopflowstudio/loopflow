@@ -20,10 +20,6 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child::ChildRef;
-use crate::work::wave::metrics::{
-    MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
-    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
-};
 use crate::durable::{Home, WorkRef, WorkStatus};
 use crate::lf::commands::runs::{format_tokens, RunSnapshot};
 use crate::lf::output::Colors;
@@ -33,6 +29,10 @@ use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
     AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
+};
+use crate::work::wave::metrics::{
+    MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
+    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
 };
 use crate::work::wave::Wave;
 
@@ -1529,17 +1529,12 @@ fn next_move_for_task(
     }
 }
 
-/// The invoking context's wave id: `LF_WAVE_ID`, else `None` (the caller
-/// errors). Kept minimal — `lf status` with no arg is a convenience, not the
-/// resolution surface `lf chat` owns.
 fn ambient_wave() -> Option<String> {
     std::env::var(crate::work::wave::context::WAVE_ID_ENV)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
-
-/// Ask a live server for its resident loop state (`/health` `loop` field).
 
 fn format_time(ts: time::OffsetDateTime) -> Option<String> {
     ts.format(&time::format_description::well_known::Rfc3339)
@@ -1571,8 +1566,6 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
         repo = "REPOSITORY",
         status = "STATUS",
         enabled = "ENABLED",
-
-
         tasks = "TASKS",
         home = "HOME",
     );
@@ -1583,11 +1576,8 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
             repo = truncate_start(&wave.repo, 28),
             status = wave.status.label(),
             enabled = if wave.enabled { "yes" } else { "no" },
-
-
             tasks = wave.active_tasks,
             home = truncate(&wave.home.route, 16),
-
         );
     }
 }
@@ -1606,9 +1596,6 @@ async fn child_work_status(store: &SharedStore, child: &ChildRef) -> Result<Work
         .await
         .map_err(|error| anyhow!("failed to read child Work status: {error}"))
 }
-
-
-/// The single contextual action a surface should offer, rendered for the CLI.
 
 fn print_status(status: &WaveDetailSnapshot) {
     let colors = Colors::default();
@@ -2150,14 +2137,14 @@ mod tests {
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
         TaskConditionState, TaskRuntimeSnapshot,
     };
-    use crate::work::wave::metrics::{
-        MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
-        MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
-    };
     use crate::durable::WorkStatus;
     use crate::ops::task_actions::TaskActionEvidence;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use crate::work::wave::metrics::{
+        MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
+        MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+    };
     use crate::work::wave::Wave;
 
     #[tokio::test]

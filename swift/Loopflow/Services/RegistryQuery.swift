@@ -2,7 +2,6 @@
 //
 // Planning and history are one-shot queries. Active Runs use one foreground
 // observation per window so native receipt discovery survives between samples.
-// Wave conversations retain their per-wave SSE stream (`WaveChatConnection`).
 //
 // This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
@@ -118,25 +117,6 @@ public struct RegistryQuery: Sendable {
         args.append("--json")
         let stdout = try await run(args, nil)
         return try Self.decode(WorkActivitySnapshot.self, from: stdout)
-    }
-
-    /// Bounded history for one conversation epoch. `lf` uses the live backing
-    /// when a listener exists and otherwise folds readable local epochs from
-    /// the journal; this query never starts a Wave listener.
-    public func chatHistory(
-        wave: String,
-        limit: Int = 12,
-        epoch: String? = nil,
-        cwd: String?
-    ) async throws -> ChatHistorySnapshot {
-        var args = [
-            "chat", "--history", "--json", "--limit", String(limit), "--wave", wave,
-        ]
-        if let epoch {
-            args.append(contentsOf: ["--epoch", epoch])
-        }
-        let stdout = try await run(args, cwd)
-        return try Self.decode(ChatHistorySnapshot.self, from: stdout)
     }
 
     /// Files changed by one Task, classified across commits, index, worktree,

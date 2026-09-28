@@ -66,7 +66,6 @@ pub enum ChildDataError {
     InvalidId(String),
 }
 
-
 /// Typed audit record for a body handoff. Work and Run identity are intentionally
 /// absent: they do not change during this transition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

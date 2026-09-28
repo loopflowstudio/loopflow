@@ -58,8 +58,7 @@ pub fn kill_child_if_running() {
 /// handler covers SIGINT (Ctrl+C), SIGTERM, and SIGHUP (`tmux kill-session`
 /// delivers SIGHUP — see the ctrlc `termination` feature in Cargo.toml) and
 /// calls `std::process::exit`, which skips Rust destructors, so anything that
-/// must be torn down on interrupt (e.g. the wave server's discovery pointer,
-/// the loop's pass process group) registers a hook here.
+/// must be torn down on interrupt registers a hook here.
 #[allow(clippy::type_complexity)]
 static INTERRUPT_HOOKS: OnceLock<Mutex<Vec<Box<dyn Fn() + Send>>>> = OnceLock::new();
 
@@ -1765,6 +1764,7 @@ fn _launch_agent_once(
     }
     scoped_env.remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
     cmd.envs(&scoped_env);
+    cmd.env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
     cmd.env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands

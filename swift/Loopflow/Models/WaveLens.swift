@@ -68,18 +68,7 @@ public struct WaveLens: Sendable, Hashable {
         return WaveLens(color: .black, reason: "Off · no active work")
     }
 
-    /// Wave lens (list context): derived only from the shared runtime `lf ls`
-    /// carries for every row — liveness, lifecycle status, and active-work counts.
-    /// Per-Task condition is a focused `lf status` read, never fetched per row, so
-    /// the list projects from the coarse runtime facts. An unregistered Wave has
-    /// no such reading; see `WaveViewModel.lens`, which shows it as unknown rather
-    /// than guessing from a local session probe.
-    ///
-    /// - green: canonical Work is advancing and the Wave listener answered, or
-    ///   the listener answered while Work claims no current body.
-    /// - blue: authored policy pauses new turns; listener evidence stays in the reason.
-    /// - red: enabled and observed liveness have not converged.
-    /// - black: disabled and no listener remains.
+    /// Counts do not establish Task health. Detailed conditions come from status.
     public static func forWave(enabled: Bool = true, activeTasks: Int) -> WaveLens {
         if !enabled { return WaveLens(color: .black, reason: "Disabled on this Home") }
         return WaveLens(color: activeTasks > 0 ? .unknown : .black,

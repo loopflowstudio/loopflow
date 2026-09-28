@@ -210,8 +210,7 @@ codebase tree, and registry health.
 
 ## Product ownership
 
-- **Wave Chat** owns the conversation, the active Wave turn, and
-  Send and bare Interrupt controls.
+- **Sessions** own conversations and retain identity across Run replacement.
 - **Waves and Tasks** appear in the work map. Linear owns authored planning;
   Loopflow's registry owns runtime state and the current chapter binding.
 - **Tasks** own implementation worktrees and PR delivery and report directly
@@ -225,9 +224,7 @@ codebase tree, and registry health.
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
   Activity history visible.
-- **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
-  `lf chat --history --json`, then connects only to the selected Wave's
-  `/events` stream and upserts its replay before continuing live.
+
 
 ## Code map
 
@@ -239,11 +236,10 @@ codebase tree, and registry health.
 - `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat, current chapter plan, and Tasks
+- `LoopflowMac/Views/WaveDetailPane.swift` — current chapter plan, Tasks and Runs
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
-- `Loopflow/Services/WaveChatClient.swift` — per-Wave event and message client
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
@@ -291,7 +287,7 @@ xcodebuild -project LoopflowSwift.xcodeproj \
   build
 ```
 
-The generated app target builds validation-only `lf` and `lfd` helpers from
+The generated app target builds a validation-only `lf` helper from
 the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app never
 borrows a different `lf` from PATH.
 

@@ -1349,7 +1349,6 @@ fn main() -> anyhow::Result<()> {
                 reuse_home,
                 cli_target,
 
-
                 app_source,
                 app_target,
                 legacy_app_target,
@@ -1358,7 +1357,6 @@ fn main() -> anyhow::Result<()> {
             }) => loopflow::lf::commands::install::promote(
                 loopflow::lf::commands::install::PromotionArtifacts {
                     cli_target,
-
 
                     app_source: app_source.as_deref(),
                     app_target: app_target.as_deref(),
@@ -1374,14 +1372,7 @@ fn main() -> anyhow::Result<()> {
             Some(InstallCommand::Rollback {
                 cli_target,
                 candidate,
-
-
-            }) => loopflow::lf::commands::install::rollback(
-                cli_target,
-                candidate,
-
-
-            ),
+            }) => loopflow::lf::commands::install::rollback(cli_target, candidate),
         };
     }
 
@@ -1713,7 +1704,11 @@ fn main() -> anyhow::Result<()> {
                     parent.as_deref(),
                 ),
             },
-            Some(Commands::Discord { cmd: loopflow::lf::DiscordCommand::Serve { wave } }) => in_repo_runtime(&args, |repo| loopflow::lf::commands::discord::serve(repo, wave)),
+            Some(Commands::Discord {
+                cmd: loopflow::lf::DiscordCommand::Serve { wave },
+            }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::discord::serve(repo, wave)
+            }),
             Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
             Some(Commands::Install { .. }) => {
                 unreachable!("install dispatches before home routing")
@@ -1925,7 +1920,7 @@ mod tests {
             "task",
             "flow",
             "skill",
-            "chat",
+            "discord",
             "usage",
             "top",
             "list",
@@ -2057,7 +2052,6 @@ mod tests {
     /// Serving a mind is its own command. Nothing about the ambient
     /// environment can turn one of these into the other.
 
-
     #[test]
     fn ssh_help_prefers_home_identity() {
         let help = Cli::try_parse_from(["lf", "ssh", "--help"])
@@ -2079,12 +2073,7 @@ mod tests {
             matches!(cli.command, Some(Commands::External(parts)) if parts[0] == "serve"),
             "`serve` survives only as an external verb, not a built-in"
         );
-        assert!(matches!(
-            Cli::try_parse_from(["lf", "wave", "serve", "goals"])
-                .expect("the replacement")
-                .command,
-            Some(Commands::Wave { .. })
-        ));
+        assert!(Cli::try_parse_from(["lf", "wave", "serve", "goals"]).is_err());
     }
 
     /// The `lf op` namespace is retired, and a caller who still types it hears
@@ -2377,18 +2366,8 @@ mod tests {
         );
     }
 
-    /// `lf chat --wave X text` must reach the chat subcommand untouched —
-    /// hoisting `--wave` to the top level silently retargets the publish.
     #[test]
     fn reorder_args_leaves_explicit_targeting_alone() {
-        let args: Vec<String> = ["lf", "chat", "--wave", "systems", "shipped it"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(
-            reorder_args(args),
-            vec!["lf", "chat", "--wave", "systems", "shipped it"]
-        );
-
         let args: Vec<String> = ["lf", "status", "systems"].map(String::from).to_vec();
         assert_eq!(reorder_args(args), vec!["lf", "status", "systems"]);
     }

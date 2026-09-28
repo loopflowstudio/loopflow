@@ -10,7 +10,7 @@ from scripts import publish_release
 
 def _native_artifacts(directory: Path) -> None:
     binaries = []
-    for name in ("lf", "lfd"):
+    for name in ("lf",):
         binary = directory / name
         binary.write_bytes(f"loopflow release {name}".encode())
         binaries.append(binary)
@@ -37,10 +37,10 @@ def test_publisher_rejects_unexpected_archive_contents(tmp_path: Path):
         package.addfile(member, io.BytesIO(b"nope"))
 
     with pytest.raises(RuntimeError, match="unexpected archive contents"):
-        publish_release._extract_arm_binaries((archive,), tmp_path)
+        publish_release._extract_arm_binary((archive,), tmp_path)
 
 
-def test_publisher_extracts_the_arm_control_plane_pair(tmp_path: Path):
+def test_publisher_extracts_the_arm_cli(tmp_path: Path):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     _native_artifacts(artifacts)
@@ -48,12 +48,10 @@ def test_publisher_extracts_the_arm_control_plane_pair(tmp_path: Path):
     output = tmp_path / "extracted"
     output.mkdir()
 
-    cli, daemon = publish_release._extract_arm_binaries(archives, output)
+    cli = publish_release._extract_arm_binary(archives, output)
 
     assert cli.read_bytes() == b"loopflow release lf"
-    assert daemon.read_bytes() == b"loopflow release lfd"
     assert cli.stat().st_mode & 0o111
-    assert daemon.stat().st_mode & 0o111
 
 
 def test_publisher_rejects_validation_only_control_plane(

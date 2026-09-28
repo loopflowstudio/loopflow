@@ -90,9 +90,9 @@ one Skill run
 | Area | What it adds | Start here |
 | --- | --- | --- |
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
-| Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps, resident loops | [Planning](architecture/planning.md) |
+| Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
-| Homes | Placement, `lfd`, Wave listeners, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
+| Homes | Placement, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
 
@@ -100,8 +100,8 @@ The source tree makes the planning boundary literal:
 
 ```text
 work/                          controller/
-wave/{mod,config,context,      wave/{runner,resident,server,
-      memory}                       placement,...}
+wave/{mod,config,context,
+      memory,metrics,relocate}
 project                       task/mod
 task                          Task worker
 
@@ -274,20 +274,19 @@ Task worker, piecemeal helper Runs, or another system.
 ### Bounded Task advancement
 
 ```bash
-lf start product
+lf --wave product wave/operate        # one finite planning pass
 lf task run INF-123
 lf --wave <wave> wave/operate "ship invoices first"
 lf status product
 ```
 
-The Home keeper may start the placed Wave listener and resident. Task motion
-does not depend on either: Task commands claim the Task's current Flow
+Task commands claim the Task's current Flow
 invocation for one worker. Chapter rotation is a deterministic
 repository-wide operation that gives every Wave a new Project at once.
 Direct questions and helper work use ordinary fresh attributed Runs without
 gaining Task Flow authority.
 A Task review FlowStep starts the persisted Skill as a provider Run and remains
-parked until its exact decision arrives. Daemon and app triggers are later work.
+parked until its exact decision arrives.
 
 ### Another machine
 
@@ -310,7 +309,7 @@ the behavior.
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
 | Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
-| daemons, remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
+| remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](architecture/codebase.md) |
 

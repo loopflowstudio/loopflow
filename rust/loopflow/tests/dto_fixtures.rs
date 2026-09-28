@@ -1,7 +1,7 @@
-use loopflow::work::wave::metrics::MetricPortfolioDto;
 use loopflow::durable::WorkStatus;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
+use loopflow::work::wave::metrics::MetricPortfolioDto;
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
@@ -94,7 +94,7 @@ fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
 }
 
 #[test]
-fn wave_detail_requires_machine_and_turn_controls() {
+fn wave_detail_preserves_flow_and_requires_enablement() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     assert_eq!(
         snapshot
@@ -115,11 +115,6 @@ fn wave_detail_requires_machine_and_turn_controls() {
         decoded.chapter.as_ref().unwrap().flows,
         snapshot.chapter.as_ref().unwrap().flows
     );
-
-    let mut legacy: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    legacy["wave"].as_object_mut().unwrap().remove("paused");
-    let error = serde_json::from_value::<WaveDetailSnapshot>(legacy).unwrap_err();
-    assert!(error.to_string().contains("paused"));
 
     let mut missing_enabled: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
     missing_enabled["wave"]

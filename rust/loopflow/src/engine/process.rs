@@ -103,9 +103,6 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
-
-
-
 fn select_binary_override(
     provenance: crate::build_info::BuildProvenance,
     control: Option<std::ffi::OsString>,
@@ -286,11 +283,6 @@ pub(crate) fn shell_escape(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
     format!("'{escaped}'")
 }
-
-/// Start a machine-Home process through the current installed/dev control pair,
-/// ignoring a historical body's `LF_CONTROL_*` pins.
-
-
 
 pub(crate) async fn start_lf_session_with_env(
     session: &str,
@@ -474,8 +466,7 @@ mod tests {
 
     use super::{
         extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary,
-        DISCORD_TOKEN_ENV,
+        pin_control_binary, select_binary_override, select_current_home_binary, DISCORD_TOKEN_ENV,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
@@ -521,7 +512,6 @@ mod tests {
             Some(PathBuf::from("/production/lf"))
         );
     }
-
 
     /// The launch boundary must resolve the current Home lf (B), never the
     /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded

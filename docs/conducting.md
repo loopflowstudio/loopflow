@@ -120,7 +120,7 @@ Reading is half; the system stays steerable while it runs.
 
 ```bash
 lf --wave <wave> wave/operate "ship the parser fix first"
-lf chat --follow                              # replay and tail the conversation
+lf --wave <wave> : "Review this plan"          # start a conversation
 lf task comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf task interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved Sessions

@@ -162,15 +162,6 @@ struct DTOFixtureTests {
             sourceWindowEnd: "2026-08-20T18:00:00Z"
         ))
 
-        var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var legacyWave = try #require(legacy["wave"] as? [String: Any])
-        legacyWave.removeValue(forKey: "paused")
-        legacy["wave"] = legacyWave
-        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: legacyData)
-        }
-
         var missingEnabled = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waveWithoutEnabled = try #require(missingEnabled["wave"] as? [String: Any])
         waveWithoutEnabled.removeValue(forKey: "enabled")
@@ -251,17 +242,6 @@ struct DTOFixtureTests {
         _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
-    @Test("child activity preserves typed delivery evidence")
-    func childActivityPreservesTypedDeliveryEvidence() throws {
-        let data = try loadFixtureData("child_control_activity.json")
-        let activity = try JSONDecoder().decode(ChildControlActivity.self, from: data)
-
-        #expect(activity.subject == .task)
-        #expect(activity.subjectId == "INF-123")
-        #expect(activity.workId == "ts_22222222222222222222222222222222")
-        #expect(activity.kind == .prOpened)
-        #expect(activity.title == "Opened PR #1073")
-    }
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(

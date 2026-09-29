@@ -229,14 +229,14 @@ impl Store {
         &self,
         id: &str,
         version: u64,
-        run: &RunId,
+        actor: &crate::id::ExecId,
         verdict: &FlowVerdict,
     ) -> StoreResult<()> {
         let id = id.to_string();
-        let run = run.clone();
+        let actor = actor.clone();
         let verdict = verdict.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_decision(&id, version, &run, &verdict)
+            store.record_flow_decision(&id, version, &actor, &verdict)
         })
         .await
     }
@@ -245,14 +245,14 @@ impl Store {
         &self,
         id: &str,
         version: u64,
-        run: &RunId,
+        actor: &crate::id::ExecId,
         path: &str,
     ) -> StoreResult<()> {
         let id = id.to_string();
-        let run = run.clone();
+        let actor = actor.clone();
         let path = path.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_path(&id, version, &run, &path)
+            store.record_flow_path(&id, version, &actor, &path)
         })
         .await
     }
@@ -261,12 +261,12 @@ impl Store {
         &self,
         id: &str,
         version: u64,
-        run: &RunId,
+        actor: &crate::id::ExecId,
     ) -> StoreResult<String> {
         let id = id.to_string();
-        let run = run.clone();
+        let actor = actor.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.flow_blocker_key(&id, version, &run)
+            store.flow_blocker_key(&id, version, &actor)
         })
         .await
     }

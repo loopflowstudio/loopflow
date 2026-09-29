@@ -74,7 +74,7 @@ landing; do not perform that Flow's steps or create another cursor here. Preserv
 worktrees, placement and execution history.
 
 - Start selected authorized work with `lf task run <issue-id>`; use the
-  current plan's recommended Flow unless an explicit choice is warranted. Existing
+  current Project's Flow unless an explicit choice is warranted. Existing
   execution is reconciled through Task operations, never a duplicate driver.
 - Inspect `lf task status` before recovery. Active work continues; unresolved
   human Sessions remain waiting. Resume interrupted work through `lf task run`
@@ -83,8 +83,10 @@ worktrees, placement and execution history.
   when execution is intended and authorized. Give work an observable outcome.
 - Update an authorized plan through `lf wave update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
-  GOAL.md only within accepted direction. Chapter rotation is the separate
-  `lf wave new-chapter` operation, never opportunistic backlog cleanup.
+  GOAL.md only within accepted direction. Supply the complete content object
+  with `metric_targets`, required nonempty `flow` and `krs`; for example
+  `{"metric_targets":[],"flow":"feature","krs":[]}`. This edits the Wave's
+  one In Progress Linear Project. Preserve authored Flow and other plan fields.
 - Use supported Task/Work operations for changes, not raw stores, unclaimed
   process signals or a competing worker on this Home. A missing Home stays an
   explicit blocker.
@@ -92,6 +94,20 @@ worktrees, placement and execution history.
 Distinguish completed effects, proposals, failed writes and unresolved readback;
 reconcile uncertain effects before retry. Keep planning at its existing owners
 without introducing a resident or another execution cursor.
+
+A chapter boundary previews the whole repository with
+`lf repo new-chapter <name> --dry-run --json`. Apply with
+`lf repo new-chapter <name> --json` only after repository direction and disposition
+review gates are satisfied; existing authorization remains valid. An ordinary
+Wave pass does not authorize rotation. The operation has no per-Wave selector
+or plan input. Started work moves intact, proven untouched backlog is canceled
+with history retained, and predecessors become Completed. Uncertain evidence
+blocks automatic retirement. Retry the same name after interruption.
+
+Planned and Completed Projects retain future and past plans. Future plan edits
+need an authorized Linear writer; `update-plan` cannot target a Planned successor.
+Judge prior chapters using dated evidence, not current metric readings or
+reconstructed starting membership. Do not introduce competing current Projects.
 
 ## Finish
 

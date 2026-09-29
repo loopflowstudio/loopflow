@@ -48,16 +48,23 @@ inspect the selected executable before operating it.
 
 ## Proof still required at the finish line
 
-Reconcile the integrated H7 code against these requirements after execution-owner
-changes. Retained fixture passes cover twelve interrupted provider mutations,
-legacy adoption response loss, authored content, fresh status conflicts and an
-archived predecessor; see [evidence](evidence.md). They are simulated Linear.
+Reconcile the integrated H7 code after execution-owner changes. At published
+`594c7c319f`, hosted Rust job109231281571 passed all 14 Chapter tests before
+stopping at the unrelated comments fixture. Supervisor inspected the rotation
+matrix: two Waves, twelve interrupted mutations, recovery from either private
+store, a mutation-free same-name retry, expected final Project/Task statuses,
+and preserved Task identity/worktree/plan/PR/captured Flow at the transfer case.
+Authored successor content, legacy response loss, ambiguous/current conflicts,
+unobserved second-Home work and archived history also pass. These exercise Rust
+operations against simulated Linear; they do not run the CLI or live provider.
 
-Final proof: every-Wave preview; one intended current Project per Wave; exact
-started Task preservation; same-name retry; ambiguous/conflicting current state;
-second private Home sync without local switching; Project Flow used when no
-explicit override; populated draft and canonical upgrade preserving Projects.
-No live Linear rotation or installed acceptance has been established.
+Remaining proof is specific: second private Home adopts by public sync alone
+(the matrix calls rotate); exact Started timestamp survives transfer (the matrix
+does not assert that column); Project Flow drives an actual Task launch with no
+override (the selector has a unit test); populated draft/canonical upgrade retains
+Projects through the final execution schema. Reuse unchanged covered behavior
+and rerun affected cases only where subsequent owner changes require it. See
+[evidence](evidence.md). No live Linear rotation or installed acceptance follows.
 
 Open product edge: a Wave with no In Progress Project has no accepted automatic
 creation policy. The earlier “create on Task start” sentence was a proposal.

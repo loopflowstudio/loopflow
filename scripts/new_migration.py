@@ -18,7 +18,7 @@ Because two branches authoring the same readable name mint different ids, they
 write different files and never collide or share an edit — and this script edits
 no shared Rust registry. A draft's registration *is* its file; canonicalization
 discovers it by scanning the directory. There is nothing to paste into
-`migrations.rs`; the release cut appends the canonical `Migration` entries it
+`migration_catalog.rs`; the release cut appends the canonical `Migration` entries it
 generates. This script performs no `git fetch` or rebase. Ordering that matters is
 declared with `--depends-on` — against another draft or an already-released
 migration name — not by a serial number.

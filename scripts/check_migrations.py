@@ -27,7 +27,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
-MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
+MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migration_catalog.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
 # A draft file is `<name>__<id>.sql`; the readable name never contains `__`, and
 # the id is an immutable 128-bit token (32 hex chars).
@@ -40,7 +40,7 @@ DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.M
 VERSION_LINE = re.compile(r'^version = "([^"]+)"', re.MULTILINE)
 MigrationKey = tuple[int, int, int, int]
 
-# One `Migration { .. }` entry of the MIGRATIONS registry in migrations.rs.
+# One `Migration { .. }` entry of the MIGRATIONS registry in migration_catalog.rs.
 REGISTRY_ENTRY = re.compile(
     r"""Migration\s*\{\s*
         id:\s*MigrationId\s*\{\s*

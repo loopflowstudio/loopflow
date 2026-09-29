@@ -13,7 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check_migrations.py"
 MIGRATIONS = "rust/loopflow/src/store/migrations"
-MIGRATIONS_RS = "rust/loopflow/src/store/migrations.rs"
+MIGRATIONS_RS = "rust/loopflow/src/store/migration_catalog.rs"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -21,7 +21,7 @@ def _git(repo: Path, *args: str) -> None:
 
 
 def _registry(*entries: tuple) -> str:
-    """A MIGRATIONS registry in Rust, shaped as migrations.rs writes it."""
+    """A MIGRATIONS registry in Rust, shaped as migration_catalog.rs writes it."""
     rendered = []
     for entry in entries:
         if len(entry) == 4:

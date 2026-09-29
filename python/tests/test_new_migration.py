@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/new_migration.py"
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 DRAFTS = MIGRATIONS / "drafts"
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
+MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 
 REGISTRY = """const MIGRATIONS: &[Migration] = &[
     Migration {

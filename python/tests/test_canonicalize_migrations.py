@@ -15,7 +15,7 @@ SCRIPT = ROOT / "scripts/canonicalize_migrations.py"
 MANIFEST_FIXTURE = ROOT / "tests/fixtures/migrations/draft_manifest.json"
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 DRAFTS = MIGRATIONS / "drafts"
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
+MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 
 REGISTRY = """const MIGRATIONS: &[Migration] = &[
     Migration {

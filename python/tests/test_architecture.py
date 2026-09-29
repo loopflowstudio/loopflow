@@ -98,7 +98,7 @@ impl Provider {
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/store/migrations.rs",
+        "rust/loopflow/src/store/migration_catalog.rs",
         """const MIGRATIONS: &[Migration] = &[
     Migration {
         sql: include_str!("migrations/0.1.001_initial.sql"),

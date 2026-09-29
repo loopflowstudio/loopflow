@@ -919,3 +919,11 @@ formatting and whitespace pass. Each disposable Linux container was removed.
 The Run API deletion alone is +29/-513 production lines versus 325e0e13e
 (supervisor receipt `status-counts-1d86cd4f3.json`), excluding tests/docs.
 Neither checkpoint closes native decision, import/table or reader obligations.
+
+### Interruption checkpoint integration (2026-09-29)
+
+Checkpoint `39985424d` retains the bounded interruption repair after Run API deletion.
+Rebase onto `359c9a6c3` conflicted only in CLI documentation while replaying the
+early spec rewrite. The final text retains the accepted owner model and upstream
+single-linear-commit preservation; upstream executable changes apply unchanged.
+No native decision or table-removal acceptance follows.

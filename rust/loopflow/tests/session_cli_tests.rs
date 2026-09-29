@@ -160,7 +160,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
 }
 
 #[test]
-fn asked_session_has_a_run_before_any_provider_is_started() {
+fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     let home = tempfile::tempdir().unwrap();
     let (id, run_id, dir) = prepare_ask(
         home.path(),
@@ -203,6 +203,21 @@ fn asked_session_has_a_run_before_any_provider_is_started() {
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
     assert_eq!(listed[0]["run_id"], run_id.as_str());
     assert!(!dir.join("events.jsonl").exists());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM agent_session_inputs WHERE session_id=?1",
+            [&id],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[cfg(unix)]
@@ -424,14 +439,29 @@ fn prepare_ask(
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .and_then(|db| {
+            let ready: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions')", [], |row| row.get(0))?;
+            if !ready { return Err(rusqlite::Error::QueryReturnedNoRows); }
             db.query_row(
-                "SELECT id, current_run_id FROM agent_sessions WHERE kind='ask' AND request=?1",
+                "SELECT id, input_id FROM agent_sessions WHERE kind='ask' AND request=?1",
                 [question],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
         });
-        if let Ok(stored) = stored {
-            break stored;
+        match stored {
+            Ok(stored) => break stored,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if matches!(
+                    error.code,
+                    rusqlite::ErrorCode::CannotOpen
+                        | rusqlite::ErrorCode::DatabaseBusy
+                        | rusqlite::ErrorCode::DatabaseLocked
+                ) => {}
+            Err(error) => {
+                let _ = asking.kill();
+                let output = asking.wait_with_output();
+                panic!("cannot inspect stored Ask: {error}; caller: {output:?}");
+            }
         }
         if asking.try_wait().unwrap().is_some() || Instant::now() >= deadline {
             let _ = asking.kill();

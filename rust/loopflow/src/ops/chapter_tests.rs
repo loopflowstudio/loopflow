@@ -525,10 +525,28 @@ async fn local_started_task(
         )
         .await
         .unwrap();
+    assert!(!context.store.task_started(&task.id).await.unwrap());
+    let flow = context
+        .store
+        .reserve_attempt(flow.id(), flow.version, None)
+        .await
+        .unwrap();
+    assert!(context.store.task_started(&task.id).await.unwrap());
     let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);
     // Compare persisted values: SQLite stores timestamps at second precision.
     let task = context.store.get_task(&task.id).await.unwrap().unwrap();
     (task, pr, flow)
+}
+
+fn task_started_at(path: &std::path::Path, task: &TaskId) -> i64 {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .expect("reserved Task work has a non-null Started timestamp")
 }
 
 fn clean_checkout(checkout: &std::path::Path) -> String {
@@ -799,7 +817,9 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
             .await;
             local_backlog_tasks(&first, &repo).await;
             let retained = if stop == 4 {
-                Some(local_started_task(&first, &repo).await)
+                let (task, pr, flow) = local_started_task(&first, &repo).await;
+                let started_at = task_started_at(&first.path, &task.id);
+                Some((task, pr, flow, started_at))
             } else {
                 None
             };
@@ -849,7 +869,8 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
                     assert_eq!(provider.lock().await.mutations, mutations);
                 })
                 .await;
-            if let Some((task, pr, flow)) = retained {
+            if let Some((task, pr, flow, started_at)) = retained {
+                let path = original.path.clone();
                 PM_TEST_CONTEXT
                     .scope(original, async {
                         rotate(&repo, "next", false).await.unwrap();
@@ -861,6 +882,7 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
                         assert_eq!(moved.plan, task.plan);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
                         assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+                        assert_eq!(task_started_at(&path, &task.id), started_at);
                     })
                     .await;
             }
@@ -931,6 +953,102 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
         provider.lock().await.projects["authored-next"]["content"],
         content
     );
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let first = context(&directory.path().join("rotating.db"), &repo, &url).await;
+    local_backlog_tasks(&first, &repo).await;
+    let second = context(&directory.path().join("syncing.db"), &repo, &url).await;
+    let (task, pr, flow) = local_started_task(&second, &repo).await;
+    let path = second.path.clone();
+    let started_at = task_started_at(&path, &task.id);
+    let store = second.store.clone();
+
+    PM_TEST_CONTEXT
+        .scope(first, rotate(&repo, "next", false))
+        .await
+        .unwrap();
+    assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+    let (mutations, projects, issues) = {
+        let state = provider.lock().await;
+        (
+            state.mutations,
+            state.projects.clone(),
+            state.issues.clone(),
+        )
+    };
+    let sync_repo = repo.clone();
+    // Operation-level sync owns a runtime; this does not invoke the public CLI.
+    tokio::task::spawn_blocking(move || {
+        PM_TEST_CONTEXT.sync_scope(second, || {
+            pm_sync(
+                &sync_repo,
+                &PmSyncOptions {
+                    wave: None,
+                    plan: false,
+                },
+                &NullProgress,
+            )
+            .unwrap();
+        });
+    })
+    .await
+    .unwrap();
+
+    for name in ["a", "b"] {
+        let wave = store
+            .get_wave_at(&WaveLocator::discover(&repo, name).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let snapshot = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).unwrap();
+        let successor = successor_id(&format!("initiative-{name}"), "next");
+        let current = super::select_current(name, &snapshot.projects).unwrap();
+        assert_eq!(current.id, successor);
+        assert_eq!(current.status, ProjectStatus::Started);
+        let previous = store
+            .get_project_by_project(&format!("{name}-old"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(previous.plan.status, ProjectStatus::Completed);
+        let adopted = store
+            .get_project_by_project(&successor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(adopted.wave_id, *wave.id());
+        assert_eq!(adopted.plan.id.as_str(), successor);
+        assert_eq!(adopted.plan.status, ProjectStatus::Started);
+        assert!(snapshot
+            .items
+            .iter()
+            .any(|item| { item.id == format!("{name}-started") && item.project_id == successor }));
+        if name == "a" {
+            assert_eq!(previous.id, task.project_id);
+            let moved = store.get_task(&task.id).await.unwrap().unwrap();
+            assert_eq!(moved.project_id, adopted.id);
+            assert_ne!(moved.project_id, task.project_id);
+            assert_eq!(moved.id, task.id);
+            assert_eq!(moved.wave_id, task.wave_id);
+            assert_eq!(moved.worktree, task.worktree);
+            assert_eq!(moved.plan, task.plan);
+        }
+    }
+    assert_eq!(task_started_at(&path, &task.id), started_at);
+    assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+    let state = provider.lock().await;
+    assert_eq!(state.mutations, mutations);
+    assert_eq!(state.projects, projects);
+    assert_eq!(state.issues, issues);
     server.abort();
 }
 

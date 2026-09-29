@@ -294,7 +294,7 @@ impl Import<'_> {
         }
         self.start(&run).await?;
         if !self.report.dry_run {
-            self.store.create_session(session, run, review).await?;
+            self.store.create_session(session, review).await?;
         }
         Ok(Some(kind))
     }
@@ -405,13 +405,21 @@ impl Import<'_> {
             ended: None,
         };
         let session = AgentSession {
-            task_id: None,
-            wave_id: None,
-            flow_session_id: None,
-            work_source: None,
+            caller_input_id: run.caller_run_id.clone(),
+            task_id: run.task_id.clone(),
+            wave_id: run.wave_id.clone(),
+            flow_session_id: run.invocation_id.clone(),
+            work_source: run.work_source,
             bound_at: None,
             id: file.id,
-            current_run_id: run.id.clone(),
+            input_id: run.id.clone(),
+            input_published: run.published,
+            cwd: run.cwd.clone(),
+            skill: run.skill.clone(),
+            provider: run.provider.clone(),
+            model: run.model.clone(),
+            node: run.node,
+            iterations: run.iterations.clone(),
             kind: SessionKind::Ask,
             interactive: true,
             repo: None,
@@ -476,13 +484,21 @@ impl Import<'_> {
             ended: None,
         };
         let session = AgentSession {
-            task_id: None,
-            wave_id: None,
-            flow_session_id: None,
-            work_source: None,
+            caller_input_id: run.caller_run_id.clone(),
+            task_id: run.task_id.clone(),
+            wave_id: run.wave_id.clone(),
+            flow_session_id: run.invocation_id.clone(),
+            work_source: run.work_source,
             bound_at: None,
             id,
-            current_run_id: run.id.clone(),
+            input_id: run.id.clone(),
+            input_published: run.published,
+            cwd: run.cwd.clone(),
+            skill: run.skill.clone(),
+            provider: run.provider.clone(),
+            model: run.model.clone(),
+            node: run.node,
+            iterations: run.iterations.clone(),
             kind: SessionKind::FlowReview,
             interactive: true,
             repo: None,
@@ -557,13 +573,21 @@ impl Import<'_> {
             ended: None,
         };
         let session = AgentSession {
-            task_id: None,
-            wave_id: None,
-            flow_session_id: None,
-            work_source: None,
+            caller_input_id: run.caller_run_id.clone(),
+            task_id: run.task_id.clone(),
+            wave_id: run.wave_id.clone(),
+            flow_session_id: run.invocation_id.clone(),
+            work_source: run.work_source,
             bound_at: None,
             id,
-            current_run_id: run.id.clone(),
+            input_id: run.id.clone(),
+            input_published: run.published,
+            cwd: run.cwd.clone(),
+            skill: run.skill.clone(),
+            provider: run.provider.clone(),
+            model: run.model.clone(),
+            node: run.node,
+            iterations: run.iterations.clone(),
             kind: SessionKind::Conversation,
             interactive: true,
             repo: None,
@@ -620,10 +644,10 @@ impl Import<'_> {
         manifest: &RunManifest,
         run: Run,
     ) -> Result<Option<Stored>> {
-        let Some((session, current)) = self.store.session_for_run(&run.id).await? else {
+        let Some(session) = self.store.session_for_run(&run.id).await? else {
             return Ok(None);
         };
-        if current.id != run.id {
+        if session.input_id != run.id {
             return Ok(None);
         }
         let (title, source) = name(dir, session.title.clone())?;

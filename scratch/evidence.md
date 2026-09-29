@@ -6,10 +6,129 @@ Detailed reports, earlier failures and source hashes remain in the
 
 ## Published CI and retained red results
 
+Implement iteration10 checkpointed the unfinished caller conversion and review
+evidence, then rebased without conflicts onto `b42d53205`; local head is
+`884b90be97836c2bc0c73ed5e84e81b7425818d0`. Fresh Task and Git reads agree on
+the base; Task publication still names `fb100f486`. Five upstream commits add
+delivery/check caching, release-test cleanup, SQLite build optimization, Swift
+build reuse and armed-PR queue handling. No conflict reconciliation test is
+needed for that rebase. The one-line migration-test correction removes only
+Project `status` from its retired-field prohibition, preserving Task status and
+Project reason/time checks. It passes in the materialized diagnostic below.
+
+The materialized matrix's first setup failed before tests because its file-copy
+loop treated the `vendor/ghostty` Git submodule directory as a file. Retain this
+as fixture setup failure, not a product test failure or executed Rust matrix.
+The corrected setup's `implement-materialized-matrix-2.log` records compilation
+in 58.78s, then **1,925 passed / 33 failed / 15 skipped**, all 1,958 selected tests
+executed across 45 binaries in 263.361s. Exit100; no LEAK or timeout reported.
+`implement-matrix-source.json` records head/base, command, source hashes and
+private source root. It includes the Project-status assertion repair, which
+passes, but predates later quoted-output regression/repair edits.
+
+The diagnostic copy has no Git metadata. Two failures explicitly report this:
+`watched_landing_completes_task_only_from_merged_pr_evidence` fails `git rev-parse
+HEAD`, and `run_attribution_classifies_absent_context_and_hand_set_names` fails
+repository discovery. Verified supervisor comment
+`04354d7f-063f-4fe2-a797-3fc1aee16b41` requests correcting the isolated Git
+context through the supported path before rerunning affected failures, without
+weakening production behavior. Main acknowledged this distinction. The five
+account-route failures sharing that cause remains a hypothesis. Three historical
+migration fixtures insert into `wave_chapters` after their helper has applied the
+full now-materialized tail that drops it; those are separate seed failures.
+The Session native-client test changes its DB path after capture and fails to
+open that file on resume. Other failures cover landing output, branch-data
+selection, active-Run attribution, native-provider fixture launch, command
+admission, Flow/cutover/Chapter fixtures and command-matrix inventory. Keep all
+33 results until each is explained and repaired; this is a complete diagnostic,
+not a passing matrix or native/provider acceptance.
+
+Main created the isolated `loo298-matrix-fixture` through `lf wt` and copied the
+same materialized source, removing tracked files absent from the snapshot. With
+Git context and the runner's ambient `LF_DB_PATH` removed,
+`implement-setup-recheck.log` records **13 passed / 2 failed** in 6.203s across
+the 15 setup-sensitive failures. All five account-route checks, the native-client
+publication test, landing repair-output read, attribution and retained branch-data
+checks now pass without source edits. The two remaining global-command failures
+are `task_origin_prevents_promotion_but_allows_read_only_candidate_preflight`
+and `missing_repository_and_missing_home_are_distinct`. This removes 13 from the
+original unresolved set, leaving 20; it does not prove which of the two fixture
+changes caused each recovery. Receipt: `implement-setup-recheck.json`.
+
+The next five-check batch, `implement-quoted-output-red.log`, overlaid the source
+migration registry onto that materialized copy, accidentally unregistering the
+generated batch. Two tests then stopped at missing `projects.flow`/`execs` before
+the intended behavior. Its three migration passes are not final-schema proof.
+Main identified the mistake and restored the generated registry; supervisor
+confirmed both original and focused copies include `0.12.25.001_release.sql`.
+The corrected repeat, `implement-quoted-output-red-2.log`, reaches the intended
+classifier rejection of the completed review (including the recovered delivery
+failure). Its other four checks pass: the three migration-preservation scenarios
+and the public CLI command-failure/retained-lock proof. This establishes the red
+regression and restores the migration proof's final-schema scope; the classifier's
+green repeat belongs to the subsequent focused repair batch, described below.
+
+Bounded Codex status-test contribution completed with exit0 and ownership returned
+to main in verified comment `c063210e-67fe-499b-acc3-78f57cb83b68`. Only
+`rust/loopflow/tests/status_tests.rs` changed: Project-owned KRs/targets and exact
+current planning replace retired Chapter expectations, while stranded Task
+evidence and retained historical credential failure remain asserted. Supervisor
+reviewed the diff against `ProjectSummary`/`project_planning` and fixture seeds;
+whitespace passes. No builds/tests ran in that contribution. Main acknowledged
+handback and ran the complete status suite on the corrected materialized fixture:
+**11 passed**, 10.434s after 21.95s compilation in `implement-focused-repairs.log`.
+Supervisor confirmed current and fixture status-file hashes match
+`implement-repairs-source.json`. The three status failures are resolved within
+that proof. Contributor log: `status-fixture-contributor.log`.
+
+The second command in `implement-focused-repairs.log` records **12 passed / 1
+failed** in 32.267s. The completed-review regression now passes after deleting
+the output scanner; command events remain, actual provider failure releases its
+claim, rejected credentials stay explicit, and a public failed `lf commit`
+retains its failed Exec result and lock bytes. Failed PR draft promotion also
+passes after moving readiness before copy update: rejected readiness preserves
+the prior draft copy, and retry publishes the ready copy. Supervisor inspected
+the production diff and verified the controller/PR/Exec-test hashes still match
+the receipt. These are local proofs, not an installed control repair.
+
+The cached-auth failure exercised empty PATH from the Git source checkout and
+stopped before its assertion. Main retained empty PATH and set the intended
+ordinary disposable cwd. `implement-final-fixtures.log` then records three
+assertion passes in 10.372s: cached auth, failed draft promotion/retry, and fresh
+launch inventory. Nextest reports **one LEAK in the PR test**; this is not clean
+process-settlement proof. `implement-final-fixture-source.json` records the four
+overlaid fixture hashes. No full-green claim follows.
+
+`implement-managed-topology.log` records the topology/return-count/bad-restart
+test passing in 1.99s in the existing disposable OS installation harness; its
+Docker container was removed afterward. This uses source 0.12.24 with drafts,
+not the materialized 0.12.25 fixture or Jack's installed Home. The assertions
+prove the managed fixture path, not configured-provider or Desktop acceptance.
+`implement-repairs-static.log` records all-target Clippy finishing in 15.88s and
+the static runner reporting success. Supervisor read these logs directly.
+
+Main acknowledged verified sequencing comment
+`c460c719-6374-4ed5-8eef-9f821479e05d`: continue from this repair checkpoint into
+AgentSession reservation/publication and readers, retaining the zero-Run CLI
+failure as the next executable target. Native decision retry remains a separate
+failing requirement. Neither these fixture passes nor the static checkpoint
+complete the owner conversion.
+
+Main checkpointed the repairs as `f48606e8c`. Supervisor reconciled all 33 original
+failures against the retained reruns in `supervisor-matrix-dispositions.json`:
+**29 have focused passes, one has passing assertions with a process leak, and
+three remain unresolved**. Renamed tests are mapped explicitly; the topology
+pass retains its disposable-OS scope. These are mixed recorded snapshots, not
+one passing matrix. The unresolved cases are checkout identity with main/parent
+upstreams, Task Flow failure/retry/review, and taskless decision recording. Their
+actual failures concern original-caller navigation authority or absent native
+connection during OpenCode continuation. Keep all-provider admission/recovery in
+the owner conversion; a Codex-only successful launch does not settle these cases.
+
 Latest published head is `fb100f486`, still based on `1dce02734`, mergeable with
 auto-merge off. GitHub and Task publication both name that head. It contains only
-the one-line hierarchical-selector fixture correction described below; unfinished
-native and owner changes remain uncommitted. CI36517146691 is terminal. Rust
+the one-line hierarchical-selector fixture correction described below; subsequent
+local checkpoints and working changes remain unpublished. CI36517146691 is terminal. Rust
 job109241873536 reports **1,304 passed / 1 failed / 14 skipped / 643 unrun**:
 `a_fresh_database_applies_the_whole_chain_once` still forbids `projects.status`
 alongside retired controller reason/time columns. The Chapter model deliberately
@@ -618,9 +737,141 @@ decision retry environment. Supervisor inspected the result and assertion log.
 
 ## Retained local proof
 
+**Agent admission: ordinary automatic retry now has zero Run rows.** Supervisor
+read `agent-admission-native-zero-run-2/results.json` and the fixture assertions
+in `tests/e2e/codex_connect.py`. Candidate SHA-256
+`d2cdd28d5bc0ec3bee424d1b40ee598827afee7fa54f9a15713c9ee95520286e`
+exits0, completes the standalone Flow, records one failed and one successful
+native turn under the same Session/thread/generation/Exec, retains reported usage,
+selects history 1→3 and consumes success 6 once. `run_rows=0`; both automatic
+retry and owner assertions pass. Real Codex with synthetic Responses and a
+private Home; not configured provider, managed Task, Ask/review, populated import
+or decision-retry proof. The first invocation stopped before execution because
+`websockets` was missing; main repeated with the script's dependencies. Logs:
+`agent-admission-native-zero-run.log` and `agent-admission-native-zero-run-2.log`.
+The candidate build passed with one unused old helper warning. The conversion
+is still dirty and incomplete; later bytes require their own affected proof.
+
+`agent-admission-session-cli.log` first passed one test, then its five Ask-based
+cases waited in a fixture query still selecting removed `current_run_id`.
+Supervisor identified the shared polling query and sent verified comment
+`38689def-dc29-45e6-a8f5-07843aeaa3fe`; main acknowledged it and stopped that
+owned fixture group. That run ends with five SIGTERMs, not recovery passes.
+After changing the query to `input_id`, `agent-admission-session-cli-2.log`
+records **six passed** in 11.796s after 20.78s compilation. Supervisor inspected
+the result and test diff: resolution, naming/replacement, saved executable/Home,
+waiting-provider launch/resume and prepared Ask checks remain; the Ask adds zero
+Run rows and one captured-input reference. These use fixture providers, not a
+configured account or complete all-kind migration. A proposed fail-fast change
+to the polling helper was not part of the inspected passing diff.
+
+The bounded Task initialization fixture conversion returned partially complete
+with exit0 and no builds/tests. It changed review publication/readiness to the
+AgentSession input fields, preserving assertions and main's starting dirty edits.
+The stale/current Ask fixture remains red at compilation rather than inventing
+caller evidence. Supervisor confirmed `task_waiting_unblock` now reads
+`manifest.parent_run_id`, propagating a missing-payload error, while admission
+and input replacement no longer retain that relation. Verified handback
+`9464adc8-3045-4b71-82a0-22b9eaaa1a8d` returns ownership to main and requests
+preserving the exact caller relation through the accepted owners. No new product
+object or weaker stale-Ask criterion is selected. Log:
+`task-initialization-contributor.log`; the source finding is not a runtime repro.
+
 Paths without a directory are under `.lf/tmp/execution-model/`; Cut logs are
 under `.lf/tmp/cut-i/`. Native tests use actual Codex with synthetic upstream and
 private stores, not configured model/accounts or rendered Desktop.
+
+Later admission inspection confirms the caller relation is now stored as
+`agent_session_inputs.caller_input_id`, imported from recorded Run caller IDs;
+`task_waiting_unblock` reads it through the Session SQL query. The converted
+Task initialization fixture retains stale/current Ask, completion without cursor
+movement, and wrong-boundary checks. Its execution remains pending.
+
+`agent-admission-focused.log` completes 73 tests: **71 passed (two leaky), two
+failed**, 49.651s after 28.09s compilation. All 15 Chapter tests pass, including
+the returned exact Started and `pm_sync`-only second-store adoption proof. Ask
+and saved review checks pass within the selected modules. The two failures are
+`managed_flow_retry_releases_only_dead_native_selection_and_consumes_its_successor`
+and `task_decision_recovery_requires_the_original_successful_run`. Main removed
+their obsolete synthetic Run-outcome expectations, retaining selected native
+history, cursor preservation and zero Run rows. Supervisor inspected the diff;
+this does not establish that native driver-loss recovery works. The first rerun
+(`agent-admission-store-recovery.log`) failed compilation on a test-only Store
+method call and exercised no behavior. The corrected
+`agent-admission-store-recovery-2.log` completes **21 passed, seven failed** out
+of 28, with one failed test also leaking. Both preceding controller failures now
+pass. This uses store fixtures, not the still-failing real native decision retry.
+The seven remaining failures cover populated admission upgrade, claim reservation,
+Task invocation selection, headless history, review provenance, constructor
+fixtures and stale-driver recovery. The upgrade fails during fixture setup on
+the removed `flow_sessions.ready_summary` column, before migration execution;
+no populated migration result follows. Main owns their repair and rerun.
+The leaky tests are `active_task_invocation_ignores_later_flow_and_skill_edits`
+and `comment_sync_recovers_history_and_deduplicates_edits_and_webhooks`.
+
+The seven-case repair (`agent-admission-repaired-store.log`) passed two and failed
+five. It exposed an actual Flow-conversation provenance regression; main corrected
+the writer to inherit attribution. The migration fixture needed the existing
+migration transaction wrapper for table rebuilds, retaining foreign-key validation.
+`agent-admission-repaired-store-2.log` then passed all five remaining cases in
+0.609s after 29.39s compilation. Supervisor inspected the preservation assertions:
+conversation fields, both input/caller references, native history/usage, Flow
+history/selection and connection identity retain their recorded values. Historical
+Run rows remain import evidence. This proves the populated draft boundary, not
+complete filesystem import, canonical repetition or installed adoption.
+
+`agent-admission-cli-recovery.log` is the subsequent CLI pass. The exact
+stale/current unblock integration test passes, covering the caller-relation fix.
+It completed **17 passes, 12 assertion failures and one SIGTERM** in 158.433s
+(five unselected tests skipped). Main stopped the owned Ask fixture group after
+29 cases finished because it was polling a removed
+`agent_sessions.current_run_id` column while suppressing the SQL error. Verified
+comment `a86f9710-5975-4c3c-8a3d-b1066952ba99` gives main the source diagnosis and
+bounded fixture correction; `agent-admission-cli-recovery-interruption.txt`
+records the stop. This is not evidence of a hung provider. The failed cutover
+cases still include launch/inventory/import/bind and the retained native Flow
+failures; main is converting their fixtures and preserving the behavioral
+requirements, not treating the 17 passes as completion.
+
+`agent-admission-cutover-fixtures.log` now passes all five selected repaired
+cases in 11.566s after 20.39s compilation: interactive lifecycle, Ask answer and
+replacement, taskless review replacement/completion, SQL-only review inventory,
+and repository/task filtering before paging. Supervisor inspected the diff:
+retained identity, name/feedback, stale-action and retired-file assertions remain;
+fresh admission asserts zero Run rows and uses immutable input references.
+Providers are scripts. Other discovery/import/bind and native failures are open.
+
+The bounded Desktop contribution completed exit0 and returned ownership in
+comment `8ff3937a-f2a9-4675-af30-657c13cf687a`. Supervisor inspected the five-file
+diff and verified handback hashes/whitespace. It preserves typed bound ancestry
+and selection without roadmap records, excludes bound Sessions from the orphan
+section, and adds unit plus existing mounted terminal-proof coverage. It ran no
+build/test. Production delta +70/-11, net +59, excludes tests. Handback with exact
+commands and source hashes: `.lf/tmp/cut-i/desktop-ancestry-handback.md`.
+Mounted proof execution is required: an unrelated unit layout object staying
+unchanged cannot establish terminal retention. Full DTO/history/numeric graph
+conversion and configured Desktop acceptance remain separate.
+
+Main has now executed both requested Swift checks on the handback bytes:
+`agent-admission-desktop-unit.log` passes **25 tests** (including four planning-loss
+variants) in 4.452s after an 11.92s build. `agent-admission-desktop-native.log`
+passes the one mounted `namedSessionDrillDownRetainsTerminal` proof in 4.590s.
+That proof removes all Tasks and then all Waves before restoring planning,
+asserting typed ancestry/siblings, selection, identical surfaces, focus/layout,
+and the retained draft/PTY responses. It uses fixture readings and owned test
+terminals; no configured live Desktop acceptance follows. Supervisor verified all
+five source hashes still match the handback; receipt
+`desktop-ancestry-verified-source.json`. CoreVideo was unavailable and the native
+proof used its timer-rendering fallback. No extra layout-only claim is needed.
+
+`agent-admission-canonical.log` also passes **four selected checks** after all
+26 drafts are materialized as `0.12.25.001_release` in a disposable source copy:
+populated admission preservation, fresh schema, retained retry conversation and
+exact selected native completion without a Run outcome. Source receipt:
+`canonical-admission-source.json`. The admission SQL still matches at inspection;
+subsequent formatting and source edits mean this is not a full current-tree gate.
+The first static pass (`agent-admission-static.log`) fails on two test-only
+`manual_contains` Clippy findings; a final static pass remains required.
 
 | Evidence | Observed result and limit |
 | --- | --- |

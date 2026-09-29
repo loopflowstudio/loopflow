@@ -42,7 +42,17 @@ impl SessionEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentSession {
     pub id: String,
-    pub current_run_id: RunId,
+    /// Immutable captured input, not a resumable execution identity.
+    pub input_id: RunId,
+    /// Causal input reference; grants neither driver nor Flow authority.
+    pub caller_input_id: Option<RunId>,
+    pub input_published: bool,
+    pub cwd: std::path::PathBuf,
+    pub skill: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub node: Option<u32>,
+    pub iterations: Option<Vec<Vec<u32>>>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
     pub flow_session_id: Option<String>,

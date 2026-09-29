@@ -120,7 +120,7 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
         .as_deref()
         .map(|id| {
             conn.query_row(
-                "SELECT current_run_id,task_id,wave_id,flow_session_id,work_source
+                "SELECT input_id,task_id,wave_id,flow_session_id,work_source
              FROM agent_sessions WHERE id=?1",
                 [id],
                 |row| {
@@ -306,45 +306,6 @@ pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<Wave
     WaveId::parse(&wave).map_err(invalid)
 }
 
-/// Human and headless reservations select the attempt under the same version fence.
-pub(super) fn select_attempt_in(
-    conn: &Connection,
-    invocation: &str,
-    version: u64,
-    run: &RunId,
-) -> StoreResult<()> {
-    let (capture, cursor) = super::flows::capture_in(conn, invocation)?;
-    let (node, iterations) = capture.location(&cursor).map_err(invalid)?;
-    let iterations = serde_json::to_string(&iterations)?;
-    if conn.execute(
-        "UPDATE flow_sessions SET current_run_id=?3 WHERE id=?1 AND state='current' AND position_version=?2
-         AND EXISTS(SELECT 1 FROM runs r WHERE r.id=?3 AND r.invocation_id=?1 AND ((r.node=?4 AND r.iterations=?5) OR (r.node IS NULL AND r.id=current_run_id)))
-         AND (pending_session_id IS NULL OR EXISTS(SELECT 1 FROM agent_sessions s
-             WHERE s.id=pending_session_id AND s.current_run_id=?3))",
-        params![invocation, i64::try_from(version).map_err(invalid)?, run.as_str(), node, iterations],
-    )? != 1 {
-        return Err(StoreError::InvalidAuthority("Invocation changed before attempt selection".into()));
-    }
-    Ok(())
-}
-
-pub(super) fn require_attempt_in(
-    conn: &Connection,
-    invocation: &str,
-    run: &RunId,
-) -> StoreResult<()> {
-    let current: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM flow_sessions WHERE id=?1 AND current_run_id=?2 AND state='current')",
-        params![invocation, run.as_str()], |row| row.get(0),
-    )?;
-    if !current {
-        return Err(StoreError::InvalidAuthority(
-            "Run is not the current Invocation attempt".into(),
-        ));
-    }
-    Ok(())
-}
-
 impl super::SqliteStore {
     pub fn run(&self, id: &RunId) -> StoreResult<Option<Run>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -445,23 +406,5 @@ impl super::SqliteStore {
             })
         })
         .collect()
-    }
-
-    pub fn position_runs(
-        &self,
-        invocation: &str,
-        node: u32,
-        iterations: &[Vec<u32>],
-    ) -> StoreResult<Vec<Run>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT {RUN_COLUMNS} FROM runs
-            WHERE invocation_id=?1 AND node=?2 AND iterations=?3 ORDER BY attempt"
-        ))?;
-        let rows = query.query_map(
-            params![invocation, node, serde_json::to_string(iterations)?],
-            |row| read_run(row, 0),
-        )?;
-        rows.map(|row| row?).collect()
     }
 }

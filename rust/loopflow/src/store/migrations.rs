@@ -5055,6 +5055,118 @@ mod tests {
     }
 
     #[test]
+    fn conversation_admission_upgrade_preserves_inputs_history_and_connection() {
+        let conn = open();
+        let name = "agent_session_admission";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO execs(id,trace_id,started_at) VALUES('driver','trace',1),('engine','trace',1);
+            INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
+                VALUES('flow','{"id":"flow","capture":"retained"}','/repo',0,0,4,0,1,'current');
+            BEGIN;
+            INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind,request,ready_summary,
+                completed_at,driver_exec_id,driver_generation,provider_exec_id,provider_generation,
+                interactive,repo,provider_endpoint,provider_thread,provider_pid,provider_started_at,flow_session_id)
+                VALUES('conversation','current','Renamed review','human',1,'flow_review','Review input','Saved answer',9,
+                    'driver',3,'engine',2,1,'repo','socket','thread',42,7,'flow');
+            INSERT INTO runs(id,created_at,published,cwd) VALUES('caller',1,1,'/repo');
+            INSERT INTO runs(id,session_id,invocation_id,node,iterations,attempt,created_at,published,cwd,skill,provider,model,caller_run_id,outcome,ended_at)
+                VALUES('past','conversation','flow',0,'[[2]]',1,1,1,'/repo','review','codex','test','caller','failed',2),
+                    ('current','conversation','flow',0,'[[2]]',2,3,1,'/repo','review','codex','test','caller',NULL,NULL);
+            UPDATE flow_sessions SET current_run_id='current',pending_session_id='conversation' WHERE id='flow';
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+                VALUES('conversation','thread','failed-turn','completed','failed',2,'{"status":"failed"}'),
+                    ('conversation','thread','retry','started','retry-start',3,'{}'),
+                    ('conversation','thread','retry','usage','retry-usage',4,'{"input":40,"output":10}'),
+                    ('conversation','thread','retry','completed','retry-end',5,'{"status":"completed"}');
+            INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload)
+                VALUES('flow',4,0,'[[2]]','selected',2,3,'{"caller_token":"original"}'),
+                    ('flow',4,0,'[[2]]','consumed',4,5,'{}');
+            COMMIT;
+        "#).unwrap();
+        let rows = |sql: &str| {
+            let mut query = conn.prepare(sql).unwrap();
+            let count = query.column_count();
+            query
+                .query_map([], |row| {
+                    (0..count)
+                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(agent_sessions)")
+            .unwrap()
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let session = rows(&format!("SELECT {} FROM agent_sessions", columns.join(",")));
+        let inputs = rows("SELECT * FROM runs ORDER BY id");
+        let native = rows("SELECT * FROM session_events ORDER BY seq");
+        let flow_history = rows("SELECT * FROM flow_events ORDER BY seq");
+        super::_migration_transaction(&conn, |conn| {
+            conn.execute_batch(&current_draft_sql(name))?;
+            validate_foreign_keys(conn)
+        })
+        .unwrap();
+        let columns: Vec<_> = columns
+            .iter()
+            .map(|column| {
+                if column == "current_run_id" {
+                    "input_id"
+                } else {
+                    column.as_str()
+                }
+            })
+            .collect();
+        assert_eq!(
+            rows(&format!("SELECT {} FROM agent_sessions", columns.join(","))),
+            session
+        );
+        assert_eq!(rows("SELECT * FROM runs ORDER BY id"), inputs);
+        assert_eq!(rows("SELECT * FROM session_events ORDER BY seq"), native);
+        assert_eq!(rows("SELECT * FROM flow_events ORDER BY seq"), flow_history);
+        let admission: String = conn.query_row(
+            "SELECT json_array(input_published,cwd,skill,provider,model,node,iterations) FROM agent_sessions", [], |row| row.get(0)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&admission).unwrap(),
+            serde_json::json!([1, "/repo", "review", "codex", "test", 0, "[[2]]"])
+        );
+        let references: Vec<(String,String,String)> = conn.prepare(
+            "SELECT input_id,session_id,caller_input_id FROM agent_session_inputs ORDER BY input_id").unwrap()
+            .query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap()
+            .collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(
+            references,
+            vec![
+                ("current".into(), "conversation".into(), "caller".into()),
+                ("past".into(), "conversation".into(), "caller".into())
+            ]
+        );
+        let pending: (String, String, i64) = conn
+            .query_row(
+                "SELECT current_run_id,pending_session_id,position_version FROM flow_sessions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(pending, ("current".into(), "conversation".into(), 4));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn turn_caller_upgrade_preserves_unknown_command_origin_and_selected_history() {
         let conn = open();
         let name = "record_flow_turn_caller";

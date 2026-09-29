@@ -14,22 +14,19 @@ impl Store {
     pub async fn reserve_review_run(
         &self,
         expected: &FlowSession,
-    ) -> StoreResult<(FlowSession, Run)> {
+    ) -> StoreResult<(FlowSession, AgentSession)> {
         let expected = expected.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_review_run(&expected)
         })
         .await
     }
-    pub async fn session(&self, id: &str) -> StoreResult<Option<(AgentSession, Run)>> {
+    pub async fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await
     }
 
-    pub async fn session_for_run(
-        &self,
-        run_id: &RunId,
-    ) -> StoreResult<Option<(AgentSession, Run)>> {
+    pub async fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<AgentSession>> {
         let run_id = run_id.clone();
         run_sqlite(&self.sqlite, move |store| store.session_for_run(&run_id)).await
     }
@@ -50,20 +47,23 @@ impl Store {
     pub async fn create_session(
         &self,
         session: AgentSession,
-        run: Run,
         review: Option<FlowSession>,
-    ) -> StoreResult<(AgentSession, Run)> {
+    ) -> StoreResult<AgentSession> {
         let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, run, review.as_ref(), caller.as_ref())
+            store.create_session(session, review.as_ref(), caller.as_ref())
         })
         .await
     }
 
-    pub async fn replace_session_run(&self, expected_run: &RunId, run: Run) -> StoreResult<Run> {
+    pub async fn replace_session_input(
+        &self,
+        expected_run: &RunId,
+        session: AgentSession,
+    ) -> StoreResult<AgentSession> {
         let expected_run = expected_run.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.replace_session_run(&expected_run, run)
+            store.replace_session_input(&expected_run, session)
         })
         .await
     }
@@ -103,7 +103,7 @@ impl Store {
         id: &str,
         expected_run: &RunId,
         task: &TaskId,
-    ) -> StoreResult<(AgentSession, Run)> {
+    ) -> StoreResult<AgentSession> {
         let id = id.to_string();
         let expected_run = expected_run.clone();
         let task = task.clone();
@@ -138,7 +138,7 @@ impl Store {
     pub async fn sessions(
         &self,
         filter: &crate::session::SessionFilter,
-    ) -> StoreResult<Vec<(AgentSession, Run)>> {
+    ) -> StoreResult<Vec<AgentSession>> {
         let filter = filter.clone();
         run_sqlite(&self.sqlite, move |store| store.sessions(&filter)).await
     }
@@ -157,9 +157,9 @@ impl Store {
         .await
     }
 
-    pub async fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {
+    pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<RunId>> {
         let id = id.to_string();
-        run_sqlite(&self.sqlite, move |store| store.session_runs(&id)).await
+        run_sqlite(&self.sqlite, move |store| store.session_inputs(&id)).await
     }
 
     pub async fn rename_session(

@@ -334,10 +334,10 @@ pub(crate) fn require_provider_session_launch(dir: &Path) -> Result<()> {
     let manifest = crate::run_record::read_manifest(dir)?;
     let store =
         SqliteStore::open_run_ledger_read_only(&crate::store::observability_database_path()?)?;
-    let run = store
-        .run(&manifest.run_id)?
+    let session = store
+        .session_for_run(&manifest.run_id)?
         .ok_or_else(|| anyhow!("Run {} is not recorded on this Home", manifest.run_id))?;
-    let Some(task_id) = run.task_id else {
+    let Some(task_id) = session.task_id else {
         return Ok(());
     };
     let task = store

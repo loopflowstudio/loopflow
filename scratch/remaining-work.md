@@ -75,15 +75,22 @@ one managed FlowSession pointer while allowing other attributed Flows.
   provider/account identity, artifacts and outcomes all need their final owners.
   Delete `runs`, `current_run_id`, old reader/writer paths and replacement wrappers
   only after preservation and callers converge. Renaming tables is intermediate.
-  Current dependency is concrete: `store/sqlite/flows.rs::FLOW_SELECT` still
-  reads Run publication/outcome, `publish_attempt` writes it, and creation of
-  the native-selection capability reads Run. The working conversion has removed
-  the Run join from `select_flow_turn`; it carries the reserved AgentSession ID.
+  At checkpoint `f48606e8c`, `store/sqlite/flows.rs::FLOW_SELECT` still reads Run
+  publication/outcome, `publish_attempt` writes it, and creation of the
+  native-selection capability reads Run. The current dirty conversion moves
+  publication and captured input onto AgentSession, removes that Session reader
+  join, and uses native history for the Flow outcome. These changes need complete
+  caller and populated-preservation proof. `select_flow_turn` already carries
+  the reserved AgentSession ID without a Run join.
   Verdict/route/blocked now share original-turn caller Exec authority. Focused
   source/canonical tests cover those store changes, while the real provider's
   valid decision retry remains failing. The public automatic-retry ownership
-  fixture now asserts zero Runs and fails on one retained row after consuming
-  the successful native turn; launch/publication conversion owns that boundary.
+  fixture's zero-Run assertion now passes on candidate `d2cdd28d5bc0` after
+  ordinary capture/Flow reservation move to AgentSession: both native outcomes
+  and reported usage survive, and success is consumed once. This standalone
+  real-Codex/synthetic-provider proof does not establish managed Task, Ask/review,
+  populated preservation, or the still-failing native decision retry. Complete
+  the remaining launch/publication callers and Run-backed readers together.
   Published `lf/commands/flow.rs::run_op` records mechanical results directly
   on Flow history. Focused source/canonical, standalone crash/retry and hosted
   disposable-OS managed proofs pass within their recorded scope (see evidence).
@@ -173,6 +180,13 @@ new Jack decision. No bulk history rewrite; mid-turn missingness stays visible.
 - Bound Tasks omitted from the roadmap must retain Task ancestry/breadcrumbs,
   Session identity and pane. Interactive default and explicit headless/completed
   discovery must agree with CLI; `--all` continues to mean all repositories.
+  The bounded Swift contribution now implements known ancestry/selection and
+  orphan classification using existing typed wire fields. Main passed its 25-test
+  navigation suite and extended mounted terminal proof on the handback bytes;
+  planning disappearance/return preserves the selected surfaces and draft there.
+  Retain this proof through the final DTO conversion. Configured acceptance and
+  headless discovery remain separate requirements.
+  See `.lf/tmp/cut-i/desktop-ancestry-handback.md` for exact checks and hashes.
 - Prove selected terminal surface/draft survives rename/bind/refresh; conversation
   identity survives restart. Native thread persistence alone does not prove an
   unsubmitted editor draft. Projection updates only when inputs change.
@@ -204,9 +218,9 @@ ancestry alone to signal. No duplicate deletion implementation or widened scope.
 Preserve main's upstream semantics and rebase/publish coherent verified checkpoints
 through lf. Run affected checks after final changes, canonical materialization in
 a disposable source copy, architecture/migration checks, fmt and all-target Clippy.
-The latest 2026-09-28 rebase integrates main `1dce02734`; published head is
-`fb100f486`. Integration of main `bc51da30` is queued for the next owned
-implementation boundary, not applied. It retains PR1317's saved Session executable/Home/database and
+The latest 2026-09-28 rebase integrates main `b42d53205` without conflicts;
+local checkpoint is `884b90be97`, while published head remains `fb100f486`.
+Task base and Git merge-base agree. It retains PR1317's saved Session executable/Home/database and
 launch-failure journal evidence, plus the subsequent landing and schema-cache
 changes. Two focused schema-cache reconciliation tests pass. Preserve those
 upstream behaviors across Session/Run conversion. Main owns later rebases.
@@ -220,8 +234,11 @@ setup and retained-predecessor mock now pass the twelve-test planning module;
 `70e8db9c6` publishes that fixture-only repair. Its CI then failed the hierarchy
 fixture; `fb100f486` publishes that one-line correction. The latter CI is terminal
 at the obsolete Project-status prohibition: 1,304 passed, one failed, 643 unrun.
-After its narrow correction and rebase, run one no-fail-fast materialized Rust
-matrix to expose remaining failures together; retain exact source and all results.
+The post-rebase materialized diagnostic now records 1,925 passed, 33 failed,
+15 skipped, with no selected tests left unrun. The Project-status correction
+passes; Git-context setup, historical fixture and unresolved behavior failures
+remain. Retain the exact source receipt and all results, repair causes and rerun
+affected failures; no repeat full matrix is selected for each small correction.
 Full CI is owed. Resumed loop-decide iteration9 completed and chose Iterate;
 implement iteration10 is running after operational recovery of the quoted-output
 classifier failure. This does not finish

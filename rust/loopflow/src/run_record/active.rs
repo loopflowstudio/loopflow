@@ -226,8 +226,8 @@ async fn project(
                 continue;
             }
         };
-        let work = match store.run(&manifest.run_id).await {
-            Ok(Some(run)) => match (run.task_id, run.wave_id) {
+        let work = match store.session_for_run(&manifest.run_id).await {
+            Ok(Some(session)) => match (session.task_id, session.wave_id) {
                 (Some(task), _) => Some(WorkRef::Task(task)),
                 (None, wave) => wave.map(WorkRef::Wave),
             },
@@ -354,7 +354,7 @@ mod tests {
         );
         let task = TaskId::new();
         let other_task = TaskId::new();
-        // A Run's row names a registered Task.
+        // Each live conversation names a registered Task.
         let wave = crate::id::WaveId::new();
         {
             let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -410,6 +410,9 @@ mod tests {
             capture.mark_spawn_requested();
             captures.push(capture);
             clients.push(client);
+        }
+        for capture in &captures {
+            assert!(store.run(&capture.run_id()).await.unwrap().is_none());
         }
         let snapshot = crate::run_record::active::snapshot(
             home.path(),

@@ -198,7 +198,7 @@ fn classify_github_observation(
                 ),
             })
         }
-        _ => match merge_gate_state(&landing.worktree, &landing.branch) {
+        _ => match merge_gate_state(&landing.worktree, u64::from(landing.pr_number), &head_sha) {
             Ok(Some(reading)) if reading.failing => Ok(LandingObservation::Failing {
                 head_sha,
                 failing_checks: reading
@@ -225,17 +225,21 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
         .ok_or_else(|| OpsError::Message("ci-fix skill has no content".to_string()))?;
-    let urls = merge_gate_state(&landing.worktree, &landing.branch)
-        .ok()
-        .flatten()
-        .map(|reading| {
-            reading
-                .failing_leaves
-                .into_iter()
-                .filter_map(|check| check.url.map(|url| (check.name, url)))
-                .collect::<std::collections::BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
+    let urls = merge_gate_state(
+        &landing.worktree,
+        u64::from(landing.pr_number),
+        &incident.failed_head_sha,
+    )
+    .ok()
+    .flatten()
+    .map(|reading| {
+        reading
+            .failing_leaves
+            .into_iter()
+            .filter_map(|check| check.url.map(|url| (check.name, url)))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    })
+    .unwrap_or_default();
     let checks = incident
         .failure_set
         .iter()

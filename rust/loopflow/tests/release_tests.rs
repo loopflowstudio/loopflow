@@ -129,6 +129,7 @@ exit 1
 }
 
 fn write_gh_dropped_auto_merge_script(log_path: &str) -> String {
+    let checks = support::github_checks_page("$head", &[]);
     format!(
         r#"#!/bin/sh
 log="{log_path}"
@@ -137,6 +138,16 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 printf '%s\n' "$*" >> "$log"
+if [ "$1 $2" = "api graphql" ]; then
+  case "$*" in
+    *LoopflowPrChecks*)
+      head="$(git rev-parse HEAD)"
+      cat <<JSON
+{checks}
+JSON
+      exit 0 ;;
+  esac
+fi
 case "$1 $2" in
   'pr list')
     case " $* " in
@@ -155,7 +166,6 @@ case "$1 $2" in
       printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
     fi
     exit 0;;
-  'pr checks') echo '[]'; exit 0;;
   'api graphql')
     if [ -f "$armed" ]; then echo 'true'; else echo 'false'; fi
     exit 0;;
@@ -175,6 +185,7 @@ fn write_gh_dirty_release_script(
     release_branch: &str,
     main_branch: &str,
 ) -> String {
+    let checks = support::github_checks_page("$head", &[]);
     format!(
         r#"#!/bin/sh
 log="{log_path}"
@@ -186,6 +197,16 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 printf '%s\n' "$*" >> "$log"
+if [ "$1 $2" = "api graphql" ]; then
+  case "$*" in
+    *LoopflowPrChecks*)
+      head="$(git rev-parse HEAD)"
+      cat <<JSON
+{checks}
+JSON
+      exit 0 ;;
+  esac
+fi
 case "$1 $2" in
   'pr list')
     case " $* " in
@@ -213,7 +234,6 @@ case "$1 $2" in
       printf '{{"state":"OPEN","mergeStateStatus":"%s","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n' "$merge_state"
     fi
     exit 0;;
-  'pr checks') echo '[]'; exit 0;;
   'api graphql') echo 'false'; exit 0;;
   'pr merge')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
@@ -911,12 +931,23 @@ fn release_run_is_a_green_noop_without_merged_changes() {
 }
 
 fn minor_release_scripts(state: &std::path::Path) -> (String, String) {
+    let checks = support::github_checks_page("$head", &[]);
     let gh = format!(
         r#"#!/bin/sh
 set -eu
 state='{state}'
 [ "$1" != --version ] || exit 0
 branch=''
+if [ "$1 $2" = "api graphql" ]; then
+  case "$*" in
+    *LoopflowPrChecks*)
+      head="$(git rev-parse HEAD)"
+      cat <<JSON
+{checks}
+JSON
+      exit 0 ;;
+  esac
+fi
 case "$1 $2" in
   'pr list')
     previous=''
@@ -932,7 +963,6 @@ case "$1 $2" in
       *) branch=$(git branch --show-current) ;;
     esac ;;
   'pr create'|'pr edit'|'pr ready') exit 0 ;;
-  'pr checks') echo '[]'; exit 0 ;;
   'api graphql') echo false; exit 0 ;;
   'release view') echo '{{"isDraft":false}}'; exit 0 ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 1 ;;
@@ -1530,6 +1560,13 @@ fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
 fn release_run_repairs_failed_checks_before_tagging() {
     let state = tempfile::tempdir().unwrap();
     let repaired = state.path().join("repaired");
+    let checks = support::github_checks_page(
+        "$head",
+        &[
+            ("tests-result", "FAILURE", true),
+            ("swift-test", "FAILURE", false),
+        ],
+    );
     let gh = format!(
         r#"#!/bin/sh
 repaired='{}'
@@ -1549,14 +1586,18 @@ case "$1 $2" in
     else
       echo '{{"state":"OPEN","mergeStateStatus":"BLOCKED","mergeCommit":null}}'
     fi;;
-  'api graphql') echo true;;
+  'api graphql')
+    case "$*" in
+      *LoopflowPrChecks*)
+        cat <<JSON
+{checks}
+JSON
+        ;;
+      *) echo true ;;
+    esac;;
   'api -H')
     if [ -f "$repaired" ]; then merged=true; else merged=false; fi
     printf '{{"number":1309,"state":"open","merged":%s,"html_url":"https://github.com/loopflowstudio/release-fixture/pull/1309","merge_commit_sha":"%s","head":{{"sha":"%s"}},"mergeable_state":"blocked"}}\n' "$merged" "$head" "$head";;
-  'pr checks')
-    case " $* " in *' --required '*) name=tests-result;; *) name=swift-test;; esac
-    printf '[{{"name":"%s","bucket":"fail","link":"https://example.com/swift-job"}}]\n' "$name"
-    exit 1;;
   *) echo "unexpected gh: $*" >&2; exit 1;;
 esac
 "#,

@@ -2789,12 +2789,12 @@ async fn apply_merged_task_landing(
 /// while others are still pending.
 fn observe_required_checks(
     worktree: &Path,
-    branch: &str,
+    pr_number: u64,
     head_sha: Option<&str>,
     now: time::OffsetDateTime,
 ) -> Option<CiObservation> {
     let head_sha = head_sha?.to_string();
-    let checks = crate::ops::pr::merge_gate_state(worktree, branch)
+    let checks = crate::ops::pr::merge_gate_state(worktree, pr_number, &head_sha)
         .ok()
         .flatten()?;
     let state = if checks.failing {
@@ -3036,7 +3036,7 @@ async fn reconcile_task_pr_observation(
             pr.abandoned_at = None;
             if let Some(ci_observation) = observe_required_checks(
                 &task.worktree,
-                &pr.branch,
+                github_pr.number,
                 github_pr.head_sha.as_deref(),
                 now,
             ) {

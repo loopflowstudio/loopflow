@@ -519,6 +519,41 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                     .unwrap(),
                 Some(confirmed.clone())
             );
+            // A content edit without ordering evidence still invalidates planning.
+            let unknown = json!({"type":"Issue","action":"update",
+                "data":{"id":"issue-1","title":"Unordered edit"},
+                "updatedFrom":{"title":"Previous title"}});
+            let (event, _) = parse_event(unknown.to_string().as_bytes()).unwrap();
+            assert_eq!(
+                ingest_event(
+                    &fixture.store,
+                    event,
+                    "viewer",
+                    time::OffsetDateTime::now_utc(),
+                )
+                .await
+                .unwrap(),
+                crate::webhook::WebhookOutcome::PlanningInvalidated
+            );
+            assert!(fixture
+                .store
+                .pm_task(&scope, "linear", "FIX-1")
+                .await
+                .unwrap()
+                .is_none());
+            fixture
+                .store
+                .put_pm_task(&scope, "linear", confirmed.clone())
+                .await
+                .unwrap();
+            assert_eq!(
+                fixture
+                    .store
+                    .pm_task(&scope, "linear", "FIX-1")
+                    .await
+                    .unwrap(),
+                Some(confirmed.clone())
+            );
             let mut removal = change;
             removal["action"] = json!("remove");
             let (event, _) = parse_event(removal.to_string().as_bytes()).unwrap();

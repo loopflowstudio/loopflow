@@ -36,15 +36,38 @@ Accepted contracts below exceed the implemented planning slice:
   coupled runtime/store target in the LOO-321 branch notes below, while retaining
   source isolation and verified historical pairs. It is not implemented yet.
 
-Branch `dfd7563d4` implements normalized connected planning and planning-only
-status. Recorded lookup, migration and cached public-CLI proofs passed; these
-are simulated/local evidence, not live Linear or the full command story. Status
-freshness/error presentation and Swift parity remain incomplete. The grouped
-OAuth tracing test failed then passed alone; that grouped failure is unresolved.
-LOO-298 coordination failed as unregistered before any Run launched. Its older
-model notes are not a current integration contract; shared execution migrations
-must wait for that contract. This curation reruns no behavioral checks and grants
-no Task completion, publication or Flow navigation.
+Branch `b8e0e1d60` implements normalized connected planning, revision-ordered
+issue writes, webhook invalidation/removal receipts and planning-only status.
+Soft-refresh errors now preserve age and surface stale/error evidence; Rust/Swift
+fixtures cover the planning envelope. Invalidated records remain hidden and
+Project/membership ordering still uses acquisition time. Full execution/action
+parity, local lifecycle, contextual definitions and runtime selection remain work.
+All new status fixtures have null execution; an unavailable fixture alone does
+not establish public CLI success without planning or execution.
+
+Durable lessons from this slice:
+
+- Partial webhook payloads invalidate; they never supply complete entity facts.
+  Keep revision/removal receipts even before caching or execution exists. Unknown
+  revisions cannot authorize ordered steering. Realign reproduced a missing
+  `updatedAt` content edit failing before invalidation, then routed it through
+  the existing unknown-revision invalidation path.
+- Current normalized membership cannot reconstruct a predecessor chapter. The
+  chapter receipt owns frozen history. Failed assertions expecting stale snapshot
+  resurrection or never-acquired entities did not establish lost history.
+- Tracing callsite interest is process-global. The grouped OAuth log-capture
+  failure reproduced and was resolved with an isolated process/subscriber;
+  its recorded grouped run passed 15 active tests. Do not add retries or production
+  tracing hooks to satisfy a concurrent test's subscriber.
+
+Recorded lookup, mutation, receiver, migration, Rust/Swift planning and five
+installation-container proofs are local/simulated evidence, not live Linear or
+the full command story. The working design retains exact receipts and limits.
+The last-fetched `origin/main` remains `a3820bf7e`. LOO-298 coordination previously
+failed as unregistered before any Run launched; no new owner contract is available.
+Its older model notes are not integration agreement. Shared execution migrations
+must wait, while independent planning work can continue. This curation does not
+select outage/transition policy or authorize Task completion or Flow navigation.
 
 ## Session launch continuity (branch evidence, 2026-09-28)
 

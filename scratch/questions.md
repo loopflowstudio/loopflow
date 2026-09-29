@@ -113,65 +113,32 @@ No Run launched or owner reply established the latest execution schema. Retry
 coordination before shared migrations; do not edit that branch, copy stores,
 repair auth or treat prior Wave memory as current agreement.
 
-The shared normalized lookup now has focused proofs for cache miss, missing
-Project, unknown selector and provider failure. The follow-through below implements issue revision ordering, webhook invalidation
-and soft-refresh status evidence. Project/membership ordering and public retained
-invalid-state representation remain. Resolve the outage
-policy before dependent managed-admission work or any offline execution claim.
-This review records no Advance/Iterate verdict; the saved Flow owns navigation.
+## Current implementation evidence — 2026-09-29
 
-## Implementation observations — 2026-09-29
+At `b8e0e1d60`, issue revisions, UUID-scoped webhook invalidation/removal receipts,
+soft-refresh errors with unchanged observation age, and Rust/Swift planning
+fixtures are implemented. The grouped OAuth capture failure is resolved by an
+isolated process/subscriber; the recorded grouped run passed all 15 active tests.
+Project/membership ordering still uses acquisition timestamps. Invalidated facts
+remain stored but hidden from both planning readers. Full execution/action
+fixtures, local lifecycle and contextual Wave definitions remain unimplemented.
 
-The official coordination retry for LOO-298 again returned
-`Task "LOO-298" is not registered`; no Run or owner reply exists. Keep shared
-execution migrations blocked. Planning-only storage work proceeds independently.
+The current source still refuses failed hard-stale/forced inspection. When no
+execution exists and planning cannot resolve, status returns an error rather than
+the unavailable JSON fixture. Every new status fixture has null execution. Keep
+fixture shape, public command behavior and managed-admission policy separate.
+The [working design](resolve-tasks-from-linear-and.md#implementation-checkpoint--2026-09-29)
+owns the full remaining work and retained proof receipts.
 
-Reversible storage choices: normalize provider facts by canonical repository,
-provider and UUID; keep Wave Project membership separately; never erase Task
-facts on list omission. An empty exact lookup invalidates cached admission but
-is not a provider deletion receipt. Full detail repairs that invalidation.
-Complete-detail responses require nullable relationship fields to be present;
-malformed/partial payloads cannot clear known facts. Detail does not observe rank,
-so retain existing relative order when the Project is unchanged.
+Realign found a bounded mismatch: content edits without `updatedAt` manufactured
+an empty timestamp instead of invalidating planning. Treat missing/empty revision
+as unknown, invalidate via the existing event path, and await a complete ordered
+observation before steering. This follows the accepted partial-event contract;
+it does not choose outage admission or provider restoration semantics.
 
-These choices do not settle offline managed admission, Wave migration controls,
-or provider revision ordering. The complete design remains unfinished; the working
-design contains the remaining implementation list and proof limits.
-
-Realign source inspection at `dfd7563d4` found two consumer limits: automatic
-refresh failure returns retained planning with its original timestamp but no
-status `planning_error`; the new status envelope has no Swift/DTO fixture parity.
-Invalidated records are retained but hidden by both planning readers. Keep these
-gaps separate from managed execution policy. No new behavioral checks or
-coordination request ran during reconciliation; the prior grouped OAuth tracing failure was still unresolved then; the
-follow-through below resolves its capture isolation. LOO-298 remains blocked.
-
-## Revision/freshness follow-through — 2026-09-29
-
-Issue ordering now uses parsed Linear `updatedAt`; equal-revision contradictory
-facts fail and preserve the prior record. Verified webhooks retain UUID-scoped
-revision/removal receipts even without a cached issue or execution Task. Removal
-receipts remain conclusive; no restore/recreation semantics are invented. Unknown
-revision events invalidate for a complete read rather than supplying partial facts.
-Project/membership ordering is still based on acquisition, not provider revision.
-
-Soft automatic-refresh failure is now explicit in Task status alongside stale
-state and unchanged observation age. Rust/Swift planning fixtures and a typed
-Swift query cover that envelope; complete Task action/runtime parity remains open.
-Forced and hard-stale resolution policy remains unchanged. Jack's cached-Task
-outage admission decision is still required before dependent execution work.
-
-The grouped OAuth tracing failure reproduced in the focused OAuth module run.
-The logging proof now owns an isolated process/subscriber instead of relying on
-process-wide tracing interest during concurrent tests; the grouped OAuth module
-then passed all 15 active tests. The ignored child entry point is invoked by the
-normal test, not skipped coverage. No production credential logic changed.
-
-The focused chapter proof found a stale expectation that an old snapshot restores
-predecessor membership. Current normalized membership must remain unchanged;
-historical Tasks are proved through the chapter receipt. A direct-cache assertion
-also failed because those entries had never been acquired into normalized Task
-entities; it is not evidence of lost history. The corrected chapter proof passes.
-All 17 receiver tests, four parser/signature tests, the public stale-status proof,
-Rust/Swift planning fixtures and five installation-container checks pass. No full
-PM/repository gate or live provider demonstration was claimed.
+The last-fetched `origin/main` remains `a3820bf7e`; no new execution contract was
+available there. This reconciliation made no coordination retry, fetch, provider
+mutation or installation promotion. The recorded LOO-298 unregistered response
+remains a blocker only for dependent execution migrations. Reuse local planning
+proofs without claiming live provider or full command-story acceptance. Resolve
+outage and transition policy before dependent work; the saved Flow owns navigation.

@@ -17,193 +17,126 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
-The shared planning reader now ingests exact provider issues before resolving
-ownership. It stores Project-less issues, resolves identifier/UUID aliases, and
-allocates no execution. Wave reads assemble normalized entity records and Project
-membership; the forward draft migrates existing payloads and drops `pm_snapshots`.
-All production payload consumers now read typed views. Detail queries preserve
-known list order. Missing detail invalidates cached admission without claiming
-provider deletion; existing confirmed-deletion evidence still fences stale lists.
-Malformed complete-detail responses and GraphQL errors preserve the last good
-observation. Status returns planning plus optional execution and never completes a
-Task from a PR observation. This is a partial implementation, not Task completion.
+Reconciled against `b8e0e1d60` and the bounded webhook repair below. The connected
+planning slice is implemented; the full approved single-PR outcome remains open.
+The last-fetched `origin/main` is still `a3820bf7e`. No new integrated LOO-298
+execution contract or owner reply was found; no fetch or coordination retry ran
+in this reconciliation. Shared execution migrations remain blocked.
 
-Focused local proofs passed: six simulated-provider lookup tests, populated
-snapshot migration with confirmed-removal protection, the existing idempotent
-creation/edit and explicit post-merge completion proofs, public CLI planning-only
-status by identifier and UUID, repeated merged-PR status without completion, and
-PM DTO fixtures. PR-cache failure and missing-worktree status proofs also passed.
-A first installation-script run caught two unmigrated test fixtures; those were
-fixed. The final container run passed all five checks, including the new cached
-planning CLI proof; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-`git diff --check`, and `uv run python scripts/check_migrations.py` passed.
-No live Linear provider proof or full command-story demonstration has run.
+### Implemented behavior
 
-The authorized LOO-298 coordination retry through official lf again failed with
-`Task "LOO-298" is not registered`. No Run launched and no contract was obtained.
-Shared execution migrations remain blocked; none were authored in this slice.
-Planning normalization does not alter Task/Run/claim identities or execution tables.
+- Exact connected lookup acquires an issue before resolving ownership, stores
+  Project-less issues and resolves identifier/UUID aliases without execution
+  allocation. PM operations and Task lookup share the same reader and ownership
+  resolver. Confirmed writes still force provider acquisition.
+- Normalized repository/provider/UUID entities replace `pm_snapshots` payloads.
+  Wave lists join Project membership to the shared entities in one read transaction.
+  Forward migration preserves prior observations and confirmed-deletion fences.
+  Detail reads preserve existing rank within a Project; list omission never erases
+  Task facts. Required nullable fields prevent partial responses clearing facts.
+- Linear list and detail use one issue decoder. Parsed `updatedAt` revisions order
+  issue facts at nanosecond precision. Older/unknown revisions cannot overwrite
+  newer known facts; contradictory equal-revision facts fail without replacement.
+- Verified issue webhooks persist UUID-scoped revision/removal receipts even
+  without a cached issue or execution. Complete detail at or beyond the revision
+  repairs invalidation; partial events never replace complete entities. Removal
+  receipts fence later ingestion, including events received before caching.
+  Existing steering/inbox owners remain unchanged. No execution schema changed.
+- Task status returns planning, optional execution, `planning_stale` and
+  `planning_error`. Soft automatic-refresh failure preserves the prior observation
+  age and exposes the failure. Status observes PRs without completing Tasks.
+  Rust/Swift planning fixtures and `RegistryQuery.taskStatus` cover the envelope;
+  Swift has a typed execution projection, not complete action/runtime parity.
 
-PM operations and managed Task resolution now share the same ownership resolver;
-PM writes still force a fresh planning observation and preserve execution-ID aliases.
-Wave reads use the store's Project-membership join directly, without a second
-slug filter. Nullable detail fields use Serde's existing deserializer while
-remaining required in complete observations. Test fixtures use typed planning
-values and status assertions no longer copy an already-built snapshot.
-The repository matrix now expresses conflicting Initiative owners on one Project;
-conflicting snapshot copies converge in normalized storage and cannot represent
-that case. Its previous checkout reached Git fetch and failed authentication;
-the corrected fixture rejects ownership before checkout and passes.
+### Remaining implementation
 
-Verification after reduction: the PM module run passed 49 tests and ignored its
-subprocess entry point. Its unchanged
-`linear_oauth_proactive_failure_tracing_is_secret_free` test failed to capture the
-expected log in that grouped run, then passed alone; the grouped failure was an unresolved verification limit at
-that checkpoint and is resolved by the isolated proof below. All six planning-lookup proofs, the public CLI
-planning-only status case, and the corrected repository matrix passed.
+1. Finish planning evidence: publicly retain invalid observations, distinguish
+   invalid/unavailable/absent outcomes, and order Project facts and membership
+   using provider evidence. Current Project/membership writes use acquisition
+   timestamps. Wave `synced_at` does not date newer joined issue facts.
+2. Implement genuine local Task/Project identities and lifecycle through the same
+   store. The current reader acquires Linear observations; it does not supply the
+   approved local-only lifecycle. Resolve connection migration controls before
+   publishing any private planning. Coordinate any execution identity changes
+   with LOO-298's owner first.
+3. Resolve cached-Task outage admission before enforcing validity at every managed
+   launch/resume/worker boundary. Prove ordinary Flow and Session independence
+   from invalid/terminal managed Tasks. Do not infer execution permission from
+   retained inspection or cache invalidation.
+4. Obtain LOO-298's execution contract, then implement bounded cross-store
+   discovery, independent official-runtime selection, deliberate pins and delayed
+   startup. Preserve existing identities, claims and captured invocations.
+5. Implement contextual Wave imports and the remote-main baseline, explicit
+   create/link operations, portable Initiative hierarchy and predecessor
+   completion after transfer. Resolve remaining baseline/transition choices in
+   [questions.md](questions.md) before dependent behavior.
+6. Finish design auto-placement, launch-plan artifact handoff, full execution/action
+   DTO fixtures and the two-store public-CLI command story. The complete acceptance
+   matrix below is unchanged; these internal slices are not separate deliveries.
+
+### Proof and counterexamples
+
+Recorded proofs at `2976e1d34` and `b8e0e1d60` are reused, not newly rerun:
+
+- Eight planning-lookup cases cover detail/list/shared-writer convergence,
+  equal-revision conflicts, webhook invalidation, uncached removal, incomplete
+  detail, and retained refresh age. List/detail acquisition, creation retry,
+  explicit post-merge completion and webhook steering passed after compression.
+- All 12 active planning-mutation tests passed (one child entry is exercised by
+  its parent). Public CLI identifier/UUID planning-only and stale-status cases,
+  repeated merged-PR inspection without completion, missing-worktree/PR-cache
+  failure, and the corrected conflicting-Project-ownership matrix passed.
+- Rust DTO fixtures (11 tests), Swift `ContractTests.taskStatusPlanningFixture`,
+  all 17 receiver tests, four parser/signature tests and the chapter-history
+  proof passed. Every new status fixture has `execution: null`; these fixtures
+  do not prove execution/actions or CLI success when both planning and execution
+  are unavailable. Source still returns an error in that latter case.
+- All 15 active OAuth tests passed together after the logging proof moved into
+  an isolated process/subscriber. The ignored child entry is invoked by the
+  normal test. This resolves the earlier grouped capture failure; no production
+  credential logic changed and no retry masks it.
+- Populated migration and five disposable installation-container checks passed.
+  These are local/simulated-provider evidence. The full PM/repository gate, live
+  Linear and the approved end-to-end command story remain unproven.
+- Formatting, Clippy, migration checks and whitespace checks passed at the
+  recorded boundaries. Swift emitted Ghostty missing-symbol warnings; the Linux
+  installation build reported an unused variable in `controller/wave/metrics.rs`.
+  Those warnings are retained limits, not new failures in this reconciliation.
+
+Review corrected invalidation repair based solely on equal acquisition time and
+positive fenced responses masquerading as absence. The chapter proof rejected
+an older expectation that stale snapshots restore predecessor membership: current
+membership stays unchanged and historical Tasks are read through chapter receipts.
+A subsequent direct-cache assertion also failed because those entries had never
+been acquired as normalized Task entities. It was not evidence of lost history.
+The earlier ownership matrix reached Git authentication with an obsolete fixture;
+its corrected conflicting Initiative ownership now fails before checkout.
+
+Source review still finds hard-stale/forced reads refuse failed refresh; invalidated
+bytes remain stored but hidden by both planning readers. Full retained-invalid
+inspection remains work. No restore/recreation semantics are inferred from the
+permanent removal fence. Existing installation/Session continuity mechanisms are
+useful discovery inputs, not LOO-298 agreement or independent runtime/store routing.
+
+The current reconciliation also found a concrete counterexample to the documented
+unknown-revision contract: a content-edit webhook without `updatedAt` manufactured
+an empty revision and reached the timestamp parser before invalidation. The added
+case failed with `invalid planning revision: the 'year' component could not be
+parsed`. The parser now routes missing/empty revisions through the existing
+planning-invalidation event, deferring ordered steering until a complete
+observation. No new event type, storage or execution policy was needed.
+
+Verification for that repair passed:
+`cargo test -p loopflow --lib provider_revisions_and_webhooks_converge_without_execution`
+(one convergence case, including invalidation, detail repair and no execution),
+`cargo test -p loopflow --lib webhook::tests` (four tests), and
+`cargo test -p loopflow --lib lfd::tests` (17 tests).
 `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
-`git diff --check` passed. No live Linear or full command-story proof was added.
-
-Remaining implementation, preserving the approved single-PR delivery boundary:
-
-- Issue revision ordering and webhook invalidation are implemented below. Project
-  facts and membership still lack provider revision ordering; webhook repair uses
-  the next complete detail read. Finish the public invalid/unavailable model and
-  cross-boundary acceptance before claiming full convergence.
-- Finish local planning identities/lifecycle and connection transition controls.
-  The new normalized interface currently ingests Linear observations; it does
-  not yet implement the approved local-only lifecycle.
-- Resolve cached-Task outage admission, enforce planning validity at all managed
-  launch/resume/worker boundaries, and prove ordinary Flow and Session independence.
-  Cache invalidation in this slice is not that complete execution contract.
-- Obtain LOO-298's current execution owner before shared migrations. Then implement
-  cross-Home execution location, runtime selection/pins, and delayed startup.
-- Implement contextual Wave imports and remote-main baseline, explicit Wave
-  creation/linking, portable Initiative hierarchy, and predecessor completion.
-- Finish design auto-placement and launch-plan handoff, consumer/action DTOs and
-  the complete two-store public-CLI acceptance sequence. The new CLI status shape
-  is planning/execution; existing execution snapshots remain unchanged.
-
-Source reconciliation at `dfd7563d4`: the locally fetched `origin/main` still
-points to the reviewed base `a3820bf7e`; no newer integrated execution contract
-was available from that ref. Infrastructure's Session-launch and branch-isolation
-memory reinforces retained executable/store pairs and preservation of failed
-launch evidence. Reuse those mechanisms for discovery; they do not establish
-LOO-298 agreement or the new independent runtime/store selection contract.
-
-At that reconciliation, freshness lacked a complete public representation: a
-failed automatic refresh retained `observed_at` but omitted `planning_error`.
-The implementation below fixes that soft-refresh case. `needs_refresh` hides
-an invalidated record from both readers but retains its bytes; it is not a public
-invalid/unavailable state. Wave `synced_at` dates membership acquisition, whereas
-joined entities can have newer detail observations. Preserve these distinctions
-in the remaining DTO/action work. The initial `TaskStatus` envelope had CLI coverage but no matching Swift consumer
-or cross-language fixture; the implementation below adds those for planning
-freshness. PM fixture passes alone never proved that envelope. These are implementation gaps, not selected
-offline-admission policy.
-
-This reconciliation changes documentation and relevant Infrastructure memory
-only. Prior behavioral receipts above are reused; no new behavioral run, provider
-request, coordination retry or installation promotion occurred. The grouped OAuth tracing failure was unresolved at that checkpoint; the
-isolated proof below resolves it. That reconciliation selected issue ordering/webhook convergence and planning
-freshness as the next implementation boundary; the implementation below advances
-it. Shared execution migrations still require LOO-298's contract.
-
-Review findings fixed in code: typed snapshot consumers replace serialized ones;
-Project-less existence is separate from ownership; incomplete detail cannot clear
-known relationships; list omission does not erase known Tasks; detail does not
-reset list order; cache invalidation does not manufacture deletion; multi-query
-Wave reads use a read transaction; and status no longer completes work.
-
-## Revision and freshness implementation — 2026-09-29
-
-Linear issue detail and list reads now require `updatedAt` and complete nullable
-fields. The normalized writer compares parsed provider revisions at nanosecond
-precision, retains later facts across delayed responses, and rejects contradictory
-facts at an equal revision. Unknown historical revisions cannot overwrite known
-ones. Detail preserves list rank; Project records and Wave membership still use
-acquisition timestamps. This is issue ordering, not a provider snapshot protocol.
-
-Verified issue webhooks now invalidate planning independently of execution,
-including self-authored edits and metadata changes. A planning-only draft stores
-monotonic event revision/removal receipts by Linear UUID; complete detail at or
-beyond that revision repairs invalidation. Confirmed removals fence later list
-and detail ingestion, including events received before caching. Partial webhook
-payloads never replace complete entities. Existing Task steering and inbox
-receipts remain their owners. No execution table or identity migration was made.
-
-Task status now returns `planning_stale` and carries soft automatic-refresh errors
-in `planning_error` while retaining the original `observed_at`. Rust round-trip
-and Swift decode fixtures cover fresh, retained stale and unavailable planning.
-`RegistryQuery.taskStatus` decodes the envelope and a typed execution projection
-(identity, location, lifecycle and actions). It does not establish the complete
-invalid/terminal/pinned action matrix. Existing hard-stale/forced resolution
-failure policy remains; this does not choose cached-Task outage admission.
-
-Review corrected two concrete problems: rejected detail must not clear webhook
-invalidation merely because acquisition timestamps match; positive but fenced
-provider responses must report unresolved planning rather than fabricate absence.
-The chapter proof also exposed an older assertion that expected a delayed snapshot
-to restore completed predecessor Tasks to the current Wave list. The normalized
-reader already rejects that old membership. The proof now requires the current
-snapshot to stay unchanged and checks Tasks through their chapter-history owner.
-A subsequent direct-cache assertion also failed: those historical entries had not
-been acquired into normalized entities. Absence there is not erased history; the
-chapter receipt is the relevant proof. Provider simulations now advance
-revisions with edited facts. OAuth tracing
-capture is isolated in a subprocess because the grouped run reproduced missing
-logs with the scoped subscriber. No retry or production tracing hook was added.
-
-Focused proof receipts for this iteration:
-
-- Eight planning-lookup tests pass, including revision/list/detail/webhook
-  convergence, equal-revision conflict, uncached removal and retained refresh age.
-- All 12 active planning-mutation tests pass (one subprocess entry point is
-  invoked by its parent), covering creation/edit, completion and deletion retries.
-- All 15 active OAuth tests pass together after isolating the log capture;
-  the ignored child entry point is exercised by the normal test.
-- Public CLI planning-only status by identifier/UUID and stale-cache status pass;
-  Rust DTO fixtures (11 tests), webhook Task-control proof, and the new Swift
-  `ContractTests.taskStatusPlanningFixture` pass.
-- `uv run python scripts/test_task_installation.py` passes all five disposable
-  container checks. This remains simulated/local evidence, not the full approved
-  two-store command story. The Linux build reports an existing unused-variable
-  warning in `controller/wave/metrics.rs`.
-- All 17 receiver tests, four webhook parser/signature tests, the focused list
-  acquisition test and the chapter rotation/history proof pass after fixture
-  corrections. The chapter test's two failed assertions and their corrected
-  ownership model are recorded above; neither failure changed production history.
-- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-  `uv run python scripts/check_migrations.py` and `git diff --check` pass.
-  The last chapter assertion-only adjustment followed the clippy pass; its focused
-  test and formatting/whitespace checks passed afterward.
-
-Compression follow-through: Linear detail and list responses now share the same
-required issue fields and conversion; only their Project payload differs. One
-async planning reader returns the record and refresh evidence to both inspection
-and ownership resolution. Webhook invalidation resolves its issue in the same
-dispatch, and Swift status uses the existing query decoder. Review also corrected
-the misplaced Swift query comment and the fixture documentation's coverage claim.
-The incomplete-response proof now checks omitted descriptions as well as Projects.
-
-Focused checks passed after these reductions: eight planning-lookup cases, the
-Linear list/detail acquisition cases, creation retry and explicit post-merge
-completion, webhook Task steering, cached public-CLI status, and the Swift status
-fixture. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
-`git diff --check` passed. The Swift build emitted Ghostty missing-symbol warnings
-but passed.
-Prior OAuth isolation, migration and installation receipts remain applicable;
-those broader checks were not rerun. No execution schema or policy changed.
-
-Remaining within this boundary: public retained-invalid observations, Project
-revision/membership convergence, and full execution/action DTO fixtures. Hard-stale
-inspection retains the existing refusal policy; no new offline admission was chosen.
-The next useful implementation work is that remaining planning evidence model,
-then local lifecycle and contextual definitions without touching the blocked shared
-execution schema. Resolve outage/transition choices before dependent work.
-The full single-PR acceptance matrix and the LOO-298 coordination blocker remain.
-No live Linear proof, shared-execution migration, host promotion or Flow navigation
-was performed in this iteration.
+`git diff --check` passed. Documentation checks confirmed the full acceptance
+matrix is unchanged and local scratch links resolve. Broader recorded proofs
+were not rerun. The plan, questions, research checkpoint and Infrastructure memory
+now agree on completed freshness work, resolved OAuth capture and remaining gaps.
+No live provider, execution migration, publication or Flow navigation occurred.
 
 ## Command experience: start with an idea
 

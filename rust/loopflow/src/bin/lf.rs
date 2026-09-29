@@ -1300,7 +1300,9 @@ fn main() -> anyhow::Result<()> {
         };
     }
 
-    let directory = loopflow::repo::working_directory()?;
+    // Exec admission records this process's cwd. Each operation resolves the
+    // repository it needs after dispatch; machine inspection needs no Git.
+    let directory = std::env::current_dir()?;
     with_runtime(&directory, &args, || {
         let explicit_wave = cli
             .wave

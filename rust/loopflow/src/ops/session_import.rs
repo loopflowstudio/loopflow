@@ -433,23 +433,10 @@ impl Import<'_> {
                             step.invocation_id
                         )
                     })?;
-                let graph = crate::engine::flow_graph::FlowGraph::new(
-                    &flow.invocation.flow,
-                    &flow.invocation.steps,
-                );
                 let node = step
                     .node
-                    .as_ref()
-                    .map(|key| {
-                        let mut index = 0;
-                        while let Some(node) = graph.node_at(index) {
-                            if &node.key == key {
-                                return Ok(index);
-                            }
-                            index += 1;
-                        }
-                        bail!("input {} names an uncaptured node {key}", manifest.run_id)
-                    })
+                    .as_deref()
+                    .map(|key| captured_node(&flow, key))
                     .transpose()?;
                 capture = Some(flow);
                 (
@@ -510,11 +497,7 @@ impl Import<'_> {
                 let dir = self.run_dir(&id)?;
                 (id, dir.join("manifest.json").exists(), Some(dir))
             }
-            None => {
-                let digest = Sha256::digest(file.id.as_bytes());
-                let id = RunId::parse(&format!("run_{}", hex::encode(&digest[..16])))?;
-                (id, false, None)
-            }
+            None => (imported_input_id(&file.id)?, false, None),
         };
         let created_at = match &dir {
             Some(dir) if published => crate::run_record::read_manifest(dir)?
@@ -573,10 +556,66 @@ impl Import<'_> {
         let file: FlowFile = serde_json::from_slice(&std::fs::read(path)?)?;
         let work = file.declared_work(self.store).await?;
         let mut flow = file.invocation(work.clone());
-        flow.updated_at = OffsetDateTime::from_unix_timestamp(modified(path)?)?;
-        let human =
-            matches!(file.current_step(), Some(ConcreteStep::Skill(skill)) if skill.policy.human);
-        if file.active.is_none() || !human || file.finished {
+        let observed_at = modified(path)?;
+        flow.updated_at = OffsetDateTime::from_unix_timestamp(observed_at)?;
+        let Some(active) = &file.active else {
+            return Ok(Some(
+                if self.store.import_flow(flow, self.report.dry_run).await? {
+                    Stored::Flow
+                } else {
+                    Stored::Unchanged
+                },
+            ));
+        };
+        let current_skill = match file.current_step() {
+            Some(ConcreteStep::Skill(skill)) if skill.policy.human && !file.finished => {
+                Some(skill.skill.name.clone())
+            }
+            _ => None,
+        };
+        let id = format!("flow:{}:{}", file.id, active.id);
+        let input_id = match &active.run_id {
+            Some(input) => input.clone(),
+            None => imported_input_id(&id)?,
+        };
+        let dir = self.run_dir(&input_id)?;
+        let manifest = active
+            .run_id
+            .as_ref()
+            .map(|_| crate::run_record::read_manifest(&dir).context("the review's captured input"))
+            .transpose()?;
+        let (node, iterations) = match manifest.as_ref().and_then(|input| input.flow.as_ref()) {
+            Some(RunFlowMembership::Step(step)) => {
+                if step.invocation_id != file.id {
+                    bail!(
+                        "review {id} names a different captured Flow {}",
+                        step.invocation_id
+                    );
+                }
+                (
+                    step.node
+                        .as_deref()
+                        .map(|key| captured_node(&flow, key))
+                        .transpose()?,
+                    step.iterations.clone(),
+                )
+            }
+            _ if current_skill.is_some()
+                && manifest.as_ref().is_none_or(|input| input.surface == "tui") =>
+            {
+                let (node, iterations) = flow.invocation.location(&flow.cursor)?;
+                (Some(node), Some(iterations))
+            }
+            _ => (None, None),
+        };
+        let graph = crate::engine::flow_graph::FlowGraph::new(
+            &flow.invocation.flow,
+            &flow.invocation.steps,
+        );
+        let review_node = node
+            .and_then(|node| graph.node_at(node))
+            .filter(|node| node.human);
+        if review_node.is_none() {
             return Ok(Some(
                 if self.store.import_flow(flow, self.report.dry_run).await? {
                     Stored::Flow
@@ -585,62 +624,68 @@ impl Import<'_> {
                 },
             ));
         }
-        let Some(active) = &file.active else {
-            return Ok(None);
+        let skill = manifest
+            .as_ref()
+            .and_then(|input| input.skill.clone())
+            .or(current_skill.clone());
+        let (title, title_source) = name(
+            &dir,
+            skill
+                .clone()
+                .unwrap_or_else(|| format!("{} review", file.flow)),
+        )?;
+        // Only a review at the saved current human occurrence is a pending boundary.
+        // Earlier reviews retain their membership without selecting today's cursor.
+        if current_skill.is_some()
+            && Some(flow.invocation.location(&flow.cursor)?) == node.zip(iterations.clone())
+        {
+            flow.pending_session_id = Some(id.clone());
+        }
+        let (provider, model) = match &manifest {
+            Some(input) => (Some(input.harness.clone()), input.model.clone()),
+            None => file
+                .model
+                .as_deref()
+                .map(crate::engine::config::parse_agent)
+                .map(|(provider, model)| (Some(provider), model))
+                .unwrap_or((None, None)),
         };
-        let skill = match file.current_step() {
-            Some(ConcreteStep::Skill(skill)) if skill.policy.human && !file.finished => {
-                skill.skill.name.clone()
-            }
-            _ => return Ok(None),
-        };
-        let id = format!("flow:{}:{}", file.id, active.id);
-        let Some(run_id) = active.run_id.clone() else {
-            // Never opened: nothing to preserve but the wait itself.
-            let stored = self.store.flow(&file.id).await?;
-            if stored.is_some_and(|flow| flow.pending_session_id.is_some()) {
-                return Ok(Some(Stored::Unchanged));
-            }
-            if !self.report.dry_run {
-                let flow = self.store.create_flow(flow).await?;
-                crate::ops::flow_session::reserve(self.store, &flow).await?;
-            }
-            return Ok(Some(Stored::FlowReview));
-        };
-        let dir = self.run_dir(&run_id)?;
-        let manifest = crate::run_record::read_manifest(&dir).context("the review's Run record")?;
-        let (title, title_source) = name(&dir, skill.clone())?;
-        let created_at = manifest.created_at.unix_timestamp();
         let session = AgentSession {
-            caller_input_id: manifest.parent_run_id,
+            caller_input_id: manifest
+                .as_ref()
+                .and_then(|input| input.parent_run_id.clone()),
             task_id: flow.task_id.clone(),
             wave_id: flow.wave_id.clone(),
             flow_session_id: Some(file.id.clone()),
             work_source: work.as_ref().map(|_| WorkSource::Declared),
             bound_at: None,
             id,
-            input_id: run_id,
-            input_published: true,
-            cwd: manifest.cwd,
-            skill: Some(skill),
-            provider: Some(manifest.harness),
-            model: manifest.model,
-            node: None,
-            iterations: None,
+            input_id,
+            input_published: manifest.is_some(),
+            cwd: manifest
+                .as_ref()
+                .map(|input| input.cwd.clone())
+                .unwrap_or(file.cwd),
+            skill,
+            provider,
+            model,
+            node,
+            iterations,
             kind: SessionKind::FlowReview,
             interactive: true,
             repo: manifest
-                .repo
+                .as_ref()
+                .and_then(|input| input.repo.as_ref())
                 .map(|path| path.to_string_lossy().into_owned()),
             title,
             title_source,
             request: None,
             ready_summary: active.ready_summary.clone(),
-            completed_at: match active.completed {
-                true => Some(modified(path)?),
-                false => None,
-            },
-            created_at,
+            completed_at: active.completed.then_some(observed_at),
+            created_at: manifest
+                .as_ref()
+                .map(|input| input.created_at.unix_timestamp())
+                .unwrap_or(observed_at),
         };
         self.store(Stored::FlowReview, session, Some(flow)).await
     }
@@ -803,4 +848,26 @@ impl Import<'_> {
         }
         Ok(Some(Stored::TaskReview))
     }
+}
+
+// Unopened historical conversations have identity, but no observed process.
+fn imported_input_id(session: &str) -> Result<RunId> {
+    let digest = Sha256::digest(session.as_bytes());
+    Ok(RunId::parse(&format!(
+        "run_{}",
+        hex::encode(&digest[..16])
+    ))?)
+}
+
+fn captured_node(flow: &FlowSession, key: &str) -> Result<u32> {
+    let graph =
+        crate::engine::flow_graph::FlowGraph::new(&flow.invocation.flow, &flow.invocation.steps);
+    let mut index = 0;
+    while let Some(node) = graph.node_at(index) {
+        if node.key == key {
+            return Ok(index);
+        }
+        index += 1;
+    }
+    bail!("Flow {} has no captured node {key}", flow.id())
 }

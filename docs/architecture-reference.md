@@ -37,7 +37,7 @@ consumers without their coordinated migration.
 
 | Contract | Current evidence and next dependency |
 | --- | --- |
-| One Exec per actual lf process | Parsed ordinary commands record process ancestry and outcome. Finish coverage/disposition of help, rejected arguments, screenshot and installation/bootstrap without bypassing store authority. |
+| One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Installed startup acceptance and final discovery/wire coverage remain open. |
 | Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Complete recorded account/native Home, public restart, stale-client exclusion and shared-engine preservation across every provider path. |
 | Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Valid native decision retry still fails original-turn transport; all-provider recovery and final retired-owner deletion remain required. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |

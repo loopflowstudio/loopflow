@@ -2153,14 +2153,23 @@ mod durable_store_tests {
                     recovered.cursor.progress.direction.as_deref(),
                     Some("previous direction")
                 );
-                assert_eq!(
-                    recovered.cursor.progress.verdict.as_ref().unwrap().decision,
-                    expected
-                );
-                assert_eq!(
-                    recovered.cursor.progress.verdict.as_ref().unwrap().summary,
-                    "saved proof"
-                );
+                // Saved command verdicts remain historical bytes; only an exact
+                // successful native completion can supply current navigation.
+                assert!(recovered.cursor.progress.verdict.is_none());
+                let retained: String = store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .query_row(
+                        "SELECT review_json FROM flow_sessions WHERE id=?1",
+                        [position.id()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(retained, json);
+                let saved_verdict: crate::engine::transitions::FlowVerdict =
+                    serde_json::from_value(verdict).unwrap();
+                assert_eq!(saved_verdict.decision, expected);
                 assert!(recovered.failure.is_none());
             }
         }

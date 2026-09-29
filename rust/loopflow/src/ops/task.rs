@@ -6190,6 +6190,7 @@ mod tests {
 
     #[tokio::test]
     async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
+        let repository = loopflow_test_support::TestRepo::new();
         let TaskFixture {
             _database,
             store,
@@ -6197,7 +6198,7 @@ mod tests {
             work,
             database_path,
             ..
-        } = task_fixture("LOO-248").await;
+        } = task_fixture_at("LOO-248", repository.path().to_path_buf()).await;
         let now = time::OffsetDateTime::now_utc();
         let mut pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         pr.branch = "HEAD".to_string();

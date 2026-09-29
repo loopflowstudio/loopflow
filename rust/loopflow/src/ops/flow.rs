@@ -95,8 +95,15 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
     // Earlier and unfinished Runs can contain the first attempt on a PR merged
     // inside the window. Python windows Run statistics and PR intervals separately.
-    let runs = crate::run_record::scan_runs_since(&crate::store::observability_home_dir(), 0)
-        .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
+    let runs = crate::lf::commands::runs::collect_runs_started_since(
+        crate::lf::commands::WorkFilter {
+            wave: None,
+            project: None,
+            task: None,
+        },
+        0,
+    )
+    .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
     let mut run_input = tempfile::NamedTempFile::new()
         .map_err(|error| OpsError::Message(format!("create telemetry input: {error}")))?;
     serde_json::to_writer(run_input.as_file_mut(), &runs)
@@ -414,6 +421,7 @@ mod tests {
                 worktree: Some(repo.path().to_path_buf()),
                 skill: Some("implement".to_string()),
                 subjects: Vec::new(),
+                work: None,
                 flow: RunFlowMembership::Independent,
             },
         )

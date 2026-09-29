@@ -281,18 +281,26 @@ struct DTOFixtureTests {
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
         #expect(sessions.map(\.flowMembership) == [
             .step(flow: "task-design", invocationId: "00000000-0000-0000-0000-00000000f10w",
-                  step: "review-design", node: "1", iterations: [[]], occurrence: .current),
+                  step: "review-design", node: 1, iterations: [[]], occurrence: .current),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
-                  step: "implement", node: "4/fix/1", iterations: [[2, 1], [1]], occurrence: .earlier),
+                  step: "implement", node: 6, iterations: [[2, 1], [1]], occurrence: .earlier),
             .independent,
             .unknown(reason: "Run run_00000000000000000000000000000004 predates recorded Flow membership"),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f1",
-                  step: "implement", node: "2", iterations: [[2, 1]], occurrence: .past),
+                  step: "implement", node: 2, iterations: [[2, 1]], occurrence: .past),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f0",
                   step: "implement", node: nil, iterations: nil, occurrence: .past),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
-                  step: "demo", node: "7", iterations: [[0, 0]], occurrence: .current),
+                  step: "demo", node: 9, iterations: [[0, 0]], occurrence: .current),
         ])
+        let graphs = try JSONDecoder().decode([String: FlowGraph].self,
+            from: loadFixtureData("session_membership_graphs.json"))
+        for session in sessions {
+            if case let .step(_, invocation, step, node?, _, _) = session.flowMembership {
+                let graph = try #require(graphs[invocation])
+                #expect(graph.node(node)?.label == step)
+            }
+        }
         #expect(sessions.last?.titleSource == .unavailable)
         #expect(sessions.map(\.provider) == ["codex", "claude", "claude", "claude", "claude", "claude", nil])
         #expect(sessions[1].flowMembership.label == "feature / implement · iteration (2, 1) / (1) · earlier")

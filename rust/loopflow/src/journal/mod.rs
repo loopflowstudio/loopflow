@@ -6,7 +6,7 @@ use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -117,6 +117,9 @@ thread_local! {
 // Only the executable entry point sets this. Library calls retain their own
 // outer with_runtime scope; inherited environment cannot opt into or out of it.
 static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
+// An actual lf process keeps one identity across async and blocking workers.
+// Library callers retain the thread-scoped with_runtime lifetime above.
+static PROCESS_CONTEXT: Mutex<Option<RunContext>> = Mutex::new(None);
 
 #[derive(Debug, Clone)]
 struct RunContext {
@@ -904,6 +907,12 @@ fn lock_file(_file: &File) -> Result<FileLock, std::io::Error> {
 }
 
 fn current_context() -> Option<RunContext> {
+    if is_cli_process() {
+        return PROCESS_CONTEXT
+            .lock()
+            .expect("process context mutex poisoned")
+            .clone();
+    }
     RUN_CONTEXT.with(|cell| cell.borrow().clone())
 }
 
@@ -1013,12 +1022,24 @@ fn elapsed_seconds(value: &str) -> Option<u64> {
 }
 
 fn set_context(context: RunContext) {
+    if is_cli_process() {
+        *PROCESS_CONTEXT
+            .lock()
+            .expect("process context mutex poisoned") = Some(context);
+        return;
+    }
     RUN_CONTEXT.with(|cell| {
         *cell.borrow_mut() = Some(context);
     });
 }
 
 fn clear_context() {
+    if is_cli_process() {
+        *PROCESS_CONTEXT
+            .lock()
+            .expect("process context mutex poisoned") = None;
+        return;
+    }
     RUN_CONTEXT.with(|cell| {
         *cell.borrow_mut() = None;
     });

@@ -176,7 +176,7 @@
           "name": "feature",
           "steps": [
             {
-              "key": "0",
+              "key": 0,
               "id": "design",
               "label": "task-design",
               "kind": "skill",
@@ -188,7 +188,7 @@
               "paths": []
             },
             {
-              "key": "1",
+              "key": 1,
               "id": "implement",
               "label": "implement",
               "kind": "skill",
@@ -201,7 +201,7 @@
               "paths": []
             },
             {
-              "key": "2",
+              "key": 2,
               "id": null,
               "label": "realign",
               "kind": "skill",
@@ -214,12 +214,12 @@
               "paths": []
             },
             {
-              "key": "3",
+              "key": 3,
               "id": "decide",
               "label": "loop-decide",
               "kind": "skill",
               "human": false,
-              "returns_to": "1",
+              "returns_to": 1,
               "parents": [
                 "feature",
                 "pursue"
@@ -227,7 +227,7 @@
               "paths": []
             },
             {
-              "key": "4",
+              "key": 4,
               "id": "demo",
               "label": "demo",
               "kind": "skill",
@@ -240,12 +240,12 @@
               "paths": []
             },
             {
-              "key": "5",
+              "key": 5,
               "id": "decide_delivery",
               "label": "loop-decide",
               "kind": "skill",
               "human": false,
-              "returns_to": "1",
+              "returns_to": 1,
               "parents": [
                 "feature",
                 "pursue"
@@ -253,7 +253,7 @@
               "paths": []
             },
             {
-              "key": "6",
+              "key": 6,
               "id": null,
               "label": "xor-route",
               "kind": "xor",
@@ -268,7 +268,7 @@
                   "description": "Repair the failing check",
                   "steps": [
                     {
-                      "key": "6/fix/0",
+                      "key": 7,
                       "id": "patch",
                       "label": "patch",
                       "kind": "skill",
@@ -287,7 +287,7 @@
               ]
             },
             {
-              "key": "7",
+              "key": 8,
               "id": null,
               "label": "pr land -c",
               "kind": "op",
@@ -301,19 +301,19 @@
             }
           ]
         },
-        "current": "3",
+        "current": 3,
         "completed": [
-          "0",
-          "1",
-          "2"
+          0,
+          1,
+          2
         ],
         "returns": [
           {
-            "decider": "3",
+            "decider": 3,
             "traversals": 0
           },
           {
-            "decider": "5",
+            "decider": 5,
             "traversals": 0
           }
         ],
@@ -473,7 +473,7 @@
           "name": "feature",
           "steps": [
             {
-              "key": "0",
+              "key": 0,
               "id": "design",
               "label": "task-design",
               "kind": "skill",
@@ -485,7 +485,7 @@
               "paths": []
             },
             {
-              "key": "1",
+              "key": 1,
               "id": "implement",
               "label": "implement",
               "kind": "skill",
@@ -498,7 +498,7 @@
               "paths": []
             },
             {
-              "key": "2",
+              "key": 2,
               "id": null,
               "label": "realign",
               "kind": "skill",
@@ -511,12 +511,12 @@
               "paths": []
             },
             {
-              "key": "3",
+              "key": 3,
               "id": "decide",
               "label": "loop-decide",
               "kind": "skill",
               "human": false,
-              "returns_to": "1",
+              "returns_to": 1,
               "parents": [
                 "feature",
                 "pursue"
@@ -524,7 +524,7 @@
               "paths": []
             },
             {
-              "key": "4",
+              "key": 4,
               "id": "demo",
               "label": "demo",
               "kind": "skill",
@@ -537,12 +537,12 @@
               "paths": []
             },
             {
-              "key": "5",
+              "key": 5,
               "id": "decide_delivery",
               "label": "loop-decide",
               "kind": "skill",
               "human": false,
-              "returns_to": "1",
+              "returns_to": 1,
               "parents": [
                 "feature",
                 "pursue"
@@ -550,7 +550,7 @@
               "paths": []
             },
             {
-              "key": "6",
+              "key": 6,
               "id": null,
               "label": "xor-route",
               "kind": "xor",
@@ -565,7 +565,7 @@
                   "description": "Repair the failing check",
                   "steps": [
                     {
-                      "key": "6/fix/0",
+                      "key": 7,
                       "id": "patch",
                       "label": "patch",
                       "kind": "skill",
@@ -584,7 +584,7 @@
               ]
             },
             {
-              "key": "7",
+              "key": 8,
               "id": null,
               "label": "pr land -c",
               "kind": "op",
@@ -598,20 +598,20 @@
             }
           ]
         },
-        "current": "4",
+        "current": 4,
         "completed": [
-          "0",
-          "1",
-          "2",
-          "3"
+          0,
+          1,
+          2,
+          3
         ],
         "returns": [
           {
-            "decider": "3",
+            "decider": 3,
             "traversals": 1
           },
           {
-            "decider": "5",
+            "decider": 5,
             "traversals": 1
           }
         ],
@@ -800,7 +800,7 @@
           "name": "feature",
           "steps": [
             {
-              "key": "0",
+              "key": 0,
               "id": "design",
               "label": "task-design",
               "kind": "skill",
@@ -812,7 +812,7 @@
               "paths": []
             },
             {
-              "key": "1",
+              "key": 1,
               "id": "implement",
               "label": "implement",
               "kind": "skill",
@@ -825,7 +825,7 @@
               "paths": []
             },
             {
-              "key": "2",
+              "key": 2,
               "id": null,
               "label": "realign",
               "kind": "skill",
@@ -838,12 +838,12 @@
               "paths": []
             },
             {
-              "key": "3",
+              "key": 3,
               "id": "decide",
               "label": "loop-decide",
               "kind": "skill",
               "human": false,
-              "returns_to": "1",
+              "returns_to": 1,
               "parents": [
                 "feature",
                 "pursue"
@@ -851,7 +851,7 @@
               "paths": []
             },
             {
-              "key": "4",
+              "key": 4,
               "id": "demo",
               "label": "demo",
               "kind": "skill",
@@ -864,12 +864,12 @@
               "paths": []
             },
             {
-              "key": "5",
+              "key": 5,
               "id": "decide_delivery",
               "label": "loop-decide",
               "kind": "skill",
               "human": false,
-              "returns_to": "1",
+              "returns_to": 1,
               "parents": [
                 "feature",
                 "pursue"
@@ -877,7 +877,7 @@
               "paths": []
             },
             {
-              "key": "6",
+              "key": 6,
               "id": null,
               "label": "xor-route",
               "kind": "xor",
@@ -892,7 +892,7 @@
                   "description": "Repair the failing check",
                   "steps": [
                     {
-                      "key": "6/fix/0",
+                      "key": 7,
                       "id": "patch",
                       "label": "patch",
                       "kind": "skill",
@@ -911,7 +911,7 @@
               ]
             },
             {
-              "key": "7",
+              "key": 8,
               "id": null,
               "label": "pr land -c",
               "kind": "op",
@@ -925,18 +925,18 @@
             }
           ]
         },
-        "current": "2",
+        "current": 2,
         "completed": [
-          "0",
-          "1"
+          0,
+          1
         ],
         "returns": [
           {
-            "decider": "3",
+            "decider": 3,
             "traversals": 2
           },
           {
-            "decider": "5",
+            "decider": 5,
             "traversals": 0
           }
         ],

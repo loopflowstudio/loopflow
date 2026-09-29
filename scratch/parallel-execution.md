@@ -1550,3 +1550,64 @@ Current source retains review_commands with the quoted inspection failure and
 actual failed delivery/retry, and neither retired scanner function remains.
 The incident note now points to that later proof without rewriting its historical
 observations or claiming a fresh behavioral run.
+
+## Numeric Flow wire and same-process repair (2026-09-29, in progress)
+
+Main applied the released numeric proposal hunks (patch SHA
+`897ed66fc09cc37ed15a33b734329aafb22e8f0fe727952f6dee48b5acbd2ca2`)
+to `91e0215c1`. Graph, cursor, returns and Session membership now share captured
+numeric IDs; Swift follows explicit graph containment and invocation identity.
+Historical path translation remains inside import. Rust focused proof passes 13
+with one Nextest LEAK annotation on the pure repeated-decisions projection; the
+CLI/import proof passes 4. DTO/Swift/mounted/managed-operation/static proof remains
+in progress; no numeric-wire acceptance yet.
+
+The retained public landing test reproduced the exact hosted missing-Exec error
+(`landing-exec-red.log`, 8.723s). The admitted context was thread-local while the
+CLI marker was process-wide; Tokio blocking repair therefore lost the same
+process identity. CLI context now lives in the existing journal's process-wide
+mutex; non-CLI library scopes retain their thread-local lifetime. No new Exec,
+provider authority or persistence owner was introduced. The existing four
+inspection/result/malformed-caller/missing-observation proofs pass in
+`landing-exec-green.log`; its extended landing case initially failed only in the
+new Flow fixture. Diagnostics exposed quoted op arguments then an uncommitted
+Flow file; the fixture now uses whitespace-safe arguments committed before launch.
+`landing-exec-final-2.log` passes the complete six-case landing matrix in 20.301s,
+including mechanical Flow → landing → ci-fix → nested lf rebase. Session starts
+and Flow operation history name the calling Exec and command completion occurs
+once. Providers/GitHub remain scripted, Git transport local; no real PR mutated.
+Full scope, native decision counterexamples and configured acceptance remain open.
+
+The subsequent DTO/library check passes 12 in 0.700s, including a clean isolated
+repeat of the previously annotated pure projection and both library-context
+lifetime checks. Swift first failed compilation at the running-step label
+fallback, then exposed one stalled fixture assertion retaining its old string
+path index. The candidate now formats an unknown numeric label explicitly and
+uses captured node 0 in that one-node fixture. `numeric-flow-wire-swift-3.log`
+executes 8 Swift Testing checks in 12.937s, including all three mounted terminal/
+draft/companion proofs. The preliminary XCTest zero-count is not this result.
+`landing-exec-merged.log` passes the six scenarios in 20.713s with an explicit
+stored `(merged, merge-head)` outcome and exactly two actual Execs. The disposable
+managed topology proof first reached an obsolete as_str return-edge assertion;
+that test now checks numeric values and its rerun is pending. Architecture and
+the generated HTML check pass; Clippy and final checkpoint remain pending.
+
+`numeric-flow-wire-managed-2.log` passes the one managed topology proof in 1.84s
+after a 19.37s container build; its disposable container was removed.
+This proves public pinned topology, both return counts and bad-restart preservation
+through the selected installation route. The earlier failed as_str assertion
+remains in the first log. Production measurement versus `91e0215c1`: +210/-198,
+net +12, including +22/-1 for process context and +188/-197 for numeric wire;
+trailing Rust test modules, test files, UI fixture, Markdown and JSON excluded.
+Receipt: `.lf/tmp/cut-i/numeric-thread-counts.json`. Review found and repaired the
+missing Swift fallback, stale single-node assertion, legacy catalog assertion and
+missing Flow merge-outcome assertion. No new owner, migration or native decision
+interface. Chapters now points to the already-recorded public CLI proof instead
+of listing it as unrun. Full remaining scope stays with this Task.
+
+All-target Clippy passes in `numeric-thread-clippy-2.log`; the preceding command
+found only an unnecessary cloned test slice, now borrowed without changing the
+assertion. Formatting/whitespace, architecture and generated HTML checks pass.
+`numeric-thread-source.json` names HEAD/base and every changed executable/test/
+fixture/document hash for this proof boundary. No broader matrix was repeated.
+Publication is a review checkpoint, not code-complete acceptance or shipment.

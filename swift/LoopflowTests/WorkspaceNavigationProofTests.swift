@@ -435,7 +435,8 @@ struct WorkspaceNavigationProofTests {
 
         // A repeated skill name and a nested occurrence both locate the exact
         // captured node; navigation preserves the original unfinished draft.
-        for node in ["5", "6/fix/0"] {
+        // Captured preorder: root decision 5; XOR 6; its patch child 7.
+        for node in [UInt32(5), UInt32(7)] {
             try await named.membership(.step(flow: "feature", invocationId: invocation,
                                             step: "recorded skill", node: node,
                                             iterations: [[2, 0]], occurrence: .earlier), for: "first")
@@ -490,7 +491,7 @@ struct WorkspaceNavigationProofTests {
         // A historical invocation must not jump into an identically keyed node
         // of the current Flow. The real chip leaves this Session selected.
         try await named.membership(.step(flow: "feature", invocationId: "prior-invocation",
-                                        step: "loop-decide", node: "5", iterations: [[1, 1]],
+                                        step: "loop-decide", node: 5, iterations: [[1, 1]],
                                         occurrence: .past), for: "first")
         await model.refresh()
         try await settle(window)

@@ -228,7 +228,7 @@ pub enum SessionFlowMembership {
         invocation_id: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
-        node: Option<String>,
+        node: Option<u32>,
         iterations: Option<Vec<Vec<u32>>>,
         occurrence: SessionFlowOccurrence,
     },
@@ -1495,15 +1495,12 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
                 let node = session
                     .node
                     .map(|id| {
-                        graph
-                            .node_at(id)
-                            .map(|node| node.key.clone())
-                            .ok_or_else(|| {
-                                anyhow!(
-                                    "Session {} names an absent captured Flow node {id}",
-                                    session.id
-                                )
-                            })
+                        graph.node_at(id).map(|node| node.key).ok_or_else(|| {
+                            anyhow!(
+                                "Session {} names an absent captured Flow node {id}",
+                                session.id
+                            )
+                        })
                     })
                     .transpose()?;
                 SessionFlowMembership::Step {
@@ -2974,9 +2971,14 @@ mod tests {
         let position = nested_position();
         let graph = FlowGraph::new("review", &position.invocation.steps);
         let expected = &graph.steps[1].paths[0].steps[1].key;
-        assert_eq!(expected, "1/fix/1");
+        assert_eq!(*expected, 3);
         let captured = RunFlowStep::of(&position).unwrap();
-        assert_eq!(captured.node.as_ref(), Some(expected));
+        // Immutable legacy input retains its runtime path; the public wire uses its captured ID.
+        assert_eq!(captured.node.as_deref(), Some("1/fix/1"));
+        assert_eq!(
+            position.invocation.node_id(&position.cursor).unwrap(),
+            *expected
+        );
         assert_eq!(captured.iterations, Some(vec![vec![5], vec![2]]));
 
         // Old captures keep their known Flow provenance without fabricating a
@@ -3054,7 +3056,7 @@ mod tests {
                         else {
                             panic!("stored Session must name its captured node")
                         };
-                        assert_eq!(node.as_deref(), Some(expected[previous].key.as_str()));
+                        assert_eq!(node, Some(expected[previous].key));
                         assert_eq!(step, expected[previous].label);
                         assert_eq!(&actual_iterations, iterations);
                         assert_eq!(
@@ -3281,5 +3283,87 @@ mod tests {
         client.kill().unwrap();
         client.wait().unwrap();
         assert!(resumable.unwrap());
+    }
+
+    #[test]
+    fn membership_wire_ids_are_derived_from_their_captures() {
+        use crate::engine::flow::{
+            ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, OccurrencePolicy, Skill,
+        };
+        use crate::engine::flow_graph::FlowGraph;
+        fn skill(name: &str, human: bool) -> ConcreteStep {
+            ConcreteStep::Skill(ConcreteSkill {
+                skill: Skill::named(name),
+                policy: OccurrencePolicy {
+                    human,
+                    ..Default::default()
+                },
+                flow_parents: Vec::new(),
+            })
+        }
+        let opening = || vec![skill("kickoff", false), skill("review-design", true)];
+        let mut past = opening();
+        past.push(skill("implement", false));
+        let mut current = past.clone();
+        current.push(skill("compress", false));
+        current.push(ConcreteStep::Xor(ConcreteXor {
+            router: Skill::named("route"),
+            flow_parents: Vec::new(),
+            paths: std::collections::HashMap::from([
+                (
+                    "fix".into(),
+                    ConcretePath {
+                        description: "Repair".into(),
+                        steps: vec![skill("patch", false), skill("implement", false)],
+                    },
+                ),
+                (
+                    "skip".into(),
+                    ConcretePath {
+                        description: "Skip".into(),
+                        steps: vec![],
+                    },
+                ),
+            ]),
+        }));
+        current.extend([
+            skill("loop-decide", false),
+            skill("pr-publish", false),
+            skill("demo", true),
+        ]);
+        let expected = std::collections::BTreeMap::from([
+            (
+                "00000000-0000-0000-0000-00000000f10w".to_string(),
+                FlowGraph::new("task-design", &opening()),
+            ),
+            (
+                "00000000-0000-0000-0000-0000000000f1".to_string(),
+                FlowGraph::new("feature", &past),
+            ),
+            (
+                "00000000-0000-0000-0000-0000000000f2".to_string(),
+                FlowGraph::new("feature", &current),
+            ),
+        ]);
+        let graphs: std::collections::BTreeMap<String, FlowGraph> = serde_json::from_str(
+            include_str!("../../../../tests/fixtures/dto/session_membership_graphs.json"),
+        )
+        .unwrap();
+        assert_eq!(graphs, expected);
+        let sessions: Vec<super::SessionRecord> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_memberships.json"
+        ))
+        .unwrap();
+        for session in sessions {
+            if let super::SessionFlowMembership::Step {
+                invocation_id,
+                step,
+                node: Some(node),
+                ..
+            } = session.flow_membership
+            {
+                assert_eq!(graphs[&invocation_id].node_at(node).unwrap().label, step);
+            }
+        }
     }
 }

@@ -194,6 +194,8 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
             .layoutPriority(-1)
     }
 
+    // Numeric node IDs are local to the captured invocation; keep this fence
+    // before resolving a Session into the current diagram.
     private func flowTarget(_ session: SessionRecord) -> (task: WorkspaceTask, node: FlowNodeSelection)? {
         guard let task = crumb?.task,
               case let .step(_, invocation, _, node?, _, occurrence) = session.flowMembership,

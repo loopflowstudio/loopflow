@@ -9,6 +9,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = Path("swift/.build/source-times.json")
+INDEXES = {
+    "swiftpm": INDEX,
+    "xcode": Path("swift/.build/xcode-derived-data/source-times.json"),
+}
 
 
 def _tracked_sources(repo: Path) -> list[Path]:
@@ -22,7 +26,7 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def cache_key(repo: Path, toolchain: str) -> tuple[str, str]:
+def cache_key(repo: Path, toolchain: str, build_system: str = "swiftpm") -> tuple[str, str]:
     toolchain_hash = hashlib.sha256(toolchain.encode()).hexdigest()
     sources = hashlib.sha256()
     for path in _tracked_sources(repo):
@@ -36,11 +40,11 @@ def cache_key(repo: Path, toolchain: str) -> tuple[str, str]:
             value = "missing"
         sources.update(value.encode())
         sources.update(b"\0")
-    prefix = f"swiftpm-source-times-{toolchain_hash}-"
+    prefix = f"{build_system}-source-times-{toolchain_hash}-"
     return prefix + sources.hexdigest(), prefix
 
 
-def save_source_times(repo: Path) -> int:
+def save_source_times(repo: Path, build_system: str = "swiftpm") -> int:
     records = {
         str(path.relative_to(repo)): {
             "sha256": _digest(path),
@@ -50,15 +54,15 @@ def save_source_times(repo: Path) -> int:
         for path in _tracked_sources(repo)
         if path.is_file() and not path.is_symlink()
     }
-    index = repo / INDEX
+    index = repo / INDEXES[build_system]
     index.parent.mkdir(parents=True, exist_ok=True)
     index.write_text(json.dumps(records, sort_keys=True) + "\n")
     return len(records)
 
 
-def restore_source_times(repo: Path) -> int:
+def restore_source_times(repo: Path, build_system: str = "swiftpm") -> int:
     try:
-        records = json.loads((repo / INDEX).read_text())
+        records = json.loads((repo / INDEXES[build_system]).read_text())
     except (OSError, ValueError):
         print("No readable Swift source timestamp index; keeping checkout timestamps")
         return 0
@@ -86,19 +90,25 @@ def restore_source_times(repo: Path) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("key", "save", "restore"))
+    parser.add_argument("--build-system", choices=INDEXES, default="swiftpm")
     args = parser.parse_args()
     if args.action == "key":
+        commands = [["swift", "--version"], ["xcrun", "--show-sdk-version"]]
+        if args.build_system == "xcode":
+            commands.extend([["xcodebuild", "-version"], ["xcodegen", "--version"]])
         identity = "\n".join(
             subprocess.run(command, capture_output=True, text=True, check=True).stdout
-            for command in (["swift", "--version"], ["xcrun", "--show-sdk-version"])
+            for command in commands
         )
-        key, prefix = cache_key(ROOT, identity)
+        key, prefix = cache_key(ROOT, identity, args.build_system)
         print(f"key={key}")
         print(f"restore-prefix={prefix}")
     elif args.action == "save":
-        print(f"Saved Swift source timestamps for {save_source_times(ROOT)} files")
+        count = save_source_times(ROOT, args.build_system)
+        print(f"Saved Swift source timestamps for {count} files")
     else:
-        print(f"Restored Swift source timestamps for {restore_source_times(ROOT)} unchanged files")
+        count = restore_source_times(ROOT, args.build_system)
+        print(f"Restored Swift source timestamps for {count} unchanged files")
 
 
 if __name__ == "__main__":

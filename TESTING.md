@@ -287,14 +287,20 @@ the Xcode test target compiles.
 Two levels, split on purpose:
 
 **Compile check** (`loopflow` suite, in `--all` and CI). Compiles the macOS app
-and its signed test runners. Swift package tests already exercise the shared
-suites un-hosted, so the only unique signal here is that the app target builds:
+and its signed test runners with the terminal fallback. Swift package tests
+exercise the shared suites with GhosttyKit:
 
 ```bash
 cd swift
 xcodegen generate
 xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
 ```
+
+CI caches this build only for identical tracked Swift inputs, Xcode, SDK and
+XcodeGen versions. Matching source timestamps preserve compilation across
+checkouts; changed inputs start fresh, including signed entitlement state.
+Only main saves caches. PRs and merge groups still run the compile command and
+build the current Rust control tools.
 
 **Hosted run** (`ui-host` required gate, permissioned host only). Actually runs
 `LoopflowUITests`; needs macOS UI-automation permission. Never runs under

@@ -186,7 +186,8 @@ jobs:
         # is the CI-runnable half of the control-room state proof — fixture
         # lookup and state-forwarding regressions fail this step.
         run: |
-          swift build --package-path swift --product LoopflowMac
+          # The Swift test target depends on LoopflowMac and already builds it.
+          test -x swift/.build/debug/LoopflowMac
           scripts/prove_wave_surface_states.sh
         timeout-minutes: 15
 

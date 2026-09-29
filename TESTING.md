@@ -6,6 +6,12 @@ proof that can change the next decision.
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
 
+CI Rust cache keys include the root workspace's build profiles, which the cache
+action's member-manifest discovery omits. Profile changes get fresh dependency
+caches; version-only releases retain them. Main publishes the shared caches;
+PRs and merge groups restore them without accumulating private copies. Cache
+restoration never skips compilation checks or tests.
+
 The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.

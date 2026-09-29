@@ -200,10 +200,13 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Sessions in this repository.
-    public func sessions(cwd: String? = nil) async throws -> [SessionRecord] {
+    public func sessions(includingHeadless: Bool = false, cwd: String? = nil) async throws -> [SessionRecord] {
         // One SQL selection retains a complete inventory despite concurrent
         // rename/completion; separate offset pages could skip or duplicate IDs.
-        let stdout = try await run(["session", "list", "--json", "--limit", "0"], cwd)
+        var args = ["session", "list", "--json"]
+        if includingHeadless { args += ["--interactive", "all"] }
+        args += ["--limit", "0"]
+        let stdout = try await run(args, cwd)
         return try Self.decode([SessionRecord].self, from: stdout)
     }
 
@@ -227,6 +230,16 @@ public struct RegistryQuery: Sendable {
         cwd: String? = nil
     ) async throws -> SessionRecord {
         let stdout = try await run(["session", "rename", "--json", "--", id, name], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
+    public func previewSessionBinding(id: String, task: String, cwd: String?) async throws -> SessionBindingPreview {
+        let stdout = try await run(["session", "bind", "--dry-run", "--json", "--task", task, "--", id], cwd)
+        return try Self.decode(SessionBindingPreview.self, from: stdout)
+    }
+
+    public func bindSession(id: String, taskId: String, cwd: String?) async throws -> SessionRecord {
+        let stdout = try await run(["session", "bind", "--json", "--task", taskId, "--", id], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 

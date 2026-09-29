@@ -578,6 +578,41 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     let end = fixture.json(&["session", "list", "--json", "--limit", "2", "--offset", "2"]);
     assert_eq!(end.as_array().unwrap().len(), 1);
     assert_eq!(end[0]["id"], "inventory-112");
+    fixture
+        .db()
+        .execute(
+            "UPDATE agent_sessions SET interactive=0 WHERE id IN ('inventory-000','inventory-112')",
+            [],
+        )
+        .unwrap();
+    let default = fixture.json(&["session", "list", "--json", "--limit", "0"]);
+    assert_eq!(default.as_array().unwrap().len(), 2);
+    let both = fixture.json(&[
+        "session",
+        "list",
+        "--interactive",
+        "all",
+        "--json",
+        "--limit",
+        "0",
+    ]);
+    assert_eq!(both.as_array().unwrap().len(), 3);
+    assert!(both
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["id"].as_str().unwrap() >= "inventory-110"));
+    let everywhere = fixture.json(&[
+        "session",
+        "list",
+        "--interactive",
+        "all",
+        "--all",
+        "--json",
+        "--limit",
+        "0",
+    ]);
+    assert_eq!(everywhere.as_array().unwrap().len(), 113);
 }
 
 #[test]
@@ -634,10 +669,33 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(started(task.task.id.as_str()), None);
     assert!(task_runs("INF-123").is_empty());
 
+    let preview = fixture.json(&[
+        "session",
+        "bind",
+        &session,
+        "--task",
+        "INF-123",
+        "--dry-run",
+        "--json",
+    ]);
+    assert_eq!(preview["session_id"], session);
+    assert_eq!(preview["task_id"], task.task.id.as_str());
+    assert_eq!(preview["identifier"], "INF-123");
+    assert_eq!(started(task.task.id.as_str()), None);
+    assert_eq!(fixture.sessions()[0]["work"], Value::Null);
+    assert_eq!(fixture.launches().len(), 1);
+
     // The bind happens measurably after the Run was created.
     std::thread::sleep(Duration::from_secs(2));
     let before = now();
-    let bound = fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
+    let bound = fixture.json(&[
+        "session",
+        "bind",
+        &session,
+        "--task",
+        preview["task_id"].as_str().unwrap(),
+        "--json",
+    ]);
     let after = now();
     assert_eq!(bound["id"], session.as_str());
     assert_eq!(bound["run_id"], orphan.as_str());
@@ -771,7 +829,35 @@ fn continuing_provider_children_inherit_the_bound_session_without_rewriting_hist
             [task.task.id.as_str()],
         )
         .unwrap();
-    fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
+    let preview = fixture.json(&[
+        "session",
+        "bind",
+        &session,
+        "--task",
+        "INF-123",
+        "--dry-run",
+        "--json",
+    ]);
+    assert_eq!(preview["task_id"], task.task.id.as_str());
+    assert_eq!(
+        fixture
+            .db()
+            .query_row(
+                "SELECT work_state FROM tasks WHERE id=?1",
+                [task.task.id.as_str()],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        "done"
+    );
+    fixture.json(&[
+        "session",
+        "bind",
+        &session,
+        "--task",
+        preview["task_id"].as_str().unwrap(),
+        "--json",
+    ]);
     let started: i64 = fixture
         .db()
         .query_row(
@@ -2720,6 +2806,29 @@ fn import_stores_each_old_session_once_with_its_name() {
             })
             .collect();
         names.sort();
+        let both: Vec<Value> = serde_json::from_value(fixture.json(&[
+            "session",
+            "list",
+            "--all",
+            "--interactive",
+            "all",
+            "--limit",
+            "0",
+            "--json",
+        ]))
+        .unwrap();
+        let mut combined: Vec<_> = both
+            .iter()
+            .map(|session| {
+                (
+                    session["title"].as_str().unwrap().to_string(),
+                    session["kind"].as_str().unwrap().to_string(),
+                    session["run_id"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        combined.sort();
+        assert_eq!(combined, names);
         names
     };
     assert_eq!(

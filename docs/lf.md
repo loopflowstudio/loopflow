@@ -720,6 +720,16 @@ explicit filters expose headless and completed history. `--all` retains its
 all-repositories meaning. Interactive mode does not decide Flow membership,
 completion or permission to advance a review.
 
+Use `--interactive all` for both modes in one inventory. In Desktop, the outline
+menu's **Show headless Sessions** reveals headless conversations. Hiding them
+keeps their open terminals and drafts.
+
+Choose **Bind to Task…** beside a Session name, enter an issue identifier or
+stable Task ID, then review the resolved Task before **Bind permanently**.
+`lf session bind SESSION --task INF-123 --dry-run --json` resolves that same
+identity without assigning work. Confirmation submits its stable Task ID;
+existing Wave and Flow constraints are checked by the binding transaction.
+
 Connect uses the live engine where possible and retains conversation identity,
 name, feedback and native history. The new driver receives write authority; the
 old client can remain a passive display. Restart explicitly replaces the exact

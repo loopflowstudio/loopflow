@@ -88,6 +88,12 @@ final class PodiumModel {
     var workspace: WorkspaceProjection {
         WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: sessions.value ?? [])
     }
+    /// Visibility never changes the inventory used by panes and selection.
+    var visibleWorkspace: WorkspaceProjection {
+        WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: (sessions.value ?? []).filter {
+            navigation.showsHeadlessSessions || $0.interactive
+        })
+    }
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {
         didSet {
             // Retain the latest observed Task across temporary chapter membership
@@ -603,6 +609,53 @@ final class PodiumModel {
         navigation.renaming = nil
     }
 
+    func beginSessionBinding(_ record: SessionRecord) {
+        guard navigation.binding == nil else { return }
+        navigation.binding = SessionBindingDraft(sessionId: record.id, title: record.title)
+    }
+
+    func previewSessionBinding() async {
+        guard let repo = repoPath, let draft = navigation.binding, !draft.submitting else { return }
+        let owner = navigation
+        owner.binding?.submitting = true
+        owner.binding?.error = nil
+        do {
+            let preview = try await query.previewSessionBinding(
+                id: draft.sessionId, task: draft.selector.trimmingCharacters(in: .whitespacesAndNewlines), cwd: repo)
+            guard owner.binding?.id == draft.id else { return }
+            owner.binding?.preview = preview
+            owner.binding?.submitting = false
+        } catch {
+            guard owner.binding?.id == draft.id else { return }
+            owner.binding?.submitting = false
+            owner.binding?.error = error.localizedDescription
+        }
+    }
+
+    func commitSessionBinding() async {
+        guard let repo = repoPath, let draft = navigation.binding, !draft.submitting,
+              let preview = draft.preview, preview.sessionId == draft.sessionId else { return }
+        let owner = navigation
+        owner.binding?.submitting = true
+        owner.binding?.error = nil
+        do {
+            let record = try await query.bindSession(id: preview.sessionId, taskId: preview.taskId, cwd: repo)
+            sessionsGeneration &+= 1
+            replaceSession(record, repo: repo)
+            if owner.selectedSessionId == record.id { owner.selection = record.work }
+            if owner.binding?.id == draft.id { owner.binding = nil }
+        } catch {
+            guard owner.binding?.id == draft.id else { return }
+            owner.binding?.submitting = false
+            owner.binding?.error = error.localizedDescription
+        }
+    }
+
+    func cancelSessionBinding() {
+        guard navigation.binding?.submitting == false else { return }
+        navigation.binding = nil
+    }
+
     private func replaceSession(_ record: SessionRecord, repo: String) {
         let replace = { (records: [SessionRecord]) in
             records.map { $0.id == record.id ? record : $0 }
@@ -825,7 +878,7 @@ final class PodiumModel {
     ) async -> Result<[SessionRecord], Error> {
         guard let repoPath else { return .success([]) }
         do {
-            return .success(try await query.sessions(cwd: repoPath))
+            return .success(try await query.sessions(includingHeadless: true, cwd: repoPath))
         } catch {
             return .failure(error)
         }

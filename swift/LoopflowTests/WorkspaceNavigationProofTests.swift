@@ -302,6 +302,7 @@ struct WorkspaceNavigationProofTests {
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.list()
             case ("session", "rename"): return try await named.rename(args)
+            case ("session", "bind"): return try await named.bind(args, task: task)
             default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
             }
         }
@@ -343,6 +344,48 @@ struct WorkspaceNavigationProofTests {
         #expect(await named.renames == 1)
         #expect(workspace.multiplexer.layout == layout)
         #expect(terminals[0].surface == surfaces[0])
+
+        // Hidden headless Sessions stay selected, with the same native panes.
+        try await named.headlessUnbound("first")
+        await model.refreshSessions()
+        for visible in [true, false, true] {
+            model.navigation.showsHeadlessSessions = visible
+            await model.refreshSessions()
+            try await settle(window)
+            #expect(model.navigation.selectedSessionId == "first")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(terminals[0].surface == surfaces[0])
+        }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-bind").button().tap()
+        model.navigation.binding?.selector = "W2-131"
+        await model.previewSessionBinding()
+        #expect(model.sessions.value?.first { $0.id == "first" }?.work == nil)
+        #expect(model.navigation.binding?.preview?.taskId == task.id)
+        var relocatedPlan = plan
+        var relocatedWaves = waves
+        var relocatedTasks = tasks
+        var relocatedItems = items
+        var reference = try #require(relocatedItems[taskIndex]["reference"] as? [String: Any])
+        var taskWorkspace = try #require(reference["workspace"] as? [String: Any])
+        taskWorkspace["worktree"] = repo + "-other-task-checkout"
+        taskWorkspace["local_exists"] = true
+        reference["workspace"] = taskWorkspace
+        relocatedItems[taskIndex]["reference"] = reference
+        relocatedTasks["items"] = relocatedItems
+        relocatedWaves[waveIndex]["tasks"] = relocatedTasks
+        relocatedPlan["waves"] = relocatedWaves
+        await planning.replace(String(decoding: try JSONSerialization.data(withJSONObject: relocatedPlan), as: UTF8.self))
+        await model.refresh()
+        await model.commitSessionBinding()
+        try await settle(window)
+        #expect(model.workspace.breadcrumb(selection: model.selection, sessionId: "first")?.taskWork == task)
+        #expect(workspace.multiplexer.layout == layout)
+        for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+        #expect(window.firstResponder === terminals[0])
+        await planning.replace(roadmap)
+        await model.refresh()
+        try await settle(window)
+        // The existing final PTY assertions below read the draft typed before binding.
 
         // Current planning can disappear while the same conversations and
         // native surfaces remain. The draft typed above must survive this too.
@@ -1105,6 +1148,26 @@ private actor NamedSessionSource {
 
     func list() throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
+    }
+
+    func headlessUnbound(_ id: String) throws {
+        let index = try #require(records.firstIndex { $0["id"] as? String == id })
+        records[index]["interactive"] = false
+        records[index]["work"] = NSNull()
+        records[index]["wave_id"] = NSNull()
+    }
+
+    func bind(_ args: [String], task: WorkReference) throws -> String {
+        if args.contains("--dry-run") {
+            return String(decoding: try JSONSerialization.data(withJSONObject: [
+                "session_id": "first", "task_id": task.id, "identifier": "W2-131", "title": "Retained Task",
+            ]), as: UTF8.self)
+        }
+        #expect(args == ["session", "bind", "--json", "--task", task.id, "--", "first"])
+        let index = try #require(records.firstIndex { $0["id"] as? String == "first" })
+        records[index]["work"] = ["kind": "task", "id": task.id]
+        records[index]["wave_id"] = "wave-1"
+        return String(decoding: try JSONSerialization.data(withJSONObject: records[index]), as: UTF8.self)
     }
 
     func membership(_ value: SessionFlowMembership, for id: String) throws {

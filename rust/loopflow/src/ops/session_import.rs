@@ -230,11 +230,13 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
     }
     let database = crate::store::database_path_from_env()?;
     for (session, observation) in store.historical_session_inputs().await? {
+        let starts = import.first_assignment(session.task_id.as_ref()).await?;
         let result = store
             .import_session(session, None, vec![observation], dry_run)
             .await
             .map(|changed| {
                 Some(if changed {
+                    import.report.tasks_started.extend(starts);
                     Stored::Run
                 } else {
                     Stored::Unchanged

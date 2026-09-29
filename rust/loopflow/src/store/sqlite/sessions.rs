@@ -143,13 +143,15 @@ impl SqliteStore {
         &self,
     ) -> StoreResult<Vec<(AgentSession, crate::session::SessionObservation)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT i.session_id,r.id,r.created_at,r.task_id,r.wave_id,
+        let mut query = conn.prepare("SELECT coalesce(i.session_id,r.session_id,r.id),r.id,r.created_at,r.task_id,r.wave_id,
             json_object('id',r.id,'session_id',r.session_id,'invocation_id',r.invocation_id,
                 'task_id',r.task_id,'wave_id',r.wave_id,'work_source',r.work_source,
                 'created_at',r.created_at,'published',r.published,'cwd',r.cwd,'skill',r.skill,
                 'node',r.node,'iterations',r.iterations,'attempt',r.attempt,'provider',r.provider,
                 'model',r.model,'caller_run_id',r.caller_run_id,'outcome',r.outcome,'ended_at',r.ended_at)
-            FROM runs r JOIN agent_session_inputs i ON i.input_id=r.id
+            FROM runs r LEFT JOIN agent_session_inputs i ON i.input_id=r.id
+            WHERE i.session_id IS NOT NULL OR r.session_id IS NOT NULL
+                OR r.skill IS NOT NULL OR (r.provider IS NOT NULL AND r.provider!='loopflow')
             ORDER BY r.created_at,r.id")?;
         let rows = query.query_map([], |row| {
             Ok((
@@ -163,8 +165,11 @@ impl SqliteStore {
         })?;
         rows.map(|row| {
             let (session, input, observed_at, task, wave, raw) = row?;
-            let session = session_in(&conn, &session)?.ok_or(StoreError::NotFound)?;
             let evidence: serde_json::Value = serde_json::from_str(&raw)?;
+            let session = match session_in(&conn, &session)? {
+                Some(session) => session,
+                None => historical_conversation(&evidence)?,
+            };
             if evidence["session_id"].as_str().is_some_and(|id| id != session.id) {
                 return Err(invalid(format!("historical input {input} names a different Session")));
             }
@@ -701,6 +706,61 @@ impl SqliteStore {
     }
 }
 
+/// Sessionless agent rows used the input ID as their conversation selector.
+/// Mechanical or unclassified rows remain on the legacy table until their
+/// Flow/command evidence has a destination; they are never agent conversations.
+fn historical_conversation(row: &serde_json::Value) -> StoreResult<AgentSession> {
+    let input: String = serde_json::from_value(row["id"].clone())?;
+    if !row["session_id"].is_null() {
+        return Err(invalid(format!(
+            "historical input {input} names an unavailable Session"
+        )));
+    }
+    let skill: Option<String> = serde_json::from_value(row["skill"].clone())?;
+    let iterations = row["iterations"]
+        .as_str()
+        .map(serde_json::from_str)
+        .transpose()?;
+    Ok(AgentSession {
+        id: input.clone(),
+        input_id: RunId::parse(&input).map_err(invalid)?,
+        caller_input_id: row["caller_run_id"]
+            .as_str()
+            .map(RunId::parse)
+            .transpose()
+            .map_err(invalid)?,
+        input_published: row["published"] == 1,
+        cwd: serde_json::from_value(row["cwd"].clone())?,
+        title: skill.clone().unwrap_or(input),
+        title_source: TitleSource::Generated,
+        skill,
+        provider: serde_json::from_value(row["provider"].clone())?,
+        model: serde_json::from_value(row["model"].clone())?,
+        node: serde_json::from_value(row["node"].clone())?,
+        iterations,
+        task_id: row["task_id"]
+            .as_str()
+            .map(TaskId::parse)
+            .transpose()
+            .map_err(invalid)?,
+        wave_id: row["wave_id"]
+            .as_str()
+            .map(crate::id::WaveId::parse)
+            .transpose()
+            .map_err(invalid)?,
+        flow_session_id: serde_json::from_value(row["invocation_id"].clone())?,
+        work_source: serde_json::from_value(row["work_source"].clone())?,
+        bound_at: None,
+        kind: SessionKind::Conversation,
+        interactive: false,
+        repo: None,
+        request: None,
+        ready_summary: None,
+        completed_at: None,
+        created_at: serde_json::from_value(row["created_at"].clone())?,
+    })
+}
+
 pub(super) fn retain_history_in(
     conn: &Connection,
     session: &AgentSession,
@@ -708,6 +768,32 @@ pub(super) fn retain_history_in(
 ) -> StoreResult<bool> {
     let mut changed = false;
     for observation in history {
+        if observation.source == "runs" {
+            let caller = observation.payload["evidence"]["caller_run_id"].as_str();
+            let saved: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT session_id,caller_input_id FROM agent_session_inputs WHERE input_id=?1",
+                    [observation.input_id.as_str()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            match saved {
+                Some((owner, original_caller))
+                    if owner != session.id || original_caller.as_deref() != caller =>
+                {
+                    return Err(invalid(format!(
+                        "input {} has conflicting Session or caller evidence",
+                        observation.input_id
+                    )));
+                }
+                Some(_) => {}
+                None => {
+                    conn.execute("INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",
+                        params![observation.input_id.as_str(),session.id,caller])?;
+                    changed = true;
+                }
+            }
+        }
         let key = format!("{}:{}", observation.input_id, observation.source);
         let payload = serde_json::to_string(&observation.payload)?;
         let saved: Option<String> = conn.query_row(

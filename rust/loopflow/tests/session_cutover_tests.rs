@@ -1778,11 +1778,12 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
         ).unwrap();
     }
     let unpublished = RunId::new();
+    // An older input can retain its Session relation only in the old SQL row.
     fixture
         .db()
         .execute(
-            "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,?2)",
-            rusqlite::params![unpublished.as_str(), saved.id],
+            "DELETE FROM agent_session_inputs WHERE input_id=?1",
+            [prior.as_str()],
         )
         .unwrap();
     fixture
@@ -1797,16 +1798,31 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
             ],
         )
         .unwrap();
+    let standalone = RunId::new();
+    fixture
+        .db()
+        .execute(
+            "INSERT INTO runs(id,created_at,published,cwd,skill,provider,caller_run_id)
+         VALUES(?1,60,1,?2,'research','codex',?3)",
+            rusqlite::params![
+                standalone.as_str(),
+                fixture.repo.path().to_string_lossy(),
+                prior.as_str()
+            ],
+        )
+        .unwrap();
     let preview = fixture.json(&["session", "import", "--dry-run", "--json"]);
     assert_eq!(preview["failed"], json!([]));
-    assert_eq!(preview["run"], 3, "{preview}");
+    assert_eq!(preview["run"], 4, "{preview}");
     assert_eq!(fixture.count("session_events"), 0);
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(fixture.count("agent_session_inputs"), 1);
     let imported = fixture.json(&["session", "import", "--json"]);
     assert_eq!(imported["failed"], json!([]));
     assert_eq!(imported["run"], preview["run"]);
     assert_eq!(
         fixture.json(&["session", "import", "--json"])["unchanged"],
-        3
+        4
     );
     assert_eq!(
         runtime.block_on(store.session(&saved.id)).unwrap(),
@@ -1827,7 +1843,7 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
     assert_eq!(partial["provider_turn"], Value::Null);
     let usage = fixture.json(&["usage", "--days", "0", "--json"]);
     let rows = usage.as_array().unwrap();
-    assert_eq!(rows.len(), 2, "{usage}");
+    assert_eq!(rows.len(), 3, "{usage}");
     for (id, at, outcome, provider) in [
         (&prior, 10, "failed", "opencode"),
         (&current, 30, "completed", "claude"),
@@ -1843,6 +1859,21 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
             "missing payload remains explicit"
         );
     }
+    let standalone_session = runtime
+        .block_on(store.session(standalone.as_str()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(standalone_session.input_id, standalone);
+    assert_eq!(standalone_session.caller_input_id, Some(prior.clone()));
+    assert_eq!(standalone_session.completed_at, None);
+    assert_eq!(standalone_session.provider.as_deref(), Some("codex"));
+    assert!(!standalone_session.interactive);
+    assert_eq!(standalone_session.task_id, None);
+    let standalone_history = fixture.json(&["session", "history", standalone.as_str(), "--json"]);
+    assert_eq!(standalone_history.as_array().unwrap().len(), 1);
+    assert_eq!(standalone_history[0]["kind"], "observed");
+    assert_eq!(standalone_history[0]["provider_thread"], Value::Null);
+    assert_eq!(standalone_history[0]["exec_id"], Value::Null);
     fixture
         .db()
         .execute(
@@ -1862,8 +1893,8 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
     );
     fixture.db().execute("DELETE FROM runs", []).unwrap();
     assert_eq!(fixture.json(&["usage", "--days", "0", "--json"]), usage);
-    assert_eq!(fixture.count("agent_sessions"), 1);
-    assert_eq!(fixture.count("agent_session_inputs"), 3);
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    assert_eq!(fixture.count("agent_session_inputs"), 4);
     assert!(fixture.launches().is_empty());
 }
 

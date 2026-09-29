@@ -1,8 +1,10 @@
 """Resource pressure is attributed and recovery never crosses into durable work."""
 
+import fcntl
 import importlib.util
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -210,6 +212,7 @@ def test_cleanup_reclaims_stale_builds_before_emergency_reserve(tmp_path: Path) 
 def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
     tmp_path: Path, monkeypatch
 ) -> None:
+    monkeypatch.setattr(resources, "Path", lambda path: tmp_path if path == "/tmp" else Path(path))
     (tmp_path / "target").mkdir()
     artifact = tmp_path / "target/artifact"
     artifact.write_bytes(b"x" * 4096)
@@ -229,6 +232,36 @@ def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
     report = resources.inspect_resources(tmp_path, policy, recover=True)
     assert report.recovery[0].status == "removed"
     assert not artifact.exists()
+
+
+def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, monkeypatch) -> None:
+    cache = tmp_path / "uv-cache"
+    unused = cache / "archive-v0" / "unused"
+    unused.mkdir(parents=True)
+    payload = unused / "payload"
+    payload.write_bytes(b"unused cache entry" * 4096)
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.delenv("UV_LOCK_TIMEOUT", raising=False)
+
+    with (cache / ".lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        # Bound the regression: a waiting cleaner would prune after this unlock.
+        release = threading.Timer(3, lambda: fcntl.flock(lock, fcntl.LOCK_UN))
+        release.start()
+        try:
+            busy = resources._prune_uv_cache()
+        finally:
+            release.cancel()
+            release.join()
+        assert busy.status == "failed"
+        assert busy.removed_bytes == 0
+        assert payload.exists()
+        assert "lock" in busy.detail.lower()
+
+    idle = resources._prune_uv_cache()
+    assert idle.status == "pruned"
+    assert idle.removed_bytes > 0
+    assert not payload.exists()
 
 
 def test_disk_pressure_prunes_uv_through_its_supported_boundary(

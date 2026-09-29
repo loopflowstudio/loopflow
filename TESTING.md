@@ -101,7 +101,11 @@ Verification preflight and explicit `--recover` reclaim inactive worktrees'
 allowlisted build roots only when unchanged for at least 24 hours and either
 oversized or needed to restore the cleanup target. They also prune old disposable
 gate output and entries accepted by `uv cache prune`. Cleanup runs before
-verification, not on an independent timer. A nonblocking host lock permits only
+verification, not on an independent timer. A busy uv cache is reported immediately
+without waiting for its reader locks, including the parent `uv run`. Other cleanup
+and above-reserve verification continue. To reclaim uv entries, run
+`UV_LOCK_TIMEOUT=0 uv cache prune` directly when other uv commands are idle.
+A nonblocking host lock permits only
 one cleaner at a time across parallel workers. Verification prints each cleanup
 result and reclaimed size, including failed pruning attempts, and saves them in
 its resource receipt. All active

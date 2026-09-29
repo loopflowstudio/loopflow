@@ -315,6 +315,31 @@ nice refusal; the second left an empty child log. Both correctly stopped for
 missing decision. These are inconclusive fixture results, not another product
 failure or proof that late commands are fenced. Their original logs remain.
 
+**Late-child counterexample now reproduced.**
+`supervisor-late-decision-retry-3/{probe.py,results.json,probe.log}` uses the copied
+mechanical candidate `33be09c872e4c82c786237a1b21f23d59c024c33a56a1be247fe95f548182467`,
+real Codex and synthetic Responses/private Home. The first invocation stopped
+on missing Python websockets before launching; `uv run --script` supplies the
+declared environment. The definitive run starts a Python child from the first
+decision turn; the child waits for a file written by the retry's tool call.
+The first turn fails. After retry selection, the old child calls public
+`flow decide advance`, which returns0 and `Decision recorded`. The retry waits
+for that child and completes without deciding itself. Flow wrongly completes
+with command exit0: native completions are successful4, failed7, successful11;
+Flow selects5, then8 and consumes11. The assertion rejecting completion fails.
+The child finishes before retry returns; the existing cleanup handles the exact
+fixture engines. No SQL mutation, installed Home or configured model service.
+
+Source explains the gap: `record_flow_decision`/`record_flow_path` compare Flow
+version and current Run, both retained across automatic native retries. Clearing
+the candidate at selection repairs earlier writes but cannot reject this later
+old-turn write. Agent publication/navigation conversion must carry the original
+native-turn authority to children and compare it to the selected turn; looking
+up today's turn for a delayed child would preserve the defect. This is existing
+late-writer scope, not a new product object. Verified Task comment
+`cae3e281-31e1-4ba0-a757-3dd2cb00c4ee` gives main the reproduction. Earlier passing
+native/migration tests keep their scope and do not prove late-child rejection.
+
 ## Retained local proof
 
 Paths without a directory are under `.lf/tmp/execution-model/`; Cut logs are

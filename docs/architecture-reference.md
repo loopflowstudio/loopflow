@@ -19,8 +19,8 @@ before completing the remaining owner conversion.
 
 The implementation currently has `execs`, `agent_sessions` and `flow_sessions`,
 with immutable input evidence, capture files and transitional Run-named readers.
-The old `runs` table is removed; historical SQL evidence remains in the input
-catalog. Renaming Session/invocation tables did not complete the conversion. The checked inventory
+The old `runs` and `agent_session_inputs` tables are removed; unclassified
+historical SQL remains in immutable `import_evidence`, without invented Sessions. Renaming Session/invocation tables did not complete the conversion. The checked inventory
 below describes those current source dependencies, including historical wire
 names; it must remain accurate until their consumers are removed together.
 Other architecture prose describes the target contract, not a shipment claim.
@@ -29,7 +29,9 @@ Current CLI examples use supported spellings. `lf session connect` has `open` as
 an alias; `--replace` replaces an owned client. The explicit conversation/engine
 restart contract below has no public `--restart` flag yet. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
-repositories. Historical `lf runs` and `lf replay` remain command spellings.
+repositories. `--page --json` uses stable ID pages; Desktop retains earlier
+observations until enumeration succeeds. `lf flow list/show --sessions` discovers
+saved FlowSessions through metadata and exact captured graphs. Historical `lf runs` and `lf replay` remain command spellings.
 History exposes Session event and provider evidence; `RunSnapshot` and Session
 `run_id` are removed across Rust, Swift and fixtures. Retaining these names in a command or
 wire reference does not make Run a target owner or authorize breaking external

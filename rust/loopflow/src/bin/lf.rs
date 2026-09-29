@@ -1799,8 +1799,14 @@ fn execute_command(
             account_selection,
             lf_args,
         ),
-        Some(Commands::Flow { cmd }) => {
-            loopflow::lf::commands::flow::control(cmd, cli)
+        Some(Commands::Flow { cmd }) => match cmd {
+            FlowCommand::List { json, inventory } if inventory.sessions => {
+                loopflow::lf::commands::flow_inventory::list(inventory, *json)
+            }
+            FlowCommand::Show { name, json, sessions: true } => {
+                loopflow::lf::commands::flow_inventory::inspect(name, *json)
+            }
+            _ => loopflow::lf::commands::flow::control(cmd, cli),
         }
         Some(Commands::Skill { .. } | Commands::Run { .. } | Commands::External(_)) => {
             anyhow::bail!("a command target must name a builtin command")

@@ -5059,6 +5059,31 @@ mod tests {
     }
 
     #[test]
+    fn flow_repository_upgrade_preserves_unknown_history_without_resolving_cwd() {
+        let conn = open();
+        let name = "record_flow_repository";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        let capture = r#"{ "id":"retained", "opaque":"exact bytes" }"#;
+        conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state,ended_at)
+            VALUES('retained',?1,'/existing-but-unobserved',0,0,7,0,1,'completed',2)", [capture]).unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let retained: (String, Option<String>, i64, String) = conn.query_row(
+            "SELECT invocation_json,unbound_repo,position_version,state FROM flow_sessions WHERE id='retained'", [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(retained, (capture.into(), None, 7, "completed".into()));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn captured_event_upgrade_retains_unknown_sql_and_selected_history() {
         let conn = open();
         let name = "capture_session_events";

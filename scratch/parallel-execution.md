@@ -10,19 +10,12 @@ has occurred.
 
 ## Current order
 
-Jack directed autonomous progress to code-complete, with a published checkpoint
-per coherent slice:
-
-1. Repair hosted Rust and run all tests left unrun by fail-fast before publishing.
-2. Structured Flow results constrained by each captured boundary's schema;
-   remove the in-turn decision/router commands and authority paths.
-3. Captured input as a Session history event; remove RunId, the input catalog and
-   SessionRecord.run_id while retaining historical evidence and launch fences.
-4. Rebase the released history proposal onto event identity, include orphan native
-   receipts with unknown attribution, then remove unnecessary wrappers.
-5. Saved-Flow discovery with Desktop paging and reconciliation in the same cut.
-6. Released-populated public import bridge and exact materialized-copy counterpart.
-7. Reconcile docs, skills and generated HTML with final behavior.
+Jack directed autonomous progress with a published checkpoint per coherent
+slice. Finish the in-flight discovery checkpoint, then follow the deepest-first
+[remaining order](remaining-work.md): Exec per Flow step, attribution/parent-tree
+reduction, separate naming commit, populated import, and final documentation.
+The latest parent requirement preserves agent-issued commands after driver
+handoff and across shared engines; inherited identity alone cannot replace it.
 
 The complete matrix remains binding; this order does not drop configured-provider,
 Desktop, Chapter, incident or migration obligations. Final concept review with
@@ -62,11 +55,14 @@ publication, immutable capture history, retained artifact/legacy selectors and
 migration-only `import_evidence` for unclassified SQL. RunId, the input catalog,
 and SessionRecord.run_id are removed. Rust/Swift wire consumers move together;
 replay resolves Session history before opening artifacts. Final proof/checkpoint
-is recorded in [evidence](evidence.md). The released history reader is integrated on event identity in the working tree;
+is recorded in [evidence](evidence.md). The released history reader is published at `142314682` on event identity;
 its full materialized matrix passes 2,019 tests, 16 skipped, none unrun,
 with formatting and all-target Clippy. Orphan native receipts retain unknown Work/Exec,
 and the subtract-only pass removed redundant projection wrappers. Saved-Flow
-inventory and Desktop paging/reconciliation follow its checked checkpoint.
+inventory and Desktop paging/reconciliation now pass 2,029 materialized Rust tests
+and all 291 Swift tests; see
+[discovery design](discovery.md). Hosted Rust passes at `142314682`; hosted Swift
+failed two old embedded history fixtures, repaired in this slice.
 
 Runtime loop children already use the shared driver/settlement transaction:
 retry retains the child, successful return occurs once, later passes are siblings,
@@ -81,7 +77,8 @@ observation from stale checklists. Reuse unchanged proofs:
   second-private-Home sync adoption preserve identity, exact Started, worktree,
   PR and capture. Scripted Linux providers, not configured-provider acceptance.
 - Hosted Swift at `067ff0164`, run `36614840195`, confirmed the off-window terminal
-  attachment repair; the latest hosted Swift pass confirms it again.
+  attachment repair; the subsequent hosted Swift result at `142314682` fails embedded JSON fixtures,
+  not the terminal attachment proof.
 
 Detailed earlier implementation, failures, commands and proof limits are retained
 in [the committed handoff at 537e7924d](https://github.com/loopflowstudio/loopflow/blob/537e7924dee15005c94addafb56aad0bdd8bf48f/scratch/parallel-execution.md),
@@ -96,8 +93,9 @@ hunks to review, not whole files to overwrite:
 
 - `.lf/tmp/final-history-proposal/`: original proposal retained as evidence;
   integrated and adapted to events in this slice, including orphan native receipts.
-- `.lf/tmp/flow-discovery-proposal/`: uncompiled; review insertion-time Git lookup
-  and command/template collisions, now using real runtime parentage.
+- `.lf/tmp/flow-discovery-proposal/`: adapted and integrated; repository observation
+  precedes the write lock, `--sessions` preserves template names, and runtime
+  parentage remains distinct from Task selection.
 - `.lf/tmp/released-import-proposal/`: authored, unexecuted public import bridge;
   require an executed result and effective provider isolation, source and canonical.
 

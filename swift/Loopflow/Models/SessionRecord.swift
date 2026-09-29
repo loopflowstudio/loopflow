@@ -173,3 +173,9 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case terminalIds = "terminal_ids"
     }
 }
+
+/// A bounded inventory page; nil next marks a complete enumeration.
+public struct SessionPage: Codable, Sendable, Hashable {
+    public let entries: [SessionRecord]
+    public let next: String?
+}

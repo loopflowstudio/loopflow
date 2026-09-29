@@ -1,5 +1,35 @@
 # Remaining work to code-complete review
 
+LOO-298 · Reordered 2026-09-29 on Jack Heart's direction: "do the deepest cuts
+first." Work the list top down. Items below it keep their detail in the
+sections that follow.
+
+## Order, deepest first
+
+1. **A launch is an Exec.** Each Flow step runs as its own `lf` process; one
+   launcher for Flow steps and terminal launches; delete the separate Task,
+   saved-Flow and direct launchers. Decide in design whether the launch event in
+   Session history collapses into the Exec. Keep launch-once, driver and
+   provider generations, and imported launches without an Exec.
+2. **Simplify attribution and the parent tree.** Jack: "make sure that we
+   simplify and clarify attribution and the parent tree after this." Once a step
+   is an Exec, list every parent pointer and every Task/Wave attribution field,
+   name the single owner of each fact, derive the rest, delete the copies.
+3. **Names follow the model.** Jack: use the word Exec instead of launch or run
+   wherever the thing is one agent start under one lf process. Recorder types
+   that say Run are renamed on that basis (finding 2). Own commit.
+4. **Saved-Flow discovery with Desktop paging and reconciliation.** In flight
+   when the order changed; checkpoint it when coherent, then return to item 1.
+5. **Released-populated import**, executed through the public binary and on a
+   materialized copy.
+6. **Docs, skills and generated pages** for final behavior.
+
+Runtime loop children, structured-result Flow decisions and captured events have
+hosted verification. History readers pass hosted Rust at `142314682`; its two
+Swift embedded-fixture failures are repaired with the discovery slice.
+
+## Detail retained from the earlier checklist
+
 LOO-298 · 2026-09-28 · Consolidated for Jack Heart. This is the scope checklist,
 not evidence that each preceding implementation has passed.
 

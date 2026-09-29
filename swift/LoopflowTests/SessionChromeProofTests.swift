@@ -61,7 +61,7 @@ struct SessionChromeProofTests {
             case ("roadmap", _): return roadmap
             case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case ("session", "list"): return sessions
+            case ("session", "list"): return #"{"entries":\#(sessions),"next":null}"#
             default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
             }
         }
@@ -176,7 +176,7 @@ struct SessionChromeProofTests {
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }

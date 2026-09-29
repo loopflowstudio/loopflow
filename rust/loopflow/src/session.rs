@@ -135,6 +135,8 @@ pub struct SessionFilter {
     pub history: bool,
     pub limit: usize,
     pub offset: usize,
+    /// Present for stable-ID pages; empty starts the first page.
+    pub after: Option<String>,
 }
 
 impl Default for SessionFilter {
@@ -147,6 +149,7 @@ impl Default for SessionFilter {
             history: false,
             limit: 100,
             offset: 0,
+            after: None,
         }
     }
 }
@@ -183,8 +186,8 @@ pub(crate) struct SessionSummary {
 }
 
 /// Recorded Flow facts; Current says nothing about a live driver or process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FlowSummary {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowSummary {
     pub id: String,
     pub name: Option<String>,
     pub state: FlowSummaryState,
@@ -195,8 +198,9 @@ pub(crate) struct FlowSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FlowSummaryState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowSummaryState {
     Current,
     Completed,
     Replaced,

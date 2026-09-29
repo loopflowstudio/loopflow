@@ -131,12 +131,17 @@ fn inventory_query(
         i64::try_from(filter.limit).map_err(invalid)?
     };
     let limit = bind(Value::Integer(limit));
-    let offset = bind(Value::Integer(
-        i64::try_from(filter.offset).map_err(invalid)?,
-    ));
-    sql.push_str(&format!(
-        " ORDER BY s.title, s.id LIMIT {limit} OFFSET {offset}"
-    ));
+    if let Some(after) = &filter.after {
+        let after = bind(Value::Text(after.clone()));
+        sql.push_str(&format!(" AND s.id>{after} ORDER BY s.id LIMIT {limit}"));
+    } else {
+        let offset = bind(Value::Integer(
+            i64::try_from(filter.offset).map_err(invalid)?,
+        ));
+        sql.push_str(&format!(
+            " ORDER BY s.title, s.id LIMIT {limit} OFFSET {offset}"
+        ));
+    }
     Ok((sql, values))
 }
 
@@ -764,7 +769,7 @@ impl SqliteStore {
             return Ok(existing);
         }
         if let Some(flow) = review {
-            super::flows::insert_flow_in(&tx, flow)?;
+            super::flows::insert_flow_in(&tx, flow, None)?;
         }
         let session = reserve_session_in(&tx, session, caller_exec)?;
         if session.kind == SessionKind::FlowReview {
@@ -1807,5 +1812,21 @@ mod metadata_tests {
         filter.offset = 1;
         filter.limit = 1;
         assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "b");
+        filter.after = Some(String::new());
+        let first = store.session_summaries(&filter).unwrap();
+        assert_eq!(first[0].id, "a");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET title='000 renamed' WHERE id='b'",
+                [],
+            )
+            .unwrap();
+        filter.after = Some(first[0].id.clone());
+        let second = store.session_summaries(&filter).unwrap();
+        assert_eq!(second[0].id, "b");
+        assert_eq!(second[0].title, "000 renamed");
     }
 }

@@ -625,24 +625,23 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum FlowCommand {
-    /// List authored flows
+    /// List authored flows or saved FlowSessions
     List {
         #[arg(long)]
         json: bool,
+        #[command(flatten)]
+        inventory: commands::flow_inventory::FlowInventoryArgs,
     },
-    /// Inspect the expanded steps of a flow
-    Show { name: String },
+    /// Inspect an authored flow or a saved FlowSession
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        sessions: bool,
+    },
     /// Validate a flow and its review points
     Validate { name: String },
-    /// Record a decision for the current Flow boundary
-    Decide {
-        #[arg(value_parser = ["advance", "iterate"])]
-        decision: String,
-        #[arg(required = true, num_args = 1..)]
-        summary: Vec<String>,
-    },
-    /// Select an authored branch
-    Route { path: String },
     /// Open a Session to resolve a blocked decision
     Blocked {
         #[arg(required = true, num_args = 1..)]
@@ -718,6 +717,12 @@ pub enum SessionCommand {
         limit: usize,
         #[arg(long, default_value_t = 0)]
         offset: usize,
+        /// Return a bounded stable-ID page with a continuation cursor
+        #[arg(long, requires = "json", conflicts_with = "offset")]
+        page: bool,
+        /// Previous page's next identity; keep the same filters
+        #[arg(long, requires = "page")]
+        after: Option<String>,
         #[arg(long)]
         task: Option<String>,
         #[arg(long)]

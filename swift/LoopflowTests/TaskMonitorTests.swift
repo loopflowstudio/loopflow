@@ -237,7 +237,7 @@ struct TaskMonitorTests {
             switch args.first {
             case "roadmap": return text
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return sessions
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected action in Monitor proof")
             }

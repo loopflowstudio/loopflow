@@ -707,6 +707,24 @@ reparenting decision and is refused here. After the parent merges, `lf rebase`
 collapses the child onto `main`. The Tasks keep separate identities and worktrees.
 Tmux remains process containment, not product identity or advancement authority.
 
+## Saved Flows
+
+```bash
+lf flow list --sessions --json --limit 100
+lf flow list --sessions --for-task INF-123 --managed true --json
+lf flow list --sessions --parent FLOW_SESSION --json
+lf flow show --sessions --json FLOW_SESSION
+```
+
+List saved progress without starting work. `--after` accepts the previous page's
+`next` ID with the same filters. `--all` includes other repositories and unknown
+historical repository evidence. `--state` selects current, completed or replaced
+records; `--search` matches a literal name or identity. Detail reads the captured
+graph even if its template or checkout is gone. A runtime child's parent differs
+from the root FlowSession selected by its Task.
+
+`lf flow list --json` and `lf flow show TEMPLATE` still inspect reusable templates.
+
 ## Sessions
 
 These examples use current spellings. The lifecycle contract and remaining
@@ -733,6 +751,13 @@ or recorded closure. The conversation remains visible and can be connected;
 Connect validates its current owner and native history. Lists retain recorded
 Flow membership even when its relative position is unknown. They do not open
 captured graphs or transcript/history bodies to fill missing display facts.
+
+For bounded inventory, use `lf session list --page --json --limit 100` and pass
+`--after NEXT` until `next` is null. Pages use stable Session IDs, so renaming does
+not shift their order. They are separate reads, not a snapshot of concurrent
+insertions or filter changes. Desktop merges partial pages with retained records
+and removes absent Sessions only after the final successful page. A failed page
+keeps the last observations and open terminals.
 
 Use `--interactive all` for both modes in one inventory. In Desktop, the outline
 menu's **Show headless Sessions** reveals headless conversations. Hiding them

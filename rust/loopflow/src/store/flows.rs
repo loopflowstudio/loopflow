@@ -8,6 +8,28 @@ use crate::engine::ExecutionCursor;
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub async fn flow_inventory(
+        &self,
+        filter: &crate::durable::FlowFilter,
+        after: Option<&str>,
+        limit: std::num::NonZeroU32,
+    ) -> StoreResult<crate::durable::FlowPage> {
+        let filter = filter.clone();
+        let after = after.map(str::to_owned);
+        run_sqlite(&self.sqlite, move |store| {
+            store.flow_inventory(&filter, after.as_deref(), limit)
+        })
+        .await
+    }
+
+    pub async fn flow_detail(
+        &self,
+        selector: &str,
+    ) -> StoreResult<Option<crate::durable::FlowDetail>> {
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| store.flow_detail(&selector)).await
+    }
+
     /// Restore an old captured Flow without selecting or executing it.
     pub(crate) async fn import_flow(&self, flow: FlowSession, dry_run: bool) -> StoreResult<bool> {
         run_sqlite(&self.sqlite, move |store| store.import_flow(&flow, dry_run)).await

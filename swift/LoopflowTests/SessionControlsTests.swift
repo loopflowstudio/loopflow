@@ -118,8 +118,8 @@ private actor ControlsSource {
 
     func read(_ args: [String]) async throws -> String {
         if args.prefix(2) == ["session", "list"] {
-            #expect(args == ["session", "list", "--json", "--interactive", "all", "--limit", "0"])
-            let snapshot = try JSONSerialization.data(withJSONObject: rows)
+            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
+            let snapshot = try JSONSerialization.data(withJSONObject: ["entries": rows, "next": NSNull()])
             if hold {
                 hold = false
                 await withCheckedContinuation { pending = $0; waiter?.resume(); waiter = nil }

@@ -710,3 +710,33 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         .join(format!("{id}.json"))
         .exists());
 }
+
+#[test]
+fn session_inventory_pages_are_explicit_bounded_and_complete() {
+    let home = tempfile::tempdir().unwrap();
+    let output = run(
+        home.path(),
+        &[
+            "session", "list", "--page", "--json", "--all", "--limit", "1",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let page: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["entries"], serde_json::json!([]));
+    assert!(page["next"].is_null());
+    for args in [
+        &["session", "list", "--page"][..],
+        &["session", "list", "--page", "--json", "--limit", "0"],
+        &["session", "list", "--page", "--json", "--offset", "1"],
+        &["session", "list", "--json", "--after", "old"],
+    ] {
+        assert!(
+            !run(home.path(), args).status.success(),
+            "accepted {args:?}"
+        );
+    }
+}

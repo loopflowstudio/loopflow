@@ -54,5 +54,35 @@ Main implemented the event decision: reservation selects a captured sequence;
 publication/readiness/completion compare it; Rust/Swift Session wire no longer
 contains run_id; RunId and the runtime input catalog are deleted. Original SQL
 and unresolved selectors remain immutable import evidence. Source/canonical and
-consumer proofs are in [evidence](evidence.md). The general history projection
-still needs the following reader cut. Jack's acceptance remains outstanding.
+consumer proofs are in [evidence](evidence.md). The general history reader is published at `142314682`. Jack's acceptance remains outstanding.
+
+## 2. Recorder types still say Run (2026-09-29)
+
+Jack Heart read that `RunManifest` and `RunLaunchRequest` remain and said they
+"should probably be [Agent]SessionManifest and SessionLaunchRequest or
+something." Direction: the remaining Run-named recorder types take Session
+names. Exact spellings are not fixed by Jack.
+
+Counts at `142314682`, Rust plus tests plus Swift: `RunFlowMembership` 57,
+`RunManifest` 30, `RunLaunchRequest` 21, `RunFlowStep` 19, `RunWork` 16,
+`RunCapture` 9, `RunContextRef` 4, `RunRecorder` 4, plus `RunAttribution`.
+
+Constraints:
+- A manifest is written once per captured input, not once per Session. One
+  Session can hold several. The name should not read as one per conversation.
+- `manifest.json` is an on-disk format with `schema_version`, and its fields
+  `run_id`, `parent_run_id` and `subjects` are read from old directories by
+  import and replay. Renaming a Rust type is free. Renaming serialized fields
+  needs old files to keep decoding.
+- `RunEventRow` and `run_events` are the command journal, keyed by trace. They
+  stay out of this rename.
+
+Unresolved until main implements it and Jack accepts the result.
+
+### Vocabulary direction (2026-09-29)
+
+Jack followed his launch-is-an-Exec decision with: "we should also try to use
+the word exec instead of launch (or run etc) where possible." So the renames in
+this finding prefer Exec over both Run and launch. Session-prefixed names remain
+right for things that belong to the conversation and not to one process. A
+record of imported history with no process must not be named as an Exec.

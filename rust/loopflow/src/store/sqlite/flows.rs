@@ -323,14 +323,18 @@ fn validate_flow(flow: &FlowSession) -> StoreResult<()> {
 /// Store a launched Flow at its first step. A Task invocation runs in the
 /// Task worktree and stores no cwd of its own; its Wave is the Task's. The
 /// import re-registers a Flow it already stored; the row it finds wins.
-pub(super) fn insert_flow_in(conn: &Connection, flow: &FlowSession) -> StoreResult<()> {
+pub(super) fn insert_flow_in(
+    conn: &Connection,
+    flow: &FlowSession,
+    unbound_repo: Option<&str>,
+) -> StoreResult<()> {
     validate_flow(flow)?;
     conn.execute(
         "INSERT INTO flow_sessions(id, task_id, wave_id, cwd, message, model, invocation_json,
             step_index, iteration, position_version, worker_generation, failure_json,
-            updated_at, review_json, state, parent_id)
+            updated_at, review_json, state, parent_id, unbound_repo)
          VALUES(?1,?2,COALESCE(?3,(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id
-            WHERE t.id=?2)),CASE WHEN ?2 IS NULL THEN ?4 END,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current',?13)
+            WHERE t.id=?2)),CASE WHEN ?2 IS NULL THEN ?4 END,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current',?13,COALESCE(?14,(SELECT unbound_repo FROM flow_sessions WHERE id=?13)))
          ON CONFLICT(id) DO NOTHING",
         params![
             flow.invocation.id,
@@ -349,6 +353,7 @@ pub(super) fn insert_flow_in(conn: &Connection, flow: &FlowSession) -> StoreResu
             flow.updated_at.unix_timestamp(),
             serde_json::to_string(&flow.cursor)?,
             flow.parent_id,
+            unbound_repo,
         ],
     )?;
     Ok(())
@@ -788,7 +793,7 @@ fn checkpoint_in(
             updated_at: OffsetDateTime::now_utc(),
             ..saved
         };
-        insert_flow_in(tx, &child)?;
+        insert_flow_in(tx, &child, None)?;
         let child_claim = claim.filter(|_| !child.is_human());
         tx.execute(
             "UPDATE flow_sessions SET claim_json=?2,worker_generation=?3 WHERE id=?1",
@@ -983,9 +988,29 @@ impl SqliteStore {
                 "a runtime child is created by its parent's Iterate settlement".into(),
             ));
         }
+        // Observe new launch placement before taking SQLite's writer lock.
+        // Import and runtime children retain their original evidence instead.
+        let repo = if flow.task_id.is_none() && flow.wave_id.is_none() {
+            match crate::repo::discover_repo_root(&flow.cwd).and_then(|root| {
+                root.map(|root| {
+                    crate::repository::CanonicalRepo::discover(&root)
+                        .map(|repo| repo.to_string())
+                        .map_err(anyhow::Error::from)
+                })
+                .transpose()
+            }) {
+                Ok(repo) => repo,
+                Err(error) => {
+                    tracing::debug!(%error, "Flow repository observation unavailable");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_flow_in(&tx, flow)?;
+        insert_flow_in(&tx, flow, repo.as_deref())?;
         let stored = flow_in(&tx, &flow.invocation.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(stored)
@@ -1025,7 +1050,7 @@ impl SqliteStore {
                 params![task_id.as_str(), now_unix()],
             )?;
         }
-        insert_flow_in(&tx, flow)?;
+        insert_flow_in(&tx, flow, None)?;
         tx.execute(
             "UPDATE tasks SET current_invocation_id=?2 WHERE id=?1",
             params![task_id.as_str(), flow.invocation.id],

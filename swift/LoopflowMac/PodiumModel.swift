@@ -494,15 +494,37 @@ final class PodiumModel {
         sessionsGeneration &+= 1
         let generation = sessionsGeneration
         let repoPath = repoPath
-        let previous = sessions.value
-        let result = await readSessions(repoPath: repoPath)
-        guard sessionsGeneration == generation else { return }
-        // Publishing an identical reading re-renders the whole workspace every poll.
-        let next = reading(from: result, lastGood: previous)
-        if sessions != next { sessions = next }
-        if case .success(let records) = result,
-           let selected = navigation.selectedSessionId, !records.contains(where: { $0.id == selected }) {
-            navigation.selectedSessionId = nil
+        guard let repoPath else {
+            sessions = .available([])
+            return
+        }
+        let initialIDs = Set((sessions.value ?? []).map(\.id))
+        var records: [SessionRecord] = []
+        var after: String?
+        do {
+            repeat {
+                let page = try await query.sessionPage(includingHeadless: true, after: after, cwd: repoPath)
+                guard sessionsGeneration == generation, self.repoPath == repoPath,
+                      !Task.isCancelled else { return }
+                records += page.entries
+                let seen = Set(records.map(\.id))
+                // Partial enumeration cannot establish absence. Keep existing panes
+                // until the last page, including records added locally during this read.
+                let retained = (sessions.value ?? []).filter {
+                    !seen.contains($0.id) && (page.next != nil || !initialIDs.contains($0.id))
+                }
+                let next = PodiumReading.available(records + retained)
+                if sessions != next { sessions = next }
+                after = page.next
+            } while after != nil
+            if let selected = navigation.selectedSessionId,
+               !(sessions.value ?? []).contains(where: { $0.id == selected }) {
+                navigation.selectedSessionId = nil
+            }
+        } catch {
+            guard sessionsGeneration == generation, self.repoPath == repoPath,
+                  !Task.isCancelled else { return }
+            sessions = .unavailable(lastGood: sessions.value, reason: error.localizedDescription)
         }
     }
 
@@ -868,17 +890,6 @@ final class PodiumModel {
             let snapshot = try await query.processActivity()
             await Self.resolveRepoOrigins(snapshot.nodes.compactMap(\.repo))
             return .success(snapshot)
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    private func readSessions(
-        repoPath: String?
-    ) async -> Result<[SessionRecord], Error> {
-        guard let repoPath else { return .success([]) }
-        do {
-            return .success(try await query.sessions(includingHeadless: true, cwd: repoPath))
         } catch {
             return .failure(error)
         }

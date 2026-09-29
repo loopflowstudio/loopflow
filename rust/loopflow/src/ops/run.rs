@@ -775,7 +775,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         store.create_wave(&other_wave).await.unwrap();
         let primary_project = project(&wave, "loopflow-api", "project-api");
-        let other_project = project(&wave, "other", "project-other");
+        let other_project = project(&other_wave, "other", "project-other");
         store.create_project(&primary_project).await.unwrap();
         store.create_project(&other_project).await.unwrap();
         let task = task(&store, &wave, &primary_project, worktree).await;

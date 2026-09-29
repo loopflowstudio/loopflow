@@ -880,6 +880,9 @@ pub enum TaskCommand {
         /// Explain what changed after an execution blocker
         #[arg(long)]
         reason: Option<String>,
+        /// Retry uncertain native work after confirmed engine exit.
+        #[arg(long)]
+        retry: bool,
         #[arg(long)]
         json: bool,
     },

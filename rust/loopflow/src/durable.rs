@@ -210,6 +210,17 @@ impl FlowAttempt {
     }
 }
 
+/// Launch authority captured before starting a native turn. Observers and
+/// conversation continuations do not receive this Flow capability.
+#[derive(Debug, Clone)]
+pub struct FlowTurnSelection {
+    pub flow_id: String,
+    pub version: u64,
+    pub claim: Option<TaskWorkerClaim>,
+    pub run_id: RunId,
+    pub after: i64,
+}
+
 /// One Flow invocation as its row holds it: the captured graph, the cursor,
 /// the launch facts, the current attempt, the worker claim and the failure. A
 /// Task's own invocation and a saved Flow are the same record driven by the

@@ -440,6 +440,33 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
 in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
+Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
+the Session driver references share the same database. Simulated finite-provider
+harnesses must record their owned child exit; an absent endpoint is not exit
+evidence.
+
+Exercise native Flow recovery with real Codex and a local Responses fixture:
+
+```bash
+uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
+  --lf target/debug/lf --launch --flow-driver-loss completed \
+  --output .lf/tmp/native-flow-completed
+```
+
+Use `--flow-driver-loss running` for a surviving turn during public resume,
+`--flow-driver-loss both` for explicit retry after both driver and engine die,
+`--flow-automatic-retry` for failed then successful turns in one command,
+and `--flow-decision-retry missing|replace` for discarded failed-turn navigation.
+The managed recovery unit fixture exercises the public Flow-to-Task dispatch,
+preserved adoption refusal, replacement claim and exact native-history consumption;
+its provider history is synthetic, with an owned process supplying exit evidence.
+Use
+`--flow-retry` for a recorded failure, and `--flow-engine-loss` for replacement
+after confirmed engine death. The fixture copies the candidate, uses private
+Homes, and stops only its identified engine children. These proofs establish
+native execution with synthetic upstream responses, not managed-account or
+installed-Home acceptance.
+
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.

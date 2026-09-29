@@ -1612,37 +1612,31 @@ impl CaptureHandle {
             return Ok(());
         };
         let expected = store.session_driver(&session.id)?;
-        if expected
-            .as_ref()
-            .is_some_and(|driver| driver.exec_id.is_some())
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Conversation already has a driver; connect to it".into(),
-            ));
-        }
-        let mut replace_provider = match store.session_provider_process(&session.id)? {
-            Some((pid, started)) => match crate::journal::process_started_at(pid) {
-                Ok(Some(current)) => (current - started).abs() > 3,
-                Ok(None) => true,
-                Err(_) => false,
-            },
-            None => expected.is_none(),
-        };
-        let connection = store.session_connection(&session.id)?;
-        if replace_provider {
-            if let Some((endpoint, _)) = &connection {
-                // A launcher can have handed its engine to another process.
-                // A surviving connection wins over the old launcher's exit;
-                // only ordinary absence/refusal permits dead-engine recovery.
-                replace_provider = match std::os::unix::net::UnixStream::connect(endpoint) {
-                    Ok(_) => false,
-                    Err(error) => matches!(
-                        error.kind(),
-                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-                    ),
-                };
+        if let Some(exec) = expected.as_ref().and_then(|driver| driver.exec_id.as_ref()) {
+            let receipt =
+                crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
+                    .ok()
+                    .and_then(|receipts| {
+                        receipts
+                            .into_iter()
+                            .find(|receipt| receipt.exec_id == exec.as_str())
+                    });
+            let dead = receipt.is_some_and(|receipt| {
+                match crate::journal::process_started_at(receipt.pid) {
+                    Ok(Some(current)) => (current - receipt.started_at).abs() > 3,
+                    Ok(None) => true,
+                    Err(_) => false,
+                }
+            });
+            if !dead {
+                return Err(StoreError::InvalidAuthority(
+                    "Conversation already has a driver; connect to it".into(),
+                ));
             }
         }
+        let replace_provider =
+            expected.is_none() || conversation_engine_exited(&store, &session.id)?;
+        let connection = store.session_connection(&session.id)?;
         if !replace_provider && connection.is_none() {
             return Err(StoreError::InvalidAuthority(
                 "Conversation has no connection and no confirmed engine exit".into(),
@@ -1664,6 +1658,13 @@ impl CaptureHandle {
             return Ok(None);
         };
         row_store(&capture.dir)?.session_thread(session)
+    }
+
+    pub(crate) fn flow_turn_selection(
+        &self,
+    ) -> StoreResult<Option<crate::durable::FlowTurnSelection>> {
+        let capture = self.0.lock().expect("Run capture mutex poisoned");
+        row_store(&capture.dir)?.flow_turn_selection(&capture.manifest.run_id)
     }
 
     pub(crate) fn session_driver(&self) -> Option<(String, crate::exec::SessionDriver)> {
@@ -2163,6 +2164,35 @@ impl RunCapture {
 }
 
 /// The store that holds the row of the Run recorded at `dir`.
+/// An absent socket alone says nothing about an engine. Require its recorded
+/// process to have exited; a surviving endpoint wins over launcher death.
+pub(crate) fn conversation_engine_exited(
+    store: &crate::store::sqlite::SqliteStore,
+    session: &str,
+) -> StoreResult<bool> {
+    let Some((pid, started)) = store.session_provider_process(session)? else {
+        return Ok(false);
+    };
+    let exited = match crate::journal::process_started_at(pid) {
+        Ok(Some(current)) => (current - started).abs() > 3,
+        Ok(None) => true,
+        Err(_) => false,
+    };
+    if !exited {
+        return Ok(false);
+    }
+    Ok(match store.session_connection(session)? {
+        Some((endpoint, _)) => match std::os::unix::net::UnixStream::connect(endpoint) {
+            Ok(_) => false,
+            Err(error) => matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ),
+        },
+        None => true,
+    })
+}
+
 fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
     #[cfg(test)]
     let path = std::env::var_os("LF_DB_PATH")

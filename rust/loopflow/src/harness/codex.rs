@@ -1168,7 +1168,9 @@ impl CodexHarness {
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
         let authority = self.session_driver.clone();
         let writer_events = self.events.clone();
-        let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
+        let native_history = Arc::new(Mutex::new(super::codex_history::History::for_flow(
+            launch.flow_selection.clone(),
+        )));
         let writer_history = native_history.clone();
         let writer_task = tokio::spawn(async move {
             while let Some(message) = outbound_rx.recv().await {

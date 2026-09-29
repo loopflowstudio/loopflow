@@ -488,6 +488,14 @@ lf task run DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 --flow incident
 ```
 
+Use `lf flow resume INVOCATION --retry` or `lf task run DES-123 --retry`
+after a command and its native engine both stop before recording completion.
+Retry requires confirmed engine exit and keeps the earlier outcome unknown.
+A surviving engine is observed through completion without sending another turn.
+Task failure reasons and decision-unblock feedback still apply. Automatic provider
+retries retain each turn's history; a failed turn's decision or route is discarded
+when its successor is selected.
+
 A **loopflow** is a Flow with one or more backward edges. Each edge names an
 earlier node. There is no pass limit. Steps outside a backward edge's body
 do not repeat when that edge is taken. Advance enters the remaining steps;

@@ -557,6 +557,7 @@ mod tests {
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
             session_driver: None,
+            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -612,6 +613,7 @@ mod tests {
     fn live_config() -> AgentConfig {
         AgentConfig {
             session_driver: None,
+            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: None,

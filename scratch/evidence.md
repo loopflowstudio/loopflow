@@ -77,15 +77,45 @@ recoverable; old unclassified Flow selectors and failure JSON retain original
 bytes in `import_evidence`. No migration fabricates a Session from a provider label.
 Historical artifact paths and prepared→launching ownership remain intact.
 
+## History reader integration
+
+The released proposal now uses captured event identity and typed Session history;
+RunSnapshot and string-subject joins are removed. Native receipts without a capture
+or start remain discoverable with unknown attribution and partial usage. The
+subtract-only pass removes the completion wrapper, redundant Work tuple and Swift
+input-identity wrapper. Original SQL/manifest time and attribution precede import
+metadata; provider and recorder outcomes remain separate.
+
+Logs are under `.lf/tmp/cut-i/`. `history-full.log` ran the entire materialized
+Rust matrix without fail-fast: **2,013 passed, six failed, 16 skipped, none unrun**.
+Four consumer expectations were stale; two import cases exposed overwritten
+historical time/source. All six repairs plus bounded-history and orphan-discovery
+checks pass in `history-matrix-repairs.log` (8/8). Review also reproduced an
+unlinked turn borrowing another turn's Work filter (three rows instead of one);
+`history-orphan-scope-red-exact.log` retains the failure and the eight-case repair
+includes its correction. **Final `history-full-final.log`: 2,019 passed, 16 skipped, none unrun**,
+followed by formatting and all-target Clippy. The exact disposable source receipt
+is `.lf/tmp/history-event/source.json`; source/test hashes still match.
+`history-docs-final-2.log` records regenerated website docs (the preceding
+invocation named a nonexistent helper and did not change files).
+
+`history-public-orphan.log` proves public runs/usage discovery, partial counters
+and no borrowed post-bind Task ownership with a scripted OpenCode provider.
+`history-budget-proof.log` proves pre-decode limits, retained unfinished entries,
+complete exact-caller reads and visible exact-detail corruption. Swift's initial
+39 selected checks had two stale expectations; their repaired DTO/Task-history
+selection passes 18/18 in `history-swift-repair.log`. Nine lifecycle-scorecard
+Python tests, architecture coverage and the prior all-target Clippy pass. These
+are local fixture proofs; configured-provider/Desktop acceptance remains open.
+
 ## Limits retained at the finish line
 
 - The released-populated public import bridge and its canonical-copy counterpart
   remain required. Schema fixtures are not that bridge or a backed-up real-Home
   conversion. Keep source artifacts, unknown membership/Exec identity, controller-
   and SQL-only evidence, Started, ancestry and exact replay until it passes.
-- Native receipts with no capture/start relation still need aggregate discovery
-  with unknown attribution and coverage. The released history proposal is not
-  compiled or integrated. Desktop paging must change reconciliation with it.
+- Native-only aggregate discovery has local fixture proof above. Saved-Flow
+  inventory and Desktop paging/reconciliation remain the next implementation cut.
 - Configured accounts, rendered Desktop continuity, complete managed/provider
   recovery and the real-Home procedure remain explicit obligations. Never run this
   branch against the installed Home or promote it before authorized delivery.

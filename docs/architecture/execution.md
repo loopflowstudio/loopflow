@@ -123,6 +123,10 @@ exactly-once external effects from cursor movement.
 Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
 once; never add checkpoints as independent consumption. Retries retain separate
 outcomes and measurements. Missing counters and unknown finality stay missing.
+The shared typed history reader selects captured events and unlinked native turns
+before decoding payloads. Native receipts without a start stay discoverable with
+unknown Exec/Work ownership and partial usage coverage. Recorder outcomes remain
+separate from provider completion and Exec exit.
 Under the supervisor's prospective-attribution assumption, binding affects later
 work and preserves earlier usage ownership. Active-turn allocation uses recorded
 start/assignment evidence; uncertainty never becomes an invented token split.

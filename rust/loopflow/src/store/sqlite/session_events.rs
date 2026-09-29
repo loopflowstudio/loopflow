@@ -177,7 +177,7 @@ impl SqliteStore {
         after: i64,
         limit: usize,
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, after, limit, None)
+        self.read_history(session, after, limit, None, (None, None, None), None)
     }
 
     /// Keep usage, provenance and unknown evidence; transcript payloads belong to detail.
@@ -186,7 +186,26 @@ impl SqliteStore {
         session: &str,
         input: &str,
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, 0, 0, Some(input))
+        self.read_history(session, 0, 0, Some(input), (None, None, None), None)
+    }
+
+    pub(super) fn summary_for_input_matching(
+        &self,
+        session: &str,
+        input: &str,
+        scope: (Option<&str>, Option<&str>, Option<&str>),
+    ) -> StoreResult<Vec<SessionEvent>> {
+        self.read_history(session, 0, 0, Some(input), scope, None)
+    }
+
+    pub(super) fn orphaned_native_history(
+        &self,
+        session: &str,
+        scope: (Option<&str>, Option<&str>, Option<&str>),
+        thread: Option<&str>,
+        turn: Option<&str>,
+    ) -> StoreResult<Vec<SessionEvent>> {
+        self.read_history(session, 0, 0, None, scope, Some((thread, turn)))
     }
 
     fn read_history(
@@ -195,6 +214,8 @@ impl SqliteStore {
         after: i64,
         limit: usize,
         input: Option<&str>,
+        scope: (Option<&str>, Option<&str>, Option<&str>),
+        orphaned: Option<(Option<&str>, Option<&str>)>,
     ) -> StoreResult<Vec<SessionEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
@@ -206,6 +227,8 @@ impl SqliteStore {
                ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
              WHERE e.session_id=?1 AND e.seq>?2
+             AND (NOT ?8 OR (e.kind IN ('started','usage','completed','output') AND origin.captured_event IS NULL
+                  AND e.provider_thread IS ?9 AND e.provider_turn IS ?10))
              AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':')
                   OR (e.kind!='observed' AND origin.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?4)))
              AND (?4 IS NULL OR CASE WHEN json_valid(e.payload) THEN
@@ -213,6 +236,14 @@ impl SqliteStore {
                  COALESCE(json_extract(e.payload,'$.evidence.type'),'') NOT IN
                      ('activity','handoff','user_input','conversation','text','tool_use','result','provider_output')
                  ELSE 1 END)
+             AND ((e.kind='observed' AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json')) OR (
+                 (?5 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END)
+                     IN (SELECT id FROM waves WHERE id=?5 OR name=?5))
+                 AND (?6 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
+                     IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
+                         WHERE p.id=?6 OR p.project_slug=?6 OR p.external_project_id=?6))
+                 AND (?7 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
+                     IN (SELECT id FROM tasks WHERE id=?7 OR issue_identifier=?7 OR external_issue_id=?7))))
              ORDER BY e.seq LIMIT ?3",
         )?;
         let rows = query.query_map(
@@ -220,7 +251,13 @@ impl SqliteStore {
                 session,
                 after,
                 if limit == 0 { -1 } else { limit as i64 },
-                input
+                input,
+                scope.0,
+                scope.1,
+                scope.2,
+                orphaned.is_some(),
+                orphaned.and_then(|(thread, _)| thread),
+                orphaned.and_then(|(_, turn)| turn)
             ],
             |row| {
                 Ok((
@@ -389,7 +426,7 @@ mod tests {
         let session = store.session("conversation").unwrap().unwrap();
         assert_eq!(
             store
-                .input_snapshot(&input)
+                .input_history(&input)
                 .unwrap()
                 .first_provider_attempt_at,
             None
@@ -434,9 +471,9 @@ mod tests {
                 )
                 .unwrap();
         }
-        let snapshot = store.input_snapshot(&input).unwrap();
+        let snapshot = store.input_history(&input).unwrap();
         assert_eq!(snapshot.task_pr_id, Some(pr));
-        assert_eq!(snapshot.started, 1);
+        assert_eq!(snapshot.observed_at, 1);
         assert_eq!(snapshot.first_provider_attempt_at, Some(10));
         assert_eq!(snapshot.usage.gaps, 0);
     }
@@ -477,6 +514,212 @@ mod tests {
         assert_eq!(summary[1].payload["evidence"], events[2]);
         assert_eq!(store.input_events(&input).unwrap(), events);
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_callers() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let mut template = store.test_session("seed", "run_000000000000000000000000000000ff");
+        template.captured = None;
+        template.caller_artifact_key = Some(template.artifact_key.clone());
+        for at in 1..=60 {
+            let mut session = template.clone();
+            session.id = format!("conversation-{at}");
+            session.artifact_key = format!("run_{at:032x}");
+            session.created_at = at;
+            let session = store.create_session(session, None, None).unwrap();
+            store
+                .record_session_event(
+                    &session.id,
+                    "thread",
+                    &at.to_string(),
+                    SessionEventKind::Started,
+                    &json!({}),
+                )
+                .unwrap();
+            if at != 1 {
+                store
+                    .record_session_event(
+                        &session.id,
+                        "thread",
+                        &at.to_string(),
+                        SessionEventKind::Completed,
+                        &json!({"status":"completed"}),
+                    )
+                    .unwrap();
+            }
+        }
+        let (recent, truncated) = store
+            .recent_conversation_history(None, None, None, 0, 5)
+            .unwrap();
+        assert!(truncated);
+        assert_eq!(recent.len(), 5);
+        assert_eq!(
+            recent.iter().map(|row| row.observed_at).collect::<Vec<_>>(),
+            [60, 59, 58, 1, 1]
+        );
+        let exact = store
+            .conversation_history(
+                None,
+                None,
+                None,
+                Some(template.artifact_key.as_str()),
+                0,
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            exact.len(),
+            60,
+            "an exact caller drill has no presentation budget"
+        );
+        let boundary = store
+            .conversation_history(None, None, None, None, 59, false)
+            .unwrap();
+        assert_eq!(boundary.len(), 2);
+        assert_eq!(boundary[1].observed_at, 59);
+        assert_eq!(
+            store
+                .conversation_history(None, None, None, None, 59, true)
+                .unwrap()
+                .len(),
+            59,
+            "completed native turns in the window retain older captures"
+        );
+        // Corrupt body evidence outside the selected budget cannot break a list;
+        // exact detail still reports that real error instead of hiding it.
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT session_id,'observed',receipt_key||':events.jsonl:1',10,'{',seq FROM session_events
+             WHERE kind='captured' AND session_id='conversation-10'", []).unwrap();
+        assert_eq!(
+            store
+                .recent_conversation_history(None, None, None, 0, 5)
+                .unwrap()
+                .0,
+            recent
+        );
+        assert!(store
+            .input_history("run_0000000000000000000000000000000a")
+            .is_err());
+        assert!(store
+            .conversation_history(
+                None,
+                None,
+                None,
+                Some(template.artifact_key.as_str()),
+                0,
+                false
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
+        let counts = json!({"inputTokens":12,"outputTokens":3,
+            "cachedInputTokens":0,"reasoningOutputTokens":0});
+        for (turn, at) in [("old", 10), ("recent", 100)] {
+            store
+                .record_session_event(
+                    "conversation",
+                    "thread",
+                    turn,
+                    SessionEventKind::Usage,
+                    &json!({"total":counts,"last":counts}),
+                )
+                .unwrap();
+            store
+                .record_session_event(
+                    "conversation",
+                    "thread",
+                    turn,
+                    SessionEventKind::Completed,
+                    &json!({"status":"completed"}),
+                )
+                .unwrap();
+            // Simulated observation times exercise the public reader's window.
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE session_events SET observed_at=?1 WHERE provider_turn=?2",
+                    (at, turn),
+                )
+                .unwrap();
+        }
+        let rows = store
+            .conversation_history(None, None, None, None, 50, true)
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "an older unlinked turn cannot hide or join the recent one"
+        );
+        let history = &rows[0];
+        assert!(history.captured.is_none());
+        assert!(history.artifact_key.is_none());
+        assert!(history.task_id.is_none());
+        assert!(history.wave_id.is_none());
+        assert!(history.recorded_outcome.is_none());
+        assert_eq!(history.observed_at, 100);
+        assert_eq!(history.providers.len(), 1);
+        let provider = &history.providers[0];
+        assert!(
+            matches!(&provider.reference, crate::run_record::ProviderHistoryReference::NativeTurn {
+            turn, start_seq: None, completion_seq: Some(_), .. } if turn == "recent")
+        );
+        assert!(provider.exec_id.is_none());
+        assert!(provider.task_id.is_none());
+        assert!(provider.started_at.is_none());
+        assert_eq!(provider.outcome.as_deref(), Some("completed"));
+        assert_eq!(history.usage.input_tokens, Some(12));
+        assert_eq!(history.usage.streams, 1);
+        assert_eq!(
+            history.usage.final_streams, 0,
+            "a missing start keeps usage coverage partial"
+        );
+        assert!(store
+            .conversation_history(None, None, Some("missing-task"), None, 0, true)
+            .unwrap()
+            .is_empty());
+        let (recent, truncated) = store
+            .recent_conversation_history(None, None, None, 50, 1)
+            .unwrap();
+        assert_eq!(recent, vec![history.clone()]);
+        assert!(!truncated);
+        assert_eq!(
+            store
+                .conversation_history(None, None, None, None, 0, true)
+                .unwrap()
+                .len(),
+            3,
+            "both unlinked turns and the reserved capture retain independent evidence"
+        );
+        let wave = crate::id::WaveId::new();
+        store
+            .create_wave(&crate::work::wave::Wave::new(
+                wave.clone(),
+                "proof".into(),
+                "/repo".into(),
+            ))
+            .unwrap();
+        // Imported native history can establish Work without a capture. That
+        // turn cannot lend its attribution to another unlinked receipt.
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,wave_id,observed_at,payload)
+             VALUES('conversation','thread','owned','started','',?1,110,'{}')", [wave.as_str()],
+        ).unwrap();
+        let scoped = store
+            .conversation_history(Some(wave.as_str()), None, None, None, 0, true)
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].providers.len(), 1);
+        assert_eq!(scoped[0].wave_id.as_ref(), Some(&wave));
     }
 
     #[test]
@@ -556,13 +799,13 @@ mod tests {
             .summary_for_input(&session.id, &replacement.artifact_key)
             .unwrap()
             .is_empty());
-        let old = store.input_snapshot(&first_input).unwrap();
+        let old = store.input_history(&first_input).unwrap();
         assert_eq!(old.usage.input_tokens, Some(18));
         assert_eq!(old.usage.output_tokens, Some(5));
         assert_eq!(old.usage.cost_usd, None);
         assert_eq!(old.usage.final_streams, 0);
         assert_eq!(
-            old.outcome, None,
+            old.recorded_outcome, None,
             "native completion cannot invent the command outcome"
         );
         // A later recovered checkpoint measures this same turn, not extra work.
@@ -580,7 +823,7 @@ mod tests {
                 payload:json!({"input_id":first_input,"source":source,"evidence":evidence})
             }).unwrap();
         }
-        let old = store.input_snapshot(&first_input).unwrap();
+        let old = store.input_history(&first_input).unwrap();
         assert_eq!(old.usage.streams, 1);
         assert_eq!(old.usage.input_tokens, Some(18));
         assert_eq!(old.usage.output_tokens, Some(5));
@@ -629,7 +872,7 @@ mod tests {
             )
             .unwrap();
         let partial = store
-            .input_snapshot(replacement.artifact_key.as_str())
+            .input_history(replacement.artifact_key.as_str())
             .unwrap();
         assert_eq!(partial.usage.total_input_tokens, Some(10));
         assert_eq!(partial.usage.output_tokens, Some(5));
@@ -649,7 +892,7 @@ mod tests {
                     "last":{"inputTokens":last,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
         }
         let decreased = store
-            .input_snapshot(replacement.artifact_key.as_str())
+            .input_history(replacement.artifact_key.as_str())
             .unwrap();
         assert_eq!(
             decreased.usage.total_input_tokens,
@@ -682,7 +925,7 @@ mod tests {
                 "last":{"inputTokens":10,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
         assert_eq!(
             store
-                .input_snapshot(replacement.artifact_key.as_str())
+                .input_history(replacement.artifact_key.as_str())
                 .unwrap()
                 .usage
                 .total_input_tokens,
@@ -746,7 +989,7 @@ mod tests {
                 payload:json!({"input_id":input,"source":source,"evidence":evidence})
             }).unwrap();
         }
-        let usage = store.input_snapshot(&input).unwrap().usage;
+        let usage = store.input_history(&input).unwrap().usage;
         assert_eq!(usage.total_input_tokens, Some(60));
         assert_eq!(usage.streams, 3);
         assert_eq!(usage.final_streams, 1);

@@ -747,7 +747,9 @@ fn code_flow_records_each_skill_as_one_generic_run() {
         .collect::<Vec<_>>();
     skills.sort_unstable();
     assert_eq!(skills, ["compress", "implement"]);
-    assert!(runs.iter().all(|run| run["outcome"] == "completed"));
+    assert!(runs
+        .iter()
+        .all(|run| run["recorded_outcome"] == "completed"));
 }
 
 #[test]
@@ -949,8 +951,10 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     );
     assert_eq!(runs[0]["harness"], "codex");
     assert_eq!(runs[0]["skill"], "history-work");
-    assert!(!session_id_for_capture(home.path(), runs[0]["id"].as_str().unwrap()).is_empty());
-    assert!(runs[0]["started"].as_i64().is_some());
+    assert!(
+        !session_id_for_capture(home.path(), runs[0]["artifact_key"].as_str().unwrap()).is_empty()
+    );
+    assert!(runs[0]["observed_at"].as_i64().is_some());
     let after_launch = events();
     assert!(read("INF-999").is_empty(), "another Task sees none of them");
     assert_eq!(
@@ -1010,7 +1014,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|run| run["id"].as_str().unwrap().to_string())
+            .map(|run| run["artifact_key"].as_str().unwrap().to_string())
             .collect()
     };
 
@@ -1508,12 +1512,8 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let runs: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(runs.len(), 6);
     for run in runs {
-        assert!(run["subjects"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|subject| subject["selector"] == format!("task:{}", task.task.plan.identifier)));
-        assert_eq!(run["outcome"], "completed");
+        assert_eq!(run["task_identifier"], task.task.plan.identifier);
+        assert_eq!(run["recorded_outcome"], "completed");
     }
     for invocation in [
         vec!["contribution"],
@@ -1592,9 +1592,10 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     assert!(listed.status.success());
     let listed: Vec<serde_json::Value> = serde_json::from_slice(&listed.stdout).unwrap();
     assert!(
-        listed.iter().any(
-            |run| session_id_for_capture(home.path(), run["id"].as_str().unwrap()) == session_id
-        ),
+        listed.iter().any(|run| session_id_for_capture(
+            home.path(),
+            run["artifact_key"].as_str().unwrap()
+        ) == session_id),
         "{listed:?}"
     );
     let renamed = run_lf(

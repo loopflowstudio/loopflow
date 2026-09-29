@@ -148,12 +148,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskComments.self, from: stdout)
     }
 
-    /// Recent Runs attributed to one Task through the shared `lf runs` reader:
-    /// the last seven days, newest first, capped. Read-only; an unstarted Task
-    /// is neither prepared nor started by asking.
-    public func taskRuns(task: String, cwd: String?) async throws -> [RunSnapshot] {
+    /// Complete Task-attributed Session input/provider history. Read-only; querying
+    /// an unstarted Task neither prepares nor starts it.
+    public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
         let stdout = try await run(["runs", "--task", task, "--json"], cwd)
-        return try Self.decode([RunSnapshot].self, from: stdout)
+        return try Self.decode([SessionHistory].self, from: stdout)
     }
 
     public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
@@ -265,20 +264,20 @@ public struct RegistryQuery: Sendable {
         return WavePlan(objective: objective, projects: snapshot.projects)
     }
 
-    /// Direct provider-authored usage for recent Home-local Runs, optionally
+    /// Direct provider-authored usage from retained Session history, optionally
     /// drilled through the shared Wave → Project → Task attribution.
     public func usage(
         days: Int = 30,
         wave: String? = nil,
         project: String? = nil,
         task: String? = nil
-    ) async throws -> [RunSnapshot] {
+    ) async throws -> [SessionHistory] {
         var arguments = ["usage", "--days", String(days), "--json"]
         if let wave { arguments += ["--wave", wave] }
         if let project { arguments += ["--project", project] }
         if let task { arguments += ["--task", task] }
         let stdout = try await run(arguments, nil)
-        return try Self.decode([RunSnapshot].self, from: stdout)
+        return try Self.decode([SessionHistory].self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
@@ -431,7 +430,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
-    public let runs: WorkEvidence<RunSnapshot>
+    public let runs: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
         WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
@@ -444,41 +443,112 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     }
 }
 
-/// One Home-local harness bundle from `lf runs --json`.
-public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let id: String
-    public let parentRunId: String?
+/// Read-only history beneath a conversation's captured input; not a resumable Run.
+public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
+    public var id: String {
+        if let captured { return "\(sessionId):\(captured)" }
+        if case .nativeTurn(let thread, let turn, _, _) = providers.first?.reference {
+            return "\(sessionId):\(thread):\(turn)"
+        }
+        return sessionId
+    }
+    public let sessionId: String
+    public let captured: Int?
+    public let artifactKey: String?
+    public let callerArtifactKey: String?
     public let taskPrId: String?
     public let repo: String?
     public let worktree: String?
-    public let subjects: [RunSubjectAttribution]
+    public let taskId: String?
+    public let waveId: String?
+    public let taskIdentifier: String?
+    public let workSource: String?
+    public let waveName: String?
     public let skill: String?
-    public let outcome: String?
-    public let started: Int
+    public let observedAt: Int
     public let firstProviderAttemptAt: Int?
-    public let ended: Int?
-    public let usage: RunUsageSnapshot
+    public let recordedOutcome: String?
+    public let recordedAt: Int?
+    public let providers: [ProviderHistory]
+    public let usage: SessionUsage
     public let evidenceGaps: Int
     public let harness: String
     public let model: String?
     public let surface: String
 
+    public var status: String {
+        if !providers.isEmpty {
+            return providers.map { record in
+                switch record.reference {
+                case .nativeTurn: return record.outcome ?? "Unknown"
+                case .recordedAttempt: return "Recorded \(record.outcome ?? "unknown")"
+                }
+            }.joined(separator: " → ")
+        }
+        return recordedOutcome.map { "Recorded \($0)" } ?? "Unknown"
+    }
+
+    public var workLabel: String {
+        if providers.contains(where: { $0.taskId != taskId || $0.waveId != waveId }) {
+            return "Mixed/unknown · see provider history"
+        }
+        if let taskId { return "task/\(taskIdentifier ?? taskId)" }
+        if let waveId { return "wave/\(waveName ?? waveId)" }
+        return "—"
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, repo, worktree, subjects, skill, outcome, started, ended, usage, harness, model,
-            surface
-        case taskPrId = "task_pr_id"
-        case parentRunId = "parent_run_id"
-        case firstProviderAttemptAt = "first_provider_attempt_at"
-        case evidenceGaps = "evidence_gaps"
+        case repo, worktree, skill, providers, usage, harness, model, surface
+        case captured
+        case sessionId = "session_id", artifactKey = "artifact_key", callerArtifactKey = "caller_artifact_key"
+        case taskPrId = "task_pr_id", taskId = "task_id", waveId = "wave_id"
+        case taskIdentifier = "task_identifier", waveName = "wave_name", workSource = "work_source"
+        case observedAt = "observed_at", firstProviderAttemptAt = "first_provider_attempt_at"
+        case recordedOutcome = "recorded_outcome", recordedAt = "recorded_at", evidenceGaps = "evidence_gaps"
     }
 }
 
-public struct RunSubjectAttribution: Codable, Sendable, Hashable {
-    public let selector: String
-    public let source: String
+public struct ProviderHistory: Decodable, Sendable, Hashable {
+    public let reference: ProviderHistoryReference
+    public let execId: String?
+    public let taskId: String?
+    public let waveId: String?
+    public let startedAt: Int?
+    public let completedAt: Int?
+    public let outcome: String?
+    public let usage: SessionUsage
+    enum CodingKeys: String, CodingKey {
+        case reference, outcome, usage
+        case execId = "exec_id", taskId = "task_id", waveId = "wave_id"
+        case startedAt = "started_at", completedAt = "completed_at"
+    }
 }
 
-public struct RunUsageSnapshot: Decodable, Sendable, Hashable {
+public enum ProviderHistoryReference: Decodable, Sendable, Hashable {
+    case nativeTurn(thread: String, turn: String, startSeq: Int?, completionSeq: Int?)
+    case recordedAttempt(captured: Int, attemptKey: String)
+    private enum Keys: String, CodingKey {
+        case kind, thread, turn
+        case startSeq = "start_seq", completionSeq = "completion_seq"
+        case captured, attemptKey = "attempt_key"
+    }
+    private enum Kind: String, Decodable { case nativeTurn = "native_turn", recordedAttempt = "recorded_attempt" }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .nativeTurn:
+            self = .nativeTurn(thread: try c.decode(String.self, forKey: .thread),
+                turn: try c.decode(String.self, forKey: .turn),
+                startSeq: try c.decodeIfPresent(Int.self, forKey: .startSeq),
+                completionSeq: try c.decodeIfPresent(Int.self, forKey: .completionSeq))
+        case .recordedAttempt:
+            self = .recordedAttempt(captured: try c.decode(Int.self, forKey: .captured),
+                attemptKey: try c.decode(String.self, forKey: .attemptKey))
+        }
+    }
+}
+
+public struct SessionUsage: Decodable, Sendable, Hashable {
     public let streams: Int
     public let finalStreams: Int
     public let gaps: Int

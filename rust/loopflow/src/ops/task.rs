@@ -100,7 +100,7 @@ pub struct TaskSnapshot {
     pub project_id: String,
     pub status: WorkStatus,
     pub execution: crate::ops::task_execution::TaskExecutionSnapshot,
-    pub runs: Vec<crate::run_record::RunSnapshot>,
+    pub runs: Vec<crate::run_record::SessionHistory>,
     pub runs_truncated: bool,
     pub worktree: String,
     pub workspace_slug: String,

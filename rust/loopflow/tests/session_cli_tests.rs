@@ -196,9 +196,9 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
         String::from_utf8_lossy(&inspected.stderr)
     );
     let inspected: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
-    assert_eq!(inspected["id"], run_id.as_str());
-    assert_eq!(inspected["parent_run_id"], CALLER);
-    assert!(inspected["outcome"].is_null());
+    assert_eq!(inspected["artifact_key"], run_id.as_str());
+    assert_eq!(inspected["caller_artifact_key"], CALLER);
+    assert!(inspected["recorded_outcome"].is_null());
     let listed = run(home.path(), &["session", "list", "--all", "--json"]);
     assert!(
         listed.status.success(),

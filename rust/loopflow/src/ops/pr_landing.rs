@@ -987,27 +987,24 @@ async fn repair_conclusions(
 ) -> OpsResult<Vec<String>> {
     let error = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
     let runs = store
-        .conversation_snapshots(landing.created_at.unix_timestamp())
+        .conversation_history(landing.created_at.unix_timestamp())
         .await
         .map_err(|source| error(&source))?;
     let mut conclusions = Vec::new();
-    for run in runs
-        .into_iter()
-        .rev()
-        .map(|(_, snapshot)| snapshot)
-        .filter(|snapshot| {
-            snapshot.skill.as_deref() == Some("ci-fix")
-                && snapshot.worktree.as_deref() == landing.worktree.to_str()
-                && snapshot.ended.is_some()
-        })
-    {
-        if shown.contains(run.id.as_str()) {
+    for run in runs.into_iter().rev().filter(|snapshot| {
+        snapshot.skill.as_deref() == Some("ci-fix")
+            && snapshot.worktree.as_deref() == landing.worktree.to_str()
+            && (snapshot.recorded_outcome.is_some()
+                || snapshot.providers.iter().any(|p| p.completed_at.is_some()))
+    }) {
+        let Some(input) = run.artifact_key.as_ref() else {
+            continue;
+        };
+        if shown.contains(input) {
             continue;
         }
-        let input =
-            crate::run_record::parse_artifact_key(&run.id).map_err(|source| error(&source))?;
         let conclusion = store
-            .input_final_answer(&input)
+            .input_final_answer(input)
             .await
             .map_err(|source| error(&source))?
             .map(|answer| {
@@ -1017,12 +1014,12 @@ async fn repair_conclusions(
             })
             .unwrap_or_else(|| {
                 format!(
-                    "Run {} finished; inspect lf runs {} --events",
-                    run.id, run.id
+                    "Session {} finished; inspect lf session history {}",
+                    run.session_id, run.session_id
                 )
             });
         conclusions.push(conclusion);
-        shown.insert(run.id.to_string());
+        shown.insert(input.clone());
     }
     Ok(conclusions)
 }

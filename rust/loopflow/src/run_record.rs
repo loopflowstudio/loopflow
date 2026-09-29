@@ -5,7 +5,9 @@ pub(crate) mod activity;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, Write};
+#[cfg(test)]
+use std::io::BufRead;
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -185,12 +187,6 @@ impl SubjectAttribution {
     }
 }
 
-pub(crate) fn find_subject<'a>(subjects: &'a [SubjectAttribution], kind: &str) -> Option<&'a str> {
-    subjects
-        .iter()
-        .find_map(|subject| subject.selector.strip_prefix(kind)?.strip_prefix(':'))
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AttributionSource {
@@ -365,7 +361,7 @@ enum RunEvent {
 /// Optional counters stay unknown when no stream reported them. Finality is a
 /// count of direct provider receipts; Run settlement never upgrades it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RunUsage {
+pub struct SessionUsage {
     pub streams: usize,
     pub final_streams: usize,
     pub gaps: usize,
@@ -380,58 +376,96 @@ pub struct RunUsage {
     pub cost_usd: Option<f64>,
 }
 
-#[cfg(test)]
-impl RunUsage {
-    pub(crate) fn empty() -> Self {
-        Self {
-            streams: 0,
-            final_streams: 0,
-            gaps: 0,
-            input_tokens: None,
-            output_tokens: None,
-            total_input_tokens: None,
-            peak_input_tokens: None,
-            context_window_tokens: None,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd: None,
-        }
-    }
-}
-
-/// Disposable projection of one Run's manifest and recorded evidence.
+/// History beneath one conversation's immutable captured input. This is not a
+/// resumable object. Provider records retain separate outcomes and driving Execs;
+/// recorder completion is historical evidence, never native success or process exit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RunSnapshot {
-    pub id: String,
-    pub parent_run_id: Option<String>,
+pub struct SessionHistory {
+    pub session_id: String,
+    pub captured: Option<i64>,
+    pub artifact_key: Option<String>,
+    pub caller_artifact_key: Option<String>,
     pub task_pr_id: Option<crate::work::task::TaskPrId>,
     pub repo: Option<String>,
     pub worktree: Option<String>,
-    pub subjects: Vec<SubjectAttribution>,
+    pub task_id: Option<crate::durable::TaskId>,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub task_identifier: Option<String>,
+    pub work_source: Option<crate::session::WorkSource>,
+    pub wave_name: Option<String>,
     pub skill: Option<String>,
-    pub outcome: Option<String>,
-    pub started: i64,
+    pub observed_at: i64,
     pub first_provider_attempt_at: Option<i64>,
-    pub ended: Option<i64>,
-    pub usage: RunUsage,
+    pub recorded_outcome: Option<String>,
+    pub recorded_at: Option<i64>,
+    pub providers: Vec<ProviderHistory>,
+    pub usage: SessionUsage,
     pub evidence_gaps: usize,
     pub harness: String,
     pub model: Option<String>,
     pub surface: String,
 }
 
-impl RunSnapshot {
+/// An exact native turn, or an older provider observation with unknown native
+/// identity. References identify evidence; they confer no launch/settlement API.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProviderHistory {
+    pub reference: ProviderHistoryReference,
+    pub exec_id: Option<crate::id::ExecId>,
+    pub task_id: Option<crate::durable::TaskId>,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub started_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub outcome: Option<String>,
+    pub usage: SessionUsage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProviderHistoryReference {
+    NativeTurn {
+        thread: String,
+        turn: String,
+        start_seq: Option<i64>,
+        completion_seq: Option<i64>,
+    },
+    RecordedAttempt {
+        captured: i64,
+        attempt_key: String,
+    },
+}
+
+impl SessionHistory {
+    pub fn selector(&self) -> &str {
+        self.artifact_key.as_deref().unwrap_or(&self.session_id)
+    }
+
     pub fn label(&self) -> &str {
         self.skill.as_deref().unwrap_or(&self.harness)
     }
 
-    pub fn status(&self) -> &str {
-        self.outcome.as_deref().unwrap_or("unterminated")
-    }
-
-    pub fn subject(&self, kind: &str) -> Option<&str> {
-        find_subject(&self.subjects, kind)
+    /// Display all recorded provider results; a later success never erases failure.
+    pub fn status(&self) -> String {
+        if self.providers.is_empty() {
+            return self
+                .recorded_outcome
+                .as_ref()
+                .map(|outcome| format!("recorded {outcome}"))
+                .unwrap_or_else(|| "unknown".into());
+        }
+        self.providers
+            .iter()
+            .map(|record| match record.reference {
+                ProviderHistoryReference::NativeTurn { .. } => {
+                    record.outcome.clone().unwrap_or_else(|| "unknown".into())
+                }
+                ProviderHistoryReference::RecordedAttempt { .. } => format!(
+                    "recorded {}",
+                    record.outcome.as_deref().unwrap_or("unknown")
+                ),
+            })
+            .collect::<Vec<_>>()
+            .join(" → ")
     }
 
     pub fn total_tokens(&self) -> Option<i64> {
@@ -441,8 +475,29 @@ impl RunSnapshot {
             .and_then(|(input, output)| input.checked_add(output))
     }
 
-    pub fn is_unterminated(&self) -> bool {
-        self.outcome.is_none()
+    pub fn work_label(&self) -> String {
+        if self
+            .providers
+            .iter()
+            .any(|provider| provider.task_id != self.task_id || provider.wave_id != self.wave_id)
+        {
+            return "mixed/unknown · see provider history".into();
+        }
+        if let Some(task) = &self.task_id {
+            return format!(
+                "task/{}",
+                self.task_identifier.as_deref().unwrap_or(task.as_str())
+            );
+        }
+        self.wave_id
+            .as_ref()
+            .map(|wave| {
+                format!(
+                    "wave/{}",
+                    self.wave_name.as_deref().unwrap_or(wave.as_str())
+                )
+            })
+            .unwrap_or_else(|| "-".into())
     }
 }
 
@@ -826,14 +881,175 @@ fn recover_native_usage(
     gaps
 }
 
-/// The compatibility Runs/Usage projection of retained conversation input history.
-/// No current assignment, provider or completion can rewrite an earlier input.
-pub(crate) fn conversation_snapshot(
-    session: &crate::session::AgentSession,
-    artifact_key: &String,
+fn providers_first_start(history: &[crate::session::SessionEvent]) -> Option<i64> {
+    history
+        .iter()
+        .filter(|event| event.kind == crate::session::SessionEventKind::Started)
+        .map(|event| event.observed_at)
+        .min()
+}
+
+fn project_provider_history(
+    captured: Option<i64>,
+    input: Option<&str>,
+    envelopes: &[EventEnvelope],
     history: &[crate::session::SessionEvent],
-    names: (Option<String>, Option<String>, Option<String>),
-) -> std::io::Result<RunSnapshot> {
+) -> std::io::Result<Vec<ProviderHistory>> {
+    use crate::session::SessionEventKind;
+    let mut native = BTreeMap::<(&str, &str), Vec<&crate::session::SessionEvent>>::new();
+    for event in history
+        .iter()
+        .filter(|event| event.kind != SessionEventKind::Observed)
+    {
+        if let (Some(thread), Some(turn)) = (
+            event.provider_thread.as_deref(),
+            event.provider_turn.as_deref(),
+        ) {
+            native.entry((thread, turn)).or_default().push(event);
+        }
+    }
+    let threads: HashMap<_, _> = envelopes
+        .iter()
+        .filter_map(|event| match &event.event {
+            RunEvent::ProviderSessionObserved {
+                attempt_key,
+                provider_session_id,
+            } => Some((attempt_key.as_str(), provider_session_id.as_str())),
+            _ => None,
+        })
+        .collect();
+    let matches_native = |attempt: &str, turn: &str| {
+        threads
+            .get(attempt)
+            .is_some_and(|thread| native.contains_key(&(*thread, turn)))
+    };
+    let mut records = Vec::new();
+    for ((thread, turn), events) in &native {
+        let start = events
+            .iter()
+            .find(|event| event.kind == SessionEventKind::Started);
+        let completed = events
+            .iter()
+            .find(|event| event.kind == SessionEventKind::Completed);
+        let usage = reduce_usage_events(envelopes.iter().filter(|event| match &event.event {
+            RunEvent::Usage {
+                attempt_key,
+                turn_key,
+                usage_stream_id,
+                ..
+            } => turn_key.as_str() == *turn
+                && (threads.get(attempt_key.as_str()) == Some(thread)
+                    || (attempt_key.is_empty()
+                        && (usage_stream_id == &format!("native:{thread}:{turn}")
+                            || usage_stream_id.starts_with(&format!("native:{thread}:{turn}:"))))),
+            _ => false,
+        }))
+        .usage;
+        records.push(ProviderHistory {
+            reference: ProviderHistoryReference::NativeTurn {
+                thread: (*thread).into(),
+                turn: (*turn).into(),
+                start_seq: start.map(|event| event.seq),
+                completion_seq: completed.map(|event| event.seq),
+            },
+            exec_id: start
+                .and_then(|event| event.exec_id.as_deref())
+                .map(crate::id::ExecId::parse)
+                .transpose()
+                .map_err(std::io::Error::other)?,
+            task_id: start
+                .and_then(|event| event.task_id.as_deref())
+                .map(crate::durable::TaskId::parse)
+                .transpose()
+                .map_err(std::io::Error::other)?,
+            wave_id: start
+                .and_then(|event| event.wave_id.as_deref())
+                .map(crate::id::WaveId::parse)
+                .transpose()
+                .map_err(std::io::Error::other)?,
+            started_at: start.map(|event| event.observed_at),
+            completed_at: completed.map(|event| event.observed_at),
+            outcome: completed
+                .and_then(|event| event.payload["status"].as_str())
+                .map(str::to_owned),
+            usage,
+        });
+    }
+    // Old provider records have no reliable Exec or native-turn identity. Keep
+    // their own key and result, never substitute the enclosing recorder exit.
+    let mut attempts = BTreeMap::<&str, Vec<&EventEnvelope>>::new();
+    for event in envelopes {
+        let key = match &event.event {
+            RunEvent::ProviderAttemptStarted { attempt_key, .. }
+            | RunEvent::ProviderAttemptFinished { attempt_key, .. }
+            | RunEvent::Usage { attempt_key, .. }
+                if !attempt_key.is_empty() =>
+            {
+                attempt_key
+            }
+            _ => continue,
+        };
+        attempts.entry(key).or_default().push(event);
+    }
+    for (attempt, events) in attempts {
+        // The recorded attempt's outcome remains evidence even with native history;
+        // its usage excludes exactly correlated native streams to avoid double count.
+        let start = events
+            .iter()
+            .find(|event| matches!(event.event, RunEvent::ProviderAttemptStarted { .. }));
+        let finished = events.iter().find_map(|event| match &event.event {
+            RunEvent::ProviderAttemptFinished { outcome, .. } => {
+                Some((event.observed_at.unix_timestamp(), outcome.clone()))
+            }
+            _ => None,
+        });
+        let usage =
+            reduce_usage_events(events.iter().copied().filter(|event| match &event.event {
+                RunEvent::Usage { turn_key, .. } => !matches_native(attempt, turn_key),
+                _ => false,
+            }))
+            .usage;
+        let origin = history.iter().find(|event| {
+            event.kind == SessionEventKind::Observed
+                && event.payload["input_id"].as_str() == input
+                && event.payload["source"] == "manifest.json"
+        });
+        records.push(ProviderHistory {
+            reference: ProviderHistoryReference::RecordedAttempt {
+                captured: captured.ok_or_else(|| {
+                    std::io::Error::other("recorded provider evidence has no captured event")
+                })?,
+                attempt_key: attempt.into(),
+            },
+            exec_id: None,
+            task_id: origin
+                .and_then(|event| event.task_id.as_deref())
+                .map(crate::durable::TaskId::parse)
+                .transpose()
+                .map_err(std::io::Error::other)?,
+            wave_id: origin
+                .and_then(|event| event.wave_id.as_deref())
+                .map(crate::id::WaveId::parse)
+                .transpose()
+                .map_err(std::io::Error::other)?,
+            started_at: start.map(|event| event.observed_at.unix_timestamp()),
+            completed_at: finished.as_ref().map(|(at, _)| *at),
+            outcome: finished.map(|(_, outcome)| outcome),
+            usage,
+        });
+    }
+    records.sort_by_key(|record| record.started_at.or(record.completed_at));
+    Ok(records)
+}
+
+/// Project typed input and provider history from the existing Session owner.
+/// No current assignment, provider or completion can rewrite an earlier input.
+pub(crate) fn project_input_history(
+    session: &crate::session::HistoryCapture,
+    artifact_key: Option<&str>,
+    history: &[crate::session::SessionEvent],
+    names: (Option<String>, Option<String>),
+) -> std::io::Result<SessionHistory> {
     let mut events = Vec::new();
     let mut terminal: Option<TerminalReceipt> = None;
     let mut manifest: Option<RunManifest> = None;
@@ -846,17 +1062,17 @@ pub(crate) fn conversation_snapshot(
         let input = event.payload["input_id"].as_str();
         let source = event.payload["source"].as_str().unwrap_or("");
         let evidence = &event.payload["evidence"];
-        if source == "terminal.json" && input == Some(artifact_key.as_str()) {
+        if source == "terminal.json" && input == artifact_key {
             match serde_json::from_value(evidence.clone()) {
                 Ok(receipt) => terminal = Some(receipt),
                 Err(_) => gaps += 1,
             }
-        } else if source == "manifest.json" && input == Some(artifact_key.as_str()) {
+        } else if source == "manifest.json" && input == artifact_key {
             match serde_json::from_value(evidence.clone()) {
                 Ok(saved) => manifest = Some(saved),
                 Err(_) => gaps += 1,
             }
-        } else if source == "runs" && input == Some(artifact_key.as_str()) {
+        } else if source == "runs" && input == artifact_key {
             stored = Some(evidence);
         } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
             match (
@@ -873,14 +1089,10 @@ pub(crate) fn conversation_snapshot(
     events.sort_by_key(|(ordinal, _)| *ordinal);
     let mut events: Vec<_> = events.into_iter().map(|(_, envelope)| envelope).collect();
     gaps += recover_native_usage(&mut events, history);
-    let mut encoded = Vec::new();
-    for event in events {
-        serde_json::to_writer(&mut encoded, &event)?;
-        encoded.push(b'\n');
-    }
-    let evidence = reduce_usage_reader(encoded.as_slice())?;
+    let providers = project_provider_history(session.captured, artifact_key, &events, history)?;
+    let evidence = reduce_usage_events(&events);
     gaps += evidence.gaps + usize::from(manifest.is_none());
-    let current = session.artifact_key == *artifact_key;
+    let current = session.captured.is_some() && session.current_capture == session.captured;
     let stored_text = |field: &str| {
         stored
             .and_then(|row| row[field].as_str())
@@ -893,43 +1105,28 @@ pub(crate) fn conversation_snapshot(
                 || stored_end.is_some_and(|at| at != terminal.ended_at.unix_timestamp()),
         );
     }
-    // Replacement preserves admission ancestry/source; binding changes source
-    // to Bound. Matching immutable ancestry can therefore retain Inherited on
-    // prior inputs too, without lending a later assignment to earlier history.
-    let inherited_admission = session.work_source == Some(crate::session::WorkSource::Inherited)
-        && (current
-            || history.iter().any(|event| {
-                event.kind == crate::session::SessionEventKind::Observed
-                    && event.payload["input_id"].as_str() == Some(artifact_key.as_str())
-                    && event.payload["source"] == "manifest.json"
-                    && event.task_id.as_deref() == session.task_id.as_ref().map(|id| id.as_str())
-                    && event.wave_id.as_deref() == session.wave_id.as_ref().map(|id| id.as_str())
-            }));
-    let source = manifest
-        .as_ref()
-        .and_then(|m| m.subjects.first())
-        .map(|s| s.source)
-        .unwrap_or_else(|| {
-            if stored_text("work_source").as_deref() == Some("inherited")
-                || (stored.is_none() && inherited_admission)
-            {
-                AttributionSource::Inherited
-            } else {
-                AttributionSource::Declared
-            }
-        });
-    let subjects = [("wave", names.0), ("project", names.1), ("task", names.2)]
-        .into_iter()
-        .filter_map(|(kind, name)| {
-            Some(SubjectAttribution {
-                selector: format!("{kind}:{}", name?),
-                source,
+    Ok(SessionHistory {
+        session_id: session.id.clone(),
+        captured: session.captured,
+        artifact_key: artifact_key.map(str::to_owned),
+        caller_artifact_key: session.caller_artifact_key.clone(),
+        task_id: session.task_id.clone(),
+        wave_id: session.wave_id.clone(),
+        task_identifier: names.1,
+        work_source: stored
+            .and_then(|row| serde_json::from_value(row["work_source"].clone()).ok())
+            .or_else(|| {
+                manifest
+                    .as_ref()
+                    .and_then(|m| m.subjects.first())
+                    .map(|subject| match subject.source {
+                        AttributionSource::Declared => crate::session::WorkSource::Declared,
+                        AttributionSource::Inherited => crate::session::WorkSource::Inherited,
+                    })
             })
-        })
-        .collect();
-    Ok(RunSnapshot {
-        id: artifact_key.to_string(),
-        parent_run_id: None, // Selected from the immutable input relation by the SQL reader.
+            .or(session.work_source),
+        wave_name: names.0,
+        providers,
         task_pr_id: manifest.as_ref().and_then(|manifest| match &manifest.flow {
             Some(RunFlowMembership::Step(step)) => step.task_pr_id.clone(),
             _ => None,
@@ -943,7 +1140,6 @@ pub(crate) fn conversation_snapshot(
             .map(|m| m.cwd.to_string_lossy().into_owned())
             .or_else(|| stored_text("cwd"))
             .or_else(|| current.then(|| session.cwd.to_string_lossy().into_owned())),
-        subjects,
         skill: manifest
             .as_ref()
             .map(|m| m.skill.clone())
@@ -954,15 +1150,19 @@ pub(crate) fn conversation_snapshot(
                     current.then(|| session.skill.clone()).flatten()
                 }
             }),
-        outcome: terminal
+        recorded_outcome: terminal
             .as_ref()
             .map(|receipt| receipt.outcome.clone())
             .or_else(|| stored_text("outcome")),
-        started: session.created_at,
-        first_provider_attempt_at: evidence.first_provider_attempt_at,
-        ended: terminal
+        recorded_at: terminal
+            .as_ref()
             .map(|receipt| receipt.ended_at.unix_timestamp())
             .or(stored_end),
+        observed_at: session.observed_at,
+        first_provider_attempt_at: providers_first_start(history)
+            .into_iter()
+            .chain(evidence.first_provider_attempt_at)
+            .min(),
         usage: evidence.usage,
         evidence_gaps: gaps,
         harness: manifest
@@ -1517,39 +1717,47 @@ pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
 
 #[derive(Debug)]
 struct RunEvidence {
-    usage: RunUsage,
+    usage: SessionUsage,
     gaps: usize,
     first_provider_attempt_at: Option<i64>,
 }
 
+#[cfg(test)]
 fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence> {
+    let mut events = Vec::new();
+    let mut trailing_gap = 0;
+    loop {
+        let mut line = Vec::new();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        if line.last() != Some(&b'\n') {
+            trailing_gap += 1;
+            break;
+        }
+        events.push(
+            serde_json::from_slice::<EventEnvelope>(&line).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("malformed complete Run event: {error}"),
+                )
+            })?,
+        );
+    }
+    let mut evidence = reduce_usage_events(&events);
+    evidence.gaps += trailing_gap;
+    Ok(evidence)
+}
+
+fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) -> RunEvidence {
     let mut streams = BTreeMap::<String, UsageStream>::new();
     let mut gaps = 0;
     let mut envelope_seq = None;
     let mut first_provider_attempt_at = None;
-    loop {
-        let mut line = Vec::new();
-        let read = reader.read_until(b'\n', &mut line)?;
-        if read == 0 {
-            break;
-        }
-        let complete = line.last() == Some(&b'\n');
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        if !complete {
-            gaps += 1;
-            break;
-        }
-        let envelope = match serde_json::from_slice::<EventEnvelope>(&line) {
-            Ok(envelope) => envelope,
-            Err(error) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("malformed complete Run event: {error}"),
-                ));
-            }
-        };
+    for envelope in events {
         if envelope.schema_version != SCHEMA_VERSION {
             gaps += 1;
         }
@@ -1564,7 +1772,7 @@ fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence>
             first_provider_attempt_at = Some(envelope.observed_at.unix_timestamp());
         }
         let (usage_stream_id, observation_seq, counter_kind, start_known, final_receipt, usage) =
-            match envelope.event {
+            match &envelope.event {
                 RunEvent::Usage {
                     usage_stream_id,
                     observation_seq,
@@ -1574,11 +1782,11 @@ fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence>
                     usage,
                     ..
                 } => (
-                    usage_stream_id,
-                    observation_seq,
-                    counter_kind,
-                    start_known,
-                    final_receipt,
+                    usage_stream_id.clone(),
+                    *observation_seq,
+                    counter_kind.as_str(),
+                    *start_known,
+                    *final_receipt,
                     usage,
                 ),
                 RunEvent::Unknown => {
@@ -1675,7 +1883,7 @@ fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence>
         &mut gaps,
     );
     let cost_usd = sum_f64(streams.values().map(|stream| stream.cost_usd));
-    let usage = RunUsage {
+    let usage = SessionUsage {
         streams: streams.len(),
         final_streams: streams
             .values()
@@ -1692,11 +1900,11 @@ fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence>
         cache_write_tokens,
         cost_usd,
     };
-    Ok(RunEvidence {
+    RunEvidence {
         usage,
         gaps,
         first_provider_attempt_at,
-    })
+    }
 }
 
 fn observe_u64(current: &mut Option<u64>, observed: Option<u64>, gaps: &mut usize) {
@@ -3217,9 +3425,9 @@ mod tests {
         assert_eq!(
             super::row_store(&capture.artifact_dir())
                 .unwrap()
-                .input_snapshot(capture.run_id().as_str())
+                .input_history(capture.run_id().as_str())
                 .unwrap()
-                .outcome
+                .recorded_outcome
                 .as_deref(),
             Some("failed")
         );
@@ -3971,9 +4179,9 @@ mod tests {
 
         let run = super::row_store(&capture.artifact_dir())
             .unwrap()
-            .input_snapshot(capture.run_id().as_str())
+            .input_history(capture.run_id().as_str())
             .unwrap();
-        assert_eq!(run.outcome.as_deref(), Some("completed"));
+        assert_eq!(run.recorded_outcome.as_deref(), Some("completed"));
         assert_eq!(run.usage.streams, 2);
         assert_eq!(run.usage.final_streams, 1);
         assert_eq!(run.usage.input_tokens, Some(27));

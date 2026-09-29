@@ -10,7 +10,7 @@ struct TelemetryDashboardView: View {
     /// shape of the thing (a rewrite, a vendored tree), where a month shows noise.
     private static let codebaseDays = 365
 
-    @State private var usage: [RunSnapshot] = []
+    @State private var usage: [SessionHistory] = []
     @State private var doctor: DoctorReport?
     @State private var codebase: CodeNode?
     @State private var growth: [CodeSnapshot] = []
@@ -39,7 +39,7 @@ struct TelemetryDashboardView: View {
                         "Direct Run usage · 30 days",
                         subtitle: "Provider-authored cumulative counters. Dashes are unknown; final receipts and evidence gaps remain explicit."
                     ) {
-                        DirectRunUsageList(runs: usage, repo: selectedRepo)
+                        DirectSessionUsageList(runs: usage, repo: selectedRepo)
                     }
 
                     chartCard(
@@ -297,18 +297,18 @@ struct TelemetryDashboardView: View {
     }
 }
 
-private struct DirectRunUsageList: View {
+private struct DirectSessionUsageList: View {
     @Environment(\.palette) private var palette
-    let runs: [RunSnapshot]
+    let runs: [SessionHistory]
     let repo: String?
 
-    private var visible: [RunSnapshot] {
+    private var visible: [SessionHistory] {
         runs.filter { repo == nil || $0.repo == repo }.prefix(30).map { $0 }
     }
 
     var body: some View {
         if visible.isEmpty {
-            EmptyChartHint(message: "No direct Run usage in this window")
+            EmptyChartHint(message: "No provider usage in this window")
         } else {
             VStack(spacing: 0) {
                 row("WORK", "RUN", "INPUT", "OUTPUT", "FINAL", "GAPS", heading: true)
@@ -333,15 +333,8 @@ private struct DirectRunUsageList: View {
         value?.formatted() ?? "—"
     }
 
-    private func work(_ run: RunSnapshot) -> String {
-        for kind in ["task", "project", "wave"] {
-            if let subject = run.subjects.first(where: {
-                $0.selector.hasPrefix("\(kind):")
-            })?.selector.dropFirst(kind.count + 1) {
-                return "\(kind)/\(subject)"
-            }
-        }
-        return "—"
+    private func work(_ run: SessionHistory) -> String {
+        run.workLabel
     }
 
     private func row(

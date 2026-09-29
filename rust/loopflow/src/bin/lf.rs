@@ -773,7 +773,7 @@ fn print_task_snapshot(
         for run in &snapshot.runs {
             println!(
                 "  Run: {}  {}  {}  {}",
-                run.id,
+                run.selector(),
                 run.label(),
                 run.surface,
                 run.status()

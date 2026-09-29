@@ -32,19 +32,16 @@ processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Rust and Swift both round-trip it; The
 Podium derives no process state of its own.
 
-`wave_detail.json` embeds the `RunSnapshot` row shape shared by both bundle
-reads: `lf runs --json` and `lf usage --json`. Provider cumulative counters
-remain optional; stream finality and evidence gaps are required, explicit
-evidence.
-
-The Run's optional `task_pr_id` identifies the PR captured by its managed Flow.
-Optional `first_provider_attempt_at` separates the first recorded provider attempt
-from `started` (record creation, including unstarted Session preparation).
+`session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
+shape shared by `lf runs --json` and `lf usage --json`. Captured event sequences
+and native thread/turn references retain distinct outcomes. Optional counters,
+missing capture/start membership, stream finality and evidence gaps stay explicit.
+The optional `task_pr_id` retains the PR captured by the managed Flow;
+`first_provider_attempt_at` differs from capture/import observation time.
 
 `work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
-Run, PR, and Steer facts retain their existing Work, Run, author, and GitHub
-identities. Rust and Swift both round-trip it; The Podium filters this one
-history instead of maintaining a second activity store.
+Session capture/provider history, PR and Steer facts retain their original
+identities. Rust and Swift round-trip this shared history.
 
 `pm_show.json` pins the internal planning snapshot used by Task resolution
 and status refresh: a Project carries exactly one Wave Initiative and the repository

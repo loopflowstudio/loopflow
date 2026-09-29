@@ -638,6 +638,65 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
 }
 
 #[test]
+fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_bind() {
+    let fixture = Fixture::new(false);
+    let launched = fixture.run(&LAUNCH);
+    assert!(launched.status.success(), "{launched:?}");
+    let (session, ..) = fixture.session_row(&fixture.launches()[0]);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "native-history",
+        &fixture.repo.head_sha(),
+    );
+    fixture.json(&[
+        "session",
+        "bind",
+        &session,
+        "--task",
+        task.task.id.as_str(),
+        "--json",
+    ]);
+    let count = serde_json::json!({"inputTokens":12,"outputTokens":3,
+        "cachedInputTokens":0,"reasoningOutputTokens":0});
+    for (kind, payload) in [
+        ("usage", serde_json::json!({"total":count,"last":count})),
+        ("completed", serde_json::json!({"status":"completed"})),
+    ] {
+        fixture.db().execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+             VALUES(?1,'retained-thread','retained-turn',?2,'',strftime('%s','now'),?3)",
+            rusqlite::params![session,kind,payload.to_string()]).unwrap();
+    }
+    let captures = fixture.count("agent_sessions");
+    for command in [
+        vec!["runs", "--json"],
+        vec!["usage", "--days", "0", "--json"],
+    ] {
+        let rows = fixture.json(&command);
+        let recovered = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["captured"].is_null())
+            .unwrap();
+        assert_eq!(recovered["session_id"], session);
+        assert!(recovered["artifact_key"].is_null());
+        assert!(recovered["task_id"].is_null());
+        assert!(recovered["wave_id"].is_null());
+        assert!(recovered["providers"][0]["exec_id"].is_null());
+        assert!(recovered["providers"][0]["reference"]["start_seq"].is_null());
+        assert_eq!(recovered["providers"][0]["outcome"], "completed");
+        assert_eq!(recovered["usage"]["input_tokens"], 12);
+        assert_eq!(recovered["usage"]["final_streams"], 0);
+        let mut filtered = command;
+        filtered.extend(["--task", task.task.id.as_str()]);
+        assert!(fixture.json(&filtered).as_array().unwrap().is_empty());
+    }
+    assert_eq!(fixture.count("agent_sessions"), captures);
+}
+
+#[test]
 fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let fixture = Fixture::new(false);
     let task = support::register_unrun_task(
@@ -681,7 +740,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|run| run["id"].as_str().unwrap().to_string())
+            .map(|run| run["artifact_key"].as_str().unwrap().to_string())
             .collect()
     };
 
@@ -968,25 +1027,19 @@ fn continuing_provider_children_inherit_the_bound_session_without_rewriting_hist
                     .as_array()
                     .unwrap()
                     .iter()
-                    .find(|row| row["id"] == child_run)
+                    .find(|row| row["artifact_key"] == child_run)
                     .unwrap();
-                assert!(
-                    row["subjects"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|subject| subject["selector"] == "task:INF-123"
-                            && subject["source"] == "inherited"),
-                    "{command} filtered={filtered} replaced={replaced}: {row}"
-                );
+                assert_eq!(row["task_identifier"], "INF-123", "{row}");
+                assert_eq!(row["work_source"], "inherited", "{row}");
                 if !filtered {
                     let original = rows
                         .as_array()
                         .unwrap()
                         .iter()
-                        .find(|row| row["id"] == original)
+                        .find(|row| row["artifact_key"] == original)
                         .unwrap();
-                    assert!(original["subjects"].as_array().unwrap().is_empty());
+                    assert_eq!(original["task_id"], Value::Null);
+                    assert_eq!(original["wave_id"], Value::Null);
                 }
             }
         }
@@ -1900,27 +1953,28 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
     let all = fixture.json(&["usage", "--days", "0", "--json"]);
     let rows = all.as_array().unwrap();
     assert_eq!(rows.len(), 2, "{all}");
-    let first = rows.iter().find(|row| row["id"] == prior.as_str()).unwrap();
+    let first = rows
+        .iter()
+        .find(|row| row["artifact_key"] == prior.as_str())
+        .unwrap();
     let second = rows
         .iter()
-        .find(|row| row["id"] == current.as_str())
+        .find(|row| row["artifact_key"] == current.as_str())
         .unwrap();
     assert_eq!(first["usage"]["input_tokens"], 21);
     assert!(first["usage"]["output_tokens"].is_null());
-    assert!(first["subjects"].as_array().unwrap().is_empty());
+    assert_eq!(first["task_id"], Value::Null);
+    assert_eq!(first["wave_id"], Value::Null);
     assert_eq!(first["harness"], "opencode");
-    assert_eq!(first["outcome"], "failed");
+    assert_eq!(first["recorded_outcome"], "failed");
     assert_eq!(first["usage"]["final_streams"], 0);
     assert_eq!(second["usage"]["input_tokens"], 0);
     assert_eq!(second["usage"]["output_tokens"], 0);
     assert_eq!(second["harness"], "claude");
-    assert_eq!(second["outcome"], "completed");
+    assert_eq!(second["recorded_outcome"], "completed");
     assert_eq!(second["usage"]["final_streams"], 1);
-    assert!(second["subjects"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|subject| subject["selector"] == "task:INF-123" && subject["source"] == "inherited"));
+    assert_eq!(second["task_identifier"], "INF-123");
+    assert_eq!(second["work_source"], "inherited");
     assert_eq!(
         fixture.json(&["usage", "--days", "0", "--task", "INF-123", "--json"]),
         json!([second])
@@ -2198,10 +2252,13 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
         (&prior, 10, "failed", "opencode"),
         (&current, 30, "completed", "claude"),
     ] {
-        let row = rows.iter().find(|row| row["id"] == id.as_str()).unwrap();
-        assert_eq!(row["started"], at);
-        assert_eq!(row["ended"], at + 5);
-        assert_eq!(row["outcome"], outcome);
+        let row = rows
+            .iter()
+            .find(|row| row["artifact_key"] == id.as_str())
+            .unwrap();
+        assert_eq!(row["observed_at"], at);
+        assert_eq!(row["recorded_at"], at + 5);
+        assert_eq!(row["recorded_outcome"], outcome);
         assert_eq!(row["harness"], provider);
         assert_eq!(row["usage"]["input_tokens"], Value::Null);
         assert_eq!(fixture.json(&["runs", id.as_str(), "--json"]), *row);
@@ -2215,7 +2272,7 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
         fixture.json(&["runs", &saved.id, "--json"]),
         *rows
             .iter()
-            .find(|row| row["id"] == current.as_str())
+            .find(|row| row["artifact_key"] == current.as_str())
             .unwrap()
     );
     let ambiguous = fixture.run(&["runs", "run_", "--json"]);
@@ -3364,7 +3421,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     let ids = |runs: &[Value]| -> Vec<String> {
         let mut ids: Vec<String> = runs
             .iter()
-            .map(|run| run["id"].as_str().unwrap().to_string())
+            .map(|run| run["artifact_key"].as_str().unwrap().to_string())
             .collect();
         ids.sort();
         ids
@@ -3383,16 +3440,10 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     let of_wave_runs = listed(&["runs", "--wave", "task-pr-tests", "--json"]);
     assert_eq!(ids(&of_wave_runs), all);
     for run in &of_wave_runs {
-        let subjects: Vec<&str> = run["subjects"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|subject| subject["selector"].as_str().unwrap())
-            .collect();
-        assert!(subjects.contains(&"wave:task-pr-tests"), "{run}");
+        assert_eq!(run["wave_name"], "task-pr-tests", "{run}");
         assert_eq!(
-            subjects.contains(&"task:INF-123"),
-            [&of_task, &child].contains(&&run["id"].as_str().unwrap().to_string()),
+            run["task_identifier"] == "INF-123",
+            [&of_task, &child].contains(&&run["artifact_key"].as_str().unwrap().to_string()),
             "{run}"
         );
     }
@@ -3411,19 +3462,33 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     }
     let children = listed(&["runs", "--parent", &of_task, "--json"]);
     assert_eq!(ids(&children), vec![child.clone()]);
-    assert_eq!(children[0]["parent_run_id"], of_task.as_str());
+    assert_eq!(children[0]["caller_artifact_key"], of_task.as_str());
 
     let activity = fixture.json(&["activity", "--wave", "task-pr-tests", "--json"]);
-    let started = sorted(
-        activity["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|item| item["fact"]["kind"] == "run_started")
-            .map(|item| item["fact"]["run_id"].as_str().unwrap().to_string())
-            .collect(),
-    );
-    assert_eq!(started, all);
+    let mut captured: Vec<_> = activity["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["fact"]["kind"] == "input_captured")
+        .map(|item| {
+            (
+                item["fact"]["session_id"].as_str().unwrap().to_owned(),
+                item["fact"]["captured"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    let mut expected: Vec<_> = of_wave_runs
+        .iter()
+        .map(|row| {
+            (
+                row["session_id"].as_str().unwrap().to_owned(),
+                row["captured"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    captured.sort();
+    expected.sort();
+    assert_eq!(captured, expected);
 
     let sessions = fixture.sessions();
     assert_eq!(sessions.len(), 1);
@@ -3599,7 +3664,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
         serde_json::from_value(fixture.json(&["runs", "--task", "INF-123", "--json"])).unwrap();
     let mut listed: Vec<&str> = listed
         .iter()
-        .map(|run| run["id"].as_str().unwrap())
+        .map(|run| run["artifact_key"].as_str().unwrap())
         .collect();
     listed.sort();
     let mut expected: Vec<&str> = runs.iter().map(|run| run.0.as_str()).collect();
@@ -3997,7 +4062,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| row["id"] == launches[1])
+        .find(|row| row["artifact_key"] == launches[1])
         .unwrap();
     assert_eq!(retried["usage"]["input_tokens"], 40);
     assert_eq!(retried["usage"]["output_tokens"], 10);

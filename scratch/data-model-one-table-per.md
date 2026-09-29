@@ -302,6 +302,25 @@ serialized import evidence readable; command journal TraceId/run_events stays
 separate. Prove interrupted reservation/publication, replacement, old selectors,
 unknown SQL, exact original payloads and populated source/materialized upgrades.
 
+### History reader implementation boundary · 2026-09-29
+
+Rebase the released reader hunks onto captured-event identity. History is a read
+projection beneath AgentSession, with an optional captured sequence and exact
+native start/completion references; no input object or lifecycle returns. Retain
+artifact/caller strings only as historical selectors. Native receipts without a
+capture or start remain discoverable under their Session with unknown attribution,
+including usage coverage. Do not assign the Session's present Task to them.
+
+Use one typed reducer for CLI history, usage, Work activity, landing conclusions
+and scorecards. Apply scope and recent limits in SQL before decoding; exact Work
+and caller drills remain complete. Preserve every eligible unfinished item and
+native completions inside the window. Keep native and recorder outcomes distinct.
+Flatten the proposal's completion-only wrapper; retain types only where consumers
+need a distinct wire shape. Move Rust, Swift and fixtures together. Proof covers
+old selectors, post-bind prospective attribution, orphan native receipts, no
+double-counted usage, complete drills and bounded recent reads. Desktop inventory
+paging/reconciliation remains the following coordinated cut.
+
 ### Whole-design proof
 
 | Requirement | Evidence needed on integrated bytes |

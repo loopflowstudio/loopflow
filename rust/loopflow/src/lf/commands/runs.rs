@@ -1,4 +1,4 @@
-//! `lf runs` — read Home-local Run records.
+//! `lf runs` — read retained AgentSession input and provider history.
 
 use std::{
     io::Read,
@@ -11,7 +11,7 @@ use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
 pub use crate::run_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
-pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
+pub use crate::run_record::{SessionHistory, SessionUsage};
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
@@ -57,20 +57,28 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
     })
 }
 
-/// The Runs matching a filter, newest first, capped. One reader behind
-/// `lf runs`, its Work drills, and `lf wave status`'s Runs evidence, so the surfaces
-/// can never disagree on what a run is.
-pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<RunSnapshot>, bool)> {
+/// Shared Session history, newest input first. SQL selects the recent budget
+/// before decoding; exact Task and caller-input drills remain complete.
+pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    let mut runs = collect_runs_started_since(filter, since)?;
-    let truncated = cap_runs(&mut runs);
-    Ok((runs, truncated))
+    let database = crate::store::observability_database_path()?;
+    if !database.exists() {
+        return Ok((Vec::new(), false));
+    }
+    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+    Ok(store.recent_conversation_history(
+        filter.wave,
+        filter.project,
+        filter.task,
+        since,
+        MAX_RUNS,
+    )?)
 }
 
 pub(crate) fn collect_runs_started_since(
     filter: WorkFilter,
     since: i64,
-) -> Result<Vec<RunSnapshot>> {
+) -> Result<Vec<SessionHistory>> {
     let path = crate::store::observability_database_path()?;
     collect_runs_at(
         &crate::store::observability_home_dir(),
@@ -88,23 +96,19 @@ fn collect_runs_at(
     filter: WorkFilter,
     parent: Option<&str>,
     since: i64,
-) -> Result<Vec<RunSnapshot>> {
+) -> Result<Vec<SessionHistory>> {
     if !database.exists() {
         return Ok(Vec::new());
     }
     let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(database)?;
-    Ok(store
-        .conversation_snapshots(
-            filter.wave,
-            filter.project,
-            filter.task,
-            parent,
-            since,
-            false,
-        )?
-        .into_iter()
-        .map(|(_, snapshot)| snapshot)
-        .collect())
+    Ok(store.conversation_history(
+        filter.wave,
+        filter.project,
+        filter.task,
+        parent,
+        since,
+        false,
+    )?)
 }
 
 /// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent harness
@@ -141,18 +145,20 @@ pub fn list(
 
     if runs.is_empty() {
         match (parent, wave, project, task) {
-            (Some(parent), _, _, _) => println!("No child Runs recorded for {parent}."),
+            (Some(parent), _, _, _) => println!("No caller-input history recorded for {parent}."),
             (None, _, _, Some(task)) => {
-                println!("No Runs recorded for {task}.")
+                println!("No Session history recorded for {task}.")
             }
             (None, _, Some(project), None) => {
-                println!("No Runs recorded for project/{project} in the last {WINDOW_DAYS} days.")
+                println!("No Session history recorded for project/{project} in the last {WINDOW_DAYS} days.")
             }
             (None, Some(wave), None, None) => {
-                println!("No Runs recorded for wave/{wave} in the last {WINDOW_DAYS} days.")
+                println!(
+                    "No Session history recorded for wave/{wave} in the last {WINDOW_DAYS} days."
+                )
             }
             (None, None, None, None) => {
-                println!("No Runs recorded in the last {WINDOW_DAYS} days.")
+                println!("No Session history recorded in the last {WINDOW_DAYS} days.")
             }
         }
         return Ok(());
@@ -160,13 +166,13 @@ pub fn list(
 
     let colors = Colors::default();
     println!(
-        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  RUN{reset}",
+        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  INPUT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
         repo = "REPO",
         wave = "WAVE",
-        label = "RUN",
+        label = "HISTORY",
         tokens = "TOKENS",
         cost = "COST",
         agent = "AGENT",
@@ -175,9 +181,9 @@ pub fn list(
     for run in &runs {
         println!(
             "{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  {id}",
-            time = format_time(run.started),
+            time = format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), 14),
-            wave = truncate(run.subject("wave").unwrap_or("-"), 10),
+            wave = truncate(run.wave_name.as_deref().unwrap_or("-"), 10),
             label = truncate(run.label(), 22),
             tokens = run
                 .total_tokens()
@@ -190,7 +196,7 @@ pub fn list(
                 .unwrap_or_else(|| "-".to_string()),
             agent = truncate(&format_agent(Some(&run.harness), run.model.as_deref()), 18),
             status = run.status(),
-            id = short_id(&run.id),
+            id = short_id(run.selector()),
         );
     }
     Ok(())
@@ -223,11 +229,11 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
     let database = crate::store::observability_database_path()?;
     let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
     let snapshot = store
-        .input_snapshot(selector)
+        .input_history(selector)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let input = crate::run_record::parse_artifact_key(&snapshot.id)?;
+    let input = crate::run_record::parse_artifact_key(snapshot.selector())?;
     let dir = crate::run_record::record_dir(&home, &input)
-        .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.id))?;
+        .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
     if events {
         for event in store.input_events(&input)? {
             match event.get("unparsed").and_then(serde_json::Value::as_str) {
@@ -251,14 +257,14 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
                 println!("{}", answer.text);
                 Ok(())
             }
-            None if snapshot.outcome.is_none() => Err(anyhow!(
+            None if snapshot.recorded_outcome.is_none() => Err(anyhow!(
                 "Run {} is not settled and has no final answer",
-                snapshot.id
+                snapshot.selector()
             )),
             None => Err(anyhow!(
                 "Run {} settled as {} without a final answer",
-                snapshot.id,
-                snapshot.outcome.as_deref().unwrap_or("unknown")
+                snapshot.selector(),
+                snapshot.status()
             )),
         };
     }
@@ -266,8 +272,12 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         println!("{}", serde_json::to_string(&snapshot)?);
         return Ok(());
     }
-    println!("Run {}", snapshot.id);
-    if let Some(parent) = &snapshot.parent_run_id {
+    println!(
+        "Session {} · input {}",
+        snapshot.session_id,
+        snapshot.selector()
+    );
+    if let Some(parent) = &snapshot.caller_artifact_key {
         println!("Parent: {parent}");
     }
     println!("Status: {}", snapshot.status());
@@ -292,26 +302,6 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
     );
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
     Ok(())
-}
-
-fn cap_runs(runs: &mut Vec<RunSnapshot>) -> bool {
-    let truncated = runs.len() > MAX_RUNS;
-    if !truncated {
-        return false;
-    }
-    let unterminated = runs.iter().filter(|run| run.is_unterminated()).count();
-    let mut budget = MAX_RUNS.saturating_sub(unterminated);
-    runs.retain(|run| {
-        if run.is_unterminated() {
-            return true;
-        }
-        if budget == 0 {
-            return false;
-        }
-        budget -= 1;
-        true
-    });
-    true
 }
 
 fn format_agent(provider: Option<&str>, model: Option<&str>) -> String {
@@ -356,132 +346,6 @@ pub(crate) fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::format_tokens;
-
-    #[test]
-    fn history_window_keeps_boundary_usage_and_gaps_before_payload_reads() {
-        use crate::engine::stream::StreamEvent;
-        use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let home = ledger.home();
-        let database = home.join("loopflow.db");
-        crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-        let since = 1_790_000_000;
-        let _parent_env = crate::test_ambient::EnvGuard::clear(&[
-            crate::durable::RUN_ID_ENV,
-            crate::run_record::RUN_DIR_ENV,
-        ]);
-        let spec = || RunSpec {
-            harness: "proof".into(),
-            model: None,
-            surface: "headless".into(),
-            cwd: home.to_owned(),
-            repo: None,
-            worktree: None,
-            skill: None,
-            subjects: Vec::new(),
-            flow: RunFlowMembership::Independent,
-            work: None,
-        };
-        let parent = CaptureHandle::prepare_at(home, spec(), None).unwrap();
-        let mut older = None;
-        for started in [since - 1, since, since + 1] {
-            if started >= since {
-                std::env::set_var(crate::durable::RUN_ID_ENV, &parent);
-                std::env::set_var(
-                    crate::run_record::RUN_DIR_ENV,
-                    crate::run_record::record_dir(home, &parent).unwrap(),
-                );
-            }
-            let capture = CaptureHandle::begin_at(home, spec()).unwrap();
-            capture.record_stream_event(&StreamEvent::Usage {
-                input_tokens: Some(12),
-                output_tokens: Some(3),
-                cache_read_tokens: None,
-            });
-            capture.finish("completed").unwrap();
-            let dir = capture.artifact_dir();
-            let input = capture.run_id();
-            // Simulate dated retained history on the final owners.
-            let conn = rusqlite::Connection::open(&database).unwrap();
-            conn.execute(
-                "UPDATE session_events SET observed_at=?2 WHERE receipt_key=?1||':manifest.json'",
-                rusqlite::params![input.as_str(), started],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET created_at=?2 WHERE current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
-                rusqlite::params![input.as_str(), started],
-            )
-            .unwrap();
-            if started == since {
-                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                    SELECT id,'observed',?1||':events.jsonl:partial',?2,?3,current_capture FROM agent_sessions WHERE current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
-                    rusqlite::params![input.as_str(),since,serde_json::json!({"input_id": input,"source":"events.jsonl:partial","evidence":{"unparsed":"{"}}).to_string()]).unwrap();
-            }
-            if started < since {
-                older = Some(input);
-            }
-            // The SQL history remains useful after the input payload is unavailable.
-            std::fs::remove_dir_all(dir).unwrap();
-        }
-        let select = |since| {
-            super::collect_runs_at(
-                home,
-                &database,
-                super::WorkFilter {
-                    wave: None,
-                    project: None,
-                    task: None,
-                },
-                None,
-                since,
-            )
-            .unwrap()
-        };
-        let all = select(0);
-        let selected = select(since);
-        assert_eq!(all.len(), 3);
-        assert_eq!(selected.len(), 2);
-        assert_eq!(selected[0].started, since + 1);
-        assert_eq!(selected[1].started, since);
-        assert_eq!(selected[1].usage.input_tokens, Some(12));
-        assert_eq!(selected[1].evidence_gaps, 1);
-        assert_eq!(
-            selected,
-            all.into_iter()
-                .filter(|run| run.started >= since)
-                .collect::<Vec<_>>()
-        );
-        let store =
-            crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database).unwrap();
-        assert_eq!(
-            store
-                .conversation_snapshots(None, None, None, None, since, true)
-                .unwrap()
-                .len(),
-            3,
-            "activity retains the older work that ended inside the window"
-        );
-        store.assert_no_historical_runs();
-        // An excluded corrupt payload must not make the recent window fail.
-        rusqlite::Connection::open(&database).unwrap().execute(
-            "UPDATE session_events SET payload='{' WHERE kind!='captured' AND captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
-            [older.unwrap().as_str()],
-        ).unwrap();
-        assert_eq!(select(since), selected);
-        // Exact parent selection also precedes payload hydration, without a date cap.
-        assert_eq!(
-            super::collect_runs_at(
-                home,
-                &database,
-                super::WorkFilter::default(),
-                Some(parent.as_str()),
-                0
-            )
-            .unwrap(),
-            selected
-        );
-    }
 
     #[test]
     fn tokens_keep_the_compact_human_format() {

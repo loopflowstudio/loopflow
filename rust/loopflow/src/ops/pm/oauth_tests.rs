@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use axum::http::StatusCode;
 use serde_json::json;
 use tokio::sync::Barrier;
-use tracing::instrument::WithSubscriber;
 
 use super::test_fixture::{now, token, Fixture};
 use super::{
@@ -625,8 +624,30 @@ impl std::io::Write for TraceBuffer {
     }
 }
 
+#[test]
+fn linear_oauth_proactive_failure_tracing_is_secret_free() {
+    // Tracing callsite interest is process-global. Capture in an isolated process
+    // so concurrently running tests cannot disable this subscriber's callsites.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "ops::pm::oauth_tests::oauth_trace_process_entry",
+            "--ignored",
+            "--nocapture",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[tokio::test]
-async fn linear_oauth_proactive_failure_tracing_is_secret_free() {
+#[ignore = "isolated tracing entry point"]
+async fn oauth_trace_process_entry() {
     let fixture = Fixture::new().await;
     let mut original = fixture.seed(now() + 60).await;
     original.access_token = "synthetic-secret-access".into();
@@ -645,11 +666,8 @@ async fn linear_oauth_proactive_failure_tracing_is_secret_free() {
         .with_max_level(tracing::Level::TRACE)
         .with_writer(move || writer.clone())
         .finish();
-    let value = fixture
-        .resolve(&url)
-        .with_subscriber(subscriber)
-        .await
-        .unwrap();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let value = fixture.resolve(&url).await.unwrap();
     assert!(value.as_deref() == Some(original.access_token.as_str()));
     let captured = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
     assert!(captured.contains("proactive Linear refresh failed"));

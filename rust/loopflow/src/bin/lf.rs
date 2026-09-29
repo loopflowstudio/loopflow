@@ -1019,8 +1019,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
                 if let Some(planning) = &status.planning {
                     println!("{} · {}", planning.item.identifier, planning.item.name);
                     println!(
-                        "Planning: {} · observed at {}",
+                        "Planning: {} · {} · observed at {}",
                         planning.item.state.as_deref().unwrap_or("unknown"),
+                        if status.planning_stale {
+                            "stale"
+                        } else {
+                            "current"
+                        },
                         planning.observed_at
                     );
                     if planning.project.is_none() {

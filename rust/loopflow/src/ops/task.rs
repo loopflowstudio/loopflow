@@ -3799,6 +3799,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
 pub struct TaskStatus {
     pub planning: Option<crate::store::PmTaskRecord>,
     pub planning_error: Option<String>,
+    pub planning_stale: bool,
     pub execution: Option<TaskSnapshot>,
 }
 
@@ -3815,10 +3816,13 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
         .map(|task| task.plan.id.as_str())
         .or(issue)
         .ok_or_else(|| task_error("this checkout has no Task"))?;
-    let (planning, planning_error) =
+    let (planning, planning_error, planning_stale) =
         match crate::ops::pm::read_task_planning(repo, selector, crate::ops::pm::PmRefresh::Auto) {
-            Ok(record) => (Some(record), None),
-            Err(error) if task.is_some() => (None, Some(error.to_string())),
+            Ok(read) => {
+                let stale = read.is_stale();
+                (Some(read.record), read.refresh_error, stale)
+            }
+            Err(error) if task.is_some() => (None, Some(error.to_string()), true),
             Err(error) => return Err(error),
         };
     let execution = task
@@ -3831,6 +3835,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     Ok(TaskStatus {
         planning,
         planning_error,
+        planning_stale,
         execution,
     })
 }
@@ -6976,6 +6981,7 @@ mod tests {
             .to_string()
             .contains("open the parent PR"));
         let existing = crate::pm::PmItem {
+            revision: None,
             id: fixture.task.plan.id.as_str().to_string(),
             identifier: fixture.task.plan.identifier.clone(),
             url: None,

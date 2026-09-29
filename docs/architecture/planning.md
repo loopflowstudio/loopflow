@@ -43,7 +43,7 @@ for adoption, default Flow and disposition details.
 lf task status INF-124 --json
 ```
 
-Status returns `planning`, `planning_error`, and optional `execution`. An issue
+Status returns `planning`, `planning_error`, `planning_stale`, and optional `execution`. An issue
 without a Project stays inspectable; operations requiring ownership report the
 missing relationship. Status may refresh planning and observe a PR, but never
 completes a Task. Reading an issue allocates no Task execution or worktree.
@@ -57,12 +57,22 @@ A null detail response invalidates cached admission until a complete detail
 read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
 including after stale list ingestion.
 
-The status envelope currently exposes observation time, not a complete refresh
-outcome: automatic refresh failure can return dated planning with no
-`planning_error`. An invalidated record remains stored but is excluded from
-detail and Wave readers. Wave `synced_at` dates membership refresh; joined
-entities may contain newer detail observations. Neither timestamp establishes
-provider revision ordering or permission to continue managed work offline.
+Status marks retained planning stale and includes the automatic-refresh failure
+in `planning_error`; `planning.observed_at` remains the last successful acquisition.
+An invalidated record remains stored but is excluded from detail and Wave readers.
+Wave `synced_at` dates membership refresh; joined entities may have newer detail
+observations. Freshness does not authorize managed work during an outage.
+
+Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
+mutation refreshes share one writer: older provider revisions cannot overwrite
+newer facts, and conflicting facts at an equal revision fail without replacement.
+Complete responses must include nullable fields; omission cannot clear known data.
+Signed issue webhooks invalidate planning even without execution. A complete read
+at or beyond the event's revision repairs the invalidation. Removal receipts fence
+later reads, including when the event arrived before the issue was cached.
+Webhook payloads do not replace complete planning entities. Project facts and list
+membership still use acquisition timestamps; issue ordering does not establish a
+transactional provider snapshot.
 
 ## Capture a Flow once
 

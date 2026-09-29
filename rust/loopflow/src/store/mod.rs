@@ -491,6 +491,20 @@ impl Store {
         .await
     }
 
+    pub async fn observe_pm_issue_change(
+        &self,
+        issue_id: &str,
+        revision: Option<&str>,
+        removed: bool,
+    ) -> StoreResult<()> {
+        let issue_id = issue_id.to_string();
+        let revision = revision.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.observe_pm_issue_change(&issue_id, revision.as_deref(), removed)
+        })
+        .await
+    }
+
     pub async fn invalidate_pm_task(
         &self,
         repo: &str,

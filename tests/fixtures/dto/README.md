@@ -10,6 +10,12 @@ listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
+`task_status.json` pins the planning/execution envelope for fresh, stale and
+unavailable planning. Rust round-trips it and Swift decodes it through the typed
+`RegistryQuery.taskStatus` reader. The Swift execution projection exposes identity,
+location, lifecycle status and actions; full execution/action-state parity remains
+covered by the existing Wave contracts and further Task acceptance work.
+
 `task_execution.json` pins the execution evidence in `lf task status --json`.
 This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.

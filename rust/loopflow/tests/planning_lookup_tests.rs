@@ -28,7 +28,18 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     runtime
         .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", record.clone()))
         .unwrap();
-    for selector in ["FIX-1", "issue-1"] {
+    let mut stale = record.clone();
+    stale.item.id = "issue-2".into();
+    stale.item.identifier = "FIX-2".into();
+    stale.observed_at -= 3601;
+    runtime
+        .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", stale.clone()))
+        .unwrap();
+    for (selector, expected, unavailable) in [
+        ("FIX-1", &record, false),
+        ("issue-1", &record, false),
+        ("FIX-2", &stale, true),
+    ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LF_") {
@@ -48,9 +59,10 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             String::from_utf8_lossy(&output.stderr)
         );
         let status: TaskStatus = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(status.planning, Some(record.clone()));
+        assert_eq!(status.planning.as_ref(), Some(expected));
         assert!(status.execution.is_none());
-        assert!(status.planning_error.is_none());
+        assert_eq!(status.planning_error.is_some(), unavailable);
+        assert_eq!(status.planning_stale, unavailable);
     }
     assert!(runtime.block_on(store.list_tasks(None)).unwrap().is_empty());
     assert!(runtime

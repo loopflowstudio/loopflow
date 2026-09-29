@@ -1,0 +1,98 @@
+[
+  {
+    "planning": {
+      "item": {
+        "id": "issue-gmail",
+        "identifier": "LOO-2",
+        "url": "https://linear.app/loopflow/issue/LOO-2/gmail",
+        "name": "Route incoming mail",
+        "description": "Resolve through the owning Project.",
+        "rank": 1,
+        "completed": false,
+        "project_id": "project-gmail",
+        "project": "gmail",
+        "team_id": "team-loo",
+        "assignee": null,
+        "state": "unstarted",
+        "revision": "2026-09-29T12:00:00.123Z"
+      },
+      "project": {
+        "id": "project-gmail",
+        "slug": "gmail",
+        "name": "Gmail",
+        "summary": "Keep mail flowing.",
+        "flows": {
+          "recommended": null
+        },
+        "krs": [
+          {
+            "text": "Mail processing survives restart",
+            "holds": true
+          }
+        ],
+        "initiative_ids": [
+          "initiative-infrastructure"
+        ],
+        "team_ids": [
+          "team-loo"
+        ],
+        "metric_targets": []
+      },
+      "observed_at": 1790683200
+    },
+    "planning_error": null,
+    "planning_stale": false,
+    "execution": null
+  },
+  {
+    "planning": {
+      "item": {
+        "id": "issue-gmail",
+        "identifier": "LOO-2",
+        "url": "https://linear.app/loopflow/issue/LOO-2/gmail",
+        "name": "Route incoming mail",
+        "description": "Resolve through the owning Project.",
+        "rank": 1,
+        "completed": false,
+        "project_id": "project-gmail",
+        "project": "gmail",
+        "team_id": "team-loo",
+        "assignee": null,
+        "state": "unstarted",
+        "revision": "2026-09-29T12:00:00.123Z"
+      },
+      "project": {
+        "id": "project-gmail",
+        "slug": "gmail",
+        "name": "Gmail",
+        "summary": "Keep mail flowing.",
+        "flows": {
+          "recommended": null
+        },
+        "krs": [
+          {
+            "text": "Mail processing survives restart",
+            "holds": true
+          }
+        ],
+        "initiative_ids": [
+          "initiative-infrastructure"
+        ],
+        "team_ids": [
+          "team-loo"
+        ],
+        "metric_targets": []
+      },
+      "observed_at": 1790683200
+    },
+    "planning_error": "Linear unavailable",
+    "planning_stale": true,
+    "execution": null
+  },
+  {
+    "planning": null,
+    "planning_error": "Planning needs refresh",
+    "planning_stale": true,
+    "execution": null
+  }
+]

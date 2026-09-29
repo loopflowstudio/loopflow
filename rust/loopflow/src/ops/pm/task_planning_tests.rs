@@ -69,6 +69,12 @@ struct PlanningState {
     comments: Vec<serde_json::Value>,
 }
 
+fn mark_issue_updated(issue: &mut serde_json::Value) {
+    issue["updatedAt"] = json!(time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap());
+}
+
 async fn planning_graphql(
     axum::extract::State(state): axum::extract::State<Arc<tokio::sync::Mutex<PlanningState>>>,
     axum::Json(request): axum::Json<serde_json::Value>,
@@ -90,17 +96,16 @@ async fn planning_graphql(
     };
     let project = json!({"id":project_id, "name":project_name, "description":"", "content":"flow: feature", "status":{"type":"started"},
         "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
-    let data =
-        if query.contains("query ListTeams") {
-            json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
+    let data = if query.contains("query ListTeams") {
+        json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
-        } else if query.contains("query ListInitiativeProjects") {
-            let mut state = state.lock().await;
-            if !state.issues.is_empty() && state.fail_snapshot {
-                state.fail_snapshot = false;
-                return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
-            }
-            json!({"initiative":{"projects":page(vec![project])}})
+    } else if query.contains("query ListInitiativeProjects") {
+        let mut state = state.lock().await;
+        if !state.issues.is_empty() && state.fail_snapshot {
+            state.fail_snapshot = false;
+            return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
+        }
+        json!({"initiative":{"projects":page(vec![project])}})
         } else if query.contains("query ProjectOwnership") {
             if vars["id"] == project["id"] {
                 json!({"project":project})
@@ -114,113 +119,115 @@ async fn planning_graphql(
             } else {
                 json!({"project":null})
             }
-        } else if query.contains("query ListProjectIssues") {
-            let mut state = state.lock().await;
-            if !state.issues.is_empty() && state.fail_confirmation {
-                state.fail_confirmation = false;
-                return axum::Json(json!({"errors":[{"message":"confirmation unavailable"}]}));
+    } else if query.contains("query ListProjectIssues") {
+        let mut state = state.lock().await;
+        if !state.issues.is_empty() && state.fail_confirmation {
+            state.fail_confirmation = false;
+            return axum::Json(json!({"errors":[{"message":"confirmation unavailable"}]}));
+        }
+        let issues = if state.trashed && state.omit_trashed_issues {
+            vec![]
+        } else {
+            state.issues.clone()
+        };
+        json!({"project":{"issues":page(issues)}})
+    } else if query.contains("query IssueOwnership") {
+        let state = state.lock().await;
+        if state.trashed {
+            return axum::Json(
+                json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
+            );
+        }
+        let mut issue = state
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == vars["id"] || issue["identifier"] == vars["id"])
+            .unwrap()
+            .clone();
+        issue["project"] = project;
+        json!({"issue":issue})
+    } else if query.contains("query IssueDeletion") {
+        let state = state.lock().await;
+        if state.trashed && state.unreadable_trash {
+            json!({"issue":null})
+        } else {
+            json!({"issue":{"trashed":state.trashed}})
+        }
+    } else if query.contains("mutation DeleteIssue") {
+        let mut state = state.lock().await;
+        if state.refuse_deletion || state.trashed {
+            return axum::Json(json!({"data":{"issueDelete":{"success":false}}}));
+        }
+        state.trashed = true;
+        state.deletion_writes += 1;
+        state.fail_snapshot = state.fail_deleted_snapshot;
+        if state.lose_deletion {
+            state.lose_deletion = false;
+            return axum::Json(json!({"errors":[{"message":"lost deletion response"}]}));
+        }
+        json!({"issueDelete":{"success":true}})
+    } else if query.contains("query IssueTeam") {
+        json!({"issue":{"team":{"id":"team-1"}}})
+    } else if query.contains("query CompletedWorkflowStates") {
+        json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
+    } else if query.contains("mutation SetIssueState") {
+        let mut state = state.lock().await;
+        if state.fail_completion {
+            state.fail_completion = false;
+            return axum::Json(json!({"errors":[{"message":"completion unavailable"}]}));
+        }
+        state.completion_writes += 1;
+        let outcome = state
+            .completion_state
+            .take()
+            .unwrap_or_else(|| "completed".into());
+        state.issues[0]["state"] = json!({"type":outcome});
+        mark_issue_updated(&mut state.issues[0]);
+        if state.lose_completion {
+            state.lose_completion = false;
+            return axum::Json(json!({"errors":[{"message":"lost completion response"}]}));
+        }
+        json!({"issueUpdate":{"issue":{"id":"issue-1"}}})
+    } else if query.contains("query IssueComments") {
+        json!({"issue":{"comments":page(state.lock().await.comments.clone())}})
+    } else if query.contains("mutation CreateComment") {
+        let mut state = state.lock().await;
+        let id = format!("comment-{}", state.comments.len() + 1);
+        state
+            .comments
+            .push(json!({"id":id,"body":vars["body"],"user":null}));
+        if state.lose_comment {
+            state.lose_comment = false;
+            return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
+        }
+        json!({"commentCreate":{"comment":{"id":id}}})
+    } else if query.contains("mutation UpdateIssue") {
+        let mut state = state.lock().await;
+        let issue = state
+            .issues
+            .iter_mut()
+            .find(|issue| issue["id"] == vars["id"])
+            .unwrap();
+        for key in ["title", "description"] {
+            if let Some(value) = vars["input"].get(key) {
+                issue[key] = value.clone();
             }
-            let issues = if state.trashed && state.omit_trashed_issues {
-                vec![]
-            } else {
-                state.issues.clone()
-            };
-            json!({"project":{"issues":page(issues)}})
-        } else if query.contains("query IssueOwnership") {
-            let state = state.lock().await;
-            if state.trashed {
-                return axum::Json(
-                    json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
-                );
-            }
-            let mut issue = state
-                .issues
-                .iter()
-                .find(|issue| issue["id"] == vars["id"] || issue["identifier"] == vars["id"])
-                .unwrap()
-                .clone();
-            issue["project"] = project;
-            json!({"issue":issue})
-        } else if query.contains("query IssueDeletion") {
-            let state = state.lock().await;
-            if state.trashed && state.unreadable_trash {
-                json!({"issue":null})
-            } else {
-                json!({"issue":{"trashed":state.trashed}})
-            }
-        } else if query.contains("mutation DeleteIssue") {
-            let mut state = state.lock().await;
-            if state.refuse_deletion || state.trashed {
-                return axum::Json(json!({"data":{"issueDelete":{"success":false}}}));
-            }
-            state.trashed = true;
-            state.deletion_writes += 1;
-            state.fail_snapshot = state.fail_deleted_snapshot;
-            if state.lose_deletion {
-                state.lose_deletion = false;
-                return axum::Json(json!({"errors":[{"message":"lost deletion response"}]}));
-            }
-            json!({"issueDelete":{"success":true}})
-        } else if query.contains("query IssueTeam") {
-            json!({"issue":{"team":{"id":"team-1"}}})
-        } else if query.contains("query CompletedWorkflowStates") {
-            json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
-        } else if query.contains("mutation SetIssueState") {
-            let mut state = state.lock().await;
-            if state.fail_completion {
-                state.fail_completion = false;
-                return axum::Json(json!({"errors":[{"message":"completion unavailable"}]}));
-            }
-            state.completion_writes += 1;
-            let outcome = state
-                .completion_state
-                .take()
-                .unwrap_or_else(|| "completed".into());
-            state.issues[0]["state"] = json!({"type":outcome});
-            if state.lose_completion {
-                state.lose_completion = false;
-                return axum::Json(json!({"errors":[{"message":"lost completion response"}]}));
-            }
-            json!({"issueUpdate":{"issue":{"id":"issue-1"}}})
-        } else if query.contains("query IssueComments") {
-            json!({"issue":{"comments":page(state.lock().await.comments.clone())}})
-        } else if query.contains("mutation CreateComment") {
-            let mut state = state.lock().await;
-            let id = format!("comment-{}", state.comments.len() + 1);
-            state
-                .comments
-                .push(json!({"id":id,"body":vars["body"],"user":null}));
-            if state.lose_comment {
-                state.lose_comment = false;
-                return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
-            }
-            json!({"commentCreate":{"comment":{"id":id}}})
-        } else if query.contains("mutation UpdateIssue") {
-            let mut state = state.lock().await;
-            let issue = state
-                .issues
-                .iter_mut()
-                .find(|issue| issue["id"] == vars["id"])
-                .unwrap();
-            for key in ["title", "description"] {
-                if let Some(value) = vars["input"].get(key) {
-                    issue[key] = value.clone();
-                }
-            }
-            json!({"issueUpdate":{"success":true}})
-        } else if query.contains("query UnstartedWorkflowStates") {
-            json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
-        } else if query.contains("mutation CreateIssue") {
-            state.lock().await.issues.push(
+        }
+        mark_issue_updated(issue);
+        json!({"issueUpdate":{"success":true}})
+    } else if query.contains("query UnstartedWorkflowStates") {
+        json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
+    } else if query.contains("mutation CreateIssue") {
+        state.lock().await.issues.push(
                 json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
             "title":vars["title"], "description":vars["description"], "prioritySortOrder":0.0,
-            "sortOrder":0.0, "assignee":null, "state":{"type":"unstarted"},
+            "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":"project-1","name":"Chapter"}}),
             );
-            return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));
-        } else {
-            panic!("unexpected creation fixture query: {query}");
-        };
+        return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));
+    } else {
+        panic!("unexpected creation fixture query: {query}");
+    };
     axum::Json(json!({"data":data}))
 }
 
@@ -306,6 +313,7 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
             // Lookup is valid for terminal planning items; launch owns eligibility.
             state.lock().await.issues[0]["state"]["type"] = json!("completed");
+            mark_issue_updated(&mut state.lock().await.issues[0]);
             let resolved =
                 crate::ops::task_pm::resolve_task_async(&repo, "FIX-1", PmRefresh::Force)
                     .await
@@ -540,6 +548,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
     runtime.block_on(async {
         let mut state = state.lock().await;
         state.issues[0]["state"] = json!({"type":"completed"});
+        mark_issue_updated(&mut state.issues[0]);
         state.lose_deletion = lost;
         state.unreadable_trash = lost;
         state.fail_deleted_snapshot = fail_snapshot;
@@ -932,6 +941,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                 });
                 let error = complete("Cannot change the outcome").unwrap_err();
                 assert!(
@@ -991,6 +1001,7 @@ fi
                 runtime.block_on(async {
                     let mut provider = state.lock().await;
                     provider.issues[0]["state"] = json!({"type":"unstarted"});
+                    mark_issue_updated(&mut provider.issues[0]);
                     provider.completion_state = Some(terminal.into());
                 });
                 assert!(matches!(
@@ -1006,6 +1017,7 @@ fi
             }
             runtime.block_on(async {
                 state.lock().await.issues[0]["state"] = json!({"type":"unstarted"});
+                mark_issue_updated(&mut state.lock().await.issues[0]);
             });
         }
         runtime.block_on(async {
@@ -1067,6 +1079,7 @@ fi
                 provider.fail_snapshot = true;
                 provider.issues[0]["title"] = json!("Updated before completion retry");
                 provider.issues[0]["description"] = json!("Retain the provider's latest notes");
+                mark_issue_updated(&mut provider.issues[0]);
             });
             let retry = complete("Delivered the requested outcome")
                 .unwrap()
@@ -1099,6 +1112,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                     fixture.store.update_task_pm_writeback(
                         &task.id,
                         &PmWritebackState::Pending {
@@ -1152,6 +1166,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                 });
                 assert!(complete("Cannot change the outcome")
                     .unwrap_err()

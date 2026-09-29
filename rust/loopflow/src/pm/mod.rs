@@ -126,6 +126,8 @@ pub struct PmWave {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmItem {
+    /// Provider revision; absent only in historical planning.
+    pub revision: Option<String>,
     pub id: String,
     pub identifier: String,
     /// Provider-owned issue URL captured during PM sync. `None` stays explicit

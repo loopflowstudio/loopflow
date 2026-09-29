@@ -14,9 +14,6 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        if let Some(project) = &record.project {
-            put_project(&tx, repo, provider, record.observed_at, project)?;
-        }
         let mut item = record.item.clone();
         // Detail queries do not observe relative list order.
         if let Some(rank) = tx.query_row(
@@ -25,9 +22,51 @@ impl SqliteStore {
         ).optional()? {
             item.rank = rank;
         }
-        put_item(&tx, repo, provider, record.observed_at, &item)?;
-        tx.execute("UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider=?2 AND id=?3 AND observed_at=?4",
-            params![repo,provider,record.item.id,record.observed_at])?;
+        if put_item(&tx, repo, provider, record.observed_at, &item)? {
+            if let Some(project) = &record.project {
+                put_project(&tx, repo, provider, record.observed_at, project)?;
+            }
+            tx.execute(
+                "UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, record.item.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn observe_pm_issue_change(
+        &self,
+        issue_id: &str,
+        revision: Option<&str>,
+        removed: bool,
+    ) -> StoreResult<()> {
+        let revision = revision_nanos(revision)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO pm_issue_changes(issue_id,revision_ns,removed) VALUES(?1,?2,?3)
+             ON CONFLICT(issue_id) DO UPDATE SET
+             revision_ns=CASE WHEN excluded.revision_ns > revision_ns OR revision_ns IS NULL
+                 THEN excluded.revision_ns ELSE revision_ns END,
+             removed=MAX(removed,excluded.removed)",
+            params![issue_id, revision, removed],
+        )?;
+        let mut query =
+            tx.prepare("SELECT repo,body FROM pm_items WHERE provider='linear' AND id=?1")?;
+        let rows = query
+            .query_map([issue_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (repo, body) in rows {
+            let item: PmItem = serde_json::from_str(&body)?;
+            let cached = revision_nanos(item.revision.as_deref())?;
+            if removed || revision.is_none() || cached < revision {
+                tx.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2", params![repo,issue_id])?;
+            }
+        }
+        drop(query);
         tx.commit()?;
         Ok(())
     }
@@ -219,21 +258,79 @@ fn put_project(
     Ok(())
 }
 
+fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
+    revision
+        .map(|revision| {
+            time::OffsetDateTime::parse(revision, &time::format_description::well_known::Rfc3339)
+                .map_err(|error| {
+                    StoreError::InvalidData(format!("invalid planning revision: {error}"))
+                })
+                .and_then(|time| {
+                    i64::try_from(time.unix_timestamp_nanos()).map_err(|error| {
+                        StoreError::InvalidData(format!("planning revision out of range: {error}"))
+                    })
+                })
+        })
+        .transpose()
+}
+
 fn put_item(
     conn: &Connection,
     repo: &str,
     provider: &str,
     observed_at: i64,
     item: &PmItem,
-) -> StoreResult<()> {
+) -> StoreResult<bool> {
+    let revision = revision_nanos(item.revision.as_deref())?;
+    if provider == "linear" {
+        let change: Option<(Option<i64>, bool)> = conn
+            .query_row(
+                "SELECT revision_ns,removed FROM pm_issue_changes WHERE issue_id=?1",
+                [&item.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if change.is_some_and(|(floor, removed)| removed || revision < floor) {
+            return Ok(false);
+        }
+    }
+    let previous: Option<(String, i64)> = conn
+        .query_row(
+            "SELECT body,observed_at FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3",
+            params![repo, provider, item.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((previous, acquired)) = previous {
+        let previous: PmItem = serde_json::from_str(&previous)?;
+        let previous_revision = revision_nanos(previous.revision.as_deref())?;
+        if revision < previous_revision {
+            return Ok(false);
+        }
+        if revision.is_some() && revision == previous_revision {
+            // Rank comes from a list; the Project display name has its own revision.
+            let mut comparable = item.clone();
+            comparable.rank = previous.rank;
+            comparable.project = previous.project.clone();
+            comparable.revision = previous.revision.clone();
+            if comparable != previous {
+                return Err(StoreError::InvalidData(format!(
+                    "conflicting planning facts at the same provider revision for {}; refresh planning", item.identifier
+                )));
+            }
+        }
+        // For equal revisions, keep the later acquisition's list rank and freshness.
+        if revision == previous_revision && observed_at < acquired {
+            return Ok(false);
+        }
+    }
     conn.execute(
         "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES(?1,?2,?3,?4,?5,?6,?7)
          ON CONFLICT(repo,provider,id) DO UPDATE SET identifier=excluded.identifier,
-         project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body
-         WHERE excluded.observed_at >= pm_items.observed_at",
+         project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body",
         params![repo,provider,item.id,item.identifier,item.project_id,observed_at,serde_json::to_string(item)?],
     )?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]

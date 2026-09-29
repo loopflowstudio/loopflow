@@ -1685,8 +1685,26 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
 }
 
 /// Inspect planning without requiring or allocating execution.
-pub fn read_task_planning(repo: &Path, issue: &str, refresh: PmRefresh) -> OpsResult<PmTaskRecord> {
-    block_on_pm(read_task_planning_async(repo, issue, refresh))
+pub fn read_task_planning(
+    repo: &Path,
+    issue: &str,
+    refresh: PmRefresh,
+) -> OpsResult<TaskPlanningRead> {
+    block_on_pm(read_task_planning_observation(repo, issue, refresh))
+}
+
+#[derive(Debug)]
+pub struct TaskPlanningRead {
+    pub record: PmTaskRecord,
+    pub refresh_error: Option<String>,
+}
+
+impl TaskPlanningRead {
+    pub fn is_stale(&self) -> bool {
+        self.refresh_error.is_some()
+            || time::OffsetDateTime::now_utc().unix_timestamp() - self.record.observed_at
+                >= PM_SOFT_STALE_SECS
+    }
 }
 
 pub(crate) async fn read_task_planning_async(
@@ -1694,6 +1712,16 @@ pub(crate) async fn read_task_planning_async(
     issue: &str,
     refresh: PmRefresh,
 ) -> OpsResult<PmTaskRecord> {
+    Ok(read_task_planning_observation(repo, issue, refresh)
+        .await?
+        .record)
+}
+
+async fn read_task_planning_observation(
+    repo: &Path,
+    issue: &str,
+    refresh: PmRefresh,
+) -> OpsResult<TaskPlanningRead> {
     let scope = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .to_string();
@@ -1709,9 +1737,14 @@ pub(crate) async fn read_task_planning_async(
         existing.as_ref().map(|record| now - record.observed_at),
     ) {
         SnapshotPlan::ServeCache => {
-            return existing.ok_or_else(|| {
-                OpsError::Message(format!("task {issue:?} has no cached planning observation"))
-            })
+            return existing
+                .map(|record| TaskPlanningRead {
+                    record,
+                    refresh_error: None,
+                })
+                .ok_or_else(|| {
+                    OpsError::Message(format!("task {issue:?} has no cached planning observation"))
+                })
         }
         SnapshotPlan::Refresh { hard } => hard,
     };
@@ -1753,7 +1786,11 @@ pub(crate) async fn read_task_planning_async(
         store
             .pm_task(&scope, provider.as_str(), selector)
             .await
-            .map_err(|error| OpsError::Message(error.to_string()))
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .map(Some)
+            .ok_or_else(|| OpsError::Message(format!(
+                "Task {selector:?} observation cannot repair newer invalidation or confirmed removal; refresh planning"
+            )))
     };
     let result = match tokio::time::timeout(PM_REFRESH_TIMEOUT, fetch).await {
         Ok(result) => result,
@@ -1763,14 +1800,20 @@ pub(crate) async fn read_task_planning_async(
         ))),
     };
     match result {
-        Ok(Some(record)) => Ok(record),
+        Ok(Some(record)) => Ok(TaskPlanningRead {
+            record,
+            refresh_error: None,
+        }),
         Ok(None) => Err(OpsError::Message(format!(
             "task {issue:?} is absent from repository planning"
         ))),
         Err(error) => match existing {
             Some(record) if !hard => {
                 tracing::warn!(%error, observed_at=record.observed_at, "Task planning refresh failed; retaining dated observation");
-                Ok(record)
+                Ok(TaskPlanningRead {
+                    record,
+                    refresh_error: Some(error.to_string()),
+                })
             }
             _ => Err(OpsError::Message(format!(
                 "unable to resolve task {issue:?}: {error}"
@@ -3103,7 +3146,7 @@ mod tests {
             "title": format!("Task {identifier}"),
             "description": "",
             "prioritySortOrder": 0.0,
-            "sortOrder": 0.0,
+            "sortOrder": 0.0, "updatedAt": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
             "assignee": null,
             "state": { "type": if completed { "completed" } else { "unstarted" } },
             "project": { "id": project_id, "name": project_name },
@@ -3564,8 +3607,8 @@ mod tests {
             issues_response(json!([
                 { "id": "issue-1", "identifier": "LOO-1", "url": null,
                   "title": "First", "description": "one",
-                  "prioritySortOrder": 0.0, "sortOrder": 0.0,
-                  "state": { "type": "unstarted" },
+                  "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                  "assignee": null, "state": { "type": "unstarted" },
                   "project": { "id": "project-123", "name": "Scan" },
                   "team": { "id": "team-123" } }
             ])),

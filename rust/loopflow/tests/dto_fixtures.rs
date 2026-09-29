@@ -318,3 +318,28 @@ fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
         value
     );
 }
+
+#[test]
+fn task_status_preserves_planning_freshness_without_execution() {
+    use loopflow::ops::task::TaskStatus;
+    let json = include_str!("../../../tests/fixtures/dto/task_status.json");
+    let states: Vec<TaskStatus> = serde_json::from_str(json).unwrap();
+    assert!(!states[0].planning_stale);
+    assert!(states[0].planning_error.is_none());
+    assert!(states[0].execution.is_none());
+    assert!(states[1].planning_stale);
+    assert_eq!(
+        states[1].planning_error.as_deref(),
+        Some("Linear unavailable")
+    );
+    assert_eq!(states[0].planning, states[1].planning);
+    assert!(states[2].planning.is_none());
+    assert!(states[2].planning_error.is_some());
+    assert_eq!(
+        serde_json::to_value(states).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("planning_stale");
+    assert!(serde_json::from_value::<Vec<TaskStatus>>(missing).is_err());
+}

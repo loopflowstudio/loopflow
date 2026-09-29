@@ -117,6 +117,11 @@ public struct RegistryQuery: Sendable {
 
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
+    public func taskStatus(issue: String, cwd: String?) async throws -> TaskStatus {
+        let json = try await run(["task", "status", issue, "--json"], cwd)
+        return try JSONDecoder().decode(TaskStatus.self, from: Data(json.utf8))
+    }
+
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
         let stdout = try await run(["task", "changes", issue, "--base", base, "--json"], cwd)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)

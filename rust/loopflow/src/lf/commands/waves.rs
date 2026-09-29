@@ -915,6 +915,7 @@ async fn snapshot_tasks(
             continue;
         };
         let item = PmItem {
+            revision: None,
             id: task.plan.id.as_str().to_string(),
             identifier: task.plan.identifier.clone(),
             url: None,
@@ -2114,6 +2115,7 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let mut item = crate::pm::PmItem {
+            revision: None,
             id: "removed".into(),
             identifier: "FIX-1".into(),
             url: None,

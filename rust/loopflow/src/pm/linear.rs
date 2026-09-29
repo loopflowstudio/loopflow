@@ -163,6 +163,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
       nodes {
         id
         identifier
+    updatedAt
         url
         title
         description
@@ -194,6 +195,7 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
   issue(id: $id) {
     id
     identifier
+    updatedAt
     url
     title
     description
@@ -1728,25 +1730,26 @@ struct CommentUser {
 
 #[derive(Deserialize)]
 struct IssueNode {
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
     id: String,
-    #[serde(default)]
     identifier: String,
+    #[serde(deserialize_with = "Option::deserialize")]
     url: Option<String>,
-    #[serde(default)]
     title: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     description: Option<String>,
-    #[serde(rename = "prioritySortOrder", default)]
+    #[serde(rename = "prioritySortOrder")]
     priority_sort_order: f64,
-    #[serde(rename = "sortOrder", default)]
+    #[serde(rename = "sortOrder")]
     sort_order: f64,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     assignee: Option<IdNode>,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     state: Option<WorkflowStateRef>,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     project: Option<ProjectRef>,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     team: Option<IdNode>,
 }
 
@@ -1767,7 +1770,14 @@ impl IssueNode {
         let team = self
             .team
             .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Team")))?;
+        // Validate revision precision before admitting provider facts.
+        time::OffsetDateTime::parse(
+            &self.updated_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map_err(|error| PmError::Message(format!("invalid Linear issue revision: {error}")))?;
         Ok(PmItem {
+            revision: Some(self.updated_at),
             id: self.id,
             identifier,
             url: self.url,
@@ -1798,6 +1808,8 @@ struct IssueOwnershipData {
 // Detail observations must include nullable fields; omission is not a value to store.
 #[derive(Deserialize)]
 struct OwnedIssueNode {
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
     id: String,
     identifier: String,
     #[serde(deserialize_with = "Option::deserialize")]
@@ -1823,6 +1835,7 @@ impl OwnedIssueNode {
     fn into_ownership(self) -> PmResult<(PmItem, Option<PmProject>)> {
         let project = self.project;
         let item = IssueNode {
+            updated_at: self.updated_at,
             id: self.id,
             identifier: self.identifier,
             url: self.url,
@@ -2445,7 +2458,7 @@ mod tests {
                                     "title": "First",
                                     "description": "one",
                                     "prioritySortOrder": 10.0,
-                                    "sortOrder": 10.0,
+                                    "sortOrder": 10.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "assignee": { "id": "user-1" },
                                     "state": { "type": "unstarted" },
                                     "project": { "id": "project-123", "name": "Scan" },
@@ -2454,10 +2467,12 @@ mod tests {
                                 {
                                     "id": "issue-2",
                                     "identifier": "LOO-2",
+                                    "url": null,
+                                    "assignee": null,
                                     "title": "Second",
                                     "description": "two",
                                     "prioritySortOrder": 0.0,
-                                    "sortOrder": 0.0,
+                                    "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "state": { "type": "completed" },
                                     "project": { "id": "project-123", "name": "Scan" },
                                     "team": { "id": "team-9" }
@@ -3156,7 +3171,7 @@ mod tests {
             json!({ "data": { "issue": {
                 "id": "issue-uuid", "identifier": "LOO-42", "url": null,
                 "title": "Resolve ownership", "description": "",
-                "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                 "assignee": null, "state": { "type": "unstarted" },
                 "team": { "id": "team-loo" },
                 "project": {

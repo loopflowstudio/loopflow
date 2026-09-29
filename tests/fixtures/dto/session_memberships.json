@@ -43,7 +43,7 @@
       "invocation_id": "00000000-0000-0000-0000-00000000f10w",
       "step": "review-design",
       "occurrence": "current",
-      "node": "1",
+      "node": 1,
       "iterations": [
         []
       ]
@@ -94,7 +94,7 @@
       "invocation_id": "00000000-0000-0000-0000-0000000000f2",
       "step": "implement",
       "occurrence": "earlier",
-      "node": "4/fix/1",
+      "node": 6,
       "iterations": [
         [
           2,
@@ -244,7 +244,7 @@
       "invocation_id": "00000000-0000-0000-0000-0000000000f1",
       "step": "implement",
       "occurrence": "past",
-      "node": "2",
+      "node": 2,
       "iterations": [
         [
           2,
@@ -349,7 +349,7 @@
       "invocation_id": "00000000-0000-0000-0000-0000000000f2",
       "step": "demo",
       "occurrence": "current",
-      "node": "7",
+      "node": 9,
       "iterations": [
         [
           0,

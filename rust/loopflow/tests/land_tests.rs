@@ -1767,12 +1767,13 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 
 #[test]
 fn lf_pr_land_waits_for_authoritative_merged_observation() {
-    for (repair, blocked, awaiting_queue, merge_race) in [
-        (false, false, false, true),
-        (false, false, false, false),
-        (true, false, false, false),
-        (true, true, false, false),
-        (true, false, true, false),
+    for (repair, blocked, awaiting_queue, merge_race, flow) in [
+        (false, false, false, true, false),
+        (false, false, false, false, false),
+        (true, false, false, false, false),
+        (true, true, false, false, false),
+        (true, false, true, false, false),
+        (true, false, false, false, true),
     ] {
         let repo = TestRepo::new();
         let github_remote = "https://github.com/loopflowstudio/loopflow.git";
@@ -1823,6 +1824,14 @@ fi"#,
         fs::write(worktree.join("feature.txt"), "feature").unwrap();
         fs::create_dir_all(worktree.join(".lf")).unwrap();
         fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        if flow {
+            fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
+            fs::write(
+                worktree.join(".lf/flows/repair-proof.yaml"),
+                "- op: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+            )
+            .unwrap();
+        }
         let status = Command::new("git")
             .args(["add", "."])
             .current_dir(&worktree)
@@ -1842,8 +1851,11 @@ fi"#,
         let repair_proof = repo.path().join(".git/landing-repair-proof");
         let rebase_log = repo.bare_path().join("repair-rebase.log");
         let repair_launches = repo.bare_path().join("repair-launches.log");
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args([
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        if flow {
+            command.args(["flow", "repair-proof", "-b", "--no-loopflow"]);
+        } else {
+            command.args([
                 "pr",
                 "land",
                 "--strict",
@@ -1851,7 +1863,9 @@ fi"#,
                 "watched landing",
                 "--body",
                 "Observe GitHub before returning.",
-            ])
+            ]);
+        }
+        let output = command
             .current_dir(&worktree)
             .env_remove("LF_GIT_OPERATION_ID")
             .env_remove("LF_TRACE_ID")
@@ -1872,6 +1886,71 @@ fi"#,
             )
             .output()
             .unwrap();
+        if repair {
+            let db = rusqlite::Connection::open(&database).unwrap();
+            let parent: (String, i64) = db
+                .query_row(
+                    "SELECT id,exit_code FROM execs WHERE parent_exec_id IS NULL",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                parent.1,
+                i64::from(blocked),
+                "repair={repair} blocked={blocked} flow={flow}: {}\nNested rebase: {}",
+                String::from_utf8_lossy(&output.stderr),
+                fs::read_to_string(&rebase_log).unwrap_or_default(),
+            );
+            let owners: Vec<String> = db
+                .prepare("SELECT DISTINCT exec_id FROM session_events WHERE kind='started'")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(
+                owners.as_slice(),
+                std::slice::from_ref(&parent.0),
+                "repair uses the actual calling lf process"
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM execs", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                2,
+                "only the calling command and actual nested rebase are Execs"
+            );
+            let completions: i64 = db.query_row(
+                "SELECT count(*) FROM run_events WHERE process_id=?1 AND node='run' AND event IN ('completed','errored')",
+                [&parent.0], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(
+                completions, 1,
+                "the command completes once across worker threads"
+            );
+            if flow {
+                let merged: (String, String) = db
+                    .query_row("SELECT state,merge_commit FROM pr_landings", [], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
+                    .unwrap();
+                assert_eq!(merged, ("merged".into(), "merge-head".into()));
+                let operations: Vec<(String, String)> = db
+                    .prepare("SELECT kind,exec_id FROM flow_events ORDER BY seq")
+                    .unwrap()
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                assert_eq!(
+                    operations,
+                    [
+                        ("operation_started".into(), parent.0.clone()),
+                        ("operation_completed".into(), parent.0),
+                    ]
+                );
+            }
+        }
         if blocked {
             assert!(!output.status.success());
             assert!(String::from_utf8_lossy(&output.stderr)
@@ -1893,7 +1972,7 @@ fi"#,
             fs::read_to_string(&rebase_log).unwrap_or_default(),
         );
         assert!(
-            String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
+            flow || String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
             "land returned without merged evidence: {}",
             String::from_utf8_lossy(&output.stdout)
         );

@@ -28,14 +28,20 @@ struct TaskFlowTests {
             Issue.record("second snapshot is pinned"); return
         }
         #expect(running.returns.map(\.traversals) == [2, 0])
-        #expect(running.returns.map(\.decider) == ["3", "5"])
-        #expect(running.graph.steps.filter { $0.returnsTo == "1" }.map(\.key) == ["3", "5"])
+        #expect(running.returns.map(\.decider) == [3, 5])
+        #expect(running.graph.steps.filter { $0.returnsTo == 1 }.map(\.key) == [3, 5])
         #expect(snapshots[1].control(.start)?.unavailable != nil)
         #expect(snapshots[1].controls.map(\.kind) == [.start, .resume, .restart])
         #expect(snapshots[4].record == .finished(flow: "build"))
 
         var missing = try #require(JSONSerialization.jsonObject(with: fixture("task_flow.json")) as? [[String: Any]])
         let record = try #require(missing[1]["record"] as? [String: Any])
+        var stringNode = record
+        stringNode["current"] = "2"
+        missing[1]["record"] = stringNode
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([TaskFlowSnapshot].self, from: JSONSerialization.data(withJSONObject: missing))
+        }
         for field in ["returns", "iterations"] {
             var incomplete = record
             incomplete.removeValue(forKey: field)
@@ -55,11 +61,11 @@ struct TaskFlowTests {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
         guard case .pinned(let human) = snapshots[2].record else { Issue.record("pinned"); return }
         let states = flowNodeStates(human.graph, pinned: human)
-        #expect(states["1"] == .completed && states["3"] == .completed)
-        #expect(states["4"] == .waitingForHuman)
+        #expect(states[1] == .completed && states[3] == .completed)
+        #expect(states[4] == .waitingForHuman)
         // The second decision is pending again in this pass; the router pends too.
-        #expect(states["5"] == .pending && states["6"] == .pending)
-        #expect(states["6/fix/0"] == .pending)
+        #expect(states[5] == .pending && states[6] == .pending)
+        #expect(states[7] == .pending)
         #expect(human.iterations == [[1, 1]])
         #expect(human.returns[1].traversals == 1)
         guard case .pinned(let running) = snapshots[1].record else { Issue.record("pinned"); return }
@@ -69,16 +75,40 @@ struct TaskFlowTests {
         #expect(running.returns.map(\.traversals) == [2, 0])
 
         guard case .pinned(let blocked) = snapshots[3].record else { Issue.record("pinned"); return }
-        #expect(flowNodeStates(blocked.graph, pinned: blocked)["3"] == .blocked)
+        #expect(flowNodeStates(blocked.graph, pinned: blocked)[3] == .blocked)
         let stalledSnapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("task_flow_stalled.json"))
         guard case .pinned(let stalled) = stalledSnapshot.record else { Issue.record("pinned"); return }
         #expect(stalled.execution == .stalled)
-        #expect(flowNodeStates(stalled.graph, pinned: stalled)["1"] == .stalled)
+        #expect(flowNodeStates(stalled.graph, pinned: stalled)[0] == .stalled)
         #expect(FlowPalette.describe(.stalled).contains("interrupt then resume"))
         #expect(stalled.reason.contains("run_9fc06d3999af4bcabf1398cc859d49a9"))
         // A preview only marks human boundaries.
         let preview = flowNodeStates(human.graph, pinned: nil)
-        #expect(preview["4"] == .pendingHuman && preview["1"] == .pending)
+        #expect(preview[4] == .pendingHuman && preview[1] == .pending)
+    }
+
+    @Test("Captured numeric IDs preserve nested containment and independent return counts")
+    func nestedNumericIdentity() throws {
+        let snapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("flow_numeric_nested.json"))
+        guard case .pinned(let pinned) = snapshot.record else { Issue.record("pinned"); return }
+        let graph = pinned.graph
+        #expect(graph.steps.map(\.key) == [0, 1, 9])
+        #expect(graph.node(5)?.label == "check")
+        #expect(graph.node(5)?.returnsTo == 4)
+        #expect(graph.node(6)?.returnsTo == 2)
+        #expect(graph.node(8)?.returnsTo == 7)
+        #expect(graph.node(9)?.returnsTo == 0)
+        #expect(graph.node(10) == nil)
+        let outer = try #require(graph.node(1))
+        #expect(outer.contains(5) && outer.contains(8) && !outer.contains(9))
+        #expect(outer.paths[0].steps.contains { $0.contains(5) })
+        #expect(!outer.paths[1].steps.contains { $0.contains(5) })
+        let states = flowNodeStates(graph, pinned: pinned)
+        #expect(states[1] == .running && states[3] == .running && states[5] == .running)
+        #expect(states[4] == .completed && states[7] == .pending && states[9] == .pending)
+        #expect(pinned.returns.map(\.decider) == [5, 6, 8, 9])
+        #expect(pinned.returns.map(\.traversals) == [2, 0, 0, 3])
+        #expect(pinned.iterations == [[3], [0], [2]])
     }
 
     @Test("Running status elapsed time and the two return ports")

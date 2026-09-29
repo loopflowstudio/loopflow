@@ -890,14 +890,95 @@ fn imported_input_id(session: &str) -> Result<RunId> {
 }
 
 fn captured_node(flow: &FlowSession, key: &str) -> Result<u32> {
+    // Historical immutable inputs store runtime cursor paths. Resolve them only
+    // at import; the current public graph carries captured numeric IDs.
+    fn find(nodes: &[crate::engine::flow_graph::FlowNode], prefix: &str, key: &str) -> Option<u32> {
+        for (index, node) in nodes.iter().enumerate() {
+            let path_key = crate::engine::execution::node_key(prefix, index);
+            if path_key == key {
+                return Some(node.key);
+            }
+            for path in &node.paths {
+                if let Some(id) = find(&path.steps, &format!("{path_key}/{}/", path.name), key) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
     let graph =
         crate::engine::flow_graph::FlowGraph::new(&flow.invocation.flow, &flow.invocation.steps);
-    let mut index = 0;
-    while let Some(node) = graph.node_at(index) {
-        if node.key == key {
-            return Ok(index);
+    find(&graph.steps, "", key)
+        .ok_or_else(|| anyhow!("Flow {} has no captured node {key}", flow.id()))
+}
+
+#[cfg(test)]
+mod numeric_node_tests {
+    use super::captured_node;
+    use crate::durable::FlowSession;
+    use crate::engine::flow::{
+        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, OccurrencePolicy, Skill,
+    };
+    use crate::engine::invocation::QueuedInvocation;
+
+    #[test]
+    fn legacy_paths_resolve_in_the_saved_capture_after_nested_alternatives() {
+        let skill = || {
+            ConcreteStep::Skill(ConcreteSkill {
+                skill: Skill::named("repeated"),
+                policy: OccurrencePolicy::default(),
+                flow_parents: vec![],
+            })
+        };
+        let branch = |paths: Vec<(&str, Vec<ConcreteStep>)>| {
+            ConcreteStep::Xor(ConcreteXor {
+                router: Skill::named("route"),
+                flow_parents: vec![],
+                paths: paths
+                    .into_iter()
+                    .map(|(name, steps)| {
+                        (
+                            name.to_owned(),
+                            ConcretePath {
+                                description: name.to_owned(),
+                                steps,
+                            },
+                        )
+                    })
+                    .collect(),
+            })
+        };
+        let steps = vec![
+            skill(),
+            branch(vec![
+                ("zeta", vec![skill()]),
+                ("alpha", vec![skill(), branch(vec![("fix", vec![skill()])])]),
+            ]),
+            skill(),
+        ];
+        let flow = FlowSession {
+            invocation: QueuedInvocation::new("historical", steps).unwrap(),
+            cursor: Default::default(),
+            version: 0,
+            task_id: None,
+            wave_id: None,
+            cwd: "/fixture".into(),
+            message: None,
+            model: None,
+            current_attempt: None,
+            pending_session_id: None,
+            ready_summary: None,
+            worker_generation: 0,
+            claim: None,
+            failure: None,
+            finished: true,
+            updated_at: time::OffsetDateTime::UNIX_EPOCH,
+        };
+        // 0, router 1, alpha 2/router 3/fix 4, zeta 5, final root 6.
+        for (path, id) in [("0", 0), ("1/alpha/1/fix/0", 4), ("1/zeta/0", 5), ("2", 6)] {
+            assert_eq!(captured_node(&flow, path).unwrap(), id);
         }
-        index += 1;
+        assert!(captured_node(&flow, "1/missing/0").is_err());
+        assert!(captured_node(&flow, "1/alpha/1/fix/9").is_err());
     }
-    bail!("Flow {} has no captured node {key}", flow.id())
 }

@@ -175,8 +175,10 @@ new Jack decision. No bulk history rewrite; mid-turn missingness stays visible.
 ## 5. Desktop, wire and Chapters
 
 - Move Rust/Swift DTOs and fixtures together: typed ancestry, AgentSession history,
-  Exec command outcome and final numeric graph IDs. The nested graph projection
-  repair retains structural wire keys; it is not the numeric DTO conversion.
+  Exec command outcome and final numeric graph IDs. Numeric graph/membership IDs
+  now pass shared Rust/Swift fixtures, nested containment/return counts, public
+  CLI/import, managed Task topology and mounted terminal retention checks. Final
+  Session/Exec history and discovery wire conversion remains required.
 - Bound Tasks omitted from the roadmap must retain Task ancestry/breadcrumbs,
   Session identity and pane. Interactive default and explicit headless/completed
   discovery must agree with CLI; `--all` continues to mean all repositories.

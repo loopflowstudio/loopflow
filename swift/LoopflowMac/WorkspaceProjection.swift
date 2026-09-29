@@ -326,7 +326,7 @@ struct SessionRenameDraft: Equatable {
 struct FlowNodeSelection: Equatable {
     /// nil identifies the unstarted preview, never an old invocation.
     let invocationId: String?
-    let node: String
+    let node: UInt32
 }
 
 /// One Task's Flow selection and in-flight control. Presentation only: the

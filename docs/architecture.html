@@ -2028,11 +2028,9 @@ h3:hover .anchor-link,
         </header>
 <p>Loopflow records commands, preserves agent conversations, and advances captured
 Flows. Exec, AgentSession and FlowSession own those three lifetimes.</p>
-<p><strong>Implementation status:</strong> this is the accepted model for the execution cutover.
-Exec recording and the native transport proof exist; the public AgentSession /
-FlowSession lifecycle and status-based Chapter rotation are still being converted.
-The checked inventory in the reference describes the current source, including
-the Run storage that remains to be removed. Examples below specify the target.</p>
+<p>This guide specifies the accepted model. The reference owns
+<a href="https://loopflow.studio/architecture/reference#cutover-status">cutover status</a>, the remaining work
+map and the checked current-source inventory.</p>
 <p>This guide is for developers changing Loopflow. It starts with the smallest
 complete path, then opens into the six areas that own the system. Command
 syntax lives in the <a href="https://loopflow.studio/docs/lf"><code>lf</code> reference</a>; the exhaustive checked inventory
@@ -2211,7 +2209,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Chapter x Wave = Project -&gt; Task
+  Skills / Flows /       Wave -&gt; Linear Project -&gt; Task
   goals / memory                  |
           |                       +---------&gt; Task delivery
           |                       |                ^
@@ -2344,8 +2342,9 @@ an in-process step creates neither a fake Exec nor an agent conversation.
 Failed or interrupted work remains visible, and stale results cannot advance
 the current boundary. Conversation continuation is separate from Flow retry.</p>
 <p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
-Bind fills an unassigned conversation's Task once, after confirming the exact
-target; it cannot clear or move an assignment or change Flow membership. Done
+Bind fills an unassigned conversation's Task once. CLI states the permanent
+target and writes; Desktop confirms it. Bind cannot clear or move an assignment
+or change Flow membership. Done
 and landed Tasks remain valid targets. Under the current conservative attribution
 assumption, earlier usage retains its recorded owner; binding affects subsequent
 work, and uncertain mid-turn allocation remains unknown.</p>

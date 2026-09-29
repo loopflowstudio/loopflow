@@ -7,7 +7,7 @@ lf wave status shipper
 
 A Wave keeps an objective, memory, cadence, budget and metrics across Tasks.
 Each invocation makes one finite planning pass. Tasks own implementation and
-Flow execution; each Home retains its Run evidence.
+Flow execution; each Home retains command and conversation history.
 
 | Path | Holds |
 |------|-------|
@@ -15,7 +15,7 @@ Flow execution; each Home retains its Run evidence.
 | `wave/<name>/MEMORY.md` | Curated decisions and lessons |
 | `wave/<name>/metrics/*.md` | Metric meaning, window and freshness |
 
-In Loopflow on macOS, select a Wave to read its plan, Tasks and Runs. Start a
+In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
 Session for a conversation, or invoke `wave/operate` for a bounded planning pass.
 
 ## Operate manually
@@ -53,6 +53,9 @@ Tasks keep progressing through their selected Flows and human review gates
 when both operators are absent. Projects belong to Waves; they have no separate
 operator. Scheduling and connected chat are separate integration work. These
 manual passes neither install jobs nor post replies to a channel.
+
+The [execution contract and cutover status](architecture-reference.md#cutover-status)
+track remaining implementation and acceptance.
 
 ## The planning model
 
@@ -141,9 +144,8 @@ Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
 
-Work placement records the owning Home. `lf wave enable|disable` changes local
-eligibility without changing the goal or stopping a running Task. Use `lf cron`
-for scheduled Runs and `lf --wave <name> wave/operate` for an immediate pass.
+Work placement records the owning Home. Use `lf cron`
+for scheduled commands and `lf --wave <name> wave/operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
 `s1`…`s5`. Goal authoring is covered in [Authoring → Goals](authoring.md#goals).
@@ -219,7 +221,7 @@ doppler run -- lf discord serve product
 
 Run one foreground bridge for the configured channel. It polls every five
 seconds, turns each nonempty, non-bot message into a bounded Wave-attributed
-Run, and replies with that Run's final answer. Mentions are disabled in replies.
+conversation, and replies with that conversation's final answer. Mentions are disabled in replies.
 The token is `LF_DISCORD_TOKEN`, injected through Doppler and removed from
 provider child environments. The bot needs View Channel, Read Message History,
 Send Messages and access to message content.
@@ -228,7 +230,7 @@ The cursor exists only in memory. Every start skips existing channel history;
 restarting after a failure does not replay missed messages. The bridge uses the
 channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
 There is no local Wave transcript, inbox, listener or automatic service startup.
-Use Sessions for native conversations and `lf runs --wave product` for Run history.
+Use Sessions for native conversations and `lf runs --wave product` for historical launch inspection.
 
 ### Memory
 
@@ -242,7 +244,7 @@ $EDITOR wave/shipper/MEMORY.md
 
 The file is the whole memory surface — read and edit it directly, running Wave
 or not. `realign` curates it: merge durable context into the existing
-structure, correct stale entries, and drop transient Run detail. When a task ships,
+structure, correct stale entries, and drop transient execution detail. When a task ships,
 its context folds forward into memory and the remaining Linear tasks — fold,
 don't drop.
 
@@ -253,7 +255,7 @@ lf home id
 lf home observe <home-id> ssh://jack@mini.local
 lf wave place <wave-id> <home-id>
 lf ssh <home-id> --wave shipper wave/operate
-lf ssh <home-id> status shipper --json
+lf ssh <home-id> wave status shipper --json
 ```
 
 A Home is a stable machine identity with a replaceable route. Placement records
@@ -269,7 +271,7 @@ lf wave relocate <wave-id> --repo ../moved-repository
 Relocation preserves the Wave UUID, Linear projection, authored files, Work and
 Home placement. It protects unmerged authored work and uses a receipt to finish
 filesystem cleanup after the locator commits. It does not move historical Wave
-journals or Home-local Runs. Source and target PM Teams must match; use
+journals or Home-local execution history. Source and target PM Teams must match; use
 `lf repo reteam` for a provider ownership change.
 
 See [Homes and processes](architecture/homes.md) and
@@ -335,18 +337,18 @@ Project's Flow supplies the default; `--flow` selects any other template.
 Launch creates an invocation containing the expanded graph and its execution
 state. Source edits and chapter transfers do not change that captured graph.
 Finished and replaced invocations remain history; the Task has at most one
-current root invocation. Completion leaves Task Work open until an explicit
+managed FlowSession. Completion leaves Task Work open until an explicit
 completion or delivery operation settles it.
 
 Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
 KRs and targets. Explicit PR rotation selects the next serial branch while
 preserving the Task's worktree directory.
 
-Runs carry nullable Task/Wave fields; Sessions read those fields through their
-Runs. Launching `lf` in a registered Task checkout binds automatically unless
+AgentSessions and FlowSessions own typed nullable Task/Wave ancestry.
+Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and
-requires confirmation of the exact target; an existing Task cannot change.
+states the permanent target in CLI; Desktop confirms it. An existing Task cannot change.
 See [Sessions](lf.md#sessions)
 for rename, bind, and the distinction between ancestry and Flow membership.
 

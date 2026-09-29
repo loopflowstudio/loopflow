@@ -197,17 +197,17 @@ the configured model provider as part of an agent run. Browser tools, MCP
 servers, GitHub, Linear, and other integrations receive the data sent to them
 by their commands.
 
-Loopflow keeps Home-local Run records with prompt, conversation, and raw
+Loopflow keeps Home-local captured inputs and conversation history with prompt, conversation, and raw
 provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
-sensitive material, so treat the Run store as sensitive even though it is
+sensitive material, so treat the Home store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
 Home. Reading another Home with `lf ssh <home-id> runs` executes the read on
 that machine.
 
 ## Keep bridge credentials private
 
-`lf discord serve` makes outbound requests and launches bounded Runs. Inject
+`lf discord serve` makes outbound requests and launches bounded conversations. Inject
 `LF_DISCORD_TOKEN` through Doppler; provider children do not inherit it. No Wave
 or Home HTTP service is required. Use `lf ssh` for remote operation.
 

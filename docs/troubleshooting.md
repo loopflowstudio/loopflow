@@ -3,7 +3,7 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## A Wave has no active Run
+## A Wave has no active conversation
 
 Wave operations are finite. Read its plan and invoke the next pass explicitly,
 or inspect its cron schedule:
@@ -31,15 +31,15 @@ lf session list
 
 `ready` means the Task is nonterminal. Status reports `execution` separately:
 starting, running, waiting for review, blocked, idle, or unknown. Read its
-reason and worker Run before recovery. Wave status and roadmap use that same
+reason and selected execution before recovery. Wave status and roadmap use that same
 execution evidence for their recommendations. Dirty files under a live worker
 are ongoing progress.
 
-Task Run history includes independent helpers, whether recorded with the public
+Task execution history includes independent helpers, whether recorded with the public
 issue identifier or internal Task ID. An idle Task Flow does not prove those
 helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
-controls; reserve bound helper Runs for distinct contributions.
+controls; reserve bound helper conversations for distinct contributions.
 
 Task status and `lf runs` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
@@ -57,7 +57,7 @@ lf task run INF-123
 lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-`resume` starts a fresh boundary from the Task Work, Steers, worktree, and
+`task run` continues the captured Flow with the Task Work, Steers, worktree, and
 active PR. It refuses while another exact Task worker is live. A Task Steer
 is a Linear Task comment; the active Task worker receives new comments when
 possible and the next Skill seed always reads them. `task interrupt` ends the
@@ -87,8 +87,8 @@ After repairing provider access, retry the Task or Project operation:
 lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Project operations are finite Runs, so recovery is a fresh `project run`, not a
-resume of Project process state.
+Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
+for another planning pass; it has no resident Project process to resume.
 
 Other options:
 

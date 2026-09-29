@@ -26,39 +26,37 @@ asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.
 It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
-while `lf ask` parks the Run at a durable session in its own checkout.
+while `lf ask` blocks its caller on a durable AgentSession in its own checkout.
 
 A Wave directing a task is the internal case:
 
 ```bash
 lf task checkout INF-123                              # tracked Work, no execution
-lf --task INF-123 research "write scratch/api.md"    # independent bounded Run
+lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf task run INF-123                                  # start built-in Task automation
 lf task comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                # block until it settles
 ```
 
-## The nouns
+## The owners
 
-Tracked Work follows **Wave → Task**. These are stable planning
-records, not a process hierarchy. A Wave coordinates and remembers; a Project
-pursues measurable KRs; only Task Work owns a worktree, and every file-writing
-change happens there on its one active remote branch and PR to `main`. Work is `ready`,
-`done`, or `abandoned`; process liveness, Task condition, and Sessions are
-separate evidence.
+Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
+memory; its current Linear Project owns Tasks, KRs, targets and default Flow.
+Task owns the checkout, serial PRs and one managed FlowSession selection. Other
+conversations and Flows may carry Task attribution without acquiring that claim.
 
-A **Run** is different: one append-only Home-local record of one harness launch.
-A Work may produce many Runs, and a Run may merely name Work as its subject.
-Run identity does not reserve Work, authorize a worktree mutation, or prove a
-process signal-safe. Tasks are Linear issues, so durable delegated work starts
-from an existing issue and the roadmap remains the queue.
+Exec records an actual lf command process. AgentSession keeps a continuable
+conversation, whether interactive or headless. FlowSession captures one Flow
+and consumes exact boundary results. Provider turns and retries remain history
+inside the conversation; they do not create another generic execution object.
 
-Only Task Work persists a selected Flow and advances it one exact boundary at a
-time. Project operation is a finite `wave/operate` Run over current facts.
-An agent may also compose `lf task checkout`, a `--task`/`--wave`
-skill Run, Work input, and delivery commands itself. Attribution grants context,
-not permission to move a Task's Flow position.
+A child command records its causal parent and, when issued by an agent, its
+calling conversation and provider generation. That evidence grants neither
+process-control authority nor permission to move a Flow cursor. A driver handoff
+retains conversation identity while fencing the old writer. Passive observation
+acquires no claim. See the [contract and cutover status](architecture-reference.md#cutover-status)
+for the remaining reader, wire and lifecycle conversion.
 
 ## Delegate
 
@@ -89,13 +87,13 @@ lf --wave <wave> wave/operate "reassess Project priorities"
 ```
 
 Comment on the Linear Task directly, or use `task comment`. Both reach only the
-worker advancing that Task. Independent Runs sharing its worktree or using
+worker advancing that Task. Independent conversations sharing its worktree or using
 `--task`/`--as` do not subscribe to steering. With no active worker, comments
 wait for explicit advancement; steering never starts execution.
 
 Linear comments are the authored record. Workers refresh comments while running
 and before starting a Skill; local events cache their delivery. The command
-receipt confirms publication to Linear. Run traces distinguish input included
+receipt confirms publication to Linear. Conversation history distinguishes input included
 in the starting prompt from input accepted by the live provider transport;
 neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
@@ -103,12 +101,12 @@ live correction is consumed.
 `lf task interrupt INF-123` appends a durable interrupt comment;
 the active Task worker observes it and ends the current provider turn so the
 next boundary re-reads direction. With no live worker it remains durable input.
-Loopflow never guesses signal authority from a Run id, Work id, PID, or
-tmux name. Project operations are ordinary finite Runs; they have no resident
+Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
+tmux name. Project operations are ordinary finite conversations; they have no resident
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. `lf task run INF-123` starts a fresh
-boundary without losing durable direction, the worktree, or the Task PR. `lf
+Work survives its provider process. `lf task run INF-123` continues the saved
+Flow without losing durable direction, the worktree, or the Task PR. `lf
 task run` never reopens terminal Work. Create a new Task for new work;
 `lf task status ISSUE` retains deliberate historical lookup.
 
@@ -158,7 +156,7 @@ lf roadmap --json           # every Wave repeats that required portfolio envelop
 lf activity --task INF-123 --json
 lf runs --project parser --json
 lf runs --task INF-123 --json
-lf usage --days 30 --json   # direct RunSnapshot evidence, newest first
+lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf ps --json                # one OS-live process frame
 ```
@@ -166,12 +164,13 @@ lf ps --json                # one OS-live process frame
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
 and `lf roadmap` joins the current Linear plan to that runtime truth.
 `lf activity` is the ordered durable history; each item reuses `WorkRef` and
-carries one typed fact with its Run, Task PR, or Steer evidence. Agents consume
+carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
 All of these reads are local to the executing Home. Use `lf ssh <home-id> ...`
-to execute the same read remotely. `lf runs` and `lf usage` scan that Home's
-Run records; they do not query a central execution service.
+to execute the same read remotely. The historical `lf runs` interface and `lf usage` read that Home's evidence;
+their transitional wire shape is recorded in the cutover status. They do not
+query a central execution service.
 
 [Conducting →](conducting.md) covers the full monitoring surface. The Mac app is
 built on exactly these calls — it keeps no second database.
@@ -185,9 +184,10 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
 - Answer the user in the current conversation; use typed Work observations for durable
-  coordination, ordinary `lf --as` Runs for another agent perspective, and
+  coordination, ordinary `lf --as` conversations for another agent perspective, and
   `lf ask` only for a new session.
-- Write repo-specific learnings into `.lf/` and commit them with the work.
+- Keep repeatable instructions with their skill, repository rules in its agent guide,
+  and durable Wave learning in its existing memory.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.
 

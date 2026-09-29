@@ -4,13 +4,11 @@
 lf -b implement
 lf session list --interactive false --json
 lf session connect SESSION
-lf session connect SESSION --restart
 ```
 
-These examples specify the accepted execution cutover. Public connect, conversation
-history and the remaining Run removal are still under implementation. Native
-transport proofs use actual Codex with synthetic responses; they do not establish
-configured provider or Desktop acceptance.
+These commands use the current parser. This guide specifies the accepted
+lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
+which owners and proofs remain unfinished.
 
 The command has an Exec. The agent has an AgentSession. A captured Flow has a
 FlowSession. Their completion and authority are different facts.
@@ -71,15 +69,6 @@ commands must reach their exact-store authority checks before any logging-induce
 store open; unavailable-store coverage is reported explicitly. An inspection
 Exec does not reserve agent work or mark a Task Started.
 
-Ordinary parsed commands enter the process lifecycle before fallible Wave and
-account selection, so selection errors retain a failed Exec. Help and parse
-errors exit before that lifecycle; screenshot and installation use independent
-bootstrap paths. Current-directory failure and unavailable storage can also
-prevent recording. None justifies claiming an Exec for every OS process or
-opening the installed store before candidate installation authority checks.
-File-journal setup or append failure does not suppress a writable SQLite Exec;
-the obstruction and diagnostic remain evidence.
-
 ## Publish before spawn
 
 1. Resolve one Home for the store and payload root; validate typed ancestry.
@@ -117,10 +106,6 @@ Graceful stop precedes force termination of an exclusively owned process. A shar
 engine and sibling conversations survive a thread-specific restart. Mere process
 silence, tmux visibility, causal ancestry or a stored active label grants no
 termination authority.
-
-The relay currently has an actual-engine fixture consumer; normal launch/public
-connect integration remains required. Stdio harness ownership is still present
-until that conversion. No general daemon or Wave listener is introduced.
 
 ## Outcomes, retries and usage
 

@@ -70,7 +70,7 @@ An invalid flow reports its error instead of falling back to the skill.
 
 Skills that need another Work's perspective launch it directly with
 `lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
-`lf ask "<request>"`; the Run blocks while a durable session works in the
+`lf ask "<request>"`; the caller blocks while a durable AgentSession works in the
 same checkout, then resumes when the user completes that conversation.
 
 Run a step interactively with `human: true`. Give it an `id` stable within
@@ -128,7 +128,7 @@ Loop-decide starts at those paths, then reconciles the current design and other
 relevant scratch evidence. A note recommends work; the deciding occurrence
 records navigation through the Flow protocol. There is no required handoff
 filename or control file. Recursive scratch Markdown is assembled into fresh
-Run context; a running agent can reread files updated since its launch.
+conversation context; a running agent can reread files updated since its launch.
 
 ### Branching (xor)
 
@@ -150,8 +150,8 @@ one path runs:
 
 The `router:` skill reads the available evidence and records one choice with
 `lf flow route PATH`. Routing instructions and path descriptions are appended
-to its captured prompt. The choice belongs to the active Run and takes effect
-when it succeeds; failed Runs discard their candidates. A path
+to its captured prompt. The choice belongs to the selected native turn and takes effect
+when it succeeds; a retry must supply its own candidate. A path
 with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
 exit. With no `router:`, a generic routing agent picks from `scratch/` contents.
 
@@ -202,8 +202,8 @@ also targets implement: the outer loop repeats implementation, refresh,
 the inner decision loop, and demo. Review completion itself chooses no edge.
 
 At the deciding occurrence, use `lf flow decide advance "evidence"` or
-`lf flow decide iterate "next action and proof"`. The current decision Run owns
-that choice; its candidate takes effect only after the Run succeeds. A review's
+`lf flow decide iterate "next action and proof"`. The selected native turn owns
+that candidate; only its exact successful completion can authorize navigation. A review's
 final prose or a successful process exit cannot substitute for the decision.
 
 Backward edges have no pass limit. Iterate follows the edge as long as the
@@ -281,8 +281,7 @@ Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
 the repository Team and owns only its Initiative.
 
 Execution placement is durable state: use `lf wave place <wave-id> <home-id>`.
-Change local eligibility with `lf wave enable|disable <wave>`; these commands
-do not edit the goal or stop existing Runs.
+Placement does not edit the goal, launch work or stop existing conversations.
 
 ### Writing KRs
 

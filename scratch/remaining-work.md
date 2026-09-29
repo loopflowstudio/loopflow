@@ -3,6 +3,31 @@
 LOO-298 · 2026-09-28 · Consolidated for Jack Heart. This is the scope checklist,
 not evidence that each preceding implementation has passed.
 
+## Next: docs and README as the spec
+
+Jack requested this order on 2026-09-28: rewrite the docs and README for the
+accepted model before further executable owner conversion. The recovery
+checkpoint is now rebased and published at `26a0270af`; main has acknowledged
+the docs-first step. Cover the active user guides as well as architecture:
+`README.md`, `docs/index.md`, `docs/lf.md`, `docs/agent-api.md`, `docs/waves.md`,
+architecture/reference/data/execution, and other active pages that define these
+objects. Generate derived docs through the existing generator.
+
+Exec is the actual lf process; AgentSession is the continuable conversation;
+FlowSession is captured resumable Flow progress. Their relationships and history
+replace the separate Run product object. Keep one explicit implementation-status
+section so the target contract does not misrepresent unfinished behavior. Keep
+current command spellings and source inventories accurate during conversion.
+The reviewable checkpoint must map the spec to the remaining implementation;
+writing the spec does not complete the requirements below.
+
+Docs review also found active command guidance that must follow the Chapter
+conversion: builtin split-wave, wave_start-chapter, start-chapter, wave_operate,
+loopflow and init, plus the restart hint in `ops/task.rs`, still name
+`lf wave new-chapter`. Update current instructions to the supported repository
+operation; preserve historical migration text. The checked ownership inventory
+must not list deleted Chapter storage as a current transition dependency.
+
 ## 1. Finish the execution owners
 
 Main is converting Flow settlement to exact AgentSession history; see
@@ -145,10 +170,10 @@ ancestry alone to signal. No duplicate deletion implementation or widened scope.
 Preserve main's upstream semantics and rebase/publish coherent verified checkpoints
 through lf. Run affected checks after final changes, canonical materialization in
 a disposable source copy, architecture/migration checks, fmt and all-target Clippy.
-Fresh remote comparison on 2026-09-28 finds main at d9632d833, one commit above
-the branch's a2b59ed base. PR1317 retains saved Session executable/Home/database
-and launch-failure journal evidence. Main owns the next checkpoint/rebase; preserve
-those behaviors across Session/Run conversion. No rebase is claimed from this read.
+The 2026-09-28 rebase integrated main d9632d833 and PR1317's saved Session
+executable/Home/database and launch-failure journal evidence. GitHub and the Task
+publication now name 26a0270af; the Task's recorded base is d9632d833. Preserve
+those upstream behaviors across Session/Run conversion. Main owns later rebases.
 Do not cite assertion passes with a leaked process as clean settlement. Review
 complete public behavior and deletion paths; measure code by the same method/base.
 Update docs, skills and generated HTML with actual behavior. Compress and follow

@@ -46,6 +46,8 @@ fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
 /// reports an already-open PR, so `land` finds a PR to finalize without
 /// creating one.
 fn gh_open_pr_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(925, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(925, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -59,7 +61,7 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  if [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -76,6 +78,7 @@ exit 0
 }
 
 fn gh_auto_enabled_script(log_path: &str) -> String {
+    let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -83,7 +86,7 @@ if [ "$1" = "--version" ]; then
 fi
 echo "$@" >> "{log_path}"
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'true'
+  echo '{armed}'
   exit 0
 fi
 if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then

@@ -37,11 +37,11 @@ pub struct PrInfo {
     pub state: String,
     pub branch: String,
     pub merge_commit: Option<String>,
-    /// GitHub's authoritative merge instant from the single-PR REST response.
+    /// GitHub's authoritative merge instant from the PR response.
     pub merged_at: Option<String>,
     /// The PR's current head commit (`headRefOid`), when GitHub reports one.
     pub head_sha: Option<String>,
-    /// GitHub's mergeability classification, when observed through REST.
+    /// GitHub's mergeability classification, when observed.
     pub merge_state: Option<String>,
 }
 
@@ -612,8 +612,33 @@ pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&Merg
     })
 }
 
-pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
-    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
+#[derive(Debug)]
+pub(crate) struct PrMergeObservation {
+    pub pr: PrInfo,
+    pub request: Option<MergeRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhPrMerge {
+    id: String,
+    number: u64,
+    url: String,
+    state: String,
+    is_draft: bool,
+    head_ref_name: String,
+    head_ref_oid: String,
+    merged_at: Option<String>,
+    merge_commit: Option<GhCommit>,
+    merge_state_status: String,
+    is_merge_queue_enabled: bool,
+    // Value requires the fields to exist while allowing GitHub's null values.
+    auto_merge_request: serde_json::Value,
+    merge_queue_entry: serde_json::Value,
+}
+
+pub(crate) fn observe_pr_merge(repo: &Path, number: u64) -> OpsResult<PrMergeObservation> {
+    let query = "query LoopflowPrMerge($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id number url state isDraft headRefName headRefOid mergedAt mergeCommit{oid} mergeStateStatus isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
     let observation = Command::new("gh")
         .args([
             "api",
@@ -626,30 +651,73 @@ pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Optio
             &format!("number={number}"),
             "-f",
             &format!("query={query}"),
-            "--jq",
-            ".data.repository.pullRequest | if .mergeQueueEntry != null then (\"queued:\" + .id) elif .autoMergeRequest != null and .isMergeQueueEnabled then \"awaiting_queue\" else (.autoMergeRequest != null) end",
         ])
         .current_dir(repo)
         .output()?;
     if !observation.status.success() {
         return Err(OpsError::CommandFailed {
-            command: format!("gh api graphql [pull request #{number} merge request]"),
+            command: format!("gh api graphql [pull request #{number} merge state]"),
             stderr: stderr_from_output(&observation),
         });
     }
-    let output = String::from_utf8_lossy(&observation.stdout);
-    let value = output.trim();
-    if let Some(id) = value.strip_prefix("queued:") {
-        return Ok(Some(MergeRequest::Queued(id.to_string())));
+    parse_pr_merge(&observation.stdout)
+}
+
+fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
+    let response: serde_json::Value = serde_json::from_slice(output)
+        .map_err(|error| OpsError::Parse(format!("failed to parse PR merge state: {error}")))?;
+    if response
+        .get("errors")
+        .is_some_and(|errors| !errors.is_null() && !errors.as_array().is_some_and(Vec::is_empty))
+    {
+        return Err(OpsError::Message(
+            "GitHub returned errors while reading PR merge state".into(),
+        ));
     }
-    match value {
-        "false" => Ok(None),
-        "true" => Ok(Some(MergeRequest::Auto)),
-        "awaiting_queue" => Ok(Some(MergeRequest::AwaitingQueue)),
-        value => Err(OpsError::Message(format!(
-            "could not determine whether pull request #{number} has auto-merge enabled: {value:?}"
-        ))),
+    let pr: GhPrMerge =
+        serde_json::from_value(response["data"]["repository"]["pullRequest"].clone())
+            .map_err(|error| OpsError::Parse(format!("failed to parse PR merge state: {error}")))?;
+    for (name, value) in [
+        ("autoMergeRequest", &pr.auto_merge_request),
+        ("mergeQueueEntry", &pr.merge_queue_entry),
+    ] {
+        if !value.is_null() && !value.is_object() {
+            return Err(OpsError::Parse(format!("invalid PR {name}")));
+        }
     }
+    let state = match pr.state.as_str() {
+        "OPEN" if pr.is_draft => "draft",
+        "OPEN" => "open",
+        "CLOSED" => "closed",
+        "MERGED" => "merged",
+        state => return Err(OpsError::Parse(format!("unknown PR state: {state}"))),
+    };
+    let request = if !pr.merge_queue_entry.is_null() {
+        Some(MergeRequest::Queued(pr.id))
+    } else if pr.auto_merge_request.is_null() {
+        None
+    } else if pr.is_merge_queue_enabled {
+        Some(MergeRequest::AwaitingQueue)
+    } else {
+        Some(MergeRequest::Auto)
+    };
+    Ok(PrMergeObservation {
+        pr: PrInfo {
+            url: pr.url,
+            number: pr.number,
+            state: state.to_string(),
+            branch: pr.head_ref_name,
+            merge_commit: pr.merge_commit.map(|commit| commit.oid),
+            merged_at: pr.merged_at,
+            head_sha: Some(pr.head_ref_oid),
+            merge_state: Some(pr.merge_state_status.to_ascii_lowercase()),
+        },
+        request,
+    })
+}
+
+pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
+    Ok(observe_pr_merge(repo, number)?.request)
 }
 
 /// Revoke GitHub auto-merge or queue membership before a stored request is cleared.
@@ -1719,8 +1787,9 @@ mod tests {
     use super::{
         classify_pr_read_failure, disable_auto_merge, is_missing_pr, merge_gate_state,
         merge_needs_integration, normalize_task_pr_copy, observe_merge_request,
-        parse_generated_pr_copy, pr_number_from_url, project_checks, GhCheck, GhRestHead, GhRestPr,
-        MergeGateReading, MergeRequest, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
+        parse_generated_pr_copy, parse_pr_merge, pr_number_from_url, project_checks, GhCheck,
+        GhRestHead, GhRestPr, MergeGateReading, MergeRequest, PrCopy, RequiredChecks,
+        TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
     use serde_json::{json, Value};
@@ -1816,9 +1885,69 @@ esac
         }
     }
 
+    fn merge_response(state: &str, request: Value, queue: Value) -> Value {
+        json!({"data":{"repository":{"pullRequest":{
+            "id":"PR_fixture", "number":1329, "url":"https://example.com/pr/1329",
+            "state":state, "isDraft":false, "headRefName":"feature", "headRefOid":"head-1",
+            "mergedAt":"2026-09-29T05:02:15Z", "mergeCommit":{"oid":"merge-1"},
+            "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":true,
+            "autoMergeRequest":request, "mergeQueueEntry":queue
+        }}}})
+    }
+
+    #[test]
+    fn merged_observation_retains_evidence_after_auto_merge_is_removed() {
+        let response = merge_response("MERGED", Value::Null, Value::Null);
+        let result = parse_pr_merge(&serde_json::to_vec(&response).unwrap()).unwrap();
+        assert_eq!(result.pr.state, "merged");
+        assert_eq!(result.pr.merge_commit.as_deref(), Some("merge-1"));
+        assert_eq!(result.pr.merged_at.as_deref(), Some("2026-09-29T05:02:15Z"));
+        assert!(result.request.is_none());
+    }
+
+    #[test]
+    fn partial_merge_observations_never_authorize_landing_decisions() {
+        let complete = merge_response("OPEN", Value::Null, Value::Null);
+        let mut partial = complete.clone();
+        partial["errors"] = json!([{"message":"Rate limit exceeded"}]);
+        let mut missing_request = complete.clone();
+        missing_request["data"]["repository"]["pullRequest"]
+            .as_object_mut()
+            .unwrap()
+            .remove("autoMergeRequest");
+        for response in [
+            json!(null),
+            json!({"data":{"repository":{"pullRequest":null}}}),
+            partial,
+            missing_request,
+            merge_response("UNKNOWN", Value::Null, Value::Null),
+            merge_response("OPEN", json!(false), Value::Null),
+            merge_response("OPEN", Value::Null, json!([])),
+        ] {
+            assert!(
+                parse_pr_merge(&serde_json::to_vec(&response).unwrap()).is_err(),
+                "accepted {response}"
+            );
+        }
+    }
+
+    #[test]
+    fn queued_observation_keeps_the_pull_request_id_for_cancellation() {
+        let response = merge_response("OPEN", Value::Null, json!({"id":"QUEUE_entry"}));
+        let result = parse_pr_merge(&serde_json::to_vec(&response).unwrap()).unwrap();
+        assert!(matches!(result.request, Some(MergeRequest::Queued(id)) if id == "PR_fixture"));
+    }
+
     #[test]
     fn waiting_for_queue_is_an_active_request_that_can_be_revoked() {
-        let fixture = CheckFixture::new(json!(null), json!(null));
+        let fixture = CheckFixture::new(
+            merge_response(
+                "OPEN",
+                json!({"enabledAt":"2026-09-29T00:00:00Z"}),
+                Value::Null,
+            ),
+            merge_response("OPEN", Value::Null, Value::Null),
+        );
         std::fs::write(fixture.directory.path().join("armed"), "").unwrap();
         std::fs::write(
             fixture.directory.path().join("gh"),
@@ -1826,7 +1955,7 @@ esac
 fixture="$(dirname "$0")"
 case "$*" in
   *--disable-auto*) rm "$fixture/armed" ;;
-  *) if [ -f "$fixture/armed" ]; then echo awaiting_queue; else echo false; fi ;;
+  *) if [ -f "$fixture/armed" ]; then cat "$fixture/first.json"; else cat "$fixture/second.json"; fi ;;
 esac
 "#,
         )

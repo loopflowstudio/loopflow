@@ -179,6 +179,11 @@ of interpreting the original head's mergeability or checks. Removing the
 request restores ordinary handling; only an authoritative GitHub merge
 finishes the landing.
 
+Landing and release read PR state, head, merge commit, auto-merge request, and
+queue membership in one GitHub response. A merge therefore takes precedence
+over its removed request without combining an earlier open state with a later
+request read. Missing or partial responses cannot settle a landing.
+
 `PrLanding` owns the supervisor generation. `LandingSupervisor` names the
 process, placement, and heartbeat used both to claim and to retain that
 ownership. Incidents retain response provenance and timing across generations.

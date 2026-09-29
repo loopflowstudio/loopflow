@@ -33,6 +33,27 @@ pub fn github_checks_page(head: &str, checks: &[(&str, &str, bool)]) -> String {
     .to_string()
 }
 
+#[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
+pub fn github_merge_response(
+    number: u64,
+    head: &str,
+    state: &str,
+    merge_state: &str,
+    request: Option<&str>,
+) -> String {
+    let queued = request.and_then(|request| request.strip_prefix("queued:"));
+    serde_json::json!({"data":{"repository":{"pullRequest":{
+        "id":queued.unwrap_or("PR_fixture"), "number":number,
+        "url":format!("https://example.com/pr/{number}"),
+        "state":state, "isDraft":false, "headRefName":"fixture", "headRefOid":head,
+        "mergedAt":if state == "MERGED" { Some("2026-09-29T00:00:00Z") } else { None },
+        "mergeCommit":if state == "MERGED" { Some(serde_json::json!({"oid":head})) } else { None },
+        "mergeStateStatus":merge_state, "isMergeQueueEnabled":request == Some("awaiting_queue") || queued.is_some(),
+        "autoMergeRequest":request.map(|_| serde_json::json!({"enabledAt":"2026-09-29T00:00:00Z"})),
+        "mergeQueueEntry":queued.map(|_| serde_json::json!({"id":"queue-entry"}))
+    }}}}).to_string()
+}
+
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))

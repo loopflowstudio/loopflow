@@ -1,1 +1,0 @@
-Read ancestor Wave context from the executing checkout

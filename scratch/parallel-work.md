@@ -23,8 +23,9 @@ exit zero; its 106-line artifact and 73-file receipt were reviewed. The bounded
 Swift-fixture researcher (tool77919) also exited zero. Its artifact
 `scratch/research-active-swift-fixture.md` is released with an unapplied patch;
 all twelve source/log hashes match and five diff hunk counts were checked.
-It made no source edits or behavioral proof. Main owns integration and the focused
-transport test; no bounded contributor remains active.
+It made no source edits or behavioral proof. Main integrated the proposal; the
+focused realCLI transport test passed in 10.370s and hosted Swift/UI passed on
+003fa792f. No bounded contributor remains active.
 
 ## Active control
 
@@ -56,31 +57,40 @@ to make an inspection pass. Task-specific contributions use `--task LOO-298`;
 
 ## Delivery and next work
 
-Published **3280c7524fe7f13c3a5566e8b89637e688d8fd06**, based on
-**567ac07df863b524f9b1ca6698161748b60b27fd**. GitHub PR1296 and Task publication
-agree; auto-merge is absent. The continuation checkpoint dca1d617d rebased with
-one reconciled migration file. Upstream prefix hashing joins this branch's outer
-initialization transaction; the focused initialization/append/adoption contention
-regression passed once (1.021s). This was not a byte-for-byte upstream transplant.
-Main now exposes unresolved historical SQL inputs in the import report; their
-preservation still prevents dropping `runs`. Keep the full remaining-work checklist.
+Published **003fa792fa9f027416db4d260bd1a2a5eb71120d**, based on
+**567ac07df863b524f9b1ca6698161748b60b27fd**. Continuation checkpoint dca1d617d
+rebased to 3280c7524 with one reconciled migration file. Upstream prefix hashing
+joins this branch's outer initialization transaction; the focused initialization/
+append/adoption contention regression passed once (1.021s). This was not a
+byte-for-byte upstream transplant.
 
-Latest Rust job is **109333256583**, CI **36546252120**, on `3280c7524`:
-897 passes, one failure, 15 skips and 1,077 unrun tests (71.250s). The first
-`session_run_is_resumable` call in `initial_session_publication_requires_history_and_an_owned_client`
-rejects its arbitrary temporary directory with `invalid durable id: expected run_ id`.
-It fails before native publication or child launch. Main has the exact site and
-must preserve both history/client requirements through isolated admission setup.
-Log `.lf/tmp/cut-i/ci-3280c7524-rust.log`. CI is now terminal: Swift job109333256813
-also failed `ActiveRunsObservationTests.realCLI` at its observation deadline
-(280 tests, one issue). Its fixture publishes manifest/client files without SQL
-identity; bounded research owns the patch proposal. Log `ci-3280c7524-swift.log`
-beside the Rust log. Other executed jobs passed except scratch-clear.
-Earlier db60's three Task-review failures now pass their local assertions using
-the supplied store. The preceding 4ced9467f Rust job retains its separate OpenCode
-decision failure (1,835 passes / 135 unrun); the current cutoff does not retest it.
-Hosted interruption proof passed on earlier 9887f8c84; exact controlled Linux
-failure/repair receipts remain in the main handoff. No full-green claim follows.
+CI **36548046448** on 003fa792f is terminal. Swift and UI passed; Rust job
+**109339098854** stopped after 1,062 passes, one failure, 15 skips and 912 unrun
+(81.781s). The deleted-Task fixture restored its database override before the
+final native-history assertion, then opened the wrong database. Main moved
+restoration after that assertion; its focused local case now passes in 0.940s.
+Other executed jobs passed except scratch-clear; no full-green claim follows.
+Earlier 3280's publication/Swift admission fixtures are repaired and published.
+The preceding 4ced9467f Rust job retains its separate OpenCode decision failure
+(1,835 passes / 135 unrun); the current cutoff does not retest it. Hosted
+interruption proof passed on earlier 9887f8c84; retain its controlled Linux scope.
+
+Pending table-removal cut retains every historical SQL row as immutable input
+catalog evidence, with nullable conversation attachment. Unknown inputs still
+report as unresolved; no AgentSession or Exec is invented. Ordinary replacement
+again requires a fresh input INSERT after supervisor review caught earlier-input
+reuse. The six-case public/bind/ancestry/mechanical/Started/deleted-Task proof
+passes in `historical-table-public-2.log` (7.618s).
+
+`historical-table-canonical.log` passes both released-position and populated
+development upgrades (0.881s, 0.905s). The latter compares every original SQL
+column, asserts `runs` absent, retains unknown attachment and history references,
+and exercises immutability, ancestry, Started and replay. Supervisor compared all
+2,020 entries in `canonical-input-evidence-source.json`: production Rust and the
+migration match; only two docs and the Codex fixture assertion differ. All-target
+Clippy passes in `historical-table-static.log` (16.11s). The edited Codex fixture
+has not supplied fresh native proof. Table removal is a bounded local result;
+final input/wire readers, native recovery and the complete checklist remain open.
 
 Final/events now read retained Session history, including landing conclusions.
 Five focused cases passed; the summary fixture initially failed with LEAK because
@@ -114,7 +124,7 @@ Independent work continues; missing-decision and valid-retry proofs stay require
 
 | Artifact / contribution | Reusable finding and outstanding limit |
 | --- | --- |
-| [Run removal](research-final-run-removal.md) | Twelve source hashes verified; separate obsolete CRUD from historical SQL and live lifecycle readers. Main removed CRUD; table deletion still owed. |
+| [Run removal](research-final-run-removal.md) | Twelve source hashes verified; separate obsolete CRUD from historical SQL and live lifecycle readers. Main removed CRUD; table removal now has populated canonical proof, pending checkpoint. |
 | [Native retry options](research-native-retry-options.md) | Nine local source/schema hashes and upstream reload predicate verified. Four tradeoffs, no selected transport or passing valid retry. |
 | [Indexed discovery](research-indexed-discovery.md) | SQL-only fixture is not CLI latency proof. Narrowing review lookup drops nullable historical membership; preserve discovery. Desktop still requests unlimited inventory. |
 | [Exec admission](research-exec-admission.md) | Thirty-nine hashes checked; only main handoff drifted. Early paths and two hard exits escape logging; malformed-caller agent admission needs a public probe. No code/test contribution. |
@@ -132,7 +142,7 @@ The quoted-output classifier repair is source-tested, not deployed to this captu
 control binary. Old tool output cannot become current execution authority.
 
 Configured provider/Desktop, real-Home import, public Chapter/default-Flow execution,
-canonical populated preservation, final DTOs/indexed discovery and code-complete
+complete historical preservation, final DTOs/indexed discovery and code-complete
 review remain explicit obligations. A test assertion with a leak is not clean
 settlement. No partial import count permits deleting unresolved history.
 

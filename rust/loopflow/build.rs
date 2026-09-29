@@ -12,6 +12,13 @@ use std::process::Command;
 #[path = "src/migration_drafts.rs"]
 mod migration_drafts;
 
+// Identity parsing and formatting belong to the runtime migration API.
+#[allow(dead_code)]
+#[path = "src/store/migration_catalog.rs"]
+mod migration_catalog;
+#[path = "src/store/migration_schema.rs"]
+mod migration_schema;
+
 /// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
@@ -24,6 +31,7 @@ fn main() {
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     emit_build_provenance(&manifest_dir, &out_dir);
+    emit_canonical_schema(&out_dir);
     let builtins_dir = manifest_dir.join("src/engine/builtins");
 
     // Builtins live at `<cat>/<kind>/*.ext`. Skills and flows from CORE_CATEGORIES
@@ -72,6 +80,26 @@ fn main() {
     for entry in walkdir(&builtins_dir) {
         println!("cargo:rerun-if-changed={}", entry.display());
     }
+}
+
+fn emit_canonical_schema(out_dir: &Path) {
+    let connection =
+        rusqlite::Connection::open_in_memory().expect("open canonical schema reference database");
+    connection.execute_batch(
+        "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
+    ).expect("create schema reference migration ledger");
+    for migration in migration_catalog::MIGRATIONS {
+        connection
+            .execute_batch(migration.sql)
+            .unwrap_or_else(|error| {
+                panic!("build canonical schema at {}: {error}", migration.version())
+            });
+    }
+    let schema =
+        migration_schema::product_schema(&connection).expect("project canonical schema reference");
+    let json = serde_json::to_vec(&schema).expect("serialize canonical schema reference");
+    fs::write(out_dir.join("canonical_schema.json"), json)
+        .expect("write canonical schema reference");
 }
 
 fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {

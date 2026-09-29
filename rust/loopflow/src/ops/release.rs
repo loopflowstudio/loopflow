@@ -4223,7 +4223,7 @@ mod tests {
             "CREATE TABLE waves (id TEXT);\n",
         )
         .unwrap();
-        let registry_rs = root.join("rust/loopflow/src/store/migrations.rs");
+        let registry_rs = root.join("rust/loopflow/src/store/migration_catalog.rs");
         fs::write(
             &registry_rs,
             "const MIGRATIONS: &[Migration] = &[\n    Migration {\n        \

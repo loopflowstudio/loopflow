@@ -16,6 +16,8 @@ mod children;
 pub(crate) mod ci_incidents;
 mod durable;
 mod metrics;
+mod migration_catalog;
+mod migration_schema;
 pub mod migrations;
 mod pr_landings;
 pub mod provider_deliveries;

@@ -26,7 +26,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARCHITECTURE = Path("docs/architecture-reference.md")
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
+MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
 WAVE_SERVER = Path("rust/loopflow/src/controller/wave/server.rs")
@@ -422,9 +422,7 @@ def _vocabulary_errors(root: Path, rows: list[dict[str, str]]) -> list[str]:
         scopes = CODE_TOKEN.findall(row.get("allowed scopes", ""))
         used_scopes: set[str] = set()
         for relative, source in sources:
-            matching_scopes = {
-                scope for scope in scopes if _scope_matches(relative, scope)
-            }
+            matching_scopes = {scope for scope in scopes if _scope_matches(relative, scope)}
             for pattern in patterns:
                 case_sensitive = pattern.isupper()
                 for number, line in enumerate(source.splitlines(), start=1):
@@ -437,9 +435,7 @@ def _vocabulary_errors(root: Path, rows: list[dict[str, str]]) -> list[str]:
                         else:
                             errors.append(f"stale vocabulary {pattern!r} at {relative}:{number}")
         for scope in sorted(set(scopes) - used_scopes):
-            errors.append(
-                f"unused vocabulary scope {scope!r} for {', '.join(patterns)}"
-            )
+            errors.append(f"unused vocabulary scope {scope!r} for {', '.join(patterns)}")
     return errors
 
 

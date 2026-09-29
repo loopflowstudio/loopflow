@@ -1,6 +1,6 @@
 # LOO-298 control and scratch index
 
-2026-09-28 · Jack Heart requested autonomous progress to a **code-complete
+2026-09-29 · Jack Heart requested autonomous progress to a **code-complete
 concept review**, Codex only. Regular rebase/publication and useful bounded
 parallel work are authorized. Landing, auto-merge, promotion, real-Home migration
 and branch-binary access to the installed Home are not.
@@ -15,245 +15,121 @@ and branch-binary access to the installed Home are not.
 6. [Evidence](evidence.md): recorded results and limits.
 7. [Open assumptions](questions.md): unresolved policy.
 
-Main owns executable edits, builds/tests, cleanup, Git and
-`parallel-execution.md`. Supervisor owns other scratch and isolated nonbuilding
-inspection/proofs. Builds remain serialized. Never checkpoint another active
-contribution or create a competing implementation.
+Main owns executable edits, builds/tests, cleanup, Git and its handoff. Supervisor
+owns this index, other assigned scratch and isolated nonbuilding inspection/proofs.
+Builds stay serialized. Never checkpoint another active contribution or introduce
+another executable writer. All bounded contributors have returned their artifacts
+to main; no contributor/tool handle remains active at this observation.
 
-Current managed worker, verified through Task status and OS-live `lf ps`:
+## Active control
 
-- Saved feature invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`.
-- Implement iteration 10, Run `run_4f129189186948279f5cc9416d7897e6`.
-- Worker Exec `eb97ad88-3bf1-40d1-8077-260473473744`, PID87749;
-  Codex PID18549 at observation. Refresh before recovery; silence is not death.
-- Preserve the captured implement → compress → review-slice → concept-review →
-  loop-decide → human-demo order. Intermediate concept review is not the goal's
-  code-complete review. Supervisor chooses no Flow edge.
+- Saved feature invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`, implement
+  iteration 10, Run `run_4f129189186948279f5cc9416d7897e6`.
+- Worker Exec `eb97ad88-3bf1-40d1-8077-260473473744`, PID87749; Codex PID18549.
+  Refresh Task status and OS-live `lf ps` before recovery; silence is not death.
+- Preserve captured implement → compress → review-slice → concept-review →
+  loop-decide → human-demo order. Supervisor chooses no Flow edge. The earlier
+  review at `aa43c6829c:scratch/concept-review.md` was not code-complete review.
+- Control Session `run_9c16dbbe2b04440db8469e9b4964912c` has human title
+  `loopflow`; preserve it. Refresh Session list at each turn and after mutation.
+  Questions for Jack stay here, never another Ask. Completed reviews are not
+  fresh approval; Supervisor comments are not new decisions attributed to Jack.
 
-The bounded Run-removal researcher returned exit0; tool handle `71697` is closed.
-Main now owns `scratch/research-final-run-removal.md` for checkpointing. Supervisor
-verified all twelve source hashes and checked importer, history projection, CRUD
-and trigger findings. Verified handback `023cdc33-045c-4aab-a915-e11447ed2b21`.
-The audit separates obsolete Run CRUD, historical SQL preservation, immutable
-input references and still-live file-backed lifecycle readers. No executable
-edit or behavioral test ran. Log `.lf/tmp/cut-i/run-removal-research.log`.
-
-The bounded native-retry researcher returned exit0; handle `4457` is closed.
-Main now owns `scratch/research-native-retry-options.md` (94 lines). Nine local
-source/schema hashes match; supervisor independently matched the upstream
-thread-processor hash and inspected its reload predicate. Handback
-`ede31e16-4e35-42ee-a84f-7b4a1f2df3d7` retains the failed-thread and same-thread
-observer limits, four concrete repair tradeoffs and the paired acceptance proof.
-No new transport, provider fork, engine kill, upstream message or retry-policy
-change is selected. Log `.lf/tmp/cut-i/native-retry-options-research.log`.
-
-The Chapter CLI contributor returned
-`tests/e2e/chapter_rotation.py` to main with exit0; tool handle `2564` is closed.
-Handback `.lf/tmp/cut-i/chapter-cli-handback.md` retains the original source hash;
-main subsequently formatted the fixture and added the nonempty PR assertion.
-It authors public second-Home sync and actual Project-default Task launch proof,
-requiring a scripted provider's completion consumed by the real worker. No
-execution state is seeded. Ruff passes (`chapter-static-final.log`); Linux fixture
-execution remains outstanding. Main owns the file and serialized execution in a
-disposable account/container. CI's task-installation job does not run this fixture,
-and CI36527817576 provides no reusable CLI artifact. Its green installation result
-does not establish Chapter/default-Flow proof. Original contributor log:
-`.lf/tmp/cut-i/chapter-cli-contributor.log`.
-
-The Desktop contribution returned exit0;
-tool handle `50100` is closed. Verified handback
-`8ff3937a-f2a9-4675-af30-657c13cf687a` returns all six released Swift paths to main.
-Five changed: projection, breadcrumb bar, PodiumModel and two WorkspaceNavigation
-test files; SessionsView stayed unchanged. Known bound ancestry survives absent
-planning and remains outside orphan grouping. Production +70/-11, net +59;
-supervisor verified source hashes and scoped whitespace. The contributor ran no
-builds/tests. Main subsequently passed all 25 WorkspaceNavigation tests and the
-extended mounted `namedSessionDrillDownRetainsTerminal` proof on those same bytes.
-The native proof uses fixture readings/test PTYs and timer rendering; it is scoped
-pane/draft retention evidence, not configured Desktop acceptance.
-Exact hashes/commands/limits: `.lf/tmp/cut-i/desktop-ancestry-handback.md`;
-log `.lf/tmp/cut-i/desktop-ancestry-contributor.log`. No DTO/schema or new inventory.
-
-The earlier Task initialization contributor
-completed with exit0 and returned its file in verified comment
-`9464adc8-3045-4b71-82a0-22b9eaaa1a8d`; main owns it again. Review publication
-and readiness use AgentSession input APIs. The contribution exposed a missing
-caller relation and a manifest read in Task status. Main now stores
-`caller_input_id` with the immutable input reference; `task_waiting_unblock`
-reads SQL. Supervisor inspected the completed source conversion and retained
-stale/current Ask, completion-without-navigation and wrong-boundary assertions.
-The exact stale/current Ask CLI integration now passes in
-`agent-admission-cli-recovery.log`; the contributor ran no tests.
-Starting dirty bytes: `.lf/tmp/cut-i/task-initialization-before.rs.txt`; log:
-`.lf/tmp/cut-i/task-initialization-contributor.log`; handle `10626` is closed.
-
-Earlier bounded contributions are finished and returned to main:
-
-- Eight Chapter builtin skills: scoped source/whitespace review, no live planning
-  mutation or behavioral proof; preserved in the local checkpoint.
-- Status fixtures: main's corrected materialized suite passed all eleven tests.
-- `ops/chapter_tests.rs`: exact non-null Started and sync-only second-store
-  adoption assertions returned in comment `5d29a5f6-92eb-4bf6-ac50-09b15a6bf590`.
-  Main's focused pass now passes all 15 Chapter tests, including exact Started
-  preservation and sync-only second-store adoption. Returned
-  SHA-256 `e24360cfca5f0ec6207eed39a7b9048482e1e56c3633a8678bc654d18eea446c`.
-  Log `chapter-proof-contributor.log`; tool handle 8813 is closed. Public CLI
-  sync and actual default-Flow launch are still separate obligations.
-
-## Captured installed control
-
-Use `.lf/tmp/cut-i/control-checkpoint.py`. It pins both executable and Home:
+Use `.lf/tmp/cut-i/control-checkpoint.py`, which pins both executable and Home:
 
 - Binary `/Users/jack/.lf/bin/lf-f5ef8d640340e9f8b9e36d17d84de83e14e905305c43e959fd00c49a322a527f`.
-- `LF_BIN` and `LF_CONTROL_BIN` both select that binary.
-- `LF_HOME` and `LF_CONTROL_HOME` both select
+- `LF_BIN` / `LF_CONTROL_BIN` select that binary.
+- `LF_HOME` / `LF_CONTROL_HOME` select
   `/Users/jack/.lf-dev/installed/local-afee63d734c7482cb94d1071af26d9ea`.
-- `LF_DB_PATH` and `LF_CONTROL_DB_PATH` both select its `loopflow.db`.
+- `LF_DB_PATH` / `LF_CONTROL_DB_PATH` select its `loopflow.db`.
 
-Bare lf selects a different Home without this Task; absence there does not prove
-worker death. Do not repair machine selection/auth as a prerequisite. Source
-proof clears inherited LF/LOOPFLOW authority and uses private Homes; installation
-proof uses the existing disposable OS harness.
+Bare lf selects another Home; absence there does not prove death. Source proofs
+clear inherited LF/LOOPFLOW authority and pin private Homes/executables. Installation
+proof uses a disposable OS account/container. Do not repair auth/placement merely
+to make an inspection pass. Task-specific contributions use `--task LOO-298`;
+`--wave infrastructure` relocated one researcher to the repo root despite cwd.
 
-Refresh `session list --json` at each user turn and after Session mutation.
-Control Session `run_9c16dbbe2b04440db8469e9b4964912c` has human title `loopflow`;
-preserve it. Questions for Jack stay here. Earlier completed concept-review or
-unblock Sessions are not fresh approval. Task comments beginning Supervisor are
-supervisor direction, never new decisions attributed to Jack.
+## Delivery and next work
 
-## Current work and delivery
+Published **4ced9467fde48b88b232c346af054ff9e3ad8f58**, based on
+**7d1158dac2f0a7db420efadc76dcce20da05e2c1**. GitHub PR1296 and Task publication
+agree; auto-merge is absent. Latest integration includes upstream Xcode cache reuse.
+Main now converts saved native continuation; unclassified SQL history still
+prevents dropping `runs`. Preserve the full remaining-work checklist.
 
-Published head **9887f8c846f7ee21921fd96351bca82fe3665f6e** is based on
-**359c9a6c351da21e46c372afa2096f5c672f3cbd**. Rebase reconciled the CLI docs;
-the focused architecture check passed. Task publication records that head/base.
-Run/RunEnd/ListedRun and obsolete CRUD are deleted; historical SQL, cross-table
-triggers and remaining lifecycle readers still require conversion.
+Latest terminal CI inspected is **36541353761** on the preceding `6f927ea5f`:
+Rust job 109317277279 has 1,834 passes, one OpenCode taskless-decision failure,
+15 skips and 134 unrun tests. The error requires the selected native turn's
+original caller. Log `.lf/tmp/cut-i/ci-6f927ea5f-rust.log`; no full-green claim.
+Hosted interruption proof passed on earlier 9887f8c84; exact controlled Linux
+failure/repair receipts remain in the main handoff. New-head CI needs inspection.
 
-CI **36539158341**, Rust job **109310164216**, finished with 1,835 passes,
-one failure, 15 skips and 133 unrun tests. The interruption regression passes
-in 1.576s. The remaining failure is the retained OpenCode taskless decision:
-`navigation requires the selected native turn's original caller`. All other
-test/lint/migration/install jobs succeeded; scratch-clear and aggregate failed,
-merge-proof skipped. Log `ci-9887f8c84-rust.log`; verified direction `72107217`.
-This is hosted proof of the interruption repair, not a full green Rust gate.
+Final/events now read retained Session history, including landing conclusions.
+Five focused cases passed; the summary fixture initially failed with LEAK because
+of an invalid input ID, then passed alone after correction. Retain both receipts.
+Summary SQL excludes transcript payloads before Rust hydration, preserving usage
+and unknown evidence; dense latency/write cost remains unmeasured. JSONL writers
+still serve unconverted native/active consumers. This is not complete Run removal.
+Named mechanical operations retain SQL observations in Flow history, with unknown
+observed start/Exec. A non-null skill label alone never establishes an agent.
 
-The earlier OS-exit1/SQL-interrupted130 failure was reproduced with controlled
-Linux ordering. The existing interrupt-hook mutex now holds ordinary return
-behind cleanup and exit130. The regression uses test-only delayed signal delivery;
-no production delay, retry or new owner was added. Local controlled and ordinary
-exit proofs and Clippy pass; exact receipts remain in the main handoff.
+The failed-turn child race is reproduced with real Codex and scripted Responses:
+an old child decides after automatic retry begins, and the Flow wrongly completes.
+The caller repair rejects that child but also the legitimate retry because the
+failed native thread retains its tool environment. Unsubscribe/resume experiments
+failed; the successful-thread control refreshed it. Jack has not answered the
+pending decision-interface choice in questions.md. No provider fork, tool proxy,
+shared-engine kill, new attempt object or retry-contract change is selected.
+Independent work continues; missing-decision and valid-retry proofs stay required.
 
-Local **4682d662a** imports unmapped SQL agent inputs and retains current selection.
-Source/canonical proofs pass within their recorded scope. Supervisor review then
-found a historical classification defect: `e7f3e22fd` stored operation names in
-`runs.skill` before filling provider `loopflow`; non-null skill does not prove an
-agent conversation. Main is repairing that case, retaining ambiguous rows, then
-converting public detail reads that still require manifests. Verified direction
-`75479e37`. No partial import count or zero-row assertion proves table removal.
+## Returned research and proof boundaries
 
-Earlier published head **24ea61517cc5cbcfc4cf29452364fe6efcd37123**, base d4b283a87:
-CI **36533494844** finished with failure: 1,829 Rust passes, two failures,
-15 skips and 134 unrun tests. The Task Flow fixture still queries obsolete Run
-rows; the taskless decision stand-in lacks native caller authority. Verified
-direction `3e204ff4-cad2-4f9a-8df4-446478da0d29` preserves history/review/ancestry
-assertions and the production navigation check. Log `ci-24ea61517-rust.log`.
-Scratch-clear also fails on active notes; all other test/lint/install jobs pass,
-merge-proof is skipped and the aggregate tests-result fails. These failures do
-not establish the separate valid-native-retry repair. SQL-only history and the authorized
-checkout fixture are published; final all-target Clippy passed in
-`historical-sql-static-final.log` (15.30s). Main continues populated historical
-migration preservation before remaining Run deletion. Full scope stays open.
+| Artifact / contribution | Reusable finding and outstanding limit |
+| --- | --- |
+| [Run removal](research-final-run-removal.md) | Twelve source hashes verified; separate obsolete CRUD from historical SQL and live lifecycle readers. Main removed CRUD; table deletion still owed. |
+| [Native retry options](research-native-retry-options.md) | Nine local source/schema hashes and upstream reload predicate verified. Four tradeoffs, no selected transport or passing valid retry. |
+| [Indexed discovery](research-indexed-discovery.md) | SQL-only fixture is not CLI latency proof. Narrowing review lookup drops nullable historical membership; preserve discovery. Desktop still requests unlimited inventory. |
+| [Exec admission](research-exec-admission.md) | Thirty-nine hashes checked; only main handoff drifted. Early paths and two hard exits escape logging; malformed-caller agent admission needs a public probe. No code/test contribution. |
+| Chapter CLI | `tests/e2e/chapter_rotation.py`, `.lf/tmp/cut-i/chapter-cli-handback.md`: Ruff passed; disposable Linux execution is still owed. CI task-installation is not this proof. Fifteen Chapter unit cases are narrower evidence. |
+| Desktop ancestry | `.lf/tmp/cut-i/desktop-ancestry-handback.md`: 25 navigation tests and mounted PTY retention pass on returned bytes. Not configured Desktop, final DTO/headless discovery or performance acceptance. |
+| Task initialization / status | Returned and integrated; stale/current Ask CLI and eleven materialized status tests pass within recorded scope. No remaining parallel writer. |
 
-Historical CI, publication, rebase and repair chronology is preserved in
-`29d5c5229:scratch/parallel-work.md` and the exact pre-curation archive below.
-Detailed implementation receipts live in [main handoff](parallel-execution.md)
-and [evidence](evidence.md); the full finish line remains in
-[remaining work](remaining-work.md) and [import preservation](import-preservation.md).
-Do not restore old Run writes to green a stale fixture or count moved code as deletion.
+Keep earlier failed materialized matrix (1,925 pass / 33 fail / 15 skip) and its
+per-failure dispositions at `.lf/tmp/cut-i/supervisor-matrix-dispositions.json`.
+Later focused repairs do not make that snapshot green. Preserve historical
+attribution, pre-bind usage, exact worker/Session/Flow fences, activity end windows,
+uncapped child lookup, and upstream installation/cache semantics through reduction.
+The quoted-output classifier repair is source-tested, not deployed to this captured
+control binary. Old tool output cannot become current execution authority.
 
-Retain these proof boundaries through subsequent conversion:
-
-- Conversation readers preserve each input's ancestry/provider/timing and missingness,
-  including pre-bind usage and recent continuation of old conversations. Four
-  focused reader checks pass in `conversation-readers-final.log`; native ordinary
-  retry/public usage additionally passes in `conversation-native-usage-2.log`.
-  Native-only driver-loss usage, final DTOs and complete owner removal remain owed.
-- Import preserves captured headless/review distinctions, completed keyed answers,
-  replaced inputs and SQL-only members in the recorded scoped proofs. The
-  populated source/canonical frontier and missing-title limit belong in
-  `import-preservation.md`; no partial count permits dropping unmapped evidence.
-- Git-free auth records actual Exec outcomes; subdirectory commands keep actual cwd
-  with optional journal files at checkout root. The scorecard child survived lf
-  interruption in the strengthened reproduction; the existing process-group guard
-  repairs that boundary. `exec-interruption-child-fixed.log` has two passes and no
-  LEAK. This proves neither all provider termination nor Task-wide settlement.
-- The shared harness records the caller for checkout decision fixtures; those
-  focused passes do not repair the real native retry or establish OpenCode parity.
-  Preserve upstream ownership filtering, uncapped caller lookup, activity windows,
-  resource/cache semantics and the prior conflict-resolution checks.
-- Earlier broad materialized diagnostics recorded 1,925 passes, 33 failures and
-  15 skips. Later focused checks describe mixed snapshots, not a full green gate.
-  Mapping: `.lf/tmp/cut-i/supervisor-matrix-dispositions.json`. Hosted full CI,
-  final materialized preservation and code-complete review remain required.
-- The removed intermediate concept review survives at
-  `aa43c6829c:scratch/concept-review.md`; it was not the goal review. Configured
-  Desktop/provider, Linux Chapter/default-Flow, and real-Home acceptance retain
-  their separately recorded gaps. An assertion pass with a process leak is not
-  clean settlement. Full remaining scope is unchanged by this curation.
-
-The valid native decision retry still fails. The paired late-child test reproduces
-the stale decision and confirms rejection after the local attribution repair,
-but the failed Codex thread retains its old tool environment and also rejects the
-legitimate retry. The bounded unsubscribe/resume experiments were negative;
-the successful-thread control refreshed the environment. Keep one original-turn
-attribution check; no provider fork, tool proxy, shared-engine kill or retry-policy
-change is selected. See [tradeoff](native-turn-retry-tradeoff.md). Substantial
-expansion needs a concrete smallest proposal with cost and preservation proof.
-Independent owner conversion continues; this does not require another Ask Session.
-
-The quoted-tool-output classifier repair is local and tested, not deployed to
-captured control. Preserve command events and actual provider outcomes; old log
-text is not control authority. Exact historical operational recoveries and the
-retained regression are in evidence.md and `unblock-quoted-output.md`.
+Configured provider/Desktop, real-Home import, public Chapter/default-Flow execution,
+canonical populated preservation, final DTOs/indexed discovery and code-complete
+review remain explicit obligations. A test assertion with a leak is not clean
+settlement. No partial import count permits deleting unresolved history.
 
 ## Comparable production measurement
 
-Local checkpoint **1d86cd4f3 against 76c8f8af**:
-**+15,096 / −29,648 = net −14,552**.
-Rust/Swift +14,019/−29,586; Python/shell +48/−62; SQL +1,029/−0.
-The Run API deletion alone, against its parent325e0e13e, is
-**+29 / −513 = net −484 production lines**. Receipt
-`.lf/tmp/execution-model/status-counts-1d86cd4f3.json` first reproduces the prior
-24ea61517 measurement exactly. Uncommitted interruption edits are excluded;
-publication of this local checkpoint has not been verified.
+`f7f12a757` against 359c9a6c3: **+15,334 /−29,666 = net −14,332**.
+Rust/Swift +14,217/−29,604; Python/shell +48/−62; SQL +1,069/−0.
+Receipt `.lf/tmp/execution-model/status-counts-f7f12a757.json` reproduces the
+preceding 1d86cd4f3 receipt. It predates the final/events cut and latest rebase.
+Method: corrected production prefixes in `measure-published-cd4ab9d813.py`, no
+rename detection, tests/docs excluded. Changed bases prevent treating differences
+between whole-branch totals as incremental cuts. No final-size/time estimate proven.
 
-Earlier whole-branch measurements and exact receipts are retained in the archive
-and committed note above. Changed bases prevent comparing totals as per-cut
-changes. Method: `measure-published-cd4ab9d813.py`, corrected production prefixes,
-no rename detection, tests/docs excluded, trailing Rust test modules removed while
-known trailing production stays counted. The latest receipt reproduces its
-predecessor before measuring. Current edits are excluded. No completion-time or
-final-size estimate is established; main owns fresh resource preflight/cleanup.
+## Preserved history
 
-## Archives
+Earlier consolidation retained 62 files/676,767 bytes under
+`.lf/tmp/scratch-consolidation-20260928/scratch/` with its SHA manifest, plus eleven
+LOO-291 originals under `.lf/tmp/context-archive-7e2101b41/scratch/from-loo291/`.
+Checkpoint 7e2101b41 preserves published originals. Retain private archives until
+useful evidence has a durable owner before delivery clears scratch. Historical
+models do not override current decisions.
 
-Consolidation preserved **62 files / 676,767 bytes** at
-`.lf/tmp/scratch-consolidation-20260928/scratch/`, with sibling SHA manifest.
-It includes uncommitted designs and non-Markdown fixtures/patches. Eleven earlier
-LOO-291 originals remain at `.lf/tmp/context-archive-7e2101b41/scratch/from-loo291/`.
-Published historical originals are also in checkpoint `7e2101b41`. Preserve local
-archives until useful evidence has a durable owner before delivery clearing.
+This index's exact prior bytes, including completed-contributor handbacks and
+older delivery/count receipts, remain in the archive and committed version below.
+Main handoff, evidence, complete scope and design are unchanged by this curation.
 
-This control-note reduction preserves its exact prior 16,478 bytes at
-`.lf/tmp/scratch-curation-20260928-control/parallel-work-5b29beffb67e.md`, SHA-256
-`5b29beffb67e99d34128f14ea8213637324ecc6cb540b373fc19f105e9f3c4bb`.
-Detailed CI chronology already belongs in evidence.md. Archived old Session/Run,
-Chapter-table and warn-and-proceed models do not override the current contract.
-No failed result, acceptance obligation or unresolved attribution is erased by
-curation. Main's `parallel-execution.md` remains untouched.
-
-The 2026-09-29 control-note curation preserved the exact preceding 30,715
-bytes at `.lf/tmp/scratch-curation-20260929-control/parallel-work-a87f6837dd9f.md`, SHA-256
-`a87f6837dd9f5e0888dd8d9c11e59a1de01ccbb0382dc19680c8d904535265ea`. It removes repeated chronology and older measurements from active
-context, not evidence or unfinished requirements. Main's handoff and all other
-artifacts remain unchanged.
+- Commit: `4ced9467fde48b88b232c346af054ff9e3ad8f58:scratch/parallel-work.md`.
+- Archive: `.lf/tmp/scratch-curation-20260929-control/parallel-work-d7f33ebf4cfe.md` (16,561 bytes).
+- SHA-256: `d7f33ebf4cfea55654221bf03f1642f08a36244a61ec04c9d79d874a80b51417`.

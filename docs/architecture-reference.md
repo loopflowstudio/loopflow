@@ -50,9 +50,11 @@ consumers without their coordinated migration.
 The admission checkpoint preserves saved executable/Home/database handoff and
 launch-failure diagnostics. Populated canonical migration, Ask/review recovery,
 refusal before provider launch and automatic-retry fixtures cover their stated
-boundaries. Historical Run rows remain migration evidence. History lists read
-Session observations; native-only usage, remaining detail readers and complete
-historical import still need their final proof. The retained native decision
+boundaries. Historical Run rows remain migration evidence. History lists and native thread/account lookup read
+Session observations. Fresh native publications outrank imported legacy sidecars;
+JSONL fallback uses original input order. Import classification reads its parsed
+source before writing SQL. Native-only usage, remaining continuation/process readers
+and complete historical import still need their final proof. The retained native decision
 retry failure and other-provider gaps prevent code-complete acceptance. Detailed
 receipts and unresolved import obligations remain with the active Task; no
 full-green hosted, configured-provider or installed-migration result is asserted.

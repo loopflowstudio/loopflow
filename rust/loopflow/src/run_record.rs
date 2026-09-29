@@ -243,6 +243,18 @@ pub(crate) struct ProviderSessionRef {
     pub(crate) account_id: Option<crate::store::ProviderAccountId>,
 }
 
+impl ProviderSessionRef {
+    pub(crate) fn validate(&self) -> std::io::Result<()> {
+        if self.schema_version != SCHEMA_VERSION || self.provider_session_id.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid provider session reference",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProviderClientRef {
     schema_version: u32,
@@ -824,32 +836,62 @@ pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
 }
 
 pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
-    match fs::read(dir.join("provider-session.json")) {
-        Ok(bytes) => {
-            let session: ProviderSessionRef =
-                serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-            if session.schema_version != SCHEMA_VERSION || session.provider_session_id.is_empty() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "invalid provider session reference",
-                ));
-            }
-            return Ok(Some(session));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
+    let input = input_id_from_dir(dir)?;
+    crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+        &row_database(dir).map_err(std::io::Error::other)?,
+    )
+    .and_then(|store| store.input_provider_session(&input))
+    .map_err(std::io::Error::other)
+}
 
-    let file = match File::open(dir.join("events.jsonl")) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
+pub(crate) fn input_id_from_dir(dir: &Path) -> std::io::Result<RunId> {
+    let id = dir
+        .file_name()
+        .and_then(|id| id.to_str())
+        .ok_or_else(|| std::io::Error::other("input path has no identifier"))?;
+    RunId::parse(id).map_err(std::io::Error::other)
+}
+
+/// Fresh publications supersede the imported sidecar, whose import time says
+/// nothing about native identity. JSONL observations retain their original order.
+pub(crate) fn provider_session_from_history(
+    history: impl IntoIterator<Item = serde_json::Value>,
+) -> std::io::Result<Option<ProviderSessionRef>> {
+    let mut published = None;
+    let mut imported = None;
+    let mut events = Vec::new();
+    for observation in history {
+        let Some(source) = observation["source"].as_str() else {
+            continue;
+        };
+        let evidence = &observation["evidence"];
+        if source.starts_with("provider-session:") {
+            published = Some(evidence.clone());
+        } else if source == "provider-session.json" {
+            imported = Some(evidence.clone());
+        } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
+            let ordinal = ordinal.parse::<u64>().map_err(std::io::Error::other)?;
+            events.push((ordinal, evidence.clone()));
+        }
+    }
+    if let Some(reference) = published.or(imported) {
+        let reference: ProviderSessionRef =
+            serde_json::from_value(reference).map_err(std::io::Error::other)?;
+        reference.validate()?;
+        return Ok(Some(reference));
+    }
+    events.sort_by_key(|(ordinal, _)| *ordinal);
+    provider_session_from_events(events.into_iter().map(|(_, event)| event).collect())
+}
+
+fn provider_session_from_events(
+    events: Vec<serde_json::Value>,
+) -> std::io::Result<Option<ProviderSessionRef>> {
     let mut provider_session = None;
     let mut accounts = HashMap::new();
-    for line in BufReader::new(file).lines() {
+    for event in events {
         let envelope: EventEnvelope =
-            serde_json::from_str(&line?).map_err(std::io::Error::other)?;
+            serde_json::from_value(event).map_err(std::io::Error::other)?;
         if envelope.schema_version != SCHEMA_VERSION {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -966,20 +1008,22 @@ pub(crate) fn write_provider_session(
             "provider session id cannot be empty",
         ));
     }
-    read_manifest(dir)?;
-    let path = dir.join("provider-session.json");
-    let staging = dir.join(format!(".provider-session-{}.staging", Uuid::new_v4()));
-    write_private_exclusive(
-        &staging,
-        &serde_json::to_vec_pretty(&ProviderSessionRef {
+    let input = input_id_from_dir(dir)?;
+    let store = row_store(dir).map_err(std::io::Error::other)?;
+    let session = store
+        .session_for_run(&input)
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| std::io::Error::other("provider history has no admitted Session"))?;
+    let source = format!("provider-session:{}", Uuid::new_v4());
+    store.retain_session_observation(&session, &crate::session::SessionObservation {
+        input_id: input.clone(), source: source.clone(),
+        observed_at: OffsetDateTime::now_utc().unix_timestamp(),
+        task_id: session.task_id.clone(), wave_id: session.wave_id.clone(),
+        payload: serde_json::json!({"input_id":input,"source":source,"evidence":ProviderSessionRef {
             schema_version: SCHEMA_VERSION,
-            provider_session_id: provider_session_id.to_string(),
-            account_id,
-        })
-        .map_err(std::io::Error::other)?,
-    )?;
-    fs::rename(staging, path)?;
-    sync_dir(dir)
+            provider_session_id: provider_session_id.to_string(), account_id,
+        }}),
+    }).map_err(std::io::Error::other)
 }
 
 pub(crate) fn read_provider_clients(dir: &Path) -> std::io::Result<Vec<ProviderClientRef>> {
@@ -2329,6 +2373,10 @@ pub(crate) fn conversation_engine_exited(
 }
 
 fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
+    crate::store::sqlite::SqliteStore::new(&row_database(dir)?)
+}
+
+fn row_database(dir: &Path) -> StoreResult<PathBuf> {
     #[cfg(test)]
     let path = std::env::var_os("LF_DB_PATH")
         .map(PathBuf::from)
@@ -2339,7 +2387,7 @@ fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
         let _ = dir;
         crate::store::database_path_from_env().map_err(record_error)?
     };
-    crate::store::sqlite::SqliteStore::new(&path)
+    Ok(path)
 }
 
 pub(crate) fn inherited_parent() -> Option<RunId> {
@@ -3306,6 +3354,7 @@ mod tests {
         )
         .unwrap();
 
+        fs::remove_dir_all(capture.artifact_dir()).unwrap();
         let session = read_provider_session(&capture.artifact_dir())
             .unwrap()
             .expect("provider session reference");
@@ -3338,7 +3387,11 @@ mod tests {
         capture.fail_and_begin_attempt("proof".into(), None, Some(second.clone()));
         capture.observe_provider(Some("second-session".into()), Some(second.clone()));
         capture.0.lock().unwrap().recorder.drain_after_settlement();
-        fs::remove_file(dir.join("provider-session.json")).unwrap();
+        assert!(!dir.join("provider-session.json").exists());
+        rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(
+            "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
+            [capture.run_id().as_str()],
+        ).unwrap();
         let recovered = read_provider_session(&dir).unwrap().unwrap();
         assert_eq!(recovered.provider_session_id, "second-session");
         assert_eq!(recovered.account_id, Some(second));
@@ -3377,7 +3430,11 @@ mod tests {
         let ambient = read_provider_session(&dir).unwrap().unwrap();
         assert_eq!(ambient.provider_session_id, "ambient-session");
         assert_eq!(ambient.account_id, None);
-        fs::remove_file(dir.join("provider-session.json")).unwrap();
+        assert!(!dir.join("provider-session.json").exists());
+        rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(
+            "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
+            [capture.run_id().as_str()],
+        ).unwrap();
         assert_eq!(read_provider_session(&dir).unwrap(), Some(ambient));
     }
 

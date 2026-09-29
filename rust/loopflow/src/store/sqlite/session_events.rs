@@ -10,6 +10,21 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub(crate) fn input_provider_session(
+        &self,
+        input: &RunId,
+    ) -> StoreResult<Option<crate::run_record::ProviderSessionRef>> {
+        let Some(session) = self.session_for_run(input)? else {
+            return Ok(None);
+        };
+        crate::run_record::provider_session_from_history(
+            self.summary_for_input(&session.id, input)?
+                .into_iter()
+                .map(|event| event.payload),
+        )
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
+    }
+
     /// Original input order survives importing earlier observations after later ones.
     pub(crate) fn input_events(&self, input: &RunId) -> StoreResult<Vec<Value>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -244,6 +259,100 @@ mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    #[test]
+    fn provider_identity_uses_original_event_order_and_fresh_publications() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.conn.lock().unwrap().execute_batch(
+            "INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+             VALUES('conversation','run_00000000000000000000000000000001','Retained','human',1,'conversation',1,1,'/fixture');
+             INSERT INTO agent_session_inputs(input_id,session_id) VALUES('run_00000000000000000000000000000001','conversation');"
+        ).unwrap();
+        let input = crate::durable::RunId::parse("run_00000000000000000000000000000001").unwrap();
+        let session = store.session("conversation").unwrap().unwrap();
+        let retain = |source: &str, evidence: serde_json::Value| {
+            store
+                .retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        input_id: input.clone(),
+                        source: source.into(),
+                        observed_at: 1,
+                        task_id: None,
+                        wave_id: None,
+                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
+                    },
+                )
+                .unwrap();
+        };
+        let event = |seq, fields: serde_json::Value| {
+            let mut value =
+                json!({"schema_version":1,"seq":seq,"observed_at":"2026-09-29T00:00:00Z"});
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            value
+        };
+        // The thread arrives in SQL before its earlier account selection.
+        retain(
+            "events.jsonl:2",
+            event(
+                2,
+                json!({"type":"provider_session_observed","attempt_key":"second","provider_session_id":"second-thread"}),
+            ),
+        );
+        retain(
+            "events.jsonl:1",
+            event(
+                1,
+                json!({"type":"provider_account_selected","attempt_key":"second","account_id":"recorded"}),
+            ),
+        );
+        let reference = store.input_provider_session(&input).unwrap().unwrap();
+        assert_eq!(reference.provider_session_id, "second-thread");
+        assert_eq!(reference.account_id.unwrap().as_str(), "recorded");
+        // Importing an older thread later cannot replace that pair.
+        retain(
+            "events.jsonl:0",
+            event(
+                0,
+                json!({"type":"provider_session_observed","attempt_key":"first","provider_session_id":"first-thread"}),
+            ),
+        );
+        let reference = store.input_provider_session(&input).unwrap().unwrap();
+        assert_eq!(reference.provider_session_id, "second-thread");
+        assert_eq!(reference.account_id.unwrap().as_str(), "recorded");
+        retain(
+            "events.jsonl:3",
+            event(
+                3,
+                json!({"type":"provider_session_observed","attempt_key":"unknown","provider_session_id":"unknown-account"}),
+            ),
+        );
+        assert_eq!(
+            store
+                .input_provider_session(&input)
+                .unwrap()
+                .unwrap()
+                .account_id,
+            None
+        );
+        // A late import has no native observation timestamp and cannot overwrite
+        // an already published fresh identity, including its unknown account.
+        retain(
+            "provider-session:fresh",
+            json!({"schema_version":1,"provider_session_id":"fresh-thread","account_id":null}),
+        );
+        retain(
+            "provider-session.json",
+            json!({"schema_version":1,"provider_session_id":"legacy-thread","account_id":"legacy"}),
+        );
+        let reference = store.input_provider_session(&input).unwrap().unwrap();
+        assert_eq!(reference.provider_session_id, "fresh-thread");
+        assert_eq!(reference.account_id, None);
+    }
 
     #[test]
     fn summary_reads_usage_without_hydrating_conversation_text() {

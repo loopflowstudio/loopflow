@@ -1061,3 +1061,49 @@ All-target Clippy passes in `session-final-static.log` (16.16s); formatting and
 whitespace pass. Supervisor independently reviewed the writer/readers and proof
 limits. Hosted `6f927ea5f` retains the known OpenCode decision failure (1834 passes,
 one failure, 15 skips, 134 unrun); it predates this final/events cut.
+
+### Retained provider identity (in progress, 2026-09-29)
+
+The final/events checkpoint rebased conflict-free onto `7d1158dac` and published
+as `4ced9467f`; upstream Xcode cache behavior applied unchanged. No behavioral
+repeat was added for that integration. Next, replace provider-session sidecar
+publication/lookup with the existing observed Session history. Preserve the exact
+recorded thread/account through retry and legacy import; no current account
+selection may stand in for old history. SQL history gives no process or Flow
+authority. Saved continuation still has separate immutable-input/client dependencies;
+removing one sidecar does not prove all native-only recovery or complete connect.
+
+`native-history-owner-red.log` reproduces native identity loss after artifact
+removal. Session observations now own synchronous provider identity publication;
+the sidecar writer and ordinary file reader are deleted. Five initial focused
+checks passed in `native-history-owner.log`. The expanded public import then
+failed in `native-import-sidecar-removal.log`: classification queried SQL before
+import, reporting zero interactive inputs instead of one. Classification now
+uses the parsed legacy history through the same reducer.
+
+Supervisor identified insertion-order loss in the fallback. Original JSONL
+ordinals now order thread/account reduction; fresh publications outrank a late
+imported sidecar, whose import time is not native chronology. Unknown accounts
+remain unknown. `native-history-order-and-import.log` passes all three selected
+checks (7.253s): reversed observations/fresh-versus-imported identity, transcript
+exclusion with full detail retained, and public multi-origin import/replay after
+removing the provider sidecar. This proves retained source ordering, not a
+configured incident or native-only recovery.
+
+`native-history-final.log` repeats the five native writer/recovery checks after
+the reducer change: all pass (9.099s), including pre-start durability, retry
+account changes, late output after client exit and public saved-Ask resume.
+All-target Clippy passes in `native-history-static.log` (15.86s); formatting,
+whitespace and two portable-documentation checks pass. Architecture rendering
+initially used the root Python environment and failed for missing fasthtml;
+using the website environment generated the artifact and passed both checks.
+
+This cut versus `4ced9467f` adds 107/removes 38 production Rust lines,
+excluding test modules, integration tests and documentation. Review retains one
+Session history owner and removes native sidecar publication/read authority;
+import is the sole legacy source consumer. This does not remove process/client
+receipts or immutable input dependencies, prove all-provider continuation, or
+resolve native-only usage, Run-table removal or dense-query costs. Hosted
+`4ced9467f` retains the same OpenCode decision failure (1835 passes, one failure,
+15 skips, 135 unrun); it predates this cut. Supervisor's bounded-investment
+recommendation is not Jack's approval for a new decision interface.

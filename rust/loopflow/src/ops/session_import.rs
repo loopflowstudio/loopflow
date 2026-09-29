@@ -720,7 +720,13 @@ impl Import<'_> {
         // A Flow kept only its current review, so an earlier review's Run and
         // every headless Run are Runs with no Session.
         if !conversation
-            || crate::run_record::read_provider_session(dir)?.is_none()
+            || crate::run_record::provider_session_from_history(
+                self.history(&manifest.run_id)
+                    .await?
+                    .into_iter()
+                    .map(|event| event.payload),
+            )?
+            .is_none()
             || matches!(manifest.flow, Some(RunFlowMembership::Step(_)))
         {
             return self.headless(dir, manifest).await;

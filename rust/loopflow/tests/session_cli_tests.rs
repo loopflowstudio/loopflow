@@ -250,6 +250,13 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 .to_string(),
             )
             .unwrap();
+            let imported = command(home.path(), &["session", "import", "--json"])
+                .output()
+                .unwrap();
+            assert!(imported.status.success(), "{imported:?}");
+            let report: serde_json::Value = serde_json::from_slice(&imported.stdout).unwrap();
+            assert_eq!(report["failed"], serde_json::json!([]), "{report}");
+            std::fs::remove_file(dir.join("provider-session.json")).unwrap();
         }
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();

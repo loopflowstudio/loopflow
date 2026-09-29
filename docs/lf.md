@@ -1203,6 +1203,10 @@ lf pr publish --title "area: short title" --body "## Summary ..."
 lf -m codex pr publish        # one-off agent override for copy generation
 ```
 
+An existing GitHub PR can be attached to its Task even when local publication
+history is absent. If draft promotion fails, its identity remains attached and
+retryable; reviewer copy is recorded after promotion succeeds.
+
 When `-m` is omitted, copy generation uses `agent:` from `.lf/config.yaml` or
 `~/.lf/config.yaml`. Use the `pr` ops skill to generate `--title`/`--body`
 with agent judgment. When task gate has written cached PR copy, publication

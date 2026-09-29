@@ -118,6 +118,10 @@ If eligible caches cannot restore 64 GiB free, verification warns and continues
 above 32 GiB. The reserve is a last-resort stop, not a forecast of a build's disk
 requirements or a host-wide reservation for concurrent builds.
 
+Gate roots with only recent output consume no recovery slots, leaving capacity
+for stale build cleanup. Removing even an empty old directory counts toward the
+same per-pass root limit.
+
 An empty plan or an identical passing result reused with `--reuse-passing`
 returns before resource scans and cleanup. Neither executes a build nor writes
 a new proof receipt. Changed content or commands require fresh verification and

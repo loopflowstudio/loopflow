@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 
 use crate::durable::WorkRef;
 use crate::lf::commands::WorkFilter;
-use crate::run_record::RunSnapshot;
+use crate::run_record::{find_subject, RunSnapshot, SubjectAttribution};
 use crate::store::sqlite::{SqliteStore, WorkIdentity};
 
 #[derive(Debug, Default)]
@@ -98,10 +98,14 @@ impl WorkCatalog {
     }
 
     pub(crate) fn resolve_run(&self, run: &RunSnapshot) -> Option<&WorkOwner> {
+        self.resolve_subjects(&run.subjects)
+    }
+
+    fn resolve_subjects(&self, subjects: &[SubjectAttribution]) -> Option<&WorkOwner> {
         let kind = ["task", "project", "wave"]
             .into_iter()
-            .find(|kind| run.subject(kind).is_some())?;
-        let subject = run.subject(kind)?;
+            .find(|kind| find_subject(subjects, kind).is_some())?;
+        let subject = find_subject(subjects, kind)?;
         let candidates = || {
             self.owners
                 .values()
@@ -116,22 +120,26 @@ impl WorkCatalog {
         // Shared names need the recorded ancestry to select one exact Work.
         let mut matches = candidates().filter(|owner| {
             owner.matches(WorkFilter {
-                wave: run.subject("wave"),
-                project: run.subject("project"),
-                task: run.subject("task"),
+                wave: find_subject(subjects, "wave"),
+                project: find_subject(subjects, "project"),
+                task: find_subject(subjects, "task"),
             })
         });
         let owner = matches.next()?;
         matches.next().is_none().then_some(owner)
     }
 
-    pub(crate) fn matches_run(&self, run: &RunSnapshot, filter: WorkFilter<'_>) -> bool {
-        match self.resolve_run(run) {
+    pub(crate) fn matches_subjects(
+        &self,
+        subjects: &[SubjectAttribution],
+        filter: WorkFilter<'_>,
+    ) -> bool {
+        match self.resolve_subjects(subjects) {
             Some(owner) => owner.matches(filter),
             None => filter.matches(
-                run.subject("wave"),
-                run.subject("project"),
-                run.subject("task"),
+                find_subject(subjects, "wave"),
+                find_subject(subjects, "project"),
+                find_subject(subjects, "task"),
             ),
         }
     }

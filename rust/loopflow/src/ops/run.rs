@@ -735,8 +735,8 @@ mod tests {
                     catalog.resolve_run(run).unwrap().work,
                     WorkRef::Task(task.id.clone())
                 );
-                assert!(!catalog.matches_run(
-                    run,
+                assert!(!catalog.matches_subjects(
+                    &run.subjects,
                     crate::lf::commands::WorkFilter {
                         project: Some("other"),
                         ..Default::default()

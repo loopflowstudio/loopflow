@@ -71,14 +71,10 @@ pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<RunSnapshot>, bool
 fn collect_child_runs_at(lf_home: &Path, parent: &str) -> Result<Vec<RunSnapshot>> {
     let (_, manifest) = crate::run_record::resolve_manifest(lf_home, parent)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let parent_id = manifest.run_id.to_string();
-    crate::run_record::scan_runs_since(lf_home, 0)
-        .map_err(|error| anyhow!("Run records unavailable: {error}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| run.parent_run_id.as_deref() == Some(parent_id.as_str()))
-                .collect()
-        })
+    crate::run_record::scan_runs_matching(lf_home, 0, |child| {
+        child.parent_run_id.as_ref() == Some(&manifest.run_id)
+    })
+    .map_err(|error| anyhow!("Run records unavailable: {error}"))
 }
 
 fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<RunSnapshot>> {
@@ -96,13 +92,10 @@ pub(crate) fn collect_runs_started_since_at(
     since: i64,
     catalog: &WorkCatalog,
 ) -> Result<Vec<RunSnapshot>> {
-    crate::run_record::scan_runs_since(lf_home, since)
-        .map_err(|err| anyhow!("Run records unavailable: {err}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| catalog.matches_run(run, filter))
-                .collect()
-        })
+    crate::run_record::scan_runs_matching(lf_home, since, |manifest| {
+        catalog.matches_subjects(&manifest.subjects, filter)
+    })
+    .map_err(|err| anyhow!("Run records unavailable: {err}"))
 }
 
 /// The filtered Run definition without a presentation cap. Compound activity
@@ -365,11 +358,104 @@ pub(crate) fn format_tokens(value: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::{collect_child_runs_at, collect_runs_started_since_at, format_tokens};
+    use crate::durable::WorkRef;
+    use crate::engine::stream::StreamEvent;
+    use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
     use crate::lf::commands::WorkFilter;
     use crate::run_record::{
-        CaptureHandle, RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution,
+        scan_runs_since, AttributionSource, CaptureHandle, RunLaunchRequest, RunManifest, RunSpec,
+        SubjectAttribution,
     };
+    use crate::work::task::TaskId;
+
+    #[test]
+    fn work_drill_keeps_inherited_history_after_ancestor_rename() {
+        let home = tempfile::tempdir().unwrap();
+        let since = 1_790_000_000;
+        for (task, started) in [
+            ("LOO-265", since - 1),
+            ("LOO-265", since),
+            ("LOO-999", since),
+        ] {
+            let capture = CaptureHandle::begin_at(
+                home.path(),
+                RunSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: home.path().into(),
+                    repo: Some(home.path().into()),
+                    worktree: Some(home.path().into()),
+                    skill: Some("implement".into()),
+                    subjects: vec![
+                        SubjectAttribution::declared("wave:old-name".into()),
+                        SubjectAttribution {
+                            selector: format!("task:{task}"),
+                            source: AttributionSource::Inherited,
+                        },
+                    ],
+                    flow: crate::run_record::RunFlowMembership::Independent,
+                },
+            )
+            .unwrap();
+            capture.record_stream_event(&StreamEvent::Usage {
+                input_tokens: Some(12),
+                output_tokens: Some(3),
+                cache_read_tokens: None,
+            });
+            capture.finish("completed").unwrap();
+            let dir = capture.artifact_dir();
+            let mut manifest = crate::run_record::read_manifest(&dir).unwrap();
+            manifest.created_at = time::OffsetDateTime::from_unix_timestamp(started).unwrap();
+            std::fs::write(
+                dir.join("manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(dir.join("events.jsonl"))
+                .unwrap()
+                .write_all(b"{")
+                .unwrap();
+        }
+        let work = WorkRef::Task(TaskId::new());
+        let mut catalog = WorkCatalog::default();
+        catalog.owners.insert(
+            work.clone(),
+            WorkOwner {
+                work,
+                subject: "LOO-265".into(),
+                selectors: vec!["task:LOO-265".into(), "wave:current-name".into()],
+                created_at: None,
+            },
+        );
+        let selected = collect_runs_started_since_at(
+            home.path(),
+            WorkFilter {
+                wave: Some("current-name"),
+                ..Default::default()
+            },
+            since,
+            &catalog,
+        )
+        .unwrap();
+        let all = scan_runs_since(home.path(), 0).unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].subject("wave"), Some("old-name"));
+        assert_eq!(selected[0].usage.input_tokens, Some(12));
+        assert_eq!(selected[0].evidence_gaps, 1);
+        assert_eq!(
+            selected,
+            all.into_iter()
+                .filter(|run| { run.started >= since && run.subject("task") == Some("LOO-265") })
+                .collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn work_drill_reads_record_subjects_without_a_sql_ledger() {
@@ -466,6 +552,14 @@ mod tests {
         }
 
         let children = collect_child_runs_at(home.path(), parent_id.as_str()).unwrap();
+        assert_eq!(
+            children,
+            scan_runs_since(home.path(), 0)
+                .unwrap()
+                .into_iter()
+                .filter(|run| run.parent_run_id.as_deref() == Some(parent_id.as_str()))
+                .collect::<Vec<_>>()
+        );
 
         let mut actual: Vec<_> = children.into_iter().map(|child| child.id).collect();
         actual.sort();

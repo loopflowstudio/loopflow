@@ -10,11 +10,11 @@ retaining Run as a competing product owner.
 
 | Input | Destination and distinguishing proof |
 | --- | --- |
-| Interactive manifest/name/resolution/native reference | Stable AgentSession selector, human-title precedence, repo, caller, native/account identity; closure and failed terminal outcome remain distinct. Current importer dropped parent/end and repo in the reviewed version. |
+| Interactive manifest/name/resolution/native reference | Stable AgentSession selector, human-title precedence, repo, caller, native/account identity; closure and failed terminal outcome remain distinct. |
 | Completed keyed Ask and waiting Ask without prepared Run | Preserve exact key, request, answer, feedback and caller. Keyed retry returns the saved answer without provider launch. No invented Exec or successful turn; file mtime is inferred chronology. |
 | Released Task positions and SQL captures | FlowSession graph, nested/flat cursor, return counts, version/claim/failure/review association survive. Keep unmapped historical fields until accounted for; current-API seeding is not a released upgrade. |
 | SQL Session with multiple Run members | Retain every failed/replaced/successful member, ordering, outcome and attribution; current selection is not successful completion. Stable title/feedback, stale completion refusal and exact successful Flow reference. |
-| Taskless position files | Import autonomous pending, failed, completed and human-review Flows, even without a Run or an active review. Preserve capture/source independence, boundary feedback, completion and failure; reviewed parser omitted/skipped these cases. |
+| Taskless position files | Import autonomous pending, failed, completed and human-review Flows, even without a Run or an active review. Preserve capture/source independence, boundary feedback, completion and failure. |
 | Headless and earlier review manifests | Preserve native conversation and known Flow/node/iteration association even after cursor moves. Absent/partial membership stays unknown, not Independent; never null all membership just because old cursor differs. |
 | Provider attempt/turn/usage events | Preserve account/native changes, failed/successful continuations, namespace local attempt keys by original owner. Missing, zero, partial, final and cumulative counters remain distinct; totals and coverage agree without extra Execs. |
 | Terminal receipts versus SQL end | Preserve conflicting/missing evidence explicitly, including terminal write succeeding before SQL end fails. Session closure, provider completion and command exit are independent facts. |
@@ -49,6 +49,34 @@ Inventory released SQL, filesystem evidence and already-applied development
 frontiers separately. Reconcile exact identity/conflicts; label inferred timestamps,
 unknown membership/process and unavailable payload. Preserve all captures and
 conversation histories before replacing references and switching readers.
+
+Source audit distinguishes the starting schemas: released `0.12.15` already drops
+the former `runs` table; released `0.12.20` introduces `task_flow_positions`, and
+the released frontier has no `sessions` table. SQL Sessions with multiple Run
+members belong to this branch's applied development drafts. Prove released Task
+positions plus filesystem origins separately from populated pre-admission SQL
+members through the forward draft. A final-schema/current-API seed proves neither
+upgrade. Verified direction: Task comment `e6276089-bbf2-4aea-a171-e4fe3d5cf7a9`.
+Evidence previously discarded by a released migration cannot be silently recreated.
+
+The 2026-09-29 populated proofs now distinguish those frontiers. The released
+position fixture exposed an autonomous Task losing Started despite its retained
+Started event (`released-started-evidence-red.log`). The forward draft restores
+assignment presence at explicitly inferred conversion time; the old event keeps
+its timestamp. Source proof passes; `materialized-sql-upgrade.log` also passes
+the released-position and admission cases while failing development-prefix
+adoption. A historical NULL Task title still fails the earlier review migration;
+its supported-input classification remains open.
+
+`materialized-sql-upgrade-rollback.log` passes four focused cases after the
+adoption repair: populated pre-admission members, retained Projects/unreleased
+drafts, and changed-evidence rejection. The populated case retains native events,
+exact Flow references, title/feedback/caller, repeated SQL-member import and an
+existing Started value of 17. An injected schema discrepancy after pending SQL
+is applied rolls back schema, canonical/development ledgers and history. Inspected
+bytes match `canonical-sql-upgrade-final-source.json`. This is disposable,
+materialized SQL evidence; unmapped SQL inputs, filesystem origins, public
+recovery, terminal/SQL disagreement and the remaining rows above stay owed.
 
 Prove released populated schema plus four filesystem origins, headless/provider
 history and command journal through final canonical schema and public CLI. Include

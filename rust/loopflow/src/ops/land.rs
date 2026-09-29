@@ -131,6 +131,26 @@ fn prepare_pr(
                         return Ok(Some(pr));
                     }
                 }
+            } else if task_context.is_none()
+                && !options.local
+                && !options.complete
+                && options.next_slug.is_none()
+                && is_clean(&repo_root)?
+            {
+                let head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+                if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
+                    if pr.head_sha.as_deref() == Some(head.as_str())
+                        && crate::ops::pr::auto_merge_enabled(&repo_root, pr.number)?
+                    {
+                        update_pr_message(
+                            &repo_root,
+                            options.pr_title.as_deref(),
+                            options.pr_body.as_deref(),
+                        )?;
+                        progress.status("Pull request is already armed for this exact head");
+                        return Ok(Some(pr));
+                    }
+                }
             }
         }
         let cleared_task_request =
@@ -468,7 +488,7 @@ fn finalize_remote(
     progress: &impl Progress,
 ) -> OpsResult<()> {
     progress.status("Updating PR...");
-    update_pr_message(repo_root, &copy.title, &copy.body)?;
+    update_pr_message(repo_root, Some(&copy.title), Some(&copy.body))?;
     mark_ready(repo_root)?;
 
     match finalize {
@@ -617,15 +637,18 @@ fn read_worktree_state(repo: &Path) -> OpsResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
+fn update_pr_message(repo: &Path, title: Option<&str>, body: Option<&str>) -> OpsResult<()> {
+    if title.is_none() && body.is_none() {
+        return Ok(());
+    }
     let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("edit")
-        .arg("--title")
-        .arg(title)
-        .arg("--body")
-        .arg(body)
-        .current_dir(repo);
+    cmd.args(["pr", "edit"]).current_dir(repo);
+    if let Some(title) = title {
+        cmd.args(["--title", title]);
+    }
+    if let Some(body) = body {
+        cmd.args(["--body", body]);
+    }
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

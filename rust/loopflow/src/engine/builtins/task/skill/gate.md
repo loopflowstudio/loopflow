@@ -1,6 +1,6 @@
 ---
 requires: code on branch
-produces: corrected code and docs, verification evidence, and PR copy
+produces: corrected code and docs, verification evidence, and delivery context
 action_style: procedural
 ---
 Make the branch as ready to ship as possible, and as easy for reviewers to evaluate as possible.
@@ -76,49 +76,16 @@ Make the change easy to review.
      the new path. If none does, capture a concrete metric proposal for the
      Wave. A local benchmark supports it but is not live coverage by itself.
 
-2. **Write PR copy for ops handoff**
+2. **Prepare delivery context**
 
-   Write for someone returning after time away. Name the concrete improvement in the
-   title. Open the body with one short paragraph of one or two sentences explaining
-   what was difficult before
-   and what this PR makes easier or newly possible for users, operators, or maintainers.
-   They should understand the benefit without running a command or opening another document.
-
-   Keep the promise within what this PR delivers, even when the Task has a larger ambition.
-   Use familiar product language and concrete verbs. An area prefix is useful only when
-   it helps recognition. Preserve proper names and command spelling.
-
-   Follow with **What changes**: a short paragraph or a few bullets describing the
-   meaningful change. Include implementation detail only when it helps review. Put **Why
-   it matters** after that, and omit it if the summary already explains the consequence.
-   Include material risks or limitations when needed. Keep automated test and lint
-   results in **Checks** when useful, or link to CI. Finish with **Try it** when there
-   is a useful walkthrough: describe a concrete user action and the visible result
-   that demonstrates the benefit. Tests, test commands, and test results never belong
-   in this section. Distinguish suggested steps from behavior actually observed;
-   label simulations and remaining limits. Omit the walkthrough when it adds nothing.
-
-   Use only the sections the change needs. A small change may need only a short summary
-   and a useful walkthrough. Rewrite around the current diff when scope changes; remove
-   superseded explanation instead of appending a diary. Loopflow supplies Task identity
-   and merge consequences from durable state; do not invent or repeat those facts.
-
-   Link related work where you explain its relevance. In prose and PR bodies, use
-   `[Title · Task ID or PR number](known URL)` on first mention; shorten later references
-   when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
-   Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
-   In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
-
-   Write to:
-   - `scratch/pr-title.txt` — one-line PR title
-   - `scratch/pr-body.md` — markdown PR body
-   - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
-
-   `lf pr publish`, `lf pr submit`, and `lf pr land` consume these files.
-   Publication removes these files before its first commit or push, so gate
-   handoff state never becomes a PR head. Keep consequential rationale, risks,
-   and verification in this copy or their existing owner; no separate review
-   document is required. Refresh PR copy only where it is missing or stale.
+   Keep the experienced improvement, actual checks and material limits in the
+   existing plan or durable docs. Delivery commands generate PR copy through
+   their pr-message template; gate need not duplicate that writing pass.
+   If copy was explicitly requested or already prepared, reconcile it with the
+   current change. Optional cached copy lives in `scratch/pr-title.txt`,
+   `scratch/pr-body.md` and `scratch/.pr-copy-ref` (current HEAD SHA).
+   Publication consumes these files before its first commit or push. Preserve
+   consequential evidence at its lasting owner before delivery clears scratch.
 
 3. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it

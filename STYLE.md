@@ -135,7 +135,7 @@ When editing `README.md` files:
 
 When editing docs in `scratch/`:
 - Focus on what's left to build, not what's done
-- `lf review` writes its assessment under `scratch/`
+- `lf realign` updates the existing plan, code, and relevant memory; keep unresolved findings with the work
 - `lf pr land` removes `scratch/*` contents automatically
 
 When editing `*.rs` files:
@@ -340,7 +340,7 @@ def open_warp(path: Path) -> None:
 
 Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
 
-Start features with a design doc under `scratch/`. After implementation, `lf review` writes its assessment under `scratch/`. `lf pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
+Start features with a design doc under `scratch/`. After implementation, `lf realign` updates the existing plan, code, and relevant memory. `lf pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
 
 ## User-Facing Documentation
 

@@ -267,7 +267,8 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{render_all, write_catalog};
+    use crate::lf::output::Colors;
 
     const NO_COLORS: Colors = Colors {
         cyan: "",
@@ -286,10 +287,9 @@ mod tests {
         assert!(rendered.starts_with("CATALOG\n\nTask\n"));
         assert!(!rendered.contains("\nFLOWS\n"));
         assert!(!rendered.contains("\nSKILLS\n"));
-        assert!(rendered.contains("build                      flow"));
-        assert!(rendered.contains("written   kickoff → code → realign → pr-publish → demo"));
-        assert!(rendered
-            .contains("collapsed kickoff → implement → compress → realign → pr-publish → demo"));
+        assert!(rendered.contains(
+            "queue                      flow\n    written   compress → refresh → gate\n    collapsed compress → op: rebase → realign → gate\n"
+        ));
         assert!(rendered.contains("code                       flow\n    implement → compress\n"));
         assert!(!rendered
             .lines()

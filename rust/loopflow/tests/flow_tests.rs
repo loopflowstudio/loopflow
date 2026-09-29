@@ -39,13 +39,6 @@ fn assert_skill_name(item: &ConcreteStep, expected: &str) {
     }
 }
 
-fn assert_skill_sequence(items: &[ConcreteStep], expected: &[&str]) {
-    assert_eq!(items.len(), expected.len());
-    for (item, skill_name) in items.iter().zip(expected) {
-        assert_skill_name(item, skill_name);
-    }
-}
-
 fn run_git(repo: &Path, args: &[&str]) {
     let status = Command::new("git")
         .args(args)
@@ -978,7 +971,7 @@ fn flow_ref_parses_into_items() {
         "parent",
         r#"
 - flow: child
-- review
+- realign
 "#,
     );
 
@@ -1070,7 +1063,7 @@ fn expand_flow_tracks_parents() {
         "parent",
         r#"
 - flow: child
-- review
+- realign
 "#,
     );
 
@@ -1095,6 +1088,7 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     write_skill(repo, "skill-a", "First captured skill.");
     write_skill(repo, "skill-b", "Second captured skill.");
     write_flow(repo, "publish", "- skill-a\n- skill-b");
+    write_skill(repo, "review", "Review the supplied evidence.");
     write_flow(repo, "parent", "- review\n- publish");
 
     let items = expand_named_flow(repo, "parent");
@@ -1147,62 +1141,6 @@ fn builtin_deploy_uses_ops_land_item() {
     let items = expand_named_flow(repo, "deploy");
     assert!(!items.is_empty());
     assert!(matches!(&items[1], ConcreteStep::Op(_)));
-}
-
-#[test]
-fn builtin_garden_flow_structure() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-
-    let items = expand_named_flow(repo, "garden");
-
-    // garden: scan, assess, xor(act, silence)
-    assert_eq!(items.len(), 3);
-    assert_skill_name(&items[0], "scan");
-    assert_skill_name(&items[1], "assess");
-    match &items[2] {
-        ConcreteStep::Xor(xor_def) => {
-            assert_eq!(xor_def.paths.len(), 2);
-            assert!(xor_def.paths.contains_key("act"));
-            assert!(xor_def.paths.contains_key("silence"));
-        }
-        other => panic!("expected Xor, got {other:?}"),
-    }
-}
-
-#[test]
-fn builtin_governance_flows_structure() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-
-    let cases = [
-        ("govern-identity", ["s5-scan", "s5-assess", "mutate"]),
-        ("govern-intelligence", ["s4-scan", "s4-assess", "mutate"]),
-        ("govern-control", ["s3-scan", "s3-assess", "mutate"]),
-        ("govern-coordination", ["s2-scan", "s2-assess", "mutate"]),
-    ];
-
-    for (flow_name, expected) in cases {
-        let items = expand_named_flow(repo, flow_name);
-        assert_skill_sequence(&items, &expected);
-    }
-}
-
-#[test]
-fn builtin_build_or_silent_has_xor_branch() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-
-    let items = expand_named_flow(repo, "build-or-silent");
-    // xor(build, silence) — the roadmap decision, no local ingest
-    assert_eq!(items.len(), 1);
-    match &items[0] {
-        ConcreteStep::Xor(xor_def) => {
-            assert!(xor_def.paths.contains_key("build"));
-            assert!(xor_def.paths.contains_key("silence"));
-        }
-        other => panic!("expected Xor in build-or-silent, got {other:?}"),
-    };
 }
 
 fn roadmap_flow(repo: &Path, home: &Path) -> serde_json::Value {

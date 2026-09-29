@@ -72,7 +72,7 @@ struct CommandArgTables {
 /// What `reorder_args` needs to know about the CLI, derived from the clap
 /// definition so it can never drift from it (the old hand-maintained lists
 /// were missing the uppercase short aliases `-D`/`-C`/`-M`/`-I`/`-B`/`-W`,
-/// misrouting e.g. `lf debug -M codex`).
+/// misrouting e.g. `lf unbreak -M codex`).
 struct ArgTables {
     /// Top-level subcommands, indexed by canonical name and aliases.
     commands: HashMap<String, CommandArgTables>,
@@ -1240,7 +1240,7 @@ fn main() -> anyhow::Result<()> {
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
     // loop's codex app-server pair and left a stale .wave-endpoint).
     // Initialize tracing with RUST_LOG env filter
-    // Usage: RUST_LOG=lf=debug lf debug
+    // Usage: RUST_LOG=lf=debug lf unbreak
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("lf=info,loopflow=info"));
     tracing_subscriber::fmt()
@@ -2025,7 +2025,7 @@ mod tests {
     }
 
     /// Uppercase short aliases reorder exactly like their lowercase forms —
-    /// the drift the hand-maintained lists had (`lf debug -M codex` used to
+    /// the drift the hand-maintained lists had (`lf unbreak -M codex` used to
     /// treat `codex` as a skill arg).
     #[test]
     fn reorder_args_uppercase_value_alias_after_skill() {

@@ -146,7 +146,7 @@ re-derive what these already record.
 
 Working code with rough edges beats perfect code that took too long.
 
-Produce a first draft quickly. Polish cleans it up. You can be re-invoked if needed. Don't block on ambiguity—make the simplest choice and keep moving.
+Produce a working change, resolve reversible ambiguity, and verify it. Preserve the intended outcome across internal slices; a first draft does not satisfy unfinished acceptance.
 
 ## Workflow
 
@@ -197,6 +197,21 @@ compatibility shims, and parallel stores are blocking by default. Use one only
 when the reviewed design explicitly authorizes it and names its deletion point.
 
 **Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
+
+## Task context
+
+When a Task is supplied, use its directive, accepted design and included Steers.
+Stay in its supplied worktree and preserve the active writer, selected Flow,
+and review boundaries. Do not select backlog work, create a second Task or
+launch a competing implementation. A failed planning read is a named gap;
+continue independent work from the supplied evidence without repairing auth.
+Publication, landing and navigation belong to the caller's explicit steps.
+
+While building feature work, notice signals that could help the Wave steer.
+Name the outcome, candidate measure, decision value and cheapest credible
+producer. Add a useful instrument when it fits the coherent change;
+otherwise leave the proposal for Wave sponsorship.
+Metric proposals are discoveries, not a completion quota.
 
 ## Wave context
 

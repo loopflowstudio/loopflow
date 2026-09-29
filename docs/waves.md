@@ -35,6 +35,42 @@ lf wave status shipper                  # current chapter and Tasks
 Opening chat connects its internal service. Task execution and scheduled work
 do not depend on keeping a chat window open.
 
+## Operate manually
+
+```bash
+lf --wave shipper wave/operate "Review delivery and the checkout dependency"
+lf vsm-operate
+lf --wave shipper s2 : "Investigate the repeated checkout conflict"
+```
+
+`wave/operate` considers delivery, coordination, present capacity, adaptation
+and identity (S1–S5) within the selected Wave. `vsm-operate` applies those same
+questions across the current repository's Waves, including from a linked
+worktree or a Task-bound session. Its Flow runs `s1 → s2 → s3 → s4 → s5`,
+with each skill reading earlier findings from one shared working note. Each is
+also directly invokable for a focused question, with no scan/assess split.
+An explicit scope request can narrow VSM to a Wave; otherwise it uses the repository.
+Neither pass requires Discord or a schedule. VSM makes five sequential skill
+invocations, without requiring five reports or five actions. `wave/operate`
+remains a single skill; whether it should use the VSM Flow is still undecided.
+
+Each pass reads dated evidence, aims for one or two useful authorized moves,
+and replies in the invoking conversation. Evidence determines how much is
+worthwhile; the number is guidance. A no-action result is useful when
+the evidence supports it. Failed reads and stale provider data remain explicit
+gaps; they cannot justify closing work or treating a Task as idle.
+
+Task findings can challenge Wave purpose; Wave findings can challenge shared
+repository direction. Preserve the source and disagreement with the affected
+Wave or Task. Return accepted decisions to those owners with their practical
+consequence. Changes beyond accepted direction stay proposals for review.
+Repository synthesis does not own identity alone.
+
+Tasks keep progressing through their selected Flows and human review gates
+when both operators are absent. Projects belong to Waves; they have no separate
+operator. Scheduling and connected chat are separate integration work. These
+manual passes neither install jobs nor post replies to a channel.
+
 ## The planning model
 
 Open a Wave to see its enduring objective and current KRs, targets, and Tasks directly. Waves are
@@ -70,8 +106,8 @@ before its response was lost.
 
 ## The Goal
 
-`GOAL.md` is the loop surface: frontmatter carries machine config, the body is
-the prompt the wave runs each loop.
+`GOAL.md` carries the Wave objective and operating guidance. Frontmatter holds
+configuration; each finite pass reads the body.
 
 ```markdown
 ---

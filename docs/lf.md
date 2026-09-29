@@ -66,9 +66,25 @@ A direct flow creates a fresh Run for each skill, with the same Work subject and
 an updated scratch snapshot. Explicit flow operations still execute as authored.
 Use `lf task run DES-123 --flow code` to bind and pursue the managed Task workflow.
 
-Bare names prefer skills when a skill and flow share a name. Select explicitly
-with `lf skill launch-plan` or `lf flow launch-plan`. `design` and `ship-5whys`
-are skills; they need no single-step flow wrapper.
+Bare names prefer skills when a custom skill and Flow share a name. Use
+`lf skill <name>` or `lf flow <name>` to select explicitly. `design`,
+`launch-plan` and `debug` are skills.
+
+## Repair a failure
+
+```bash
+lf debug : "Why does this request fail after reconnecting?"
+cat incident.txt | lf incident
+lf 5whys : "Investigate why yesterday's deployment failed"
+```
+
+`debug` investigates a code failure and fixes its cause. `unbreak` prioritizes
+restoring the broken workflow, including a useful workaround when necessary.
+Both accept the report where it is, including clipboard input with `-c`, and
+verify the original workflow. `incident` starts with unbreak, then continues
+through causal analysis and the `launch-plan` skill to select worthwhile prevention using ordinary Task
+operations. Findings alone do not approve new work; a repair can finish with
+no prevention Task.
 
 ## Browser Captures
 
@@ -115,54 +131,44 @@ Task skills — concrete implementation, investigation, review, and delivery:
 
 | Skill | What it does |
 |------|--------------|
-| `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
-| `research` | Map the territory — architecture, complexity, quality, potential |
-| `iterate` | Read research, write design to address it |
+| `kickoff` | Turn product direction into an implementation plan, risks and proof |
+| `research` | Answer a codebase question or investigate a decision with sourced evidence |
 | `5whys` | Root cause analysis on a bug fix |
 | `implement` | Build from a design doc |
 | `compress` | Simplify code and surrounding implementation related to the diff |
 | `gate` | Ship-ready code and reviewer-friendly docs |
-| `debug` | Fix an error |
+| `unbreak` | Repair a reported failure and verify the original workflow |
+| `debug` | Investigate a code failure, fix its cause and verify it |
 | `ci-fix` | Fix failing CI checks for the current PR |
-| `integrate-upstream` | Adapt wave code after rebasing onto main |
 | `qa` | Thorough quality assessment of the current branch |
 | `triage` | Correct and prioritize findings in their existing location |
 | `review-design` | Reshape the working design around the intended experience |
 | `design` | Interactive design session |
-| `explore` | Investigate the codebase |
+| `launch-plan` | Select useful work from a design or findings and arrange authorized Task execution |
 | `realign` | Reconcile plan, code, and Wave memory with what the work has taught us |
 | `concept-review` | Reconsider the intended experience together, then follow through concepts, data, and APIs |
 | `loop-decide` | Assess a pass's progress and evidence to choose Advance, Iterate, or human help |
 | `unblock` | Resolve stalled work with the human inside an Ask Session, using concept-review by default |
 | `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
 | `refine` | Refine existing work |
-| `task/clarify` / `task/pursue` / `task/mutate` | Clarify, implement, and judge one durable Task |
 
 Planning skills — shape and pursue the current chapter:
 
 | Skill | What it does |
 |------|--------------|
-| `wave/operate` | Judge KR evidence and launch the next useful Task in one turn |
-| `expand` / `reduce` / `polish` | Find higher leverage, simplifications, and finish quality |
+| `reduce` / `polish` | Find structural simplification and improvements to the experience |
 | `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
 
 Wave skills — maintain the durable operating context and its portfolio:
 
 | Skill | What it does |
 |------|--------------|
-| `scan` | Read member wave state — PRs, blocks, progress, git activity |
-| `assess` | Judge wave health and identify pressure points |
+| `s1` / `s2` / `s3` / `s4` / `s5` | Delivery, coordination, capacity, adaptation and identity; each investigates and acts |
 | `wave-report` | Read health signals across all waves |
-| `mutate` | Compose and apply coordinated mutations across member waves |
-| `review` | Review mutations, amend or revert if needed |
-| `wave/operate` | Read, decide, and take the one or two useful Wave moves in one turn |
+| `wave/operate` | Read, judge S1–S5, and focus on a few useful Wave moves |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
-| `split-wave` | Split a Wave's structure and memory |
+| `split-wave` | Split future responsibility while preserving active work |
 | `wave/start-chapter` / `wave/review-chapter` | One Wave's chapter: propose its fresh plan / report every KR verdict |
-| `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
-| `s3-scan` / `s3-assess` | Control: live health, velocity, CI, retries, worker-pool size |
-| `s4-scan` / `s4-assess` | Intelligence: dependencies, advisories, upstream APIs, what they imply |
-| `s5-scan` / `s5-assess` | Identity: wave roster, policy, boundary and autonomy drift |
 
 Ops skills — raw prompt logic around mechanical git, PR, and release commands:
 
@@ -276,39 +282,55 @@ Wave-owned Flow lifecycle. See [Flow decisions and recovery](#flow-decisions-and
 for the protocol and current verification limits, and [authoring](authoring.md)
 for composition limitations.
 
+### Choose a stopping point
+
+```bash
+lf code                  # implement and simplify locally
+lf queue                 # simplify, rebase, reconcile and verify; no PR publication
+lf pursue                # iterate, publish and review the demo; no landing
+lf feature               # kickoff and design review, pursue, queue, land and complete
+```
+
+For an existing design, kickoff turns accepted intent into the implementation
+plan; it remains the first step of feature. For a small edit, use code. For work
+intended to land after its reviews, use feature. Design and launch-plan remain
+skills for shaping intent and arranging authorized execution.
+
 ### Builtin Flows
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → code → realign → pr-publish → demo |
 | `code` | implement → compress |
-| `pair` | design → code |
-| `design` | author one exact design at a User gate |
-| `launch-plan` | keep one coherent core here and launch independent follow-up Tasks |
 | `feature` | task-design → pursue → queue → op: pr land -c (default Task Flow) |
 | `task-design` | kickoff → human review-design |
-| `pursue` | repeat implement → compress → refresh → loop-decide, then pr-publish and human demo |
-| `slice` | code → realign → pr-publish |
+| `pursue` | repeat implement → compress → refresh → loop-decide, then pr-publish, human demo and a deciding return to implementation |
 | `refresh` | op: rebase → realign |
 | `ship` | gate → op: pr land -c |
-| `ship-demo` | gate → demo review → op: pr land -c |
+| `ship-demo` | gate → human demo → op: pr land -c |
 | `deploy` | gate → op: pr land |
-| `design-and-ship` | design → implement → reduce → polish → deploy |
-| `incident` | restore → 5whys |
+| `incident` | unbreak → 5whys → launch-plan |
 | `queue` | compress → refresh → gate |
-| `garden` | scan → assess → xor(garden-act, silence) |
-| `govern-coordination` | s2-scan → s2-assess → mutate |
-| `govern-control` | s3-scan → s3-assess → mutate |
-| `govern-intelligence` | s4-scan → s4-assess → mutate |
-| `govern-identity` | s5-scan → s5-assess → mutate |
-| `sync` | rebase → integrate-upstream |
+| `vsm-operate` | s1 → s2 → s3 → s4 → s5 |
 
 `refresh` runs the existing `lf rebase` operation, including its branch push
 with a lease, then realign reconciles the plan, code, and identified Wave memory.
-It does not create or update PR copy; `pursue` does that after convergence.
+It does not publish. In pursue, the publication step invokes `lf pr publish`
+after convergence; that command consumes prepared copy or generates it with
+the pr-message template.
 
-`sync` rebases the current branch and refreshes the default branch. The
-default-branch refresh is safe from sibling worktrees: it stashes dirty edits
+The former pair/build/slice/design-and-ship shortcuts are retired. Choose the
+endpoint above instead of an alias. Task-specific clarify/pursue/mutate and
+iterate are folded into kickoff, implement, realign and the explicit decision/
+publication steps. Research also handles conversational exploration. Realign
+owns memory curation; update-wave and record-learnings are retired.
+
+Wave/repository operation replaces the old garden and S2–S5 scan/assess/mutate
+pipelines. No report file, chord configuration or governance pass gates Task work.
+Existing captured Flows keep their pinned instructions; update custom Flow
+references deliberately. Skill export prunes generated retired entries and
+preserves personal skills. Source edits do not change installed exports.
+
+Default-branch refresh is safe from sibling worktrees: it stashes dirty edits
 on the checked-out default branch, syncs, then restores them — unless they
 collide with paths the sync rewrote, in which case they stay in a
 `sync_main: auto-stash` stash so a sync can never silently revert just-landed
@@ -345,7 +367,7 @@ lf task interrupt DES-123                             # end the active turn
 lf task wait DES-123
 lf task run DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
-lf task restart DES-123 --flow build                 # replace the pinned Flow; rejected before any checkpoint if unusable
+lf task restart DES-123 --flow feature                 # replace the pinned Flow; rejected before any checkpoint if unusable
 lf flow list --json                                  # every Flow with the topology it would pin
 lf task status task_... --json                  # stable Work projection
 lf wave place wave_... home_...                 # move idle Wave Work to a Home

@@ -448,6 +448,21 @@ match the intended contract instead of restoring retired commands in the prose.
 cargo test -p loopflow --lib engine::builtins::tests
 ```
 
+When changing the builtin catalog or Flow composition, also exercise the CLI
+catalog renderer. Its written and expanded Flow examples must use retained names.
+
+```bash
+cargo test -p loopflow --lib lf::commands::list::tests
+```
+
+Catalog retirement also affects historical migration tests. Keep their persisted
+names and data-preservation assertions at the migration boundary; current catalog
+resolution belongs in engine tests. Include the legacy Flow repair proof:
+
+```bash
+cargo test -p loopflow --lib legacy_task_flow_repair
+```
+
 Skill export tests use isolated homes and cover builtin/global definitions,
 personal agent directories and pruning. Repository `.lf/skills` are local
 execution overrides; they are not exported by `sync-skills`.

@@ -1,9 +1,16 @@
 ---
-requires: scratch/<slug>.md (ingested wave item)
-produces: scratch/<slug>.md (elaborated design)
+requires: product direction, an existing design, or a Task brief
+produces: an implementation plan with resolved risks, sequencing and proof
 default_agent: claude
 ---
-Research risks that could derail the work, then transform a wave item into a bold, well-considered design.
+Shape the supplied product direction into an implementation plan.
+
+Start from the intended experience and decisions already established. Investigate
+technical risks, inspect the existing system, choose supported mechanisms and
+sequence the work with concrete proof. Preserve accepted product decisions;
+do not restart product discovery or substitute a technically convenient outcome.
+If an unresolved product choice prevents planning, identify that choice for the
+participant. Keep an already sufficient plan rather than forcing a rewrite.
 
 ## Task and design
 
@@ -35,17 +42,17 @@ re-derive what these already record.
 
 ## Workflow
 
-1. **Understand the intent.** Read the ingested item. What problem does it solve? Who benefits?
+1. **Recover the intent.** Read the design or Task brief. What problem does it solve? Who benefits? Which decisions are accepted, and what remains open?
 
-2. **De-risk.** Before designing anything, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
+2. **De-risk.** Before choosing implementation mechanisms, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
 
-   **Start with what's already flagged.** If the ingested item, wave `GOAL.md`, `MEMORY.md`, or current chapter KRs/metric targets call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
+   **Start with what's already flagged.** If the supplied design, wave `GOAL.md`, `MEMORY.md`, or current chapter KRs/metric targets call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
 
    **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
 
    The output of this step is concrete findings, not a worry list. "Linear's API doesn't support conditional assignment, so we need read-then-assign with conflict detection" — not "there might be API limitations." When two explanations remain plausible, run the smallest safe probe whose outcomes distinguish them. Preserve the observation even when it kills the attractive approach.
 
-3. **Consider alternatives.** Develop 2-3 approaches that differ by mechanism,
+3. **Consider alternatives.** Where uncertainty warrants it, compare approaches that differ by mechanism,
    not presentation. Keep them independent long enough to expose their real
    strengths and exact gaps. Mark a route blocked when its remaining dependency
    is as hard as the original task; elegance does not make a deferred problem
@@ -71,78 +78,47 @@ re-derive what these already record.
    contain an older or poor design; do not continue it merely because it was
    present first.
 
-9. **Keep one north star.** For an indivisible change, keep the complete target
-   architecture, integration and deletion path, forbidden near-misses, full
-   proof, and ordered internal slices in this one artifact. Mark `This slice`
-   without replacing the rest of the design, and append evidence to a slice
-   ledger as work proceeds.
+## Computable design contract
 
-## Output format
+Make the plan explicit where these boundaries matter; omit irrelevant sections:
 
-Update `scratch/<slug>.md`:
+- **User-visible outcome** — whose behavior changes and what they can observe
+  when the Task holds.
+- **End-to-end proof** — one concrete scenario that crosses the source of truth
+  and every affected consumer, plus the command, test, or observation that
+  proves the outcome.
+- **Source of truth** — the authoritative persisted record, model, or API and
+  which views are derived from it.
+- **Affected surfaces and consumers** — every CLI, wire DTO, app, automation,
+  or downstream reader that must change or remain compatible.
+- **Absent and error states** — what missing evidence, empty state, invalid
+  input, or failed dependency means at each affected boundary.
+- **Operational boundary** — when relevant, the latency, subprocess, network,
+  scale, or recovery budget the implementation must hold.
+- **Exclusions** — adjacent behavior deliberately left outside this Task.
+- **Current and target architecture** — the concepts, authorities, persisted
+  records, writers, and launch paths before and after the change; state what is
+  reshaped and what becomes obsolete.
+- **Forbidden outcomes** — duplicate representations, Legacy/New splits,
+  adapters, fallbacks, dual writes, or locally passing states that would still
+  violate the intended architecture.
+- **Internal slices** — for an indivisible change, keep the complete end state
+  intact with its integration/deletion path and full proof. Order coherent cuts,
+  mark one `This slice` with focused proof, and update remaining work and evidence
+  in place rather than replacing the design with a narrower plan.
 
-```markdown
-# <Title>
+Files changed, migrations applied, tests added, and a PR opened are
+implementation receipts. They may support the proof, but they are not the
+finish line; the design must end in an observable condition.
 
-## Problem
+## Output
 
-<What we're solving. Who benefits. Why now.>
-
-## The demo
-
-<The moment that proves the win: what the developer runs and what they see.
-One or two sentences, concrete enough to perform at the end of the build.>
-
-## Approach
-
-<The chosen direction. Be specific.>
-
-## De-risking
-
-| Question | Finding | Impact on design |
-|----------|---------|-----------------|
-| ... | ... | ... |
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| ... | ... | ... |
-
-## Key decisions
-
-<Choices made and why. The things someone would question.>
-
-## Scope
-
-- In scope: ...
-- Out of scope: ...
-
-## Done when
-
-<Verification command or observable outcome>
-
-## Forbidden outcomes
-
-<Duplicate authorities, compatibility paths, or locally passing near-misses
-that still violate the target architecture.>
-
-## Internal slices
-
-<Ordered coherent cuts. Keep the complete end state above them.>
-
-## This slice
-
-<The one current executable cut and its focused proof.>
-
-## Slice ledger
-
-<Commits, evidence, findings, and design changes without shrinking the north star.>
-
-## Measure (if applicable)
-
-<What to measure before and after. Command to run, baseline to capture, what "better" looks like. Skip for changes without quantitative outcomes.>
-```
+Update the existing plan at `scratch/<slug>.md`. Organize it around the problem,
+demo, chosen approach, risk findings, alternatives and decisions, scope, and
+Done when proof. Use the contract above for relevant boundaries; preserve a
+clear existing structure rather than imposing a template. Include before/after
+measures when the outcome is quantitative. Keep consequential findings and
+remaining work beside the decisions they inform.
 
 ## Wave alignment
 
@@ -162,7 +138,7 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs
 
 **Concrete over abstract.** "Fast" means nothing. "P95 latency under 100ms" means something.
 
-**Decisions over options.** Don't present choices—make them. The design should be implementable as-is.
+**Resolve implementation choices.** Make supported reversible choices. Leave consequential product decisions explicit for the participant; a plan cannot manufacture approval.
 
 **Complete over incremental.** Prefer landing an entire architectural chunk in one go. Splitting a coherent change into pieces creates backwards-compatibility adapters, dual states, and integration ambiguity. Only split when pieces are genuinely independent and each delivers something a user or developer would notice on its own.
 

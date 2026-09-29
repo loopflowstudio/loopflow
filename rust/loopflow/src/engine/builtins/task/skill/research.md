@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: scratch/research-<topic>-<short-run-id>.md | explicitly named scratch/*.md
+produces: a sourced answer or research artifact for the requested decision
 ---
 Map the territory. Understand what exists before deciding what to change.
 
@@ -21,15 +21,15 @@ re-derive what these already record.
 
 ## Scope
 
-The included context defines your area of responsibility. Research that area thoroughly—architecture, data flow, key abstractions. If given `src/api/`, understand the API deeply. Your job is clarity on what exists, not opinions on what should change.
-
-## Goal
-
-Produce research that informs downstream decisions. The reduce step needs to know where complexity concentrates. The polish step needs to know where quality is rough. The expand step needs to know what capabilities are latent. Give them what they need.
-
-Research first, then analysis. Understand what exists before evaluating it. If you see clear opportunities with favorable cost/benefit, include recommendations—but don't force them. Open questions are a valid output.
+Follow the requested question and the participant's depth of interest. A narrow
+codebase question needs a direct sourced answer, not an architecture survey.
+Investigate more broadly when the decision depends on it. In conversation,
+answer what was asked and follow new questions; headlessly, return a bounded
+answer from available evidence. Do not implement or offer unsolicited critique.
 
 ## Workflow
+
+Follow the paths that matter to the question:
 
 1. **Orientation**: README, entry points, happy path. How does someone start using this?
 2. **Architecture**: Main modules, data structures, key abstractions. How is it organized?
@@ -54,91 +54,17 @@ Research first, then analysis. Understand what exists before evaluating it. If y
   require concrete findings rather than status reports. Do not broadcast the
   favored route until the independent passes have exposed their own gaps.
 
-## What to capture
-
-**System understanding.** How the pieces fit together. Not a file listing—the mental model someone needs to work here effectively.
-
-**Tensions.** Where the system is pulled in different directions. Features that don't quite fit the architecture. Abstractions that serve multiple masters.
-
-**Complexity hotspots.** Where the code is dense, conditional-heavy, or hard to follow. Not judgment—just observation.
-
-**Quality variations.** Where polish is high vs rough. Documentation coverage. Error message quality. Test coverage.
-
-**Latent capabilities.** What the system could do with small extensions. Patterns that are partially established. Infrastructure that's underutilized.
-
 ## Output
 
-Write one new research artifact. If the directive names an exact `scratch/*.md`
-path, use it. Otherwise derive
-`scratch/research-<topic>-<short-run-id>.md`, using the final eight id
-characters of `LF_RUN_ID` when available. Never overwrite an existing artifact;
-choose a new specific path instead. Publish the complete file atomically so a concurrent
-scratch snapshot sees all of it or none of it. Independent research Runs edit
-only their own named artifacts, never the canonical design. In a direct bound
-Run, leave the artifact uncommitted and unpushed so the caller can reconcile all
-concurrent contributions before one coherent checkpoint.
+Answer here when the reader needs an explanation. For sustained research,
+update its existing note or write a topic-named artifact under scratch/ when a
+later reader needs it. Include the system model, sources, counterexamples,
+unresolved questions and recommendations only where useful to the decision.
+Explain how the relevant pieces fit, with concrete examples of tensions,
+complexity, quality gaps or latent capabilities when they bear on the question.
+Open questions are a valid result; do not force recommendations or a report shape.
 
-Use this shape:
-
-```markdown
-# Research: <area>
-
-## System understanding
-
-<How the pieces fit together. The mental model for working here.>
-
-### Architecture
-<Main modules and their responsibilities>
-
-### Data flow
-<How information moves through the system>
-
-### Key abstractions
-<The concepts this code is built around>
-
-### Evidence and counterexamples
-<The observations that support this model and the strongest facts it must explain>
-
-## Tensions
-
-<Where the system is pulled in different directions>
-
-- <tension 1>: <description>
-- <tension 2>: <description>
-
-## Observations
-
-### Complexity
-<Where code is dense or hard to follow. Specific locations.>
-
-### Quality
-<Where polish varies. Documentation, errors, tests.>
-
-### Potential
-<What could be extended. Patterns partially in place.>
-
-## Open questions
-
-<Things you couldn't determine. Gaps in understanding. Don't need resolution.>
-
-## Recommendations
-
-<If clear opportunities emerge, include them. Not required.>
-
-### <recommendation>
-**Observation**: <what you found>
-**Cost**: <effort, risk, complexity>
-**Benefit**: <value delivered>
-**Verdict**: <worth it or not, and why>
-```
-
-## What to avoid
-
-**Forcing recommendations.** If nothing stands out, say so. Open questions and observations are valuable outputs.
-
-**Exhaustive listings.** Don't enumerate every file. Capture the structure that matters.
-
-**Vague observations.** "Code quality varies" is useless. "Error messages in `src/cli/commands.py` lack context while `src/api/errors.py` includes stack traces" is useful.
-
-**A model that only fits the latest evidence.** Read the older paths, failures,
-and tests that could falsify it before presenting it as system understanding.
+When contributing independent research to another active writer, use the exact
+assigned artifact or a distinct topic/Run path and leave the canonical design to
+its owner. Publish a complete artifact atomically; a path alone does not deliver
+its contents to another checkout. Preserve source attribution and proof limits.

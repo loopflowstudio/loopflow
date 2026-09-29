@@ -1131,7 +1131,7 @@ fn try_load_multi_skill_flow(
     if skill.content.is_some() {
         return Ok(None);
     }
-    // A flow may run its same-named skill (for example launch-plan).
+    // A custom flow may run its same-named skill.
     // Only a real skill can terminate this otherwise recursive reference.
     if chain.contains(&skill.name) && load_skill(&skill.name, repo).is_ok() {
         return Ok(None);
@@ -1453,13 +1453,13 @@ mod tests {
 
     #[test]
     fn load_skill_finds_builtin_skill() {
-        // Builtin skills like "debug", "implement" should be available everywhere
+        // Builtin skills like "unbreak", "implement" should be available everywhere
         let tmp = TempDir::new().unwrap();
 
-        let result = load_skill("debug", tmp.path());
+        let result = load_skill("unbreak", tmp.path());
         assert!(
             result.is_ok(),
-            "builtin 'debug' skill should be found: {:?}",
+            "builtin 'unbreak' skill should be found: {:?}",
             result.err()
         );
     }
@@ -1576,10 +1576,10 @@ Design the feature.
     #[test]
     fn load_flow_finds_builtin_flow() {
         let tmp = TempDir::new().unwrap();
-        let result = load_flow("build", tmp.path());
+        let result = load_flow("code", tmp.path());
         assert!(
             result.is_ok(),
-            "builtin 'build' flow should be found: {:?}",
+            "builtin 'code' flow should be found: {:?}",
             result.err()
         );
     }
@@ -1611,6 +1611,43 @@ Design the feature.
             find_skill_source_path("my-tool", tmp.path()),
             Some(skill_path)
         );
+    }
+
+    #[test]
+    fn incident_repairs_investigates_and_plans_without_expanding_delivery() {
+        let tmp = TempDir::new().unwrap();
+        let steps = expand_flow(&load_flow("incident", tmp.path()).unwrap(), tmp.path()).unwrap();
+        let names: Vec<_> = steps
+            .iter()
+            .map(|step| match step {
+                ConcreteStep::Skill(step) => step.skill.name.as_str(),
+                _ => panic!("incident should contain only repair, analysis and planning"),
+            })
+            .collect();
+        assert_eq!(names, ["unbreak", "5whys", "launch-plan"]);
+    }
+
+    #[test]
+    fn vsm_operation_captures_five_functions_without_a_loop() {
+        let tmp = TempDir::new().unwrap();
+        let steps =
+            expand_flow(&load_flow("vsm-operate", tmp.path()).unwrap(), tmp.path()).unwrap();
+        let names: Vec<_> = steps
+            .iter()
+            .map(|step| {
+                let ConcreteStep::Skill(step) = step else {
+                    panic!("VSM should contain only its five skills");
+                };
+                assert_eq!(step.flow_parents, ["vsm-operate"]);
+                assert!(!step.policy.human);
+                assert!(step.policy.repeat.is_none());
+                let content = step.skill.content.as_ref().unwrap();
+                assert!(content.contains("lf wave list --current --json"));
+                assert!(content.contains("LF_FLOW_STEP"));
+                step.skill.name.as_str()
+            })
+            .collect();
+        assert_eq!(names, ["s1", "s2", "s3", "s4", "s5"]);
     }
 
     #[test]
@@ -1892,7 +1929,7 @@ Design the feature.
                         m.insert(
                             "fix".to_string(),
                             XorPath {
-                                flow: Some("build".to_string()),
+                                flow: Some("code".to_string()),
                                 skill: None,
                                 steps: Vec::new(),
                                 description: "Fix it".to_string(),

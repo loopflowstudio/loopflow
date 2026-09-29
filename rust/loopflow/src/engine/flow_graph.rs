@@ -353,6 +353,69 @@ mod tests {
     }
 
     #[test]
+    fn retained_flows_keep_their_delivery_and_review_boundaries() {
+        let repo = tempfile::tempdir().unwrap();
+        let cases: &[(&str, &[&str], &[usize], usize)] = &[
+            ("code", &["implement", "compress"], &[], 0),
+            ("queue", &["compress", "rebase", "realign", "gate"], &[], 0),
+            ("refresh", &["rebase", "realign"], &[], 0),
+            ("task-design", &["kickoff", "review-design"], &[1], 0),
+            ("incident", &["unbreak", "5whys", "launch-plan"], &[], 0),
+            (
+                "pursue",
+                &[
+                    "implement",
+                    "compress",
+                    "rebase",
+                    "realign",
+                    "loop-decide",
+                    "pr-publish",
+                    "demo",
+                    "loop-decide",
+                ],
+                &[6],
+                2,
+            ),
+            ("deploy", &["gate", "pr land"], &[], 0),
+            ("ship", &["gate", "pr land -c"], &[], 0),
+            ("ship-demo", &["gate", "demo", "pr land -c"], &[1], 0),
+            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
+        ];
+        for (name, labels, humans, returns) in cases {
+            let flow = load_flow(name, repo.path()).unwrap();
+            let graph = FlowGraph::new(*name, &expand_flow(&flow, repo.path()).unwrap());
+            assert_eq!(
+                graph
+                    .steps
+                    .iter()
+                    .map(|s| s.label.as_str())
+                    .collect::<Vec<_>>(),
+                *labels,
+                "{name}"
+            );
+            assert_eq!(
+                graph
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, s)| s.human.then_some(i))
+                    .collect::<Vec<_>>(),
+                *humans,
+                "{name}"
+            );
+            assert_eq!(
+                graph
+                    .steps
+                    .iter()
+                    .filter(|s| s.returns_to.is_some())
+                    .count(),
+                *returns,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn refresh_integrates_upstream_before_realigning() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("refresh", repo.path()).unwrap();

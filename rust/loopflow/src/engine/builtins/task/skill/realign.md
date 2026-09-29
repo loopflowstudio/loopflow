@@ -7,7 +7,7 @@ action_style: procedural
 Bring the plan and the implementation into agreement with what the work has taught us.
 
 1. Recover the intended outcome, accepted constraints, and current approach
-   from the supplied conversation, plan, and relevant code. Read existing
+   from the supplied conversation, review feedback, plan, and relevant code. Read existing
    evidence and inspect the affected behavior. Use the context available;
    do not require a Task, branch, previous pass, or particular document layout.
    When the work identifies a Wave, read its objective and `wave/<name>/MEMORY.md`

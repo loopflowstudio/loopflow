@@ -5738,13 +5738,6 @@ mod tests {
                 .unwrap(),
             3
         );
-
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for flow in ["slice", "slice", "ship-5whys"] {
-            let invocation = crate::engine::invocation::QueuedInvocation::load(&repo, flow)
-                .expect("every repaired persisted loop flow resolves");
-            assert_eq!(invocation.flow, flow);
-        }
     }
 
     #[test]

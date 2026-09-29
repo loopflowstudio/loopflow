@@ -784,15 +784,17 @@ mod tests {
     #[test]
     fn bare_names_prefer_skills_including_lifecycle_names() {
         let tmp = TempDir::new().expect("tempdir");
-        for name in ["design", "launch-plan", "ship-5whys", "implement"] {
+        for name in ["design", "launch-plan", "debug", "unbreak", "implement"] {
             assert!(
                 matches!(discover_target(tmp.path(), name).unwrap(), Target::Skill(_)),
                 "{name}"
             );
         }
-        assert!(matches!(
-            discover_target(tmp.path(), "code").unwrap(),
-            Target::Flow(_)
-        ));
+        for name in ["code", "incident", "feature", "vsm-operate"] {
+            assert!(
+                matches!(discover_target(tmp.path(), name).unwrap(), Target::Flow(_)),
+                "{name}"
+            );
+        }
     }
 }

@@ -99,7 +99,7 @@ fn builtin_catalog_uses_slashes_for_ownership_and_never_underscores() {
     let skill_names = builtin_skill_names();
     assert!(skill_names.contains(&"wave/operate"));
     assert!(!skill_names.iter().any(|name| name.starts_with("project/")));
-    assert!(skill_names.contains(&"task/mutate"));
+    assert!(skill_names.contains(&"implement"));
     assert!(skill_names.iter().all(|name| !name.contains('_')));
     assert!(builtin_flow_names().iter().all(|name| !name.contains('_')));
 }
@@ -193,11 +193,11 @@ fn repo_skill_shadows_builtin() {
     let repo = TempDir::new().expect("repo");
     let skills_dir = repo.path().join(".lf/skills");
     std::fs::create_dir_all(&skills_dir).expect("create skills dir");
-    std::fs::write(skills_dir.join("review.md"), "# review").expect("write skill");
+    std::fs::write(skills_dir.join("qa.md"), "# qa").expect("write skill");
 
     let (user_skills, _global, builtin_only, _skills) = list_all_skills(Some(repo.path()));
-    assert!(user_skills.contains(&"review".to_string()));
-    assert!(!builtin_only.contains(&"review".to_string()));
+    assert!(user_skills.contains(&"qa".to_string()));
+    assert!(!builtin_only.contains(&"qa".to_string()));
 }
 
 #[test]
@@ -212,7 +212,7 @@ fn discover_target_finds_skill() {
 fn discover_target_finds_flow() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let target = discover_target(repo.path(), "build").expect("should find builtin flow");
+    let target = discover_target(repo.path(), "code").expect("should find builtin flow");
     assert!(matches!(target, Target::Flow(_)));
 }
 

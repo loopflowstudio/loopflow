@@ -5,6 +5,71 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Skill reduction decisions (2026-09-28)
+
+Jack reported uncertainty among repair and implementation entry points and
+requested a smaller library. Preserve useful operations before composing
+process, consistent with Intelligence's
+[realign direction](../intelligence/MEMORY.md#reconciliation-and-reusable-skills-branch-evidence-2026-09-28).
+Design draws out intent; kickoff turns that intent into an implementation plan
+and remains the first product-Task step. Jack confirmed code stops locally,
+pursue at reviewed progress, and feature after kickoff/design review, pursue,
+queue and Task-completing landing. These endpoints must stay distinguishable.
+
+Jack subsequently requested bringing debug back and making it the default in
+demos and examples. Debug investigates a reported failure and fixes its cause;
+unbreak prioritizes restoring the broken workflow.
+This distinction is the implementation interpretation of that request, not a
+new distinction explicitly stated by Jack. Neither requires clipboard input.
+Explicit systemic causal investigation stays 5whys. Incident composes
+unbreak → 5whys → launch-plan; launch-plan is a planning skill, with no same-named
+landing Flow. Expand is removed. Reduce and polish stay optional surveys; Jack
+has not selected their removal or conversion into editing passes. Research also
+answers conversational codebase questions. Realign owns memory reconciliation;
+PR authorship belongs to pr-message and delivery commands consume it.
+
+The local consolidation applies
+[Retire duplicate memory skills · PR #1319](https://github.com/loopflowstudio/loopflow/pull/1319)
+and removes the older Task-specific and governance report pipelines. QA selects
+proof from the affected behavior and repairs authorized defects; an independent
+audit stays read-only. Delivery skills leave mechanics to lf and retain separate
+publication, reviewer-owned merge, bare landing and Task-completing landing.
+Retained launch history supports prioritizing code, queue, design, ci-fix and
+review-open-work; missing history does not establish disuse or caller authorship.
+
+Jack requested single S1–S5 skills and clarified that their sequence is VSM.
+The source `vsm-operate` Flow composes five sequential agent invocations for
+delivery, coordination, capacity, adaptation and identity. Each skill can
+investigate and act independently; one shared pass note carries evidence forward.
+Repository scope remains the default despite ambient Wave attribution, unless
+the request narrows it. Whether `wave/operate` uses that sequence remains open;
+its separate operation is retained. Jack's “soften, dont harden” correction
+rejects turning “one or two useful moves” into a numeric cap. No action is valid.
+Task findings can challenge Wave purpose and Wave findings repository direction;
+accepted decisions return to affected owners without acquiring another control
+authority or making operation a prerequisite for independent Tasks.
+
+The direct finite passes used installed reads on September 28 local time
+(September 29 UTC). The repository roster crossed the invocation's Product
+attribution, but chapter/Task reads were unavailable. That was incomplete
+planning evidence, not an empty backlog or permission to rotate a chapter.
+The cross-Wave judgment reconciled Product usability, Intelligence's reusable
+instructions and Infrastructure's execution boundaries; Jack's accepted direction
+was returned to this local memory. It did not demonstrate a launched VSM Flow
+or a planning write.
+
+The [committed design](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation.md)
+and [evidence record](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation-evidence.md)
+preserve the source decisions, scenario simulations and verification limits.
+Private-Home checks covered catalog/export pruning with personal overrides,
+Flow endpoints and review returns, assembled prompts, alignment and docs;
+formatting and all-target Clippy passed. Compression's focused proof passed
+26 Rust and four Python checks. These are recorded branch checks, not new
+configured acceptance. Five-step VSM scope/evidence handoff and the incident
+handoff still need configured proof. Installed adoption, live planning changes
+and delivery are not established by this consolidation; no prompting-outcome
+KR or external-product progress is earned by source checks alone.
+
 ## Named participants and review feedback (curated 2026-09-25)
 
 Curated from the retired [name-attribution record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/name-attribution.md)

@@ -1,6 +1,6 @@
 ---
-requires: scratch/<branch>.md
-produces: one core for this Task | live follow-up Tasks
+requires: a design or findings that may warrant implementation
+produces: an execution decision and any authorized Task handoffs
 action_style: procedural
 ---
 Turn the design into an execution decision using the Task controls that already
@@ -8,14 +8,24 @@ exist. Do not create a manifest, receipt, marker, or new planning state.
 
 ## Orientation
 
-Read the design, Task directive, current Work state, and repo guide. Consult
-Wave chapter state only when the seed identifies it.
+Read the supplied design or findings, repo guide, and any named Task's current
+state. Consult Wave chapter state only when the seed identifies it.
+
+Choose what is worth implementing before allocating work. Incident findings may
+justify prevention, more investigation, or no further work. Preserve unresolved
+evidence and distinguish proposals from accepted scope. Reuse existing Tasks for
+the same outcome; do not create a prevention project merely to fill a Flow step.
+When no useful change remains, record that decision and finish.
+
+A standalone invocation need not already have a Task. Use the existing-design
+handoff below for selected work, retaining unresolved ownership or authorization
+as an explicit next decision. Never launch a competing worker into active work.
 
 ## Decide what stays here
 
 Choose the ambitious single-threaded core whose implementation will settle the
 contract for the rest of the work. Keep that core in this Task and describe its
-boundary clearly enough for the following `implement` step. Avoid scaffolding:
+boundary clearly enough for implementation. Avoid scaffolding:
 the core should ship useful end-to-end behavior in this PR.
 
 ## Decide what becomes Tasks
@@ -89,8 +99,8 @@ whose explicit edge also targets implement. The `feature` Flow
 retains the initial design review. Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after `scratch/` is cleared.
 
-Finish with a short accounting of the core retained here, Tasks launched, and
-follow-ups intentionally deferred.
+Finish with a short accounting of the selected work and its design/evidence
+path, Tasks launched, and follow-ups intentionally deferred.
 
 ## Existing-design handoff
 

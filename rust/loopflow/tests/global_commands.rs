@@ -147,7 +147,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 }
 
 #[test]
-fn missing_repository_and_missing_home_are_distinct() {
+fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
     let output = command(home.path(), cwd.path(), &["rebase", "--plan"])
@@ -158,8 +158,16 @@ fn missing_repository_and_missing_home_are_distinct() {
     let output = command(home.path(), cwd.path(), &["home", "id"])
         .output()
         .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("initialized local store"));
+    let identity = success(output);
+    assert!(!identity.trim().is_empty());
+    let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
+    let commands: i64 = database
+        .query_row("SELECT count(*) FROM execs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        commands, 2,
+        "the failed rebase and Home read each own an Exec"
+    );
     let output = command(
         home.path(),
         cwd.path(),

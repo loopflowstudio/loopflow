@@ -1818,18 +1818,21 @@ mod tests {
     }
 
     #[test]
-    fn installed_development_home_keeps_chapters_when_its_draft_is_released() {
-        let conn = chapter_development_home();
+    fn installed_development_home_keeps_projects_when_its_drafts_are_released() {
+        let conn = project_development_home();
         let receipt: String = conn
-            .query_row("SELECT receipt FROM wave_chapters", [], |r| r.get(0))
+            .query_row("SELECT project_prompt_context FROM projects", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert!(validate_installed_development_sqlite(&conn, &[]).is_err());
         apply_installed_development_sqlite(&conn, &[]).unwrap();
         validate_installed_development_sqlite(&conn, &[]).unwrap();
         assert_eq!(
-            conn.query_row("SELECT receipt FROM wave_chapters", [], |r| r
-                .get::<_, String>(0))
-                .unwrap(),
+            conn.query_row("SELECT project_prompt_context FROM projects", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
             receipt
         );
         assert!(_applied_development_migrations(&conn).unwrap().is_empty());
@@ -1837,8 +1840,7 @@ mod tests {
         apply_installed_development_sqlite(&conn, &[]).unwrap();
         assert_eq!(applied_versions(&conn).unwrap(), history);
         assert_eq!(
-            conn.query_row("SELECT COUNT(*) FROM wave_chapters", [], |r| r
-                .get::<_, i64>(0))
+            conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
             1
         );
@@ -1846,7 +1848,7 @@ mod tests {
 
     #[test]
     fn installed_development_release_keeps_unreleased_drafts() {
-        let conn = chapter_development_home();
+        let conn = project_development_home();
         let draft = development_draft(
             "22222222222222222222222222222222",
             "chapter_annotation",
@@ -1891,9 +1893,9 @@ mod tests {
     #[test]
     fn installed_development_release_rejects_changed_evidence_without_losing_data() {
         for schema_changed in [false, true] {
-            let conn = chapter_development_home();
+            let conn = project_development_home();
             if schema_changed {
-                conn.execute_batch("ALTER TABLE wave_chapters ADD COLUMN unexpected TEXT;")
+                conn.execute_batch("ALTER TABLE projects ADD COLUMN unexpected TEXT;")
                     .unwrap();
             } else {
                 conn.execute("UPDATE development_migrations SET checksum = 'changed'", [])
@@ -1907,15 +1909,14 @@ mod tests {
             assert_eq!(_applied_development_migrations(&conn).unwrap(), drafts);
             assert_eq!(product_schema(&conn).unwrap(), schema);
             assert_eq!(
-                conn.query_row("SELECT COUNT(*) FROM wave_chapters", [], |r| r
-                    .get::<_, i64>(0))
+                conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get::<_, i64>(0))
                     .unwrap(),
                 1
             );
         }
     }
 
-    fn chapter_development_home() -> rusqlite::Connection {
+    fn project_development_home() -> rusqlite::Connection {
         let conn = open();
         let (index, _, _) = draft_location("wave_chapters");
         apply_set(&conn, &MIGRATIONS[..index]).unwrap();
@@ -1944,8 +1945,8 @@ mod tests {
         }
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at) VALUES ('demo-wave', 'product', '/repo', 1);
-             INSERT INTO wave_chapters (wave_id, chapter_id, project_id, current, receipt)
-             VALUES ('demo-wave', 'accepted-chapter', 'provider-project', 1,
+             INSERT INTO projects (id, wave_id, external_project_id, created_at, project_prompt_context)
+             VALUES ('retained-project', 'demo-wave', 'provider-project', 1,
                      '{\"phase\":\"complete\",\"authored\":\"preserve the original plan\"}');"
         ).unwrap();
         conn
@@ -2197,7 +2198,7 @@ mod tests {
             .any(|column| { matches!(column.as_str(), "status" | "status_reason" | "status_at") }));
         assert!(!columns(&conn, "projects")
             .iter()
-            .any(|column| { matches!(column.as_str(), "status" | "status_reason" | "status_at") }));
+            .any(|column| { matches!(column.as_str(), "status_reason" | "status_at") }));
         for table in ["projects", "tasks"] {
             let names = columns(&conn, table);
             assert!(!names.iter().any(|name| name == "current_directive_version"));

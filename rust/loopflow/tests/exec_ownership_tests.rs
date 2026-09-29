@@ -123,6 +123,15 @@ async fn command_failure_records_the_process_result() {
         let result = command(home.path(), repo.path(), &args).output().unwrap();
         assert_eq!(result.status.code(), Some(1), "{result:?}");
     }
+    std::fs::write(repo.path().join("change.txt"), "retained work").unwrap();
+    let lock = repo.path().join(".git/index.lock");
+    std::fs::write(&lock, "retained lock").unwrap();
+    let result = command(home.path(), repo.path(), &["commit", "-m", "fixture"])
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1), "{result:?}");
+    assert!(String::from_utf8_lossy(&result.stderr).contains("index.lock"));
+    assert_eq!(std::fs::read_to_string(lock).unwrap(), "retained lock");
     let conn = rusqlite::Connection::open(database).unwrap();
     let row: (String, i32) = conn
         .query_row("SELECT outcome,exit_code FROM execs", [], |row| {
@@ -138,8 +147,8 @@ async fn command_failure_records_the_process_result() {
         )
         .unwrap();
     assert_eq!(
-        failed, 2,
-        "resolution failures and dispatch failures are both commands"
+        failed, 3,
+        "resolution, dispatch and delivery failures retain their command outcomes"
     );
 }
 

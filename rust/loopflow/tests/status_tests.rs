@@ -443,12 +443,29 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     let home = tempfile::tempdir().expect("tempdir");
     let project = seed_credential_history(home.path());
     let status = status_json(home.path(), &["infrastructure"], None);
-    assert!(status.get("projects").is_none());
-    assert_eq!(
-        status["chapter"]["source_project_id"],
-        project.plan.id.as_str()
-    );
-    assert_eq!(status["tasks"]["items"], serde_json::json!([]));
+    let roadmap = roadmap_json(home.path(), "infrastructure");
+    let expected_projects = serde_json::json!({
+        "state": "ok",
+        "items": [{
+            "id": project.plan.id.as_str(),
+            "work_id": project.id.as_str(),
+            "slug": project.plan.slug,
+            "name": project.plan.name,
+            "flow": "feature",
+            "status": "started",
+            "metric_targets": [],
+            "krs": [{"text": "Current state and history stay distinct", "holds": false}]
+        }],
+        "truncated": false
+    });
+    for view in [&status, &roadmap["waves"][0]] {
+        assert_eq!(view["projects"], expected_projects);
+        assert_eq!(view["wave"]["status"], "ready");
+        assert_eq!(view["tasks"]["state"], "ok");
+        assert_eq!(view["tasks"]["items"], serde_json::json!([]));
+        assert_eq!(view["unavailable_tasks"], serde_json::json!([]));
+        assert!(!view.to_string().contains("credential"));
+    }
     let human = status_human(home.path(), "infrastructure");
     assert!(!human.contains("credential"));
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
@@ -680,13 +697,27 @@ Count dispatched Task loops that settle without rescue.
     assert_eq!(status_metric["freshness"]["kind"], "fresh");
     assert_eq!(status_metric["evidence"]["kind"], "met");
     assert_eq!(status_metric["evidence"]["value"], 1.0);
-    assert_eq!(status["chapter"]["krs"][0]["holds"], false);
+    assert_eq!(status["projects"]["state"], "ok");
+    let projects = status["projects"]["items"].as_array().unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["id"], project_payload["projects"][0]["id"]);
+    assert_eq!(projects[0]["status"], "started");
+    assert_eq!(projects[0]["krs"], project_payload["projects"][0]["krs"]);
+    assert_eq!(
+        projects[0]["metric_targets"],
+        project_payload["projects"][0]["metric_targets"]
+    );
+    assert_eq!(roadmap["waves"][0]["projects"], status["projects"]);
     assert_eq!(
         roadmap["waves"][0]["metric_portfolio"],
         status["metric_portfolio"]
     );
 
     let human = status_human(home.path(), "product");
+    assert!(
+        human.contains("[ ] Task loops earn trust for one week"),
+        "{human}"
+    );
     assert!(human.contains("Task loops earn trust  [met]"), "{human}");
     assert!(
         human.contains("Value 100.00% · Target >= 100.00% over 7d"),
@@ -727,8 +758,14 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         let roadmap = roadmap_json(home.path(), "product");
         let wave = &roadmap["waves"][0];
         for view in [&status, wave] {
-            assert!(view.get("projects").is_none());
-            assert_eq!(view["chapter"]["source_project_slug"], "auditability");
+            assert_eq!(view["projects"]["state"], "ok");
+            assert_eq!(view["projects"]["truncated"], false);
+            let projects = view["projects"]["items"].as_array().unwrap();
+            assert_eq!(projects.len(), 1);
+            assert_eq!(projects[0]["id"], "95159066-9098-4d0b-8903-01459dc7ec14");
+            assert_eq!(projects[0]["slug"], "auditability");
+            assert_eq!(projects[0]["status"], "started");
+            assert_eq!(projects[0]["flow"], "feature");
             assert_eq!(view["tasks"]["state"], "ok");
             assert_eq!(view["tasks"]["items"].as_array().unwrap().len(), 1);
             assert_eq!(view["tasks"]["items"][0]["task"]["identifier"], "PRD-52");
@@ -743,6 +780,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
                 .unwrap()
                 .contains(PERSISTED_TASK_ID));
         }
+        assert_eq!(wave["projects"], status["projects"]);
         assert_eq!(wave["unavailable_tasks"], status["unavailable_tasks"]);
     }
 }

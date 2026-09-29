@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::child::ChildRef;
 use crate::durable::{FlowSession, Steer, TaskWorkerClaim, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
@@ -376,7 +376,6 @@ impl StepLauncher for TaskLauncher {
         });
         let _comment_refresh = CommentRefresh(comment_refresh);
         let mut last_text = String::new();
-        let mut command_failures = Vec::new();
         // Steers land as durable comments on this Work; a live turn injects any that
         // arrive after its seed was folded. The initial cursor comes from that exact
         // snapshot, so a comment landing between preparation and TurnStarted cannot
@@ -417,30 +416,6 @@ impl StepLauncher for TaskLauncher {
                     capture.record_conversation(event.clone());
                     match event {
                         ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
-                        ConversationEvent::TurnStarted { .. } => {
-                            command_failures.clear();
-                        }
-                        ConversationEvent::ItemCompleted { item, .. } => {
-                            if let ConversationItem::Command {
-                                command,
-                                status,
-                                output,
-                                exit_code,
-                                ..
-                            } = &item
-                            {
-                                if let Some(failure) = completed_boundary_failure(
-                                    command,
-                                    *status,
-                                    output.as_deref(),
-                                    *exit_code,
-                                ) {
-                                    if !command_failures.contains(&failure) {
-                                        command_failures.push(failure);
-                                    }
-                                }
-                            }
-                        }
                         ConversationEvent::TurnCompleted { status, .. } => {
                             let _ = harness.stop().await;
                             if status == Lifecycle::Failed {
@@ -453,11 +428,6 @@ impl StepLauncher for TaskLauncher {
                                     None => (reason, true),
                                 };
                                 return Err(fail(&reason, retryable));
-                            }
-                            if let Some(reason) =
-                                execution_blocker_at_handoff(status, &command_failures)
-                            {
-                                return Err(fail(&reason, false));
                             }
                             return match status {
                                 Lifecycle::Interrupted => {
@@ -483,7 +453,9 @@ impl StepLauncher for TaskLauncher {
                             let _ = harness.stop().await;
                             return Err(fail(&reason, retryable));
                         }
-                        ConversationEvent::ItemStarted { .. }
+                        ConversationEvent::TurnStarted { .. }
+                        | ConversationEvent::ItemCompleted { .. }
+                        | ConversationEvent::ItemStarted { .. }
                         | ConversationEvent::ItemUpdated { .. }
                         | ConversationEvent::ReasoningDelta { .. }
                         | ConversationEvent::DiffUpdated { .. }
@@ -763,55 +735,6 @@ fn provider_credential_blocker(detail: &str) -> Option<String> {
     })
 }
 
-fn completed_boundary_failure(
-    command: &[String],
-    status: Lifecycle,
-    output: Option<&str>,
-    exit_code: Option<i32>,
-) -> Option<String> {
-    if status != Lifecycle::Failed && exit_code.is_none_or(|code| code == 0) {
-        return None;
-    }
-    let output = output?;
-    let lower = output.to_ascii_lowercase();
-    if ![
-        "operation not permitted",
-        "permission denied",
-        "read-only file system",
-        "network access is disabled",
-        "network is unreachable",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-    {
-        return None;
-    }
-    let command = command.join(" ");
-    let detail = output
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .unwrap_or("no command error output");
-    let detail = detail.chars().take(1_000).collect::<String>();
-    let exit = exit_code
-        .map(|code| format!(" (exit {code})"))
-        .unwrap_or_default();
-    Some(format!("`{command}` failed{exit}: {detail}"))
-}
-
-fn execution_blocked_reason(failures: &[String]) -> String {
-    format!(
-        "Task execution boundary is blocked:\n- {}\nCorrect the named filesystem, control-plane, or network capability before starting a new Run.",
-        failures.join("\n- ")
-    )
-}
-
-fn execution_blocker_at_handoff(status: Lifecycle, failures: &[String]) -> Option<String> {
-    (status == Lifecycle::Completed && !failures.is_empty())
-        .then(|| execution_blocked_reason(failures))
-}
-
 fn task_seed(
     task: &Task,
     project: &ProjectPlan,
@@ -870,10 +793,7 @@ impl Drop for TestLfBinGuard {
 
 #[cfg(test)]
 mod planning_tests {
-    use super::{
-        completed_boundary_failure, execution_blocker_at_handoff, task_seed,
-        unhandled_failure_receipt,
-    };
+    use super::{task_seed, unhandled_failure_receipt};
     use crate::chat::types::Lifecycle;
     use crate::durable::{
         Author, FlowSession, RunId, TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner,
@@ -1138,6 +1058,18 @@ mod planning_tests {
         expected_input: Option<(Vec<&'static str>, std::sync::Arc<tokio::sync::Notify>)>,
     }
 
+    fn review_commands() -> Vec<crate::chat::types::ConversationItem> {
+        [
+            ("inspect-history", "saved fixture: operation not permitted: ps\nAttributeError: 'list' object has no attribute 'get'", 1),
+            ("delivery", "fatal: cannot create index.lock: Permission denied", 128),
+            ("delivery-retry", "committed", 0),
+        ].into_iter().map(|(id, output, exit_code)| crate::chat::types::ConversationItem::Command {
+            id: id.into(), command: vec![id.into()], cwd: "/fixture".into(),
+            status: if exit_code == 0 { Lifecycle::Completed } else { Lifecycle::Failed },
+            output: Some(output.into()), exit_code: Some(exit_code), duration_ms: Some(1),
+        }).collect()
+    }
+
     #[async_trait::async_trait]
     impl Harness for SliceHarness {
         async fn start(&mut self, config: &AgentConfig) -> anyhow::Result<()> {
@@ -1243,6 +1175,15 @@ mod planning_tests {
                 assert!(content.contains("repair the demonstrated gap"));
             }
             let actor = self.store.sqlite.test_flow_turn(&run);
+            if step.step == "concept-review" {
+                for item in review_commands() {
+                    self.events
+                        .send(crate::chat::types::ConversationEvent::ItemCompleted {
+                            turn_id: "fixture-turn".into(),
+                            item,
+                        })?;
+                }
+            }
             if routing {
                 assert!(content.contains("lf flow route"));
                 self.store
@@ -1599,6 +1540,14 @@ mod planning_tests {
                     let session = crate::run_record::read_provider_session(&dir).unwrap().unwrap();
                     assert_eq!(session.provider_session_id, "task-provider-session");
                     assert_eq!(session.account_id.unwrap().as_str(), "selected-account");
+                }
+                for (_, run) in turns.iter().filter(|(step, _)| step == "concept-review") {
+                    let (dir, _) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
+                    let events = std::fs::read_to_string(dir.join("events.jsonl")).unwrap();
+                    let commands = events.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                        .filter(|event| event["type"] == "conversation" && event["event"]["type"] == "item_completed")
+                        .map(|event| event["event"]["item"].clone()).collect::<Vec<_>>();
+                    assert_eq!(commands, review_commands().into_iter().map(|item| serde_json::to_value(item).unwrap()).collect::<Vec<_>>());
                 }
                 assert_eq!(turns.iter().map(|(step, _)| step.as_str()).collect::<Vec<_>>(),
                     ["xor-route", "implement", "compress", "realign", "concept-review", "loop-decide", "implement", "compress", "realign", "concept-review", "loop-decide"]);
@@ -2580,50 +2529,6 @@ mod planning_tests {
         assert!(position.current_attempt.is_none());
         assert_eq!(position.cursor, initial.cursor);
         assert!(store.task_started(&task.id).await.unwrap());
-    }
-
-    #[test]
-    fn normal_task_completion_preserves_delivery_permission_and_run_network_failures() {
-        let commit = completed_boundary_failure(
-            &["lf".into(), "commit".into(), "-m".into(), "ship".into(), "-p".into()],
-            Lifecycle::Failed,
-            Some(
-                "fatal: Unable to create '/repo/.git/worktrees/task/index.lock': Operation not permitted",
-            ),
-            Some(128),
-        )
-        .unwrap();
-        let run = completed_boundary_failure(
-            &[
-                "lf".into(),
-                "--as".into(),
-                "project:proj_1".into(),
-                ":".into(),
-                "Review this".into(),
-            ],
-            Lifecycle::Failed,
-            Some("network access is disabled by policy"),
-            Some(1),
-        )
-        .unwrap();
-        let reason = execution_blocker_at_handoff(Lifecycle::Completed, &[commit, run])
-            .expect("normal task_complete with unresolved capability failures is blocked");
-
-        assert!(reason.contains(".git/worktrees/task/index.lock"));
-        assert!(reason.contains("Operation not permitted"));
-        assert!(reason.contains("network access is disabled by policy"));
-        assert!(reason.contains("before starting a new Run"));
-    }
-
-    #[test]
-    fn ordinary_failed_probe_is_not_an_execution_boundary_blocker() {
-        assert!(completed_boundary_failure(
-            &["rg".into(), "missing-pattern".into()],
-            Lifecycle::Failed,
-            Some(""),
-            Some(1),
-        )
-        .is_none());
     }
 
     #[test]

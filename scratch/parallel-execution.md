@@ -151,6 +151,18 @@ retain paired stale-child rejection and valid-retry failure, and the smallest
 concrete proposal requirement in `native-turn-retry-tradeoff.md` before expanding
 provider machinery. This checkpoint does not complete iteration 10 or LOO-298.
 
+Publication reached `f60fcb3ded` on base `5402d9397`, with matching GitHub/Task
+head and no auto-merge. Main then advanced to `7c2f53b9e`; pinned `lf` rebase
+integrated its ownership-before-payload behavior without restoring manifest
+selection authority. The current SQL query already selects Work and exact caller
+before hydration. Focused proof retains inherited Task identity after Project
+rename, 56 exact children beyond the presentation cap, inclusive dates, usage,
+partial evidence and activity's start-or-finish window. Two checks passed first;
+the third exposed reliance on ambient database initialization in its fixture.
+Explicit ephemeral-store creation fixes that setup and the single rerun passes
+(`admission-rebase-1337` and `admission-rebase-1337-window`). Historical readers
+remain transitional; these results do not cover newly admitted zero-Run history.
+
 ## Decision pass 10 · 2026-09-28
 
 Reassessment after the completed operational unblock in

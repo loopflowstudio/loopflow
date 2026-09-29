@@ -626,10 +626,6 @@ pub(crate) fn resolve_manifest(
 pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
     let manifest = read_manifest(dir)?;
     validate_manifest_path(dir, &manifest)?;
-    project_run(dir, manifest)
-}
-
-fn project_run(dir: &Path, manifest: RunManifest) -> std::io::Result<RunSnapshot> {
     let mut evidence_gaps = usize::from(
         !dir.join("prepared").is_file() && !context_ref_is_valid(dir, manifest.context.as_ref()),
     );

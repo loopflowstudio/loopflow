@@ -101,14 +101,6 @@ const COMMANDS: &[Cmd] = &[
         kind: Kind::Read,
         global_default: true,
     },
-    Cmd {
-        id: "wave history",
-        path: &["wave", "history"],
-        base_args: &["wave", "history", "--json"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Read,
-        global_default: false,
-    },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
         id: "wave connect",
@@ -145,14 +137,6 @@ const COMMANDS: &[Cmd] = &[
         id: "task create",
         path: &["task", "create"],
         base_args: &["task", "create", "--title", "Fixture task"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        global_default: false,
-    },
-    Cmd {
-        id: "wave new-chapter",
-        path: &["wave", "new-chapter"],
-        base_args: &["wave", "new-chapter", "--chapter", "next", "--dry-run"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         global_default: false,

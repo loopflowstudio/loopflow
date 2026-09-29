@@ -1683,7 +1683,12 @@ fn import_stores_each_old_session_once_with_its_name() {
         assert_eq!(report["tasks_started"], json!([sibling.id]), "{report}");
         let failed = report["failed"].as_array().unwrap();
         assert_eq!(failed.len(), 1, "{report}");
-        assert_eq!(failed[0]["path"], json!(broken.canonicalize().unwrap()));
+        assert_eq!(
+            std::path::Path::new(failed[0]["path"].as_str().unwrap())
+                .canonicalize()
+                .unwrap(),
+            broken.canonicalize().unwrap()
+        );
         assert!(!failed[0]["reason"].as_str().unwrap().is_empty());
     }
     let again = fixture.json(&["session", "import", "--json"]);
@@ -1940,7 +1945,14 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(membership(&step), (Some(invocation.clone()), None, None));
+    assert_eq!(
+        membership(&step),
+        (
+            Some(invocation.clone()),
+            Some(fixture.session_row(&step).0),
+            None
+        )
+    );
     assert_eq!(
         fixture.run_parents(&step),
         (None, Some(wave_id.clone()), declared.clone())

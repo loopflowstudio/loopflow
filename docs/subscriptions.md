@@ -110,9 +110,10 @@ lf auth status --details --json      # sources, saved browsers, full timestamps
 Status lists stable account IDs beside full usable logins. Managed accounts and
 local service credentials have separate sections: an expired local token says
 nothing about a managed account. Missing local tokens leave ambient auth
-uninspected. Cached inspection opens the database read-only, starts no provider,
-does not decrypt local tokens or create an encryption key, and leaves an absent
-store absent. An inherited account lease carries no cached identity catalog:
+uninspected. Cached inspection reads account state without starting a provider,
+decrypting local tokens or creating an encryption key. The CLI records the
+command's Exec in its Home; this can initialize an empty store, but creates no
+account, route or conversation. An inherited account lease carries no cached identity catalog:
 plain status reports forwarded identities as uninspected without contacting the
 origin broker. Local token metadata is cached evidence, not server acceptance;
 `--verify` reports local server verification unavailable.

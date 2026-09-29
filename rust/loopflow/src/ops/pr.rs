@@ -185,22 +185,22 @@ pub fn create_or_update_pr(
     let copy = normalize_task_pr_copy(copy, task_context.as_ref(), &lifecycle)?;
     let title = copy.title.trim();
     let body = copy.body.trim();
-    crate::ops::task::request_task_pr_publication(repo, title, body)?;
-
     if let Some(mut pr) = existing_pr {
         let info = pr_info(&branch, &pr);
         crate::ops::task::attach_task_github_pr(repo, Some(&info))?;
-        progress.status("Updating PR...");
-        update_pr(repo, info.number, title, body, &base_branch)?;
         if !draft {
             mark_pr_ready(repo, &mut pr)?;
             crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
         }
+        crate::ops::task::request_task_pr_publication(repo, title, body)?;
+        progress.status("Updating PR...");
+        update_pr(repo, info.number, title, body, &base_branch)?;
         Ok(PrResult {
             url: info.url,
             created: false,
         })
     } else {
+        crate::ops::task::request_task_pr_publication(repo, title, body)?;
         progress.status("Creating PR...");
         let url = create_pr(repo, title, body, &base_branch, draft)?;
         let acknowledged = pr_number_from_url(&url).map(|number| PrInfo {

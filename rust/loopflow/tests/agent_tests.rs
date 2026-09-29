@@ -122,7 +122,8 @@ fn launch_nonzero_exit() {
 #[test]
 fn release_acceptance_recovers_from_a_revoked_selected_account() {
     let home = TempDir::new().expect("lf home");
-    let codex = r#"#!/bin/sh
+    let codex = support::codex_socket_script(
+        r#"#!/bin/sh
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
@@ -140,9 +141,11 @@ case "$CODEX_HOME" in
     echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}';;
   *) echo "unexpected CODEX_HOME" >&2; exit 9;;
 esac
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
-"#;
-    let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
+"#,
+    );
+    let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
     let revoked_home = home.path().join("accounts/codex/revoked");
     let fallback_home = home.path().join("accounts/codex/fallback");
     std::fs::create_dir_all(&revoked_home).expect("revoked home");

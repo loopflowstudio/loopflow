@@ -5,6 +5,51 @@ Supervisor owns the other compact scratch documents. Read the full
 [contract](data-model-one-table-per.md), [remaining scope](remaining-work.md),
 [import obligations](import-preservation.md) and [evidence](evidence.md).
 
+## Implement iteration 10 · 2026-09-28
+
+Preserved the complete returned edits and review notes in a local checkpoint after
+`implement-preserve-static.log` passed formatting and all-target Clippy (20.18s).
+Pinned installed `lf rebase --plan` selected direct rebase; `lf rebase --manual`
+completed without conflicts. HEAD is `884b90be9`, base `b42d53205`, zero behind
+observed origin/main. No publication or Flow navigation followed. Session inventory
+refresh succeeded through the captured installed executable/data pair.
+
+The integrated materialized diagnostic completed: 1,925 passed, 33 failed,
+15 skipped. `implement-materialized-matrix-2.log` retains the complete first
+matrix; `implement-matrix-source.json` identifies its unfinished-owner snapshot.
+Its ordinary source copy lacked Git metadata. The corrected isolated checkout,
+created through `lf wt`, and removal of inherited `LF_DB_PATH` cleared 13 of 15
+setup-sensitive cases. The five account-first cases passed together; the evidence
+does not isolate which setup correction mattered. No full matrix was repeated.
+
+Focused repairs now pass the three populated canonical migration cases, all 11
+status tests returned by the contributor, and the affected command, import,
+publication and fixture cases. The latest three-case check has three assertion
+passes but one Nextest LEAK on failed draft promotion; process settlement is
+unproven. The managed topology/restart test passed in its disposable Docker OS
+fixture. Logs are `implement-setup-recheck`, `implement-quoted-output-red-2`,
+`implement-focused-repairs`, `implement-final-fixtures` and
+`implement-managed-topology` under `.lf/tmp/cut-i/`. No configured provider,
+installed-Home migration or full-green claim follows.
+
+The observed quoted-output case first reproduced the Task capability blocker.
+Task settlement now consumes provider/command outcomes from their owners and
+preserves tool events without interpreting quoted command text as authority.
+The existing driver proof passes with the failed inspection and failed/retried
+Git command retained. Genuine provider failure and the actual failed CLI commit
+remain separate passing checks. Existing draft promotion now succeeds before
+publishing ready copy; failure retains both local and remote draft copy.
+Production delta against `884b90be9` is +8/-85 (net -77), excluding tests/docs.
+`implement-repairs-static.log` passes fmt, all-target Clippy, Ruff and diff checks.
+
+Three original matrix failures remain in native execution: OpenCode decisions
+lack original-turn attribution (two cases), and managed retry lacks confirmed
+engine exit/connection evidence (one). The retained valid Codex decision retry
+and ordinary zero-Run CLI proofs remain red independently. Next work is the
+selected complete AgentSession admission/publication and SQL-reader conversion
+through ordinary launches, TaskLauncher, reviews and Asks. Native transport is
+separate. These diagnostic repairs do not complete the implementation slice.
+
 ## Decision pass 10 · 2026-09-28
 
 Reassessment after the completed operational unblock in

@@ -170,13 +170,21 @@ fn failed_draft_promotion_stays_draft_and_can_retry() {
         fs::read_to_string(state.with_extension("body")).unwrap(),
         draft_body
     );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let retained = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        retained.publication.unwrap().presentation.unwrap().body,
+        draft_body
+    );
 
     fs::remove_file(failure).unwrap();
     create_or_update_pr(repo.path(), &options, &NullProgress).unwrap();
     assert_eq!(current_pr(repo.path()).unwrap().unwrap().state, "open");
     let ready_body = fs::read_to_string(state.with_extension("body")).unwrap();
     assert!(ready_body.contains("published for review"));
-    let runtime = tokio::runtime::Runtime::new().unwrap();
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
         .unwrap()

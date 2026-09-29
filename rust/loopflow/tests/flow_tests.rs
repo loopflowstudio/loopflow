@@ -83,6 +83,58 @@ fn mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec() {
     );
 }
 
+#[test]
+fn mechanical_failure_retains_earlier_success_in_the_same_exec() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    write_flow(
+        repo.path(),
+        "mechanical-failure",
+        "- op: rebase --plan\n- op: __telemetry-scorecard\n",
+    );
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["flow", "mechanical-failure", "-b", "--no-loopflow"],
+        None,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("telemetry scorecard generator not found"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let outcomes: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT outcome,exec_id FROM flow_events WHERE kind='operation_completed' ORDER BY seq",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        outcomes
+            .iter()
+            .map(|(outcome, _)| outcome.as_str())
+            .collect::<Vec<_>>(),
+        vec!["completed", "failed"]
+    );
+    assert_eq!(outcomes[0].1, outcomes[1].1);
+    assert_eq!(
+        conn.query_row("SELECT outcome FROM execs", [], |row| row
+            .get::<_, String>(0))
+            .unwrap(),
+        "failed"
+    );
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM runs", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
 fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteStep> {
     let flow = load_flow(name, repo).unwrap();
     expand_flow(&flow, repo).unwrap()
@@ -1001,7 +1053,8 @@ fn historical_start_evidence_still_prevents_backlog_retirement() {
 }
 
 #[test]
-fn task_claim_starts_before_real_worker_publishes_its_run() {
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
+fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use loopflow::engine::invocation::QueuedInvocation;
     let repo = loopflow_test_support::TestRepo::new();
@@ -1057,11 +1110,31 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
         .block_on(task.store.flow(flow.id()))
         .unwrap()
         .unwrap();
-    let attempt = reserved.current_attempt.as_ref().unwrap();
-    assert!(!attempt.published);
-    assert!(runtime
+    assert!(reserved.current_attempt.is_none());
+    assert!(!runtime
         .block_on(task.store.task_started(&task.task.id))
         .unwrap());
+    let released = runtime
+        .block_on(
+            task.store
+                .release_flow(flow.id(), reserved.version, Some(&claim)),
+        )
+        .unwrap();
+    assert!(!runtime
+        .block_on(task.store.task_started(&task.task.id))
+        .unwrap());
+    let TaskWorkerClaimOutcome::Claimed(claim) = runtime
+        .block_on(task.store.claim_task_worker(
+            &task.task.id,
+            flow.id(),
+            released.version,
+            &owner,
+            time::OffsetDateTime::now_utc(),
+        ))
+        .unwrap()
+    else {
+        panic!("replacement claim");
+    };
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         db.query_row(
@@ -1080,7 +1153,7 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
     );
     let roadmap: serde_json::Value = serde_json::from_slice(&read.stdout).unwrap();
     assert_eq!(
-        roadmap["waves"][0]["tasks"]["items"][0]["runtime"]["started"], true,
+        roadmap["waves"][0]["tasks"]["items"][0]["runtime"]["started"], false,
         "{roadmap}"
     );
     // The worker resumes the captured graph after its template has gone.
@@ -1103,12 +1176,22 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let run = runtime
-        .block_on(task.store.run(&attempt.run_id))
-        .unwrap()
+    let started: i64 = db
+        .query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [task.task.id.as_str()],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert!(run.published);
-    assert_eq!(run.ended.unwrap().outcome, "completed");
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM flow_events WHERE flow_id=?1 AND kind='operation_started'",
+            [flow.id()],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
     let read = run_lf(
         repo.path(),
         home.path(),
@@ -1121,7 +1204,16 @@ fn task_claim_starts_before_real_worker_publishes_its_run() {
         String::from_utf8_lossy(&read.stderr)
     );
     let runs: serde_json::Value = serde_json::from_slice(&read.stdout).unwrap();
-    assert_eq!(runs[0]["id"], attempt.run_id.as_str());
+    assert_eq!(runs, serde_json::json!([]));
+    assert_eq!(
+        db.query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [task.task.id.as_str()],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        started
+    );
     assert!(
         runtime
             .block_on(task.store.flow(flow.id()))

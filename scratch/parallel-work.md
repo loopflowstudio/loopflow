@@ -39,19 +39,23 @@ Current control Session `run_9c16dbbe2b04440db8469e9b4964912c` has human title
 
 ## Published state and comparable size
 
-Published head `26a0270af604ac14abbd20df9a020336bee85a0a`, base
-`d9632d833c8216b00cde117656d12172eda00c2c`,
+Published head `81b57c91f6d2199e898984517af1c13faec56fab`, base
+`aab595e6ab2ca5f3ec88972ccf9c9f11458523fe`,
 [PR1296](https://github.com/loopflowstudio/loopflow/pull/1296).
 GitHub and Task publication heads matched on 2026-09-28; Task base and Git
 merge-base match the integrated main. Auto-merge is absent. Hosted run
-36507832289 completed with one Rust failure (882 passed, 1,050 unrun), scratch-clear
-and aggregate failure; all other jobs passed. The exact metric-reader failure
-is retained in evidence.md.
-Jack's docs/README-first direction is the next substantive step, before further
-owner conversion; main acknowledged it and has begun reading those pages.
+36510330745 completed with one Rust failure (928 passed, 1,007 unrun), scratch-clear
+and aggregate failure; other substantive jobs passed. The OAuth fixture failure
+and subsequent local repair are retained in evidence.md.
+Jack's docs/README-first direction is implemented in rebased checkpoint
+`12462fe51`; the metric repair follows in `1be9faed3`. Main is converting mechanical
+Flow operations to Flow history, with no Run or synthetic Exec per operation.
+The current worker is live at implement iteration 9; stale activity samples do
+not authorize recovery. The disposable-OS managed proof awaits Docker, while
+local preservation and driver checks continue.
 Refresh shared state before delivery actions.
 
-Current measured checkpoint, **26a0270af against d9632d833**, has production
+Last measured checkpoint, **26a0270af against d9632d833**, has production
 **+14,240 / −29,502 = net −15,262**: Rust/Swift+13,447/−29,446;
 Python/shell+47/−56; SQL+746/−0. Method excludes tests/docs, disables rename
 accounting, strips trailing Rust tests but retains known trailing production code.

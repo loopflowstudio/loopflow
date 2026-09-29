@@ -185,11 +185,20 @@ impl Fixture {
             .unwrap_or_else(|error| panic!("Run {run_id} has no Session row: {error}"))
     }
 
-    /// (task, wave, work_source) of one Run.
+    /// Original input attribution, independent of a later conversation binding.
     fn run_parents(&self, run_id: &str) -> (Option<String>, Option<String>, Option<String>) {
         self.db()
             .query_row(
-                "SELECT s.task_id, s.wave_id, s.work_source FROM agent_sessions s JOIN agent_session_inputs i ON i.session_id=s.id WHERE i.input_id=?1",
+                "SELECT CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE s.task_id END,
+                    CASE WHEN m.seq IS NOT NULL THEN m.wave_id ELSE s.wave_id END,
+                    CASE WHEN m.seq IS NULL THEN s.work_source
+                         ELSE coalesce(json_extract(m.payload,'$.evidence.subjects[0].source'),
+                            CASE WHEN m.task_id IS s.task_id AND m.wave_id IS s.wave_id THEN s.work_source END)
+                    END
+                 FROM agent_sessions s JOIN agent_session_inputs i ON i.session_id=s.id
+                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                    AND m.receipt_key=i.input_id||':manifest.json'
+                 WHERE i.input_id=?1",
                 [run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -830,6 +839,59 @@ fn continuing_provider_children_inherit_the_bound_session_without_rewriting_hist
     let answer = asking.wait_with_output().unwrap();
     assert!(answer.status.success(), "{answer:?}");
     assert!(String::from_utf8_lossy(&answer.stdout).contains("Keep it"));
+    // This child inherited its ancestry during admission, after the immutable
+    // manifest was authored. Preserve that source when it becomes a prior input.
+    let child_input = loopflow::durable::RunId::parse(&child_run).unwrap();
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(fixture.run_dir(&child_run).join("manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(manifest["subjects"].as_array().unwrap().is_empty());
+    let mut next = store.session_for_run(&child_input).unwrap().unwrap();
+    for replaced in [false, true] {
+        if replaced {
+            next.input_id = loopflow::durable::RunId::new();
+            next.input_published = false;
+            next = store.replace_session_input(&child_input, next).unwrap();
+            assert_eq!(
+                next.work_source,
+                Some(loopflow::session::WorkSource::Inherited)
+            );
+        }
+        for command in ["runs", "usage"] {
+            for filtered in [false, true] {
+                let mut args = vec![command, "--json"];
+                if filtered {
+                    args.extend(["--task", "INF-123"]);
+                }
+                let rows = fixture.json(&args);
+                let row = rows
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["id"] == child_run)
+                    .unwrap();
+                assert!(
+                    row["subjects"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|subject| subject["selector"] == "task:INF-123"
+                            && subject["source"] == "inherited"),
+                    "{command} filtered={filtered} replaced={replaced}: {row}"
+                );
+                if !filtered {
+                    let original = rows
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|row| row["id"] == original)
+                        .unwrap();
+                    assert!(original["subjects"].as_array().unwrap().is_empty());
+                }
+            }
+        }
+    }
     assert_eq!(fixture.run_parents(&original), (None, None, None));
     let retained: (i64, String, i64) = fixture
         .db()
@@ -2676,7 +2738,9 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
         fixture
             .db()
             .query_row(
-                "SELECT invocation_id, session_id, caller_run_id FROM runs WHERE id=?1",
+                "SELECT s.flow_session_id,i.session_id,i.caller_input_id
+                 FROM agent_session_inputs i JOIN agent_sessions s ON s.id=i.session_id
+                 WHERE i.input_id=?1",
                 [run],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -2758,8 +2822,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     let (review, invocation): (String, String) = fixture
         .db()
         .query_row(
-            "SELECT r.id, r.invocation_id FROM agent_sessions s
-             JOIN runs r ON r.id=s.current_run_id WHERE s.kind='flow_review'",
+            "SELECT input_id,flow_session_id FROM agent_sessions WHERE kind='flow_review'",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -2777,27 +2840,19 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
         (None, Some(wave_id.clone()), declared.clone())
     );
     assert_eq!(fixture.run_parents(&review), fixture.run_parents(&step));
-    let positions: Vec<(String, i64, i64)> = fixture
-        .db()
-        .prepare("SELECT id, node, attempt FROM runs WHERE invocation_id=?1 ORDER BY node")
-        .unwrap()
-        .query_map([&invocation], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
+    let positions = invocation_inputs(&fixture, &invocation);
     assert_eq!(positions.len(), 2, "{positions:?}");
     assert_eq!((&positions[0].0, positions[0].2), (&step, 1));
     assert_eq!((&positions[1].0, positions[1].2), (&review, 1));
     assert_ne!(positions[0].1, positions[1].1, "each step is its own node");
 
-    // Every settled Run's state is its row.
+    // Each input retains its own completion in conversation history.
     for run in [&of_wave, &of_task, &child, &step] {
         let (outcome, ended): (Option<String>, Option<i64>) = fixture
             .db()
             .query_row(
-                "SELECT outcome, ended_at FROM runs WHERE id=?1",
+                "SELECT json_extract(payload,'$.evidence.outcome'),observed_at
+                 FROM session_events WHERE kind='observed' AND receipt_key=?1||':terminal.json'",
                 [run],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -2806,8 +2861,9 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
         assert!(ended.is_some());
     }
 
-    // One row per launch, and every reader lists each Run once.
-    assert_eq!(fixture.count("runs"), 5);
+    // One input per launch, and every reader lists each input once.
+    assert_eq!(fixture.count("agent_session_inputs"), 5);
+    assert_eq!(fixture.count("runs"), 0);
     let listed =
         |args: &[&str]| -> Vec<Value> { serde_json::from_value(fixture.json(args)).unwrap() };
     let ids = |runs: &[Value]| -> Vec<String> {
@@ -2918,16 +2974,28 @@ fn saved_flow_stand_in(fixture: &Fixture) {
     .unwrap();
 }
 
-/// (id, node, attempt, outcome, task) of one Run.
+/// (input, node, ordinal at that node, outcome, Task) from conversation history.
 type AttemptRow = (String, i64, i64, Option<String>, Option<String>);
 
-/// Every Run of one invocation, oldest attempt first.
-fn invocation_runs(fixture: &Fixture, invocation: &str) -> Vec<AttemptRow> {
+/// Retain earlier inputs independently of the conversation's current selection.
+fn invocation_inputs(fixture: &Fixture, invocation: &str) -> Vec<AttemptRow> {
     fixture
         .db()
         .prepare(
-            "SELECT id, node, attempt, outcome, task_id FROM runs WHERE invocation_id=?1
-             ORDER BY created_at, attempt",
+            "WITH inputs AS (
+                SELECT i.input_id,
+                    CAST(coalesce(json_extract(m.payload,'$.evidence.flow.node'),s.node) AS INTEGER) AS node,
+                    coalesce(m.seq,9223372036854775807) AS sequence,
+                    json_extract(t.payload,'$.evidence.outcome') AS outcome,
+                    CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE s.task_id END AS task_id
+                FROM agent_session_inputs i JOIN agent_sessions s ON s.id=i.session_id
+                LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                    AND m.receipt_key=i.input_id||':manifest.json'
+                LEFT JOIN session_events t ON t.session_id=s.id AND t.kind='observed'
+                    AND t.receipt_key=i.input_id||':terminal.json'
+                WHERE s.flow_session_id=?1)
+             SELECT input_id,node,row_number() OVER(PARTITION BY node ORDER BY sequence),outcome,task_id
+             FROM inputs ORDER BY node,sequence",
         )
         .unwrap()
         .query_map([invocation], |row| {
@@ -2993,7 +3061,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     let failure = failure.unwrap();
     assert!(failure.contains("work-proof Run failed"), "{failure}");
     assert_eq!(pointer, None, "a Flow about the Task is not its Flow");
-    let failed = invocation_runs(&fixture, &invocation);
+    let failed = invocation_inputs(&fixture, &invocation);
     assert_eq!(failed.len(), 1, "{failed:?}");
     assert_eq!(
         (failed[0].2, failed[0].3.as_deref(), failed[0].4.as_deref()),
@@ -3025,7 +3093,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
         "{waiting:?}"
     );
     no_position_file();
-    let runs = invocation_runs(&fixture, &invocation);
+    let runs = invocation_inputs(&fixture, &invocation);
     assert_eq!(runs.len(), 3, "{runs:?}");
     assert_eq!(runs[0].0, failed[0].0);
     assert_eq!(
@@ -3099,7 +3167,12 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
         .unwrap();
     assert_eq!(state, "completed");
     no_position_file();
-    assert_eq!(invocation_runs(&fixture, &invocation).len(), 3);
+    assert_eq!(invocation_inputs(&fixture, &invocation).len(), 3);
+    assert_eq!(fixture.count("runs"), 0);
+    let launches = fixture.launches();
+    let repeated = fixture.run(&["flow", "resume", &invocation]);
+    assert!(repeated.status.success(), "{repeated:?}");
+    assert_eq!(fixture.launches(), launches);
 }
 
 /// `lf flow decide` inside a taskless step writes the invocation row, and the

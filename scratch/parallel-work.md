@@ -38,14 +38,14 @@ The audit separates obsolete Run CRUD, historical SQL preservation, immutable
 input references and still-live file-backed lifecycle readers. No executable
 edit or behavioral test ran. Log `.lf/tmp/cut-i/run-removal-research.log`.
 
-One bounded native-retry research contribution is active: tool handle `4457`,
-Exec `da164d1d-ae27-48fa-9136-de7018966a6a`, PID48014 at launch. It owns only
-`scratch/research-native-retry-options.md` (max100 lines, atomic). It compares
-smallest repairs against the retained delayed-child and legitimate-retry failures;
-no code, experiment, process-control or policy change is assigned. Main retains
-implementation and builds. Verified scope comment
-`e6359bae-3d9c-429e-b02a-8df929db6193`; log
-`.lf/tmp/cut-i/native-retry-options-research.log`. Do not checkpoint before handback.
+The bounded native-retry researcher returned exit0; handle `4457` is closed.
+Main now owns `scratch/research-native-retry-options.md` (94 lines). Nine local
+source/schema hashes match; supervisor independently matched the upstream
+thread-processor hash and inspected its reload predicate. Handback
+`ede31e16-4e35-42ee-a84f-7b4a1f2df3d7` retains the failed-thread and same-thread
+observer limits, four concrete repair tradeoffs and the paired acceptance proof.
+No new transport, provider fork, engine kill, upstream message or retry-policy
+change is selected. Log `.lf/tmp/cut-i/native-retry-options-research.log`.
 
 The Chapter CLI contributor returned
 `tests/e2e/chapter_rotation.py` to main with exit0; tool handle `2564` is closed.
@@ -123,9 +123,29 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Current published head is **24ea61517cc5cbcfc4cf29452364fe6efcd37123**, based on
+Current published head is **29d5c5229e19c3179a33e17a34ca1248faf8a522**, based on
 **d4b283a873804c18ef1894d49bb690d67f4d59f5** (#1343, Swift compilation reuse).
 GitHub, Task publication and Git merge-base agree; auto-merge is absent.
+CI **36535480097** finished with 1,831 Rust passes, the same two cutover failures,
+15 skips and 134 unrun of 1,967; log `ci-29d5c5229-rust.log`. This publishes the
+populated migration repair and retained evidence. Rebase initially refused before any sequencer while
+supervisor notes were dirty; after their released checkpoint, rebase succeeded
+with the same base. `lf commit --no-add --push` published the exact checkpoint
+without the then-active research artifact. Main is repairing the cutover tests;
+OpenCode's missing native selection is an integration question, not assumed to
+be only stale fixture wiring. All remaining-work obligations stay open.
+
+The source Session suite subsequently finishes all twenty cases with fifteen
+passes and five failures (`session-cutover-provider-repair.log`). Direct provider
+PID/start recording repairs the scripted OpenCode continuation/review path;
+selected native decision integration stays red. Four remaining history/fixture
+cases then yield two passes and two inherited-source failures
+(`session-cutover-history-fixtures.log`). Task/Wave agree; original source needs
+proper evidence rather than mutable current-Session fallback. Verified direction
+`233e4769-5fb7-4ff7-ad91-8545c1ae7f33`. These are local intermediate results, not
+a green Session suite or full CI. Main retains their implementation and proof.
+
+Previous published head **24ea61517cc5cbcfc4cf29452364fe6efcd37123**, same base:
 CI **36533494844** finished with failure: 1,829 Rust passes, two failures,
 15 skips and 134 unrun tests. The Task Flow fixture still queries obsolete Run
 rows; the taskless decision stand-in lacks native caller authority. Verified
@@ -138,239 +158,42 @@ checkout fixture are published; final all-target Clippy passed in
 `historical-sql-static-final.log` (15.30s). Main continues populated historical
 migration preservation before remaining Run deletion. Full scope stays open.
 
-The preceding published head **da19cf0b50138d04be5c75b3b4d4df6d1e17f2da** was based on
-**566fb3981d99b430c41358a2bad3559612999693**. GitHub, refreshed Task publication
-and Git merge-base agree; auto-merge is absent. CI **36531960032** finished with
-failure: 1,656 Rust passes, one failed checkout-identity test, 15 skips, 307 unrun.
-The fixture supplies only old Run/Flow environment to `flow decide`, without the
-selected native turn's caller. Verified comment
-`4377c9fd-fe6d-4456-9460-11dd8c926dcc` directs fixture setup repair while retaining
-both upstream variants and child/parent identity assertions; navigation authority
-must not be relaxed. Log `ci-da19cf0b5-rust.log`. Scratch-clear also fails on active
-notes. This is not proof of the still-failing native decision retry.
-This publishes saved-review preservation, Git-free auth/Exec admission, journal
-root placement and the reproduced scorecard interruption repair described below.
-Final all-target Clippy passes in `exec-interruption-static.log` (15.68s).
-No full CI or complete model conversion follows from these focused checks.
+Historical CI, publication, rebase and repair chronology is preserved in
+`29d5c5229:scratch/parallel-work.md` and the exact pre-curation archive below.
+Detailed implementation receipts live in [main handoff](parallel-execution.md)
+and [evidence](evidence.md); the full finish line remains in
+[remaining work](remaining-work.md) and [import preservation](import-preservation.md).
+Do not restore old Run writes to green a stale fixture or count moved code as deletion.
 
-The preceding published head **190455f062fa95d31f31f46e8ebc3ec97a4c5fcd** was based on
-**1e163d20931efc7d92b54760877a62a6308143d6**. GitHub, refreshed Task publication
-and Git merge-base agree; auto-merge is absent. CI **36530104314** finished with
-1,578 Rust passes, two auth-status failures, 15 skips and 383 unrun; scratch-clear
-also fails on active notes. All other required jobs passed. The auth fixtures
-intentionally remove Git from PATH; startup's unconditional repository discovery
-fails before cached auth inspection. Verified comment
-`53b994a1-5beb-4df0-9eb8-6466a46b804b` directs repair at command observation/scope
-after the current review-import proof, preserving no-broker/no-Git behavior and
-Exec logging. No credential repair is implicated. Log `ci-190455f06-rust.log`.
-This publishes the reader proof below. The rebase integrated #1340's CI resource
-reporting and #1341's non-waiting uv cache lock. Two cache-recovery conflicts
-retained that lock behavior plus this branch's subprocess timeout;
-`conversation-rebase-cache.log` passes three focused reconciliation cases.
-The next conflict-free rebase integrated #1342 (`566fb3981`, cleanup with recent
-gate output), now the recorded Task base. Main owns subsequent integrations.
+Retain these proof boundaries through subsequent conversion:
 
-The preceding published head **dd97558752f1262634ef9edba31857792a99c6e7**, based on
-**7e5f32ce607f7ed744c685b2f7639b304455460c**. GitHub, refreshed Task publication
-and Git merge-base agree; auto-merge is absent. The conflict-free rebase includes
-#1338's checkout-local Git build watches and #1339's combined landing/release PR
-observation. CI **36527817576** finished with failure: Rust reached 885 passes,
-one telemetry failure, 15 skips and 1,077 unrun; scratch-clear also failed on active
-notes. All other required jobs completed successfully, including Swift and the UI
-compile check. This is not rendered Desktop acceptance. Rust log:
-`.lf/tmp/cut-i/ci-dd9755875-rust.log`.
-
-The preceding import head **275589bee** was published and its CI36527468363
-reached 885 Rust passes, one failure, 15 skips and 1,076 unrun. The failing
-`telemetry_flow_op_runs_internal_scorecard` receives zero records: capture now
-admits AgentSession, but telemetry still queries Run rows. Verified diagnosis
-comment `c9e01d1c-f609-4825-bfc2-45d9efe14ebc` directs the remaining reader
-conversion while retaining tokens=12, missing cost, zero final streams and
-completed outcome. Log `ci-275589bee-rust.log`. That overall run was subsequently
-canceled by the next publication; its completed Rust failure remains evidence.
-Main is implementing this boundary: generic capture observations are being moved
-into AgentSession history and the readers switched to that owner. Two focused
-tests pass in `conversation-history-boundaries.log`: telemetry preserves 12 input
-tokens/unknown cost/completion with artifact files removed and zero Run rows;
-history lookup retains date-boundary/gap/parent behavior and excludes unrelated
-corrupt payload before decoding. These fixtures use one input per conversation.
-Supervisor review found that aggregating every input under current Session fields
-misattributes pre-bind usage and loses recent continuations of old conversations.
-Verified comment `93da8fb6-9d05-4d86-90aa-720bde3cbb1e` records the source
-counterexamples. The extended replaced-input public CLI proof now passes: unbound
-21-token failure versus bound zero-token success, original providers/outcomes,
-recent continuation of an old conversation, uncapped parent lookup, removed
-artifacts and zero Run rows. `conversation-readers-final.log` passes all four
-selected cases: that proof, telemetry, the history-window/gap test and landing's
-once-only repair conclusion. Earlier runs retain the missing input-prefix fixture
-failure (`conversation-attribution.log`) and mismatched fixture database failure
-(`conversation-readers.log`); main corrected setup and kept their assertions.
-This is local captured/imported-history proof, not native-only recovered usage,
-full CI, complete import or final wire/owner removal. Docs now name those limits.
-`conversation-native-usage-2.log` additionally passes the existing real-Codex
-automatic-retry fixture with scripted Responses/private Home: candidate
-`a1397de2c6f3`, zero Run rows, completed Flow, public usage 40 input/10 output,
-unknown cost and one final stream. The first probe completed retry but failed
-the newly added Python inspection's missing timeout argument; it does not count
-as a usage pass. All-target Clippy passed (`conversation-static.log`, 15.91s).
-Native-only driver-loss usage and valid decision retry remain unproven.
-No runtime Run writer is to be restored to make the fixture pass.
-
-Next import proof `historical-review-final.log` passes stable identity/feedback
-for unopened, past and finished reviews after `historical-review-red.log`
-reproduced their misclassification. The older multi-origin proof passed in
-`historical-review-repair.log`; that run also exposed a fixture deleting one
-source before its later conflict checks. Supervisor comment
-`1bfa5c7a-ed3f-4886-a8a0-5fff75935c0b` caught active headless/Op boundaries being
-classified as reviews. The corrected captured-policy classification and extended
-fixture pass in `historical-review-and-auth.log`: three reviews, one headless
-conversation, no manufactured AgentSession for the mechanical boundary. Existing
-multi-origin import and both cached-auth checks pass in the same four-case run.
-This is not complete import acceptance.
-Comment `51018428-8659-4288-adf7-e75e93f9ee00` retains `--history` for closed
-inventory rather than widening `--all` or default UI behavior.
-
-Local checkpoint `71ec9d23d` preserves these repairs. Supervisor independently
-verified `auth-exec-scope.log`: five Git-free auth commands retain completed Execs,
-while `rebase --plan` records failure and reports unavailable Git. The journal
-placement correction retains actual process cwd and writes optional files at the
-checkout root; `exec-subdirectory-journal-final.log` passes its focused proof.
-Final all-target Clippy passes in `review-auth-commit-static.log`. The six-case
-`auth-exec-directory.log` has six assertion passes but one Nextest LEAK on the
-interruption fixture. Verified comment `ee1c6eb3-6c31-441c-a426-2a2ea83f46a4`
-requests exact fixture-owned process/pipe diagnosis without weakening cleanup.
-The generated nested journals remain preserved under
-`.lf/tmp/cut-i/subdirectory-journal-counterexample`.
-
-The stronger `exec-interruption-child-red.log` reproduces the scorecard surviving
-after its owning lf exits 130. The fixture observes its own recorded PID/script
-before separate cleanup, so cleanup cannot supply the passing result. Telemetry
-now uses the existing process-group guard; `exec-interruption-child-fixed.log`
-passes child termination and the normal scorecard behavior (two tests, no LEAK).
-This is the scorecard boundary only, not provider/Task-wide settlement. The test
-run reported an unused test import; source removes it and final static validation
-remains main's responsibility. Local review checkpoint rebased to `2b7f24a09` on
-main `566fb3981`, with matching recorded Task base. GitHub still held `190455f06`
-at this observation; no new publication or full CI pass is claimed.
-
-Current SQL-only import work has two focused passes in
-`historical-sql-members.log`: retained SQL members without artifacts and the
-existing replaced-input proof. The SQL-only test keeps original outcome/provider,
-unknown usage, title/feedback, replay/conflict behavior and public reads after
-removing old Run rows. It seeds the final schema, not a released populated Home.
-The first red log failed on an invalid attempt ordinal; `historical-sql-members-red-2.log`
-then reached the actual zero-import-versus-two failure. A later unfinished-row
-extension in `historical-sql-partial.log` failed at fixture setup: this schema
-requires outcome/end presence together. Verified supervisor comment
-`ca1521dd-4b10-4712-a347-3da30a72a751` directs a legal unpublished/unterminated row,
-retaining actual terminal-file versus SQL disagreement as a distinct obligation.
-No constraint bypass or production machinery for that impossible row is selected.
-The corrected `historical-sql-unpublished.log` passes (5.122s): the legal
-unpublished member retains null outcome/end, Exec and provider-turn evidence,
-while only the two published members appear in usage. The existing pair of
-SQL-only/replaced-input proofs passed before that extension. Separately,
-`checkout-selected-native-caller.log` passes (7.635s): the scripted provider and
-shared harness record/select a turn, and its original caller authorizes the
-child Task's decision in both upstream variants. Production navigation authority
-is unchanged. This fixture does not establish real native decision retry.
-Final all-target Clippy passes in `historical-sql-static-final.log` (15.30s);
-these changes are published in 24ea61517. Populated prior-schema preservation,
-missing Session members and exact historical Flow membership remain separate.
-
-The replaced-input public CLI proof passes in `historical-members.log`:
-two inputs retain separate outcome/account/usage evidence in one conversation,
-pre-bind history stays unassigned, current name/feedback/input/Started remain,
-and replay is unchanged. Its setup uses current Session APIs plus legacy files;
-it does not establish released SQL-only multi-member migration or normalized
-usage totals. Finished/unopened reviews, SQL-only history, Chapter Linux execution
-and the native valid-decision retry remain unfinished.
-
-Earlier checkpoint **f60fcb3dedfca0f652d59f2e9904314a286e5c2b** on
-[PR1296](https://github.com/loopflowstudio/loopflow/pull/1296), based on
-**5402d93974dba3b6e94bea1d411951a9dfeb20d9**. GitHub and Task publication agree;
-auto-merge is absent. This checkpoint includes AgentSession admission and the
-returned Desktop/Chapter work. Post-rebase evidence: one historical-window test,
-25 Rust DTO/context checks, eight Wave-detail checks, the mounted terminal/draft
-proof and 25 Python architecture checks pass. Native admission/authority source
-was unchanged by that rebase. No complete matrix or configured acceptance follows.
-
-Main then advanced by #1337, ownership filtering before unrelated payload reads,
-and GitHub marked the published head conflicting; no fresh CI was observed there.
-Main completed another local rebase at **a03de75276bf3f7c5e02cc2628e123ca7f29f76e**
-on **7c2f53b9e91564ae0ac37618098bbff065f1af9e**. Task base and Git merge-base agree.
-The reconciled ownership/rename and uncapped parent tests pass. The historical
-window fixture first failed because its private database was not initialized;
-after explicit ephemeral initialization, its focused rerun passes, retaining
-usage, partial evidence, exact parent selection and activity's ending-in-window
-case. Logs: `admission-rebase-1337.log` and `admission-rebase-1337-window.log`.
-Formatting/all-target Clippy passed; main published the reconciliation as
-**b884feeef649301af657b032f9a08861df73ae7b**. GitHub and Task publication agree,
-GitHub reports mergeable and auto-merge remains absent. CI **36525294138** ended
-in failure: architecture, Rust lint, migration, Python, website, e2e smoke, Swift,
-disposable Task installation and UI compilation passed; scratch-clear failed on
-retained active notes. UI compilation is not rendered acceptance. Rust job109266882853 ended
-with 486 passes, one failure, 15 skips and 1,470 unrun. The failure is the fresh
-Codex history fixture inserting removed `agent_sessions.current_run_id`;
-`session_events.rs` and `branch_data.rs` retain two equivalent fresh-store inserts.
-Supervisor sent the three setup repairs to main; historical migration input stays
-unchanged. All three setup repairs pass locally in
-`historical-capture-and-ci-fixtures.log`; they remain unpublished with the active
-import conversion. Log `.lf/tmp/cut-i/ci-b884-rust.log` preserves hosted failure.
-
-Historical import now has narrow passes for autonomous/completed captures and
-completed keyed Ask replay without a provider. History DTO Rust proof passes.
-The new history-table rebuild first failed on the Task validation trigger's
-reference to the temporarily absent table; main restored that trigger alongside
-the two history triggers. The materialized fresh-chain check then passed, while
-populated preservation reached a duplicate-worktree fixture error. The first
-repair rerun lost the generated migration registration in its disposable copy
-and failed before seeding (`no such table: execs`). Supervisor diagnosed that
-specific harness error in verified comment `b78c211c-7ce9-4edd-975d-4a446c89c9b0`.
-Fresh materialization with the repaired fixture now passes the populated test:
-exact history, selected/consumed references, Started preservation and recreated
-trigger behavior. Logs: `historical-history-dto.log`, `historical-materialized.log`,
-`historical-materialized-repair.log`, `historical-materialized-final.log`.
-This is one populated migration proof, not full import acceptance.
-
-Supervisor identified a separate source-derived dry-run dependency: rolled-back
-capture imports cannot satisfy headless membership lookup through `store.flow()`
-later in the same batch. Verified comment `24a0c21e-46d5-4688-8e6f-616adcc75286`
-asks main to prove fresh-Home capture-plus-headless preview without durable writes
-and with the same intended membership as applied import. No executed failure is
-claimed for that initial observation. Main now retains successfully parsed
-captures for the batch and validates each capture/member together inside the
-import transaction. The public attributed-import proof passes in
-`historical-attributed-4.log`: dry-run/applied classification agrees, headless
-Flow/node/iterations survive a moved cursor, original ancestry/caller and failed
-terminal evidence remain, replay is unchanged, and no Run rows are created.
-The preceding failures retain the Task Flow cwd storage mismatch and a fixture
-that omitted explicit headless listing. The corrected test queries both modes;
-interactive remains the default. This proof does not establish normalized
-historical usage, prior SQL members, interrupted import or configured recovery.
-Chapter fixture now passes Ruff (`chapter-static-final.log`) and asserts a
-nonempty PR row; Linux behavioral execution remains outstanding.
-
-Publication preparation removed the previous intermediate `concept-review.md`;
-its exact evidence remains at `aa43c6829c:scratch/concept-review.md`. That review
-was not the requested code-complete review. Remaining scope and import obligations
-stay active here. No review completion or Flow edge follows from publication.
-
-The one materialized diagnostic ran all selected tests: 1,925 passed, 33 failed,
-15 skipped. Supervisor reconciled the failures against focused reruns: 29 have
-passes, one has passing assertions with a process leak, three remain unresolved.
-These are mixed recorded snapshots, not a full green matrix. Exact mappings:
-`.lf/tmp/cut-i/supervisor-matrix-dispositions.json`; limits in evidence.md. Do not
-repeat the full matrix after each small correction. Hosted Rust has not passed
-fully; latest published CI stopped at the now-locally-repaired Codex history
-fixture. Retain full CI and final canonical preservation as finish obligations.
-
-The published admission conversion moves captured input/publication onto AgentSession and
-removes Run joins from Session reads and Flow publication. The standalone native
-automatic-retry fixture now passes with zero Run rows on candidate d2cdd28d5bc0:
-one conversation/thread, failed and successful turn history, reported usage and
-one successful consumption. Six Session CLI tests also pass after correcting the
-fixture's removed-column query. These prove only the named paths; managed Task,
-remaining providers, populated import and complete Run deletion remain unfinished.
+- Conversation readers preserve each input's ancestry/provider/timing and missingness,
+  including pre-bind usage and recent continuation of old conversations. Four
+  focused reader checks pass in `conversation-readers-final.log`; native ordinary
+  retry/public usage additionally passes in `conversation-native-usage-2.log`.
+  Native-only driver-loss usage, final DTOs and complete owner removal remain owed.
+- Import preserves captured headless/review distinctions, completed keyed answers,
+  replaced inputs and SQL-only members in the recorded scoped proofs. The
+  populated source/canonical frontier and missing-title limit belong in
+  `import-preservation.md`; no partial count permits dropping unmapped evidence.
+- Git-free auth records actual Exec outcomes; subdirectory commands keep actual cwd
+  with optional journal files at checkout root. The scorecard child survived lf
+  interruption in the strengthened reproduction; the existing process-group guard
+  repairs that boundary. `exec-interruption-child-fixed.log` has two passes and no
+  LEAK. This proves neither all provider termination nor Task-wide settlement.
+- The shared harness records the caller for checkout decision fixtures; those
+  focused passes do not repair the real native retry or establish OpenCode parity.
+  Preserve upstream ownership filtering, uncapped caller lookup, activity windows,
+  resource/cache semantics and the prior conflict-resolution checks.
+- Earlier broad materialized diagnostics recorded 1,925 passes, 33 failures and
+  15 skips. Later focused checks describe mixed snapshots, not a full green gate.
+  Mapping: `.lf/tmp/cut-i/supervisor-matrix-dispositions.json`. Hosted full CI,
+  final materialized preservation and code-complete review remain required.
+- The removed intermediate concept review survives at
+  `aa43c6829c:scratch/concept-review.md`; it was not the goal review. Configured
+  Desktop/provider, Linux Chapter/default-Flow, and real-Home acceptance retain
+  their separately recorded gaps. An assertion pass with a process leak is not
+  clean settlement. Full remaining scope is unchanged by this curation.
 
 The valid native decision retry still fails. The paired late-child test reproduces
 the stale decision and confirms rejection after the local attribution repair,
@@ -395,41 +218,13 @@ Rust/Swift +14,451/−29,575; Python/shell +48/−62; SQL +1,002/−0.
 Receipt `.lf/tmp/execution-model/status-counts-24ea61517.json` reproduces the
 preceding da19 measurement first. Current migration edits are excluded.
 
-Published **da19cf0b5 against 566fb3981**:
-**+15,393 / −29,637 = net −14,244**.
-Rust/Swift +14,343/−29,575; Python/shell +48/−62; SQL +1,002/−0.
-Receipt `.lf/tmp/execution-model/status-counts-da19cf0b5.json` first reproduces
-the preceding 190455 measurement. Dirty work is excluded. Changed bases prevent
-interpreting the difference between whole-branch totals as a per-cut delta.
-
-Published **190455f06 against 1e163d209**:
-**+15,299 / −29,636 = net −14,337**.
-Rust/Swift +14,249/−29,574; Python/shell +48/−62; SQL +1,002/−0.
-Receipt `.lf/tmp/execution-model/status-counts-190455f06.json` reproduces the
-preceding 275589 measurement first. Dirty work is excluded. Base changes mean
-the totals alone do not measure incremental code added by the reader checkpoint.
-
-Published **275589bee against 7c2f53b9e**:
-**+15,009 / −29,615 = net −14,606**.
-Rust/Swift +13,960/−29,559; Python/shell +47/−56; SQL +1,002/−0.
-Receipt `.lf/tmp/execution-model/status-counts-275589bee.json` reproduces the
-preceding f60 measurement first. The subsequent replaced-input change and rebase
-are excluded; do not label this count as the current dirty-tree total.
-
-Published **f60fcb3ded against 5402d9397**:
-**+14,616 / −29,605 = net −14,989**.
-Rust/Swift +13,615/−29,549; Python/shell +47/−56; SQL +954/−0.
-Receipt `.lf/tmp/execution-model/status-counts-f60fcb3ded.json` reproduces the
-preceding ddf4a2ddc measurement first. Subsequent rebase/reconciliation edits are
-excluded; this is a comparable whole-branch count, not completion evidence.
-
-Last measured published `594c7c319f` against `1dce02734`: +14,445/−29,505, net −15,060.
-Different bases cannot establish incremental deletion. Method:
-`measure-published-cd4ab9d813.py`, corrected production prefixes, tests/docs
-excluded, rename detection disabled, trailing Rust tests removed while retained
-trailing production code stays counted. Receipts retain prior measurements.
-No current completion-time or final-size estimate is established. Main owns fresh
-resource preflight and cleanup; old disk samples authorize no deletion.
+Earlier whole-branch measurements and exact receipts are retained in the archive
+and committed note above. Changed bases prevent comparing totals as per-cut
+changes. Method: `measure-published-cd4ab9d813.py`, corrected production prefixes,
+no rename detection, tests/docs excluded, trailing Rust test modules removed while
+known trailing production stays counted. The latest receipt reproduces its
+predecessor before measuring. Current edits are excluded. No completion-time or
+final-size estimate is established; main owns fresh resource preflight/cleanup.
 
 ## Archives
 
@@ -447,3 +242,9 @@ Detailed CI chronology already belongs in evidence.md. Archived old Session/Run,
 Chapter-table and warn-and-proceed models do not override the current contract.
 No failed result, acceptance obligation or unresolved attribution is erased by
 curation. Main's `parallel-execution.md` remains untouched.
+
+The 2026-09-29 control-note curation preserved the exact preceding 30,715
+bytes at `.lf/tmp/scratch-curation-20260929-control/parallel-work-a87f6837dd9f.md`, SHA-256
+`a87f6837dd9f5e0888dd8d9c11e59a1de01ccbb0382dc19680c8d904535265ea`. It removes repeated chronology and older measurements from active
+context, not evidence or unfinished requirements. Main's handoff and all other
+artifacts remain unchanged.

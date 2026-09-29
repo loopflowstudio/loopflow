@@ -1,368 +1,78 @@
-# Main implementation handoff
+# Execution-model handoff
 
-LOO-298 · Jack Heart · Updated 2026-09-29 after the runtime-child slice.
+LOO-298 · Jack Heart · 2026-09-29.
 
-## Finish and ownership
+The complete contract remains in [the design](data-model-one-table-per.md),
+[remaining work](remaining-work.md), [import preservation](import-preservation.md)
+and [Chapters](chapters.md). [Concept review](concept-review.md) identifies the
+next ownership changes. No code-complete acceptance, Task completion or shipment
+has occurred.
 
-Jack now requires complete implementation → concept review with him → resolved
-findings → saved delivery workflow, required gates/CI repair and verified merge of
-PR #1296. This supersedes the former final stop at code-complete review; it does
-not bypass review. Rebase/publish coherent checkpoints regularly through `lf`.
-No branch promotion or installed-Home migration before landing. No new native
-retry-policy decision follows from delivery authorization.
+## Current order
 
-Main owns executable edits, builds/tests, Git and this handoff. Supervisor owns
-[control](parallel-work.md); follow its live contribution/release records. The
-2026-09-29 curation explicitly authorizes main to compact evidence.md too. Keep
-one executable writer. Supervisor released the active Session-view proposal
-`f928998ca6687fe814817bc2349fc3c8b8e67e8fe5729da740968e1f4fd98786` for this
-compression cut; its reviewed hunks are integrated. Supervisor has released the
-Flow-discovery and released-import proposals for reviewed integration at the next
-implementation boundary. They remain unapplied and uncompiled; see the ownership index.
+Jack directed autonomous progress to code-complete, with a published checkpoint
+per coherent slice:
 
-Read these complete, unchanged acceptance owners before choosing another cut:
-[accepted model](data-model-one-table-per.md), [remaining work](remaining-work.md),
-[import preservation](import-preservation.md), [Chapters](chapters.md),
-[native tradeoff](native-turn-retry-tradeoff.md), [questions](questions.md).
-Older drafts are evidence, not approval. Their full acceptance matrix remains
-binding even when a slice below passes. [Evidence](evidence.md) indexes original
-red results, replacements and limits.
+1. Repair hosted Rust and run all tests left unrun by fail-fast before publishing.
+2. Structured Flow results constrained by each captured boundary's schema;
+   remove the in-turn decision/router commands and authority paths.
+3. Captured input as a Session history event; remove RunId, the input catalog and
+   SessionRecord.run_id while retaining historical evidence and launch fences.
+4. Rebase the released history proposal onto event identity, include orphan native
+   receipts with unknown attribution, then remove unnecessary wrappers.
+5. Saved-Flow discovery with Desktop paging and reconciliation in the same cut.
+6. Released-populated public import bridge and exact materialized-copy counterpart.
+7. Reconcile docs, skills and generated HTML with final behavior.
 
-## Metadata checkpoint preceding compression
+The complete matrix remains binding; this order does not drop configured-provider,
+Desktop, Chapter, incident or migration obligations. Final concept review with
+Jack and resolved findings precede final gates and saved delivery. Usage after
+bind remains prospective as an operating assumption pending Jack's decision.
 
-Same captured `feature` invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`,
-implement iteration 10. Do not restart it. Current worker
-`run_65fc64d8389d49ea9fdbeb47efdc9c40` continued after the prior worker's compaction
-capacity failure. GitHub publication of `e6aa8d4c775c5c02bccd63ca80d6b616a3b60077`
-is verified; PR #1296 remains open. The checkpoint rebased without conflicts onto
-`a3820bf7e493b7d533a45677b7945020adf80721` (v0.12.25 release). No behavioral rerun
-was required solely for that conflict-free rebase. The checks below describe
-pre-rebase implementation bytes, not a final integrated gate.
+## Current evidence
 
-Use the captured installed control pair through:
-`uv run python .lf/tmp/cut-i/control-checkpoint.py ...`.
-Bare `lf` can select a different store. This wrapper is for control/checkpoint/
-publication, never for pointing a branch executable at installed data. Read
-Task status and Session inventory through it; do not infer shared state from
-worktrees/processes. Use ordinary source inspection for code.
+HEAD `537e7924d`, PR #1296. Hosted run `36619025873`: Swift and UI pass;
+Rust 1,935 passed / one failed / 15 skipped / 64 unrun. The publication test now
+passes. `wave_resolution_matrix::registry_is_complete` lacks `exec list`, whose
+Wave argument filters recorded work. `exec show` has no Wave argument. The isolated no-fail-fast run (`ci-tail.log`) passed 72/72: all 64 hosted-unrun
+cases, the repaired classification, and seven macOS-only cases. The failed
+classification was first reproduced unchanged (`wave-matrix-red.log`). No green
+hosted matrix is claimed before publication.
 
-## Next work
+Runtime loop children already use the shared driver/settlement transaction:
+retry retains the child, successful return occurs once, later passes are siblings,
+and the managed Task pointer stays on the root. Do not rebuild this or early Exec
+observation from stale checklists. Reuse unchanged proofs:
 
-1. Finish the public history/discovery consumers and their deletion paths. The
-   metadata cut removes captured/history decoding from passive Session inventory;
-   FlowSession inventory, final history wire, Desktop paging and measured
-   startup/query/payload partition remain open. Current Desktop inventory remains
-   complete: passing individual pages into reconciliation would drop retained
-   panes. Change paging and reconciliation together.
-   Runtime children now execute through the shared driver and transaction; the
-   slice below records source/canonical and scripted public evidence. Integrate
-   saved-Flow discovery with actual parentage and preserve this behavior through
-   final consumer removal. No metadata reader substitutes for the driver proof.
-2. Active observation now uses Session/Exec ownership and removes run-bindings.
-   The review repairs terminal mounting and reproduces/fixes stale old-host focus
-   updates. The released off-window-mount repair now passes six integrated local
-   tests. Hosted swift-test at `067ff0164` now passes, confirming that repair;
-   lifecycle diagnostics, original attachment/surface/draft/focus assertions and
-   the deadline remain. The review below reuses this unchanged Swift evidence.
-3. At the next implementation boundary, design Jack's accepted structured
-   decision/route result and captured-input event changes together with the
-   final-history reader. Selected successful turns return validated typed output;
-   bounded validation retry stays in the same conversation, and settlement
-   consumes the result from Session history. Delete in-turn decision commands.
-   Captured input becomes a `session_events` sequence, removing `RunId`, the input
-   side table and `SessionRecord.run_id`; preserve old selectors and launch-once
-   reservation/publication. Rebase the released history proposal onto that event
-   model. The old Codex valid-retry failure remains evidence until its replacement
-   is proved; this review does not change provider or decision policy.
-4. Complete preserved import/attribution and populated final-schema obligations,
-   all-provider common connect/restart/recovery, public Chapter/default-Flow
-   preservation, incident dispositions and integrated verification from the full
-   matrix. Table deletion, local fixture passes and publication are not completion.
-5. Bring the whole implementation and usage/ownership/deletion review to Jack.
-   Resolve findings before gates and landing through the saved Flow. Configured
-   provider/Desktop, backed-up real-Home conversion and release activation keep
-   separate evidence/procedure requirements; local fixtures cannot discharge them.
+- `runtime-compress-final.log`: 29 focused passes.
+- `runtime-children-canonical-final.log`: 22 ownership/Chapter passes.
+- `review-runtime-repairs.log`: 16 runtime/publication repair passes, including
+  public taskless looping. Providers/GitHub are scripted and remotes local.
+- `chapter-public-cli-3.log`: public Project-default Task launch, rotation and
+  second-private-Home sync adoption preserve identity, exact Started, worktree,
+  PR and capture. Scripted Linux providers, not configured-provider acceptance.
+- Hosted Swift at `067ff0164`, run `36614840195`, confirmed the off-window terminal
+  attachment repair; the latest hosted Swift pass confirms it again.
 
-## Compression cut: active Session ownership
+Detailed earlier implementation, failures, commands and proof limits are retained
+in [the committed handoff at 537e7924d](https://github.com/loopflowstudio/loopflow/blob/537e7924dee15005c94addafb56aad0bdd8bf48f/scratch/parallel-execution.md),
+[evidence](evidence.md) and [runtime children](runtime-flow-children.md). The links
+replace chronology here; they do not upgrade any recorded result.
 
-The current `compress` worker retains the same invocation and iteration. Removed
-run-bindings publication/scanning and the per-input ActiveRun wire; Monitor uses
-stable Session identity. Queries select observed Exec/PID/client keys through new
-SQLite indexes. Exact start mismatches cannot suppress new PIDs or reassign them
-to stale owners. Managed Claude records its existing engine identity; Flow status
-uses the managed runtime's provider. Historical unknown engines remain explicit.
+## Working boundaries
 
-Proofs under `.lf/tmp/cut-i/`: `active-rust-final.log` 13 passes;
-`active-public.log` 17 passes including actual watch EOF/closed-output cleanup.
-`active-swift-2.log` 38/39 pass (all mounted cases pass); its one obsolete error-text
-assertion is corrected and `active-swift-transport.log` passes all five parameters.
-Bundled SQLite: 20,000 retained Sessions, five reads total 0.39ms empty / 0.43ms
-four candidates (`active-repairs.log`); query-only, warm fixture evidence.
-Initial `active-focused.log` compilation failed; `active-focused-2.log` retains an
-import-fixture refusal and one Claude leaked-handle report. Vendor setup overwrote
-AgentConfig PATH and launched installed Claude in a disposable test Home; that
-attempt is not fake-provider proof or configured acceptance. The corrected fixture
-pins process PATH/executable before launch; final 13-case run has no leak report.
-Earlier Swift compilation and Clippy diagnostics are retained in `active-swift.log`
-and `active-clippy.log`. No full gate, fresh hosted green, or concept acceptance.
+Main owns this worktree's source, builds, integration and Git. Preserve supervisor
+edits to questions, findings and the contributor index. Released proposals are
+hunks to review, not whole files to overwrite:
 
-Published source checkpoint `94b258e8a` retains this cut. The subsequent full local
-Swift diagnostic (`active-swift-suite.log`, `swift test --package-path swift
---no-parallel -Xswiftc -gnone`) passed 287 tests across 48 suites in 99.372s;
-the mixed Monitor preservation case passed in 1.175s. This did not reproduce the
-hosted attachment failure and does not establish its repair. Final all-target
-Clippy (`active-clippy-checked.log`), formatting, migration history and architecture
-checks pass. Supervisor verified the production delta against `a3820bf7e` as
-+18,787/-31,209, net -12,422; this cut changes that net by -30. Counts support
-the ownership reduction but do not discharge the remaining acceptance matrix.
+- `.lf/tmp/final-history-proposal/`: uncompiled; retains RunId and omits orphan
+  native receipts from aggregate discovery. Integrate only after event identity.
+- `.lf/tmp/flow-discovery-proposal/`: uncompiled; review insertion-time Git lookup
+  and command/template collisions, now using real runtime parentage.
+- `.lf/tmp/released-import-proposal/`: authored, unexecuted public import bridge;
+  require an executed result and effective provider isolation, source and canonical.
 
-## Slice review: active Session ownership (2026-09-29)
-
-Review scope is `07030b703` → `1fe26d25e` plus the bounded repairs below,
-not whole-design acceptance. The consumer replacement holds: `runs --active`
-and Desktop Monitor use stable AgentSession identity and existing Exec/native
-evidence. Source search finds no production `RunBinding`, run-bindings reader or
-writer, `ActiveRun` DTO, or subject-based live join. Retained native-client files
-are exact process evidence; historical Run-shaped readers remain the next cut.
-Passive observation neither claims a driver nor writes Started. SQL selects
-observed Exec/PID/input keys before decoding; cold filesystem discovery still
-scales with retained input directories.
-
-| Claim | Executed evidence and disposition |
-| --- | --- |
-| Public watch survives publication/removal and stops only its reader | `review-active-public.log`: watch passed in 8.288s with real CLI/FSEvents and a fixture client. No configured-provider acceptance. |
-| Exact PID/start, sequential Claude engines, shared-engine ambiguity, outside-Home SQL updates and bounded history | Reuse `active-rust-final.log` (13 passes), `active-public.log` (17 passes) and their scoped evidence above. No new broad suite or benchmark claim. |
-| Explicit work differs from Flow inheritance | Hosted `ci-94b-rust.log` and local `review-active-public.log` both reproduce declared-versus-inherited failure. Shared Flow reservation correctly marks the agent Session inherited; taskless review preparation still marked it declared. Corrected that constructor and the obsolete expectation. `review-flow-attribution.log`: full launch/reader case passes in 9.204s, retaining explicit Wave/Task declaration, inherited child/Flow members and one-row/history assertions. |
-| Terminal, surface, draft, companion and focus survive Monitor insertion | Hosted `ci-94b-swift.log` identifies terminal 0 detached (`window=nil`, no ancestors) while surface and layout survive. A local overlapping-mount experiment passed before repair (`review-terminal-remount-red.log`, despite its filename); it is not a reproduced failure. Source returned the same pooled NSView as two representables' root during split replacement. Candidate repair gives each representable its own mount containing the retained terminal. `review-terminal-mount.log`: 21 focused Swift tests pass, including the unchanged Monitor preservation assertions. Hosted repair remains unproved. |
-| Departing mount cannot change current terminal focus | Reviewed released handback `.lf/tmp/terminal-mount-proposal/handback.md`, patch SHA256 `2cd3c5fc6558dd689907e55b89563a1c66691a89a819ed4d240dfe14313ec111`. Test-only `review-terminal-stale-update-red.log` reproduces old-host disabling clearing the current terminal's focus after verified reparenting. One parent-identity guard fixes it. `review-terminal-stale-update-green.log`: five tests pass in 8.856s, including original Monitor, Chapter transfer, rename/navigation and hidden-terminal draft proofs. This proves the stale-update boundary, not the original hosted detach mechanism. |
-
-Measured production slice plus these repairs: **+582/−608, net −26** against
-`07030b703`, with `1fe26d25e` and review working bytes. SQL contributes +8;
-tests, docs/generated assets and scratch are excluded, with no rename credit.
-`review-active-source.json` records exact hashes/counts and the production-prefix
-method, excluding `top.rs`'s test helper and retaining production below inline
-tests in `events.rs`. This refines the earlier count's scope; line reduction is
-supporting evidence, not an acceptance criterion.
-
-Original red logs and the earlier leaked-handle report remain evidence. The new
-mount changes lifetime ownership, not timeout/retry policy. Full local Swift's
-earlier 287-pass result did not resolve hosted detachment. Rust formatting and
-all-target Clippy pass (`review-active-clippy.log`); resource preflight observed
-51.0 GiB free above the 32 GiB floor. Source proofs used disposable Homes with
-inherited execution authority cleared; no installed store or configured provider
-was used.
-
-At that review boundary, whole-design blockers included runtime loop child
-production/recovery (implemented in the subsequent slice below), plus final
-history/discovery/Desktop paging;
-released-populated import and attribution; legitimate Codex decision retry;
-configured provider/Desktop acceptance and final integrated checks. Review the
-released Flow-discovery and preservation proposals at the next implementation
-boundary, preserving their cautions and missing cases. Inventory alone cannot
-close runtime nesting. Concept review with Jack still precedes delivery; this
-review chooses no Flow edge and completes no Task.
-
-## Runtime children and CI repairs — implementation iteration 11
-
-Jack's accepted runtime-pass contract now uses `flow_sessions.parent_id` and the
-existing checkpoint transaction. The shared Task/taskless driver selects the
-active child under the root's lock. A backward Iterate freezes the deciding
-parent, transfers its worker claim and enters a child; exact selected successful
-completion returns once. Failed/interrupted retries retain that child, the next
-pass creates a sibling, and overlapping backward edges create nested children.
-Template composition and XOR remain expanded cursor structure without new rows.
-Task keeps its one root pointer; the recursive `managed_flows` view projects its
-members and preserves review/Session attribution without a second owner.
-
-The switched consumer is the existing `drive`/checkpoint path: it no longer
-executes repeated work solely under the root's mutable repeat cursor. Original
-return counters remain captured navigation facts. Review found that transferring
-a worker claim into a child beginning at human review would keep the review
-claimed; the settlement now releases it, and the focused managed-review proof
-retains the root pointer and rejects late completion. Historical flows receive
-NULL parentage, never inferred children.
-
-Compared with c928d261c and including the untracked draft, corrected production-
-prefix measurement is **+406/−140 (net +266)**: Rust/Swift +378/−140 and SQL +28/−0.
-Tests/test modules, docs, scratch and generated files are excluded. This includes
-the terminal repair/diagnostics; it is added behavior, not a reduction claim.
-Method and receipt: `.lf/tmp/cut-i/measure-runtime-children.py` and
-`runtime-children-counts.json`.
-
-Focused proof logs below live under `.lf/tmp/cut-i/`; the scrubbed `run.py` owns
-private Home/database and process cleanup. They do not establish configured
-provider or installed acceptance:
-
-- `runtime-children-focused.log`: 22 source store/reducer/Task-driver passes.
-  `runtime-children-recovery.log` first had 3 passes and one malformed review
-  fixture failure; correcting its initial captured review position yields one
-  pass in `runtime-children-review.log`. No behavioral assertion was removed.
-- `runtime-children-public.log`: three actual public CLI passes through scripted
-  OpenCode, including two distinct completed taskless child passes, six consumed
-  successful completions, completed-root resume with no launch, and zero Run
-  table. Existing managed failure/retry/review and taskless decision cases pass.
-- `runtime-children-canonical-final.log`: 22 passes after draft materialization in
-  a disposable source copy, including seven ownership/upgrade cases and all 15
-  Chapter cases. Child failure/interruption, stale writes, exact parent return,
-  next sibling, overlapping loops, Task and taskless drivers and source-free
-  captured execution are covered. `runtime-children-canonical.log` retains the
-  earlier 6-pass/1-fail fixture whose serialized invocation ID differed from its
-  SQL row; the corrected fixture keeps matching original identity. This includes
-  a populated prior Flow frontier upgrade, not the pending released public-import
-  bridge. Chapter simulations remain operation-level evidence.
-
-Jack's c928 hosted counterexamples are retained. The deletion fixture now models
-RenameProject's name write and success result. `runtime-deletion-linux.log`
-records **one actual applicable Linux public test pass** (38.11s), preserving
-all delete/retry/retained-Task/PR/files assertions and post-delete sync/doctor.
-Its disposable-container source hashes are in `runtime-deletion-linux-source.json`.
-The snapshot precedes later Flow-only edits; this is no green full matrix.
-
-The released terminal patch is integrated by reviewed hunks over bounded debug
-lifecycle diagnostics. `GhosttyTerminalMount` adopts only after it has a window;
-updates saved before attachment are applied when it attaches. An off-window
-speculative representable cannot take the displayed pooled terminal. The private
-contributor's uninstrumented c928 regression failed with five issues; its patch
-passed six cases. Main's integrated `runtime-terminal-integrated.log` passes the
-same six cases in 9.336s, retaining Monitor/Chapter transfer/rename/draft/focus/
-companion/surface assertions. Neither local proof reproduces hosted Monitor's
-ordering. The next hosted swift-test is the confirming proof; no timeout changed.
-
-Final static checks pass: `cargo fmt --check`, `cargo clippy --all-targets --
--D warnings` (`runtime-children-clippy-complete.log`), migration history,
-architecture inventory and `git diff --check`. The populated Flow upgrade also
-passes on the ordinary source draft frontier (`runtime-children-source-upgrade.log`,
-one selected test). Website docs were regenerated through `dev.py sync-docs`.
-Ruff passes the deletion fixture. Direct lint of the raw OpenCode provider template
-reports the same seven diagnostics on c928 and this slice (six pre-existing line
-lengths plus its substituted `__WAIT__` placeholder); `runtime-ruff-baseline.json`
-retains that comparison. It is not a passing template-wide Ruff result.
-These are focused implementation checks; no full diagnostic or gate reran.
-
-Compression removes full Task reads from event insertion, capture decoding from
-root-ID lookup, and per-tick graph cloning/outcome rewrapping. Final proof:
-`runtime-compress-final.log` 29 passes; `runtime-compress-public.log` three scripted
-public CLI passes; `runtime-compress-clippy.log`, formatting and diff checks pass.
-No schema, native retry contract, configured acceptance or delivery state changed.
-
-Remaining: review/integrate discovery and released import; final typed history
-and Desktop paging/reconciliation; native retry-contract choice; configured
-provider/Desktop and full final preservation matrix. Jack's complete concept
-review and saved delivery remain required. No installed data, promotion, native
-retry contract or captured-input naming choice changed in this slice.
-
-## Current implementation and its limits
-
-- AgentSession owns conversation admission/publication, immutable inputs and
-  subordinate provider outcome/usage history. Ordinary and managed launches,
-  reviews and Asks create no runtime Run rows. The Run table/CRUD were removed
-  after retaining original SQL and unresolved inputs. Remaining Run names/wire,
-  native evidence files and consumers still need final disposition.
-- Exec is the actual `lf` process with causal parentage and observed terminal
-  outcome. Async/blocking command ancestry is preserved. Command success, native
-  turn completion and Flow settlement remain different facts. Observational Execs
-  do not start Tasks. No synthetic process is imported without process evidence.
-- FlowSession owns captured progression, claim/version and exact successful native
-  history references. Mechanical boundaries retain independent start/outcome
-  events, including success before a later operation fails in the same Exec.
-  Task/taskless share the driver; numeric graph identity agrees across Rust/Swift.
-- Bind is write-once null→Task, same-target idempotent, permits done Tasks and sets
-  Started once. Prior usage retains attribution; prospective allocation is the
-  recorded conservative assumption, not a new Jack decision. Unknown mid-turn
-  allocation stays unknown. Neither driver replacement nor chapter movement
-  rewrites historical owners.
-- OpenCode native request/history integration passes scripted public automatic
-  retry and real OpenCode/scripted-model final-output proofs. The latter's injected
-  failure retries inside OpenCode, not Loopflow. Codex ordinary automatic retry
-  passes zero-Run history/usage and exact consumption; valid decision retry does
-  not. Configured accounts/all-provider recovery remain separate.
-- Desktop reveals headless conversations, previews/confirms permanent binding and
-  retains a Session's own workspace, surfaces, draft and companion. `runs --resume`
-  is deleted; connect/open share the selected conversation path. Whole common-
-  connect acceptance and configured Desktop acceptance remain open.
-- Chapters use Linear Project statuses, preserve transferred Task identity/Started/
-  worktree/PR/capture, and use Project Flow defaults. Scripted public Linux rotation
-  and second-Home sync pass. No live Linear rotation or distributed no-work lock
-  is claimed; unknown evidence never authorizes backlog cancellation.
-
-## Proof discipline
-
-Read logs before launching duplicate builds. Source checks use
-`uv run python .lf/tmp/cut-i/run.py NAME COMMAND...`: scrub inherited LF_/LOOPFLOW_
-authority, unrelated private Home/database, nice +10, four build jobs, saved full
-log and bounded process cleanup. Run resource preflight and serialize builds.
-Never touch real/shared provider engines to diagnose fixtures. The metadata
-preflight had 52.3 GiB free: below cleanup target, above the emergency reserve.
-
-One isolated materialized no-fail-fast matrix already ran (1,925 pass / 33 fail /
-15 skip). Its later focused repairs do not create one green matrix. Preserve all
-failure dispositions; run focused changed behavior now and final affected/gate
-proof at its proper boundary. Do not repeat full matrices per small repair.
-All-target Clippy and formatting precede Rust commits. Rebase without conflicts
-needs no new behavioral proof. Leaked handles never count as clean settlement.
-
-## Passive Session metadata and CI continuation (2026-09-29)
-
-The retained metadata implementation now lists Sessions through a bounded SQL
-projection before local client observation. Captured Flow graphs, request bodies,
-transcripts and history payloads remain exact-detail/action evidence. Maintained
-expression indexes project Flow names and recorded independent membership; a
-pending-Session/state index removes the correlated review scan without changing
-historical review selection. Unknown observation/occurrence travels through the
-Rust/Swift wire. Prepared Asks stay independent; preparation retains inherited
-attribution when a consumed input is replaced and launched again.
-
-Review removed the unused public Flow-summary entry point supplied by the proposal;
-Session inventory uses its shared internal projection directly. Metadata is not a
-new durable owner. Compared with d4a66125c, production Rust/Swift changes are
-+394/-10 (net +384), excluding test modules, SQL, docs/generated files and scratch;
-`.lf/tmp/cut-i/metadata-source.json` records method and hashes. This is a reader
-improvement, not a net reduction. Flow inventory, Desktop pagination and complete
-CLI startup/query/payload measurements remain open.
-
-The prior worker's five metadata unit checks and 68 Swift tests completed. Its
-public/density logs remained red; the final attribution edit postdated those
-binaries. The rebuilt Ask case passes in metadata-resume-ask.log. The subsequent
-metadata-final-rust.log records 26 selected passes, including public Ask/taskless
-review, metadata, DTO and seven native-client cases, with one Nextest leaked-handle
-report on native-client publication. The separate final-projection run passes both
-the reduced metadata consumer and publication case with no leak report. This does
-not explain the earlier intermittent handle observation; no live owned test process
-was found afterward. Both logs are retained.
-
-NativeClient now selects a private Home/database before capture and restores its
-ambient authority on drop. The test runner supplies an unrelated empty ambient
-Home, covering the hosted missing-development-database case without changing
-production ownership resolution. The mounted Monitor proof now waits for the
-required terminal/window attachment with a bounded deadline after splitting;
-its old fixed pause did not establish mount completion. All surface, draft,
-companion, focus and history assertions remain. metadata-monitor-mount.log passes
-eight tests across both Monitor suites and both chrome sizes. Local passes do not
-establish a hosted timing diagnosis or configured Desktop acceptance.
-
-Bundled SQLite 3.53.2 measured the 20,000-Session/5,000-Flow review fixture at
-0.38ms first page, 1.41ms offset 4500 and 4.09ms empty offset 5100; the absent-title
-query took 2.06 ms. Removing only the pending-review index measured 0.57 / 267.82 / 2181.93 ms
-and 2.19 ms with identical returned IDs. EXPLAIN uses the covering pending-review
-and membership indexes and no JSON function opcode for summary selection. These
-are warm synthetic SQL measurements, not cold CLI or installed latency.
-
-All-target Clippy passes (16.96s), formatting, migration history, architecture and
-whitespace checks pass; website docs were regenerated. Public Session suites ran all 34 cases without fail-fast:33 passed and the
-checkout-attribution fixture failed. Its helper preferred a two-value historical
-manifest source over the unbound Session's recorded four-value source. The fixture
-now uses unchanged admission ancestry/source before bind, while preserving earlier
-manifest attribution after assignment. Four focused checkout/declared/Ask/bind/
-continuation cases pass in metadata-public-attribution.log; production attribution
-was unchanged for that correction. No full-suite rerun was needed. Full scope, native decision-policy question,
-configured-provider proofs and populated final import obligations remain unchanged.
-No landing, promotion, installed-Home access or Flow navigation is selected.
-
-## Preserved chronology
-
-The full pre-curation handoff is [committed at e6aa8d4c7](https://github.com/loopflowstudio/loopflow/blob/e6aa8d4c775c5c02bccd63ca80d6b616a3b60077/scratch/parallel-execution.md). Its exact private copy is `.lf/tmp/scratch-curation-20260929-metadata/parallel-execution.md`
-(133,112 bytes; SHA-256
-`026bdf2d4a95689c8ec622a09c06e2b8b12a4b4f4a81b944d2c263b7c46b9549`).
-`manifest.json` beside it records the commit, section line index and exact proof
-references. No observation, red result or acceptance document was deleted. This
-curation executes no new behavioral proof and makes no new delivery judgment.
+Use `uv run python .lf/tmp/cut-i/control-checkpoint.py ...` for installed control
+operations only. Bare lf can choose another store. Never point branch bytes at
+that installed data. Source proofs use disposable Homes with LF_/LOOPFLOW_ authority
+removed by `.lf/tmp/cut-i/run.py`. No installation promotion is authorized.

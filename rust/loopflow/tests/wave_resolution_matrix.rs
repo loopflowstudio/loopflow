@@ -57,13 +57,14 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
-/// Commands whose optional `--wave` narrows a machine-wide result instead of
-/// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
-/// reject names absent from the registry.
+/// Commands whose optional `--wave` filters recorded results instead of
+/// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
+/// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
     &["activity"],
     &["ci"],
     &["cron", "list"],
+    &["exec", "list"],
     &["runs"],
     &["usage"],
 ];

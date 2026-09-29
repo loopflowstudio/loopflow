@@ -561,7 +561,7 @@ struct SessionsView: View {
         navigation.selectedSessionId = nil
         navigation.content = .terminals
         multiplexer.showMonitor(taskId: taskId)
-        model.observeActiveRuns()
+        model.observeActiveSessions()
     }
 
     private func startConversation() {

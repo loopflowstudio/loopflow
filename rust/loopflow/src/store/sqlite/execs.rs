@@ -435,6 +435,74 @@ impl SqliteStore {
         Ok(result)
     }
 
+    /// Read current conversation attribution and exact retained client membership.
+    /// No captured input, history body, endpoint or command outcome establishes liveness.
+    pub(crate) fn session_process_ownership(
+        &self,
+        inputs: &[crate::durable::RunId],
+        execs: &[String],
+        pids: &[u32],
+    ) -> StoreResult<crate::exec::SessionProcessOwnership> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let input_json = serde_json::to_string(inputs)?;
+        let exec_json = serde_json::to_string(execs)?;
+        let pid_json = serde_json::to_string(pids)?;
+        let sessions = {
+            let mut statement = tx.prepare(
+                "SELECT s.id,s.title,s.task_id,s.wave_id,s.driver_exec_id,e.trace_id,
+                    s.driver_generation,s.provider_pid,s.provider_started_at,s.provider_exec_id
+                 FROM agent_sessions s LEFT JOIN execs e ON e.id=s.driver_exec_id
+                 WHERE s.id IN (
+                    SELECT id FROM agent_sessions WHERE driver_exec_id IN (SELECT value FROM json_each(?2))
+                    UNION SELECT id FROM agent_sessions WHERE provider_pid IN (SELECT value FROM json_each(?3))
+                    UNION SELECT id FROM agent_sessions WHERE provider_pid IS NULL
+                        AND provider_exec_id IN (SELECT value FROM json_each(?2))
+                    UNION SELECT session_id FROM agent_session_inputs
+                        WHERE input_id IN (SELECT value FROM json_each(?1)))
+                 ORDER BY s.id",
+            )?;
+            let mut rows = statement.query(params![input_json, exec_json, pid_json])?;
+            let mut sessions = Vec::new();
+            while let Some(row) = rows.next()? {
+                let task = row
+                    .get::<_, Option<String>>(2)?
+                    .as_deref()
+                    .map(crate::durable::TaskId::parse)
+                    .transpose()
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                let wave: Option<crate::id::WaveId> = row.get(3)?;
+                sessions.push(crate::exec::SessionProcessObservation {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    work: task
+                        .map(crate::durable::WorkRef::Task)
+                        .or_else(|| wave.map(crate::durable::WorkRef::Wave)),
+                    driver_exec_id: row.get(4)?,
+                    driver_trace_id: row.get(5)?,
+                    driver_generation: row.get(6)?,
+                    provider_pid: row.get(7)?,
+                    provider_started_at: row.get(8)?,
+                    provider_exec_id: row.get(9)?,
+                });
+            }
+            sessions
+        };
+        let inputs = {
+            let mut statement = tx.prepare(
+                "SELECT input_id,session_id FROM agent_session_inputs
+                 WHERE input_id IN (SELECT value FROM json_each(?1))
+                    AND session_id IS NOT NULL ORDER BY input_id",
+            )?;
+            let rows = statement
+                .query_map([&input_json], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()?;
+            rows
+        };
+        tx.commit()?;
+        Ok(crate::exec::SessionProcessOwnership { sessions, inputs })
+    }
+
     pub fn session_driver(&self, session: &str) -> StoreResult<Option<SessionDriver>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         driver_in(&conn, session)
@@ -560,6 +628,68 @@ mod discovery_tests {
             )
             .unwrap();
         id
+    }
+
+    #[test]
+    fn active_ownership_filters_dense_retained_history_before_materializing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let old = insert_exec(&store, 1, 1);
+        let live = insert_exec(&store, 2, 2);
+        let input = crate::durable::RunId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
+                INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,completed_at,
+                    input_published,cwd,provider_exec_id,provider_pid,provider_started_at)
+                SELECT 'retained-'||x,'input-'||x,'Retained','human',1,2,1,'/fixture',?1,
+                    CASE WHEN x%2=0 THEN x+100000 END,1 FROM n",
+                [&old],
+            )
+            .unwrap();
+            conn.execute("UPDATE agent_sessions SET driver_exec_id=?1,completed_at=NULL WHERE id='retained-1'", [&live]).unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET provider_exec_id=?1 WHERE id='retained-3'",
+                [&live],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,'retained-5')",
+                [input.as_str()],
+            )
+            .unwrap();
+        }
+        for (execs, pids, inputs, expected) in [
+            (vec![], vec![], vec![], vec![]),
+            (
+                vec![live.to_string()],
+                vec![100002],
+                vec![input.clone()],
+                vec!["retained-1", "retained-2", "retained-3", "retained-5"],
+            ),
+        ] {
+            let started = std::time::Instant::now();
+            for _ in 0..5 {
+                let result = store
+                    .session_process_ownership(&inputs, &execs, &pids)
+                    .unwrap();
+                assert_eq!(
+                    result
+                        .sessions
+                        .iter()
+                        .map(|s| s.id.as_str())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(result.inputs.len(), inputs.len());
+            }
+            eprintln!(
+                "active ownership: 20000 retained, {} selected, five bundled-SQLite queries {:?}",
+                expected.len(),
+                started.elapsed()
+            );
+        }
     }
 
     #[test]

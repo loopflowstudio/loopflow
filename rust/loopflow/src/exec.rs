@@ -111,3 +111,23 @@ impl SessionDriver {
         }
     }
 }
+
+/// Read-local ownership evidence; never a liveness or control claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionProcessObservation {
+    pub id: String,
+    pub title: String,
+    pub work: Option<crate::durable::WorkRef>,
+    pub driver_exec_id: Option<ExecId>,
+    pub driver_trace_id: Option<String>,
+    pub driver_generation: i64,
+    pub provider_exec_id: Option<ExecId>,
+    pub provider_pid: Option<u32>,
+    pub provider_started_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionProcessOwnership {
+    pub sessions: Vec<SessionProcessObservation>,
+    pub inputs: std::collections::BTreeMap<String, String>,
+}

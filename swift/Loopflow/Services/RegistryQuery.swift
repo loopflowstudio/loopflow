@@ -1,6 +1,6 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
-// Planning and history are one-shot queries. Active Runs use one foreground
+// Planning and history are one-shot queries. Active Sessions use one foreground
 // observation per window so native receipt discovery survives between samples.
 //
 // This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
@@ -28,20 +28,20 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
-    private let observe: @Sendable () async throws -> ActiveRunsObservation
+    private let observe: @Sendable () async throws -> ActiveSessionsObservation
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        watchActiveRuns: @escaping @Sendable () async throws -> ActiveRunsObservation = {
-            throw RegistryQueryError("Active Run observation is unavailable on this transport")
+        watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
+            throw RegistryQueryError("Active Session observation is unavailable on this transport")
         },
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
-        self.observe = watchActiveRuns
+        self.observe = watchActiveSessions
     }
 
     /// Current Waves across the machine, including stopped Waves. The shared
@@ -93,7 +93,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(String?.self, from: stdout)
     }
 
-    public func watchActiveRuns() async throws -> ActiveRunsObservation {
+    public func watchActiveSessions() async throws -> ActiveSessionsObservation {
         try await observe()
     }
 

@@ -119,9 +119,36 @@ impl ClaudeHarness {
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
+        let owner = config
+            .session_driver
+            .as_ref()
+            .map(|(session, driver)| {
+                let path = crate::store::database_path_from_env()?;
+                Ok::<_, anyhow::Error>((
+                    crate::store::sqlite::SqliteStore::new(&path)?,
+                    session,
+                    driver,
+                ))
+            })
+            .transpose()?;
         let mut child = cmd
             .spawn()
             .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
+        if let Some((store, session, driver)) = owner {
+            let recorded = (|| -> Result<()> {
+                if let Some(pid) = child.id() {
+                    if let Some(start) = crate::journal::process_started_at(pid)? {
+                        store.record_session_provider_process(session, driver, pid, start)?;
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = recorded {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(error);
+            }
+        }
         let stdin = child
             .stdin
             .take()
@@ -547,7 +574,68 @@ mod activity_tests {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
+    async fn sequential_managed_sessions_retain_their_exact_claude_engines() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let _storage =
+            crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH", "LF_BIN", "PATH"]);
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("loopflow.db");
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_DB_PATH", &database);
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        let exec = crate::id::ExecId::new();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'trace',1)",
+            [&exec],
+        )
+        .unwrap();
+        let script = home.path().join("claude");
+        std::fs::write(&script, "#!/bin/sh\nwhile read -r line; do printf '%s\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\"}'; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Vendor setup rebuilds PATH from the process environment, not AgentConfig.
+        let mut paths = vec![home.path().to_path_buf()];
+        paths.extend(std::env::split_paths(&original_path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let mut harnesses = Vec::new();
+        let mut recorded = Vec::new();
+        for id in ["first", "second"] {
+            conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd)
+                VALUES(?1,?1,?1,'human',1,1,'/fixture')", [id]).unwrap();
+            let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let mut harness = ClaudeHarness::new(tx);
+            let mut config = live_config();
+            config.session_driver = Some((id.into(), driver.clone()));
+            harness.config = Some(config);
+            harness.send_input("one turn").await.unwrap();
+            recorded.push((
+                harness.process_id().unwrap(),
+                store.session_provider_process(id).unwrap(),
+            ));
+            store.release_session_driver(id, &driver).unwrap();
+            // Retain the first process while the same Exec starts the next step.
+            harnesses.push(harness);
+        }
+        for harness in &mut harnesses {
+            harness.stop().await.unwrap();
+        }
+        assert_ne!(recorded[0].0, recorded[1].0);
+        for (pid, evidence) in recorded {
+            let (saved, start) = evidence.expect("managed Claude publishes exact engine identity");
+            assert_eq!(pid, saved);
+            assert!(start > 0);
+        }
+    }
 
     // build_claude_session_turn_args coverage lives in engine::agent::tests.
 

@@ -1,80 +1,25 @@
-//! Current capture intervals joined to verified, Home-local provider ownership.
-//! An interval establishes attribution, never liveness by itself.
+//! Stable conversations joined to exact live process evidence. SQL ownership
+//! attributes observations; it never establishes liveness or control authority.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 mod events;
 mod reader;
-pub(crate) use reader::ActiveRunReader;
+pub(crate) use reader::ActiveSessionReader;
 
-use crate::durable::{RunId, TaskWorkerOwner, WorkRef};
-use crate::lf::commands::top::{live_exec_providers, LiveExecProviders, LiveProviderProcess};
-use crate::run_record::{input_id_from_dir, write_private_exclusive, SubjectAttribution};
+use crate::durable::{RunId, WorkRef};
+use crate::exec::SessionProcessOwnership;
+use crate::lf::commands::top::{exact_provider_process, live_exec_providers, LiveProviderProcess};
 use crate::store::SharedStore;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct RunBinding {
-    run_id: RunId,
-    owner: Option<TaskWorkerOwner>,
-}
-
-/// Its lifetime is one capture, not the containing Exec.
-#[derive(Debug)]
-pub(crate) struct RunBindingGuard {
-    path: PathBuf,
-}
-
-impl RunBindingGuard {
-    pub(crate) fn publish(dir: &Path) -> std::io::Result<Self> {
-        let owner = crate::journal::current_process_identity();
-        let input = input_id_from_dir(dir)?;
-        let home = dir
-            .ancestors()
-            .nth(3)
-            .ok_or_else(|| std::io::Error::other("Run directory has no Home"))?;
-        Self::publish_at(
-            home,
-            RunBinding {
-                run_id: input,
-                owner,
-            },
-        )
-    }
-
-    fn publish_at(home: &Path, binding: RunBinding) -> std::io::Result<Self> {
-        let root = home.join("run-bindings");
-        fs::create_dir_all(&root)?;
-        let id = Uuid::new_v4();
-        let path = root.join(format!("{id}.json"));
-        let staging = root.join(format!(".{id}.staging"));
-        write_private_exclusive(&staging, &serde_json::to_vec(&binding)?)?;
-        fs::rename(staging, &path)?;
-        Ok(Self { path })
-    }
-}
-
-impl Drop for RunBindingGuard {
-    fn drop(&mut self) {
-        if let Err(error) = fs::remove_file(&self.path) {
-            tracing::warn!(%error, path = %self.path.display(), "failed to clear Run capture interval");
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ActiveRun {
-    pub id: RunId,
+pub struct ActiveSession {
+    pub id: String,
+    pub title: String,
     pub work: Option<WorkRef>,
-    pub subjects: Vec<SubjectAttribution>,
-    pub label: String,
-    pub harness: String,
-    pub model: Option<String>,
-    pub repo: Option<PathBuf>,
     pub processes: Vec<LiveProviderProcess>,
 }
 
@@ -88,198 +33,190 @@ pub enum DiscoveryState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ActiveRunsSnapshot {
+pub struct ActiveSessionsSnapshot {
     pub discovery: DiscoveryState,
     pub home: PathBuf,
     pub observed_at: i64,
     pub task: Option<WorkRef>,
-    pub runs: Vec<ActiveRun>,
+    pub sessions: Vec<ActiveSession>,
     pub gaps: Vec<String>,
-}
-
-#[cfg(test)]
-fn read_bindings(home: &Path) -> std::io::Result<BTreeMap<PathBuf, RunBinding>> {
-    let entries = match fs::read_dir(home.join("run-bindings")) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(error) => return Err(error),
-    };
-    let mut bindings = BTreeMap::new();
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        bindings.insert(path, serde_json::from_slice(&bytes)?);
-    }
-    Ok(bindings)
-}
-
-fn join_bindings(
-    bindings: &BTreeMap<PathBuf, RunBinding>,
-    execs: &[LiveExecProviders],
-    gaps: &mut Vec<String>,
-) -> BTreeMap<String, Vec<LiveProviderProcess>> {
-    let mut runs: BTreeMap<String, Vec<LiveProviderProcess>> = BTreeMap::new();
-    for exec in execs.iter().filter(|exec| !exec.providers.is_empty()) {
-        let ids = bindings
-            .values()
-            .filter(|binding| {
-                let Some(owner) = &binding.owner else {
-                    return false;
-                };
-                owner.exec_id.as_str() == exec.receipt.exec_id
-                    && owner.trace_id.as_str() == exec.receipt.trace_id
-                    && owner.pid == exec.receipt.pid
-                    && owner.started_at == exec.receipt.started_at
-            })
-            .map(|binding| binding.run_id.to_string())
-            .collect::<BTreeSet<_>>();
-        if ids.len() != 1 {
-            gaps.push(format!(
-                "Exec {} has live providers but {} current Run identities",
-                exec.receipt.exec_id,
-                ids.len()
-            ));
-            continue;
-        }
-        let id = ids.into_iter().next().expect("exactly one Run identity");
-        runs.entry(id)
-            .or_default()
-            .extend(exec.providers.iter().cloned());
-    }
-    for processes in runs.values_mut() {
-        processes.sort_by_key(|process| process.pid);
-        processes.dedup_by_key(|process| process.pid);
-    }
-    runs
 }
 
 pub async fn snapshot(
     home: &Path,
     store: &SharedStore,
     task: Option<WorkRef>,
-) -> ActiveRunsSnapshot {
-    match ActiveRunReader::start(home, false, tokio_util::sync::CancellationToken::new()) {
+) -> ActiveSessionsSnapshot {
+    match ActiveSessionReader::start(home, false, tokio_util::sync::CancellationToken::new()) {
         Ok(mut reader) => reader.observe(store, task).await,
-        Err(error) => ActiveRunsSnapshot {
+        Err(error) => ActiveSessionsSnapshot {
             home: home.to_owned(),
             observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             task,
             discovery: DiscoveryState::Unavailable,
-            runs: Vec::new(),
+            sessions: Vec::new(),
             gaps: vec![error.to_string()],
         },
     }
 }
 
-async fn project(
-    store: &SharedStore,
-    bindings: &BTreeMap<PathBuf, RunBinding>,
+fn project(
+    ownership: &SessionProcessOwnership,
     processes: &crate::lf::commands::top::ProcessSnapshot,
     clients: &[(RunId, crate::run_record::ProviderClientRef)],
-    snapshot: &mut ActiveRunsSnapshot,
+    snapshot: &mut ActiveSessionsSnapshot,
 ) {
-    // Resolve each retained input once. Native receipts establish process evidence;
-    // they no longer require a second manifest read to discover their provider.
-    let ids = clients
-        .iter()
-        .map(|(id, _)| id.to_string())
-        .collect::<BTreeSet<_>>();
-    let mut inputs = BTreeMap::new();
-    for id in ids {
-        match store.sqlite.input_snapshot(&id) {
-            Ok(input) => {
-                inputs.insert(id, input);
-            }
-            Err(error) => snapshot.gaps.push(format!("Input {id}: {error}")),
+    let live = live_exec_providers(processes, clients);
+    snapshot.gaps.extend(live.gaps);
+    let mut drivers = BTreeMap::new();
+    for session in &ownership.sessions {
+        let Some(driver) = &session.driver_exec_id else {
+            continue;
+        };
+        let receipts = live
+            .execs
+            .iter()
+            .filter(|exec| exec.receipt.exec_id == driver.as_str())
+            .collect::<Vec<_>>();
+        if receipts.len() == 1
+            && session.driver_trace_id.as_deref() == Some(receipts[0].receipt.trace_id.as_str())
+        {
+            drivers.insert(session.id.as_str(), driver.as_str());
+        } else {
+            snapshot.gaps.push(format!(
+                "Session {}: driver {} lacks one exact live Exec receipt; liveness is unresolved",
+                session.id, driver,
+            ));
         }
     }
-    let clients = clients
-        .iter()
-        .filter_map(|(id, client)| {
-            inputs
-                .get(id.as_str())
-                .map(|input| (id.clone(), client.clone(), input.harness.clone()))
-        })
-        .collect::<Vec<_>>();
-    let owners = bindings
-        .values()
-        .filter_map(|binding| binding.owner.clone())
-        .collect::<Vec<_>>();
-    let execs = live_exec_providers(processes, &owners, &clients);
-    let unowned = bindings
-        .values()
-        .filter(|binding| {
-            binding.owner.is_none() && !clients.iter().any(|(id, _, _)| id == &binding.run_id)
-        })
-        .map(|binding| binding.run_id.to_string())
-        .collect::<BTreeSet<_>>();
-    for id in unowned {
-        snapshot.gaps.push(format!(
-            "Run {id}: capture has no Exec or native-client ownership evidence"
-        ));
+    let mut attributed: BTreeMap<String, Vec<LiveProviderProcess>> = BTreeMap::new();
+    // A receipt names its original immutable input, whose retained link identifies
+    // the conversation even after input replacement or driver release.
+    let mut native: BTreeMap<u32, (LiveProviderProcess, BTreeSet<String>)> = BTreeMap::new();
+    for (input, process) in live.clients {
+        let Some(session) = ownership.inputs.get(input.as_str()) else {
+            snapshot.gaps.push(format!(
+                "Native client {}: input {} has no known Session",
+                process.pid, input
+            ));
+            continue;
+        };
+        native
+            .entry(process.pid)
+            .or_insert_with(|| (process, BTreeSet::new()))
+            .1
+            .insert(session.clone());
     }
-    let mut runs = join_bindings(bindings, &execs.execs, &mut snapshot.gaps);
-    snapshot.gaps.extend(execs.gaps);
-    for (id, process) in execs.clients {
-        runs.entry(id.to_string()).or_default().push(process);
+    let native_pids = native.keys().copied().collect::<BTreeSet<_>>();
+    for (_, (process, sessions)) in native {
+        attribute(process, sessions, &mut attributed, &mut snapshot.gaps);
     }
-    for (id, mut processes) in runs {
-        processes.sort_by_key(|process| process.pid);
-        processes.dedup_by_key(|process| process.pid);
-        let input = match inputs
-            .remove(&id)
-            .map(Ok)
-            .unwrap_or_else(|| store.sqlite.input_snapshot(&id))
-        {
-            Ok(input) => input,
-            Err(error) => {
-                snapshot.gaps.push(format!("Input {id}: {error}"));
+    // Known retained engines cannot be borrowed by the next conversation in a
+    // reused Exec. A shared engine without exact conversation evidence stays a gap.
+    let mut engines = BTreeMap::new();
+    for session in &ownership.sessions {
+        let (Some(pid), Some(start)) = (session.provider_pid, session.provider_started_at) else {
+            continue;
+        };
+        if native_pids.contains(&pid) {
+            continue;
+        }
+        if let Some(process) = exact_provider_process(processes, pid, start) {
+            engines
+                .entry(pid)
+                .or_insert_with(|| (process, BTreeSet::new()));
+            if drivers.contains_key(session.id.as_str()) {
+                engines
+                    .get_mut(&pid)
+                    .expect("engine inserted above")
+                    .1
+                    .insert(session.id.clone());
+            }
+        } else if drivers.contains_key(session.id.as_str()) {
+            snapshot.gaps.push(format!("Session {}: recorded engine {} has no matching live PID/start evidence; liveness is unresolved", session.id, pid));
+        }
+    }
+    let known_pids = engines.keys().copied().collect::<BTreeSet<_>>();
+    for (_, (process, sessions)) in engines {
+        // A retained idle engine alone is not an active conversation.
+        if !sessions.is_empty() {
+            attribute(process, sessions, &mut attributed, &mut snapshot.gaps);
+        }
+    }
+    // Providers without a recorded engine identity use nearest-Exec containment.
+    // Never assign its entire process set to every conversation sharing that Exec.
+    for exec in live.execs {
+        for process in exec.providers {
+            if known_pids.contains(&process.pid) {
                 continue;
             }
-        };
-        let id = match RunId::parse(&id) {
-            Ok(id) => id,
-            Err(error) => {
-                snapshot.gaps.push(error.to_string());
+            // A released conversation with no exact engine identity may still
+            // own this process. Its historical origin blocks guessing, not work.
+            if ownership.sessions.iter().any(|session| {
+                session
+                    .provider_exec_id
+                    .as_ref()
+                    .is_some_and(|origin| origin.as_str() == exec.receipt.exec_id)
+                    && session.provider_pid.is_none()
+                    && !drivers.contains_key(session.id.as_str())
+            }) {
+                snapshot.gaps.push(format!("Live process {}: an earlier Session in Exec {} has no exact engine identity; attribution is unresolved", process.pid, exec.receipt.exec_id));
                 continue;
             }
-        };
-        let work = match store.session_for_run(&id).await {
-            Ok(Some(session)) => match (session.task_id, session.wave_id) {
-                (Some(task), _) => Some(WorkRef::Task(task)),
-                (None, wave) => wave.map(WorkRef::Wave),
-            },
-            Ok(None) => None,
-            Err(error) => {
-                snapshot.gaps.push(format!("Input {id}: {error}"));
-                None
-            }
+            let sessions = ownership
+                .sessions
+                .iter()
+                .filter(|session| {
+                    drivers.get(session.id.as_str()).is_some_and(|driver|
+                        *driver == exec.receipt.exec_id.as_str())
+                        // Exact identity already rejected this Session's old process.
+                        && session.provider_pid != Some(process.pid)
+                })
+                .map(|session| session.id.clone())
+                .collect();
+            attribute(process, sessions, &mut attributed, &mut snapshot.gaps);
+        }
+    }
+    for session in &ownership.sessions {
+        let Some(mut processes) = attributed.remove(&session.id) else {
+            continue;
         };
         if snapshot
             .task
             .as_ref()
-            .is_some_and(|task| work.as_ref() != Some(task))
+            .is_some_and(|task| session.work.as_ref() != Some(task))
         {
             continue;
         }
-        snapshot.runs.push(ActiveRun {
-            id,
-            work,
-            subjects: input.subjects,
-            label: input.skill.unwrap_or_else(|| input.harness.clone()),
-            harness: input.harness,
-            model: input.model,
-            repo: input.repo.map(PathBuf::from),
+        processes.sort_by_key(|process| process.pid);
+        processes.dedup_by_key(|process| process.pid);
+        snapshot.sessions.push(ActiveSession {
+            id: session.id.clone(),
+            title: session.title.clone(),
+            work: session.work.clone(),
             processes,
         });
     }
+    snapshot.gaps.sort();
+    snapshot.gaps.dedup();
+}
+
+fn attribute(
+    process: LiveProviderProcess,
+    sessions: BTreeSet<String>,
+    attributed: &mut BTreeMap<String, Vec<LiveProviderProcess>>,
+    gaps: &mut Vec<String>,
+) {
+    if sessions.len() != 1 {
+        gaps.push(format!(
+            "Live process {} has {} possible current Sessions; attribution is unresolved",
+            process.pid,
+            sessions.len()
+        ));
+        return;
+    }
+    let session = sessions.into_iter().next().expect("one Session identity");
+    attributed.entry(session).or_default().push(process);
 }
 
 #[cfg(test)]
@@ -287,11 +224,12 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use crate::durable::{RunId, TaskWorkerOwner};
-    use crate::id::{ExecId, TraceId};
+    use super::{project, ActiveSessionsSnapshot, DiscoveryState};
+    use crate::durable::RunId;
+    use crate::exec::{SessionProcessObservation, SessionProcessOwnership};
+    use crate::id::ExecId;
     use crate::journal::ExecProcessReceipt;
-    use crate::lf::commands::top::{ActivityState, LiveExecProviders, LiveProviderProcess};
-    use crate::run_record::active::{join_bindings, read_bindings, RunBinding, RunBindingGuard};
+    use crate::lf::commands::top::{test_process, ActivityState, ProcessSnapshot};
 
     #[derive(Debug)]
     struct OwnedClient(std::process::Child);
@@ -305,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
-    async fn native_client_receipts_do_not_require_a_new_capture_binding() {
+    async fn native_client_survives_input_replacement_without_retired_payload() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
@@ -334,6 +272,7 @@ mod tests {
         )
         .unwrap();
         let id = capture.run_id();
+        let session_id = store.sqlite.session_for_run(&id).unwrap().unwrap().id;
         let (dir, _) = crate::run_record::resolve_manifest(home.path(), id.as_str()).unwrap();
         let client = OwnedClient(
             std::process::Command::new("/bin/cat")
@@ -347,18 +286,45 @@ mod tests {
         let snapshot = super::snapshot(home.path(), &store, None).await;
         assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
         assert_eq!(
-            snapshot.runs.iter().map(|run| &run.id).collect::<Vec<_>>(),
-            [&id]
+            snapshot
+                .sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            [session_id.as_str()]
         );
+        let mut replacement = store.sqlite.session_for_run(&id).unwrap().unwrap();
+        replacement.input_id = RunId::new();
+        replacement.provider = Some("different-provider".into());
+        store
+            .sqlite
+            .replace_session_input(&id, replacement)
+            .unwrap();
+        store
+            .sqlite
+            .rename_session(
+                &session_id,
+                None,
+                "Retained conversation",
+                crate::session::TitleSource::Human,
+            )
+            .unwrap();
+        std::fs::remove_file(dir.join("manifest.json")).unwrap();
+        std::fs::write(dir.join("events.jsonl"), b"broken retired payload").unwrap();
+        let snapshot = super::snapshot(home.path(), &store, None).await;
+        assert_eq!(snapshot.sessions[0].id, session_id);
+        assert_eq!(snapshot.sessions[0].title, "Retained conversation");
+        assert_eq!(snapshot.sessions[0].processes[0].provider, "cat");
+        assert!(snapshot.gaps.is_empty(), "{snapshot:?}");
         drop(client);
         let snapshot = super::snapshot(home.path(), &store, None).await;
-        assert!(snapshot.runs.is_empty());
+        assert!(snapshot.sessions.is_empty());
         assert!(snapshot.gaps.is_empty());
     }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
-    async fn old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear() {
+    async fn old_waiting_sessions_are_task_exact_in_one_checkout_and_dead_clients_disappear() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
@@ -379,6 +345,7 @@ mod tests {
         );
         let task = TaskId::new();
         let other_task = TaskId::new();
+        let untouched = TaskId::new();
         // Each live conversation names a registered Task.
         let wave = crate::id::WaveId::new();
         {
@@ -389,7 +356,8 @@ mod tests {
                  VALUES('project','{wave}','project',1);
                  INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
                  VALUES('{task}','project','{task}','{task}','/repo.one',1),
-                       ('{other_task}','project','{other_task}','{other_task}','/repo.two',1);"
+                       ('{other_task}','project','{other_task}','{other_task}','/repo.two',1),
+                       ('{untouched}','project','{untouched}','{untouched}','/repo.three',1);"
             ))
             .unwrap();
         }
@@ -437,6 +405,25 @@ mod tests {
             clients.push(client);
         }
         store.sqlite.assert_no_historical_runs();
+        let inputs = captures
+            .iter()
+            .map(|capture| capture.run_id())
+            .collect::<Vec<_>>();
+        let before = store
+            .sqlite
+            .session_process_ownership(&inputs, &[], &[])
+            .unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let started: Vec<(String, Option<i64>)> = conn
+            .prepare("SELECT id,started_at FROM tasks ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(started
+            .iter()
+            .any(|(id, at)| id == untouched.as_str() && at.is_none()));
         let snapshot = crate::run_record::active::snapshot(
             home.path(),
             &store,
@@ -444,171 +431,249 @@ mod tests {
         )
         .await;
         assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
-        assert_eq!(snapshot.runs.len(), 1);
-        assert_eq!(snapshot.runs[0].id, captures[0].run_id());
-        assert_eq!(snapshot.runs[0].work, Some(WorkRef::Task(task)));
-        assert_eq!(snapshot.runs[0].processes[0].state, ActivityState::Waiting);
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(
+            snapshot.sessions[0].id,
+            store
+                .sqlite
+                .session_for_run(&captures[0].run_id())
+                .unwrap()
+                .unwrap()
+                .id
+        );
+        assert_eq!(snapshot.sessions[0].work, Some(WorkRef::Task(task)));
+        assert_eq!(
+            snapshot.sessions[0].processes[0].state,
+            ActivityState::Waiting
+        );
         let snapshot = crate::run_record::active::snapshot(home.path(), &store, None).await;
-        assert_eq!(snapshot.runs.len(), 2);
+        assert_eq!(snapshot.sessions.len(), 2);
         drop(clients);
         // Captures and client receipts remain unfinished, but neither process lives.
         let snapshot = crate::run_record::active::snapshot(home.path(), &store, None).await;
-        assert!(snapshot.runs.is_empty());
+        assert!(snapshot.sessions.is_empty());
         assert!(snapshot.gaps.is_empty());
+        std::fs::create_dir_all(home.path().join("run-bindings")).unwrap();
         std::fs::write(home.path().join("run-bindings/broken.json"), b"{").unwrap();
         let unavailable = crate::run_record::active::snapshot(home.path(), &store, None).await;
-        assert!(unavailable.runs.is_empty());
-        assert!(!unavailable.gaps.is_empty());
+        assert!(unavailable.sessions.is_empty());
+        assert!(
+            unavailable.gaps.is_empty(),
+            "retired files are not ownership"
+        );
+        assert_eq!(
+            before,
+            store
+                .sqlite
+                .session_process_ownership(&inputs, &[], &[])
+                .unwrap()
+        );
+        let after: Vec<(String, Option<i64>)> = conn
+            .prepare("SELECT id,started_at FROM tasks ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(started, after);
     }
 
-    fn owner(pid: u32) -> TaskWorkerOwner {
-        TaskWorkerOwner {
-            trace_id: TraceId::new(),
-            exec_id: ExecId::new(),
+    fn session(id: &str, exec: &ExecId) -> SessionProcessObservation {
+        SessionProcessObservation {
+            id: id.into(),
+            title: format!("Conversation {id}"),
+            work: None,
+            driver_exec_id: Some(exec.clone()),
+            driver_trace_id: Some("trace".into()),
+            driver_generation: 1,
+            provider_exec_id: Some(exec.clone()),
+            provider_pid: None,
+            provider_started_at: None,
+        }
+    }
+
+    fn receipt(exec: &ExecId, pid: u32) -> ExecProcessReceipt {
+        ExecProcessReceipt {
+            schema_version: 1,
+            trace_id: "trace".into(),
+            exec_id: exec.to_string(),
             pid,
             started_at: 100,
         }
     }
 
-    fn exec(owner: &TaskWorkerOwner, pids: &[u32]) -> LiveExecProviders {
-        LiveExecProviders {
-            receipt: ExecProcessReceipt {
-                schema_version: 1,
-                trace_id: owner.trace_id.to_string(),
-                exec_id: owner.exec_id.to_string(),
-                pid: owner.pid,
-                started_at: owner.started_at,
-            },
-            providers: pids
-                .iter()
-                .map(|pid| LiveProviderProcess {
-                    pid: *pid,
-                    provider: "claude".into(),
-                    state: ActivityState::Waiting,
-                })
-                .collect(),
-        }
+    fn observe(
+        owners: Vec<SessionProcessObservation>,
+        processes: &ProcessSnapshot,
+    ) -> ActiveSessionsSnapshot {
+        let ownership = SessionProcessOwnership {
+            sessions: owners,
+            inputs: BTreeMap::new(),
+        };
+        let mut result = ActiveSessionsSnapshot {
+            discovery: DiscoveryState::Ready,
+            home: PathBuf::from("/fixture"),
+            observed_at: 100,
+            task: None,
+            sessions: vec![],
+            gaps: vec![],
+        };
+        project(&ownership, processes, &[], &mut result);
+        result
     }
 
     #[test]
-    fn capture_intervals_do_not_keep_prior_runs_alive_in_a_reused_exec() {
-        let home = tempfile::tempdir().unwrap();
-        let owner = owner(50);
-        let first = RunId::new();
-        let second = RunId::new();
-        let first_guard = RunBindingGuard::publish_at(
-            home.path(),
-            RunBinding {
-                run_id: first.clone(),
-                owner: Some(owner.clone()),
-            },
-        )
-        .unwrap();
-        let mut gaps = Vec::new();
-        assert!(join_bindings(
-            &read_bindings(home.path()).unwrap(),
-            &[exec(&owner, &[51])],
-            &mut gaps
-        )
-        .contains_key(first.as_str()));
-        drop(first_guard);
-        let _second_guard = RunBindingGuard::publish_at(
-            home.path(),
-            RunBinding {
-                run_id: second.clone(),
-                owner: Some(owner.clone()),
-            },
-        )
-        .unwrap();
-        let runs = join_bindings(
-            &read_bindings(home.path()).unwrap(),
-            &[exec(&owner, &[51])],
-            &mut gaps,
-        );
-        assert_eq!(runs.keys().collect::<Vec<_>>(), vec![second.as_str()]);
-        assert!(gaps.is_empty());
-    }
-
-    #[test]
-    fn exact_owners_deduplicate_one_run_and_keep_other_runs_separate() {
-        let first = owner(50);
-        let second = owner(60);
-        let third = owner(70);
-        let run = RunId::new();
-        let other = RunId::new();
-        let bindings = BTreeMap::from([
-            (
-                PathBuf::from("capture"),
-                RunBinding {
-                    run_id: run.clone(),
-                    owner: Some(first.clone()),
-                },
-            ),
-            (
-                PathBuf::from("resume"),
-                RunBinding {
-                    run_id: run.clone(),
-                    owner: Some(second.clone()),
-                },
-            ),
-            (
-                PathBuf::from("other-task"),
-                RunBinding {
-                    run_id: other.clone(),
-                    owner: Some(third.clone()),
-                },
-            ),
-        ]);
-        let mut gaps = Vec::new();
-        let runs = join_bindings(
-            &bindings,
-            &[
-                exec(&first, &[51, 52]),
-                exec(&second, &[61]),
-                exec(&third, &[71]),
+    fn sequential_sessions_do_not_borrow_a_retained_engine() {
+        let exec = ExecId::new();
+        let mut first = session("first", &exec);
+        first.driver_exec_id = None;
+        first.driver_trace_id = None;
+        first.provider_pid = Some(51);
+        first.provider_started_at = Some(100);
+        let second = session("second", &exec);
+        let processes = ProcessSnapshot {
+            processes: vec![
+                test_process(50, 1, 100, "lf"),
+                test_process(51, 50, 100, "codex app-server"),
+                test_process(52, 50, 100, "claude --print"),
             ],
-            &mut gaps,
-        );
-        assert_eq!(runs.len(), 2);
+            receipts: vec![receipt(&exec, 50)],
+            opencode_servers: vec![],
+        };
+        let snapshot = observe(vec![first.clone(), second.clone()], &processes);
+        assert!(snapshot.gaps.is_empty(), "{snapshot:?}");
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(snapshot.sessions[0].id, "second");
         assert_eq!(
-            runs[run.as_str()]
+            snapshot.sessions[0]
+                .processes
                 .iter()
-                .map(|process| process.pid)
+                .map(|p| p.pid)
                 .collect::<Vec<_>>(),
-            [51, 52, 61]
+            [52]
         );
-        assert_eq!(runs[other.as_str()][0].pid, 71);
-        assert!(gaps.is_empty());
+        // The old integer PID cannot hide a new provider beneath the current driver.
+        let mut old_pid = first.clone();
+        old_pid.provider_started_at = Some(1);
+        let reused = observe(vec![old_pid, second.clone()], &processes);
+        assert_eq!(reused.sessions.len(), 1);
+        assert_eq!(reused.sessions[0].id, "second");
+        assert_eq!(
+            reused.sessions[0]
+                .processes
+                .iter()
+                .map(|p| p.pid)
+                .collect::<Vec<_>>(),
+            [51, 52]
+        );
+        // Two unresolved current drivers cannot both borrow the Claude process.
+        let mut unknown = first.clone();
+        unknown.provider_pid = None;
+        unknown.provider_started_at = None;
+        let unresolved = observe(vec![unknown, second.clone()], &processes);
+        assert!(unresolved.sessions.is_empty());
+        assert!(unresolved
+            .gaps
+            .iter()
+            .any(|gap| gap.contains("earlier Session")));
+        first.driver_exec_id = Some(exec);
+        first.driver_trace_id = Some("trace".into());
+        let mut reused_pid = first.clone();
+        reused_pid.provider_started_at = Some(1);
+        let rejected = observe(vec![reused_pid], &processes);
+        assert!(rejected
+            .sessions
+            .iter()
+            .all(|session| session.processes.iter().all(|process| process.pid != 51)));
+        assert!(rejected.gaps.iter().any(|gap| gap.contains("PID/start")));
+        let ambiguous = observe(vec![first, second], &processes);
+        assert_eq!(ambiguous.sessions[0].id, "first"); // its exact engine, not Claude
+        assert_eq!(ambiguous.sessions[0].processes[0].pid, 51);
+        assert!(ambiguous
+            .gaps
+            .iter()
+            .any(|g| g.contains("52") && g.contains("2 possible")));
     }
 
     #[test]
-    fn dead_missing_reused_and_ambiguous_owners_never_claim_a_live_run() {
-        let owner = owner(50);
-        let run = RunId::new();
-        let mut bindings = BTreeMap::from([(
-            PathBuf::from("first"),
-            RunBinding {
-                run_id: run,
-                owner: Some(owner.clone()),
-            },
-        )]);
-        let mut gaps = Vec::new();
-        assert!(join_bindings(&bindings, &[], &mut gaps).is_empty());
-        assert!(gaps.is_empty());
-        // A live containment without a provider is not an active Run.
-        assert!(join_bindings(&bindings, &[exec(&owner, &[])], &mut gaps).is_empty());
-        let mut reused = owner.clone();
-        reused.started_at += 100;
-        assert!(join_bindings(&bindings, &[exec(&reused, &[51])], &mut gaps).is_empty());
-        assert_eq!(gaps.len(), 1);
-        bindings.insert(
-            PathBuf::from("second"),
-            RunBinding {
-                run_id: RunId::new(),
-                owner: Some(owner.clone()),
-            },
-        );
-        assert!(join_bindings(&bindings, &[exec(&owner, &[51])], &mut gaps).is_empty());
-        assert_eq!(gaps.len(), 2);
+    fn child_exec_is_distinct_and_pid_or_trace_mismatch_cannot_claim_work() {
+        let root = ExecId::new();
+        let child = ExecId::new();
+        let first = session("root", &root);
+        let second = session("child", &child);
+        let mut processes = ProcessSnapshot {
+            processes: vec![
+                test_process(50, 1, 100, "lf"),
+                test_process(51, 50, 100, "claude"),
+                test_process(60, 50, 100, "lf"),
+                test_process(61, 60, 100, "codex app-server"),
+            ],
+            receipts: vec![receipt(&root, 50), receipt(&child, 60)],
+            opencode_servers: vec![],
+        };
+        let snapshot = observe(vec![first.clone(), second.clone()], &processes);
+        assert!(snapshot.gaps.is_empty(), "{snapshot:?}");
+        assert_eq!(snapshot.sessions[0].processes[0].pid, 51);
+        assert_eq!(snapshot.sessions[1].processes[0].pid, 61);
+        processes.receipts[0].started_at = 1;
+        processes.receipts[1].trace_id = "different-trace".into();
+        let snapshot = observe(vec![first, second], &processes);
+        assert!(snapshot.sessions.is_empty(), "{snapshot:?}");
+        assert!(!snapshot.gaps.is_empty());
+    }
+
+    #[test]
+    fn shared_engine_is_not_broadcast_and_native_clients_survive_driver_exit() {
+        let exec = ExecId::new();
+        let mut first = session("first", &exec);
+        first.provider_pid = Some(51);
+        first.provider_started_at = Some(100);
+        let mut second = first.clone();
+        second.id = "second".into();
+        let mut processes = ProcessSnapshot {
+            processes: vec![
+                test_process(50, 1, 100, "lf"),
+                test_process(51, 1, 100, "codex app-server"),
+                test_process(70, 1, 100, "codex"),
+                test_process(71, 1, 100, "codex"),
+            ],
+            receipts: vec![receipt(&exec, 50)],
+            opencode_servers: vec![],
+        };
+        let snapshot = observe(vec![first.clone(), second.clone()], &processes);
+        assert!(snapshot.sessions.is_empty());
+        assert!(snapshot.gaps.iter().any(|g| g.contains("2 possible")));
+        first.driver_exec_id = None;
+        first.driver_trace_id = None;
+        second.driver_exec_id = None;
+        second.driver_trace_id = None;
+        processes.receipts.clear();
+        processes.processes.remove(0);
+        let old = RunId::new();
+        let sibling = RunId::new();
+        let ownership = SessionProcessOwnership {
+            sessions: vec![first, second],
+            inputs: BTreeMap::from([
+                (old.to_string(), "first".into()),
+                (sibling.to_string(), "second".into()),
+            ]),
+        };
+        let clients = [(old, 70), (sibling, 71)].map(|(input, pid)| {
+            (
+                input,
+                crate::run_record::ProviderClientRef {
+                    schema_version: 1,
+                    pid,
+                    terminal_id: None,
+                    started_at: time::OffsetDateTime::from_unix_timestamp(100).unwrap(),
+                },
+            )
+        });
+        let mut snapshot = observe(vec![], &processes);
+        project(&ownership, &processes, &clients, &mut snapshot);
+        assert_eq!(snapshot.sessions.len(), 2, "{snapshot:?}");
+        assert_eq!(snapshot.sessions[0].processes[0].pid, 70);
+        assert_eq!(snapshot.sessions[1].processes[0].pid, 71);
+        assert!(snapshot.gaps.is_empty(), "{snapshot:?}");
     }
 }

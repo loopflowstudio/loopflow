@@ -829,7 +829,7 @@ lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # recent Home-local Run records
-lf runs --active --json          # current provider-backed Runs and observation gaps
+lf runs --active --json          # live Sessions and observation gaps
 lf runs --active --watch --json  # retain discovery and stream snapshots (macOS)
 lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
 lf runs --project parser        # one Project's Runs, filtered before the result cap
@@ -932,27 +932,33 @@ Home's SQLite store before decoding its evidence. Each input keeps its original
 Work attribution, provider, usage and outcome across conversation continuation.
 The historical command and JSON names remain during the coordinated wire cutover.
 
-`lf runs --active` discovers existing receipts once and checks current processes.
-Waiting native clients count while their owned process remains live; unfinished
-Run metadata alone does not. Exact native receipts and current Exec capture
-bindings supply ownership. No history window, result cap or new launcher marker
-is required. The one-shot cold scan still grows with retained history.
+`lf runs --active` retains its command spelling and now returns live AgentSessions.
+Rows use stable Session `id`, `title`, current typed `work`, and verified `processes`;
+input replacement does not change their identity. The JSON collection is `sessions`,
+replacing `runs`. Per-input subjects, harness, model and repository metadata are
+removed from this live projection. Historical input/usage commands are unchanged.
 
-On macOS, `--watch --json` keeps that reader alive, follows filesystem publication,
-and emits newline-delimited snapshots every two seconds. Unchanged warm reads
-recheck live candidates without enumerating historical Runs. Send
-`{"action":"refresh"}` on stdin for an immediate read or `{"action":"rescan"}`
-after sleep/wake or to retry discovery. Closing stdin or stdout exits only this
-reader. Notification loss requests a full cold rescan; errors remain explicit.
-Linux supports one-shot reads and reports continuous discovery as unsupported.
+Current SQL drivers attribute exact live Exec/process receipts. Native client
+receipts resolve through retained input membership, including after driver exit.
+Retained provider PID/start evidence keeps earlier engines off a later Session in
+one Exec. A driver, endpoint or idle engine alone never proves activity. Ambiguous
+shared engines or multiple current Sessions stay explicit gaps. This observation
+has no process-control or Flow-settlement authority.
 
-JSON includes required `discovery` (`scanning`, `ready`, `unavailable`), `home`,
-`observed_at`, optional `task`, `runs`, and `gaps`. Empty `runs` confirms no active
-Runs only when discovery is ready and gaps are empty. Missing or ambiguous
-ownership stays incomplete. A replaced Home requires a fresh reader; repeated
-read failures wait for a request instead of repeatedly scanning history.
-Use one unfiltered Home observation for several Task views, matching each row's
-typed `work`, never its checkout. Wave/Project filters remain history reads.
+On macOS, `--watch --json` emits bounded newline-delimited snapshots every two
+seconds. Each tick rereads SQL ownership, including a database outside Home;
+filesystem events only invalidate process receipts. Send `{"action":"refresh"}`
+for an immediate read or `{"action":"rescan"}` after sleep/wake. Closing stdin or
+stdout exits only this reader. Notification loss requests a full cold rescan;
+unchanged warm reads avoid enumerating retained input directories. Linux supports
+one-shot reads and reports continuous discovery as unsupported.
+
+JSON requires `discovery` (`scanning`, `ready`, `unavailable`), `home`,
+`observed_at`, optional `task`, `sessions`, and `gaps`. Empty `sessions` confirms
+no observed active conversations only when discovery is ready and gaps are empty.
+Ownership changes during projection yield Scanning; Desktop retains its last good
+frame. A replaced Home requires a fresh reader. Use one unfiltered Home observation
+for several Task views, matching typed `work`, never a checkout or subject string.
 
 The `--parent` drill resolves one exact Run and returns all direct children
 without the seven-day presentation cap. The one-Run `--final` read projects the

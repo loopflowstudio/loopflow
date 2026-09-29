@@ -10,7 +10,7 @@ use anyhow::{anyhow, Result};
 use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
-pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot, DiscoveryState};
+pub use crate::run_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
 pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
 
 const WINDOW_DAYS: i64 = 7;
@@ -43,14 +43,14 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         if json {
             println!("{}", serde_json::to_string(&snapshot)?);
         } else {
-            for run in &snapshot.runs {
-                println!("{}  {}  {}", run.id, run.harness, run.label);
+            for session in &snapshot.sessions {
+                println!("{}  {}", session.id, session.title);
             }
             for gap in &snapshot.gaps {
                 println!("Unavailable: {gap}");
             }
-            if snapshot.runs.is_empty() && snapshot.gaps.is_empty() {
-                println!("No active Runs.");
+            if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
+                println!("No active Sessions.");
             }
         }
         Ok(())

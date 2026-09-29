@@ -26,10 +26,11 @@ those broader obligations. No review edge has been selected.
 
 ## Live ownership
 
-Main Run `run_65fc64d8389d49ea9fdbeb47efdc9c40` owns executable edits,
-builds/tests, Git, cleanup and its handoff. Same saved feature invocation
-`1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`, implement iteration10. Shared Task
-status reports running after the continuation recovery below. Recheck liveness.
+Current worker is compress Run `run_de6cc72e4b3e47fc919c51831f5b43c0`,
+same saved feature invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`,
+iteration10. Main implement Run `run_65fc64d8389d49ea9fdbeb47efdc9c40`
+completed; saved Flow advanced normally to compress. Main retains sole executable
+edit/build/test/Git ownership. Recheck shared status before any launch.
 
 Prior Run `run_344d4bfe1bf040b99a43e65434efbf97` failed during Codex remote
 compaction at17:13:58UTC (model capacity); claim released. First continuation
@@ -41,33 +42,83 @@ No evidence or scope was discarded. Same-boundary `lf task run` then launched
 current Run; no restart or Flow navigation. Continuation direction
 `ce409314-a34f-46e1-89b9-ab3d0e1881e6` was verified before launch.
 
-Local HEAD d4a66125c commits import repair (seven focused cases). The final
-committed cut is +34/−79, net−45production; the earlier −50 description referred
-to intermediate edits. Whole local committed delta +17,874/−30,666=net−12,792
-againstbase6e718; working changes excluded. Counts receipt:
-`.lf/tmp/execution-model/status-counts-d4a66125c.json`.
-Dirty metadata integration and NativeClient fixture repair remain main's work.
-68 Swift tests/9suites completed successfully in metadata-swift.log. Later
-metadata-final-rust.log passes26selected cases (one leaky; cleanup unresolved),
-including Ask provenance; metadata-monitor-mount.log passes8tests/3suites with
-bounded actual terminal-window attachment and original retention assertions.
-Clippy completed successfully. BundledSQLite density passed: empty deep page
-2181.925ms→4.087ms, identical returned IDs. SQL timings are not CLI/Desktop
-latency proof. Earlier red logs remain retained. Supervisor log/source hashes:
-`.lf/tmp/cut-i/metadata-supervisor-review.json`.
+Published HEAD **07030b7033029c635c9803973d49770f6034da5a**, based on
+main **a3820bf7e493b7d533a45677b7945020adf80721**. Metadata/import/fixture
+checkpoint e6aa8d4c7 rebased conflict-free; 07030b703 changes scratch only.
+GitHub and Task publication agree. Main compacted parallel-execution/evidence
+from203,731 to28,687bytes, retaining hashed originals and committed history.
+
+Whole committed production delta **+18,280/−30,672=net−12,392** by the same
+corrected production-prefix/no-renames method; tests/docs/working changes excluded.
+Receipts `.lf/tmp/execution-model/status-counts-{e6aa8d4c7,07030b703}.json`.
+The importer cut is net−45; metadata improves reads but adds code. No deletion
+claim follows from archived notes. Focused metadata proof:26Rust selected pass
+with one retained leaked-handle observation; separate two-check repeat clean;
+68Swift tests and eight mounted Monitor/chrome tests pass; Clippy/static pass.
+Public Session suite33/34 passed before its attribution helper correction, then
+four focused attribution/continuation cases passed. No full-green gate claim.
 
 Supervisor owns this index and isolated reviews, with no competing executable
 writer or build. Control Session `run_9c16dbbe2b04440db8469e9b4964912c` retains
 its human title loopflow.
 
-**Active private contributor:** tool14717, Run
-`run_5a749c04bcb64b7195089b13a274857d`, Exec
-`ceda711b-6a08-4188-9aac-bb79db8fbaae`, PID97123. Assignment acknowledged;
-writes ONLY `.lf/tmp/active-session-proposal/`. Complete proposed Session-based
-active-view/DTO conversion and interval-file deletion, no source/build/provider/
-Home/PM/Git/process mutations or publication hold. Main owns integration after
-reviewed terminal handback. Coordination `0bc2fe41-de49-4f11-9e83-f8264ef7b6c0`
-was read back.
+**Active preservation contributor:** tool25840, Run
+`run_6c140a0a9bea481fbf33075fa2f31821`, Exec
+`86e94725-719a-41d0-9e0f-b53cdfeacbf1`/PID47592. Live handle/ack verified.
+Writes ONLY `.lf/tmp/released-import-proposal`; prepares the missing bridge
+between populated released schema and public CLI import, reusing covered origin
+proofs. Current-schema seed is not release-upgrade evidence. No source/build/test/
+provider/Home/PM/Git/process changes or publication hold. Main owns integration
+and execution after reviewed terminal handback. Coordination ff722d66-4cca-4e7d-8e25-80ba599578f3 read back.
+
+**Active private contributor:** tool53793, Run
+`run_69b5879a1af84990877c7d331a849e20`, Exec
+`3e75fceb-63dc-48c9-8f27-acb84f7b36b5`/PID87710. Live handle and
+assignment acknowledgment verified. Writes ONLY `.lf/tmp/flow-discovery-proposal/`:
+bounded searchable FlowSession summary/detail proposal, preserving template list/show,
+existing owners, exact actions and historical missingness. No source/build/test/
+provider/Home/PM/Git/process mutation or publication hold. Main continues active-view
+integration; reviewed terminal handback is required before integrating these hunks.
+Assignment is retained in its directory; coordination bb1fa1af-7ce7-47a4-8601-11349181a42e read back.
+
+**Released private contributor:** tool14717 exited0; Run
+`run_5a749c04bcb64b7195089b13a274857d` completed its handback at
+`.lf/tmp/active-session-proposal/handback.md`. Patch SHA256
+`f928998ca6687fe814817bc2349fc3c8b8e67e8fe5729da740968e1f4fd98786`.
+All33 original/proposed hashes verified; only TaskMonitorTests.swift has source
+drift. Integrate reviewed hunks, retaining main's bounded mount repair.
+Release direction **953eabc0-3e2c-4b44-be50-1b06f135973e** was read back.
+This supersedes the main handoff's earlier unreleased statement. Syntax and five
+synthetic SQL assertions passed; no compile/product/OS proof. Proposed production
+cut +489/−592=net−103 is not yet a branch result.
+
+Supervisor review found three specific integration obligations:
+- raw known_pids excludes a reused PID even after its old start identity fails;
+  prove a new unrecorded provider is neither silently hidden nor misattributed.
+- managed Claude ensure_process does not record exact engine identity, unlike
+  Codex/OpenCode. Sequential steps in one Exec otherwise degrade to ambiguity;
+  finish the existing producer path without a new owner. Historical missingness
+  still stays unknown; retain surviving old-engine exclusion.
+- ownership SQL returns every retained provider-origin Session twice per tick.
+  A private exact-query/captured87-migration PythonSQLite probe with20,000 completed,
+  released-driver Sessions and no clients returns all20,000, median11.578ms/query
+  (five warm samples). This proves unbounded historical materialization, not a
+  CLI latency failure. Use relevant observed Exec/PID/client identities and existing
+  keys, measure dense behavior, avoid adding another cache/authority.
+Review hashes `.lf/tmp/cut-i/active-session-supervisor-review.json`; query evidence
+`.lf/tmp/cut-i/active-session-density-review.json`. Main owns resolution/tests.
+
+Main integrated the active proposal and source corrections. Current local evidence
+is incomplete: initial Rust build failed two SQL type conversions; the next13-test
+run had12passes (one leaked handle) and one import/client fixture failure. Vendor
+environment setup replaced the fake Claude PATH, reaching the installed executable
+inside the disposable test environment. Main corrected fixture isolation; the later
+three-case repair passes, and17public Session/watch/DTO checks pass. Earlier red/leak
+receipts remain. BundledSQLite five-read totals:0.389ms for0 candidates,0.426ms for4
+among20,000retainedSessions; query-only timings. Swift integration initially fails
+at a remaining old `.runs` consumer; mounted hosted failure remains unresolved.
+Log hashes/results `.lf/tmp/cut-i/active-integration-supervisor-progress.json`.
+Do not cite stale `active-swift-fixture.log` (earlier02:14 proof) as this cut's result.
 
 Prior tool72315/Run b527d5e completed and exited0. Its handback/SQL-only proof
 under `.lf/tmp/active-observation-proposal/` establishes missing driver→input
@@ -80,19 +131,29 @@ production deletion delivered and its test-only characterization patch unapplied
 
 ## Publication and checks
 
-Published **636abc941081d2e70b5068dc97ab517cceec13a1** includes the alternate
-runs --resume deletion and command/Desktop fixture repair. GitHub PR #1296 and
-Task publication agree. Base and GitHub main were both
-`6e7189926ede81b3edd05c8d81955c6cbe67a4e2` at this check; recheck before delivery.
-Hosted CI 36601948200 is complete and red. Rust: 840 passed, one failed,
-15 skipped, 1,141 unrun; session_stop_waits_for_native_client_publication opens
-an absent ambient development DB during its final resume. Swift: 286 tests, one
-issue at TaskMonitorTests.swift:144, terminal window identity. Both earlier chrome
-failures are gone; separate UI job passes. Architecture, migrations, lint,
-installation, Python, website and smoke pass. Scratch remains retained.
-Supervisor direction `5c7cf8af-7482-4437-b629-e10fdd2390b2` was read back;
-main owns both repairs. Complete bounded logs/direction live under
-`.lf/tmp/cut-i/ci-636abc941-*`. **No full-green CI claim.**
+Current07030b703 CI: Rust repeats the metadata assertion below (31passes/onefailure,
+15skips/1958unrun). Swift287tests/oneissue142.428s: mixedMonitorRetainsInput still
+fails TaskMonitorTests.swift:151 window attachment after the bounded three-second
+wait. This counterexample invalidates a claimed hosted timing repair; local passes
+retain their narrower scope. Investigate actual terminal/mount identity rather than
+increase timeout/retry. Keep draft, surface, companion and focus preservation.
+Verified direction f0473c7f-8648-4a1d-8ed6-6642d8d52871. Compact logs are
+`.lf/tmp/cut-i/ci-07030b703-{rust-clean.log,swift-summary.json}`; do not dump giant
+Swift inspector values. Separate UI, installation, architecture, migrations,
+lint, Python, website and smoke passed. Scratch-clear fails while evidence remains.
+
+Prior e6aa8d4c7 Rust
+job109534138916 failed after31passes/onefailure,15skips,1958unrun. The test
+`session_list_and_open_preserve_valid_reviews_beside_unreadable_captures` still
+expects passive inventory to decode a corrupt graph. Reconcile with metadata-only
+listing while keeping valid-neighbor access, exact broken-open refusal and retained
+corrupt bytes. This direction is included in verified release comment above.
+Log `.lf/tmp/cut-i/ci-e6aa8d4c7-rust-clean.log`. Other jobs were still running.
+
+Historical636abc941 CI36601948200 failed on NativeClient ambient database and
+Monitor mount timing; both received focused repairs in e6aa8d4c7. Those local
+passes do not establish hosted success. Earlier logs remain
+`.lf/tmp/cut-i/ci-636abc941-*`. No final CI/gate or delivery approval follows.
 
 The terminal predecessor CI 36600147964 at 59ed94ea5 failed:
 - Rust 109515111201: 660 passed, 2 failed, 15 skipped, 1,321 unrun; 37.122 s.
@@ -132,7 +193,9 @@ Supervisor verified 16 original/proposed files and read-only applicability at
 The proposal removes capture/history decoding from passive inventory, uses
 SQLite-maintained expression indexes for Flow name and known input membership,
 and retains exact-action readers. Unknown state/occurrence moves with Rust/Swift
-and fixtures. **Unapplied, uncompiled; +405/−6 production** by contributor method.
+and fixtures. Original handback: **unapplied, uncompiled; +405/−6 production** by contributor method.
+Main subsequently integrated it with the query repair in e6aa8d4c7; current proof
+is recorded above. The following text preserves the pre-integration review.
 Six SQL-expression checks, syntax and hunk replay pass; no application proof.
 Do not apply the superseded private Session-cache proposal alongside it.
 
@@ -231,7 +294,7 @@ never inline patches or huge fixture/event JSON. Current source proofs clear
 ambient LF/LOOPFLOW authority and use disposable Homes. Promotion needs a
 separate disposable OS account/container, not HOME alone.
 
-Last measured published production delta, 636abc941 versus base6e718:
+Historical published production delta, 636abc941 versus base6e718:
 **+17,919 / −30,666 = net−12,747**. Same corrected production-prefix method,
 no rename detection, tests/docs and working changes excluded. Receipt:
 `.lf/tmp/execution-model/status-counts-636abc941.json`. OpenCode's cut was net+266;

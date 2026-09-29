@@ -271,8 +271,8 @@ struct AppliedDevelopmentMigration {
     checksum: String,
 }
 
-/// A release packages draft SQL that may already have run in this Home. Move
-/// its receipts, never replay the SQL (which can transform existing data).
+/// A release packages draft SQL that may already have run in this Home. Adopt
+/// matching receipts without replaying applied SQL, then apply any pending suffix.
 /// The caller holds the migration transaction across inspection and adoption.
 fn adopt_released_development_drafts(
     conn: &rusqlite::Connection,
@@ -304,16 +304,20 @@ fn adopt_released_development_drafts(
             // exactly one final newline. Only identical draft bytes are adopted.
             let body = format!("{}\n", body.trim_end_matches('\n'));
             let checksum = hex::encode(Sha256::digest(body.as_bytes()));
-            if !development
-                .get(consumed)
-                .is_some_and(|draft| draft.name == name && draft.checksum == checksum)
-            {
-                return Err(StoreError::IncompatibleDevelopment(format!(
-                    "release {} does not match applied draft {name}",
-                    migration.version()
-                )));
+            if let Some(draft) = development.get(consumed) {
+                if draft.name != name || draft.checksum != checksum {
+                    return Err(StoreError::IncompatibleDevelopment(format!(
+                        "release {} does not match applied draft {name}",
+                        migration.version()
+                    )));
+                }
+                consumed += 1;
+            } else {
+                // This Home stopped at an earlier verified development prefix.
+                // Apply the remaining release bytes in the same transaction;
+                // existing names/checksums are never replaced or replayed.
+                conn.execute_batch(&body)?;
             }
-            consumed += 1;
         }
     }
     let remaining = &development[consumed..];
@@ -5501,6 +5505,308 @@ mod tests {
                 )
                 .unwrap());
         }
+    }
+
+    #[test]
+    fn development_conversation_members_import_after_forward_upgrade() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let frontier = "agent_session_admission";
+        if _draft_is_canonical(frontier) {
+            let (index, sql, offset) = draft_location(frontier);
+            apply_set(&conn, &MIGRATIONS[..index]).unwrap();
+            conn.execute_batch("CREATE TABLE development_migrations(position INTEGER NOT NULL UNIQUE,id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,checksum TEXT NOT NULL,applied_at INTEGER NOT NULL)").unwrap();
+            // This is an applied development prefix becoming canonical, with
+            // the exact generated SQL/checksums, not a fictional released Session.
+            for block in sql[..offset]
+                .trim_end()
+                .strip_prefix("-- draft: ")
+                .unwrap()
+                .split("\n\n-- draft: ")
+            {
+                let (name, body) = block.split_once('\n').unwrap();
+                let body = format!("{}\n", body.trim_end_matches('\n'));
+                conn.execute_batch(&body).unwrap();
+                conn.execute("INSERT INTO development_migrations SELECT COUNT(*),?1,?1,?2,1 FROM development_migrations",
+                    (name,hex::encode(Sha256::digest(body.as_bytes())))).unwrap();
+            }
+        } else {
+            let drafts = crate::build_info::migration_draft_manifest();
+            let index = drafts
+                .iter()
+                .position(|draft| draft.name == frontier)
+                .unwrap();
+            apply_installed_development_sqlite(&conn, &drafts[..index]).unwrap();
+        }
+        let prior = crate::durable::RunId::new();
+        let current = crate::durable::RunId::new();
+        let caller = crate::durable::RunId::new();
+        let capture =
+            crate::durable::test_flow_invocation("retained", 0, "review", Some("review"), true);
+        conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
+            VALUES(?1,?2,'/missing-original-checkout',0,2,4,0,1,'current')",rusqlite::params![capture.id,serde_json::to_string(&capture).unwrap()]).unwrap();
+        conn.execute_batch("BEGIN").unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,current_run_id,title,title_source,ready_summary,created_at,kind,interactive,flow_session_id)
+            VALUES('retained',?1,'Original title','human','Saved feedback',1,'flow_review',1,?2)",rusqlite::params![current.as_str(),capture.id]).unwrap();
+        conn.execute("INSERT INTO runs(id,created_at,published,cwd) VALUES(?1,1,1,'/missing-original-checkout')",[caller.as_str()]).unwrap();
+        for (input, attempt, at, outcome) in
+            [(&prior, 1, 1, "failed"), (&current, 2, 3, "completed")]
+        {
+            conn.execute("INSERT INTO runs(id,session_id,invocation_id,node,iterations,attempt,created_at,published,cwd,skill,provider,caller_run_id,outcome,ended_at)
+                VALUES(?1,'retained',?2,0,'[[2]]',?3,?4,1,'/missing-original-checkout','review','codex',?5,?6,?7)",
+                rusqlite::params![input.as_str(),capture.id,attempt,at,caller.as_str(),outcome,at+1]).unwrap();
+        }
+        conn.execute(
+            "UPDATE flow_sessions SET current_run_id=?1,pending_session_id='retained' WHERE id=?2",
+            rusqlite::params![current.as_str(), capture.id],
+        )
+        .unwrap();
+        conn.execute_batch("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+            VALUES('retained','thread','failed','started','',1,'{}'),('retained','thread','failed','completed','',2,'{\"status\":\"failed\"}'),
+                  ('retained','thread','success','started','',3,'{}'),('retained','thread','success','completed','',4,'{\"status\":\"completed\"}');").unwrap();
+        conn.execute(
+            "UPDATE flow_sessions SET selected_start=3 WHERE id=?1",
+            [&capture.id],
+        )
+        .unwrap();
+        for (kind, event) in [("selected", 3), ("consumed", 4)] {
+            conn.execute("INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload) VALUES(?1,4,0,'[[2]]',?2,?3,4,'{}')",rusqlite::params![capture.id,kind,event]).unwrap();
+        }
+        let wave = crate::id::WaveId::new();
+        let task = crate::durable::TaskId::new();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'infra','/repo',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project',?1,'linear-project',1)",[&wave]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,'project',?1,?1,'/repo',1)",[task.as_str()]).unwrap();
+        conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
+            VALUES('retained','thread','historical','started','',?1,?2,17,'{}')",rusqlite::params![task.as_str(),wave]).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.as_str()],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            17
+        );
+        conn.execute_batch("COMMIT").unwrap();
+        // Canonical adoption applies the unrecorded suffix before validating
+        // the resulting schema. A failure must roll back SQL and both ledgers.
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN unexpected TEXT")
+            .unwrap();
+        let schema = product_schema(&conn).unwrap();
+        let released = applied_versions(&conn).unwrap();
+        let development = _applied_development_migrations(&conn).unwrap();
+        assert!(apply_installed_development_sqlite(
+            &conn,
+            crate::build_info::migration_draft_manifest()
+        )
+        .is_err());
+        assert_eq!(product_schema(&conn).unwrap(), schema);
+        assert_eq!(applied_versions(&conn).unwrap(), released);
+        assert_eq!(_applied_development_migrations(&conn).unwrap(), development);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM session_events", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            5
+        );
+        conn.execute_batch("ALTER TABLE projects DROP COLUMN unexpected")
+            .unwrap();
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        let saved = store.session("retained").unwrap().unwrap();
+        assert_eq!(saved.input_id, current);
+        assert_eq!(saved.caller_input_id.as_ref(), Some(&caller));
+        assert_eq!(saved.ready_summary.as_deref(), Some("Saved feedback"));
+        assert_eq!(
+            store.flow(&capture.id).unwrap().unwrap().invocation,
+            capture
+        );
+        let native = store.session_history("retained", 0, 100).unwrap();
+        assert_eq!(native.len(), 5);
+        for dry_run in [true, false, false] {
+            let members = store.historical_session_inputs().unwrap();
+            assert_eq!(members.len(), 2);
+            for (session, observation) in members {
+                assert_eq!(observation.payload["evidence"]["invocation_id"], capture.id);
+                assert_eq!(observation.payload["evidence"]["node"], 0);
+                assert_eq!(observation.payload["evidence"]["iterations"], "[[2]]");
+                store
+                    .import_session(session, None, &[observation], dry_run)
+                    .unwrap();
+            }
+            let history = store.session_history("retained", 0, 100).unwrap();
+            assert_eq!(&history[..5], native);
+            assert_eq!(history.len(), if dry_run { 5 } else { 7 });
+            assert_eq!(store.session("retained").unwrap().unwrap(), saved);
+        }
+        assert_eq!(
+            conn.query_row("SELECT selected_start FROM flow_sessions", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        let references: Vec<i64> = conn
+            .prepare("SELECT session_event FROM flow_events ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(references, vec![3, 4]);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM execs", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        conn.execute(
+            "UPDATE runs SET outcome='interrupted' WHERE id=?1",
+            [prior.as_str()],
+        )
+        .unwrap();
+        let (session, changed) = store.historical_session_inputs().unwrap().remove(0);
+        assert!(store
+            .import_session(session, None, &[changed], false)
+            .is_err());
+        assert_eq!(store.session_history("retained", 0, 100).unwrap().len(), 7);
+        assert_eq!(
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.as_str()],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            17
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
+    fn released_task_positions_survive_the_complete_conversation_upgrade() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let frontier = MIGRATIONS
+            .iter()
+            .position(|m| m.version() == "0.12.24.001_release")
+            .unwrap();
+        apply_set(&conn, &MIGRATIONS[..=frontier]).unwrap();
+        assert!(columns(&conn, "sessions").is_empty());
+        assert!(columns(&conn, "runs").is_empty());
+        let wave = crate::id::WaveId::new();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'infra','/repo',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project',?1,'linear-project',1)", [&wave]).unwrap();
+        let mut captures = Vec::new();
+        for human in [true, false] {
+            let task = crate::durable::TaskId::new();
+            let input = crate::durable::RunId::new();
+            let invocation = crate::durable::test_flow_invocation(
+                "retained",
+                0,
+                "review",
+                Some("review"),
+                human,
+            );
+            let cursor = crate::engine::ExecutionCursor {
+                iteration: 7,
+                progress: crate::engine::transitions::FlowProgress {
+                    direction: Some("Retained direction".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let claim = (!human).then(|| crate::durable::TaskWorkerClaim {
+                invocation_id: invocation.id.clone(),
+                generation: 4,
+                position_version: 9,
+                owner: crate::durable::TaskWorkerOwner {
+                    trace_id: crate::id::TraceId::new(),
+                    exec_id: crate::id::ExecId::new(),
+                    pid: 123,
+                    started_at: 100,
+                },
+                claimed_at: time::OffsetDateTime::from_unix_timestamp(100).unwrap(),
+            });
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at)
+                VALUES(?1,'project',?1,?1,'Saved task',?2,1)", rusqlite::params![task.as_str(),format!("/repo/{human}")]).unwrap();
+            conn.execute("INSERT INTO task_flow_positions(task_id,invocation_json,flow,step,node_id,human,
+                session_run_id,ready_summary,step_index,iteration,position_version,worker_generation,
+                claim_json,failure_json,updated_at,review_json)
+                VALUES(?1,?2,'retained','review','review',?3,?4,'Saved answer',0,7,9,4,?5,NULL,100,?6)",
+                rusqlite::params![task.as_str(),serde_json::to_string(&invocation).unwrap(),human,input.as_str(),
+                    claim.as_ref().map(|c| serde_json::to_string(c).unwrap()),serde_json::to_string(&cursor).unwrap()]).unwrap();
+            conn.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',50)",[task.as_str()]).unwrap();
+            captures.push((task, input, invocation, cursor, claim, human));
+        }
+        // Normal final-store opening applies the complete canonical/draft chain,
+        // rather than manually selecting only the migrations this proof expects.
+        let before = time::OffsetDateTime::now_utc().unix_timestamp();
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        let after = time::OffsetDateTime::now_utc().unix_timestamp();
+        assert!(columns(&conn, "task_flow_positions").is_empty());
+        for (task, input, invocation, cursor, claim, human) in captures {
+            let flow = store.task_flow(&task).unwrap().unwrap();
+            assert_eq!(flow.invocation, invocation);
+            assert_eq!(flow.cursor, cursor);
+            assert_eq!(flow.version, 9);
+            assert_eq!(flow.worker_generation, 4);
+            assert_eq!(flow.claim, claim);
+            assert_eq!(flow.task_id.as_ref(), Some(&task));
+            let historical: (String,String) = conn.query_row("SELECT historical_session_run_id,historical_ready_summary FROM flow_sessions WHERE id=?1",
+                [&invocation.id], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+            assert_eq!(historical, (input.to_string(), "Saved answer".into()));
+            assert_eq!(conn.query_row("SELECT min(created_at) FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='started'",[task.as_str()],|r|r.get::<_,i64>(0)).unwrap(),50);
+            let started: Option<i64> = conn
+                .query_row(
+                    "SELECT started_at FROM tasks WHERE id=?1",
+                    [task.as_str()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(
+                started.is_some(),
+                "{human}: recorded legacy work must remain Started"
+            );
+            assert!(
+                (before..=after).contains(&started.unwrap()),
+                "conversion time is inferred; the original event remains at 50"
+            );
+            assert!(conn
+                .execute(
+                    "UPDATE tasks SET started_at=51 WHERE id=?1",
+                    [task.as_str()]
+                )
+                .is_err());
+            if human {
+                let session = store.session_for_run(&input).unwrap().unwrap();
+                assert_eq!(session.ready_summary.as_deref(), Some("Saved answer"));
+                assert_eq!(session.task_id.as_ref(), Some(&task));
+                assert_eq!(
+                    flow.pending_session_id.as_deref(),
+                    Some(session.id.as_str())
+                );
+                assert_eq!(store.session_inputs(&session.id).unwrap(), vec![input]);
+            } else {
+                assert!(
+                    store.session_for_run(&input).unwrap().is_none(),
+                    "an autonomous legacy boundary is not an invented interactive review"
+                );
+            }
+        }
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM execs", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        validate_foreign_keys(&conn).unwrap();
     }
 
     #[test]

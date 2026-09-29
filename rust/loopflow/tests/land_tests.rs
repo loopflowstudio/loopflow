@@ -475,6 +475,77 @@ fn land_clears_scratch_and_preserves_gitkeep() {
 }
 
 #[test]
+fn final_preparation_only_rewrites_a_single_commit_when_the_base_changes() {
+    for (manual_merge, advance_base) in [(false, false), (true, false), (false, true)] {
+        let home = tempfile::TempDir::new().unwrap();
+        let repo = TestRepo::new();
+        repo.create_file("scratch/.gitkeep", "");
+        repo.stage_all();
+        repo.commit("track empty scratch");
+        repo.push();
+        repo.create_branch("feature");
+        repo.create_file("feature.txt", "reviewed change");
+        repo.stage_all();
+        repo.commit("reviewed change");
+        repo.push_new_branch("feature");
+        let published_head = repo.head_sha();
+        if advance_base {
+            repo.checkout("main");
+            repo.create_file("upstream.txt", "new upstream work");
+            repo.stage_all();
+            repo.commit("advance main");
+            repo.push();
+            repo.checkout("feature");
+        }
+        let gh_log = home.path().join("gh.log");
+        let script = gh_existing_pr_script(gh_log.to_str().unwrap())
+            .replace("git rev-parse HEAD", "git rev-parse @{upstream}");
+        let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+        let options = LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("reviewed change".to_string()),
+            pr_body: Some("ready".to_string()),
+            agent: None,
+        };
+        if manual_merge {
+            submit(repo.path(), &options, &NullProgress).unwrap();
+        } else {
+            land(repo.path(), &options, &NullProgress).unwrap();
+        }
+        if advance_base {
+            assert_ne!(repo.head_sha(), published_head);
+            assert_eq!(
+                fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
+                "new upstream work"
+            );
+        } else {
+            assert_eq!(repo.head_sha(), published_head);
+        }
+        assert_eq!(
+            fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
+            "reviewed change"
+        );
+        let remote = Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["rev-parse", "refs/heads/feature"])
+            .output()
+            .unwrap();
+        assert!(remote.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&remote.stdout).trim(),
+            repo.head_sha()
+        );
+    }
+}
+
+#[test]
 fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
     let repo = TestRepo::new();
     repo.create_branch("feature");

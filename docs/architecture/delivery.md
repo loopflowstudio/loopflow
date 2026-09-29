@@ -78,8 +78,9 @@ lf pr land                                     # prepared and auto-merged
 `publish` creates or refreshes the current PR without rebasing. `arm` and
 `land` integrate current main, clear merge-time scratch state, collapse
 checkpoint history into one authored commit, verify once, and push the exact
-head. `arm` requests GitHub auto-merge and returns. `land` watches through
-merge. `submit` performs the same preparation but leaves the exact-head merge
+head. A range with one linear commit keeps that commit; integrating a changed
+target can still replace it. `arm` requests GitHub auto-merge and returns. `land`
+watches through merge. `submit` performs the same preparation but leaves the exact-head merge
 to a person. These delivery commands inspect Task delivery state when present;
 they do not require a live Task worker or certify that a particular Flow ran.
 

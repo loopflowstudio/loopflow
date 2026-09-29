@@ -1424,8 +1424,8 @@ mod planning_tests {
                     }
                 }
             }
-            // A worker that died mid-step: reclaiming ends its launched Run as
-            // interrupted and the next driver blocks on it for inspection.
+            // A dead driver cannot establish the provider outcome. Reclaim preserves
+            // the unresolved input and refuses to settle or replay it.
             let guard = super::TestLfBinGuard::pin();
             let (store, task, _) =
                 human_task_fixture_at(&guard.ledger.home().join("loopflow.db")).await;
@@ -1460,20 +1460,18 @@ mod planning_tests {
             )
             .await
             .is_err());
-            let blocked = store.task_flow(&task.id).await.unwrap().unwrap();
-            let failure = blocked.failure.unwrap();
-            assert_eq!(failure.run_id, Some(run.clone()));
-            assert!(failure.reason.contains("interrupted"), "{}", failure.reason);
-            assert_eq!(
-                store
-                    .run(&run)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .ended
-                    .map(|end| end.outcome),
-                Some("interrupted".into())
-            );
+            let unresolved = store.task_flow(&task.id).await.unwrap().unwrap();
+            assert_eq!(unresolved.cursor, flow.cursor);
+            let input = unresolved.current_attempt.as_ref().unwrap();
+            assert_eq!(input.run_id, run);
+            assert_eq!(input.outcome, None);
+            assert!(store.run(&run).await.unwrap().is_none());
+            let session = store.session_for_run(&run).await.unwrap().unwrap();
+            assert!(store
+                .sqlite
+                .session_history(&session.id, 0, 0)
+                .unwrap()
+                .is_empty());
         });
     }
 
@@ -1577,7 +1575,6 @@ mod planning_tests {
                     summary: "saved whole-design proof".into(),
                 }).await.unwrap();
                 store.sqlite.test_finish_flow_turn(&actor, "completed");
-                store.sqlite.end_run(&run, &crate::session::RunEnd { outcome: "completed".into(), at: 1 }).unwrap();
                 super::drive_task(store.clone(), task.id.clone(), claim, closing_harness()).await.unwrap();
                 assert!(store.task_flow(&task.id).await.unwrap().is_none());
 
@@ -1644,7 +1641,7 @@ mod planning_tests {
                 let claim = claim(&store, &task, &flow, u32::MAX).await;
                 let run = reserved_run(&store, &task).await;
                 store.sqlite.publish_attempt(flow.id(), flow.version, &run, Some(&claim), "codex", None).unwrap();
-                let session = store.sqlite.session_for_run(&run).unwrap().unwrap().0;
+                let session = store.sqlite.session_for_run(&run).unwrap().unwrap();
                 let exec = crate::journal::current_exec_id().unwrap();
                 let driver = store.sqlite.claim_session_driver(&session.id, None, &exec, true).unwrap();
                 let mut selection = store.sqlite.flow_turn_selection(&run).unwrap().unwrap();
@@ -1671,11 +1668,11 @@ mod planning_tests {
                 assert_eq!(retried.cursor, flow.cursor);
                 assert!(retried.current_attempt.is_none() && retried.claim.is_none() && retried.failure.is_none());
                 assert_eq!(store.sqlite.session_history(&session.id, 0, 100).unwrap(), prior);
-                assert!(store.sqlite.run(&run).unwrap().unwrap().ended.is_none());
+                assert!(store.sqlite.run(&run).unwrap().is_none());
                 let owner = crate::journal::current_process_identity().unwrap();
                 let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(&task.id, retried.id(), retried.version, &owner, time::OffsetDateTime::now_utc()).await.unwrap() else { panic!("retry claim") };
                 let next = reserved_run(&store, &task).await;
-                assert_eq!(store.sqlite.session_for_run(&next).unwrap().unwrap().0.id, session.id);
+                assert_eq!(store.sqlite.session_for_run(&next).unwrap().unwrap().id, session.id);
                 store.sqlite.publish_attempt(retried.id(), retried.version, &next, Some(&claim), "codex", None).unwrap();
                 let expected = store.sqlite.session_driver(&session.id).unwrap();
                 let driver = store.sqlite.claim_session_driver(&session.id, expected.as_ref(), &owner.exec_id, true).unwrap();
@@ -1691,8 +1688,8 @@ mod planning_tests {
                 let consumed: Vec<i64> = conn.prepare("SELECT session_event FROM flow_events WHERE flow_id=?1 AND kind='consumed'").unwrap()
                     .query_map([flow.id()], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
                 assert_eq!(consumed, vec![completion]);
-                assert!(store.sqlite.run(&run).unwrap().unwrap().ended.is_none());
-                assert!(store.sqlite.run(&next).unwrap().unwrap().ended.is_none());
+                assert!(store.sqlite.run(&run).unwrap().is_none());
+                assert!(store.sqlite.run(&next).unwrap().is_none());
             });
             Ok(())
         }).unwrap();
@@ -2839,12 +2836,12 @@ mod planning_tests {
         assert!(next.is_human());
         assert!(next.claim.is_none());
         let next = super::park_at_review(&store, &task, &next).await.unwrap();
-        let (_, review) = store
+        let review = store
             .session(&crate::ops::human_session::flow_id(&next).unwrap())
             .await
             .unwrap()
             .unwrap();
-        assert!(!review.published);
+        assert!(!review.input_published);
         assert_eq!(
             (review.provider.as_deref(), review.model.as_deref()),
             (Some("claude"), Some("sonnet"))
@@ -2893,7 +2890,7 @@ mod planning_tests {
             .await
             .unwrap();
         assert_eq!(agent, "claude:sonnet");
-        let (_, review) = store.session(&review_id).await.unwrap().unwrap();
+        let review = store.session(&review_id).await.unwrap().unwrap();
         assert_eq!(
             (review.provider.as_deref(), review.model.as_deref()),
             (Some("claude"), Some("sonnet"))
@@ -2909,9 +2906,9 @@ mod planning_tests {
             .unwrap();
         let retargeted = store.task_flow(&task.id).await.unwrap().unwrap();
         assert_eq!(retargeted.cursor, flow.cursor);
-        let (_, retargeted_run) = store.session(&review_id).await.unwrap().unwrap();
-        assert_eq!(retargeted_run.id, review.id);
-        assert!(!retargeted_run.published);
+        let retargeted_run = store.session(&review_id).await.unwrap().unwrap();
+        assert_eq!(retargeted_run.input_id, review.input_id);
+        assert!(!retargeted_run.input_published);
         assert_eq!(
             (
                 retargeted_run.provider.as_deref(),
@@ -2924,7 +2921,7 @@ mod planning_tests {
             .sqlite
             .publish_review_run(
                 &review_id,
-                &retargeted_run.id,
+                &retargeted_run.input_id,
                 retargeted.version,
                 "codex",
                 Some("replacement"),
@@ -2934,7 +2931,7 @@ mod planning_tests {
         crate::ops::human_session::retarget_prepared_task_review(&store, &task)
             .await
             .unwrap();
-        let (_, published) = store.session(&review_id).await.unwrap().unwrap();
+        let published = store.session(&review_id).await.unwrap().unwrap();
         assert_eq!(published.model.as_deref(), Some("replacement"));
 
         // Without a Task choice, either form of captured step default beats config.
@@ -3073,15 +3070,16 @@ mod planning_tests {
         let parked = store.task_flow(&task.id).await.unwrap().unwrap();
         assert!(parked.is_human());
         assert!(parked.claim.is_none() && parked.failure.is_none());
-        let (session, run) = store
+        let session = store
             .session(parked.pending_session_id.as_ref().unwrap())
             .await
             .unwrap()
             .unwrap();
+        let run = session.clone();
         assert_eq!(run.task_id, Some(task.id));
-        assert_eq!(run.invocation_id.as_deref(), Some(flow.id()));
-        assert_eq!(session.current_run_id, run.id);
-        assert!(!run.published);
+        assert_eq!(run.flow_session_id.as_deref(), Some(flow.id()));
+        assert_eq!(session.input_id, run.input_id);
+        assert!(!run.input_published);
     }
 
     #[tokio::test]
@@ -3263,7 +3261,7 @@ mod planning_tests {
                         ),
                         work: None,
                     },
-                    first.id.clone(),
+                    first.input_id.clone(),
                     None,
                     &crate::trace::PreparedTurnContext::from_prompts("system", "review"),
                     |run| {
@@ -3274,17 +3272,17 @@ mod planning_tests {
                 )
                 .unwrap();
                 store
-                    .ready_session(&id, &first.id, "Retain this feedback")
+                    .ready_session(&id, &first.input_id, "Retain this feedback")
                     .await
                     .unwrap();
                 let before = store.task_flow(&task.id).await.unwrap().unwrap();
-                let original = store.session(&id).await.unwrap().unwrap().0;
+                let original = store.session(&id).await.unwrap().unwrap();
                 let selector = match selector_kind {
-                    "run" => first.id.to_string(),
-                    "prefix" => first.id.as_str()[..20].to_string(),
+                    "run" => first.input_id.to_string(),
+                    "prefix" => first.input_id.as_str()[..20].to_string(),
                     _ => id.clone(),
                 };
-                let clients = NativeClients::new(&id, std::slice::from_ref(&first.id));
+                let clients = NativeClients::new(&id, std::slice::from_ref(&first.input_id));
                 let pause = LookupPause::at(action, &selector);
                 // Rename starts acquiring this lock after its initial lookup.
                 // Replacement owns it until B and retained feedback are published.
@@ -3317,9 +3315,15 @@ mod planning_tests {
                     let (reserved, replacement) = store.reserve_review_run(&before).await.unwrap();
                     store
                         .sqlite
-                        .publish_review_run(&id, &replacement.id, reserved.version, "codex", None)
+                        .publish_review_run(
+                            &id,
+                            &replacement.input_id,
+                            reserved.version,
+                            "codex",
+                            None,
+                        )
                         .unwrap();
-                    clients.add(&id, &replacement.id);
+                    clients.add(&id, &replacement.input_id);
                     let position = store.task_flow(&task.id).await.unwrap().unwrap();
                     drop(replacement_lock);
                     pause.proceed.notify_one();
@@ -3339,13 +3343,14 @@ mod planning_tests {
                         "{action} via {selector_kind} selected a replacement"
                     );
                     assert_eq!(
-                        store.session(&id).await.unwrap().unwrap().0.title,
+                        store.session(&id).await.unwrap().unwrap().title,
                         original.title
                     );
                 }
                 assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), expected);
-                let (session, current) = store.session(&id).await.unwrap().unwrap();
-                assert_eq!(current.id, replacement.id);
+                let session = store.session(&id).await.unwrap().unwrap();
+                let current = session.clone();
+                assert_eq!(current.input_id, replacement.input_id);
                 assert_eq!(
                     session.ready_summary.as_deref(),
                     Some("Retain this feedback")
@@ -3353,12 +3358,12 @@ mod planning_tests {
                 assert!(session.completed_at.is_none());
                 assert_eq!(
                     clients.active(),
-                    [first.id.clone(), replacement.id.clone()].into()
+                    [first.input_id.clone(), replacement.input_id.clone()].into()
                 );
                 assert!(store
                     .rename_session(
                         &id,
-                        Some(&first.id),
+                        Some(&first.input_id),
                         "Stale direct write",
                         crate::session::TitleSource::Human,
                     )
@@ -3369,20 +3374,20 @@ mod planning_tests {
                 // it so Complete can settle and stop exactly B. A remains untouched.
                 let opened = human_session::open(
                     &store,
-                    replacement.id.as_str(),
+                    replacement.input_id.as_str(),
                     human_session::OpenMode::Refuse,
                     true,
                 )
                 .await
                 .unwrap();
-                assert_eq!(opened.run_id, replacement.id);
-                let completed = human_session::complete(&store, replacement.id.as_str())
+                assert_eq!(opened.run_id, replacement.input_id);
+                let completed = human_session::complete(&store, replacement.input_id.as_str())
                     .await
                     .unwrap();
-                assert_eq!(completed.run_id, replacement.id);
-                assert_eq!(clients.active(), [first.id.clone()].into());
+                assert_eq!(completed.run_id, replacement.input_id);
+                assert_eq!(clients.active(), [first.input_id.clone()].into());
                 assert!(store.task_flow(&task.id).await.unwrap().is_none());
-                let closed = store.session(&id).await.unwrap().unwrap().0;
+                let closed = store.session(&id).await.unwrap().unwrap();
                 assert!(closed.completed_at.is_some());
                 assert_eq!(
                     closed.ready_summary.as_deref(),
@@ -3400,7 +3405,7 @@ mod planning_tests {
                         .count(),
                     1
                 );
-                assert_eq!(store.session_runs(&id).await.unwrap().len(), 2);
+                assert_eq!(store.session_inputs(&id).await.unwrap().len(), 2);
                 drop(capture);
             }
         }
@@ -3412,17 +3417,17 @@ mod planning_tests {
         let (store, task, flow) = human_task_fixture().await;
         let position = parked(&store, &task, flow).await;
         let id = human_session::flow_id(&position).unwrap();
-        let (_, first) = store.session(&id).await.unwrap().unwrap();
+        let first = store.session(&id).await.unwrap().unwrap();
         let named = human_session::rename(
             &store,
-            first.id.as_str(),
+            first.input_id.as_str(),
             "Parser review",
             SessionTitleSource::Human,
         )
         .await
         .unwrap();
         assert_eq!(named.id, id);
-        assert_eq!(named.run_id, first.id);
+        assert_eq!(named.run_id, first.input_id);
         assert_eq!(named.work, Some(WorkRef::Task(task.id.clone())));
         assert!(matches!(
             &named.flow_membership,
@@ -3431,11 +3436,11 @@ mod planning_tests {
         ));
 
         let home = crate::store::observability_home_dir();
-        let first_dir = crate::run_record::record_dir(&home, &first.id).unwrap();
+        let first_dir = crate::run_record::record_dir(&home, &first.input_id).unwrap();
         std::fs::create_dir_all(&first_dir).unwrap();
         let manifest = crate::run_record::RunManifest {
             schema_version: 1,
-            run_id: first.id.clone(),
+            run_id: first.input_id.clone(),
             parent_run_id: None,
             created_at: time::OffsetDateTime::now_utc(),
             harness: "codex".into(),
@@ -3466,15 +3471,15 @@ mod planning_tests {
         let (_, replacement) = store.reserve_review_run(&position).await.unwrap();
         let retained = human_session::rename(
             &store,
-            replacement.id.as_str(),
+            replacement.input_id.as_str(),
             "Generated suggestion",
             SessionTitleSource::Generated,
         )
         .await
         .unwrap();
         assert_eq!(retained.id, id);
-        assert_ne!(retained.run_id, first.id);
-        assert_eq!(retained.run_id, replacement.id);
+        assert_ne!(retained.run_id, first.input_id);
+        assert_eq!(retained.run_id, replacement.input_id);
         assert_eq!(retained.title, "Parser review");
         assert_eq!(retained.title_source, SessionTitleSource::Human);
         assert_eq!(retained.flow_membership, named.flow_membership);
@@ -3486,13 +3491,13 @@ mod planning_tests {
             .find(|session| session.id == id)
             .unwrap();
         assert_eq!(listed, retained);
-        let history = store.session_runs(&id).await.unwrap();
+        let history = store.session_inputs(&id).await.unwrap();
         assert_eq!(history.len(), 2);
-        assert!(history.iter().any(|run| run.id == first.id));
-        assert!(history.iter().any(|run| run.id == replacement.id));
+        assert!(history.contains(&first.input_id));
+        assert!(history.contains(&replacement.input_id));
         let historical = human_session::rename(
             &store,
-            first.id.as_str(),
+            first.input_id.as_str(),
             "Old actor",
             SessionTitleSource::Human,
         )
@@ -3502,7 +3507,7 @@ mod planning_tests {
             .to_string()
             .contains(&format!("historical attempt of Session {id}")));
         assert!(!first_dir.join("session-name.json").exists());
-        let prefix = &first.id.as_str()[..16];
+        let prefix = &first.input_id.as_str()[..16];
         assert!(
             human_session::rename(&store, prefix, "Old prefix", SessionTitleSource::Human)
                 .await
@@ -3512,13 +3517,13 @@ mod planning_tests {
         );
         assert!(human_session::open(
             &store,
-            first.id.as_str(),
+            first.input_id.as_str(),
             human_session::OpenMode::Refuse,
             false
         )
         .await
         .is_err());
-        assert!(human_session::complete(&store, first.id.as_str())
+        assert!(human_session::complete(&store, first.input_id.as_str())
             .await
             .is_err());
 
@@ -3527,13 +3532,13 @@ mod planning_tests {
         let (_, third) = store.reserve_review_run(&position).await.unwrap();
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
-        assert_eq!(position.session_run_id(), Some(&third.id));
+        assert_eq!(position.session_run_id(), Some(&third.input_id));
         assert!(store
-            .ready_session(&id, &first.id, "stale answer")
+            .ready_session(&id, &first.input_id, "stale answer")
             .await
             .is_err());
         let previous_actor = std::env::var_os("LF_RUN_ID");
-        std::env::set_var("LF_RUN_ID", first.id.as_str());
+        std::env::set_var("LF_RUN_ID", first.input_id.as_str());
         let stale_actor = human_session::require_current_review_actor(&store, &position).await;
         match previous_actor {
             Some(value) => std::env::set_var("LF_RUN_ID", value),
@@ -3550,7 +3555,7 @@ mod planning_tests {
             .is_err());
         let error = human_session::rename(
             &store,
-            first.id.as_str(),
+            first.input_id.as_str(),
             "Closed actor",
             SessionTitleSource::Human,
         )
@@ -3562,7 +3567,7 @@ mod planning_tests {
         assert!(!first_dir.join("session-name.json").exists());
         assert!(human_session::rename(
             &store,
-            third.id.as_str(),
+            third.input_id.as_str(),
             "Closed actor",
             SessionTitleSource::Human
         )
@@ -3570,12 +3575,13 @@ mod planning_tests {
         .unwrap_err()
         .to_string()
         .contains("already complete"));
-        let (closed, current) = store.session(&id).await.unwrap().unwrap();
+        let closed = store.session(&id).await.unwrap().unwrap();
+        let current = closed.clone();
         assert!(closed.completed_at.is_some());
         assert_eq!(closed.title, "Parser review");
         assert_eq!(closed.ready_summary.as_deref(), Some("Keep this answer"));
-        assert_eq!(current.id, third.id);
-        assert_eq!(store.session_runs(&id).await.unwrap().len(), 3);
+        assert_eq!(current.input_id, third.input_id);
+        assert_eq!(store.session_inputs(&id).await.unwrap().len(), 3);
     }
 
     #[tokio::test]
@@ -3602,7 +3608,7 @@ mod planning_tests {
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let interrupted = crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec.clone(),
-            run.id.clone(),
+            run.input_id.clone(),
             None,
             &context,
             |_| {
@@ -3612,8 +3618,8 @@ mod planning_tests {
             },
         );
         assert!(interrupted.is_err());
-        let dir =
-            crate::run_record::record_dir(&crate::store::authority_home_dir(), &run.id).unwrap();
+        let dir = crate::run_record::record_dir(&crate::store::authority_home_dir(), &run.input_id)
+            .unwrap();
         let original = std::fs::read(dir.join("manifest.json")).unwrap();
         assert!(!dir.join("terminal.json").exists());
         let (retry, same_run) = store.reserve_review_run(&reserved).await.unwrap();
@@ -3621,7 +3627,7 @@ mod planning_tests {
         assert_eq!(retry, reserved);
         let capture = crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec.clone(),
-            run.id.clone(),
+            run.input_id.clone(),
             None,
             &context,
             |id| {
@@ -3631,22 +3637,21 @@ mod planning_tests {
             },
         )
         .unwrap();
-        assert_eq!(capture.run_id(), run.id);
+        assert_eq!(capture.run_id(), run.input_id);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
-        assert_eq!(store.session_runs(&session_id).await.unwrap().len(), 1);
+        assert_eq!(store.session_inputs(&session_id).await.unwrap().len(), 1);
         assert!(
             store
                 .session(&session_id)
                 .await
                 .unwrap()
                 .unwrap()
-                .1
-                .published
+                .input_published
         );
         assert!(
             crate::run_record::CaptureHandle::begin_reserved_with_context(
                 spec,
-                run.id.clone(),
+                run.input_id.clone(),
                 None,
                 &context,
                 |id| store
@@ -3663,16 +3668,10 @@ mod planning_tests {
             .unwrap_err();
         assert!(error.to_string().contains("launch status is unresolved"));
         assert_eq!(
-            store
-                .session(&session_id)
-                .await
-                .unwrap()
-                .unwrap()
-                .0
-                .current_run_id,
-            run.id
+            store.session(&session_id).await.unwrap().unwrap().input_id,
+            run.input_id
         );
-        assert_eq!(store.session_runs(&session_id).await.unwrap().len(), 1);
+        assert_eq!(store.session_inputs(&session_id).await.unwrap().len(), 1);
         capture.finish("interrupted").unwrap();
     }
 
@@ -3897,9 +3896,12 @@ mod planning_tests {
         let (position, run) = store.reserve_review_run(&position).await.unwrap();
         store
             .sqlite
-            .publish_review_run(&id, &run.id, position.version, "codex", None)
+            .publish_review_run(&id, &run.input_id, position.version, "codex", None)
             .unwrap();
-        store.ready_session(&id, &run.id, feedback).await.unwrap();
+        store
+            .ready_session(&id, &run.input_id, feedback)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

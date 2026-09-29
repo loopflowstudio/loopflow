@@ -1,4 +1,4 @@
-//! Every Session is a `sessions` row and its `runs` rows from launch to completion.
+//! Conversations own admission, immutable inputs, and history through completion.
 //! The real `lf` binary runs in a private Home; a script stands in for the provider.
 #![cfg(unix)]
 
@@ -169,8 +169,8 @@ impl Fixture {
         self.db()
             .query_row(
                 "SELECT s.id, s.kind, s.title, s.title_source, s.completed_at IS NOT NULL
-                 FROM agent_sessions s JOIN runs r ON r.session_id=s.id AND s.current_run_id=r.id
-                 WHERE r.id=?1",
+                 FROM agent_sessions s JOIN agent_session_inputs i ON i.session_id=s.id
+                 WHERE i.input_id=?1",
                 [run_id],
                 |row| {
                     Ok((
@@ -189,7 +189,7 @@ impl Fixture {
     fn run_parents(&self, run_id: &str) -> (Option<String>, Option<String>, Option<String>) {
         self.db()
             .query_row(
-                "SELECT task_id, wave_id, work_source FROM runs WHERE id=?1",
+                "SELECT s.task_id, s.wave_id, s.work_source FROM agent_sessions s JOIN agent_session_inputs i ON i.session_id=s.id WHERE i.input_id=?1",
                 [run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -214,6 +214,37 @@ impl Fixture {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         command
+    }
+
+    fn wait_for_ask(&self, asking: &mut Child) -> (String, String) {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let stored = self.db().query_row(
+                "SELECT id,input_id FROM agent_sessions WHERE kind='ask'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            );
+            match stored {
+                Ok(stored) => return stored,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {}
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if matches!(
+                        error.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) => {}
+                Err(error) => {
+                    let _ = asking.kill();
+                    let _ = asking.wait();
+                    panic!("cannot inspect stored Ask: {error}");
+                }
+            }
+            if asking.try_wait().unwrap().is_some() || Instant::now() >= deadline {
+                let _ = asking.kill();
+                let status = asking.wait();
+                panic!("Ask stored no Session: {status:?}");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     fn launcher_requests(&self) -> String {
@@ -256,8 +287,8 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     let (first, first_run) = fixture.attach(&LAUNCH);
     assert_eq!(
         (fixture.count("agent_sessions"), fixture.count("runs")),
-        (1, 1),
-        "launch reserves one Session and its Run"
+        (1, 0),
+        "launch reserves one Session and no Run"
     );
     let (id, kind, title, source, completed) = fixture.session_row(&first_run);
     assert_ne!(id, first_run, "a Session is not its Run");
@@ -327,7 +358,7 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     fixture.release(resumed);
     assert_eq!(
         (fixture.count("agent_sessions"), fixture.count("runs")),
-        (1, 1)
+        (1, 0)
     );
 
     // Another launch in the same checkout is another conversation.
@@ -337,7 +368,7 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     assert_ne!(second_id, id);
     assert_eq!(
         (fixture.count("agent_sessions"), fixture.count("runs")),
-        (2, 2)
+        (2, 0)
     );
     assert_eq!(fixture.sessions().len(), 2);
 
@@ -462,13 +493,21 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             ended: None,
         };
         let session = loopflow::session::AgentSession {
-            task_id: None,
-            wave_id: None,
-            flow_session_id: None,
-            work_source: None,
+            caller_input_id: run.caller_run_id.clone(),
+            task_id: run.task_id.clone(),
+            wave_id: run.wave_id.clone(),
+            flow_session_id: run.invocation_id.clone(),
+            work_source: run.work_source,
             bound_at: None,
             id: id.clone(),
-            current_run_id: run.id.clone(),
+            input_id: run.id.clone(),
+            input_published: run.published,
+            cwd: run.cwd.clone(),
+            skill: run.skill.clone(),
+            provider: run.provider.clone(),
+            model: run.model.clone(),
+            node: run.node,
+            iterations: run.iterations.clone(),
             kind: loopflow::session::SessionKind::Conversation,
             interactive: true,
             repo: None,
@@ -496,7 +535,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .unwrap();
         }
         runtime
-            .block_on(task.store.create_session(session, run, None))
+            .block_on(task.store.create_session(session, None))
             .unwrap();
     }
     let list = ["session", "list", "--json", "--limit", "2"];
@@ -766,21 +805,12 @@ fn continuing_provider_children_inherit_the_bound_session_without_rewriting_hist
         Some("inherited".to_string()),
     );
     assert_eq!(fixture.run_parents(&child_run), expected);
-    let asking = fixture
+    let mut asking = fixture
         .ask(&original, "Keep the existing target?")
         .env("LF_AGENT_CALLER", &caller)
         .spawn()
         .unwrap();
-    let (ask, ask_run): (String, String) = wait_for("bound child Ask", || {
-        fixture
-            .db()
-            .query_row(
-                "SELECT id,current_run_id FROM agent_sessions WHERE kind='ask'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .ok()
-    });
+    let (ask, ask_run) = fixture.wait_for_ask(&mut asking);
     assert_eq!(fixture.run_parents(&ask_run), expected);
     wait_for("Ask launcher", || {
         fixture
@@ -856,20 +886,11 @@ fn ask_session_is_rows_from_request_to_answer() {
     );
     let (caller, caller_run) = fixture.attach(&BOUND_LAUNCH);
 
-    let asking = fixture
+    let mut asking = fixture
         .ask(&caller_run, "Which release target?")
         .spawn()
         .unwrap();
-    let (id, first_run): (String, String) = wait_for("the Ask Session row", || {
-        fixture
-            .db()
-            .query_row(
-                "SELECT id, current_run_id FROM agent_sessions WHERE kind='ask'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .ok()
-    });
+    let (id, first_run) = fixture.wait_for_ask(&mut asking);
     wait_for("the conversation launcher", || {
         fixture
             .launcher_requests()
@@ -878,7 +899,7 @@ fn ask_session_is_rows_from_request_to_answer() {
     });
     assert_eq!(
         (fixture.count("agent_sessions"), fixture.count("runs")),
-        (2, 2)
+        (2, 0)
     );
     let inherited = (
         Some(task.task.id.to_string()),
@@ -890,7 +911,7 @@ fn ask_session_is_rows_from_request_to_answer() {
         fixture
             .db()
             .query_row(
-                "SELECT invocation_id, caller_run_id, session_id FROM runs WHERE id=?1",
+                "SELECT s.flow_session_id, i.caller_input_id, s.id FROM agent_session_inputs i JOIN agent_sessions s ON s.id=i.session_id WHERE i.input_id=?1",
                 [run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -945,7 +966,7 @@ fn ask_session_is_rows_from_request_to_answer() {
         fixture
             .db()
             .query_row(
-                "SELECT title, ready_summary, current_run_id, completed_at IS NOT NULL
+                "SELECT title, ready_summary, input_id, completed_at IS NOT NULL
                  FROM agent_sessions WHERE id=?1",
                 [&id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -984,7 +1005,7 @@ fn ask_session_is_rows_from_request_to_answer() {
     let history: i64 = fixture
         .db()
         .query_row(
-            "SELECT count(*) FROM runs WHERE session_id=?1",
+            "SELECT count(*) FROM agent_session_inputs WHERE session_id=?1",
             [&id],
             |row| row.get(0),
         )
@@ -1141,8 +1162,7 @@ impl Fixture {
         );
         self.db()
             .query_row(
-                "SELECT s.id, r.invocation_id, r.id FROM agent_sessions s
-                 JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id
+                "SELECT s.id, s.flow_session_id, s.input_id FROM agent_sessions s
                  WHERE s.kind='flow_review'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -1154,7 +1174,7 @@ impl Fixture {
     fn feedback(&self, id: &str) -> (String, String, Option<String>, String, bool) {
         self.db()
             .query_row(
-                "SELECT title, title_source, ready_summary, current_run_id,
+                "SELECT title, title_source, ready_summary, input_id,
                     completed_at IS NOT NULL FROM agent_sessions WHERE id=?1",
                 [id],
                 |row| {
@@ -1177,13 +1197,13 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     let (id, invocation, first_run) = fixture.waiting_review();
     assert_eq!(
         (fixture.count("agent_sessions"), fixture.count("runs")),
-        (1, 1)
+        (1, 0)
     );
     let parents: (Option<String>, Option<String>, String, String) = fixture
         .db()
         .query_row(
             "SELECT r.task_id, f.task_id, f.pending_session_id, f.state
-             FROM runs r JOIN flow_sessions f ON f.id=r.invocation_id WHERE r.id=?1",
+             FROM agent_sessions r JOIN flow_sessions f ON f.id=r.flow_session_id WHERE r.input_id=?1",
             [&first_run],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
@@ -1228,7 +1248,7 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     );
     assert_eq!(
         (fixture.count("agent_sessions"), fixture.count("runs")),
-        (1, 1)
+        (1, 0)
     );
     let ready = inside(&first_run, &["session", "ready", "Ship the parser"]);
     assert!(ready.status.success(), "{ready:?}");
@@ -1254,8 +1274,8 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     let history: Vec<(String, Option<String>, Option<String>)> = fixture
         .db()
         .prepare(
-            "SELECT id, invocation_id, task_id FROM runs WHERE session_id=?1
-             ORDER BY created_at, attempt",
+            "SELECT i.input_id, s.flow_session_id, s.task_id FROM agent_session_inputs i JOIN agent_sessions s ON s.id=i.session_id WHERE i.session_id=?1
+             ORDER BY i.input_id",
         )
         .unwrap()
         .query_map([&id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
@@ -1263,11 +1283,15 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(
-        history,
-        vec![
+        history
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
             (first_run.clone(), Some(invocation.clone()), None),
             (second_run.clone(), Some(invocation.clone()), None)
-        ],
+        ]
+        .into_iter()
+        .collect(),
         "the replaced Run stays in the Session's history"
     );
     let current: String = fixture
@@ -1310,7 +1334,7 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     assert_eq!(state, "completed");
     assert_eq!(
         (fixture.count("agent_sessions"), fixture.count("runs")),
-        (1, 2)
+        (1, 0)
     );
     assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
 }
@@ -1572,13 +1596,21 @@ fn import_stores_each_old_session_once_with_its_name() {
             ended: None,
         };
         let session = loopflow::session::AgentSession {
-            task_id: None,
-            wave_id: None,
-            flow_session_id: None,
-            work_source: None,
+            caller_input_id: run.caller_run_id.clone(),
+            task_id: run.task_id.clone(),
+            wave_id: run.wave_id.clone(),
+            flow_session_id: run.invocation_id.clone(),
+            work_source: run.work_source,
             bound_at: None,
             id: review_id,
-            current_run_id: run.id.clone(),
+            input_id: run.id.clone(),
+            input_published: run.published,
+            cwd: run.cwd.clone(),
+            skill: run.skill.clone(),
+            provider: run.provider.clone(),
+            model: run.model.clone(),
+            node: run.node,
+            iterations: run.iterations.clone(),
             kind: loopflow::session::SessionKind::FlowReview,
             interactive: true,
             repo: None,
@@ -1590,7 +1622,7 @@ fn import_stores_each_old_session_once_with_its_name() {
             created_at: 1,
         };
         task.store
-            .create_session(session, run, Some(parked))
+            .create_session(session, Some(parked))
             .await
             .unwrap();
     });

@@ -1608,7 +1608,7 @@ impl CaptureHandle {
             return Ok(());
         }
         let store = row_store(&capture.dir)?;
-        let Some((session, _)) = store.session_for_run(&capture.manifest.run_id)? else {
+        let Some(session) = store.session_for_run(&capture.manifest.run_id)? else {
             return Ok(());
         };
         let expected = store.session_driver(&session.id)?;
@@ -1840,59 +1840,50 @@ impl RunCapture {
             Some(RunFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
             Some(RunFlowMembership::Independent) | None => None,
         };
-        let mut run = crate::session::Run {
-            id: manifest.run_id.clone(),
-            session_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id: work.as_ref().and_then(|work| work.task_id.clone()),
-            wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
-            work_source: work.as_ref().map(|work| work.source),
-            invocation_id,
-            created_at: manifest.created_at.unix_timestamp(),
-            published: true,
-            cwd: manifest.cwd.clone(),
-            skill: manifest.skill.clone(),
-            provider: Some(manifest.harness.clone()),
-            model: manifest.model.clone(),
-            caller_run_id: manifest.parent_run_id.clone(),
-            ended: None,
-        };
+        // Mechanical commands have an Exec and, in a Flow, operation history.
+        // Capturing their diagnostics does not create an agent conversation.
+        if manifest.harness == "loopflow" {
+            return Ok(());
+        }
         let store = row_store(dir)?;
-        if manifest.harness != "loopflow" && run.invocation_id.is_none() {
-            let id = format!("session_{}", Uuid::new_v4().simple());
-            run.session_id = Some(id.clone());
-            let session = crate::session::AgentSession {
-                task_id: None,
-                wave_id: None,
+        if invocation_id.is_some() {
+            return Err(crate::store::StoreError::InvalidAuthority(
+                "Flow agent input must be published through its reservation".into(),
+            ));
+        }
+        store.create_session(
+            crate::session::AgentSession {
+                caller_input_id: manifest.parent_run_id.clone(),
+                id: format!("session_{}", Uuid::new_v4().simple()),
+                input_id: manifest.run_id.clone(),
+                input_published: true,
+                cwd: manifest.cwd.clone(),
+                skill: manifest.skill.clone(),
+                provider: Some(manifest.harness.clone()),
+                model: manifest.model.clone(),
+                node: None,
+                iterations: None,
+                task_id: work.as_ref().and_then(|work| work.task_id.clone()),
+                wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
+                work_source: work.as_ref().map(|work| work.source),
                 flow_session_id: None,
-                work_source: None,
                 bound_at: None,
-                id,
-                current_run_id: run.id.clone(),
                 kind: crate::session::SessionKind::Conversation,
                 interactive: manifest.surface != "headless",
                 repo: None,
-                title: run
+                title: manifest
                     .skill
                     .clone()
-                    .unwrap_or_else(|| crate::engine::naming::word_pair(run.id.as_str())),
+                    .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
                 ready_summary: None,
                 completed_at: None,
-                created_at: run.created_at,
-            };
-            store.create_session(
-                session,
-                run,
-                None,
-                crate::journal::current_exec_id().as_ref(),
-            )?;
-        } else {
-            store.create_run(run, crate::journal::current_exec_id().as_ref())?;
-        }
+                created_at: manifest.created_at.unix_timestamp(),
+            },
+            None,
+            crate::journal::current_exec_id().as_ref(),
+        )?;
         Ok(())
     }
 
@@ -2102,15 +2093,6 @@ impl RunCapture {
         )?;
         self.settled_outcome = Some(outcome.to_string());
         self.binding = None;
-        let end = crate::session::RunEnd {
-            outcome: outcome.to_string(),
-            at: OffsetDateTime::now_utc().unix_timestamp(),
-        };
-        if let Err(error) =
-            row_store(&self.dir).and_then(|store| store.end_run(&self.manifest.run_id, &end))
-        {
-            tracing::warn!(%error, run_id = %self.manifest.run_id, "Run end is not recorded");
-        }
         if self.attempt_started {
             if let Err(error) = self.append_event(RunEvent::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),
@@ -2734,7 +2716,8 @@ mod tests {
         let capture =
             CaptureHandle::begin_at_with_launch(home.path(), spec(home.path()), launch).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
-        let (session, run) = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+        let session = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+        let run = session.clone();
         assert!(!session.interactive);
         assert_eq!(session.kind, crate::session::SessionKind::Conversation);
         assert_eq!(session.title, "implement");
@@ -2748,9 +2731,16 @@ mod tests {
             "repair the failed operation"
         );
         capture.finish("failed").unwrap();
-        let (after, run) = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+        let after = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+
         assert_eq!(after.id, session.id);
-        assert_eq!(run.ended.unwrap().outcome, "failed");
+        assert_eq!(
+            super::read_run_snapshot(&capture.artifact_dir())
+                .unwrap()
+                .outcome
+                .as_deref(),
+            Some("failed")
+        );
         assert!(after.completed_at.is_none());
     }
 

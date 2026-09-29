@@ -648,7 +648,9 @@ final class PodiumModel {
 
     func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
         for wave in visibleRoadmaps {
-            if let task = wave.tasks.items.first(where: { $0.id == id }) { return (wave, task) }
+            if let task = wave.tasks.items.first(where: { $0.id == id || $0.runtime?.workId == id }) {
+                return (wave, task)
+            }
         }
         if let previous = navigation.selectedTaskEvidence, previous.task.id == id,
            let current = wave(id: previous.wave.wave.id),
@@ -671,6 +673,17 @@ final class PodiumModel {
 
     func clearSelectionIfOutsideScope() {
         guard let selection else { return }
+        // The repository's Session reading retains Work even when current
+        // planning no longer contains it. Keep that conversation's selection.
+        if let records = sessions.value {
+            if records.contains(where: { $0.work == selection }) { return }
+            if let selected = navigation.selectedSessionId,
+               let session = records.first(where: { $0.id == selected }),
+               session.work?.kind == .task,
+               navigation.selectedTaskEvidence?.task.runtime?.workId == session.work?.id {
+                return
+            }
+        }
         let visibleIds = Set(visibleWaves.map(\.id) + visibleRoadmaps.map { $0.wave.id })
         guard let waveId = waveId(for: selection), visibleIds.contains(waveId) else {
             setSelection(nil)

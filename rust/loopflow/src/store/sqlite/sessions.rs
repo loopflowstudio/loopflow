@@ -4,73 +4,62 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 
 use crate::durable::{FlowSession, RunId, TaskId};
 use crate::engine::ExecutionCursor;
-use crate::session::{AgentSession, Run, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-const SESSION_SELECT: &str = "SELECT s.id, s.current_run_id, s.title, s.title_source,
-    s.ready_summary, s.completed_at, s.created_at, s.kind, s.request, s.interactive, s.repo,
-    r.id, r.session_id, r.invocation_id, r.task_id, r.wave_id, r.work_source,
-    r.created_at, r.published, r.cwd, r.skill, r.node, r.iterations, r.attempt,
-    r.provider, r.model, r.caller_run_id, r.outcome, r.ended_at,
-    s.task_id,s.wave_id,s.flow_session_id,s.work_source,s.bound_at
-    FROM agent_sessions s JOIN runs r ON r.id=s.current_run_id AND r.session_id=s.id";
+const SESSION_SELECT: &str = "SELECT s.id,s.input_id,s.title,s.title_source,
+    s.ready_summary,s.completed_at,s.created_at,s.kind,s.request,s.interactive,s.repo,
+    s.task_id,s.wave_id,s.flow_session_id,s.work_source,s.bound_at,
+    s.input_published,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,i.caller_input_id FROM agent_sessions s LEFT JOIN agent_session_inputs i ON i.input_id=s.input_id";
 
-fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<(AgentSession, Run)>> {
-    let id: String = row.get(0)?;
-    let run_id: String = row.get(1)?;
-    let title = row.get(2)?;
-    let source: String = row.get(3)?;
-    let ready_summary = row.get(4)?;
-    let completed_at = row.get(5)?;
-    let created_at = row.get(6)?;
-    let kind: String = row.get(7)?;
-    let request = row.get(8)?;
-    let run = super::runs::read_run(row, 11)?;
+fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSession>> {
     Ok((|| {
-        let run_id = RunId::parse(&run_id).map_err(invalid)?;
-        Ok((
-            AgentSession {
-                id: id.clone(),
-                current_run_id: run_id.clone(),
-                task_id: row
-                    .get::<_, Option<String>>(29)?
-                    .map(|id| TaskId::parse(&id))
-                    .transpose()
-                    .map_err(invalid)?,
-                wave_id: row
-                    .get::<_, Option<String>>(30)?
-                    .map(|id| crate::id::WaveId::parse(&id))
-                    .transpose()
-                    .map_err(invalid)?,
-                flow_session_id: row.get(31)?,
-                work_source: row
-                    .get::<_, Option<String>>(32)?
-                    .map(|source| serde_json::from_value(serde_json::Value::String(source)))
-                    .transpose()?,
-                bound_at: row.get(33)?,
-                kind: match kind.as_str() {
-                    "conversation" => SessionKind::Conversation,
-                    "flow_review" => SessionKind::FlowReview,
-                    "ask" => SessionKind::Ask,
-                    _ => return Err(invalid("unknown Session kind")),
-                },
-                title,
-                title_source: match source.as_str() {
-                    "human" => TitleSource::Human,
-                    "generated" => TitleSource::Generated,
-                    _ => return Err(invalid("unknown Session title provenance")),
-                },
-                interactive: row.get(9)?,
-                repo: row.get(10)?,
-                request,
-                ready_summary,
-                completed_at,
-                created_at,
-            },
-            run?,
-        ))
+        Ok(AgentSession {
+            caller_input_id: row
+                .get::<_, Option<String>>(23)?
+                .map(|id| RunId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            id: row.get(0)?,
+            input_id: RunId::parse(&row.get::<_, String>(1)?).map_err(invalid)?,
+            title: row.get(2)?,
+            title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
+            ready_summary: row.get(4)?,
+            completed_at: row.get(5)?,
+            created_at: row.get(6)?,
+            kind: serde_json::from_value(serde_json::Value::String(row.get(7)?))?,
+            request: row.get(8)?,
+            interactive: row.get(9)?,
+            repo: row.get(10)?,
+            task_id: row
+                .get::<_, Option<String>>(11)?
+                .map(|id| TaskId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            wave_id: row
+                .get::<_, Option<String>>(12)?
+                .map(|id| crate::id::WaveId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            flow_session_id: row.get(13)?,
+            work_source: row
+                .get::<_, Option<String>>(14)?
+                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
+                .transpose()?,
+            bound_at: row.get(15)?,
+            input_published: row.get(16)?,
+            cwd: row.get::<_, String>(17)?.into(),
+            skill: row.get(18)?,
+            provider: row.get(19)?,
+            model: row.get(20)?,
+            node: row.get(21)?,
+            iterations: row
+                .get::<_, Option<String>>(22)?
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
     })())
 }
 
@@ -85,7 +74,7 @@ fn title_source(source: TitleSource) -> &'static str {
     }
 }
 
-pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<(AgentSession, Run)>> {
+pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<AgentSession>> {
     conn.query_row(
         &format!("{SESSION_SELECT} WHERE s.id=?1"),
         [id],
@@ -149,51 +138,37 @@ fn inventory_query(
 }
 
 impl SqliteStore {
-    pub fn reserve_review_run(&self, expected: &FlowSession) -> StoreResult<(FlowSession, Run)> {
+    pub fn reserve_review_run(
+        &self,
+        expected: &FlowSession,
+    ) -> StoreResult<(FlowSession, AgentSession)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
         if current != *expected || current.claim.is_some() || current.failure.is_some() {
             return Err(StoreError::InvalidAuthority(
-                "review changed before Run reservation".into(),
+                "review changed before input reservation".into(),
             ));
         }
         let id = review_id(expected)?;
-        let (session, run) = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
+        let mut session = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
         if session.completed_at.is_some() {
             return Err(StoreError::InvalidAuthority("review is complete".into()));
         }
-        if run.published {
-            let replacement = RunId::new();
-            super::runs::insert_run_in(
-                &tx,
-                Run {
-                    id: replacement.clone(),
-                    node: None,
-                    iterations: None,
-                    attempt: None,
-                    cwd: expected.cwd.clone(),
-                    published: false,
-                    created_at: crate::store::rows::now_unix(),
-                    work_source: Some(WorkSource::Inherited),
-                    ..run
-                },
-            )?;
-            tx.execute(
-                "UPDATE agent_sessions SET current_run_id=?2 WHERE id=?1",
-                params![id, replacement.as_str()],
-            )?;
+        if session.input_published {
+            session.input_id = RunId::new();
+            session.input_published = false;
+            replace_input_in(&tx, &session)?;
             tx.execute(
                 "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
                 [expected.id()],
             )?;
         }
         let flow = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
-        let (_, run) = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
-        super::runs::select_attempt_in(&tx, flow.id(), flow.version, &run.id)?;
+        select_input_in(&tx, &flow, &session)?;
         let flow = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
-        Ok((flow, run))
+        Ok((flow, session))
     }
 
     pub(crate) fn publish_review_run(
@@ -208,28 +183,27 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute("UPDATE flow_sessions SET position_version=position_version+1
             WHERE state='current' AND pending_session_id=?1 AND position_version=?3
-            AND claim_json IS NULL AND EXISTS(SELECT 1 FROM agent_sessions s JOIN runs r ON r.id=s.current_run_id
-                WHERE s.id=?1 AND r.id=?2 AND r.published=0 AND s.completed_at IS NULL)",
+            AND claim_json IS NULL AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND s.input_id=?2 AND s.input_published=0 AND s.completed_at IS NULL)",
             params![session_id, run_id.as_str(), i64::try_from(version).map_err(invalid)?])? != 1 {
             return Err(StoreError::InvalidAuthority("review Run reservation is stale".into()));
         }
         tx.execute(
-            "UPDATE runs SET published=1, provider=?2, model=?3 WHERE id=?1",
+            "UPDATE agent_sessions SET input_published=1, provider=?2, model=?3 WHERE input_id=?1",
             params![run_id.as_str(), provider, model],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn session(&self, id: &str) -> StoreResult<Option<(AgentSession, Run)>> {
+    pub fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         session_in(&conn, id)
     }
 
-    pub fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<(AgentSession, Run)>> {
+    pub fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM runs WHERE id=?1)"),
+            &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM agent_session_inputs WHERE input_id=?1)"),
             [run_id.as_str()],
             read_session,
         )
@@ -237,34 +211,13 @@ impl SqliteStore {
         .transpose()
     }
 
-    /// Reserve a Session and its first Run together; reserving an id again
-    /// returns the first one. `review` is the saved Flow a review waits in;
-    /// the import stores a Flow it meets for the first time here.
+    /// Admit the conversation and its captured input before provider effects.
     pub fn create_session(
         &self,
-        mut session: AgentSession,
-        mut run: Run,
+        session: AgentSession,
         review: Option<&FlowSession>,
         caller_exec: Option<&crate::id::ExecId>,
-    ) -> StoreResult<(AgentSession, Run)> {
-        if run.session_id.as_deref() != Some(session.id.as_str())
-            || run.id != session.current_run_id
-            || review.is_some() != (session.kind == SessionKind::FlowReview)
-            || review.map(FlowSession::id) != run.invocation_id.as_deref()
-        {
-            return Err(invalid(
-                "a Session is reserved with its first Run, a review with its invocation",
-            ));
-        }
-        if session.repo.is_none() && run.cwd.is_dir() {
-            session.repo = crate::repo::discover_repo_root(&run.cwd)
-                .map_err(invalid)?
-                .map(|root| {
-                    crate::repository::CanonicalRepo::discover(&root).map(|repo| repo.to_string())
-                })
-                .transpose()
-                .map_err(invalid)?;
-        }
+    ) -> StoreResult<AgentSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -273,84 +226,47 @@ impl SqliteStore {
         if let Some(flow) = review {
             super::flows::insert_flow_in(&tx, flow)?;
         }
-        tx.execute(
-            "INSERT INTO agent_sessions(id,current_run_id,kind,title,title_source,request,created_at,
-                ready_summary,completed_at,interactive,repo)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-            params![
-                session.id,
-                run.id.as_str(),
-                match session.kind {
-                    SessionKind::Conversation => "conversation",
-                    SessionKind::Ask => "ask",
-                    SessionKind::FlowReview => "flow_review",
-                },
-                session.title,
-                title_source(session.title_source),
-                session.request,
-                session.created_at,
-                session.ready_summary,
-                session.completed_at,
-                session.interactive,
-                session.repo
-            ],
-        )?;
-        super::runs::inherit_agent_work_in(&tx, &mut run, caller_exec)?;
-        let run = super::runs::insert_run_in(&tx, run)?;
-        if session
-            .task_id
-            .as_ref()
-            .is_some_and(|id| Some(id) != run.task_id.as_ref())
-            || session
-                .wave_id
-                .as_ref()
-                .is_some_and(|id| Some(id) != run.wave_id.as_ref())
-            || session
-                .flow_session_id
-                .as_ref()
-                .is_some_and(|id| Some(id) != run.invocation_id.as_ref())
-        {
-            return Err(invalid(
-                "AgentSession admission ancestry disagrees with its work",
-            ));
+        let session = reserve_session_in(&tx, session, caller_exec)?;
+        if session.kind == SessionKind::FlowReview {
+            tx.execute(
+                "UPDATE flow_sessions SET pending_session_id=?2,current_run_id=?3 WHERE id=?1",
+                params![
+                    session.flow_session_id,
+                    session.id,
+                    session.input_id.as_str()
+                ],
+            )?;
         }
-        tx.execute(
-            "UPDATE flow_sessions SET pending_session_id=?2, current_run_id=?3 WHERE id=?1",
-            params![run.invocation_id, session.id, run.id.as_str()],
-        )?;
-        let created = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
-        Ok(created)
+        Ok(session)
     }
 
-    /// Append an attempt to a Session. Title and feedback stay on the Session.
-    /// A Task review appends its attempts through `reserve_review_run`.
-    pub fn replace_session_run(&self, expected_run: &RunId, run: Run) -> StoreResult<Run> {
-        let id = run
-            .session_id
-            .clone()
-            .ok_or_else(|| invalid("a replacement Run belongs to its Session"))?;
+    /// Replace captured input under the existing conversation. Native history,
+    /// title, feedback and assignment remain on their owners.
+    pub fn replace_session_input(
+        &self,
+        expected_input: &RunId,
+        session: AgentSession,
+    ) -> StoreResult<AgentSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = super::runs::insert_run_in(&tx, run)?;
-        if tx.execute(
-            "UPDATE agent_sessions SET current_run_id=?3 WHERE id=?1 AND current_run_id=?2
-             AND completed_at IS NULL AND NOT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id
-                 WHERE r.id=?2 AND t.current_invocation_id=r.invocation_id)",
-            params![id, expected_run.as_str(), run.id.as_str()],
-        )? != 1
+        let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
+        if previous.input_id != *expected_input
+            || previous.completed_at.is_some()
+            || previous.task_id != session.task_id
+            || previous.wave_id != session.wave_id
+            || previous.flow_session_id != session.flow_session_id
         {
             return Err(StoreError::InvalidAuthority(
-                "Session changed before its Run was replaced".into(),
+                "conversation changed before input replacement".into(),
             ));
         }
-        tx.execute(
-            "UPDATE flow_sessions SET current_run_id=?2
-             WHERE pending_session_id=?1 AND state='current'",
-            params![id, run.id.as_str()],
-        )?;
+        replace_input_in(&tx, &session)?;
+        tx.execute("UPDATE flow_sessions SET current_run_id=?2 WHERE current_run_id=?1 AND state='current'",
+            params![expected_input.as_str(),session.input_id.as_str()])?;
+        let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
-        Ok(run)
+        Ok(session)
     }
 
     /// A review Run stored before providers were: take it from launch evidence.
@@ -362,7 +278,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE runs SET provider=?2, model=?3 WHERE id=?1 AND provider IS NULL",
+            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE input_id=?1 AND provider IS NULL",
             params![run.as_str(), provider, model],
         )?;
         Ok(())
@@ -378,7 +294,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE runs SET provider=?2, model=?3 WHERE id=?1 AND published=0",
+            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE input_id=?1 AND input_published=0",
             params![run.as_str(), provider, model],
         )?;
         Ok(())
@@ -390,11 +306,11 @@ impl SqliteStore {
         id: &str,
         expected_run: &RunId,
         task: &TaskId,
-    ) -> StoreResult<(AgentSession, Run)> {
+    ) -> StoreResult<AgentSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (session, _) = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if session.current_run_id != *expected_run {
+        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if session.input_id != *expected_run {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),
             ));
@@ -447,7 +363,7 @@ impl SqliteStore {
     pub fn sessions(
         &self,
         filter: &crate::session::SessionFilter,
-    ) -> StoreResult<Vec<(AgentSession, Run)>> {
+    ) -> StoreResult<Vec<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (sql, values) = inventory_query(filter)?;
         let mut query = conn.prepare(&sql)?;
@@ -480,10 +396,10 @@ impl SqliteStore {
     pub fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
-            "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
+            "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND input_id=?2
              AND completed_at IS NULL AND (kind='conversation' OR ready_summary IS NOT NULL)
-             AND NOT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id
-                 WHERE r.id=?2 AND t.current_invocation_id=r.invocation_id)",
+             AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=agent_sessions.task_id
+                 AND t.current_invocation_id=agent_sessions.flow_session_id)",
             params![id, expected_run.as_str(), crate::store::rows::now_unix()],
         )? != 1
         {
@@ -494,14 +410,14 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {
+    pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<RunId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT {} FROM runs WHERE session_id=?1 ORDER BY created_at, id",
-            super::runs::RUN_COLUMNS
-        ))?;
-        let rows = query.query_map([id], |row| super::runs::read_run(row, 0))?;
-        rows.map(|row| row?).collect()
+        let mut query = conn.prepare(
+            "SELECT input_id FROM agent_session_inputs WHERE session_id=?1 ORDER BY input_id",
+        )?;
+        let rows = query.query_map([id], |row| row.get::<_, String>(0))?;
+        rows.map(|row| RunId::parse(&row?).map_err(invalid))
+            .collect()
     }
 
     pub fn rename_session(
@@ -516,8 +432,8 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (session, _) = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if expected_run.is_some_and(|run| *run != session.current_run_id) {
+        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if expected_run.is_some_and(|run| *run != session.input_id) {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before rename".into(),
             ));
@@ -538,10 +454,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
-            "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND current_run_id=?2
-             AND completed_at IS NULL AND (kind='ask' OR EXISTS(SELECT 1 FROM runs r
-                 JOIN flow_sessions f ON f.id=r.invocation_id
-                 WHERE r.id=?2 AND r.published=1 AND f.pending_session_id=?1 AND f.state='current'
+            "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND input_id=?2
+             AND completed_at IS NULL AND (kind='ask' OR EXISTS(SELECT 1 FROM flow_sessions f WHERE f.id=agent_sessions.flow_session_id
+                 AND agent_sessions.input_published=1 AND f.pending_session_id=?1 AND f.state='current'
                  AND f.claim_json IS NULL))",
             params![id, expected_run.as_str(), summary.trim()],
         )? != 1
@@ -585,74 +500,71 @@ pub(super) fn reserve_task_review_in(
 ) -> StoreResult<()> {
     if !flow.is_human() {
         return Err(StoreError::InvalidAuthority(
-            "only a review position reserves a review Session".into(),
+            "only a review reserves a review Session".into(),
         ));
     }
     let id = review_id(flow)?;
-    match session_in(conn, &id)? {
-        Some((session, _)) if session.completed_at.is_some() => {
+    let session = match session_in(conn, &id)? {
+        Some(session) if session.completed_at.is_some() => {
             return Err(StoreError::InvalidAuthority(
                 "completed review cannot be reopened by a cursor write".into(),
-            ));
+            ))
         }
-        Some(_) => {}
+        Some(session) => session,
         None => {
-            let run_id = RunId::new();
-            let title: String = conn.query_row(
+            let title = conn.query_row(
                 "SELECT issue_title FROM tasks WHERE id=?1",
                 [flow.task_id.as_ref().map(TaskId::as_str)],
                 |row| row.get(0),
             )?;
-            conn.execute(
-                "INSERT INTO agent_sessions(id,current_run_id,kind,title,title_source,created_at,repo)
-                VALUES(?1,?2,'flow_review',?3,'generated',?4,
-                    (SELECT w.repo FROM waves w JOIN projects p ON p.wave_id=w.id
-                        JOIN tasks t ON t.project_id=p.id WHERE t.id=?5))",
-                params![
-                    id,
-                    run_id.as_str(),
-                    title,
-                    crate::store::rows::now_unix(),
-                    flow.task_id.as_ref().map(TaskId::as_str)
-                ],
-            )?;
-            super::runs::insert_run_in(
-                conn,
-                Run {
-                    id: run_id,
-                    session_id: Some(id.clone()),
-                    invocation_id: Some(flow.id().to_owned()),
-                    node: None,
-                    iterations: None,
-                    attempt: None,
-                    task_id: flow.task_id.clone(),
-                    wave_id: flow.wave_id.clone(),
-                    work_source: Some(WorkSource::Inherited),
-                    created_at: crate::store::rows::now_unix(),
-                    published: false,
-                    cwd: flow.cwd.clone(),
-                    skill: Some(flow.current().step),
-                    provider: None,
-                    model: None,
-                    caller_run_id: None,
-                    ended: None,
-                },
-            )?;
+            reserve_flow_conversation_in(conn, flow, id, SessionKind::FlowReview, title)?
         }
-    }
-    if conn.execute(
-        "UPDATE flow_sessions SET pending_session_id=?2
-         WHERE id=?1 AND state='current' AND position_version=?3 AND claim_json IS NULL",
-        params![flow.id(), id, i64::try_from(flow.version).map_err(invalid)?],
-    )? != 1
+    };
+    if conn.execute("UPDATE flow_sessions SET pending_session_id=?2 WHERE id=?1 AND state='current' AND position_version=?3 AND claim_json IS NULL",
+        params![flow.id(),session.id,i64::try_from(flow.version).map_err(invalid)?])? != 1
     {
-        return Err(StoreError::InvalidAuthority(
-            "review position changed before its Session was reserved".into(),
-        ));
+        return Err(StoreError::InvalidAuthority("review changed before reservation".into()));
     }
-    let (_, run) = session_in(conn, &id)?.ok_or(StoreError::NotFound)?;
-    super::runs::select_attempt_in(conn, flow.id(), flow.version, &run.id)?;
-    Ok(())
+    select_input_in(conn, flow, &session)
+}
+
+pub(super) fn reserve_flow_conversation_in(
+    conn: &Transaction<'_>,
+    flow: &FlowSession,
+    id: String,
+    kind: SessionKind,
+    title: String,
+) -> StoreResult<AgentSession> {
+    reserve_session_in(
+        conn,
+        AgentSession {
+            caller_input_id: None,
+            id,
+            input_id: RunId::new(),
+            input_published: false,
+            cwd: flow.cwd.clone(),
+            skill: Some(flow.current().step),
+            provider: None,
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: flow.task_id.clone(),
+            wave_id: flow.wave_id.clone(),
+            flow_session_id: Some(flow.id().to_owned()),
+            work_source: flow.declared_work().map(|_| WorkSource::Inherited),
+            bound_at: None,
+            kind,
+            interactive: kind != SessionKind::Conversation,
+            repo: None,
+            title,
+            title_source: TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: crate::store::rows::now_unix(),
+        },
+        None,
+    )
 }
 
 pub(super) fn complete_review_in(conn: &Connection, expected: &FlowSession) -> StoreResult<()> {
@@ -664,17 +576,136 @@ pub(super) fn complete_review_in(conn: &Connection, expected: &FlowSession) -> S
         .ok_or_else(|| StoreError::InvalidAuthority("review is not ready".into()))?;
     let run_id = expected
         .session_run_id()
-        .ok_or_else(|| StoreError::InvalidAuthority("review has no published Run".into()))?;
-    super::runs::require_attempt_in(conn, expected.id(), run_id)?;
+        .ok_or_else(|| StoreError::InvalidAuthority("review has no published input".into()))?;
     if conn.execute(
-        "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_run_id=?2
-        AND completed_at IS NULL AND ready_summary IS ?4",
-        params![id, run_id.as_str(), crate::store::rows::now_unix(), summary],
+        "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND input_id=?2
+        AND completed_at IS NULL AND ready_summary IS ?4
+        AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?5 AND current_run_id=?2 AND state='current')",
+        params![id, run_id.as_str(), crate::store::rows::now_unix(), summary, expected.id()],
     )? != 1
     {
         return Err(StoreError::InvalidAuthority(
             "review changed before completion".into(),
         ));
+    }
+    Ok(())
+}
+
+/// Resolve ancestry and captured location on the conversation's admission transaction.
+pub(super) fn reserve_session_in(
+    conn: &Transaction<'_>,
+    mut session: AgentSession,
+    caller: Option<&crate::id::ExecId>,
+) -> StoreResult<AgentSession> {
+    if session.flow_session_id.is_none()
+        && (session.work_source.is_none() || session.work_source == Some(WorkSource::Inherited))
+    {
+        if let Some(caller) = caller {
+            if let Some(work) = super::execs::agent_work_in(conn, caller)? {
+                session.task_id = work.task_id;
+                session.wave_id = work.wave_id;
+                session.work_source = Some(work.source);
+            }
+        }
+    }
+    if let Some(id) = &session.flow_session_id {
+        let flow = super::flows::flow_in(conn, id)?.ok_or(StoreError::NotFound)?;
+        if session.task_id.is_some() && session.task_id != flow.task_id {
+            return Err(invalid("AgentSession and FlowSession Tasks disagree"));
+        }
+        session.task_id = flow.task_id;
+        if let Some(wave) = flow.wave_id {
+            if session.wave_id.as_ref().is_some_and(|given| given != &wave) {
+                return Err(invalid("AgentSession and FlowSession Waves disagree"));
+            }
+            session.wave_id = Some(wave);
+        }
+        let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
+        if session.node.is_some_and(|given| given != node)
+            || session
+                .iterations
+                .as_ref()
+                .is_some_and(|given| given != &iterations)
+        {
+            return Err(invalid(
+                "AgentSession location differs from captured Flow cursor",
+            ));
+        }
+        session.node = Some(node);
+        session.iterations = Some(iterations);
+    }
+    if let Some(task) = &session.task_id {
+        let wave = super::runs::task_wave_in(conn, task)?;
+        if session.wave_id.as_ref().is_some_and(|given| given != &wave) {
+            return Err(invalid("AgentSession Task and Wave disagree"));
+        }
+        session.wave_id = Some(wave);
+    }
+    if session.repo.is_none() && session.cwd.is_dir() {
+        session.repo = crate::repo::discover_repo_root(&session.cwd)
+            .map_err(invalid)?
+            .map(|root| {
+                crate::repository::CanonicalRepo::discover(&root).map(|repo| repo.to_string())
+            })
+            .transpose()
+            .map_err(invalid)?;
+    }
+    conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,ready_summary,completed_at,
+        created_at,kind,request,interactive,repo,task_id,wave_id,flow_session_id,work_source,bound_at,
+        input_published,cwd,skill,provider,model,node,iterations)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+        params![session.id,session.input_id.as_str(),session.title,title_source(session.title_source),
+            session.ready_summary,session.completed_at,session.created_at,
+            serde_json::to_value(session.kind)?.as_str(),session.request,session.interactive,session.repo,
+            session.task_id.as_ref().map(TaskId::as_str),session.wave_id.as_ref().map(crate::id::WaveId::as_str),
+            session.flow_session_id,session.work_source.map(serde_json::to_value).transpose()?.as_ref().and_then(serde_json::Value::as_str),
+            session.bound_at,session.input_published,session.cwd.to_string_lossy(),session.skill,session.provider,session.model,
+            session.node,session.iterations.as_ref().map(serde_json::to_string).transpose()?])?;
+    conn.execute(
+        "INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",
+        params![
+            session.input_id.as_str(),
+            session.id,
+            session.caller_input_id.as_ref().map(RunId::as_str)
+        ],
+    )?;
+    Ok(session)
+}
+
+pub(super) fn replace_input_in(conn: &Transaction<'_>, session: &AgentSession) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",
+        params![
+            session.input_id.as_str(),
+            session.id,
+            session.caller_input_id.as_ref().map(RunId::as_str)
+        ],
+    )?;
+    conn.execute("UPDATE agent_sessions SET input_id=?2,input_published=?3,cwd=?4,skill=?5,provider=?6,model=?7
+        WHERE id=?1 AND completed_at IS NULL",
+        params![session.id,session.input_id.as_str(),session.input_published,session.cwd.to_string_lossy(),
+            session.skill,session.provider,session.model])?;
+    Ok(())
+}
+
+pub(super) fn select_input_in(
+    conn: &Transaction<'_>,
+    flow: &FlowSession,
+    session: &AgentSession,
+) -> StoreResult<()> {
+    let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
+    if session.flow_session_id.as_deref() != Some(flow.id())
+        || session.node != Some(node)
+        || session.iterations.as_ref() != Some(&iterations)
+    {
+        return Err(StoreError::InvalidAuthority(
+            "conversation does not belong to this captured Flow boundary".into(),
+        ));
+    }
+    if conn.execute("UPDATE flow_sessions SET current_run_id=?3 WHERE id=?1 AND position_version=?2 AND state='current'",
+        params![flow.id(),i64::try_from(flow.version).map_err(invalid)?,session.input_id.as_str()])? != 1
+    {
+        return Err(StoreError::InvalidAuthority("Flow changed before conversation selection".into()));
     }
     Ok(())
 }

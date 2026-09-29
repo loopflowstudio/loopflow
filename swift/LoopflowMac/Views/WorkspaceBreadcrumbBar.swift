@@ -46,14 +46,16 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
 
     private func crumbs(_ crumb: WorkspaceBreadcrumb) -> some View {
         HStack(spacing: 6) {
-            if let wave = crumb.wave {
-                Button(wave.roadmap.wave.name) { model.select(wave.id.work) }
+            if let work = crumb.waveWork {
+                Button(crumb.wave?.roadmap.wave.name ?? "Wave \(work.id)") { model.select(work) }
                     .buttonStyle(.plain)
                     .foregroundStyle(palette.textSecondary)
+                    .help(crumb.wave == nil ? "Wave name unavailable" : "Show Wave")
+                    .disabled(crumb.wave == nil)
                     .accessibilityIdentifier("breadcrumb-wave")
             }
             if let task = crumb.task {
-                separator
+                if crumb.waveWork != nil { separator }
                 // The Task overview shows its title once below; inside a
                 // Session the ancestor carries the title to navigate upward.
                 if crumb.session != nil {
@@ -78,9 +80,16 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                 } else {
                     Text(task.task.task.identifier).font(Typography.code(12)).foregroundStyle(palette.textTertiary)
                 }
+            } else if let work = crumb.taskWork {
+                if crumb.waveWork != nil { separator }
+                Text("Task \(work.id)")
+                    .font(Typography.code(12))
+                    .foregroundStyle(palette.textSecondary)
+                    .help("Task name and planning details unavailable")
+                    .accessibilityIdentifier("breadcrumb-task")
             }
             if let session = crumb.session {
-                if crumb.wave != nil { separator }
+                if crumb.waveWork != nil || crumb.taskWork != nil { separator }
                 sessionCrumb(session, siblings: crumb.siblings)
             }
         }

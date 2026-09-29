@@ -208,7 +208,7 @@ def main() -> None:
     parser.add_argument("--flow-retry", action="store_true")
     parser.add_argument("--flow-engine-loss", action="store_true")
     parser.add_argument("--flow-automatic-retry", action="store_true")
-    parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
+    parser.add_argument("--flow-decision-retry", choices=("missing", "replace", "late"))
     parser.add_argument("--flow-driver-loss", choices=("running", "completed", "both"))
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -287,6 +287,7 @@ enabled = false
                             server,
                             results,
                             replace=args.flow_decision_retry == "replace",
+                            late=args.flow_decision_retry == "late",
                         )
                         return
                     if args.flow_automatic_retry:
@@ -884,6 +885,7 @@ def _flow_decision_retry_contract(
     results: dict,
     *,
     replace: bool,
+    late: bool,
 ) -> None:
     _init_repo(work, env)
     for directory in ("skills", "flows"):
@@ -909,6 +911,35 @@ def _flow_decision_retry_contract(
     server.commands[5] = (
         shlex.join(decision + ["advance", "retry decision"]) if replace else "printf no-decision"
     )
+    if late:
+        child = work / "delayed-decision.py"
+        child.write_text(
+            "import json, os, subprocess, sys, time\nfrom pathlib import Path\n"
+            "root = Path(__file__).parent\n"
+            "def wait(name, seconds):\n"
+            "    deadline = time.monotonic() + seconds\n"
+            "    while not (root / name).exists():\n"
+            "        assert time.monotonic() < deadline, name\n"
+            "        time.sleep(0.05)\n"
+            "if sys.argv[1] == 'launch':\n"
+            "    with (root / 'child.log').open('w') as log:\n"
+            "        subprocess.Popen([sys.executable, __file__, 'child'], "
+            "stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)\n"
+            "    wait('child-ready', 5)\n"
+            "elif sys.argv[1] == 'child':\n"
+            "    (root / 'child-ready').touch()\n"
+            "    wait('retry-started', 25)\n"
+            f"    result = subprocess.run({decision + ['advance', 'late failed-turn decision']!r}, "
+            "capture_output=True, text=True, timeout=25)\n"
+            "    (root / 'late-result.json').write_text(json.dumps({"
+            "'exit': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr}))\n"
+            "else:\n"
+            "    (root / 'retry-started').touch()\n"
+            "    wait('late-result.json', 30)\n"
+            "    print('retry completed without a decision')\n"
+        )
+        server.commands[3] = shlex.join([sys.executable, str(child), "launch"])
+        server.commands[5] = shlex.join([sys.executable, str(child), "release"])
     command = _command(
         [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
         work=work,
@@ -933,7 +964,14 @@ def _flow_decision_retry_contract(
         if item.get("type") == "function_call_output"
     ]
     results["tool_outputs"] = outputs
-    assert any("Decision recorded" in value for value in outputs), outputs
+    if late:
+        results["late_result"] = json.loads((work / "late-result.json").read_text())
+        assert results["late_result"]["exit"] != 0, (
+            "Flow accepted a failed turn descendant decision after its successor started",
+            results["late_result"],
+        )
+    else:
+        assert any("Decision recorded" in value for value in outputs), outputs
     completed = [
         (seq, json.loads(payload)["status"])
         for seq, kind, _, payload in results["history"]
@@ -973,6 +1011,7 @@ def _flow_automatic_retry_contract(
     )
     results.update(command_exit=command.returncode, command_stderr=command.stderr)
     with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        results["run_rows"] = db.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
         results["flow_state"] = db.execute(
             "SELECT state,failure_json FROM flow_sessions"
         ).fetchone()
@@ -1010,6 +1049,11 @@ def _flow_automatic_retry_contract(
     assert usage[-1]["total"]["outputTokens"] == 10
     assert len(list(Path(env["LF_PROBE_ENGINES"]).glob("*.json"))) == 1
     results["automatic_retry"] = "passed"
+    assert results["run_rows"] == 0, (
+        "Flow agent history must use AgentSession and Exec without a separate Run owner",
+        results["run_rows"],
+    )
+    results["session_owners"] = "passed"
 
 
 def _flow_retry_contract(

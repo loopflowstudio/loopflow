@@ -1247,10 +1247,16 @@ mod planning_tests {
             if position.cursor.iteration > 0 {
                 assert!(content.contains("repair the demonstrated gap"));
             }
+            let actor = self.store.sqlite.test_flow_turn(&run);
             if routing {
                 assert!(content.contains("lf flow route"));
                 self.store
-                    .record_flow_path(&position.invocation.id, position.version, &run, "selected")
+                    .record_flow_path(
+                        &position.invocation.id,
+                        position.version,
+                        &actor,
+                        "selected",
+                    )
                     .await?;
             }
             if let Some(failure) = self.failure {
@@ -1260,7 +1266,7 @@ mod planning_tests {
                         .record_flow_decision(
                             &position.invocation.id,
                             position.version,
-                            &run,
+                            &actor,
                             &crate::engine::transitions::FlowVerdict {
                                 decision: crate::engine::transitions::FlowDecision::Advance,
                                 summary: String::new(),
@@ -1272,8 +1278,10 @@ mod planning_tests {
                         .to_string()
                         .contains("evidence cannot be empty"));
                 } else if failure == "disconnected" {
+                    self.store.sqlite.test_finish_flow_turn(&actor, "failed");
                     anyhow::bail!("decision provider disconnected");
                 }
+                self.store.sqlite.test_finish_flow_turn(&actor, "completed");
                 self.events
                     .send(crate::chat::types::ConversationEvent::TurnCompleted {
                         turn_id: "failed-decision".into(),
@@ -1286,7 +1294,7 @@ mod planning_tests {
                     .record_flow_decision(
                         &position.invocation.id,
                         position.version,
-                        &run,
+                        &actor,
                         &crate::engine::transitions::FlowVerdict {
                             decision: if position.cursor.iteration == 0 {
                                 crate::engine::transitions::FlowDecision::Iterate
@@ -1298,6 +1306,7 @@ mod planning_tests {
                     )
                     .await?;
             }
+            self.store.sqlite.test_finish_flow_turn(&actor, "completed");
             self.events
                 .send(crate::chat::types::ConversationEvent::TurnCompleted {
                     turn_id: "fixture-turn".into(),
@@ -1403,9 +1412,10 @@ mod planning_tests {
                         publish,
                     )
                     .unwrap();
+                    let actor = store.sqlite.test_flow_turn(&run);
                     if routing {
                         store
-                            .record_flow_path(flow.id(), flow.version, &run, "done")
+                            .record_flow_path(flow.id(), flow.version, &actor, "done")
                             .await
                             .unwrap();
                     } else {
@@ -1413,7 +1423,7 @@ mod planning_tests {
                             .record_flow_decision(
                                 flow.id(),
                                 flow.version,
-                                &run,
+                                &actor,
                                 &crate::engine::transitions::FlowVerdict {
                                     decision: crate::engine::transitions::FlowDecision::Advance,
                                     summary: "candidate, not completion".into(),
@@ -1422,6 +1432,7 @@ mod planning_tests {
                             .await
                             .unwrap();
                     }
+                    store.sqlite.test_finish_flow_turn(&actor, status);
                     capture.finish(status).unwrap();
                     let saved = store.task_flow(&task.id).await.unwrap().unwrap();
                     // The driver settles the saved candidate from its Run's row; a
@@ -1616,10 +1627,12 @@ mod planning_tests {
                 ).await.unwrap() else { panic!("recovery fixture claim") };
                 let run = reserved_run(&store, &task).await;
                 store.sqlite.publish_attempt(flow.id(), flow.version, &run, Some(&claim), "proof", None).unwrap();
-                store.record_flow_decision(flow.id(), flow.version, &run, &crate::engine::transitions::FlowVerdict {
+                let actor = store.sqlite.test_flow_turn(&run);
+                store.record_flow_decision(flow.id(), flow.version, &actor, &crate::engine::transitions::FlowVerdict {
                     decision: crate::engine::transitions::FlowDecision::Advance,
                     summary: "saved whole-design proof".into(),
                 }).await.unwrap();
+                store.sqlite.test_finish_flow_turn(&actor, "completed");
                 store.sqlite.end_run(&run, &crate::session::RunEnd { outcome: "completed".into(), at: 1 }).unwrap();
                 super::drive_task(store.clone(), task.id.clone(), claim, closing_harness()).await.unwrap();
                 assert!(store.task_flow(&task.id).await.unwrap().is_none());
@@ -1690,7 +1703,8 @@ mod planning_tests {
                 let session = store.sqlite.session_for_run(&run).unwrap().unwrap().0;
                 let exec = crate::journal::current_exec_id().unwrap();
                 let driver = store.sqlite.claim_session_driver(&session.id, None, &exec, true).unwrap();
-                let selection = store.sqlite.flow_turn_selection(&run).unwrap().unwrap();
+                let mut selection = store.sqlite.flow_turn_selection(&run).unwrap().unwrap();
+                selection.caller_token = Some("managed-unfinished".into());
                 let start = store.sqlite.record_session_turn_origin(&session.id, "native-thread", "unfinished", driver.provider_generation, &exec).unwrap();
                 store.sqlite.select_flow_turn(&selection, &session.id, &driver, start).unwrap();
                 let mut engine = std::process::Command::new("sleep").arg("60").spawn().unwrap();
@@ -1721,7 +1735,8 @@ mod planning_tests {
                 store.sqlite.publish_attempt(retried.id(), retried.version, &next, Some(&claim), "codex", None).unwrap();
                 let expected = store.sqlite.session_driver(&session.id).unwrap();
                 let driver = store.sqlite.claim_session_driver(&session.id, expected.as_ref(), &owner.exec_id, true).unwrap();
-                let selection = store.sqlite.flow_turn_selection(&next).unwrap().unwrap();
+                let mut selection = store.sqlite.flow_turn_selection(&next).unwrap().unwrap();
+                selection.caller_token = Some("managed-retry".into());
                 let start = store.sqlite.record_session_turn_origin(&session.id, "native-thread", "retry", driver.provider_generation, &owner.exec_id).unwrap();
                 store.sqlite.select_flow_turn(&selection, &session.id, &driver, start).unwrap();
                 let completion = store.sqlite.record_session_event(&session.id, "native-thread", "retry", SessionEventKind::Completed, &serde_json::json!({"status":"completed"})).unwrap();
@@ -2084,7 +2099,7 @@ mod planning_tests {
                 assert_eq!(retried.cursor.leaf().progress.direction.as_deref(), Some(feedback));
                 assert!(retried.failure.is_none());
                 assert!(store.task_steers(&task.id).await.unwrap().iter().any(|s| s.text.contains(reason)));
-                assert!(store.record_flow_decision(&retried.invocation.id, retried.version, &run, &crate::engine::transitions::FlowVerdict {
+                assert!(store.record_flow_decision(&retried.invocation.id, retried.version, &ExecId::new(), &crate::engine::transitions::FlowVerdict {
                     decision: crate::engine::transitions::FlowDecision::Advance,
                     summary: "late failed Run must not navigate".into(),
                 }).await.is_err());

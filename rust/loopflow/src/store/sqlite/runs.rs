@@ -196,7 +196,8 @@ pub(super) fn insert_run_in(conn: &Transaction<'_>, mut run: Run) -> StoreResult
             }
             run.wave_id = wave;
         }
-        let (node, iterations) = location_in(conn, invocation)?;
+        let (capture, cursor) = super::flows::capture_in(conn, invocation)?;
+        let (node, iterations) = capture.location(&cursor).map_err(invalid)?;
         if run.node.is_some_and(|supplied| supplied != node)
             || run
                 .iterations
@@ -305,17 +306,6 @@ pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<Wave
     WaveId::parse(&wave).map_err(invalid)
 }
 
-pub(super) fn location_in(
-    conn: &Connection,
-    invocation: &str,
-) -> StoreResult<(u32, Vec<Vec<u32>>)> {
-    let (capture, cursor) = super::flows::capture_in(conn, invocation)?;
-    Ok((
-        capture.node_id(&cursor).map_err(invalid)?,
-        crate::engine::flow_graph::flow_iterations(&capture.steps, &cursor),
-    ))
-}
-
 /// Human and headless reservations select the attempt under the same version fence.
 pub(super) fn select_attempt_in(
     conn: &Connection,
@@ -323,7 +313,8 @@ pub(super) fn select_attempt_in(
     version: u64,
     run: &RunId,
 ) -> StoreResult<()> {
-    let (node, iterations) = location_in(conn, invocation)?;
+    let (capture, cursor) = super::flows::capture_in(conn, invocation)?;
+    let (node, iterations) = capture.location(&cursor).map_err(invalid)?;
     let iterations = serde_json::to_string(&iterations)?;
     if conn.execute(
         "UPDATE flow_sessions SET current_run_id=?3 WHERE id=?1 AND state='current' AND position_version=?2

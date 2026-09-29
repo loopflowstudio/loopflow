@@ -5011,7 +5011,7 @@ async fn restart_task_async(
         .map_err(|error| task_error(format!("failed to resolve refreshed Project: {error}")))?
         .ok_or_else(|| {
             task_error(format!(
-                "refreshed Task {} has unresolved chapter ownership ({}); resume `lf wave new-chapter` with the pending chapter id before restarting",
+                "refreshed Task {} has no synced Project record ({}); sync its Wave planning data before restarting",
                 resolved.item.identifier, resolved.project.slug
             ))
         })?;

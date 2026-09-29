@@ -1,6 +1,8 @@
 //! Every Flow invocation's driver transactions: keyed by invocation id, fenced
-//! by `position_version` for the cursor, `claim_json` for the one live Task
-//! worker, and `current_run_id` for the attempt allowed to act. A Task's own
+//! by `position_version` for the cursor and `claim_json` for the Task worker.
+//! Navigation belongs to the selected native turn's caller Exec; mechanical
+//! results belong to Flow history. Transitional Run rows still own agent launch
+//! publication and outcomes where native selection is absent. A Task's own
 //! invocation is the same row, read through `tasks.current_invocation_id`;
 //! its writes carry the worker claim as one more predicate.
 
@@ -449,8 +451,8 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<(
         .current_checked()
         .ok_or_else(|| invalid("Flow position has no current step"))?;
     let run_id = RunId::new();
-    let session = if step.kind != crate::engine::invocation::StepKind::Op && !flow.is_human() {
-        let (node, iterations) = super::runs::location_in(tx, flow.id())?;
+    let session = if !flow.is_human() {
+        let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
         let existing: Option<String> = tx
             .query_row(
                 "SELECT s.id FROM runs r JOIN agent_sessions s ON s.id=r.session_id
@@ -502,7 +504,7 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<(
             created_at: now_unix(),
             published: false,
             cwd: flow.cwd.clone(),
-            skill: (step.kind != crate::engine::invocation::StepKind::Op).then_some(step.step),
+            skill: Some(step.step),
             provider: None,
             model: None,
             caller_run_id: None,
@@ -613,102 +615,34 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<Flo
     current_flow_in(tx, &id)
 }
 
-fn require_attempt_authority(
+fn require_turn_authority(
+    conn: &Connection,
     flow: &FlowSession,
     version: u64,
-    run: &RunId,
-    what: &str,
+    actor: &crate::id::ExecId,
 ) -> StoreResult<()> {
-    if flow.version != version
-        || flow.failure.is_some()
-        || flow
-            .current_attempt
-            .as_ref()
-            .is_none_or(|attempt| attempt.run_id != *run || attempt.outcome.is_some())
-    {
-        return Err(StoreError::InvalidAuthority(format!(
-            "{what} belongs to a stale or different Flow Run"
-        )));
-    }
-    Ok(())
-}
-
-/// Record the current attempt's decision on its position. The caller has
-/// checked the Run's authority over the invocation and holds the transaction.
-pub(super) fn record_verdict_in(
-    tx: &Transaction<'_>,
-    id: &str,
-    run: &RunId,
-    verdict: &FlowVerdict,
-) -> StoreResult<()> {
-    if verdict.summary.trim().is_empty() {
-        return Err(invalid("review evidence cannot be empty"));
-    }
-    super::runs::require_attempt_in(tx, id, run)?;
-    let (invocation, mut cursor) = capture_in(tx, id)?;
-    let (steps, leaf) = cursor.current_body(&invocation.steps);
-    match steps.get(leaf.index) {
-        Some(ConcreteStep::Skill(skill)) if skill.policy.human => {
-            return Err(StoreError::InvalidAuthority(
-                "an interactive review returns feedback; its following decision step owns navigation"
-                    .into(),
-            ))
-        }
-        Some(ConcreteStep::Skill(skill)) if skill.policy.repeat.is_some() => {}
-        _ => {
-            return Err(StoreError::InvalidAuthority(
-                "this Flow step does not own a decision".into(),
-            ))
-        }
-    }
-    let progress = &mut cursor.leaf_mut().progress;
-    if progress
-        .verdict
-        .as_ref()
-        .is_some_and(|saved| saved != verdict)
-    {
-        return Err(StoreError::InvalidAuthority(
-            "Flow step already has a different decision".into(),
-        ));
-    }
-    progress.verdict = Some(verdict.clone());
-    tx.execute(
-        "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
-        params![id, serde_json::to_string(&cursor)?],
+    let valid: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM flow_sessions f
+         JOIN session_events start ON start.seq=f.selected_start
+         JOIN flow_events selected ON selected.flow_id=f.id AND selected.kind='selected'
+             AND selected.session_event=start.seq
+         JOIN execs caller ON caller.id=?2 AND caller.via_agent=1
+             AND caller.caller_session_id=start.session_id
+             AND caller.caller_provider_generation=start.provider_generation
+             AND caller.caller_flow_turn=json_extract(selected.payload,'$.caller_token')
+         JOIN agent_sessions s ON s.id=start.session_id
+             AND s.provider_generation=start.provider_generation
+         WHERE f.id=?1 AND NOT EXISTS(SELECT 1 FROM session_events done
+             WHERE done.session_id=start.session_id AND done.provider_thread=start.provider_thread
+                 AND done.provider_turn=start.provider_turn AND done.kind='completed'))",
+        params![flow.id(), actor],
+        |row| row.get(0),
     )?;
-    Ok(())
-}
-
-/// Record the current attempt's route on its position; same contract as
-/// [`record_verdict_in`].
-pub(super) fn record_route_in(
-    tx: &Transaction<'_>,
-    id: &str,
-    run: &RunId,
-    path: &str,
-) -> StoreResult<()> {
-    super::runs::require_attempt_in(tx, id, run)?;
-    let (invocation, mut cursor) = capture_in(tx, id)?;
-    let (steps, leaf) = cursor.current_body(&invocation.steps);
-    let Some(ConcreteStep::Xor(branch)) = steps.get(leaf.index) else {
+    if flow.version != version || flow.failure.is_some() || !valid {
         return Err(StoreError::InvalidAuthority(
-            "this Flow step is not a router".into(),
-        ));
-    };
-    if !branch.paths.contains_key(path) {
-        return Err(invalid(format!("unknown Flow path {path:?}")));
-    }
-    let route = &mut cursor.leaf_mut().route;
-    if route.as_deref().is_some_and(|saved| saved != path) {
-        return Err(StoreError::InvalidAuthority(
-            "router already selected a different path".into(),
+            "navigation requires the selected native turn's original caller".into(),
         ));
     }
-    *route = Some(path.to_owned());
-    tx.execute(
-        "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
-        params![id, serde_json::to_string(&cursor)?],
-    )?;
     Ok(())
 }
 
@@ -875,16 +809,18 @@ impl SqliteStore {
         run: &RunId,
     ) -> StoreResult<Option<FlowTurnSelection>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let id: Option<String> = conn
+        let launch: Option<(String, String)> = conn
             .query_row(
-                "SELECT f.id FROM flow_sessions f JOIN runs r ON r.id=f.current_run_id
+                "SELECT f.id,s.id FROM flow_sessions f JOIN runs r ON r.id=f.current_run_id
              JOIN agent_sessions s ON s.id=r.session_id
              WHERE r.id=?1 AND r.published=1 AND f.state='current' AND s.kind='conversation'",
                 [run.as_str()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        let Some(id) = id else { return Ok(None) };
+        let Some((id, session_id)) = launch else {
+            return Ok(None);
+        };
         let flow = current_flow_in(&conn, &id)?;
         let after = conn.query_row(
             "SELECT COALESCE(MAX(seq),0) FROM session_events",
@@ -895,8 +831,9 @@ impl SqliteStore {
             flow_id: id,
             version: flow.version,
             claim: flow.claim,
-            run_id: run.clone(),
+            session_id,
             after,
+            caller_token: None,
         }))
     }
 
@@ -926,13 +863,16 @@ impl SqliteStore {
             flow_id: id,
             version,
             claim,
-            run_id,
+            session_id,
             after,
+            caller_token,
         } = selection;
+        let caller_token = caller_token.as_deref().ok_or_else(|| stale(id))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
-        if flow.version != *version
+        if session != session_id
+            || flow.version != *version
             || flow.claim.as_ref() != claim.as_ref()
             || flow.failure.is_some()
             || start <= *after
@@ -959,14 +899,13 @@ impl SqliteStore {
         }
         let valid: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-             JOIN flow_sessions f ON f.id=s.flow_session_id JOIN runs r ON r.id=f.current_run_id
+             JOIN flow_sessions f ON f.id=s.flow_session_id
              WHERE f.id=?1 AND s.id=?2 AND e.seq=?3 AND e.kind='started'
-               AND r.session_id=s.id AND r.id=s.current_run_id AND r.published=1
-               AND r.id=?4 AND e.exec_id=?5 AND e.exec_id=s.driver_exec_id
-               AND s.driver_generation=?6 AND e.provider_generation=?7 AND s.provider_generation=?7
+               AND e.exec_id=?4 AND e.exec_id=s.driver_exec_id
+               AND s.driver_generation=?5 AND e.provider_generation=?6 AND s.provider_generation=?6
                AND NOT EXISTS(SELECT 1 FROM flow_events old WHERE old.flow_id=f.id
-                   AND old.kind='selected' AND old.session_event=e.seq AND old.version<>?8))",
-            params![id,session,start,run_id.as_str(),driver.exec_id,driver.generation,driver.provider_generation,i64::try_from(*version).map_err(invalid)?], |row| row.get(0),
+                   AND old.kind='selected' AND old.session_event=e.seq AND old.version<>?7))",
+            params![id,session,start,driver.exec_id,driver.generation,driver.provider_generation,i64::try_from(*version).map_err(invalid)?], |row| row.get(0),
         )?;
         if !valid {
             return Err(stale(id));
@@ -979,15 +918,16 @@ impl SqliteStore {
                 params![id, serde_json::to_string(&cursor)?],
             )?;
         }
-        let (node, iterations) = super::runs::location_in(&tx, flow.id())?;
+        let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
         tx.execute(
             "UPDATE flow_sessions SET selected_start=?2 WHERE id=?1",
             params![id, start],
         )?;
         tx.execute(
-            "INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at)
-             VALUES(?1,?2,?3,?4,'selected',?5,?6) ON CONFLICT(flow_id,kind,session_event) DO NOTHING",
-            params![id, i64::try_from(*version).map_err(invalid)?, node, serde_json::to_string(&iterations)?, start, now_unix()],
+            "INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload)
+             VALUES(?1,?2,?3,?4,'selected',?5,?6,json_object('caller_token',?7))
+             ON CONFLICT(flow_id,kind,session_event) DO NOTHING",
+            params![id, i64::try_from(*version).map_err(invalid)?, node, serde_json::to_string(&iterations)?, start, now_unix(),caller_token],
         )?;
         tx.commit()?;
         Ok(())
@@ -1056,7 +996,7 @@ impl SqliteStore {
                 Err(stale(id))
             };
         }
-        let (node, iterations) = super::runs::location_in(&tx, id)?;
+        let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
         tx.execute(
             "INSERT INTO flow_events(flow_id,version,node,iterations,kind,exec_id,observed_at)
             VALUES(?1,?2,?3,?4,'operation_started',?5,?6)",
@@ -1436,46 +1376,100 @@ impl SqliteStore {
         Ok(claim)
     }
 
-    /// `lf flow decide` from inside the step's Run.
+    /// `lf flow decide` from the selected native turn's tool Exec.
     pub fn record_flow_decision(
         &self,
         id: &str,
         version: u64,
-        run: &RunId,
+        actor: &crate::id::ExecId,
         verdict: &FlowVerdict,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let flow = current_flow_in(&tx, id)?;
-        require_attempt_authority(&flow, version, run, "decision")?;
-        record_verdict_in(&tx, id, run, verdict)?;
+        let mut flow = current_flow_in(&tx, id)?;
+        require_turn_authority(&tx, &flow, version, actor)?;
+        if verdict.summary.trim().is_empty() {
+            return Err(invalid("review evidence cannot be empty"));
+        }
+        match flow.current_step() {
+            Some(ConcreteStep::Skill(skill)) if skill.policy.human => {
+                return Err(StoreError::InvalidAuthority(
+                    "an interactive review returns feedback; its following decision step owns navigation"
+                        .into(),
+                ))
+            }
+            Some(ConcreteStep::Skill(skill)) if skill.policy.repeat.is_some() => {}
+            _ => {
+                return Err(StoreError::InvalidAuthority(
+                    "this Flow step does not own a decision".into(),
+                ))
+            }
+        }
+        let progress = &mut flow.cursor.leaf_mut().progress;
+        if progress
+            .verdict
+            .as_ref()
+            .is_some_and(|saved| saved != verdict)
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Flow step already has a different decision".into(),
+            ));
+        }
+        progress.verdict = Some(verdict.clone());
+        tx.execute(
+            "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
+            params![id, serde_json::to_string(&flow.cursor)?],
+        )?;
         tx.commit()?;
         Ok(())
     }
 
-    /// `lf flow route` from inside the router's Run.
+    /// `lf flow route` from the selected native router turn's tool Exec.
     pub fn record_flow_path(
         &self,
         id: &str,
         version: u64,
-        run: &RunId,
+        actor: &crate::id::ExecId,
         path: &str,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let flow = current_flow_in(&tx, id)?;
-        require_attempt_authority(&flow, version, run, "route")?;
-        record_route_in(&tx, id, run, path)?;
+        let mut flow = current_flow_in(&tx, id)?;
+        require_turn_authority(&tx, &flow, version, actor)?;
+        let Some(ConcreteStep::Xor(branch)) = flow.current_step() else {
+            return Err(StoreError::InvalidAuthority(
+                "this Flow step is not a router".into(),
+            ));
+        };
+        if !branch.paths.contains_key(path) {
+            return Err(invalid(format!("unknown Flow path {path:?}")));
+        }
+        let route = &mut flow.cursor.leaf_mut().route;
+        if route.as_deref().is_some_and(|saved| saved != path) {
+            return Err(StoreError::InvalidAuthority(
+                "router already selected a different path".into(),
+            ));
+        }
+        *route = Some(path.to_owned());
+        tx.execute(
+            "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
+            params![id, serde_json::to_string(&flow.cursor)?],
+        )?;
         tx.commit()?;
         Ok(())
     }
 
-    /// The Ask key of a loop blocker raised from inside the deciding Run:
+    /// The Ask key of a loop blocker raised by the selected deciding turn:
     /// `flow:<invocation>:<node>:<iterations>`.
-    pub fn flow_blocker_key(&self, id: &str, version: u64, run: &RunId) -> StoreResult<String> {
+    pub fn flow_blocker_key(
+        &self,
+        id: &str,
+        version: u64,
+        actor: &crate::id::ExecId,
+    ) -> StoreResult<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let flow = current_flow_in(&conn, id)?;
-        require_attempt_authority(&flow, version, run, "loop blocker")?;
+        require_turn_authority(&conn, &flow, version, actor)?;
         let deciding = matches!(flow.current_step(), Some(ConcreteStep::Skill(skill))
             if skill.policy.repeat.is_some() && !skill.policy.human);
         if !deciding {
@@ -1591,8 +1585,79 @@ pub(super) fn decode_flow_cursor(
 }
 
 #[cfg(test)]
+impl SqliteStore {
+    /// A fixture tool command from one selected native turn; no Run grants navigation.
+    pub(crate) fn test_turn_caller(
+        &self,
+        session: &str,
+        generation: i64,
+        token: &str,
+    ) -> crate::id::ExecId {
+        let actor = crate::id::ExecId::new();
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO execs(id,trace_id,started_at,via_agent,caller_session_id,caller_provider_generation,caller_flow_turn)
+             VALUES(?1,'fixture',1,1,?2,?3,?4)",
+            params![actor,session,generation,token],
+        ).unwrap();
+        actor
+    }
+
+    pub(crate) fn test_flow_turn(&self, run: &RunId) -> crate::id::ExecId {
+        let (session, _) = self.session_for_run(run).unwrap().unwrap();
+        let driver = self
+            .session_driver(&session.id)
+            .unwrap()
+            .unwrap_or_else(|| {
+                let exec = crate::id::ExecId::new();
+                self.conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                        [&exec],
+                    )
+                    .unwrap();
+                self.claim_session_driver(&session.id, None, &exec, false)
+                    .unwrap()
+            });
+        let mut selection = self.flow_turn_selection(run).unwrap().unwrap();
+        let turn = uuid::Uuid::new_v4().to_string();
+        selection.caller_token = Some(turn.clone());
+        let start = self
+            .record_session_turn_origin(
+                &session.id,
+                "fixture-thread",
+                &turn,
+                driver.provider_generation,
+                driver.exec_id.as_ref().unwrap(),
+            )
+            .unwrap();
+        self.select_flow_turn(&selection, &session.id, &driver, start)
+            .unwrap();
+        self.test_turn_caller(&session.id, driver.provider_generation, &turn)
+    }
+
+    pub(crate) fn test_finish_flow_turn(&self, actor: &crate::id::ExecId, status: &str) {
+        let (session,thread,turn): (String,String,String) = self.conn.lock().unwrap().query_row(
+            "SELECT start.session_id,start.provider_thread,start.provider_turn FROM execs e
+             JOIN flow_events selected ON json_extract(selected.payload,'$.caller_token')=e.caller_flow_turn
+             JOIN session_events start ON start.seq=selected.session_event WHERE e.id=?1", [actor],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        self.record_session_event(
+            &session,
+            &thread,
+            &turn,
+            crate::session::SessionEventKind::Completed,
+            &serde_json::json!({"status":status}),
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use crate::durable::{FlowSession, RunId};
+    use crate::durable::FlowSession;
     use crate::engine::flow::{Op, RepeatPolicy};
     use crate::engine::invocation::QueuedInvocation;
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
@@ -1621,31 +1686,16 @@ mod tests {
         }
     }
 
-    fn attempt(store: &SqliteStore, invocation: &str, skill: Option<&str>, provider: &str) -> Run {
+    fn attempt(store: &SqliteStore, invocation: &str, _skill: Option<&str>, provider: &str) -> Run {
+        let flow = store.flow(invocation).unwrap().unwrap();
+        let flow = store
+            .reserve_attempt(invocation, flow.version, None)
+            .unwrap();
+        let run = flow.current_attempt.unwrap().run_id;
         store
-            .create_run(
-                Run {
-                    id: RunId::new(),
-                    session_id: None,
-                    invocation_id: Some(invocation.to_string()),
-                    node: None,
-                    iterations: None,
-                    attempt: None,
-                    task_id: None,
-                    wave_id: None,
-                    work_source: None,
-                    created_at: 1,
-                    published: true,
-                    cwd: "/repo".into(),
-                    skill: skill.map(str::to_owned),
-                    provider: Some(provider.into()),
-                    model: None,
-                    caller_run_id: None,
-                    ended: None,
-                },
-                None,
-            )
-            .unwrap()
+            .publish_attempt(invocation, flow.version, &run, None, provider, None)
+            .unwrap();
+        store.session_for_run(&run).unwrap().unwrap().1
     }
 
     fn launched(store: &SqliteStore, steps: Vec<ConcreteStep>, index: usize) -> FlowSession {
@@ -1722,7 +1772,10 @@ mod tests {
                 &serde_json::json!({"status":"completed"}),
             )
             .unwrap();
-        let selection = store.flow_turn_selection(run).unwrap().unwrap();
+        let mut selection = store.flow_turn_selection(run).unwrap().unwrap();
+        selection.caller_token = Some("selected-token".into());
+        let actor =
+            store.test_turn_caller(&session.id, driver.provider_generation, "selected-token");
         assert!(store
             .select_flow_turn(&selection, &session.id, &driver, earlier)
             .is_err());
@@ -1764,7 +1817,7 @@ mod tests {
             .record_flow_decision(
                 flow.id(),
                 flow.version,
-                run,
+                &actor,
                 &verdict(FlowDecision::Advance),
             )
             .unwrap();
@@ -1772,7 +1825,7 @@ mod tests {
             .record_flow_decision(
                 flow.id(),
                 flow.version,
-                run,
+                &actor,
                 &verdict(FlowDecision::Iterate)
             )
             .is_err());
@@ -1800,9 +1853,22 @@ mod tests {
                 &serde_json::json!({"status":"failed"}),
             )
             .unwrap();
+        selection.caller_token = Some("retry-token".into());
         store
             .select_flow_turn(&selection, &session.id, &driver, automatic_start)
             .unwrap();
+        assert!(
+            store
+                .record_flow_decision(
+                    flow.id(),
+                    flow.version,
+                    &actor,
+                    &verdict(FlowDecision::Advance)
+                )
+                .is_err(),
+            "a failed turn's delayed child cannot navigate after retry starts"
+        );
+        let actor = store.test_turn_caller(&session.id, driver.provider_generation, "retry-token");
         assert!(
             store
                 .flow(flow.id())
@@ -1819,7 +1885,7 @@ mod tests {
             .record_flow_decision(
                 flow.id(),
                 flow.version,
-                run,
+                &actor,
                 &verdict(FlowDecision::Iterate),
             )
             .unwrap();
@@ -1827,7 +1893,7 @@ mod tests {
             .record_flow_decision(
                 flow.id(),
                 flow.version,
-                run,
+                &actor,
                 &verdict(FlowDecision::Advance)
             )
             .is_err());
@@ -1861,7 +1927,8 @@ mod tests {
         store
             .publish_attempt(flow.id(), retry.version, retry_run, None, "codex", None)
             .unwrap();
-        let retry_selection = store.flow_turn_selection(retry_run).unwrap().unwrap();
+        let mut retry_selection = store.flow_turn_selection(retry_run).unwrap().unwrap();
+        retry_selection.caller_token = Some("explicit-retry-token".into());
         assert!(store
             .select_flow_turn(&retry_selection, &session.id, &driver, earlier)
             .is_err());
@@ -2061,7 +2128,7 @@ mod tests {
     }
 
     #[test]
-    fn a_decision_belongs_to_the_current_attempt_and_recovery_reads_its_outcome() {
+    fn a_decision_belongs_to_the_selected_turn_and_recovery_reads_its_outcome() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let steps = vec![
@@ -2100,28 +2167,29 @@ mod tests {
             .current_attempt
             .is_none());
 
-        // The step's Run is the attempt allowed to decide, at the version it saw.
+        // Navigation names the selected native turn through the tool's Exec.
         let run = attempt(&store, &id, Some("loop-decide"), "codex");
         assert_eq!(run.node, Some(1));
+        let actor = store.test_flow_turn(&run.id);
         let iterate = verdict(FlowDecision::Iterate);
         assert!(store
-            .record_flow_decision(&id, 1, &RunId::new(), &iterate)
+            .record_flow_decision(&id, 1, &crate::id::ExecId::new(), &iterate)
             .is_err());
         assert!(store
-            .record_flow_decision(&id, 2, &run.id, &iterate)
+            .record_flow_decision(&id, 2, &actor, &iterate)
             .is_err());
         store
-            .record_flow_decision(&id, 1, &run.id, &iterate)
+            .record_flow_decision(&id, 1, &actor, &iterate)
             .unwrap();
         store
-            .record_flow_decision(&id, 1, &run.id, &iterate)
+            .record_flow_decision(&id, 1, &actor, &iterate)
             .unwrap();
         assert!(store
-            .record_flow_decision(&id, 1, &run.id, &verdict(FlowDecision::Advance))
+            .record_flow_decision(&id, 1, &actor, &verdict(FlowDecision::Advance))
             .is_err());
         assert!(
             store.recover_flow(&id, None).is_err(),
-            "an unsettled Run keeps the Flow waiting"
+            "an unsettled native turn keeps the Flow waiting"
         );
         // A checkpoint of the same position keeps the recorded decision.
         let version = store
@@ -2134,7 +2202,7 @@ mod tests {
             Some(iterate.clone())
         );
 
-        // A failed Run blocks the Flow with its candidate cleared; retry opens
+        // A failed native turn blocks the Flow with its candidate cleared; retry opens
         // the position for the next attempt.
         store
             .end_run(
@@ -2145,6 +2213,7 @@ mod tests {
                 },
             )
             .unwrap();
+        store.test_finish_flow_turn(&actor, "failed");
         let blocked = store.recover_flow(&id, None).unwrap();
         assert!(blocked
             .failure
@@ -2153,7 +2222,7 @@ mod tests {
             .contains("loop-decide Run failed"));
         assert!(blocked.cursor.progress.verdict.is_none());
         assert!(store
-            .record_flow_decision(&id, blocked.version, &run.id, &iterate)
+            .record_flow_decision(&id, blocked.version, &actor, &iterate)
             .is_err());
         let retried = store.retry_flow(&id, None).unwrap();
         assert!(retried.failure.is_none() && retried.current_attempt.is_none());
@@ -2165,8 +2234,9 @@ mod tests {
         // The second attempt completes; its decision survives to the settled edge.
         let second = attempt(&store, &id, Some("loop-decide"), "codex");
         assert_eq!(second.attempt, Some(2));
+        let successor = store.test_flow_turn(&second.id);
         store
-            .record_flow_decision(&id, retried.version, &second.id, &iterate)
+            .record_flow_decision(&id, retried.version, &successor, &iterate)
             .unwrap();
         store
             .end_run(
@@ -2177,6 +2247,7 @@ mod tests {
                 },
             )
             .unwrap();
+        store.test_finish_flow_turn(&successor, "completed");
         let settled = store.recover_flow(&id, None).unwrap();
         assert_eq!(settled.cursor.progress.verdict, Some(iterate));
         assert_eq!(
@@ -2197,7 +2268,7 @@ mod tests {
             "a new position has no attempt"
         );
         assert!(store
-            .record_flow_decision(&id, version, &second.id, &verdict(FlowDecision::Advance))
+            .record_flow_decision(&id, version, &successor, &verdict(FlowDecision::Advance))
             .is_err());
         assert!(store
             .checkpoint_flow(&id, version - 1, &moved.cursor, None, None)

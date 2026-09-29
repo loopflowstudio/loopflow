@@ -5042,6 +5042,61 @@ mod tests {
     }
 
     #[test]
+    fn turn_caller_upgrade_preserves_unknown_command_origin_and_selected_history() {
+        let conn = open();
+        let name = "record_flow_turn_caller";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO execs(id,trace_id,started_at,outcome,exit_code)
+                VALUES('command','trace',1,NULL,NULL);
+            INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
+                VALUES('flow','{"id":"flow","capture":"retained"}','/repo',0,0,1,0,1,'current');
+            BEGIN;
+            INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind)
+                VALUES('conversation','agent','Retained','human',1,'conversation');
+            INSERT INTO runs(id,session_id,created_at,published,cwd) VALUES('agent','conversation',1,1,'/repo');
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+                VALUES('conversation','thread','turn','started','start',1,'{}');
+            INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload)
+                VALUES('flow',1,0,'[]','selected',last_insert_rowid(),1,'{"retained":"evidence"}');
+            COMMIT;
+        "#).unwrap();
+        let before: (i64, i64, String) = conn
+            .query_row(
+                "SELECT seq,session_event,payload FROM flow_events",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let after: (i64, i64, String) = conn
+            .query_row(
+                "SELECT seq,session_event,payload FROM flow_events",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(after, before);
+        let unknown: (Option<String>, Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT caller_flow_turn,outcome,exit_code FROM execs WHERE id='command'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unknown, (None, None, None));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn operation_history_upgrade_preserves_receipts_and_unknown_start_evidence() {
         let conn = open();
         let name = "flow_operation_history";

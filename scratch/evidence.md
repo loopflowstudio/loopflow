@@ -6,7 +6,215 @@ Detailed reports, earlier failures and source hashes remain in the
 
 ## Published CI and retained red results
 
-Latest published head is `81b57c91f`, rebased onto `aab595e6a`. GitHub reports
+Latest published head is `fb100f486`, still based on `1dce02734`, mergeable with
+auto-merge off. GitHub and Task publication both name that head. It contains only
+the one-line hierarchical-selector fixture correction described below; unfinished
+native and owner changes remain uncommitted. CI36517146691 is terminal. Rust
+job109241873536 reports **1,304 passed / 1 failed / 14 skipped / 643 unrun**:
+`a_fresh_database_applies_the_whole_chain_once` still forbids `projects.status`
+alongside retired controller reason/time columns. The Chapter model deliberately
+stores Linear Project status. Supervisor inspected the test and sent the narrow
+assertion correction plus a materialized migration-module proof request in verified
+comment `cb67b4d4-ef13-4728-82c0-0c765b399bd0`. Keep Task status absence and obsolete
+Project reason/time checks; retain the positive Project-status schema/preservation
+proofs. This test applies canonical MIGRATIONS, so its source-only pass cannot
+establish the materialized result. Raw log `.lf/tmp/execution-model/fb100-rust-ci.log`.
+No full hosted pass is claimed for this head. Verified supervisor comment
+`ac8e73dc-b16f-4541-b1f8-3ea8187e56c9` supersedes the separate migration-module
+run: after this correction and the owned rebase, run one no-fail-fast Rust matrix
+on an isolated materialized snapshot, including migration coverage. Four successive
+hosted stops across different modules justify that broader diagnostic. Record all
+failures and exact snapshot bytes; do not run a redundant module first or repeat
+the whole suite after each small repair.
+
+Preceding head `70e8db9c6`, CI36516387300:
+Rust job109239490288 failed: **1,054 passed / 1 failed / 14 skipped / 893 unrun**.
+`ops::run::tests::hierarchical_work_selectors_must_match` creates two Started
+Projects under the same Wave, then fails in Task creation before its selector
+assertions: `cannot prepare a new Task in chapter history`. The fixture creates
+`other_wave` but passes `wave` to its other Project constructor. Supervisor sent
+the exact finding and a focused module proof request in verified Task comment
+`1199b96b-fae4-4ca2-9824-2011d63ba4e0`. Raw log:
+`.lf/tmp/execution-model/70e8-rust-ci.log`. CI is terminal: all substantive jobs
+except Rust pass; scratch-clear fails with active notes. No full hosted pass follows.
+The one-line correction assigns the other Project to `other_wave` and preserves
+both selector assertions. `compress-run-fixture.log` records six `ops::run` tests
+passing in 2.825s, formatting and all-target Clippy (17.41s) on published source
+plus that fixture overlay. Supervisor inspected the diff and log; the correction
+is now published as `fb100f486`. Verified review handoff `be418650-8459-4be9-ba12-055080ae24df`
+requests a selective fixture checkpoint while preserving incomplete native edits.
+Review-slice iteration9 completed with an explicit incomplete disposition in
+`parallel-execution.md`; the saved Flow moved to its intermediate concept review.
+The unfinished owner conversion and native failure are retained. This does not
+establish the requested code-complete review or authorize a model/retry change.
+
+Concept review `run_fe7ae2c0bf9941caa2550d950e4f3d62` wrote its retained judgment
+and final answer, but Task execution blocked on a failed inspection command:
+`AttributeError: 'list' object has no attribute 'get'`. Its code treated saved
+`flow_events` row arrays as dictionaries. Supervisor reran the reads successfully
+with row indexes, verified worker917/provider16037 absent through fresh `lf ps`,
+and used `task resume --reason` to retry the same saved boundary. Fresh status and
+OS evidence show `run_2cd37ffce47843dc8d9d27c132dd5ed9`, worker19438/provider20411.
+This is recovery from a script error; no missing filesystem/control/network
+capability was demonstrated by the blocker wording. The artifact and original
+failure remain evidence; no accepted model or Flow edge was changed.
+Further inspection of that Run's `ItemCompleted` event establishes the trigger:
+the reader printed saved native fixture tool output containing `operation not
+permitted` before its Python exception. `completed_boundary_failure` searches
+the entire failed command output for that phrase, and
+`execution_blocker_at_handoff` turns it into a Task capability blocker. The
+permission text described a prior fixture's `ps`, not this command's failure.
+Verified supervisor comment `c9c25a86-051f-4314-8054-194180846866` carries this
+observed counterexample into the existing Task/Exec outcome conversion. The
+reader correction recovers this instance; the classifier is not repaired.
+
+The resumed concept review completed. Its following decision,
+`run_232d082cf8da4b26b1753affd8190c8f`, recorded Iterate but was then failed by
+the same classifier. This time source inspection itself printed the marker;
+the command's actual exit2 came from `rg` using a guessed unsharded Run path.
+Public Run inspection succeeded. The failed Run's verdict was not consumed.
+The existing automatic unblock Ask
+`ask_once_3b65e08317dfd16e8a83b89cb9a2fd0b0b49f4a48ca7e37fa05b0b56edc8619e`
+was opened through supported Session controls; its agent verified the sharded
+path, retained [the operational resolution](unblock-quoted-output.md), and marked
+ready. Supervisor read the summary, completed that Ask under existing autonomous
+management authorization, refreshed the Session list, and resumed the same saved
+decision. Fresh Task/OS reads show `run_c94415c9f4554764bb7c41d78e615139`,
+worker87749/provider88434. This is operational recovery, not new Jack approval,
+a Flow verdict, or a classifier repair. Native retry remains separately failing.
+The resumed decision subsequently completed and recorded Iterate. Fresh Task/OS
+reads establish implement iteration10, `run_4f129189186948279f5cc9416d7897e6`,
+same worker87749 and new provider18549. Its opening retains owner conversion,
+queued integration and materialized diagnostics. No implementation result follows
+from this successful navigation.
+
+Review-slice replayed the legitimate native decision retry on the current source,
+candidate `66f410dd9019612fa163fdd41c56219a594d32660d67798b2f70d9c7677d0280`.
+`review-slice-native-replace/results.json` still records command exit1, a successful
+successor provider turn whose decision command is rejected, and no consumption of
+that successor. The Flow stays blocked for a missing decision. Supervisor inspected
+the result: failed completion7, successor start8/completion11, selections5/8 but
+no consumption11. This is real Codex with scripted Responses and a private Home;
+it is a current-source regression result, not configured-provider acceptance.
+The same candidate's two companion results are also inspected:
+`review-slice-native-late` rejects the old child (exit1) and retains the unresolved
+decision; `review-slice-native-owners` completes ordinary automatic retry with
+one Session/thread/generation/Exec and consumes successor completion6 once, but
+still records **one Run row**, failing the zero-Run assertion. The three results
+together preserve both failing requirements instead of mistaking stale-child
+rejection for a complete retry repair.
+
+The current review receipt `review-slice-source.json` compares published
+`70e8db9c6` with the working source at head `fb100f486`, including the untracked
+caller draft: **+193 / -173, net +20 production lines**. It excludes tests,
+Markdown and generated files and includes nine SQL lines. All 24 recorded source
+hashes matched at supervisor inspection. This is the current bounded conversion
+delta, not the whole-branch reduction; no final owner table is deleted by it.
+
+Preceding head `0131ed763f` failed Rust in CI36515601936. That commit changes
+only four Project fixture files (+11/-4), preserving the unfinished navigation diff locally.
+Its isolated source copy passed five focused tests, formatting and all-target
+Clippy (17.35s); `project-fixture-static.log` and its runner retain that scope.
+
+Rust job109237049839 reports **932 passed / 2 failed / 14 skipped / 1,010 unrun**.
+Both `task_completion_reconciles_lost_registered_response` and
+`task_completion_reconciles_provider_outcome_after_landing` fail at
+`ops/pm/task_planning_tests.rs:834`: `UNIQUE constraint failed:
+projects.external_project_id`. Supervisor inspected the shared fixture: after
+real `task_create`, registered cases unconditionally insert another `project-1`
+with a fresh local ID. Reuse of the synchronized Project is the leading repair;
+production uniqueness and actual completion/retry assertions must remain.
+Raw log `.lf/tmp/execution-model/0131ed-rust-ci.log`. Task-installation passes
+on this head; remaining hosted results keep their own scope.
+
+The isolated completion-fixture repair first passed ten of twelve tests and
+exposed two deletion cases whose synthetic provider omitted ProjectOwnership
+for the retained predecessor. The final fixture reuses the synced Project and
+returns the Completed predecessor separately from the named successor.
+`completion-fixture-contract-2.log` passes all twelve planning tests (7.692s),
+formatting and all-target Clippy (16.85s); the first red log remains. No product
+uniqueness constraint or outcome assertion was relaxed. Supervisor inspected
+the diff/log; this does not establish the unfinished navigation tree or hosted CI.
+
+The broader PM check reused that isolated completion-fixture source tree:
+`compress-pm-module.log` records **44 passed (one leaky)** in 17.313s, with
+`--no-fail-fast`. The leak is `linear_oauth_cancelled_lock_waiter_never_exchanges`;
+its assertions passed, but process settlement is not clean. The known SQLite
+contention test passed in this run. No further PM fixture failures appeared;
+this result does not verify subsequent navigation/compression edits.
+
+Supervisor reviewed compression against the three saved source files under
+`.lf/tmp/cut-i/compress-before/`: **+77 / -94, net -17 production lines**,
+excluding trailing test modules. The location helper now derives from the
+already-loaded capture, and decision/route writes reuse the Flow read in their
+transaction. Five duplicate capture reads and obsolete operation branches in
+agent reservation are removed; the shared original-turn check stays. The
+remaining `runs` owner is not deleted by this reduction. Inspected logs record
+six owner tests (2.861s), three Session/mechanical consumer tests (3.993s), and
+all-target Clippy (17.23s), all passing. These retain the synthetic/native proof
+boundaries; the valid native decision retry and zero-Run public proof remain red.
+
+Chapter skill contributor `run_cb8561c9f2d9443897f282a50e52d0ad` completed eight
+Markdown edits without builds or live operations. Supervisor reviewed the diff
+against parser/data/writer source and repeated the obsolete-command/storage
+scan plus scoped whitespace check. Guidance now uses repository rotation,
+required Project Flow, retained canceled issues, current-plan-only updates and
+dated historical evidence. Review gates remain. The files are uncommitted and
+returned to main; no installed skill synchronization or live Chapter proof follows.
+
+Preceding head `594c7c319f` integrated upstream. Reconciliation changes only seven files relative to
+the pre-rebase mechanical checkpoint; operation/native source and draft bytes
+are unchanged. `rebase-schema-cache.log` passes both focused checks: distinct
+prefix/changed-SQL keys and rejection of schema/ledger/data drift.
+
+Hosted run36513715591, Rust job109231281571: **930 passed / 1 failed / 14 skipped /
+1,013 unrun**. The previous OAuth regression passes. The new failure is
+`ops::pm::task_comments_tests::task_comments_read_and_publish_without_placement`,
+at task_comments_tests.rs:201: `failed to decode Linear response: missing field
+status`. Its IssueOwnership fixture omits Project status and carries empty
+content; the adjacent planning fixture supplies started status and `flow: feature`.
+Raw log `.lf/tmp/execution-model/594c7-rust-ci.log`. Do not relax required provider
+fields to repair a stale fixture. Supervisor relayed the exact failure and sibling
+fixture audit in verified Task comment `77e10d11-aee9-4341-8ac2-5a0522193640`.
+No full Rust pass follows.
+Local `project-fixture-contract.log` subsequently passes five focused tests:
+comments without placement, PM snapshot, OAuth recovery, reteam preservation
+and interrupted reteam. It tests an archive of `594c7c319f` with four fixture-file
+overlays, recorded in `project-fixture-source.json`. Supervisor verified the two
+Rust overlay hashes still match. The run executes Rust only; it does not verify
+the two edited Python CLI fixtures (one Python hash changed afterward), the
+unfinished navigation diff, or a fresh hosted result. No production parser changed.
+Swift job109231281996 and UI job109231281715 subsequently passed; all other
+substantive jobs are also green. Scratch-clear remains red with active notes.
+Those hosted results do not establish configured Desktop acceptance.
+
+The same job passed all **14 Chapter tests**. Supervisor inspected
+`ops/chapter_tests.rs::every_provider_mutation_recovers_on_the_same_or_a_second_home`:
+24 recovery cases cover twelve interruption points across two stores, a two-Wave
+read-only preview, final statuses, repeat without extra provider mutations, and
+preserved Task identity/worktree/plan/PR/Flow in the retained transfer case.
+The fixture invokes Rust rotation, including on the second Home; it does not
+prove adoption by public sync alone and does not compare Started timestamps.
+Adjacent tests cover legacy content, response loss, conflicting/archived statuses
+and unobserved work on another Home. The updated Chapter note distinguishes
+these fresh hosted passes from remaining public-path and final-schema proofs.
+
+**The mechanical managed disposable-OS proof now passes in hosted CI.** Job
+109231281578 ran all five tests through `scripts/test_task_installation.py` in a
+container with a fresh OS account and no host Home mounted. Exact named test
+`task_operation_starts_with_durable_history_after_claim_only_failure` passed in
+6.52s, zero ignored. Supervisor inspected the test: claim/release leaves Started
+unset, roadmap agrees, removal of the template does not prevent the real task
+worker executing its captured operation, durable history sets Started, and Run
+inventory stays empty without changing that timestamp. The claim is seeded
+through the store before invoking `task __worker`; this is not a configured
+agent or normal Task-launch admission proof. Other four installation proofs
+also pass. Raw log `.lf/tmp/execution-model/594c7-task-installation-ci.log`.
+The earlier Mac Docker timeout remains an observation, but no longer blocks
+this particular proof obligation. Shared result recorded in Task comment
+`bf673e2e-3df0-48e1-9336-71faa89ba7f6`.
+
+Historical published head `81b57c91f`, rebased onto `aab595e6a`: GitHub reported
 mergeable; Task base matches Git and auto-merge is off. CI36510330745, Rust job
 109220794661, reports 928 passed / 1 failed / 13 skipped / 1,007 unrun.
 `ops::pm::oauth_tests::pm_read_linear_oauth_recovers` fails decoding its synthetic
@@ -15,7 +223,7 @@ fixture lacks the status already present on its local ProjectPlan. This is not
 the separately recorded SQLite-contention flake. Raw log:
 `.lf/tmp/execution-model/rebase-81b57-rust-ci.log`. Other substantive hosted jobs
 passed; scratch-clear and aggregate result failed. The preserved mechanical
-ownership proof has not passed: its local RED in `flow-operation-owner-red.log`
+ownership proof had not yet passed: its local RED in `flow-operation-owner-red.log`
 observes two Runs, zero AgentSessions and one Exec for two in-process operations.
 CI stopped before that test. The first local `flow-operation-owner-green.log`
 passes the new actual-CLI mechanical assertion (two operations, one Exec, zero
@@ -339,6 +547,74 @@ up today's turn for a delayed child would preserve the defect. This is existing
 late-writer scope, not a new product object. Verified Task comment
 `cae3e281-31e1-4ba0-a757-3dd2cb00c4ee` gives main the reproduction. Earlier passing
 native/migration tests keep their scope and do not prove late-child rejection.
+
+**The first caller-token repair rejects valid retry too.** On candidate
+`d2791ad2264bde9389b3a9f66b6d44d1cde4d01ac54965b4e7071667b0b6413e`,
+`native-turn-caller-late/results.json` rejects the old child and leaves the Flow
+waiting for a decision, retaining both outcomes. But
+`native-turn-caller-replace/results.json` also rejects the replacement turn's
+valid Advance. Main observed that thread resume retains the earlier tool
+environment. Supervisor inspected both results: this is not a passing repair.
+
+Supervisor exported the installed Codex0.157.1 experimental protocol schema to
+`.lf/tmp/execution-model/supervisor-codex-schema/`. `TurnStartParams` and
+`ThreadSettingsUpdateParams` expose no general config or shell-environment
+override; `environments` holds environment identity/cwd/workspace roots only.
+`ThreadResumeParams` accepts config. Current
+[official app-server documentation](https://learn.chatgpt.com/docs/app-server#unsubscribe-from-a-loaded-thread)
+describes delayed unload after the last subscription, with a 30-minute inactivity
+period; unsubscribe is not documented as immediate reload. The schema is pinned
+to the local binary; the webpage is current documentation. Main must distinguish
+a native lifecycle solution from added provider machinery before widening this
+repair under Jack's simplicity constraint. Original-turn attribution remains the
+required behavior; no new product object or alternate success criterion follows.
+
+**Existing native lifecycle experiment is negative.** Supervisor inspected
+`native-idle-resume-config-1`: after the failed turn, the thread reports
+`systemError`; unsubscribe succeeds and a new client resumes the same thread
+with generation 2 configured, but the next tool still prints generation 1.
+The assertion fails. Its filename does not establish an idle thread.
+`native-interrupt-resume-config-1` then receives `no active turn to interrupt`
+when interrupting the completed failed turn, and stops before resume. These
+real Codex0.157.1/synthetic Responses/private-Home probes establish those two
+failures, not impossibility of every handoff. Their original scripts/results and
+Cut logs survive. See [tradeoff review](native-turn-retry-tradeoff.md); passing
+store authority tests cannot stand in for the still-failing valid native retry.
+The subsequent control `native-success-resume-config-1` passes: after success,
+the observed thread is idle and unsubscribe/resume preserves thread/engine while
+the next tool prints generation 2. Supervisor inspected the actual results.
+This isolates the demonstrated failure to the failed-thread path; it does not
+prove a fix, sibling preservation, or configured account continuity.
+
+`native-navigation-store.log` passes nine selected store/Task-driver tests
+(6.422s after 32.08s compilation) following the Exec authority conversion.
+Supervisor inspected the log and changed fixtures: they supply synthetic native
+history and correctly attributed caller Execs. Coverage includes old-caller and
+conflicting-decision rejection, exact completion, nested routing and unblock
+feedback recovery. These passes precede further selection-capability edits;
+they do not establish the real provider's environment transport or all-target
+static success for the unfinished conversion.
+
+`native-selection-session.log` passes two focused checks (1.711s): exact native
+completion and managed recovery after FlowTurnSelection takes the reserved
+AgentSession ID instead of Run ID. Source inspection confirms `select_flow_turn`
+no longer joins Run for authority; capability creation and launch publication
+still do. `native-navigation-canonical.log` passes four checks (1.591s) after
+materializing all 25 drafts into disposable 0.12.25.001_release: unknown caller
+origin/selected-history preservation, exact selection, managed recovery and
+nested route/decision authority. Source receipt: `native-canonical-source.json`.
+`native-navigation-clippy.log` passes all-target Clippy (17.03s). These are
+bounded source/store proofs; the caller-environment retry failure remains open.
+The source receipt covers 316 files; supervisor comparison found only the later
+completion fixture and restart-hint edits changed at inspection. The latter is
+wording only. Further implementation needs its own affected verification.
+
+`native-agent-owner-red-2` on candidate
+`78feced5b868b753557251a116a0eba3f871ec494ac1c56b5ead51aaa028aa67`
+records command success and the automatic-retry/history assertions passing,
+then fails its new zero-Run assertion with one retained row. This is a concrete
+launch/publication owner-conversion target, distinct from the already-failing
+decision retry environment. Supervisor inspected the result and assertion log.
 
 ## Retained local proof
 

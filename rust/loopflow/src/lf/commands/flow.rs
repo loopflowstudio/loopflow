@@ -186,38 +186,41 @@ pub fn control(command: &str, args: &[String], cli: &Cli) -> Result<()> {
             );
             let verdict = FlowVerdict { decision, summary };
             let step = active_step()?;
-            let run = active_run_id()?;
+            let actor =
+                journal::current_exec_id().ok_or_else(|| anyhow!("command Exec is unavailable"))?;
             block_on_store(|store| async move {
                 store
-                    .record_flow_decision(&step.invocation, step.version, &run, &verdict)
+                    .record_flow_decision(&step.invocation, step.version, &actor, &verdict)
                     .await
                     .map_err(Into::into)
             })?;
-            println!("Decision recorded; it takes effect when this Run finishes successfully.");
+            println!("Decision recorded; it takes effect when its selected native turn finishes successfully.");
             Ok(())
         }
         "route" => {
             anyhow::ensure!(args.len() == 1, "usage: lf flow route PATH");
-            let run = active_run_id()?;
+            let actor =
+                journal::current_exec_id().ok_or_else(|| anyhow!("command Exec is unavailable"))?;
             let path = args[0].clone();
             let step = active_step()?;
             block_on_store(|store| async move {
                 store
-                    .record_flow_path(&step.invocation, step.version, &run, &path)
+                    .record_flow_path(&step.invocation, step.version, &actor, &path)
                     .await
                     .map_err(Into::into)
             })?;
-            println!("Route recorded; it takes effect when this Run finishes successfully.");
+            println!("Route recorded; it takes effect when its selected native turn finishes successfully.");
             Ok(())
         }
         "blocked" => {
             let reason = args.join(" ");
             anyhow::ensure!(!reason.trim().is_empty(), "usage: lf flow blocked REASON");
-            let run_id = active_run_id()?;
+            let actor =
+                journal::current_exec_id().ok_or_else(|| anyhow!("command Exec is unavailable"))?;
             let step = active_step()?;
             block_on_store(|store| async move {
                 let key = store
-                    .flow_blocker_key(&step.invocation, step.version, &run_id)
+                    .flow_blocker_key(&step.invocation, step.version, &actor)
                     .await?;
                 let summary =
                     crate::ops::human_session::ask_once(&store, &key, &reason, Some("unblock"))
@@ -298,16 +301,8 @@ where
     })
 }
 
-fn active_run_id() -> Result<crate::durable::RunId> {
-    crate::durable::RunId::parse(
-        &std::env::var(crate::durable::RUN_ID_ENV)
-            .context("this operation requires the active decision Run")?,
-    )
-    .map_err(Into::into)
-}
-
 fn active_step() -> Result<flow_run::ActiveStep> {
-    flow_run::token()?.ok_or_else(|| anyhow!("this operation runs inside a Flow step's Run"))
+    flow_run::token()?.ok_or_else(|| anyhow!("this operation requires a Flow step"))
 }
 
 /// Drive a saved Flow from its row with the `lf` launcher.

@@ -217,8 +217,9 @@ pub struct FlowTurnSelection {
     pub flow_id: String,
     pub version: u64,
     pub claim: Option<TaskWorkerClaim>,
-    pub run_id: RunId,
+    pub session_id: String,
     pub after: i64,
+    pub caller_token: Option<String>,
 }
 
 /// One Flow invocation as its row holds it: the captured graph, the cursor,

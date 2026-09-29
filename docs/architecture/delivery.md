@@ -83,6 +83,13 @@ merge. `submit` performs the same preparation but leaves the exact-head merge
 to a person. These delivery commands inspect Task delivery state when present;
 they do not require a live Task worker or certify that a particular Flow ran.
 
+Repeating `arm` or `land` on a clean, already armed exact head resumes the
+existing request, including standalone PRs. It preserves the commit, merge
+queue position, and CI. Explicit standalone title/body edits update only those
+fields; omitted copy is preserved. Dirty source or a new local commit still
+prepares and publishes a replacement head. Task requests must also match the
+requested completion/continuation disposition.
+
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish, arm, or land.
 

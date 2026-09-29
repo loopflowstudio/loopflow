@@ -1206,11 +1206,103 @@ fn repeated_identical_land_preserves_the_armed_task_request() {
 }
 
 #[test]
+fn non_task_land_preserves_the_queued_head_and_requested_copy() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let log_path = home.path().join("gh.log");
+    let copy = format!(
+        r#"if [ "$1 $2" = "pr edit" ]; then
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title) printf '%s' "$2" > '{}/title'; shift 2 ;;
+      --body) printf '%s' "$2" > '{}/body'; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  exit 0
+fi
+"#,
+        home.path().display(),
+        home.path().display(),
+    );
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref())
+        .replace("git rev-parse HEAD", "git rev-parse @{upstream}")
+        .replacen(
+            "if [ \"$1 $2\" = \"pr list\" ]; then",
+            &format!("{copy}if [ \"$1 $2\" = \"pr list\" ]; then"),
+            1,
+        );
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    repo.create_branch("jack/queued-replay");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch("jack/queued-replay");
+    let head = repo.head_sha();
+    let queue = log_path.with_extension("log.queued");
+    fs::write(&queue, "queued").unwrap();
+    fs::write(home.path().join("title"), "existing title").unwrap();
+    fs::write(home.path().join("body"), "existing body").unwrap();
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut options = LandOptions {
+        strict: true,
+        local: false,
+        create_pr: false,
+        complete: false,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: Some("revised title".to_string()),
+        pr_body: None,
+        agent: None,
+    };
+    land(repo.path(), &options, &NullProgress).unwrap();
+    assert_eq!(
+        fs::read_to_string(home.path().join("title")).unwrap(),
+        "revised title"
+    );
+    assert_eq!(
+        fs::read_to_string(home.path().join("body")).unwrap(),
+        "existing body"
+    );
+
+    options.pr_title = None;
+    options.pr_body = Some("revised body".to_string());
+    land(repo.path(), &options, &NullProgress).unwrap();
+    options.pr_body = None;
+    land(repo.path(), &options, &NullProgress).unwrap();
+    assert_eq!(repo.head_sha(), head);
+    assert!(queue.exists(), "replay must preserve queue membership");
+    assert_eq!(
+        fs::read_to_string(home.path().join("title")).unwrap(),
+        "revised title"
+    );
+    assert_eq!(
+        fs::read_to_string(home.path().join("body")).unwrap(),
+        "revised body"
+    );
+}
+
+#[test]
 fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
+    assert_non_task_land_publishes_changed_source(true);
+}
+
+#[test]
+fn non_task_land_publishes_dirty_source_instead_of_resuming_the_old_head() {
+    assert_non_task_land_publishes_changed_source(false);
+}
+
+fn assert_non_task_land_publishes_changed_source(committed: bool) {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let log_path = home.path().join("gh.log");
-    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref());
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref())
+        .replace("git rev-parse HEAD", "git rev-parse @{upstream}");
     let _env = EnvGuard::with_lf_home(
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
@@ -1221,6 +1313,11 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
+    repo.create_file("repair.txt", "new source after the queued head");
+    if committed {
+        repo.stage_all();
+        repo.commit("repair the queued head");
+    }
     fs::write(format!("{}.queued", log_path.display()), "queued")
         .expect("seed remote auto-merge state");
     let hook = repo.bare_path().join("hooks/pre-receive");
@@ -1241,7 +1338,7 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
     land(
         repo.path(),
         &LandOptions {
-            strict: true,
+            strict: committed,
             local: false,
             create_pr: false,
             complete: false,
@@ -1269,6 +1366,10 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
         repo.head_sha()
     );
     assert!(log_path.with_extension("log.auto").exists());
+    assert_eq!(
+        fs::read_to_string(repo.path().join("repair.txt")).unwrap(),
+        "new source after the queued head"
+    );
 }
 
 #[test]

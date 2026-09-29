@@ -49,10 +49,18 @@ worktrees/processes. Use ordinary source inspection for code.
 
 1. Finish the public history/discovery consumers and their deletion paths. The
    metadata cut removes captured/history decoding from passive Session inventory;
-   FlowSession inventory, final history/active wire, Desktop paging and measured
+   FlowSession inventory, final history wire, Desktop paging and measured
    startup/query/payload partition remain open. Current Desktop inventory remains
    complete: passing individual pages into reconciliation would drop retained
    panes. Change paging and reconciliation together.
+   Runtime loop children are unfinished core behavior: each pass must create a
+   child FlowSession with the same nullable Task, transactional parent wait/child
+   completion, same-child retry and a new child on the next pass. Current nested
+   cursors cover XOR and repeat counters only; neither proves runtime parentage.
+   Jack's scope confirmation and source hashes are retained in
+   `.lf/tmp/cut-i/runtime-flow-parent-review.json`. Resolve this existing owner
+   behavior in the next implementation pass alongside history/discovery; inventory
+   alone cannot close it.
 2. Active observation now uses Session/Exec ownership and removes run-bindings.
    The hosted terminal attachment counterexample remains unresolved: local mounted
    proofs pass, and per-terminal window/surface/focus/ancestor diagnostics preserve
@@ -92,6 +100,16 @@ attempt is not fake-provider proof or configured acceptance. The corrected fixtu
 pins process PATH/executable before launch; final 13-case run has no leak report.
 Earlier Swift compilation and Clippy diagnostics are retained in `active-swift.log`
 and `active-clippy.log`. No full gate, fresh hosted green, or concept acceptance.
+
+Published source checkpoint `94b258e8a` retains this cut. The subsequent full local
+Swift diagnostic (`active-swift-suite.log`, `swift test --package-path swift
+--no-parallel -Xswiftc -gnone`) passed 287 tests across 48 suites in 99.372s;
+the mixed Monitor preservation case passed in 1.175s. This did not reproduce the
+hosted attachment failure and does not establish its repair. Final all-target
+Clippy (`active-clippy-checked.log`), formatting, migration history and architecture
+checks pass. Supervisor verified the production delta against `a3820bf7e` as
++18,787/-31,209, net -12,422; this cut changes that net by -30. Counts support
+the ownership reduction but do not discharge the remaining acceptance matrix.
 
 ## Current implementation and its limits
 

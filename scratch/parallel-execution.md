@@ -747,3 +747,55 @@ remain open, including valid native decision retry and Linux Chapter execution.
 
 `historical-sql-static-final.log`: all-target Clippy passed in 15.30s; formatting
 and diff whitespace checks passed before this checkpoint.
+
+## Populated release and development upgrades (2026-09-29)
+
+The released-frontier proof starts at 0.12.24 with populated Task Flow positions,
+not a fictional released Session/Run schema. It retains human and autonomous
+captures, cursor, iteration, version/generation, saved answer and original Task
+Started events. `released-position-upgrade-2.log` exposed a NULL Task title that
+cannot populate the old Session title; the normal fixture now supplies its title,
+but preservation of a supported missing-title Task remains an unresolved input
+limit. `released-position-upgrade-3.log` then rejected the fixture's assumed
+Started=position.updated_at. Jack's accepted rule assigns inferred Started during
+conversion. The proof now bounds that assignment by the migration window and
+preserves the original Started event at 50 separately.
+
+`released-started-evidence-red.log` reached a real loss: an autonomous Task with
+that recorded Started event and no mapped Run remained unstarted. The forward
+retain_task_start_evidence draft backfills only NULL assignment times from
+existing Started evidence at conversion time, retaining original events and
+immutable non-NULL assignments. It does not manufacture a conversation or Exec.
+`released-started-evidence.log` passes (0.737s); the subsequent materialized
+released-position check also passes. The trigger still references historical
+Runs and must join the eventual forward table-removal conversion.
+
+The separate pre-admission development proof retains two SQL members, exact
+Flow/node/iteration, failed/successful native history, current input/caller,
+title/answer, selected_start and Flow event seq references. Preview, application
+and repeated import retain both members; a changed source outcome rejects replay.
+A preexisting Task Started=17 remains exactly 17 after the upgrade/import. No
+historical Exec is fabricated. This is a populated development schema proof,
+not the public filesystem importer or configured installation acceptance.
+
+`materialized-sql-upgrade.log` found canonical adoption rejected a valid shorter
+applied draft prefix at agent_session_admission. The existing migration
+transaction now skips only verified applied bytes and applies the remaining
+release suffix. Divergent recorded names/checksums still fail. The populated
+proof injects an unexpected schema column, verifies failed adoption rolls back
+schema, both ledgers and native history, removes that fixture column, then proves
+successful replay. No historical migration bytes changed. The first repair log
+passed the three existing adoption checks but failed a stale history count after
+adding the Started event (7 versus 6); that assertion is corrected, not a product
+failure. `materialized-sql-upgrade-rollback.log` passes all four focused checks in
+0.955s, including existing checksum/schema rejection and populated suffix rollback.
+Snapshot scope is current source plus these migration edits, canonicalized to
+0.12.25.001 in a disposable copy; its exact receipt is
+`.lf/tmp/cut-i/canonical-sql-upgrade-final-source.json`. No installed store was read
+or migrated. Full remaining-work obligations and native valid-retry red remain.
+
+`source-development-upgrade.log` also passes the source-draft path (0.739s).
+`populated-upgrade-static.log` passes all-target Clippy (16.06s); cargo fmt,
+whitespace and migration-history checks pass, with 55 shipped migrations unchanged.
+Review keeps the repair in the existing adoption transaction and one forward
+Started draft; no new migration framework or execution owner was introduced.

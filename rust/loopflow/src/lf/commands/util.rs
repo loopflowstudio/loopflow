@@ -331,12 +331,12 @@ pub(crate) fn stop_provider_session(dir: &Path, harness: &str) -> Result<()> {
 }
 
 pub(crate) fn require_provider_session_launch(dir: &Path) -> Result<()> {
-    let manifest = crate::run_record::read_manifest(dir)?;
+    let input = crate::run_record::input_id_from_dir(dir)?;
     let store =
         SqliteStore::open_run_ledger_read_only(&crate::store::observability_database_path()?)?;
     let session = store
-        .session_for_run(&manifest.run_id)?
-        .ok_or_else(|| anyhow!("Run {} is not recorded on this Home", manifest.run_id))?;
+        .session_for_run(&input)?
+        .ok_or_else(|| anyhow!("Input {input} is not recorded on this Home"))?;
     let Some(task_id) = session.task_id else {
         return Ok(());
     };

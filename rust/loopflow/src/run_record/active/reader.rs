@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::harness::opencode_runtime::{registered_opencode_servers_at, OpenCodeServerEntry};
 use crate::journal::{ExecProcessReceipt, EXEC_PROCESS_ROOT};
 use crate::lf::commands::top::{sample_processes, OsProcess, ProcessSnapshot};
-use crate::run_record::{read_manifest, ProviderClientRef};
+use crate::run_record::ProviderClientRef;
 
 use super::events::{Changes, Subscription};
 use super::{ActiveRunsSnapshot, DiscoveryState, RunBinding};
@@ -18,7 +18,7 @@ use super::{ActiveRunsSnapshot, DiscoveryState, RunBinding};
 type Observation = (
     BTreeMap<PathBuf, RunBinding>,
     ProcessSnapshot,
-    Vec<(crate::durable::RunId, ProviderClientRef, String)>,
+    Vec<(crate::durable::RunId, ProviderClientRef)>,
     Vec<String>,
 );
 
@@ -57,25 +57,11 @@ impl Receipt {
 pub(super) struct DiscoveryCost {
     pub directories: usize,
     pub receipts: usize,
-    pub manifests: usize,
     pub bytes: usize,
     pub process_samples: usize,
     pub rescans: usize,
     pub retained: usize,
     pub dirty_paths: usize,
-}
-
-impl DiscoveryCost {
-    pub(super) fn manifest(
-        &mut self,
-        dir: &Path,
-    ) -> std::io::Result<crate::run_record::RunManifest> {
-        self.manifests += 1;
-        self.bytes += fs::metadata(dir.join("manifest.json"))
-            .map(|m| m.len() as usize)
-            .unwrap_or(0);
-        read_manifest(dir)
-    }
 }
 
 #[derive(Debug)]
@@ -437,7 +423,7 @@ impl ActiveRunReader {
             } else if relative == Path::new("runtime/opencode-servers.json") {
                 self.read_servers(processes)?;
             } else if path.extension().is_some_and(|ext| ext == "json") {
-                // Manifest changes are read when projecting retained live candidates.
+                // Input metadata comes from SQL; only process receipts affect discovery.
                 if path.file_name().is_none_or(|name| name != "manifest.json") {
                     self.read_receipt(&path, processes)?;
                 }
@@ -474,16 +460,7 @@ impl ActiveRunReader {
                         .iter()
                         .map(|(p, e)| format!("{}: {e}", p.display())),
                 );
-                super::project(
-                    &self.home,
-                    store,
-                    &bindings,
-                    &processes,
-                    &clients,
-                    &mut result,
-                    &mut self.cost,
-                )
-                .await;
+                super::project(store, &bindings, &processes, &clients, &mut result).await;
                 // Revalidate known ownership after the join as well. This protects
                 // one-shot reads, which have no notification subscription.
                 let before = self.candidates.clone();
@@ -603,15 +580,9 @@ impl ActiveRunReader {
                         .parent()
                         .and_then(Path::parent)
                         .context("native receipt has no Run directory")?;
-                    match self.cost.manifest(dir) {
-                        Ok(manifest) => {
-                            clients.push((manifest.run_id, client.clone(), manifest.harness));
-                        }
-                        Err(error) => {
-                            // Manifest evidence belongs to this observation's live
-                            // clients, not to the retained receipt-discovery cache.
-                            gaps.push(format!("{}: {error}", dir.join("manifest.json").display()));
-                        }
+                    match crate::run_record::input_id_from_dir(dir) {
+                        Ok(input) => clients.push((input, client.clone())),
+                        Err(error) => gaps.push(format!("{}: {error}", dir.display())),
                     }
                 }
             }

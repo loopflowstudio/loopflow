@@ -18,8 +18,9 @@ and branch-binary access to the installed Home are not.
 Main owns executable edits, builds/tests, cleanup, Git and its handoff. Supervisor
 owns this index, other assigned scratch and isolated nonbuilding inspection/proofs.
 Builds stay serialized. Never checkpoint another active contribution or introduce
-another executable writer. All bounded contributors have returned their artifacts
-to main; no contributor/tool handle remains active at this observation.
+another executable writer. All bounded contributions have returned. The wire/
+Desktop researcher finished with tool64028 exit zero; its 106-line artifact and
+73-file receipt were reviewed. No bounded contributor/tool handle remains active.
 
 ## Active control
 
@@ -51,18 +52,23 @@ to make an inspection pass. Task-specific contributions use `--task LOO-298`;
 
 ## Delivery and next work
 
-Published **4ced9467fde48b88b232c346af054ff9e3ad8f58**, based on
-**7d1158dac2f0a7db420efadc76dcce20da05e2c1**. GitHub PR1296 and Task publication
-agree; auto-merge is absent. Latest integration includes upstream Xcode cache reuse.
+Published **db60d989665f3c1787c36cd019a6f33dc6e30020**, based on
+**6f3780338b42a8a2d544a81589ced6febeabac24**. GitHub PR1296 and Task publication
+agree; auto-merge is absent. Rebase resolved documentation conflicts. Comparing
+the saved native checkpoint 792c46eca with the rebased tree shows exactly main's
+five-file published-PR-copy change, preserving the branch's other bytes.
 Main now converts saved native continuation; unclassified SQL history still
 prevents dropping `runs`. Preserve the full remaining-work checklist.
 
-Latest terminal CI inspected is **36541353761** on the preceding `6f927ea5f`:
-Rust job 109317277279 has 1,834 passes, one OpenCode taskless-decision failure,
-15 skips and 134 unrun tests. The error requires the selected native turn's
-original caller. Log `.lf/tmp/cut-i/ci-6f927ea5f-rust.log`; no full-green claim.
+Latest Rust job is **109325762199**, CI **36543960247**, on `db60d9896`:
+10 passes, three Task-review failures, 15 skips and 1,960 unrun tests. Each failure
+reports inability to open the fixture database while parking at a review. Main
+has the counterexample and is converting those reads to the passed store.
+Log `.lf/tmp/cut-i/ci-db60d9896-rust.log`. Other jobs were still running when read.
+The preceding 4ced9467f Rust job retains its separate OpenCode decision failure
+(1,835 passes / 135 unrun); this early failure does not repair or retest it.
 Hosted interruption proof passed on earlier 9887f8c84; exact controlled Linux
-failure/repair receipts remain in the main handoff. New-head CI needs inspection.
+failure/repair receipts remain in the main handoff. No full-green claim follows.
 
 Final/events now read retained Session history, including landing conclusions.
 Five focused cases passed; the summary fixture initially failed with LEAK because
@@ -72,6 +78,13 @@ and unknown evidence; dense latency/write cost remains unmeasured. JSONL writers
 still serve unconverted native/active consumers. This is not complete Run removal.
 Named mechanical operations retain SQL observations in Flow history, with unknown
 observed start/Exec. A non-null skill label alone never establishes an agent.
+
+Provider thread/account publication and lookup now use retained Session history.
+The ordering/import/summary proof passes three cases, and the five focused native
+durability/resume checks pass after the reducer change. Original event order and
+fresh-versus-imported precedence are retained; no provider-session sidecar writer
+remains. Manifest/client-dependent continuation and active readers still need
+conversion. These fixtures do not establish configured native recovery.
 
 The failed-turn child race is reproduced with real Codex and scripted Responses:
 an old child decides after automatic retry begins, and the Flow wrongly completes.
@@ -90,6 +103,7 @@ Independent work continues; missing-decision and valid-retry proofs stay require
 | [Native retry options](research-native-retry-options.md) | Nine local source/schema hashes and upstream reload predicate verified. Four tradeoffs, no selected transport or passing valid retry. |
 | [Indexed discovery](research-indexed-discovery.md) | SQL-only fixture is not CLI latency proof. Narrowing review lookup drops nullable historical membership; preserve discovery. Desktop still requests unlimited inventory. |
 | [Exec admission](research-exec-admission.md) | Thirty-nine hashes checked; only main handoff drifted. Early paths and two hard exits escape logging; malformed-caller agent admission needs a public probe. No code/test contribution. |
+| [Session wire/Desktop](research-session-wire.md) | Seventy-three files checked: 70 unchanged, three main-owned lifecycle files changed without public declaration changes. Retain original/closing hashes and supervisor drift receipt. Maps Session discovery, numeric graph identity, and typed history consumers; no tests or new product policy. |
 | Chapter CLI | `tests/e2e/chapter_rotation.py`, `.lf/tmp/cut-i/chapter-cli-handback.md`: Ruff passed; disposable Linux execution is still owed. CI task-installation is not this proof. Fifteen Chapter unit cases are narrower evidence. |
 | Desktop ancestry | `.lf/tmp/cut-i/desktop-ancestry-handback.md`: 25 navigation tests and mounted PTY retention pass on returned bytes. Not configured Desktop, final DTO/headless discovery or performance acceptance. |
 | Task initialization / status | Returned and integrated; stale/current Ask CLI and eleven materialized status tests pass within recorded scope. No remaining parallel writer. |
@@ -109,10 +123,13 @@ settlement. No partial import count permits deleting unresolved history.
 
 ## Comparable production measurement
 
-`f7f12a757` against 359c9a6c3: **+15,334 /−29,666 = net −14,332**.
-Rust/Swift +14,217/−29,604; Python/shell +48/−62; SQL +1,069/−0.
-Receipt `.lf/tmp/execution-model/status-counts-f7f12a757.json` reproduces the
-preceding 1d86cd4f3 receipt. It predates the final/events cut and latest rebase.
+Saved native checkpoint `792c46eca` against 7d1158dac:
+**+15,483 / −29,719 = net −14,236**. Rust/Swift +14,366/−29,657;
+Python/shell +48/−62; SQL +1,069/−0. The native-identity cut alone versus
+4ced9467f is +107/−38 (net +69). Receipt
+`.lf/tmp/execution-model/status-counts-792c46eca.json`; excludes working bytes.
+This measurement predates the latest rebase. The preceding f7f12a757 receipt
+retains its old-base total and method reproduction.
 Method: corrected production prefixes in `measure-published-cd4ab9d813.py`, no
 rename detection, tests/docs excluded. Changed bases prevent treating differences
 between whole-branch totals as incremental cuts. No final-size/time estimate proven.

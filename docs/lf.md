@@ -729,6 +729,10 @@ Binding affects subsequent work under the conservative attribution assumption;
 prior usage retains its recorded owner. First assignment, including bind, sets
 Task Started once without rewriting earlier work or usage.
 Inspection commands are still visible in Exec history but do not start Tasks.
+Help, version and rejected arguments retain their actual exit code when a
+compatible process ledger already exists. These early paths do not initialize
+or migrate a Home. Missing storage is reported without changing the command's
+result; agent launch still requires durable admission.
 Rename and bind retain the Session ID, pane, draft and membership. Human names
 survive generated suggestions. A bound Session absent from the visible roadmap
 remains bound.

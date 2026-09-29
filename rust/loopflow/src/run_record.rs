@@ -634,22 +634,26 @@ fn recover_native_usage(
             .find(|event| event.kind == SessionEventKind::Started);
         let previous = start
             .and_then(|start| {
-                history.iter().rev().find(|event| {
-                    event.kind == SessionEventKind::Usage
-                        && event.provider_thread.as_deref() == Some(thread)
-                        && event.provider_turn.as_deref() != Some(turn)
-                        && event.seq < start.seq
-                })
+                history
+                    .iter()
+                    .filter(|event| {
+                        event.kind != SessionEventKind::Observed
+                            && event.provider_thread.as_deref() == Some(thread)
+                            && event.provider_turn.as_deref() != Some(turn)
+                            && event.seq < start.seq
+                    })
+                    .max_by_key(|event| event.seq)
             })
             .filter(|previous| {
                 history.iter().any(|event| {
                     event.kind == SessionEventKind::Completed
-                        && event.provider_thread.as_deref() == Some(thread)
+                        && event.provider_thread == previous.provider_thread
                         && event.provider_turn == previous.provider_turn
-                        && event.seq > previous.seq
-                        && event.seq < start.expect("previous receipt requires a start").seq
+                        && event.seq < start.expect("previous turn requires a start").seq
                 })
             });
+        // Only the immediately preceding turn can supply a baseline. A missing
+        // usage notification cannot make an older turn stand in for it.
         // A retained predecessor receipt supplies the baseline when reconnect
         // misses the first request. Otherwise only the observed suffix is known.
         let prior_total = |key: &str| {
@@ -1901,6 +1905,11 @@ impl CaptureHandle {
     /// used by its tools. A later driver transfer never rewrites this launch.
     pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
         let Some(exec_id) = crate::journal::current_exec_id() else {
+            if crate::journal::is_cli_process() {
+                return Err(StoreError::InvalidAuthority(
+                    "agent launch requires an admitted Exec; command observation failed".into(),
+                ));
+            }
             // Library callers outside an actual lf process have no Exec to name.
             return Ok(());
         };
@@ -1910,6 +1919,11 @@ impl CaptureHandle {
         }
         let store = row_store(&capture.dir)?;
         let Some(session) = store.session_for_run(&capture.manifest.run_id)? else {
+            if crate::journal::is_cli_process() {
+                return Err(StoreError::InvalidAuthority(
+                    "agent launch requires an admitted conversation".into(),
+                ));
+            }
             return Ok(());
         };
         let expected = store.session_driver(&session.id)?;

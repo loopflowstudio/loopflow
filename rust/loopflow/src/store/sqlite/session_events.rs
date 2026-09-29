@@ -609,6 +609,85 @@ mod tests {
     }
 
     #[test]
+    fn native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let input = crate::durable::RunId::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+             VALUES('conversation',?1,'Retained','human',1,'conversation',1,1,'/fixture')",
+            [input.as_str()],
+        ).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,'conversation')",
+                [input.as_str()],
+            )
+            .unwrap();
+        let counts = |value| {
+            json!({"inputTokens":value,"outputTokens":0,
+            "cachedInputTokens":0,"reasoningOutputTokens":0,"cacheWriteInputTokens":0})
+        };
+        for (turn, total, last) in [("a", Some(20), 20), ("b", None, 30), ("c", Some(60), 10)] {
+            store
+                .record_session_event(
+                    "conversation",
+                    "thread",
+                    turn,
+                    SessionEventKind::Started,
+                    &json!({}),
+                )
+                .unwrap();
+            if let Some(total) = total {
+                store
+                    .record_session_event(
+                        "conversation",
+                        "thread",
+                        turn,
+                        SessionEventKind::Usage,
+                        &json!({"total":counts(total),"last":counts(last)}),
+                    )
+                    .unwrap();
+            }
+            store
+                .record_session_event(
+                    "conversation",
+                    "thread",
+                    turn,
+                    SessionEventKind::Completed,
+                    &json!({"status":"completed"}),
+                )
+                .unwrap();
+        }
+        let session = store.session("conversation").unwrap().unwrap();
+        for (seq, event) in [
+            json!({"type":"provider_session_observed","attempt_key":"attempt","provider_session_id":"thread"}),
+            json!({"type":"usage","provider":"codex","model":null,"attempt_key":"attempt","turn_key":"b",
+                "usage_stream_id":"recorder-b","observation_seq":1,"counter_kind":"cumulative","start_known":true,
+                "final_receipt":true,"usage":{"input_tokens":30,"output_tokens":0,"total_input_tokens":30}})
+        ].into_iter().enumerate() {
+            let mut evidence = json!({"schema_version":1,"seq":seq,"observed_at":"2026-09-29T00:00:00Z"});
+            evidence.as_object_mut().unwrap().extend(event.as_object().unwrap().clone());
+            let source = format!("events.jsonl:{seq}");
+            store.retain_session_observation(&session, &crate::session::SessionObservation {
+                input_id:input.clone(), source:source.clone(), observed_at:1, task_id:None,wave_id:None,
+                payload:json!({"input_id":input,"source":source,"evidence":evidence})
+            }).unwrap();
+        }
+        let usage = store.input_snapshot(input.as_str()).unwrap().usage;
+        assert_eq!(usage.total_input_tokens, Some(60));
+        assert_eq!(usage.streams, 3);
+        assert_eq!(usage.final_streams, 1);
+        assert!(
+            usage.gaps > 0,
+            "C has only its observed suffix, not a complete baseline"
+        );
+    }
+
+    #[test]
     fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();

@@ -356,7 +356,7 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         "agent: codex\npm:\n  provider: linear\n  linear_team: team-1\n"
     )
     (repo / f".lf/flows/{FLOW}.yaml").write_text(
-        "- chapter-marker\n- step:\n    name: chapter-review\n    human: true\n"
+        "- chapter-marker\n- step:\n    id: review\n    name: chapter-review\n    human: true\n"
     )
     (repo / ".lf/flows/successor-proof.yaml").write_text("- chapter-marker\n")
     (repo / ".lf/skills/chapter-marker.md").write_text(f"Record {MARKER}.\n")
@@ -450,7 +450,10 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         consumed = db.execute(
             "SELECT s.payload,e.command,e.outcome FROM flow_events f "
             "JOIN session_events s ON s.seq=f.session_event "
-            "JOIN execs e ON e.id=s.exec_id "
+            "JOIN session_events origin ON origin.session_id=s.session_id "
+            "AND origin.provider_thread=s.provider_thread AND origin.provider_turn=s.provider_turn "
+            "AND origin.kind='started' "
+            "JOIN execs e ON e.id=origin.exec_id "
             "WHERE f.flow_id=? AND f.kind='consumed'",
             (before["flow"]["id"],),
         ).fetchall()

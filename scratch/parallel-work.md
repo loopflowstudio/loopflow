@@ -30,7 +30,13 @@ Its [unapplied proposal](proposal-exec-entry.md) is released: artifact SHA-256
 `4b89f5af436fc28f5527498372200b40ff980deee6e94b5002072899ae28f46d`;
 all 25 diff hunks and the embedded digest were checked. Only run_record.rs
 changed among source fingerprints, matching main's documented native-usage work.
-No contributor remains active; main owns source integration and builds.
+Main owns source integration and builds. A new bounded numeric Flow wire
+contributor is active (tool41910, Exec `c79afcab-2b09-4098-bfdf-7e74da8eeccd`,
+PID56307). Its sole tracked output is `scratch/proposal-numeric-flow-wire.md`:
+an unapplied Rust/Swift/fixture patch using the existing wire research. No shared
+source edits, builds/tests, Git or PM mutations. Main continues Exec/usage work;
+coordinate rebase with source fingerprint handback. Verified scope comment
+`59189fa4-5373-42bc-a04a-ff8ae02371bd` preserves the boundary.
 
 Supervisor review removes the proposal's extra `process_is_recorded` check:
 it reads journal events, while driver/provider FKs already require the Exec row.
@@ -39,6 +45,14 @@ Early parser/startup/install/screenshot persistence remains unfinished; temporar
 zero-row assertions are not permanent product policy or missing user approval.
 A safe noninitializing writer is the remaining technical boundary. Proposal
 formatting/parsing is not compilation or behavioral evidence; apply hunks only.
+
+Main's `exec-entry-proof.log` now passes 12 focused CLI tests (19.758s, after
+24.36s compilation): exact SSH/release exits, interruption, inspection without
+Started, and provider refusal when Exec insertion fails or caller context is
+malformed. The two parser cases retain the explicitly unfinished early-store gap;
+they are not proof of complete process logging. `linux-interrupt-final.log` is
+older evidence: its receipt names head1d86cd4f3 and differs in the entry/exit files.
+The new wrapper still needs its Linux interruption proof on matching bytes.
 
 
 ## Active control
@@ -71,9 +85,15 @@ to make an inspection pass. Task-specific contributions use `--task LOO-298`;
 
 ## Delivery and next work
 
-Published **ad8cb3a7ba0395ae8e033eb7e2afde8d77d84338**, based on
+Published **858444d9175248f0bc5987fc2f3b1a1786365a42**, based on
 **4439aedd9afb6deae779f646b667ab1a1e90d43b**. GitHub and Task publication agree;
-auto-merge is absent. CI36549325005 is terminal: Swift109343328459 and UI passed;
+auto-merge is absent. In CI36551670877, Swift109351070547, UI109351070444 and
+installation passed. Rust109351070825 failed the same OpenCode decision case:
+1,841 passed, one failed, 15 skipped, 134 unrun (199.184s). Log
+`.lf/tmp/cut-i/ci-858444d91-rust.log`; both child decisions lacked original-turn
+authority. The workflow is now terminal failure; other executed jobs passed
+except scratch-clear and its aggregate tests-result. Prior ad8cb3a7b
+CI36549325005 is terminal: Swift109343328459 and UI passed;
 Rust109343328423 failed the retained OpenCode taskless decision case after 1,840
 passes, one failure, 15 skips and 134 unrun (194.705s). Both step child commands
 refused original-turn authority. Log `ci-ad8cb3a7b-rust.log` under `.lf/tmp/cut-i/`;
@@ -151,9 +171,28 @@ reducer. `native-usage-decrease-green.log` passes replacement, deduplication,
 missing baseline and retained peak in one case (0.406s). The materialized
 `native-usage-canonical.log` passes that case and populated development migration
 (0.238s, 0.642s). All 2,022 source hashes matched when reviewed. Later edits to
-the native CLI fixture remain separate. This is retained SQL evidence; native
-recovery of observations missed by every client remains unproven. Main owns the
-remaining static/public verification and checkpoint.
+the native CLI fixture remain separate. The strengthened `native-usage-public-final.log`
+then passed on candidate `0a4ffa6b…f8`: both lf receivers exited, missed-turn SQL
+usage/completion were zero, reconnect retained the original interrupted/130 Exec,
+and public usage reported 120/30 once. A native inspector remained connected;
+this is real Codex with scripted Responses, not zero-native-client or configured
+account proof. Final Clippy passed (17.45s); the later predecessor proof passed
+(0.402s). Those later reducer bytes were not part of the canonical snapshot.
+
+Supervisor found a further concrete counterexample after publication:
+`.lf/tmp/execution-model/supervisor-native-baseline-gap/{probe.py,results.json}`.
+Copied candidate `7b59f6db…23f`, scrubbed authority and a disposable Home; no provider.
+Seed sequential same-input turns A=20, B=30, C=10. B has a final recorder receipt
+and native start/completion but no native usage; C's native total is60, last10.
+Public usage reports **90 tokens, gaps0**, expected60. The baseline search skips B
+to A and assigns B's30 to C again. Main received verified comment
+`3ef3e767-d002-45ac-aa55-47329f38e0d3`: use immediate-predecessor evidence or retain
+a partial suffix/gap. This is a seeded missing-notification case, not an observed
+write failure. Main's regression reproduces90 in `native-baseline-gap-red.log`
+(0.394s), then passes60 with a gap in `native-baseline-gap-green.log` (0.407s).
+The earlier replacement/deduplication/peak case also passes (0.417s). The reader
+repair is +12/-15 production lines; no new state. These are focused source proofs;
+the previous public120/30 transport receipt still names its earlier candidate.
 
 ## Returned research and proof boundaries
 
@@ -183,10 +222,13 @@ settlement. No partial import count permits deleting unresolved history.
 
 ## Comparable production measurement
 
-Published `ad8cb3a7b` against its base `4439aedd9`:
-**+15,710 / −29,888 = net −14,178**. Rust/Swift +14,512/−29,826;
-Python/shell +48/−62; SQL +1,150/−0. Receipt
-`.lf/tmp/execution-model/status-counts-ad8cb3a7b.json`; excludes working bytes.
+Published `858444d91` against its base `4439aedd9`:
+**+15,912 / −29,888 = net −13,976**. Rust/Swift +14,706/−29,826;
+Python/shell +48/−62; SQL +1,158/−0. Receipt
+`.lf/tmp/execution-model/status-counts-858444d91.json`; excludes working bytes.
+Working changes at that read were +211/-83 (net+128), a moving snapshot only.
+GitHub main advanced to `6e7189926ede81b3edd05c8d81955c6cbe67a4e2`
+(PR1351, native capture concurrency); main owns the next coordinated rebase.
 The table-removal cut alone is Rust+56/−42, SQL+81/−0 (net+95), because the old
 released/draft migration history remains while forward preservation drops its
 runtime table. Earlier receipts retain their own bases and measured snapshots.

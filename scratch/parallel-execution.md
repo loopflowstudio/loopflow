@@ -1363,3 +1363,108 @@ The returned unapplied Exec proposal is now owned by main. Next review/apply onl
 its hunks, omit the redundant run_events-presence admission check, and preserve
 existing Exec FK admission plus the real-CLI/library distinction. Early compatible
 store observation remains required; no permission question or new sink is selected.
+
+
+### Exec entry/exit integration · 2026-09-29 · in progress
+
+Native usage is published at 858444d91 on unchanged base4439aedd9; rebase was a
+no-op. The returned Exec proposal is applied by unique-context hunks only, after
+review. Omitted its run_events-presence admission guard: the existing Exec foreign
+keys already require the admitted process. Retained the real-CLI versus library
+entry distinction, so malformed caller context cannot silently use the library
+exemption. A successful parsed exit has no error field. The compatible-store
+parser fixture is named as an outstanding observation gap, not a permission rule.
+This is unfinished source. No proposal formatting check is counted as compilation.
+Next: focused actual-exit, selective-observation-failure and interruption proofs;
+then finish early compatible-store observation under existing installation/data
+selection, without a new sink or a request for ordinary logging permission.
+
+
+Exec entry checks passed 12/12 in exec-entry-proof.log (19.758s), including actual
+SSH42/release1, interruption, no Started from inspection and selective Exec-write
+failure before provider effects. The proposal's compatible-store zero-row check
+was temporary gap evidence and has now been replaced. Early commands use the
+same branch destination selection without seeding, and append through an existing
+compatible connection without schema/token initialization. Start/end keep that
+connection; no new registry or process owner. Parser exits preserve0/2, explicit
+preflight target bytes remain unchanged, and screenshot parent/supervisor have
+three completed Execs together with the preflight command. exec-early-boundaries.log
+first fails compilation on the shared database identity helper's visibility;
+exec-early-boundaries-2.log passes all three selected cases(1.867s). The preceding
+exec-early-proof.log passes29, including two usage checks and five branch-data
+checks; its broad parser substring also selected unrelated parser tests, not a
+new requested suite. No installed Home was used. Missing/incompatible early
+stores still report unavailable evidence and do not initialize a replacement.
+
+Supervisor's seeded public baseline counterexample reports90 instead of60 when
+turnB has recorder usage but no native notification. native-baseline-gap-red.log
+reproduces90/60(0.394s); green reports60 with a gap(0.407s), while existing
+replacement/deduplication/peak proof passes(0.417s). The reducer now identifies
+the immediate previous native turn before using its retained usage maximum;
+an intervening turn without usage cannot be skipped. Usage delivered after a
+completion remains eligible for that same predecessor. exec-early-proof.log
+passes both fixtures after that ordering refinement. No new accounting owner.
+
+native-baseline-public-recovery.log passes the retained real Codex0.157.1/private
+Home/scripted Responses proof on the new candidate:120/30 once, zero SQL usage
+and completion before reconnect, original interrupted/130 Exec preserved.
+The direct native inspector remains alive; this is not zero-native-client or
+configured-account recovery. Results live in
+.lf/tmp/execution-model/native-baseline-public-recovery/results.json.
+exec-entry-linux-interrupt.log passes the controlled Linux ordering check(1.30s),
+with exact source receipt exec-entry-linux-interrupt-source.json. The owned
+container was removed. This replaces no historical failure and does not establish
+valid native decision retry or OpenCode decision support. Affected settlement,
+static checks and checkpoint remain in progress.
+
+exec-entry-settlement.log passes17 affected public checks(16.592s), including
+screenshot success/parent-death cleanup and cached auth with no Git. No LEAK
+markers were reported. All-target Clippy passes in exec-entry-static.log(16.43s),
+formatting/whitespace and two docs checks pass. The review kept existing Exec FKs
+as launch admission, removed ordinary hard exits, and pins the early noninitializing
+connection through completion. Source reduction measure versus858444d91 is
++347/-125, net+222 production lines, excluding tests/docs; exec-entry-count.json
+retains the corrected-prefix/no-renames method. This is an entry/return slice,
+not full Exec query/wire or installed promotion proof. Numeric-wire proposal
+remains contributor-owned until explicit handback; rebase is held for its
+fingerprint coordination, with no source/build writer delegated.
+
+The independent public seeded baseline replay also passes in
+native-baseline-public-gap.log:60 input tokens, one gap, three streams and one
+final recorder stream. It copies the compiled CLI into a disposable directory,
+clears inherited authority and uses synthetic SQLite/no provider. Its candidate
+SHAe0d6a37a7dbcc0a743f8ab7cf3c3c49e9b146397a9d956c23702e17134ec587d
+differs from the native recovery candidate44407cc530fb51d21ae6035bdeeefad1eaa3bf03507fe41960ee3fdedd31f7dc;
+the intervening build is retained, with no reducer change between these proofs.
+
+The returned Chapter public fixture is now executing for the first time under
+chapter-public-cli.py in a disposable Linux OS account, separate from installed
+authority. Exact source snapshot is chapter-public-cli-source.json; execution
+results, not compilation or fixture authorship, determine the remaining gap.
+
+chapter-public-cli.log first reaches public Task run and refuses the fixture's
+authored Flow: review steps require a stable id. No default launch or rotation
+was proved. The retained commands/results identify a missing fixture id, matching
+the existing reviewed Flow contract. Added id:review without changing assertions;
+chapter-public-cli-2 reruns the public boundary in another disposable account.
+
+chapter-public-cli-2 reaches the real scripted Codex worker, receives the authored
+marker, records Started, consumes seq10 after selecting seq9 and parks at review.
+Its final join returns no rows because the fixture reads completed.exec_id, while
+the owner stores origin on the Started event. Retained SQL confirms one succeeded
+worker and one exact consumed completion. This is a fixture projection failure,
+not a missing completion. Changed the join to the original Started entry by
+Session/thread/turn, matching session_history; all completion/worker assertions
+remain. chapter-public-cli-3 repeats the public boundary with this repair.
+
+chapter-public-cli-3.log now passes the complete returned public scenario on Linux:
+Task checkout leaves Started absent; task run without --flow sends the Project's
+authored marker to scripted Codex, consumes one native success under its original
+worker Exec and parks at review. Public repo new-chapter then second-Home wave
+sync --all preserve exact Task/Started/worktree/PR/captured Flow and authored
+checkout bytes; seeded PR existence/github_number17 and no second-store provider
+mutations are asserted. No execution rows were seeded. Receipts are retained in
+chapter-public-cli-3-results plus its exact source snapshot. The first missing-id
+and second obsolete-completion-join failures remain separate receipts. All three
+owned containers were removed. This closes this synthetic public CLI boundary,
+not configured planning/account or installed migration acceptance. Ruff passes.

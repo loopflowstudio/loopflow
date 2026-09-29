@@ -591,18 +591,23 @@ fn recover_native_usage(
         let Some(first) = receipts.first() else {
             continue;
         };
+        let provider = if first.payload["provider"] == "opencode" {
+            "opencode"
+        } else {
+            "codex"
+        };
         let matching: Vec<_> = events[..recorder_len]
             .iter()
             .filter_map(|event| match &event.event {
                 RunEvent::Usage {
-                    provider,
+                    provider: recorded_provider,
                     attempt_key,
                     turn_key,
                     usage_stream_id,
                     observation_seq,
                     final_receipt,
                     ..
-                } if provider == "codex"
+                } if recorded_provider == provider
                     && turn_key == turn
                     && threads.get(attempt_key).is_none_or(|known| known == thread) =>
                 {
@@ -624,6 +629,73 @@ fn recover_native_usage(
             continue;
         }
         if matching.iter().any(|receipt| receipt.2) {
+            continue;
+        }
+        if provider == "opencode" {
+            // Each completed assistant message owns a native usage counter.
+            // Preserve snapshots for the existing max/missingness reducer;
+            // tool-call and terminal assistants are distinct model calls.
+            for receipt in receipts {
+                let info = &receipt.payload["message"];
+                let Some(message) = info["id"].as_str() else {
+                    gaps += 1;
+                    continue;
+                };
+                let tokens = &info["tokens"];
+                let input = tokens["input"].as_u64();
+                let cached = tokens["cache"]["read"].as_u64();
+                let written = tokens["cache"]["write"].as_u64();
+                let total = input
+                    .zip(cached)
+                    .zip(written)
+                    .and_then(|((a, b), c)| a.checked_add(b)?.checked_add(c));
+                let usage = TurnUsage {
+                    input_tokens: input,
+                    output_tokens: tokens["output"].as_u64(),
+                    total_input_tokens: total,
+                    peak_input_tokens: total,
+                    context_window_tokens: None,
+                    reasoning_tokens: tokens["reasoning"].as_u64(),
+                    cache_read_tokens: cached,
+                    cache_write_tokens: written,
+                    model: info["modelID"].as_str().map(str::to_owned),
+                    cost_usd: info["cost"].as_f64(),
+                };
+                let Ok(observed_at) = OffsetDateTime::from_unix_timestamp(receipt.observed_at)
+                else {
+                    gaps += 1;
+                    continue;
+                };
+                // A recorder's partial request total cannot be combined with
+                // independent message totals without double counting.
+                if !matching.is_empty() {
+                    gaps += 1;
+                    break;
+                }
+                events.push(EventEnvelope {
+                    schema_version: SCHEMA_VERSION,
+                    seq: events
+                        .iter()
+                        .map(|event| event.seq)
+                        .max()
+                        .map_or(0, |seq| seq + 1),
+                    observed_at,
+                    event: RunEvent::Usage {
+                        usage_stream_id: format!("native:{thread}:{turn}:{message}"),
+                        provider: provider.into(),
+                        model: usage.model.clone(),
+                        attempt_key: String::new(),
+                        turn_key: turn.into(),
+                        observation_seq: receipt.seq as u64,
+                        counter_kind: "cumulative".into(),
+                        start_known: native
+                            .iter()
+                            .any(|event| event.kind == SessionEventKind::Started),
+                        final_receipt: true,
+                        usage: Box::new(usage),
+                    },
+                });
+            }
             continue;
         }
         let field = |value: &serde_json::Value, part: &str, key: &str| value[part][key].as_u64();

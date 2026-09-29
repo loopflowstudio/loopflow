@@ -245,6 +245,11 @@ Pass `--no-parallel` explicitly for the full suite. Native proofs share AppKit's
 main actor; concurrent suites can starve async observations and distort timing
 budgets. Swift Testing otherwise runs suites concurrently.
 
+`scripts/prove_wave_surface_states.sh` separately renders four fixture states at
+two widths using the built app. It runs the two widths in separate processes,
+waits for both, then advances to the next state. All eight images must be nonempty
+and pairwise distinct. Interrupting the script stops and reaps its capture children.
+
 Failed Swift CI runs retain a `swift-tests-<run>-<attempt>` artifact for seven
 days with the toolchain, output log, and Swift Testing event stream. When console
 output stops after compilation, inspect `events.jsonl` for the last started test

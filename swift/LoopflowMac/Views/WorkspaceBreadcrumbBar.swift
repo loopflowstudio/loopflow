@@ -90,7 +90,9 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
             }
             if let session = crumb.session {
                 if crumb.waveWork != nil || crumb.taskWork != nil { separator }
-                sessionCrumb(session, siblings: crumb.siblings)
+                sessionCrumb(session, siblings: crumb.siblings.filter {
+                    model.navigation.showsHeadlessSessions || $0.interactive || $0.id == session.id
+                })
             }
         }
         .lineLimit(1)
@@ -154,6 +156,15 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                 .accessibilityLabel("Rename Session")
                 .accessibilityIdentifier("session-rename")
             }
+            if session.work?.kind != .task || model.navigation.binding?.sessionId == session.id {
+                Button("Bind to Task…") { model.beginSessionBinding(session) }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("session-bind")
+                    .popover(isPresented: Binding(
+                        get: { model.navigation.binding?.sessionId == session.id },
+                        set: { if !$0 { model.cancelSessionBinding() } }
+                    )) { bindingForm }
+            }
             if case .step = session.flowMembership {
                 Button {
                     if let target = flowTarget(session) {
@@ -180,6 +191,43 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                     .help(membershipHelp(session.flowMembership))
                     .accessibilityIdentifier("session-flow-membership")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var bindingForm: some View {
+        if let draft = model.navigation.binding {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Bind “\(draft.title)” to a Task").font(Typography.textStrong)
+                if let preview = draft.preview {
+                    Text("\(preview.identifier) · \(preview.title)")
+                    Text("This assignment is permanent. This Session cannot be moved to another Task or unbound.")
+                    HStack {
+                        Button("Choose another Task") { model.navigation.binding?.preview = nil }
+                        Button("Bind permanently") { Task { await model.commitSessionBinding() } }
+                            .accessibilityIdentifier("session-bind-confirm")
+                    }
+                    .disabled(draft.submitting)
+                } else {
+                    TextField("Task identifier or stable ID", text: Binding(
+                        get: { model.navigation.binding?.selector ?? "" },
+                        set: { model.navigation.binding?.selector = $0 }))
+                        .disabled(draft.submitting)
+                        .accessibilityIdentifier("session-bind-target")
+                    Button("Review assignment") { Task { await model.previewSessionBinding() } }
+                        .disabled(draft.submitting || draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("session-bind-preview")
+                }
+                if let error = draft.error {
+                    Text(error).foregroundStyle(Color.statusWarning)
+                        .accessibilityIdentifier("session-bind-error")
+                }
+                Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)
+            }
+            .padding(16)
+            .frame(width: 380)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 

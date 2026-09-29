@@ -198,8 +198,11 @@ new Jack decision. No bulk history rewrite; mid-turn missingness stays visible.
   orphan classification using existing typed wire fields. Main passed its 25-test
   navigation suite and extended mounted terminal proof on the handback bytes;
   planning disappearance/return preserves the selected surfaces and draft there.
-  Retain this proof through the final DTO conversion. Configured acceptance and
-  headless discovery remain separate requirements.
+  Retain this proof through the final DTO conversion. Headless discovery was
+  subsequently integrated with complete-inventory filtering
+  and permanent-bind preview/confirmation. The focused mounted proof retains
+  terminal/draft/focus across toggles and binding to a Task in another checkout.
+  Configured Desktop acceptance and final paging remain separate requirements.
   See `.lf/tmp/cut-i/desktop-ancestry-handback.md` for exact checks and hashes.
 - Prove selected terminal surface/draft survives rename/bind/refresh; conversation
   identity survives restart. Native thread persistence alone does not prove an

@@ -191,7 +191,7 @@ struct WorkSurfaceView: View {
     private var taskDetail: some View {
         if let selection = model.selection, let found = model.task(id: selection.id) {
             let task = found.task
-            let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
+            let sessions = model.visibleWorkspace.waves.lazy.flatMap(\.tasks)
                 .first { $0.id.work == selection }?.sessions
             scrollingDetail(identifier: "podium-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {

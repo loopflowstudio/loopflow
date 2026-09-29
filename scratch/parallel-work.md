@@ -106,7 +106,24 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Current published head is **dd97558752f1262634ef9edba31857792a99c6e7**, based on
+Current published head is **190455f062fa95d31f31f46e8ebc3ec97a4c5fcd**, based on
+**1e163d20931efc7d92b54760877a62a6308143d6**. GitHub, refreshed Task publication
+and Git merge-base agree; auto-merge is absent. CI **36530104314** finished with
+1,578 Rust passes, two auth-status failures, 15 skips and 383 unrun; scratch-clear
+also fails on active notes. All other required jobs passed. The auth fixtures
+intentionally remove Git from PATH; startup's unconditional repository discovery
+fails before cached auth inspection. Verified comment
+`53b994a1-5beb-4df0-9eb8-6466a46b804b` directs repair at command observation/scope
+after the current review-import proof, preserving no-broker/no-Git behavior and
+Exec logging. No credential repair is implicated. Log `ci-190455f06-rust.log`.
+This publishes the reader proof below. The rebase integrated #1340's CI resource
+reporting and #1341's non-waiting uv cache lock. Two cache-recovery conflicts
+retained that lock behavior plus this branch's subprocess timeout;
+`conversation-rebase-cache.log` passes three focused reconciliation cases.
+GitHub main then advanced to #1342 (`566fb3981`, cleanup with recent gate output);
+that commit is not part of the recorded Task base. Main owns the next integration.
+
+The preceding published head **dd97558752f1262634ef9edba31857792a99c6e7**, based on
 **7e5f32ce607f7ed744c685b2f7639b304455460c**. GitHub, refreshed Task publication
 and Git merge-base agree; auto-merge is absent. The conflict-free rebase includes
 #1338's checkout-local Git build watches and #1339's combined landing/release PR
@@ -143,7 +160,26 @@ failure (`conversation-attribution.log`) and mismatched fixture database failure
 (`conversation-readers.log`); main corrected setup and kept their assertions.
 This is local captured/imported-history proof, not native-only recovered usage,
 full CI, complete import or final wire/owner removal. Docs now name those limits.
+`conversation-native-usage-2.log` additionally passes the existing real-Codex
+automatic-retry fixture with scripted Responses/private Home: candidate
+`a1397de2c6f3`, zero Run rows, completed Flow, public usage 40 input/10 output,
+unknown cost and one final stream. The first probe completed retry but failed
+the newly added Python inspection's missing timeout argument; it does not count
+as a usage pass. All-target Clippy passed (`conversation-static.log`, 15.91s).
+Native-only driver-loss usage and valid decision retry remain unproven.
 No runtime Run writer is to be restored to make the fixture pass.
+
+Next import proof `historical-review-final.log` passes stable identity/feedback
+for unopened, past and finished reviews after `historical-review-red.log`
+reproduced their misclassification. The older multi-origin proof passed in
+`historical-review-repair.log`; that run also exposed a fixture deleting one
+source before its later conflict checks. This is not complete import acceptance:
+supervisor comment `1bfa5c7a-ed3f-4886-a8a0-5fff75935c0b` identifies the new
+active-boundary branch also classifying headless/Op boundaries as reviews.
+Main must preserve classification from captured policy and pair the review proof
+with active autonomous input; an Op must not manufacture an AgentSession.
+Comment `51018428-8659-4288-adf7-e75e93f9ee00` retains `--history` for closed
+inventory rather than widening `--all` or default UI behavior.
 
 The replaced-input public CLI proof passes in `historical-members.log`:
 two inputs retain separate outcome/account/usage evidence in one conversation,
@@ -256,6 +292,13 @@ text is not control authority. Exact historical operational recoveries and the
 retained regression are in evidence.md and `unblock-quoted-output.md`.
 
 ## Comparable production measurement
+
+Published **190455f06 against 1e163d209**:
+**+15,299 / −29,636 = net −14,337**.
+Rust/Swift +14,249/−29,574; Python/shell +48/−62; SQL +1,002/−0.
+Receipt `.lf/tmp/execution-model/status-counts-190455f06.json` reproduces the
+preceding 275589 measurement first. Dirty work is excluded. Base changes mean
+the totals alone do not measure incremental code added by the reader checkpoint.
 
 Published **275589bee against 7c2f53b9e**:
 **+15,009 / −29,615 = net −14,606**.

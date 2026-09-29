@@ -95,6 +95,40 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
         .unwrap()
         .contains("unavailable"));
     assert_eq!(verified["accounts"].as_array().unwrap().len(), 2);
+
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (commands, completed): (i64, i64) = db
+        .query_row(
+            "SELECT count(*),sum(outcome='succeeded' AND completed_at IS NOT NULL) FROM execs",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (commands, completed),
+        (5, 5),
+        "each actual auth process remains an Exec"
+    );
+    let repository = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["rebase", "--plan"])
+        .env("PATH", "/nonexistent")
+        .output()
+        .unwrap();
+    assert!(!repository.status.success());
+    assert!(
+        String::from_utf8_lossy(&repository.stderr).contains("discover the current Git repository")
+    );
+    let failed: i64 = db
+        .query_row(
+            "SELECT count(*) FROM execs WHERE outcome='failed' AND completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        failed, 1,
+        "repository discovery failure is the command's observed outcome"
+    );
 }
 
 fn account(account_id: &str, home: std::path::PathBuf) -> ProviderAccount {

@@ -594,3 +594,83 @@ remain: native-only history usage, remaining detail/import consumers, complete
 released multi-member/SQL-only import and final Run deletion, dense measurements,
 all-provider recovery, public Chapter execution and configured/installed proof.
 The existing valid native decision retry failure remains separate.
+
+
+Reader checkpoint rebased and published as
+`190455f062fa95d31f31f46e8ebc3ec97a4c5fcd`, Task base
+`1e163d20931efc7d92b54760877a62a6308143d6`. The two cache-recovery conflicts
+retain upstream non-waiting uv lock acquisition and the existing subprocess bound.
+The busy-cache integration assertion now expects uv's immediate lock failure;
+cache preservation, continued build cleanup and later idle pruning are unchanged.
+`conversation-rebase-cache.log` passes all three selected reconciliation cases;
+Ruff and formatting pass. No unrelated Rust suite was repeated for the rebase.
+GitHub and Task publication head agree; auto-merge is absent and the PR is mergeable.
+GitHub main advanced to 566fb3981 after integration; this does not change the
+recorded Task base or invalidate the local focused results. No acceptance or
+Flow navigation follows. Next owner boundary remains complete historical import
+and remaining reader/deletion work, with native transport scope kept separate.
+
+## Saved review import and command admission · iteration 10 continuation
+
+Base `190455f062`. The focused public import proof first reproduced loss:
+`historical-review-red.log` reports only one review, two generic inputs and two
+captures for three saved review boundaries. Import now preserves the boundary ID,
+feedback, completion and recorded node/iteration after an autonomous successor
+or finished Flow. Unopened reviews use deterministic immutable input references;
+import no longer calls runtime review reservation. Only the matching current
+human occurrence can become pending, and existing progressed Flow state remains
+owned by its row. Preview rolls back the same import transaction.
+
+Supervisor identified that an active boundary also describes autonomous agents
+and operations. Classification now reads the captured node's human policy;
+non-human captures proceed through ordinary headless import, and an operation
+creates no AgentSession. The proof includes both cases. Historical reviews with
+insufficient occurrence evidence, complete SQL-only member import and mechanical
+outcome preservation still belong to the full import contract; this fixture does
+not establish those remaining cases.
+
+`historical-review-repair.log`: existing multi-origin import passed; the new
+fixture failed because deleting only position.json left an empty Flow directory
+which the next import correctly reported as missing input. The corrected fixture
+removes its retired directory. Closed inventory uses `--history --all`; default
+inventory behavior is unchanged. `historical-review-final.log` passed the first
+review matrix. `historical-review-and-auth.log` passed the strengthened active
+agent/operation matrix, existing multi-origin import and both cached-auth cases
+(four passes, 6.728s). No provider launches, runtime Run rows or native successful
+turns are manufactured by these imports. These are public CLI/private Home proofs
+with authored historical inputs, not released populated multi-member conversion.
+
+Hosted CI36530104314 on 190455f06 stopped after 1,578 passes, two auth failures,
+15 skips and 383 unrun tests. Both cached inspections deliberately omitted Git
+from PATH; unconditional repository discovery before Exec admission prevented
+auth dispatch. Exec admission now takes the actual process cwd; repository
+operations resolve their repository in their existing dispatch paths. No auth
+exception or global Git-error fallback was added. `auth-exec-scope.log` passes:
+five actual auth commands retain completed successful Execs with no broker
+contact, and `rebase --plan` still reports missing Git and records a failed Exec.
+No credential or installed-Home mutation was needed.
+
+Production measurement versus 190455f062 is retained in
+`.lf/tmp/cut-i/review-import-lines.json`; excludes test tails, integration tests,
+docs and scratch. All full-scope obligations remain, including the valid native
+decision retry red and bounded transport proposal, native-only driver-loss usage,
+released SQL-only/multi-member import, final readers/deletion, typed wire cleanup,
+all-provider recovery, Chapter CLI execution and configured/installed acceptance.
+
+Pre-commit inspection exposed five generated journals below rust/loopflow/.lf:
+using actual cwd for Exec admission had also moved the optional file journal.
+Their exact files were retained at `.lf/tmp/cut-i/subdirectory-journal-counterexample`.
+The journal now resolves its checkout root independently, with the existing
+ledger-only behavior when Git/file journaling is unavailable. Exec retains actual
+cwd. `auth-exec-directory.log` passed all six selected auth/Exec tests but reported
+a LEAK on the interruption case; assertion success is not process-settlement
+proof. The dedicated subdirectory proof first failed only on macOS /var versus
+/private/var spelling (`exec-subdirectory-journal.log`); compare the canonical cwd,
+without changing the recorded process directory. No timeout or cleanup assertion
+was weakened. Static pass `review-auth-final-static.log` took 15.49s before this
+one-line fixture correction; final static receipt follows below.
+
+`exec-subdirectory-journal-final.log` passes the scoped journal/cwd proof in 3.309s.
+`review-auth-commit-static.log`, cargo fmt and diff whitespace checks pass.
+Final production-prefix measurement: +159/-82, net +77;
+trailing cfg(test) modules, integration tests, docs and scratch excluded.

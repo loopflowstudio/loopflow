@@ -56,6 +56,8 @@ fn obstructed_file_journal_preserves_command_start_and_completion_in_sql() {
     for append in [false, true] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
+        let cwd = repo.path().join("nested");
+        std::fs::create_dir(&cwd).unwrap();
         let trace = uuid::Uuid::new_v4().to_string();
         let root = repo.path().join(".lf/journal/runs");
         let obstruction = if append {
@@ -67,14 +69,10 @@ fn obstructed_file_journal_preserves_command_start_and_completion_in_sql() {
             std::fs::write(&root, "retained obstruction").unwrap();
             root
         };
-        let output = command(
-            home.path(),
-            repo.path(),
-            &["session", "list", "--all", "--json"],
-        )
-        .env("LF_TRACE_ID", &trace)
-        .output()
-        .unwrap();
+        let output = command(home.path(), &cwd, &["session", "list", "--all", "--json"])
+            .env("LF_TRACE_ID", &trace)
+            .output()
+            .unwrap();
         assert!(output.status.success(), "{output:?}");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
@@ -98,6 +96,14 @@ fn obstructed_file_journal_preserves_command_start_and_completion_in_sql() {
         assert_eq!(events, ["started", "completed"]);
         let facts: (i64, i64) = conn.query_row("SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),(SELECT count(*) FROM runs)", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(facts, (1, 0));
+        let recorded_cwd: String = conn
+            .query_row("SELECT cwd FROM execs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(recorded_cwd, cwd.canonicalize().unwrap().to_string_lossy());
+        assert!(
+            !cwd.join(".lf").exists(),
+            "file journal belongs at the checkout root"
+        );
     }
 }
 

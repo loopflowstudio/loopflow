@@ -259,11 +259,6 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(flow) = review {
             super::flows::import_flow_in(&tx, flow)?;
-            if session.node.is_none() && session.kind == SessionKind::FlowReview && !flow.finished {
-                let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
-                session.node = Some(node);
-                session.iterations = Some(iterations);
-            }
         }
         resolve_ancestry_in(&tx, &mut session)?;
         if let Some(mut saved) = session_in(&tx, &session.id)? {
@@ -278,8 +273,8 @@ impl SqliteStore {
             if session.completed_at.is_none() {
                 session.completed_at = saved.completed_at;
             }
-            // File modification time was the only chronology for unopened Asks.
-            if !session.input_published && session.kind == SessionKind::Ask {
+            // File modification time was the only chronology for unopened conversations.
+            if !session.input_published {
                 session.created_at = saved.created_at;
                 if session.completed_at.is_some() {
                     session.completed_at = saved.completed_at;
@@ -305,15 +300,22 @@ impl SqliteStore {
         }
         insert_session_in(&tx, &session)?;
         retain_history_in(&tx, &session, history)?;
-        if session.kind == SessionKind::FlowReview && review.is_some_and(|flow| !flow.finished) {
-            tx.execute(
-                "UPDATE flow_sessions SET pending_session_id=?2,current_run_id=?3 WHERE id=?1",
-                params![
-                    session.flow_session_id,
-                    session.id,
-                    session.input_id.as_str()
-                ],
-            )?;
+        let pending = review.filter(|flow| flow.pending_session_id.as_deref() == Some(&session.id));
+        if let Some(flow) = pending {
+            let current = super::flows::flow_in(&tx, flow.id())?.ok_or(StoreError::NotFound)?;
+            if !current.finished
+                && current.cursor == flow.cursor
+                && current.pending_session_id.is_none()
+            {
+                tx.execute(
+                    "UPDATE flow_sessions SET pending_session_id=?2,current_run_id=?3 WHERE id=?1",
+                    params![
+                        session.flow_session_id,
+                        session.id,
+                        session.input_id.as_str()
+                    ],
+                )?;
+            }
         }
         if !dry_run {
             tx.commit()?;

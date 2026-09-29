@@ -157,3 +157,16 @@ ledger and memory-only scopes. Review first moved to the name as the identity
 (`2f54a48f7`), then back to ids once Jack saw that renaming a parent would
 rename every child. Source findings, measurements and the cron research behind
 this page are in those commits and in `11ff4121c`.
+
+## This slice
+
+2026-09-28: build step 1 is coded but integrated verification is blocked by
+inherited LOO-298 compilation errors. This supersedes the opening paragraph’s
+pre-implementation status. The checkout-local ancestor read uses the existing
+prompt document pipeline for every Wave Markdown file, including memory.
+The separate Work-layer memory registry walk and preassembled memory input
+are removed. Native skill launch context and context attribution use that same
+collection. Parent identity/discovery and the installed release split remain
+later build steps; this slice cannot establish their disposable-Home proof.
+
+Proof and open assumptions: [read slice ledger](subwave-read-slice.md).

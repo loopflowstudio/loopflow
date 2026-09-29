@@ -4,12 +4,12 @@
 //! managed Work process. Wave names resolve only inside the canonical
 //! repository; the UUID remains durable identity across locator changes.
 //!
-//! Wave state (journal, endpoint pointer, MEMORY.md) lives under the ORIGIN
-//! repo — a worktree resolves its main repo first.
+//! Registry resolution uses the canonical repository. Authored Wave files are
+//! gathered by the prompt engine from the executing checkout.
 
 use crate::id::WaveId;
 use crate::work::wave::{Wave, WaveLocator};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -344,100 +344,6 @@ pub fn wave_origin(repo_root: &Path) -> PathBuf {
     repo_origin(repo_root)
 }
 
-/// The Wave's prompt memory, read directly from applicable `MEMORY.md` files.
-pub fn gather_wave_memory(repo_root: &Path, wave: &str) -> Option<String> {
-    let origin = wave_origin(repo_root);
-    gather_wave_memory_from(&origin, &origin, wave)
-}
-
-/// Resolve inherited Wave scope from the canonical registry while reading the
-/// mutable memory files from the resident's execution checkout.
-pub(crate) fn gather_wave_memory_from(
-    origin: &Path,
-    content_repo: &Path,
-    wave: &str,
-) -> Option<String> {
-    let chain = memory_wave_chain(origin, wave).unwrap_or_else(|| vec![wave.to_string()]);
-    gather_memory_chain(content_repo, &chain)
-}
-
-/// Resolve lexical memory scope through the registry.
-fn memory_wave_chain(origin: &Path, wave: &str) -> Option<Vec<String>> {
-    let origin = origin.to_path_buf();
-    let wave = wave.to_string();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().ok()?;
-        rt.block_on(async {
-            let store = crate::store::open_existing_store().await?;
-            memory_wave_chain_from_store(&store, &origin, &wave).await
-        })
-    })
-    .join()
-    .ok()
-    .flatten()
-}
-
-async fn memory_wave_chain_from_store(
-    store: &crate::store::Store,
-    origin: &Path,
-    wave: &str,
-) -> Option<Vec<String>> {
-    let locator = WaveLocator::discover(origin, wave).ok()?;
-    let mut current = store.get_wave_at(&locator).await.ok().flatten()?;
-    let mut seen = HashSet::new();
-    let mut chain = Vec::new();
-    loop {
-        if !seen.insert(current.id().clone()) {
-            tracing::warn!(
-                wave,
-                "cycle in parent_wave_id; using the acyclic memory prefix"
-            );
-            break;
-        }
-        chain.push(current.name().to_string());
-        let Some(parent) = current.parent_wave_id() else {
-            break;
-        };
-        current = match store.get_wave(parent).await.ok().flatten() {
-            Some(parent) => parent,
-            None => {
-                tracing::warn!(wave, parent = %parent, "missing parent wave in memory scope");
-                break;
-            }
-        };
-    }
-    chain.reverse();
-    Some(chain)
-}
-
-/// Render each wave's memory oldest-ancestor first. A lone wave reads as its
-/// own memory, unheadered; an inherited chain labels who owns what.
-fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
-    let leaf = chain.last()?;
-    let scoped = chain
-        .iter()
-        .filter_map(|wave| {
-            let base = super::memory::Memory::for_wave(origin, wave).read();
-            let memory = render_wave_memory(&base)?;
-            if chain.len() == 1 {
-                return Some(memory);
-            }
-            let ownership = if wave == leaf {
-                "owned by"
-            } else {
-                "inherited from"
-            };
-            Some(format!("## Memory {ownership} {wave}\n\n{memory}"))
-        })
-        .collect::<Vec<_>>();
-    (!scoped.is_empty()).then(|| scoped.join("\n\n"))
-}
-
-fn render_wave_memory(base: &str) -> Option<String> {
-    let base = base.trim();
-    (!base.is_empty()).then(|| base.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,70 +410,5 @@ mod tests {
         // A plain directory is its own origin.
         let tmp = tempfile::tempdir().expect("tempdir");
         assert_eq!(wave_origin(tmp.path()), tmp.path());
-    }
-
-    #[test]
-    fn render_wave_memory_uses_only_the_file() {
-        assert_eq!(
-            render_wave_memory("# Memory\n\ncompiled base\n").as_deref(),
-            Some("# Memory\n\ncompiled base")
-        );
-        assert!(render_wave_memory("  \n").is_none());
-    }
-
-    #[test]
-    fn gather_wave_memory_reads_the_file_without_a_server() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(tmp.path().join("wave/goals")).unwrap();
-        std::fs::write(
-            tmp.path().join("wave/goals/MEMORY.md"),
-            "# Goals\n\ncompiled\n",
-        )
-        .unwrap();
-
-        let memory = gather_wave_memory(tmp.path(), "goals").expect("memory");
-        assert_eq!(memory, "# Goals\n\ncompiled");
-    }
-
-    #[tokio::test]
-    async fn child_memory_walks_parent_scope() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
-            tmp.path().join("loopflow.db"),
-        ))
-        .await
-        .unwrap();
-        let parent = crate::work::wave::Wave::new(
-            WaveId::new(),
-            "platform".into(),
-            tmp.path().display().to_string(),
-        );
-        let child = crate::work::wave::Wave::new(
-            WaveId::new(),
-            "release".into(),
-            tmp.path().display().to_string(),
-        )
-        .with_parent(parent.id().clone());
-        store.create_wave(&parent).await.unwrap();
-        store.create_wave(&child).await.unwrap();
-        std::fs::create_dir_all(tmp.path().join("wave/platform")).unwrap();
-        std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
-        std::fs::write(
-            tmp.path().join("wave/platform/MEMORY.md"),
-            "Parent constraint.",
-        )
-        .unwrap();
-        std::fs::write(tmp.path().join("wave/release/MEMORY.md"), "Child decision.").unwrap();
-
-        let chain = memory_wave_chain_from_store(&store, tmp.path(), "release")
-            .await
-            .expect("scope resolves");
-        assert_eq!(chain, ["platform", "release"]);
-        let memory = gather_memory_chain(tmp.path(), &chain).expect("memory renders");
-        assert!(memory.contains("## Memory inherited from platform\n\nParent constraint."));
-        assert!(memory.contains("## Memory owned by release\n\nChild decision."));
-        assert!(
-            memory.find("Parent constraint.").unwrap() < memory.find("Child decision.").unwrap()
-        );
     }
 }

@@ -44,3 +44,10 @@ sent to either worker.
 - What discovery on LOO-298 records for a nested directory.
 - Whether any Home has a parent recorded for any Wave.
 - The cron log path problem was read, not run.
+
+## Read slice · 2026-09-28
+
+The headless task/pursue pass proceeds with build step 1 after the earlier
+documentation gate. Exact short-hint wording uses the implementation assumption
+in [the slice ledger](subwave-read-slice.md); descendant reading for realign
+remains open. A repeated scoped Task read still reports no Task for LOO-329.

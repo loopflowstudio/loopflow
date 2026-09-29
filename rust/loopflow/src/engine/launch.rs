@@ -28,8 +28,6 @@ pub struct LaunchPromptInput {
     pub surface: Surface,
     pub docs: Vec<String>,
     pub wave: Option<String>,
-    /// Wave memory already resolved by the Work layer.
-    pub wave_memory: Option<String>,
     pub message: Option<String>,
     /// Current participant supplied by the request boundary, never the host owner.
     pub user_name: Option<String>,
@@ -66,7 +64,6 @@ pub fn prepare_launch_prompt(
         surface,
         docs: requested_docs,
         wave,
-        wave_memory,
         message,
         user_name,
         no_loopflow,
@@ -99,7 +96,6 @@ pub fn prepare_launch_prompt(
         docs,
         files: Vec::new(),
         wave,
-        wave_memory,
         include_diff: diff,
         include_diff_files: diff_files,
         include_clipboard: clipboard,

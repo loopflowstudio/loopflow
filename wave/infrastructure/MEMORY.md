@@ -9,8 +9,8 @@ Release-specific findings live in [release memory](release/MEMORY.md).
 Jack Heart settled the model for
 [Subwaves · LOO-329](https://linear.app/loopflow/issue/LOO-329), building on
 [One SQLite owner per product object · LOO-298](https://linear.app/loopflow/issue/LOO-298).
-The [accepted design](https://github.com/loopflowstudio/loopflow/blob/a612c1592e73c3e567d365b8cdb77a31cc2d5877/scratch/define-durable-subwave-identity-and.md)
-and [review history](https://github.com/loopflowstudio/loopflow/blob/a612c1592e73c3e567d365b8cdb77a31cc2d5877/scratch/subwave-identity-review.md)
+The [accepted design](https://github.com/loopflowstudio/loopflow/blob/ded3dd02ae2fb984ae4550766e7c5e881082efa2/scratch/define-durable-subwave-identity-and.md)
+and [review history](https://github.com/loopflowstudio/loopflow/blob/ded3dd02ae2fb984ae4550766e7c5e881082efa2/scratch/subwave-identity-review.md)
 retain the decisions; that checkpoint exists locally, with remote availability
 unchecked. These are implementation requirements, not shipped behavior.
 
@@ -26,7 +26,10 @@ unchecked. These are implementation requirements, not shipped behavior.
 - **Context follows the selected Wave in the executing checkout.** Read all
   top-level Markdown in each ancestor and the selected directory, root first.
   Include memory through that same gatherer, without a separate registry walk.
-  Exclude children, siblings and unrelated Waves. Task-derived selection and
+  Ordinary Runs exclude children, siblings and unrelated Waves. Parent
+  `realign` reads child files so their findings can reach parent memory; the
+  depth of descendant reading remains open. Keep `GOAL.md` as the Wave file.
+  Task-derived selection and
   explicit `--wave` use the same rule for scheduled and ad hoc execution.
   `scratch/` remains recursive. Memory edits are ordinary branch changes;
   no canonical-main checkout is required. A short ownership hint belongs with
@@ -45,9 +48,9 @@ the nested cron log path still need behavioral proof; this curation ran none.
 Rename/reparent commands, conflict resolution between machines, desktop changes
 and historical Run migration remain deferred.
 
-The short hint's wording, Wave filename and explicit child reading during
-parent `realign` remain open in the
-[retained questions](https://github.com/loopflowstudio/loopflow/blob/a612c1592e73c3e567d365b8cdb77a31cc2d5877/scratch/subwave-questions.md).
+The short hint's wording and the depth of child reading during parent
+`realign` remain open in the
+[retained questions](https://github.com/loopflowstudio/loopflow/blob/ded3dd02ae2fb984ae4550766e7c5e881082efa2/scratch/subwave-questions.md).
 The [Product companion · LOO-330](https://linear.app/loopflow/issue/LOO-330) and
 [Intelligence companion · LOO-331](https://linear.app/loopflow/issue/LOO-331) still
 need their drafts reconciled with this model; no worker notification is recorded.

@@ -71,7 +71,8 @@ lf --wave designer wave/operate        # one finite planning pass
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
-reviewed repository file, not live server state.
+reviewed repository file. Prompts read the selected Wave’s top-level Markdown
+and its ancestors’ files, root first, from the executing checkout.
 
 Delegate durable work — the same verbs whether the caller is you or the wave:
 

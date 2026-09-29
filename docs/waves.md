@@ -204,12 +204,16 @@ reviewed repository file:
 $EDITOR wave/shipper/MEMORY.md
 ```
 
-The file is the whole memory surface — read and edit it directly, running Wave
-or not. `update-wave` owns
-deliberate end-of-work curation: merge durable context into the existing
-structure, correct stale entries, and drop transient Run detail. When a task ships,
-its context folds forward into memory and the remaining Linear tasks — fold,
-don't drop.
+Prompts read every top-level `.md` in the selected Wave directory and each
+ancestor directory, root first, from the executing checkout. For
+`infrastructure/release`, that means `wave/infrastructure/*.md` followed by
+`wave/infrastructure/release/*.md`. Memory uses the same reader as goals and
+notes. Children, siblings and unrelated Waves stay out of ordinary context;
+`scratch/` remains recursive. No registry lookup is needed to gather these files.
+
+Edit memory through the ordinary repository workflow. `realign` reconciles the
+plan, code and Wave memory; the prompt identifies the selected Wave's memory
+as the file to curate.
 
 ### Home
 

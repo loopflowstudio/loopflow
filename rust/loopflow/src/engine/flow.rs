@@ -162,7 +162,6 @@ pub struct Goal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoalRenderContext {
     pub flows: Vec<String>,
-    pub memory: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -251,25 +250,7 @@ pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
     Err(LoadError::GoalNotFound(name.to_string()))
 }
 
-/// The one wave-memory injector. Both the wave agent's goal seed
-/// ([`render_goal`]) and ambient context assembly
-/// ([`crate::engine::prompt::format_content_sections`]) emit memory through
-/// this, so it appears under one tag — and at most once per prompt (assembly
-/// skips it when the task message already carries the tag).
-///
-/// `None` when the memory is empty: an absent section costs zero tokens.
-pub fn wave_memory_section(memory: &str) -> Option<String> {
-    let trimmed = memory.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(format!("<lf:wave-memory>\n{trimmed}\n</lf:wave-memory>"))
-}
-
-/// Sections run stable → volatile so providers can prefix-cache the front of
-/// the seed: goal prompt and flow list rarely change between passes, while
-/// MEMORY.md is rewritten every pass — it goes last so a memory edit doesn't
-/// invalidate the cacheable bytes ahead of it.
+/// Render the goal and available flows; authored Wave files enter through prompt gathering.
 pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
     let flows = if ctx.flows.is_empty() {
         "No flows are available.".to_string()
@@ -280,15 +261,11 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let memory = wave_memory_section(&ctx.memory).unwrap_or_else(|| {
-        "<lf:wave-memory>\nNo wave memory is recorded.\n</lf:wave-memory>".to_string()
-    });
 
     format!(
-        "{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n</lf:goal-context>\n\n{}",
+        "{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n</lf:goal-context>",
         goal.prompt.trim(),
         flows,
-        memory,
     )
 }
 
@@ -1378,7 +1355,7 @@ mod tests {
     }
 
     #[test]
-    fn render_goal_includes_flows_and_memory() {
+    fn render_goal_includes_available_flows() {
         let goal = Goal {
             prompt: "Drive the work.".to_string(),
         };
@@ -1386,36 +1363,21 @@ mod tests {
             &goal,
             &GoalRenderContext {
                 flows: vec!["build".to_string(), "qa".to_string()],
-                memory: "Last loop found the docs drift.".to_string(),
             },
         );
 
         assert!(rendered.contains("Drive the work."));
-        assert!(rendered.contains("<lf:wave-memory>"));
-        assert!(rendered.contains("Last loop found the docs drift."));
         assert!(rendered.contains("- build"));
         assert!(rendered.contains("- qa"));
-        // Stable → volatile: memory is rewritten between passes, so it must
-        // trail the stable goal and flow list to keep the prefix cacheable.
-        let memory_at = rendered.find("<lf:wave-memory>").expect("memory section");
-        let flows_at = rendered.find("<lf:goal-context>").expect("flow section");
-        assert!(flows_at < memory_at, "memory renders after the flow list");
     }
 
     #[test]
-    fn render_goal_handles_empty_memory() {
+    fn render_goal_handles_no_flows() {
         let goal = Goal {
             prompt: "Drive the work.".to_string(),
         };
-        let rendered = render_goal(
-            &goal,
-            &GoalRenderContext {
-                flows: Vec::new(),
-                memory: String::new(),
-            },
-        );
+        let rendered = render_goal(&goal, &GoalRenderContext { flows: Vec::new() });
 
-        assert!(rendered.contains("<lf:wave-memory>\nNo wave memory is recorded."));
         assert!(rendered.contains("No flows are available."));
     }
 

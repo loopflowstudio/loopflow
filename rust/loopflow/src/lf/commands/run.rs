@@ -395,9 +395,6 @@ fn build_prompt_at(
         .wave
         .clone()
         .or_else(crate::work::wave::context::resolve_ambient_wave_name);
-    let wave_memory = wave
-        .as_deref()
-        .and_then(|wave| crate::work::wave::context::gather_wave_memory(&repo_root, wave));
     let prepared = prepare_launch_prompt(
         &config,
         LaunchPromptInput {
@@ -407,7 +404,6 @@ fn build_prompt_at(
             surface,
             docs: cli.docs.clone(),
             wave,
-            wave_memory,
             message: message.map(|value| value.to_string()),
             user_name,
             no_loopflow: cli.no_loopflow,
@@ -470,15 +466,15 @@ fn build_prompt_at(
                 elapsed_ms = sync_start.elapsed().as_millis(),
                 "synced vendor skills"
             );
-            let wave_memory =
-                crate::engine::prompt::format_wave_memory_section(&prepared.components);
+            let wave_context =
+                crate::engine::prompt::format_wave_sections(&prepared.components).join("\n\n");
             prompt = skill_launch_seed(
                 &harness,
                 surface,
                 skill_name,
                 message,
                 prepared.components.operate,
-                wave_memory.as_deref(),
+                Some(&wave_context),
                 prepared.components.user_name.as_deref(),
             );
             agent_config.system_prompt.clear();
@@ -561,7 +557,7 @@ fn skill_launch_seed(
     skill_name: &str,
     message: Option<&str>,
     loopflow: bool,
-    wave_memory: Option<&str>,
+    wave_context: Option<&str>,
     user_name: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
@@ -577,9 +573,9 @@ fn skill_launch_seed(
         seed.push_str("\n\n");
         seed.push_str(&user_context);
     }
-    if let Some(memory) = wave_memory {
+    if let Some(context) = wave_context.filter(|context| !context.is_empty()) {
         seed.push_str("\n\n");
-        seed.push_str(memory);
+        seed.push_str(context);
     }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
@@ -970,19 +966,11 @@ pub(crate) fn attributed_context(
             "wave",
         );
     }
-    if let Some(memory) = &components.wave_memory {
-        push(
-            &memory.content,
-            Kind::Memory,
-            Scope::Wave,
-            "wave memory".to_string(),
-            Some(memory.path.clone()),
-            "wave",
-        );
-    }
     for document in &components.docs {
         let kind = if document.source == DocumentSource::Scratch {
             Kind::Scratch
+        } else if document.source == DocumentSource::Wave && document.path.ends_with("/MEMORY.md") {
+            Kind::Memory
         } else if document.path.ends_with("AGENTS.md") || document.path.ends_with("CLAUDE.md") {
             Kind::RepoInstructions
         } else {
@@ -991,10 +979,18 @@ pub(crate) fn attributed_context(
         push(
             &document.content,
             kind,
-            Scope::Repo,
+            if document.source == DocumentSource::Wave {
+                Scope::Wave
+            } else {
+                Scope::Repo
+            },
             document.path.clone(),
             Some(document.path.clone()),
-            "docs",
+            if document.source == DocumentSource::Wave {
+                "wave"
+            } else {
+                "docs"
+            },
         );
     }
     for document in &components.diff_files {
@@ -1933,20 +1929,38 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_launch_seed_carries_wave_memory_before_the_message() {
-        let memory = "<lf:wave-memory>\n- prefer small PRs\n</lf:wave-memory>";
+    fn skill_launch_seed_carries_wave_files_before_the_message() {
+        let components = PromptComponents {
+            wave: Some("infrastructure/release".into()),
+            docs: vec![
+                Document {
+                    path: "wave/infrastructure/MEMORY.md".into(),
+                    content: "Inherited decisions.".into(),
+                    source: DocumentSource::Wave,
+                },
+                Document {
+                    path: "wave/infrastructure/release/GOAL.md".into(),
+                    content: "Deliver releases.".into(),
+                    source: DocumentSource::Wave,
+                },
+            ],
+            ..Default::default()
+        };
+        let context = crate::engine::prompt::format_wave_sections(&components).join("\n\n");
         let seed = skill_launch_seed(
             "claude",
             Surface::Headless,
             "implement",
             Some("build auth"),
             false,
-            Some(memory),
+            Some(&context),
             None,
         );
-        let memory_pos = seed.find("<lf:wave-memory>").unwrap();
-        let message_pos = seed.find("<lf:message>").unwrap();
-        assert!(memory_pos < message_pos);
+        assert!(
+            seed.find("Inherited decisions.").unwrap() < seed.find("Deliver releases.").unwrap()
+        );
+        assert!(seed.find("Deliver releases.").unwrap() < seed.find("<lf:message>").unwrap());
+        assert_eq!(seed.matches("Inherited decisions.").count(), 1);
     }
 
     #[test]
@@ -1959,11 +1973,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     #[test]
     fn attributed_context_keeps_nested_message_and_repeated_channel_sources() {
         let components = PromptComponents {
-            wave_memory: Some(Document {
+            docs: vec![Document {
                 path: "wave/product/MEMORY.md".to_string(),
                 content: "MEMORY".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
+                source: DocumentSource::Wave,
+            }],
             message: Some("outer MEMORY remainder".to_string()),
             message_context: Some((ContextAssetKind::Goal, ContextScope::Step)),
             ..PromptComponents::default()

@@ -124,37 +124,24 @@ No rendering environment. Output is logged, not displayed.
 
 <lf:wave name="rust">
 You are building toward the rust program of work.
-Wave context is included in docs below.
-
-## Wave memory
-
-Persistent memory at wave/rust/MEMORY.md. Read it before every iteration; its current
-contents, when any, ride this prompt's wave-memory section.
-Keep it compact enough to include every iteration: correct stale entries,
-add durable observations, and delete session-specific notes.
-
-Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.
-- Patterns: codebase conventions, architecture, how things connect
-- Preferences: user workflow, tool choices, communication norms
-- Learnings: what worked, what failed, surprises
-
-What belongs elsewhere:
-- architectural decisions → wave docs or explicit docs
-- design rationale → scratch/ or wave plan
-- session-specific notes → nowhere (let them die)
-
-How to update:
-- Edit the file through the ordinary repository workflow; no live Wave is required.
-- `update-wave` owns deliberate end-of-work curation.
-- Correct or remove entries that are wrong or stale.
-- Use absolute dates, not "today" or "recently".
-- When a section grows large, promote stable entries to wave docs or explicit docs and trim.
+Curate wave/rust/MEMORY.md in this checkout. Ancestor files provide inherited context.
+Use realign to reconcile the plan, code and Wave memory.
 </lf:wave>
 
-<lf:wave-memory>
+Reference files for this task. Includes parent documentation for context.
+<lf:files>
+<lf:file path="wave/rust/README.md">
+# Rust Roadmap
+
+Overview of Rust work.
+
+</lf:file>
+<lf:file path="wave/rust/MEMORY.md">
 - Keep prompts concise and concrete.
 - Prefer behavior-focused tests over mock wiring.
-</lf:wave-memory>
+
+</lf:file>
+</lf:files>
 
 Scratch design artifacts and working notes.
 
@@ -169,12 +156,6 @@ Current design notes.
 
 Reference files for this task. Includes parent documentation for context.
 <lf:files>
-<lf:file path="wave/rust/README.md">
-# Rust Roadmap
-
-Overview of Rust work.
-
-</lf:file>
 <lf:file path="README.md">
 # Test Repo
 

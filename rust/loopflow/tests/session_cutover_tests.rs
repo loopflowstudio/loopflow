@@ -3421,9 +3421,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     assert_eq!(sessions[0]["run_id"], review.as_str());
 }
 
-/// A provider stand-in that fails its first launch when `fail-once` exists
-/// and records its decision inside a Flow step. A development `lf` resolves
-/// its own Home, so the stand-in names the fixture's Home for the nested call.
+/// A native provider fixture that returns a schema-constrained final result.
 fn saved_flow_stand_in(fixture: &Fixture) {
     std::fs::write(fixture.home.path().join("decide-enabled"), "").unwrap();
     let lf = fixture.repo.path().join(".lf");
@@ -3645,8 +3643,54 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     assert_eq!(fixture.launches(), launches);
 }
 
-/// `lf flow decide` inside a taskless step writes the invocation row, and the
-/// Flow takes the recorded edge.
+#[test]
+fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversation() {
+    for exhausted in [false, true] {
+        let fixture = Fixture::new(false);
+        saved_flow_stand_in(&fixture);
+        std::fs::write(
+            fixture.home.path().join(if exhausted {
+                "invalid-output-always"
+            } else {
+                "invalid-output-once"
+            }),
+            "",
+        )
+        .unwrap();
+        let output = fixture.run(&[
+            "--model",
+            "opencode",
+            "flow",
+            "work-then-decide",
+            "-b",
+            "--no-loopflow",
+        ]);
+        assert_eq!(
+            output.status.success(),
+            !exhausted,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fixture.count("agent_sessions"), 2);
+        assert_eq!(
+            fixture.launches().len(),
+            if exhausted { 4 } else { 3 },
+            "exhausted={exhausted}; launches={:?}; results={}; stderr={}",
+            fixture.launches(),
+            std::fs::read_to_string(fixture.home.path().join("decide.log")).unwrap_or_default(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let (starts, consumed): (i64,i64) = fixture.db().query_row(
+            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),(SELECT count(*) FROM flow_events WHERE kind='consumed')", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!(starts, if exhausted { 4 } else { 3 });
+        assert_eq!(consumed, if exhausted { 1 } else { 2 });
+        if exhausted {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("exhausted after 3"));
+        }
+    }
+}
+
+/// A taskless step consumes its selected native structured output once.
 #[test]
 fn a_taskless_step_records_its_decision_on_the_invocation() {
     let fixture = Fixture::new(false);
@@ -3666,15 +3710,13 @@ fn a_taskless_step_records_its_decision_on_the_invocation() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        log.lines()
-            .filter(|line| line.contains("Decision recorded"))
-            .count(),
+        log.lines().count(),
         1,
-        "{log}"
+        "only the decision step has an output contract"
     );
-    assert!(
-        log.contains("does not own a decision"),
-        "the work step refuses a decision: {log}"
+    assert_eq!(
+        serde_json::from_str::<Value>(log.trim()).unwrap()["decision"],
+        "advance"
     );
     let (state, task, cursor): (String, Option<String>, String) = fixture
         .db()
@@ -3707,13 +3749,20 @@ fn a_taskless_step_records_its_decision_on_the_invocation() {
         "each boundary consumes its exact native completion"
     );
     assert_eq!(fixture.retired_run_tables(), 0);
-    for input in fixture.launches() {
-        let answer = fixture.run(&["runs", &input, "--final"]);
+    for (index, input) in fixture.launches().iter().enumerate() {
+        let answer = fixture.run(&["runs", input, "--final"]);
         assert!(answer.status.success(), "{answer:?}");
-        assert_eq!(
-            String::from_utf8_lossy(&answer.stdout).trim(),
-            "Fixture completed."
-        );
+        if index == 0 {
+            assert_eq!(
+                String::from_utf8_lossy(&answer.stdout).trim(),
+                "Fixture completed."
+            );
+        } else {
+            assert_eq!(
+                serde_json::from_slice::<Value>(&answer.stdout).unwrap()["decision"],
+                "advance"
+            );
+        }
     }
 
     assert!(std::fs::read_dir(fixture.home.path().join("flows"))
@@ -3724,6 +3773,41 @@ fn a_taskless_step_records_its_decision_on_the_invocation() {
                 .all(|file| file.file_name() == "driver.lock")
         }))
         .unwrap_or(true));
+}
+
+#[test]
+fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    std::fs::write(fixture.repo.path().join(".lf/flows/choose.yaml"),
+        "- xor:\n    router: decide-proof\n    paths:\n      alpha:\n        description: Do the selected work\n        skill: work-proof\n      zeta:\n        description: Leave this path untouched\n        skill: review-proof\n").unwrap();
+    let output = fixture.run(&[
+        "--model",
+        "opencode",
+        "flow",
+        "choose",
+        "-b",
+        "--no-loopflow",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = std::fs::read_to_string(fixture.home.path().join("decide.log")).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(log.trim()).unwrap(),
+        serde_json::json!({"path":"alpha"})
+    );
+    assert_eq!(
+        fixture.launches().len(),
+        2,
+        "router and selected path once each"
+    );
+    let (state, consumed): (String, i64) = fixture.db().query_row(
+        "SELECT state,(SELECT count(*) FROM flow_events WHERE kind='consumed') FROM flow_sessions", [],
+        |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!((state.as_str(), consumed), ("completed", 2));
 }
 
 #[test]
@@ -3857,7 +3941,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
 }
 
 #[test]
-fn opencode_automatic_retry_keeps_conversation_and_rejects_earlier_turn_caller() {
+fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("transient-once"), "").unwrap();
@@ -3874,11 +3958,16 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_earlier_turn_caller()
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let old = std::fs::read_to_string(fixture.home.path().join("old-decision.log")).unwrap();
-    assert!(
-        old.contains("selected native turn's original caller"),
-        "{old}"
-    );
+    let failed_consumed: i64 = fixture
+        .db()
+        .query_row(
+            "SELECT count(*) FROM flow_events f JOIN session_events e ON e.seq=f.session_event
+         WHERE f.kind='consumed' AND json_extract(e.payload,'$.status')!='completed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(failed_consumed, 0);
     assert_eq!(fixture.count("agent_sessions"), 2);
     assert_eq!(fixture.count("agent_session_inputs"), 2);
     assert_eq!(fixture.retired_run_tables(), 0);
@@ -3905,7 +3994,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_earlier_turn_caller()
     assert_eq!(retried["usage"]["output_tokens"], 10);
     let answer = fixture.run(&["runs", &fixture.launches()[1], "--final"]);
     assert_eq!(
-        String::from_utf8_lossy(&answer.stdout).trim(),
-        "Fixture completed."
+        serde_json::from_slice::<Value>(&answer.stdout).unwrap()["decision"],
+        "advance"
     );
 }

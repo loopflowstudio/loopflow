@@ -513,9 +513,12 @@ async fn prepare_task_flow_step(
             "\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.",
             u64::from(traversals) + 1, repeat.from,
         ));
-        seed.push_str(
-            "\n\nBefore finishing, run `lf flow decide iterate \"<remaining work, direction, and evidence>\"` or `lf flow decide advance \"<whole-design proof>\"`. Advance requires the obligations of this decision, not just the latest slice, and leaves later review steps intact. If blocked, run `lf flow blocked \"<reason, attempted direction, and evidence>\"`; this requests an Ask running unblock and waits for human completion. Reread its summary and changed artifacts, then reassess; completing the Ask supplies evidence rather than a navigation decision. Record the decision after edits and verification; missing decisions block advancement.",
-        );
+    }
+    if let Some(output) = flow
+        .current_step()
+        .and_then(crate::engine::flow_output::FlowOutput::for_step_instructions)
+    {
+        seed.push_str(&output);
     }
     let agent = crate::ops::task::resolve_task_agent(
         &task.worktree,
@@ -1200,34 +1203,17 @@ mod planning_tests {
                 }
             }
             if routing {
-                assert!(content.contains("lf flow route"));
+                assert!(content.contains("declared JSON object"));
                 self.store
-                    .record_flow_path(
-                        &position.invocation.id,
-                        position.version,
-                        &actor,
-                        "selected",
-                    )
-                    .await?;
+                    .sqlite
+                    .test_output(&actor, &serde_json::json!({"path": "selected"}))?;
             }
             if let Some(failure) = self.failure {
                 if failure == "malformed" {
-                    let rejected = self
-                        .store
-                        .record_flow_decision(
-                            &position.invocation.id,
-                            position.version,
-                            &actor,
-                            &crate::engine::transitions::FlowVerdict {
-                                decision: crate::engine::transitions::FlowDecision::Advance,
-                                summary: String::new(),
-                            },
-                        )
-                        .await;
-                    assert!(rejected
-                        .unwrap_err()
-                        .to_string()
-                        .contains("evidence cannot be empty"));
+                    self.store.sqlite.test_output(
+                        &actor,
+                        &serde_json::json!({"decision":"advance", "summary":""}),
+                    )?;
                 } else if failure == "disconnected" {
                     self.store.sqlite.test_finish_flow_turn(&actor, "failed");
                     anyhow::bail!("decision provider disconnected");
@@ -1241,21 +1227,17 @@ mod planning_tests {
                 return Ok(());
             }
             if step.repeat.is_some() {
-                self.store
-                    .record_flow_decision(
-                        &position.invocation.id,
-                        position.version,
-                        &actor,
-                        &crate::engine::transitions::FlowVerdict {
-                            decision: if position.cursor.iteration == 0 {
-                                crate::engine::transitions::FlowDecision::Iterate
-                            } else {
-                                crate::engine::transitions::FlowDecision::Advance
-                            },
-                            summary: "repair the demonstrated gap".into(),
+                self.store.sqlite.test_decision_output(
+                    &actor,
+                    &crate::engine::transitions::FlowVerdict {
+                        decision: if position.cursor.iteration == 0 {
+                            crate::engine::transitions::FlowDecision::Iterate
+                        } else {
+                            crate::engine::transitions::FlowDecision::Advance
                         },
-                    )
-                    .await?;
+                        summary: "repair the demonstrated gap".into(),
+                    },
+                )?;
             }
             self.store.sqlite.test_finish_flow_turn(&actor, "completed");
             self.events
@@ -1366,21 +1348,19 @@ mod planning_tests {
                     let actor = store.sqlite.test_flow_turn(&run);
                     if routing {
                         store
-                            .record_flow_path(flow.id(), flow.version, &actor, "done")
-                            .await
+                            .sqlite
+                            .test_output(&actor, &serde_json::json!({"path": "done"}))
                             .unwrap();
                     } else {
                         store
-                            .record_flow_decision(
-                                flow.id(),
-                                flow.version,
+                            .sqlite
+                            .test_decision_output(
                                 &actor,
                                 &crate::engine::transitions::FlowVerdict {
                                     decision: crate::engine::transitions::FlowDecision::Advance,
                                     summary: "candidate, not completion".into(),
                                 },
                             )
-                            .await
                             .unwrap();
                     }
                     store.sqlite.test_finish_flow_turn(&actor, status);
@@ -1593,10 +1573,10 @@ mod planning_tests {
                 let run = reserved_run(&store, &task).await;
                 store.sqlite.publish_attempt(flow.id(), flow.version, &run, Some(&claim), "proof", None).unwrap();
                 let actor = store.sqlite.test_flow_turn(&run);
-                store.record_flow_decision(flow.id(), flow.version, &actor, &crate::engine::transitions::FlowVerdict {
+                store.sqlite.test_decision_output(&actor, &crate::engine::transitions::FlowVerdict {
                     decision: crate::engine::transitions::FlowDecision::Advance,
                     summary: "saved whole-design proof".into(),
-                }).await.unwrap();
+                }).unwrap();
                 store.sqlite.test_finish_flow_turn(&actor, "completed");
                 super::drive_task(store.clone(), task.id.clone(), claim, closing_harness()).await.unwrap();
                 assert!(store.task_flow(&task.id).await.unwrap().is_none());
@@ -1875,14 +1855,14 @@ mod planning_tests {
             use crate::pm::test_server::{self, json_response};
             use serde_json::json;
                 let (store, task, _) = human_task_fixture_at(&guard.ledger.home().join("loopflow.db")).await;
-                let (url, _) = test_server::spawn(vec![json_response(
+                let (url, _) = test_server::spawn((0..3).map(|_| json_response(
                     axum::http::StatusCode::OK,
                     json!({"data": {"issue": {
                         "updatedAt": "2026-09-24T00:00:00Z", "title": task.plan.title,
                         "description": task.plan.description,
                         "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
                     }}}),
-                )]).await;
+                )).collect()).await;
                 store.upsert_provider_token(&crate::store::ProviderToken {
                     provider: "linear".into(), access_token: "fixture-token".into(),
                     refresh_token: None, oauth_client_id: None, expires_at: None,
@@ -1912,9 +1892,9 @@ mod planning_tests {
                 let error = crate::ops::pm::PM_TEST_CONTEXT.scope(context,
                     super::drive_task(store.clone(), task.id.clone(), claim, create),
                 ).await.unwrap_err();
-                assert!(error.to_string().contains(if failure == "disconnected" { "disconnected" } else { "requires a decision" }), "{error:#}");
+                assert!(error.to_string().contains(if failure == "disconnected" { "disconnected" } else { "structured output validation exhausted" }), "{error:#}");
                 let blocked = store.task_flow(&task.id).await.unwrap().unwrap();
-                let run = seen.lock().unwrap()[0].1.clone();
+                let run = seen.lock().unwrap().last().unwrap().1.clone();
                 assert_eq!(blocked.failure.as_ref().unwrap().run_id.as_ref(), Some(&run));
                 // A completed Run whose step wanted a decision fails the step, not
                 // the Run; a disconnected provider fails the Run itself.
@@ -1977,14 +1957,14 @@ mod planning_tests {
             let failure = "missing";
                 let (store, task, _) = human_task_fixture_at(&guard.ledger.home().join("loopflow.db")).await;
                 store.set_task_agent(&task.id, "claude:sonnet").await.unwrap();
-                let (url, _) = test_server::spawn(vec![json_response(
+                let (url, _) = test_server::spawn((0..3).map(|_| json_response(
                     axum::http::StatusCode::OK,
                     json!({"data": {"issue": {
                         "updatedAt": "2026-09-24T00:00:00Z", "title": task.plan.title,
                         "description": task.plan.description,
                         "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
                     }}}),
-                )]).await;
+                )).collect()).await;
                 store.upsert_provider_token(&crate::store::ProviderToken {
                     provider: "linear".into(), access_token: "fixture-token".into(),
                     refresh_token: None, oauth_client_id: None, expires_at: None,
@@ -2014,9 +1994,9 @@ mod planning_tests {
                 let error = crate::ops::pm::PM_TEST_CONTEXT.scope(context,
                     super::drive_task(store.clone(), task.id.clone(), claim, create),
                 ).await.unwrap_err();
-                assert!(error.to_string().contains(if failure == "disconnected" { "disconnected" } else { "requires a decision" }), "{error:#}");
+                assert!(error.to_string().contains(if failure == "disconnected" { "disconnected" } else { "structured output validation exhausted" }), "{error:#}");
                 let blocked = store.task_flow(&task.id).await.unwrap().unwrap();
-                let run = seen.lock().unwrap()[0].1.clone();
+                let run = seen.lock().unwrap().last().unwrap().1.clone();
                 assert_eq!(blocked.failure.as_ref().unwrap().run_id.as_ref(), Some(&run));
                 assert_eq!(store.sqlite.input_snapshot(run.as_str()).unwrap().status(), "completed");
                 assert!(blocked.claim.is_none());
@@ -2060,10 +2040,10 @@ mod planning_tests {
                 assert_eq!(retried.cursor.leaf().progress.direction.as_deref(), Some(feedback));
                 assert!(retried.failure.is_none());
                 assert!(store.task_steers(&task.id).await.unwrap().iter().any(|s| s.text.contains(reason)));
-                assert!(store.record_flow_decision(&retried.invocation.id, retried.version, &ExecId::new(), &crate::engine::transitions::FlowVerdict {
+                assert!(store.sqlite.test_decision_output(&ExecId::new(), &crate::engine::transitions::FlowVerdict {
                     decision: crate::engine::transitions::FlowDecision::Advance,
                     summary: "late failed Run must not navigate".into(),
-                }).await.is_err());
+                }).is_err());
                 assert!(std::process::Command::new("git").current_dir(&task.worktree)
                     .args(["checkout", "-b", "test/human-task-proof"]).output().unwrap().status.success());
 
@@ -2112,9 +2092,9 @@ mod planning_tests {
                     tokio::join!(resume, worker)
                 }).await.unwrap();
                 resumed.unwrap();
-                assert!(error.to_string().contains("requires a decision"), "{error:#}");
+                assert!(error.to_string().contains("structured output validation exhausted"), "{error:#}");
                 let turns = seen.lock().unwrap().clone();
-                assert_eq!(turns.len(), 2);
+                assert_eq!(turns.len(), 4);
                 assert_ne!(turns[0].1, turns[1].1);
                 let (_, manifest) = crate::run_record::resolve_manifest(guard.ledger.home(), turns[1].1.as_str()).unwrap();
                 assert_eq!(manifest.harness, "claude");
@@ -3923,6 +3903,31 @@ mod planning_tests {
             .unwrap();
     }
 
+    async fn finish_test_decision(
+        store: &SharedStore,
+        flow: &FlowSession,
+        verdict: crate::engine::transitions::FlowVerdict,
+    ) -> FlowSession {
+        let saved = store
+            .reserve_attempt(flow.id(), flow.version, None)
+            .await
+            .unwrap();
+        let input = &saved.current_attempt.as_ref().unwrap().run_id;
+        store
+            .sqlite
+            .publish_attempt(saved.id(), saved.version, input, None, "proof", None)
+            .unwrap();
+        let actor = store.sqlite.test_flow_turn(input);
+        store.sqlite.test_decision_output(&actor, &verdict).unwrap();
+        store.sqlite.test_finish_flow_turn(&actor, "completed");
+        let mut saved = store.flow(saved.id()).await.unwrap().unwrap();
+        finish(&mut saved).unwrap();
+        store
+            .checkpoint_flow(saved.id(), saved.version, &saved.cursor, None, None)
+            .await
+            .unwrap()
+    }
+
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // serializes LF_BIN while assembling the real next prompt
     async fn nested_review_returns_feedback_before_the_outer_decision() {
@@ -4007,11 +4012,10 @@ mod planning_tests {
             .await
             .is_err());
         assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), saved);
-        saved.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
+        saved = finish_test_decision(&store, &saved, FlowVerdict {
             decision: FlowDecision::Iterate,
             summary: "Implement scratch/search/design.md using the findings and proof in scratch/search/feedback.md".into(),
-        });
-        finish(&mut saved).unwrap();
+        }).await;
         assert_eq!(saved.current().step, "implement");
         assert_eq!(saved.cursor.iteration, 1);
         let implementation =
@@ -4030,12 +4034,20 @@ mod planning_tests {
         );
         while !saved.is_decision() {
             assert!(!finish(&mut saved).unwrap());
+            saved = store
+                .checkpoint_flow(saved.id(), saved.version, &saved.cursor, None, None)
+                .await
+                .unwrap();
         }
-        saved.cursor.leaf_mut().progress.verdict = Some(FlowVerdict {
-            decision: FlowDecision::Advance,
-            summary: "revision demonstrated".into(),
-        });
-        finish(&mut saved).unwrap();
+        saved = finish_test_decision(
+            &store,
+            &saved,
+            FlowVerdict {
+                decision: FlowDecision::Advance,
+                summary: "revision demonstrated".into(),
+            },
+        )
+        .await;
         assert_eq!(saved.current().step, "pr-publish");
         finish(&mut saved).unwrap();
         store
@@ -4112,16 +4124,14 @@ mod planning_tests {
             .unwrap();
         let actor = store.sqlite.test_flow_turn(&input);
         store
-            .record_flow_decision(
-                flow.id(),
-                flow.version,
+            .sqlite
+            .test_decision_output(
                 &actor,
                 &crate::engine::transitions::FlowVerdict {
                     decision: crate::engine::transitions::FlowDecision::Iterate,
                     summary: "review the revision".into(),
                 },
             )
-            .await
             .unwrap();
         store.sqlite.test_finish_flow_turn(&actor, "completed");
         let saved = store.flow(flow.id()).await.unwrap().unwrap();

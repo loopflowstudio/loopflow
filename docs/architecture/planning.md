@@ -73,20 +73,14 @@ correlated starts and results in Flow history; they create neither fake agent
 conversations nor synthetic Execs. One actual lf process can execute several
 boundaries and then fail; its command outcome is not every boundary's outcome.
 
-```bash
-lf flow decide iterate "remaining work and proof"
-lf flow decide advance "completion evidence"
-lf flow route PATH
-lf flow blocked "reason, attempted direction and question"
-```
-
-These commands require the selected boundary's authority. Advance follows the
-forward edge; Iterate follows its captured backward edge. Pass counts describe
-history without imposing a budget. A verdict or route is a candidate until the
-selected native turn succeeds. Contradictory candidates in the same turn are
-rejected. A failed turn cannot supply navigation for its retry; the authorized
-successor must choose again. Helpers, older successes and late generations cannot
-settle the current selection.
+A deciding step declares a JSON object containing `decision` (`advance` or
+`iterate`) and a nonempty `summary`. A router declares a JSON object containing
+`path`, constrained to the captured branch's path names. Each provider receives
+the schema before generation. Session history retains the native output and
+completion separately; only the exact selected successful result is consumed
+inside the Flow's fenced settlement transaction. Invalid output receives at most
+two corrective turns in the same conversation; provider failure remains distinct.
+Helpers, older successes and late generations cannot settle the current selection.
 
 A blocked decision opens one keyed Ask. Completion returns saved feedback for
 reassessment at the same boundary, never a navigation verdict. Retry preserves

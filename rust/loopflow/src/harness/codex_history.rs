@@ -17,6 +17,7 @@ use crate::store::StoreResult;
 pub(super) struct History {
     flow_selection: Option<crate::durable::FlowTurnSelection>,
     sequence: u64,
+    final_answers: HashMap<String, String>,
     known: HashMap<String, u64>,
     requests: HashMap<String, u64>,
     started: HashSet<String>,
@@ -63,7 +64,7 @@ impl History {
             .unwrap_or_default();
         if !matches!(
             method,
-            "turn/started" | "turn/completed" | "thread/tokenUsage/updated"
+            "turn/started" | "turn/completed" | "thread/tokenUsage/updated" | "item/completed"
         ) && rpc.pointer("/result/turn").is_none()
             && rpc.pointer("/result/thread/turns").is_none()
             && rpc.pointer("/result/data").is_none()
@@ -113,8 +114,22 @@ impl History {
                         &params["tokenUsage"],
                     )?;
                 }
+                "item/completed" => {
+                    if let Some(text) = final_text(&params["item"]) {
+                        self.final_answers.insert(turn, text.to_owned());
+                    }
+                }
                 "turn/completed" => {
                     completion(store, session, thread, &params["turn"])?;
+                    if let Some(text) = self.final_answers.remove(&turn) {
+                        store.record_session_event(
+                            session,
+                            thread,
+                            &turn,
+                            SessionEventKind::Output,
+                            &json!({"text": text}),
+                        )?;
+                    }
                 }
                 _ => {}
             }
@@ -171,6 +186,12 @@ impl History {
     }
 }
 
+fn final_text(item: &Value) -> Option<&str> {
+    (item["type"] == "agentMessage" && (item["phase"].is_null() || item["phase"] == "final_answer"))
+        .then(|| item["text"].as_str())
+        .flatten()
+}
+
 fn completion(store: &SqliteStore, session: &str, thread: &str, turn: &Value) -> StoreResult<()> {
     let Some(id) = turn["id"].as_str() else {
         return Ok(());
@@ -178,6 +199,18 @@ fn completion(store: &SqliteStore, session: &str, thread: &str, turn: &Value) ->
     let Some(status @ ("completed" | "failed" | "interrupted")) = turn["status"].as_str() else {
         return Ok(());
     };
+    if let Some(text) = turn["items"]
+        .as_array()
+        .and_then(|items| items.iter().rev().find_map(final_text))
+    {
+        store.record_session_event(
+            session,
+            thread,
+            id,
+            SessionEventKind::Output,
+            &json!({"text": text}),
+        )?;
+    }
     store.record_session_event(session, thread, id, SessionEventKind::Completed,
         &json!({"status": status, "error": turn["error"], "started_at": turn["startedAt"], "completed_at": turn["completedAt"], "duration_ms": turn["durationMs"]}))?;
     Ok(())

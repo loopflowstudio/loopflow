@@ -148,8 +148,8 @@ one path runs:
         description: "No actionable defect in the supplied change"
 ```
 
-The `router:` skill reads the available evidence and records one choice with
-`lf flow route PATH`. Routing instructions and path descriptions are appended
+The `router:` skill reads the available evidence and returns `{"path":"NAME"}`
+under the schema declared by its captured branch. Routing instructions and path descriptions are appended
 to its captured prompt. The choice belongs to the selected native turn and takes effect
 when it succeeds; a retry must supply its own candidate. A path
 with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
@@ -201,10 +201,11 @@ feedback and revised design to the second loop-decide. Its own explicit edge
 also targets implement: the outer loop repeats implementation, refresh,
 the inner decision loop, and demo. Review completion itself chooses no edge.
 
-At the deciding occurrence, use `lf flow decide advance "evidence"` or
-`lf flow decide iterate "next action and proof"`. The selected native turn owns
-that candidate; only its exact successful completion can authorize navigation. A review's
-final prose or a successful process exit cannot substitute for the decision.
+At the deciding occurrence, return `{"decision":"advance","summary":"evidence"}`
+or `{"decision":"iterate","summary":"next action and proof"}`. The provider receives
+this schema before generation. The Flow validates and consumes the exact selected
+successful completion; invalid output gets at most two corrective turns in the
+same conversation. Failed turns, older results and command exit cannot navigate.
 
 Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts

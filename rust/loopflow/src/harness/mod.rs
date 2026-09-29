@@ -1,4 +1,5 @@
 pub mod claude;
+mod claude_history;
 mod claude_mapping;
 pub mod codex;
 #[cfg(unix)]

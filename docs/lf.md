@@ -510,13 +510,18 @@ a pass. Task binding adds context and Task authority.
 
 `loop-decide` compares the caller's objective and previous direction with the
 available evidence and feedback. It works with any Flow; its selected native turn supplies
-one navigation candidate:
+one typed result from its final answer:
 
-```sh
-lf flow decide advance "Evidence that this boundary's obligations are satisfied"
-lf flow decide iterate "Remaining work, next action, and the proof to collect"
-lf flow blocked "What stalled, what was tried, and what needs human judgment"
+```json
+{"decision":"iterate","summary":"Remaining work, next action, and proof to collect"}
 ```
+
+The captured step declares `advance` or `iterate`, with a nonempty `summary`.
+The provider receives that schema before generation. The Flow consumes only the
+selected successful turn's validated result. Invalid output gets at most two
+corrective turns in the same conversation; exhaustion retains all evidence and
+stops the boundary. To request feedback, use `lf flow blocked "What stalled,
+what was tried, and what needs human judgment"` and reassess when it returns.
 
 Implement builds the intended behavior and updates the working plan with what
 remains. When replacing a path, move its consumer and delete the predecessor.
@@ -590,7 +595,7 @@ have no implicit revision target. Closing the provider, marking ready, or
 reopening a Session does not complete it.
 Already finished invocations report completion rather than starting again.
 
-Invocations capture all XOR routers and branch definitions at creation. A router records its exact choice with `lf flow route PATH`;
+Invocations capture all XOR routers and branch definitions at creation. A router returns `{"path":"NAME"}` constrained to its captured paths;
 failed native turns cannot donate that candidate to a retry. Nested paths and review completion use the
 same cursor transition. Recovery fixtures prove these paths locally; live
 provider/desktop review completion → decision → implementation → Ask → reassessment remains a

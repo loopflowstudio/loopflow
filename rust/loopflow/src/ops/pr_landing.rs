@@ -299,7 +299,8 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
     capture
         .finish(outcome)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let conclusion = crate::run_record::read_final_answer(&capture.artifact_dir())
+    let conclusion = capture
+        .final_answer()
         .ok()
         .flatten()
         .map(|answer| answer.text)
@@ -921,7 +922,6 @@ async fn wait_for_landing(
     store: &SharedStore,
     landing_id: &crate::pr_landing::PrLandingId,
 ) -> OpsResult<PrLanding> {
-    let home = crate::store::lf_home_dir();
     let mut shown = HashSet::new();
     let mut report_at = std::time::Instant::now();
     loop {
@@ -931,7 +931,7 @@ async fn wait_for_landing(
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message(format!("landing {landing_id} disappeared")))?;
         if landing.state.is_terminal() || std::time::Instant::now() >= report_at {
-            match repair_conclusions(store, &home, &landing, &mut shown).await {
+            match repair_conclusions(store, &landing, &mut shown).await {
                 Ok(conclusions) => {
                     for conclusion in conclusions {
                         eprintln!("ci-fix: {conclusion}");
@@ -982,7 +982,6 @@ async fn wait_for_landing(
 
 async fn repair_conclusions(
     store: &SharedStore,
-    home: &Path,
     landing: &PrLanding,
     shown: &mut HashSet<String>,
 ) -> OpsResult<Vec<String>> {
@@ -1006,9 +1005,9 @@ async fn repair_conclusions(
             continue;
         }
         let input = crate::durable::RunId::parse(&run.id).map_err(|source| error(&source))?;
-        let dir = crate::run_record::record_dir(home, &input)
-            .ok_or_else(|| error(&format!("Run {} has an invalid id", run.id)))?;
-        let conclusion = crate::run_record::read_final_answer(&dir)
+        let conclusion = store
+            .input_final_answer(&input)
+            .await
             .map_err(|source| error(&source))?
             .map(|answer| {
                 parse_repair_conclusion(&answer.text)
@@ -1408,18 +1407,19 @@ mod tests {
                     status: crate::chat::types::Lifecycle::Completed,
                 });
                 capture.finish("completed").unwrap();
+                std::fs::remove_dir_all(capture.artifact_dir()).unwrap();
             } else {
                 active.push(capture);
             }
         }
         assert_eq!(
-            super::repair_conclusions(&store, home.path(), &landing, &mut shown)
+            super::repair_conclusions(&store, &landing, &mut shown)
                 .await
                 .unwrap(),
             ["GitHub credential revoked; reconnect it before retrying."]
         );
         assert!(
-            super::repair_conclusions(&store, home.path(), &landing, &mut shown)
+            super::repair_conclusions(&store, &landing, &mut shown)
                 .await
                 .unwrap()
                 .is_empty()

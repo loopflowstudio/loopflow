@@ -13,6 +13,7 @@ PROOFS = {
     ),
     "task_review_completion_consumes_only_installed_readiness": "task_initialization_tests",
     "task_operation_starts_with_durable_history_after_claim_only_failure": "flow_tests",
+    "task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart": "flow_tests",
 }
 
 

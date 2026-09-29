@@ -588,10 +588,11 @@ esac
 }
 
 #[test]
-fn cached_auth_leaves_an_absent_home_absent() {
+fn cached_auth_records_its_exec_without_creating_account_state() {
     let temp = tempfile::tempdir().unwrap();
     let lf_home = temp.path().join("absent");
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .current_dir(temp.path())
         .env_clear()
         .env("LF_HOME", &lf_home)
         .env("LF_DB_PATH", lf_home.join("loopflow.db"))
@@ -610,7 +611,19 @@ fn cached_auth_leaves_an_absent_home_absent() {
         .unwrap()
         .iter()
         .all(|r| r["scope"] == "local" && r["cached_credential_state"] == "uninspected"));
-    assert!(!lf_home.exists());
+    let database = rusqlite::Connection::open(lf_home.join("loopflow.db")).unwrap();
+    let counts: (i64, i64, i64, i64) = database
+        .query_row(
+            "SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),
+                    (SELECT count(*) FROM provider_accounts),
+                    (SELECT count(*) FROM provider_routes),
+                    (SELECT count(*) FROM agent_sessions)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(counts, (1, 0, 0, 0));
+    assert!(!lf_home.join("accounts").exists());
 }
 
 fn write_identity(home: &std::path::Path, email: &str, subject: &str) {

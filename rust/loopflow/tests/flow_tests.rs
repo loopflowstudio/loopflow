@@ -215,7 +215,7 @@ fn publish_stack_fixture_pr(
 }
 
 #[test]
-fn prepared_task_selects_parent_without_rewriting_work_or_publication() {
+fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let child =
@@ -253,7 +253,7 @@ fn prepared_task_selects_parent_without_rewriting_work_or_publication() {
             home.path(),
             &[
                 "task",
-                "prepare",
+                "checkout",
                 "INF-123",
                 "--stack-on",
                 "INF-124",
@@ -1744,6 +1744,7 @@ fn unavailable(flow: &serde_json::Value, kind: &str) -> Option<String> {
 }
 
 #[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() {
     use loopflow::durable::{FlowSession, TaskFlowBlocker};
     use loopflow::engine::invocation::QueuedInvocation;

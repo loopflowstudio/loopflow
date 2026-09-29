@@ -109,12 +109,7 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
-    r#"#!/bin/sh
-if [ -z "$LF_TEST_CODEX_STDIO" ]; then
-    case "$*" in
-        *--listen*) exec python3 '__SOCKET_BRIDGE__' "$0" "$@" ;;
-    esac
-fi
+    codex_socket_script(&r#"#!/bin/sh
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
@@ -129,13 +124,25 @@ echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-te
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
-    .replace(
-        "__SOCKET_BRIDGE__",
-        &concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_socket.py")
-            .replace('\'', r#"'"'"'"#),
-    )
     .replace("__SETUP__", setup)
-    .replace("__OUTPUT__", &output)
+    .replace("__OUTPUT__", &output))
+}
+
+#[allow(dead_code)] // Shared provider transport compiled into multiple test crates.
+pub fn codex_socket_script(script: &str) -> String {
+    let bridge = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_socket.py")
+        .replace('\'', r#"'"'"'"#);
+    format!(
+        r#"#!/bin/sh
+if [ -z "$LF_TEST_CODEX_STDIO" ]; then
+    case "$*" in
+        *--listen*) exec python3 '{bridge}' "$0" "$@" ;;
+    esac
+fi
+{script}
+"#,
+        script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
+    )
 }
 
 pub struct EnvGuard {

@@ -57,3 +57,16 @@ remain requirements, and independent Run removal, import and reader work continu
   node policy or a recorded Session relation; labels alone remain unclassified.
   The populated fixture retains an unknown caller without fabricating a Session
   or Exec. Its destination remains open before table removal.
+
+## Historical SQL destination (2026-09-29)
+
+Main interprets the accepted one-time input mapping/evidence contract as allowing
+the existing immutable-input catalog to retain an opaque original SQL payload.
+Conversation attachment may remain unknown; such a row is neither AgentSession
+nor Exec and keeps the public import failure until classification is established.
+There is no mutable execution state or new attempt API. Use that existing owner
+to preserve every mapped and unmapped row before removing runs. Current input
+relationships stay separate from the frozen historical payload. Migration proof
+must retain original foreign-key/ancestry constraints, Started, exact replay,
+unknowns and canonical rollback. This is an implementation assumption, not a new
+product decision attributed to Jack.

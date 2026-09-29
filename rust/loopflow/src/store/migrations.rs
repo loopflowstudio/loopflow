@@ -5632,6 +5632,20 @@ mod tests {
         )
         .unwrap();
         conn.execute_batch("COMMIT").unwrap();
+        let source_fields = columns(&conn, "runs")
+            .into_iter()
+            .map(|name| format!("'{name}',{name}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let original_sql: Vec<serde_json::Value> = conn
+            .prepare(&format!(
+                "SELECT json_object({source_fields}) FROM runs ORDER BY id"
+            ))
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|row| serde_json::from_str(&row.unwrap()).unwrap())
+            .collect();
         // Canonical adoption applies the unrecorded suffix before validating
         // the resulting schema. A failure must roll back SQL and both ledgers.
         conn.execute_batch("ALTER TABLE projects ADD COLUMN unexpected TEXT")
@@ -5656,6 +5670,85 @@ mod tests {
         conn.execute_batch("ALTER TABLE projects DROP COLUMN unexpected")
             .unwrap();
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        assert!(
+            columns(&conn, "runs").is_empty(),
+            "legacy lifecycle table must be absent"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM agent_session_inputs WHERE imported_sql IS NOT NULL",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            5
+        );
+        let retained_sql: Vec<serde_json::Value> = conn.prepare("SELECT imported_sql FROM agent_session_inputs WHERE imported_sql IS NOT NULL ORDER BY input_id").unwrap()
+            .query_map([], |r| r.get::<_,String>(0)).unwrap()
+            .map(|row| serde_json::from_str(&row.unwrap()).unwrap()).collect();
+        assert_eq!(
+            retained_sql, original_sql,
+            "every old column survives without a lifecycle table"
+        );
+        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let other_wave = crate::id::WaveId::new();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'other','/repo',1)",
+            [&other_wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('same-wave',?1,'same',1),('other-wave',?2,'other',1)",rusqlite::params![wave,other_wave]).unwrap();
+        let ancestry_error = conn
+            .execute(
+                "UPDATE tasks SET project_id='other-wave' WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap_err();
+        assert!(
+            ancestry_error
+                .to_string()
+                .contains("historical input ancestry"),
+            "{ancestry_error}"
+        );
+        conn.execute(
+            "UPDATE tasks SET project_id='same-wave' WHERE id=?1",
+            [task.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE tasks SET project_id='project' WHERE id=?1",
+            [task.as_str()],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "UPDATE projects SET wave_id=?1 WHERE id='project'",
+                [&other_wave]
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "UPDATE flow_sessions SET task_id=?1,cwd=NULL WHERE id=?2",
+                rusqlite::params![task.as_str(), operation.id]
+            )
+            .is_err());
+        assert!(conn
+            .execute("DELETE FROM tasks WHERE id=?1", [task.as_str()])
+            .is_err());
+        assert!(conn
+            .execute(
+                "DELETE FROM agent_session_inputs WHERE input_id=?1",
+                [caller.as_str()]
+            )
+            .is_err());
+        for value in [None, Some(18)] {
+            assert!(conn
+                .execute(
+                    "UPDATE tasks SET started_at=?2 WHERE id=?1",
+                    rusqlite::params![task.as_str(), value]
+                )
+                .is_err());
+        }
         let saved = store.session("retained").unwrap().unwrap();
         assert_eq!(saved.input_id, current);
         assert_eq!(saved.caller_input_id.as_ref(), Some(&caller));
@@ -5713,7 +5806,7 @@ mod tests {
             assert!(store.session_for_run(&caller).unwrap().is_none());
             assert_eq!(
                 conn.query_row(
-                    "SELECT count(*) FROM runs WHERE id=?1",
+                    "SELECT count(*) FROM agent_session_inputs WHERE input_id=?1 AND imported_sql IS NOT NULL AND session_id IS NULL",
                     [caller.as_str()],
                     |row| row.get::<_, i64>(0)
                 )
@@ -5805,17 +5898,17 @@ mod tests {
                 .unwrap(),
             0
         );
-        conn.execute(
-            "UPDATE runs SET outcome='interrupted' WHERE id=?1",
+        assert!(conn.execute(
+            "UPDATE agent_session_inputs SET imported_sql=json_set(imported_sql,'$.outcome','interrupted') WHERE input_id=?1",
             [prior.as_str()],
-        )
-        .unwrap();
-        let (session, changed) = store
+        ).is_err(), "retained source is immutable");
+        let (session, mut changed) = store
             .historical_session_inputs()
             .unwrap()
             .into_iter()
             .find(|(_, input)| input.input_id == prior)
             .unwrap();
+        changed.payload["evidence"]["outcome"] = serde_json::json!("interrupted");
         assert!(store
             .import_session(session.unwrap(), None, &[changed], false)
             .is_err());

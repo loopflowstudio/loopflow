@@ -156,6 +156,16 @@ impl Fixture {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
     }
 
+    fn retired_run_tables(&self) -> i64 {
+        self.db()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
     fn count(&self, table: &str) -> i64 {
         self.db()
             .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
@@ -295,7 +305,10 @@ fn interactive_session_is_rows_from_launch_to_completion() {
 
     let (first, first_run) = fixture.attach(&LAUNCH);
     assert_eq!(
-        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (
+            fixture.count("agent_sessions"),
+            fixture.retired_run_tables()
+        ),
         (1, 0),
         "launch reserves one Session and no Run"
     );
@@ -366,7 +379,10 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     assert_eq!(fixture.sessions()[0]["state"], "active");
     fixture.release(resumed);
     assert_eq!(
-        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (
+            fixture.count("agent_sessions"),
+            fixture.retired_run_tables()
+        ),
         (1, 0)
     );
 
@@ -376,7 +392,10 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     let (second_id, ..) = fixture.session_row(&second_run);
     assert_ne!(second_id, id);
     assert_eq!(
-        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (
+            fixture.count("agent_sessions"),
+            fixture.retired_run_tables()
+        ),
         (2, 0)
     );
     assert_eq!(fixture.sessions().len(), 2);
@@ -690,12 +709,12 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(task_runs("INF-123"), vec![later]);
     assert_eq!(fixture.run_parents(&orphan), (None, None, None));
 
-    // Started is stored once and only beside a Run that names the Task.
+    // Started is stored once beside admitted work naming the Task.
     let db = fixture.db();
     let disagreeing: i64 = db
         .query_row(
             "SELECT count(*) FROM tasks t WHERE (t.started_at IS NOT NULL)
-                != (EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.id)
+                != (EXISTS(SELECT 1 FROM agent_session_inputs i WHERE i.historical_task_id=t.id)
                 OR EXISTS(SELECT 1 FROM agent_sessions s WHERE s.task_id=t.id))",
             [],
             |row| row.get(0),
@@ -941,7 +960,10 @@ fn ask_session_is_rows_from_request_to_answer() {
             .then_some(())
     });
     assert_eq!(
-        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (
+            fixture.count("agent_sessions"),
+            fixture.retired_run_tables()
+        ),
         (2, 0)
     );
     let inherited = (
@@ -1147,7 +1169,7 @@ fn agent_admission_requires_the_store_before_provider_launch() {
     );
     let stored: (i64, i64) = rows
         .query_row(
-            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM runs)",
+            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs')",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -1239,7 +1261,10 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     let fixture = Fixture::new(true);
     let (id, invocation, first_run) = fixture.waiting_review();
     assert_eq!(
-        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (
+            fixture.count("agent_sessions"),
+            fixture.retired_run_tables()
+        ),
         (1, 0)
     );
     let parents: (Option<String>, Option<String>, String, String) = fixture
@@ -1290,7 +1315,10 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
         "{waiting:?}"
     );
     assert_eq!(
-        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (
+            fixture.count("agent_sessions"),
+            fixture.retired_run_tables()
+        ),
         (1, 0)
     );
     let ready = inside(&first_run, &["session", "ready", "Ship the parser"]);
@@ -1376,7 +1404,10 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
         .unwrap();
     assert_eq!(state, "completed");
     assert_eq!(
-        (fixture.count("agent_sessions"), fixture.count("runs")),
+        (
+            fixture.count("agent_sessions"),
+            fixture.retired_run_tables()
+        ),
         (1, 0)
     );
     assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
@@ -1714,7 +1745,7 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
     );
     assert_eq!(fixture.count("agent_sessions"), 1);
     assert_eq!(fixture.count("agent_session_inputs"), 2);
-    assert_eq!(fixture.count("runs"), 0);
+    assert_eq!(fixture.retired_run_tables(), 0);
     assert!(fixture.launches().is_empty());
 }
 
@@ -1851,64 +1882,58 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
         next.provider = Some("claude".into());
         store.replace_session_input(&prior, next).await.unwrap()
     });
-    // Historical SQL inputs remain after admission migration. No artifact file
-    // is available; this final-schema fixture is not a released upgrade proof.
+    // These immutable source payloads are the final-schema import boundary;
+    // the populated development migration proves their extraction from old SQL.
+    let seed = |input: &RunId, changes: Value| {
+        let mut evidence = serde_json::json!({
+            "id":input.as_str(),"session_id":null,"invocation_id":null,"task_id":null,"wave_id":null,
+            "work_source":null,"created_at":70,"published":1,"cwd":fixture.repo.path().to_string_lossy(),
+            "skill":null,"node":null,"iterations":null,"attempt":null,"provider":null,
+            "model":null,"caller_run_id":null,"outcome":null,"ended_at":null
+        });
+        for (key, value) in changes.as_object().unwrap() {
+            evidence[key] = value.clone();
+        }
+        fixture.db().execute("INSERT INTO agent_session_inputs(input_id,caller_input_id,imported_sql)
+            VALUES(?1,?2,?3) ON CONFLICT(input_id) DO UPDATE SET imported_sql=excluded.imported_sql",
+            rusqlite::params![input.as_str(),evidence["caller_run_id"].as_str(),evidence.to_string()]).unwrap();
+    };
     for (id, at, outcome, provider) in [
         (&prior, 10, "failed", "opencode"),
         (&current, 30, "completed", "claude"),
     ] {
-        fixture.db().execute(
-            "INSERT INTO runs(id,session_id,created_at,published,cwd,skill,provider,outcome,ended_at)
-             VALUES(?1,?2,?3,1,?4,'implement',?5,?6,?7)",
-            rusqlite::params![id.as_str(), saved.id, at, fixture.repo.path().to_string_lossy(), provider, outcome, at + 5],
-        ).unwrap();
+        seed(
+            id,
+            serde_json::json!({"session_id":saved.id,"created_at":at,"skill":"implement","provider":provider,"outcome":outcome,"ended_at":at+5}),
+        );
     }
-    let unpublished = RunId::new();
-    // An older input can retain its Session relation only in the old SQL row.
+    // The earlier input retains only the historical Session relation until import.
     fixture
         .db()
         .execute(
-            "DELETE FROM agent_session_inputs WHERE input_id=?1",
+            "UPDATE agent_session_inputs SET session_id=NULL WHERE input_id=?1",
             [prior.as_str()],
         )
         .unwrap();
-    fixture
-        .db()
-        .execute(
-            "INSERT INTO runs(id,session_id,created_at,published,cwd)
-        VALUES(?1,?2,50,0,?3)",
-            rusqlite::params![
-                unpublished.as_str(),
-                saved.id,
-                fixture.repo.path().to_string_lossy()
-            ],
-        )
-        .unwrap();
+    let unpublished = RunId::new();
+    seed(
+        &unpublished,
+        serde_json::json!({"session_id":saved.id,"created_at":50,"published":0}),
+    );
     let standalone = RunId::new();
-    fixture
-        .db()
-        .execute(
-            "INSERT INTO runs(id,created_at,published,cwd,skill,provider,caller_run_id)
-         VALUES(?1,60,1,?2,'research','codex',?3)",
-            rusqlite::params![
-                standalone.as_str(),
-                fixture.repo.path().to_string_lossy(),
-                prior.as_str()
-            ],
-        )
-        .unwrap();
+    seed(
+        &standalone,
+        serde_json::json!({"created_at":60,"skill":"research","provider":"codex","caller_run_id":prior.as_str()}),
+    );
     let mechanical = RunId::new();
     let ambiguous_kind = RunId::new();
     for (id, provider) in [(&mechanical, Some("loopflow")), (&ambiguous_kind, None)] {
-        fixture
-            .db()
-            .execute(
-                "INSERT INTO runs(id,created_at,published,cwd,skill,provider)
-             VALUES(?1,70,1,?2,'publish',?3)",
-                rusqlite::params![id.as_str(), fixture.repo.path().to_string_lossy(), provider],
-            )
-            .unwrap();
+        seed(
+            id,
+            serde_json::json!({"skill":"publish","provider":provider}),
+        );
     }
+    assert_eq!(fixture.retired_run_tables(), 0);
     let preview = fixture.json(&["session", "import", "--dry-run", "--json"]);
     let unresolved = preview["failed"].as_array().unwrap();
     assert_eq!(unresolved.len(), 2, "{preview}");
@@ -1920,7 +1945,7 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
     assert_eq!(preview["run"], 4, "{preview}");
     assert_eq!(fixture.count("session_events"), 0);
     assert_eq!(fixture.count("agent_sessions"), 1);
-    assert_eq!(fixture.count("agent_session_inputs"), 1);
+    assert_eq!(fixture.count("agent_session_inputs"), 6);
     let imported = fixture.json(&["session", "import", "--json"]);
     assert_eq!(imported["failed"], preview["failed"]);
     assert_eq!(imported["run"], preview["run"]);
@@ -1941,7 +1966,7 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
             fixture
                 .db()
                 .query_row(
-                    "SELECT count(*) FROM runs WHERE id=?1",
+                    "SELECT count(*) FROM agent_session_inputs WHERE input_id=?1 AND session_id IS NULL AND imported_sql IS NOT NULL",
                     [input.as_str()],
                     |row| row.get::<_, i64>(0)
                 )
@@ -2007,27 +2032,26 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
     assert_eq!(standalone_history[0]["kind"], "observed");
     assert_eq!(standalone_history[0]["provider_thread"], Value::Null);
     assert_eq!(standalone_history[0]["exec_id"], Value::Null);
-    fixture
-        .db()
-        .execute(
-            "UPDATE runs SET outcome='interrupted' WHERE id=?1",
-            [prior.as_str()],
-        )
-        .unwrap();
-    let conflict = fixture.json(&["session", "import", "--json"]);
-    assert_eq!(
-        conflict["failed"].as_array().unwrap().len(),
-        3,
-        "{conflict}"
-    );
+    assert!(fixture.db().execute(
+        "UPDATE agent_session_inputs SET imported_sql=json_set(imported_sql,'$.outcome','interrupted') WHERE input_id=?1",
+        [prior.as_str()]).is_err());
+    let replay = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(replay["unchanged"], 4);
+    assert_eq!(replay["failed"], preview["failed"]);
     assert_eq!(
         fixture.json(&["session", "history", &saved.id, "--json"]),
         history
     );
-    fixture.db().execute("DELETE FROM runs", []).unwrap();
+    assert!(fixture
+        .db()
+        .execute(
+            "DELETE FROM agent_session_inputs WHERE imported_sql IS NOT NULL",
+            []
+        )
+        .is_err());
     assert_eq!(fixture.json(&["usage", "--days", "0", "--json"]), usage);
     assert_eq!(fixture.count("agent_sessions"), 2);
-    assert_eq!(fixture.count("agent_session_inputs"), 4);
+    assert_eq!(fixture.count("agent_session_inputs"), 6);
     assert!(fixture.launches().is_empty());
 }
 
@@ -2213,7 +2237,7 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
             "{listed}"
         );
     }
-    assert_eq!(fixture.count("runs"), 0);
+    assert_eq!(fixture.retired_run_tables(), 0);
     assert_eq!(fixture.count("agent_sessions"), 4);
     let (interactive, kind, flow, node): (bool, String, String, i64) = fixture
         .db()
@@ -2704,7 +2728,7 @@ fn import_stores_each_old_session_once_with_its_name() {
     assert_eq!(names(), expected);
     assert_eq!(fixture.count("agent_sessions"), 6);
     assert_eq!(
-        fixture.count("runs"),
+        fixture.retired_run_tables(),
         0,
         "import does not recreate Run owners"
     );
@@ -2989,7 +3013,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
 
     // One input per launch, and every reader lists each input once.
     assert_eq!(fixture.count("agent_session_inputs"), 5);
-    assert_eq!(fixture.count("runs"), 0);
+    assert_eq!(fixture.retired_run_tables(), 0);
     let listed =
         |args: &[&str]| -> Vec<Value> { serde_json::from_value(fixture.json(args)).unwrap() };
     let ids = |runs: &[Value]| -> Vec<String> {
@@ -3294,7 +3318,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     assert_eq!(state, "completed");
     no_position_file();
     assert_eq!(invocation_inputs(&fixture, &invocation).len(), 3);
-    assert_eq!(fixture.count("runs"), 0);
+    assert_eq!(fixture.retired_run_tables(), 0);
     let launches = fixture.launches();
     let repeated = fixture.run(&["flow", "resume", &invocation]);
     assert!(repeated.status.success(), "{repeated:?}");

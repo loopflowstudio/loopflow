@@ -123,6 +123,11 @@ before anything is cut. Same script, both paths.
 
 ## What a database can be told
 
+Canonical and development schema validation share an immutable reference cached
+per process by the exact ordered migration SQL. Each validation still reads the
+actual database schema, including constraints, indexes, triggers and foreign keys.
+The cache contains no database validity results or open SQLite connections.
+
 | State | Message |
 | --- | --- |
 | Behind the chain | applies the missing tail and continues |

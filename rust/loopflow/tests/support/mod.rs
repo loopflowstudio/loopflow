@@ -384,7 +384,7 @@ fn register_task_fixture(
                 provider: "linear".to_string(),
                 initiative: "initiative-task-pr-tests".to_string(),
                 synced_at: now.unix_timestamp(),
-                payload: pm_payload,
+                snapshot: serde_json::from_str(&pm_payload).unwrap(),
             })
             .await
             .expect("cache Task PR context");

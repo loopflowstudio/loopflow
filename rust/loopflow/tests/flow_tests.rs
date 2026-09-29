@@ -1052,7 +1052,11 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             String::from_utf8_lossy(&status.stderr)
         );
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-        assert_eq!(status["task_id"], child.task.id.as_str(), "{status}");
+        assert_eq!(
+            status["execution"]["task_id"],
+            child.task.id.as_str(),
+            "{status}"
+        );
 
         let bin = TempDir::new().unwrap();
         let launched = bin.path().join("launched");

@@ -27,7 +27,6 @@ use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::planning::{LinearIssueId, TaskPlan};
-use crate::pm::PmSnapshot;
 use crate::store::{
     open_existing_store, open_registry_for_authority, ProviderAccountId, RegistryUnavailable,
     SharedStore, Store, StoreError,
@@ -779,7 +778,7 @@ fn create_prepared_task(
     } = prepared;
     let project = block_on_task(crate::ops::project::resolve_project_for_task(
         &main_repo,
-        &resolved.snapshot.wave,
+        &resolved.wave,
         &resolved.project.id,
     ))?;
     let project_id = project.id.clone();
@@ -822,7 +821,7 @@ fn create_prepared_task(
                 identifier: resolved.item.identifier.clone(),
                 title: resolved.item.name.clone(),
                 description: resolved.item.description.clone(),
-                pm_snapshot_synced_at: resolved.snapshot.synced_at,
+                pm_snapshot_synced_at: resolved.observed_at,
             },
             wave_id,
             project_id,
@@ -1560,13 +1559,7 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         .await
         .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
         .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
-    let snapshot: PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(|error| {
-        task_error(format!(
-            "cached PM snapshot for Wave {:?} is invalid: {error}. Run `lf wave sync --wave {}` before publishing this Task PR",
-            wave.name(),
-            wave.name(),
-        ))
-    })?;
+    let snapshot = snapshot.snapshot;
     let item = snapshot
         .items
         .iter()
@@ -3802,7 +3795,47 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
     })
 }
 
-pub fn task_status(issue: Option<&str>) -> OpsResult<Task> {
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TaskStatus {
+    pub planning: Option<crate::store::PmTaskRecord>,
+    pub planning_error: Option<String>,
+    pub execution: Option<TaskSnapshot>,
+}
+
+pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
+    let task = block_on_task(async {
+        let store = task_store().await?;
+        match issue {
+            Some(issue) => store.get_task_by_issue(issue).await.map_err(task_error),
+            None => task_for_checkout(&store, repo).await,
+        }
+    })?;
+    let selector = task
+        .as_ref()
+        .map(|task| task.plan.id.as_str())
+        .or(issue)
+        .ok_or_else(|| task_error("this checkout has no Task"))?;
+    let (planning, planning_error) =
+        match crate::ops::pm::read_task_planning(repo, selector, crate::ops::pm::PmRefresh::Auto) {
+            Ok(record) => (Some(record), None),
+            Err(error) if task.is_some() => (None, Some(error.to_string())),
+            Err(error) => return Err(error),
+        };
+    let execution = task
+        .as_ref()
+        .map(|task| {
+            let task = task_execution_status(Some(task.id.as_str()))?;
+            task_snapshot(&task)
+        })
+        .transpose()?;
+    Ok(TaskStatus {
+        planning,
+        planning_error,
+        execution,
+    })
+}
+
+fn task_execution_status(issue: Option<&str>) -> OpsResult<Task> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut task = match issue {
@@ -3830,16 +3863,7 @@ pub fn task_status(issue: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
-            let observed = reconcile_task_pr(&store, &mut task).await?;
-            let user_merged = observed.as_ref().is_some_and(|pr| {
-                pr.phase() == PrPhase::Merged
-                    && pr
-                        .merge_request()
-                        .is_some_and(|request| request.mode == PrMergeMode::User)
-            });
-            if user_merged {
-                reconcile_task_completion(&store, &mut task).await?;
-            }
+            reconcile_task_pr(&store, &mut task).await?;
         }
         Ok(task)
     })
@@ -5047,8 +5071,7 @@ async fn restart_task_async(
             resolved.item.identifier, resolved.project.slug
         )));
     }
-    project.plan =
-        crate::ops::project::project_plan(&resolved.project, resolved.snapshot.synced_at)?;
+    project.plan = crate::ops::project::project_plan(&resolved.project, resolved.observed_at)?;
     project.updated_at = time::OffsetDateTime::now_utc();
     store
         .update_project(&project)
@@ -5069,7 +5092,7 @@ async fn restart_task_async(
         identifier: resolved.item.identifier.clone(),
         title: resolved.item.name.clone(),
         description: resolved.item.description.clone(),
-        pm_snapshot_synced_at: resolved.snapshot.synced_at,
+        pm_snapshot_synced_at: resolved.observed_at,
     };
     task.project_id = project.id;
     task.pm_writeback = PmWritebackState::Current;
@@ -5241,7 +5264,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
 pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> OpsResult<Task> {
     let started = Instant::now();
     loop {
-        let task = task_status(Some(issue))?;
+        let task = task_execution_status(Some(issue))?;
         let status = block_on_task(async {
             let store = task_store().await?;
             task_work_status(&store, &task).await
@@ -6445,12 +6468,15 @@ mod tests {
                     graphql_url: "http://127.0.0.1:1".into(),
                 },
                 || {
-                    let error = super::task_status(None).unwrap_err();
+                    let error = super::task_execution_status(None).unwrap_err();
                     assert!(error.to_string().contains("Task was deleted"), "{error}");
-                    let task = super::task_status(Some("HISTORY-1")).unwrap();
-                    assert_eq!(super::task_status(Some(task.id.as_str())).unwrap(), task);
+                    let task = super::task_execution_status(Some("HISTORY-1")).unwrap();
                     assert_eq!(
-                        super::task_status(Some(task.plan.id.as_str())).unwrap(),
+                        super::task_execution_status(Some(task.id.as_str())).unwrap(),
+                        task
+                    );
+                    assert_eq!(
+                        super::task_execution_status(Some(task.plan.id.as_str())).unwrap(),
                         task
                     );
                     let snapshot = super::task_snapshot(&task).unwrap();
@@ -6958,8 +6984,8 @@ mod tests {
             rank: 0,
             completed: false,
             state: Some("unstarted".into()),
-            project_id: "project-1".into(),
-            project: "runtime".into(),
+            project_id: Some("project-1".into()),
+            project: Some("runtime".into()),
             team_id: "team-1".into(),
             assignee: None,
         };

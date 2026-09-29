@@ -400,7 +400,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .await?
             .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
         let registered = store.list_projects(Some(wave.id())).await?;
-        let projects = decode_pm_planning(wave, &row.payload)?
+        let projects = row.snapshot
             .projects
             .into_iter()
             .map(|project| ProjectSummary {
@@ -839,20 +839,11 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
     else {
         return Ok(None);
     };
-    let mut planning = decode_pm_planning(wave, &row.payload)?;
+    let mut planning = row.snapshot;
     let current = crate::ops::chapter::select_current(wave.name(), &planning.projects)?;
     planning.projects.retain(|project| project.id == current.id);
-    planning.items.retain(|item| item.project_id == current.id);
+    planning.items.retain(|item| item.project_id.as_deref() == Some(current.id.as_str()));
     Ok(Some(planning))
-}
-
-fn decode_pm_planning(wave: &Wave, payload: &str) -> Result<PmSnapshot> {
-    serde_json::from_str(payload).map_err(|err| {
-        anyhow!(
-            "invalid PM snapshot for wave/{}; run `lf wave sync`: {err}",
-            wave.name()
-        )
-    })
 }
 
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
@@ -868,12 +859,7 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         else {
             continue;
         };
-        let Ok(planning) = decode_pm_planning(wave, &row.payload) else {
-            // The Wave's own roadmap row reports its unreadable planning as
-            // unavailable. Keep validating every readable sibling so one stale
-            // snapshot cannot erase unrelated Work from the machine view.
-            continue;
-        };
+        let planning = row.snapshot;
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
         ownership.validate(
             wave.name(),
@@ -899,7 +885,8 @@ async fn snapshot_tasks(
         let runtime_task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
-        let recommended = recommended_flow(&planning.projects, &item.project_id);
+        let recommended =
+            recommended_flow(&planning.projects, item.project_id.as_deref().unwrap_or(""));
         details.push(
             snapshot_task_detail(store, item, runtime_task, recommended, probe_pr_empty).await?,
         );
@@ -937,8 +924,8 @@ async fn snapshot_tasks(
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
             state: None,
-            project_id: plan.id.clone(),
-            project: plan.slug.clone(),
+            project_id: Some(plan.id.clone()),
+            project: Some(plan.slug.clone()),
             team_id: String::new(),
             assignee: None,
         };
@@ -2136,8 +2123,8 @@ mod tests {
             rank: 1,
             completed: false,
             state: Some("unstarted".into()),
-            project_id: "current".into(),
-            project: "current".into(),
+            project_id: Some("current".into()),
+            project: Some("current".into()),
             team_id: "team".into(),
             assignee: None,
         };
@@ -2152,12 +2139,12 @@ mod tests {
             provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 1,
-            payload: serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
                 "initiative_ids":["initiative"], "team_ids":["team"]
-            }], "items":items})
-            .to_string(),
+            }], "items":items}))
+            .unwrap(),
         };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
@@ -2169,12 +2156,10 @@ mod tests {
             .unwrap();
         for project_id in ["current", "next"] {
             let mut stale = snapshot.clone();
-            let mut payload: serde_json::Value = serde_json::from_str(&stale.payload).unwrap();
-            payload["projects"][0]["id"] = serde_json::json!(project_id);
-            for item in payload["items"].as_array_mut().unwrap() {
-                item["project_id"] = serde_json::json!(project_id);
+            stale.snapshot.projects[0].id = project_id.to_string();
+            for item in &mut stale.snapshot.items {
+                item.project_id = Some(project_id.to_string());
             }
-            stale.payload = payload.to_string();
             store.put_pm_snapshot(stale).await.unwrap();
             let reopened = Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2228,11 +2213,11 @@ mod tests {
         ));
         store.put_pm_snapshot(crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
-            payload: serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"first", "slug":"first", "name":"First chapter", "summary":"",
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
-            }], "items":[]}).to_string(),
+            }], "items":[]})).unwrap(),
         }).await.unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
@@ -2241,7 +2226,8 @@ mod tests {
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        unreadable.payload = "{}".into();
+        unreadable.snapshot.projects.clear();
+        unreadable.snapshot.items.clear();
         store.put_pm_snapshot(unreadable).await.unwrap();
         assert!(matches!(
             super::project_planning(&store, &wave).await,

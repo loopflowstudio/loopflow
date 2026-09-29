@@ -1012,8 +1012,31 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             }
         }
         TaskCommand::Status { issue, json } => {
-            let task = loopflow::ops::task::task_status(issue.as_deref())?;
-            print_task(&task, *json)
+            let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                if let Some(planning) = &status.planning {
+                    println!("{} · {}", planning.item.identifier, planning.item.name);
+                    println!(
+                        "Planning: {} · observed at {}",
+                        planning.item.state.as_deref().unwrap_or("unknown"),
+                        planning.observed_at
+                    );
+                    if planning.project.is_none() {
+                        println!("No Project assigned; managed work requires ownership.");
+                    }
+                }
+                if let Some(error) = &status.planning_error {
+                    println!("Planning unavailable: {error}");
+                }
+                if let Some(execution) = &status.execution {
+                    print_task_snapshot(execution, false)?;
+                } else {
+                    println!("No execution allocated.");
+                }
+            }
+            Ok(())
         }
         TaskCommand::Changes { issue, base, json } => {
             let snapshot = loopflow::ops::task::task_changes(issue, base)?;

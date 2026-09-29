@@ -334,7 +334,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             provider: "linear".to_string(),
             initiative: "initiative-alpha".to_string(),
             synced_at: 1,
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .await
         .unwrap();
@@ -397,7 +400,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             provider: "linear".to_string(),
             initiative: "initiative-occupied".to_string(),
             synced_at: 1,
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .await
         .unwrap();
@@ -751,7 +757,10 @@ async fn relocation_refuses_meaningful_destination_history() {
             provider: "linear".to_string(),
             initiative: "initiative-pm".to_string(),
             synced_at: 1,
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .await
         .unwrap();

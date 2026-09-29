@@ -923,7 +923,7 @@ mod tests {
                 provider: "linear".to_string(),
                 initiative: "initiative-1".to_string(),
                 synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-                payload: serde_json::to_string(&snapshot).unwrap(),
+                snapshot,
             })
             .await
             .unwrap();

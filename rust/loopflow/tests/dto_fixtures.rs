@@ -71,7 +71,10 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
     assert_eq!(snapshot.projects[0].flow, "feature");
     assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
     assert_eq!(snapshot.items[0].identifier, "LOO-2");
-    assert_eq!(snapshot.items[0].project_id, "project-gmail");
+    assert_eq!(
+        snapshot.items[0].project_id.as_deref(),
+        Some("project-gmail")
+    );
     assert_eq!(snapshot.items[0].team_id, "team-loo");
 
     let round_trip = serde_json::to_string(&snapshot).unwrap();
@@ -82,15 +85,15 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
 }
 
 #[test]
-fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
+fn pm_show_requires_team_identity_even_without_project_ownership() {
     let mut fixture: serde_json::Value = serde_json::from_str(PM_SHOW).unwrap();
     fixture["items"][0]
         .as_object_mut()
         .unwrap()
-        .remove("project_id");
+        .remove("team_id");
 
     let error = serde_json::from_value::<PmShowResult>(fixture).unwrap_err();
-    assert!(error.to_string().contains("project_id"));
+    assert!(error.to_string().contains("team_id"));
 }
 
 #[test]

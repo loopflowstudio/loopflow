@@ -10,7 +10,7 @@ use loopflow::machine_install::{
     self, ActivationTargets, ArtifactRole, MachineInstallState, RecoveryOwner, SwitchPhase,
     SwitchReceipt,
 };
-use loopflow::ops::task::{task_snapshot, task_status};
+use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
 use loopflow::store::PmSnapshotRow;
 use loopflow::work::task::TaskEventKind;
@@ -492,7 +492,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
             String::from_utf8_lossy(&status.stderr)
         );
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-        assert_eq!(status["agent"], expected);
+        assert_eq!(status["execution"]["agent"], expected);
     }
     // The private snapshot has no installed input bundle or completion authority.
     let branch_store = runtime
@@ -844,6 +844,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             )
             .unwrap();
         let status = read(&status_args);
+        let status = &status["execution"];
         assert_eq!(status["execution"]["state"], "blocked");
         assert_eq!(status["execution"]["captured"], before.current_attempt.as_ref().unwrap().captured);
         assert!(status["execution"]["reason"]
@@ -997,7 +998,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
             provider: "linear".to_string(),
             initiative: "initialization-initiative".to_string(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         }))
         .expect("seed roadmap planning");
     let run_lf = |args: &[&str]| {
@@ -1016,6 +1017,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         String::from_utf8_lossy(&status.stderr)
     );
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
+    let status = &status["execution"];
     assert_eq!(status["execution"]["state"], "idle");
     assert_eq!(status["runs"], serde_json::json!([]));
     assert_eq!(status["runs_truncated"], false);
@@ -1050,8 +1052,10 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("roadmap condition reason")
         .contains("is initializing worktree"));
-    let projected = task_snapshot(&task_status(Some("INF-123")).expect("read Task"))
-        .expect("project Task status");
+    let projected = task_status(repo.path(), Some("INF-123"))
+        .expect("read Task")
+        .execution
+        .expect("execution");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));
 
     rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -1071,6 +1075,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale: serde_json::Value =
         serde_json::from_slice(&stale.stdout).expect("stale status JSON");
+    let stale = &stale["execution"];
     assert_eq!(stale["actions"]["recommended"], "no_action");
     assert!(stale["actions"]["reason"]
         .as_str()
@@ -1113,8 +1118,11 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let status = task_status(Some("INF-123")).expect("status survives the absent worktree");
-    let snapshot = task_snapshot(&status).expect("project missing-worktree status");
+    let status = task_status(&missing_path, Some("INF-123"))
+        .expect("status survives the absent worktree")
+        .execution
+        .expect("execution");
+    let snapshot = status.clone();
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));
     assert!(snapshot

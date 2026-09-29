@@ -139,9 +139,9 @@ pub struct PmItem {
     /// Provider workflow category; absent in historical snapshots.
     pub state: Option<String>,
     /// Stable owning Project id. Task-to-Wave resolution follows this edge.
-    pub project_id: String,
+    pub project_id: Option<String>,
     /// Canonical Project slug for display only.
-    pub project: String,
+    pub project: Option<String>,
     /// Stable owning repository Team id.
     pub team_id: String,
     /// Provider user ID of the assignee, if any.
@@ -149,9 +149,9 @@ pub struct PmItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct PmSnapshot {
-    pub(crate) projects: Vec<PmProject>,
-    pub(crate) items: Vec<PmItem>,
+pub struct PmSnapshot {
+    pub projects: Vec<PmProject>,
+    pub items: Vec<PmItem>,
 }
 
 /// Validates provider ownership across cached Wave snapshots presented together.
@@ -234,16 +234,16 @@ fn validate_snapshot_ownership(
             )));
         }
         let project = projects_by_id
-            .get(item.project_id.as_str())
+            .get(item.project_id.as_deref().unwrap_or(""))
             .ok_or_else(|| {
                 PmError::Message(format!(
-                    "Linear task {} in wave/{wave} points to missing Project {}",
+                    "Linear task {} in wave/{wave} points to missing Project {:?}",
                     item.identifier, item.project_id
                 ))
             })?;
-        if item.project != project.slug {
+        if item.project.as_deref() != Some(project.slug.as_str()) {
             return Err(PmError::Message(format!(
-                "Linear task {} in wave/{wave} names Project slug `{}`, but Project {} has slug `{}`",
+                "Linear task {} in wave/{wave} names Project slug `{:?}`, but Project {} has slug `{}`",
                 item.identifier, item.project, project.id, project.slug
             )));
         }

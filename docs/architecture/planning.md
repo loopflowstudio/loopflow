@@ -2,6 +2,7 @@
 
 ```bash
 lf --wave product wave/operate
+lf task status INF-124 --json
 lf task checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
@@ -35,6 +36,26 @@ newest-looking names never win. Status mutations do not form a distributed
 transaction. Another Home observes the new plan through normal synchronization.
 There is no Chapter row, packet or local switch. See [Waves](../waves.md#the-planning-model)
 for adoption, default Flow and disposition details.
+
+## Inspect planning before starting execution
+
+```bash
+lf task status INF-124 --json
+```
+
+Status returns `planning`, `planning_error`, and optional `execution`. An issue
+without a Project stays inspectable; operations requiring ownership report the
+missing relationship. Status may refresh planning and observe a PR, but never
+completes a Task. Reading an issue allocates no Task execution or worktree.
+
+Exact lookups and Wave views share normalized SQLite entities scoped to a
+repository and provider. An empty cache fetches the requested issue before
+reporting absence; provider errors remain resolution failures. Bounded refresh
+retains the last successful observation and its timestamp on failure. Lists
+reference shared Project/Task facts; omission alone never proves deletion.
+A null detail response invalidates cached admission until a complete detail
+read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
+including after stale list ingestion.
 
 ## Capture a Flow once
 

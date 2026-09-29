@@ -12,7 +12,6 @@ use super::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
 use crate::child::ChildRef;
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
-use crate::pm::PmSnapshot;
 use crate::store::{open_ephemeral_store, StorageConfig};
 use crate::work::task::{
     AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
@@ -617,7 +616,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
             .block_on(fixture.store.pm_snapshot(wave.id()))
             .unwrap()
             .unwrap();
-        let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();
+        let snapshot = row.snapshot;
         assert_eq!(snapshot.items.is_empty(), fail_snapshot);
         if fail_local {
             connection
@@ -710,10 +709,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
         .block_on(fixture.store.pm_snapshot(wave.id()))
         .unwrap()
         .unwrap();
-    assert!(serde_json::from_str::<PmSnapshot>(&row.payload)
-        .unwrap()
-        .items
-        .is_empty());
+    assert!(row.snapshot.items.is_empty());
     runtime.block_on(async {
         let state = state.lock().await;
         assert_eq!(state.deletion_writes, 1);
@@ -909,7 +905,7 @@ fi
             .map_or(item.identifier.as_str(), |task| task.id.as_str());
         let complete = |summary: &str| match merge {
             None => crate::ops::task::task_complete(&repo, selector, summary.into()),
-            Some(PrMergeMode::User) => crate::ops::task::task_status(Some(selector)).map(Some),
+            Some(PrMergeMode::User) => crate::ops::task::task_complete(&repo, selector, summary.into()),
             Some(PrMergeMode::Auto) => runtime.block_on(async {
                 let task = task.as_ref().unwrap();
                 let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);

@@ -89,7 +89,7 @@ fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, 
             provider: "linear".to_string(),
             initiative: initiative.to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload,
+            snapshot: serde_json::from_str(&payload).unwrap(),
         })
         .unwrap();
 }

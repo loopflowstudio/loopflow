@@ -1132,14 +1132,17 @@ impl LinearClient {
 
     /// Resolve one Issue directly by UUID or identifier, including its owning
     /// Project and Team. This is the online Task-to-Wave ownership edge.
-    pub async fn issue_ownership(&self, issue_id: &str) -> PmResult<(PmItem, PmProject)> {
+    pub async fn issue_ownership(
+        &self,
+        issue_id: &str,
+    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
         let response: IssueOwnershipData = self
             .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
             .await?;
-        let issue = response.issue.ok_or_else(|| {
-            PmError::Message(format!("no Linear issue with id or identifier {issue_id}"))
-        })?;
-        issue.into_ownership()
+        response
+            .issue
+            .map(OwnedIssueNode::into_ownership)
+            .transpose()
     }
 
     pub async fn find_project(&self, project_id: &str) -> PmResult<Option<PmProject>> {
@@ -1759,9 +1762,8 @@ impl IssueNode {
         } else {
             self.identifier
         };
-        let project = self
-            .project
-            .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Project")))?;
+        let project_id = self.project.as_ref().map(|project| project.id.clone());
+        let project = self.project.map(|project| project_slug(&project.name));
         let team = self
             .team
             .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Team")))?;
@@ -1774,8 +1776,8 @@ impl IssueNode {
             rank,
             completed,
             state: self.state.map(|state| state.r#type),
-            project_id: project.id,
-            project: project_slug(&project.name),
+            project_id,
+            project,
             team_id: team.id,
             assignee: self.assignee.map(|assignee| assignee.id),
         })
@@ -1796,32 +1798,37 @@ struct IssueOwnershipData {
 #[derive(Deserialize)]
 struct OwnedIssueNode {
     id: String,
-    #[serde(default)]
     identifier: String,
+    #[serde(deserialize_with = "_deserialize_nullable")]
     url: Option<String>,
-    #[serde(default)]
     title: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "_deserialize_nullable")]
     description: Option<String>,
-    #[serde(rename = "prioritySortOrder", default)]
+    #[serde(rename = "prioritySortOrder")]
     priority_sort_order: f64,
-    #[serde(rename = "sortOrder", default)]
+    #[serde(rename = "sortOrder")]
     sort_order: f64,
-    #[serde(default)]
+    #[serde(deserialize_with = "_deserialize_nullable")]
     assignee: Option<IdNode>,
-    #[serde(default)]
+    #[serde(deserialize_with = "_deserialize_nullable")]
     state: Option<WorkflowStateRef>,
-    #[serde(default)]
+    #[serde(deserialize_with = "_deserialize_nullable")]
     team: Option<IdNode>,
-    #[serde(default)]
+    #[serde(deserialize_with = "_deserialize_nullable")]
     project: Option<ProjectNode>,
 }
 
+fn _deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 impl OwnedIssueNode {
-    fn into_ownership(self) -> PmResult<(PmItem, PmProject)> {
-        let project = self.project.ok_or_else(|| {
-            PmError::Message(format!("Linear issue {} has no Project", self.identifier))
-        })?;
+    fn into_ownership(self) -> PmResult<(PmItem, Option<PmProject>)> {
+        let project = self.project;
         let item = IssueNode {
             id: self.id,
             identifier: self.identifier,
@@ -1832,14 +1839,14 @@ impl OwnedIssueNode {
             sort_order: self.sort_order,
             assignee: self.assignee,
             state: self.state,
-            project: Some(ProjectRef {
+            project: project.as_ref().map(|project| ProjectRef {
                 id: project.id.clone(),
                 name: project.name.clone(),
             }),
             team: self.team,
         }
         .into_pm_item(0)?;
-        Ok((item, project.into_pm_project()?))
+        Ok((item, project.map(ProjectNode::into_pm_project).transpose()?))
     }
 }
 
@@ -3175,8 +3182,9 @@ mod tests {
             base_url,
         );
 
-        let (item, project) = client.issue_ownership("LOO-42").await.unwrap();
-        assert_eq!(item.project_id, "project-api");
+        let (item, project) = client.issue_ownership("LOO-42").await.unwrap().unwrap();
+        let project = project.unwrap();
+        assert_eq!(item.project_id.as_deref(), Some("project-api"));
         assert_eq!(item.team_id, "team-loo");
         assert_eq!(project.initiative_ids, ["initiative-product"]);
         assert_eq!(project.team_ids, ["team-loo"]);

@@ -6,14 +6,69 @@ current design, including repository-owned, worktree-sensitive Wave definitions,
 remote main as the shared baseline, per-Wave Initiatives and portable `A/B` names.
 It authorizes completion of this review Session and continuation through the saved
 Flow, not an Advance/Iterate verdict, Task completion or installation promotion.
-Remaining policy choices stay explicit in questions.md and do not block the first
-implementation slice. No implementation has begun. Source inspection is against
-`a3820bf7e`.
+Remaining policy choices stay explicit in questions.md. The first planning slice
+is implemented locally; the complete design is not finished. Review source
+inspection was against `a3820bf7e`; implementation evidence follows below.
 Review feedback: [repository connection and Task validity](repository-planning-connection-review.md).
 Open choices: [questions](questions.md).
 Research: [Apollo, Relay, Realm and PowerSync](planning-store-sync-research.md).
 Command walkthrough: [Dave takes an idea to running work](idea-to-task-command-story.md).
 Wave mapping and remaining migration details: [Wave existence and Linear migration](wave-existence-and-linear-migration.md).
+
+## Implementation checkpoint — 2026-09-29
+
+The shared planning reader now ingests exact provider issues before resolving
+ownership. It stores Project-less issues, resolves identifier/UUID aliases, and
+allocates no execution. Wave reads assemble normalized entity records and Project
+membership; the forward draft migrates existing payloads and drops `pm_snapshots`.
+All production payload consumers now read typed views. Detail queries preserve
+known list order. Missing detail invalidates cached admission without claiming
+provider deletion; existing confirmed-deletion evidence still fences stale lists.
+Malformed complete-detail responses and GraphQL errors preserve the last good
+observation. Status returns planning plus optional execution and never completes a
+Task from a PR observation. This is a partial implementation, not Task completion.
+
+Focused local proofs passed: six simulated-provider lookup tests, populated
+snapshot migration with confirmed-removal protection, the existing idempotent
+creation/edit and explicit post-merge completion proofs, public CLI planning-only
+status by identifier and UUID, repeated merged-PR status without completion, and
+PM DTO fixtures. PR-cache failure and missing-worktree status proofs also passed.
+A first installation-script run caught two unmigrated test fixtures; those were
+fixed. The final container run passed all five checks, including the new cached
+planning CLI proof; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`git diff --check`, and `uv run python scripts/check_migrations.py` passed.
+No live Linear provider proof or full command-story demonstration has run.
+
+The authorized LOO-298 coordination retry through official lf again failed with
+`Task "LOO-298" is not registered`. No Run launched and no contract was obtained.
+Shared execution migrations remain blocked; none were authored in this slice.
+Planning normalization does not alter Task/Run/claim identities or execution tables.
+
+Remaining implementation, preserving the approved single-PR delivery boundary:
+
+- Provider revision ordering and webhook convergence still need integration. The
+  current writer rejects older acquisition timestamps and retains confirmed
+  tombstones, but second-resolution acquisition time is not provider revision
+  evidence. Do not claim the complete ordering contract from these tests.
+- Finish local planning identities/lifecycle and connection transition controls.
+  The new normalized interface currently ingests Linear observations; it does
+  not yet implement the approved local-only lifecycle.
+- Resolve cached-Task outage admission, enforce planning validity at all managed
+  launch/resume/worker boundaries, and prove ordinary Flow and Session independence.
+  Cache invalidation in this slice is not that complete execution contract.
+- Obtain LOO-298's current execution owner before shared migrations. Then implement
+  cross-Home execution location, runtime selection/pins, and delayed startup.
+- Implement contextual Wave imports and remote-main baseline, explicit Wave
+  creation/linking, portable Initiative hierarchy, and predecessor completion.
+- Finish design auto-placement and launch-plan handoff, consumer/action DTOs and
+  the complete two-store public-CLI acceptance sequence. The new CLI status shape
+  is planning/execution; existing execution snapshots remain unchanged.
+
+Review findings fixed in code: typed snapshot consumers replace serialized ones;
+Project-less existence is separate from ownership; incomplete detail cannot clear
+known relationships; list omission does not erase known Tasks; detail does not
+reset list order; cache invalidation does not manufacture deletion; multi-query
+Wave reads use a read transaction; and status no longer completes work.
 
 ## Command experience: start with an idea
 
@@ -615,10 +670,10 @@ invalid Task Flow; merging stores/accounts/quotas; a new sync service or offline
 mutation queue; remote fleet discovery; replacing LOO-298's execution schema;
 Wave deletion policy; automatic chapter rotation; host promotion.
 
-Current first slice: refresh an explicit connected issue into local planning and
-read it through the shared store without allocating execution. Prove a missing
-Project, truly missing selector and unavailable provider, then wire managed
-validity and ordinary Flow independence. Jack approved proceeding with this
+Current first slice now refreshes an explicit connected issue into local planning
+and reads it through the shared store without allocating execution. Focused proofs
+cover a missing Project, missing selector and unavailable provider. Managed
+validity and ordinary Flow independence still require the remaining integration. Jack approved proceeding with this
 architecture. The cached-Task outage policy and connection-transition semantics
 remain explicit in questions.md; they must not be silently inferred from library
 behavior. They do not prevent the first slice. No Flow navigation is selected here.

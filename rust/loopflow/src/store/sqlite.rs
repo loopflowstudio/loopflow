@@ -13,9 +13,9 @@ use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderAccountSelection, ProviderTokenReplacement, RoutingState, RunEventRow, StoreError,
-    StoreResult, WaveLocatorUpdate,
+    AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, ProviderAccountSelection,
+    ProviderTokenReplacement, RoutingState, RunEventRow, StoreError, StoreResult,
+    WaveLocatorUpdate,
 };
 use crate::work::wave::{Wave, WaveLocator};
 
@@ -27,6 +27,7 @@ mod execs;
 mod flow_inventory;
 mod flows;
 mod metrics;
+mod planning;
 mod pr_landings;
 mod session_events;
 pub(crate) mod sessions;
@@ -700,69 +701,6 @@ impl SqliteStore {
         }
         conn.execute_batch(&crate::store::migrations::migration_sql_for_test(name))?;
         Ok(())
-    }
-
-    pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO pm_snapshots (wave_id, provider, initiative, synced_at, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(wave_id) DO UPDATE SET
-               provider = excluded.provider,
-               initiative = excluded.initiative,
-               synced_at = excluded.synced_at,
-               payload = excluded.payload",
-            params![
-                snapshot.wave_id,
-                snapshot.provider,
-                snapshot.initiative,
-                snapshot.synced_at,
-                snapshot.payload
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut snapshot = conn
-            .query_row(
-                "SELECT wave_id, provider, initiative, synced_at, payload
-             FROM pm_snapshots WHERE wave_id = ?1",
-                params![wave_id],
-                |row| {
-                    Ok(PmSnapshotRow {
-                        wave_id: row.get(0)?,
-                        provider: row.get(1)?,
-                        initiative: row.get(2)?,
-                        synced_at: row.get(3)?,
-                        payload: row.get(4)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(StoreError::from)?;
-        if let Some(snapshot) = &mut snapshot {
-            // Leave malformed snapshots to the existing diagnostic owner.
-            if let Ok(mut payload) = serde_json::from_str::<serde_json::Value>(&snapshot.payload) {
-                if let Some(items) = payload
-                    .get_mut("items")
-                    .and_then(serde_json::Value::as_array_mut)
-                {
-                    let removed = deleted_task_issues_in(&conn, wave_id)?;
-                    let count = items.len();
-                    items.retain(|item| {
-                        item.get("id")
-                            .and_then(serde_json::Value::as_str)
-                            .is_none_or(|id| !removed.contains(id))
-                    });
-                    if items.len() != count {
-                        snapshot.payload = serde_json::to_string(&payload)?;
-                    }
-                }
-            }
-        }
-        Ok(snapshot)
     }
 
     pub(crate) fn retain_task_issue_identity(
@@ -1979,7 +1917,7 @@ impl SqliteStore {
             blockers.push(format!("{children} child Waves"));
         }
         let snapshots: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM pm_snapshots WHERE wave_id = ?1",
+            "SELECT COUNT(*) FROM pm_wave_sync WHERE wave_id = ?1",
             params![wave_id],
             |row| row.get(0),
         )?;

@@ -53,15 +53,22 @@ pub struct RunEventRow {
     pub error: Option<String>,
 }
 
-/// One wave's locally readable PM projection. Linear owns the payload; sync
-/// replaces this row atomically so readers never observe a partial refresh.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One Wave's planning view, assembled from shared entities and membership.
+#[derive(Debug, Clone, PartialEq)]
 pub struct PmSnapshotRow {
     pub wave_id: WaveId,
     pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
-    pub payload: String,
+    pub snapshot: crate::pm::PmSnapshot,
+}
+
+/// A planning observation; neither Project ownership nor execution is required.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PmTaskRecord {
+    pub item: crate::pm::PmItem,
+    pub project: Option<crate::pm::PmProject>,
+    pub observed_at: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -453,6 +460,50 @@ impl Store {
 
     pub async fn put_pm_snapshot(&self, snapshot: PmSnapshotRow) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| store.put_pm_snapshot(&snapshot)).await
+    }
+
+    pub async fn put_pm_task(
+        &self,
+        repo: &str,
+        provider: &str,
+        record: PmTaskRecord,
+    ) -> StoreResult<()> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.put_pm_task(&repo, &provider, &record)
+        })
+        .await
+    }
+
+    pub async fn pm_task(
+        &self,
+        repo: &str,
+        provider: &str,
+        selector: &str,
+    ) -> StoreResult<Option<PmTaskRecord>> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.pm_task(&repo, &provider, &selector)
+        })
+        .await
+    }
+
+    pub async fn invalidate_pm_task(
+        &self,
+        repo: &str,
+        provider: &str,
+        selector: &str,
+    ) -> StoreResult<()> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.invalidate_pm_task(&repo, &provider, &selector)
+        })
+        .await
     }
 
     pub(crate) async fn retain_task_issue_identity(
@@ -3183,14 +3234,16 @@ mod tests {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: 1,
-            payload: "{\"version\":1}".to_string(),
+            snapshot: crate::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         };
         store
             .put_pm_snapshot(snapshot.clone())
             .await
             .expect("write snapshot");
         snapshot.synced_at = 2;
-        snapshot.payload = "{\"version\":2}".to_string();
         store
             .put_pm_snapshot(snapshot.clone())
             .await

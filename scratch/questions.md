@@ -117,3 +117,21 @@ Next implementation action: build and prove the shared normalized planning
 lookup, including cache miss, missing Project, unknown selector and provider
 failure. Resolve the outage policy before claiming offline managed execution.
 This review records no Advance/Iterate verdict; the saved Flow owns navigation.
+
+## Implementation observations — 2026-09-29
+
+The official coordination retry for LOO-298 again returned
+`Task "LOO-298" is not registered`; no Run or owner reply exists. Keep shared
+execution migrations blocked. Planning-only storage work proceeds independently.
+
+Reversible storage choices: normalize provider facts by canonical repository,
+provider and UUID; keep Wave Project membership separately; never erase Task
+facts on list omission. An empty exact lookup invalidates cached admission but
+is not a provider deletion receipt. Full detail repairs that invalidation.
+Complete-detail responses require nullable relationship fields to be present;
+malformed/partial payloads cannot clear known facts. Detail does not observe rank,
+so retain existing relative order when the Project is unchanged.
+
+These choices do not settle offline managed admission, Wave migration controls,
+or provider revision ordering. The complete design remains unfinished; the working
+design contains the remaining implementation list and proof limits.

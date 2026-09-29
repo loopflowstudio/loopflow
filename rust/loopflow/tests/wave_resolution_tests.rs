@@ -166,7 +166,10 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .expect("seed pm snapshot");
     wave

@@ -636,8 +636,13 @@ This copies source into a disposable Linux container and creates an OS account
 whose installation records select the compiled CLI. An ELF trailer gives
 the installed CLI a distinct identity: byte-identical copies are installed too,
 regardless of path. No host Home, credentials or installation is mounted.
-These installation tests run only through
-this harness (`task-installation` in CI); ordinary Rust runs mark them ignored.
+The harness also runs planning-only `task status` by identifier and UUID against
+normalized local planning, proving that inspection creates no execution or worktree.
+That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
+acquisition with simulated Linear responses, including missing Projects, partial
+responses, absence, and provider failure. Neither is configured live-provider proof.
+The installation-authority tests run only through this harness (`task-installation`
+in CI); ordinary Rust runs mark those cases ignored.
 They prove Task continuation’s auto-merge revocation and review continuity, agent
 selection read from the installed database while branch reads remain private, and direct-open
 refusal without changing the owned development database/WAL bytes. Review

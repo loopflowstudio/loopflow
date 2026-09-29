@@ -94,7 +94,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             provider: "linear".to_string(),
             initiative: "initiative-infrastructure".to_string(),
             synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
 }
@@ -350,7 +350,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
 }
@@ -639,7 +639,7 @@ Count dispatched Task loops that settle without rescue.
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
-            payload: serde_json::to_string(&project_payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(project_payload).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
     select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");

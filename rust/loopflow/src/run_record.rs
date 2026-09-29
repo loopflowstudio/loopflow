@@ -475,15 +475,7 @@ impl RunRecorder {
                     let result = match message {
                         RecorderMessage::Event(event) => {
                             let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
-                            if matches!(event.event, RunEvent::Usage { .. }
-                                | RunEvent::ProviderAttemptStarted { .. }
-                                | RunEvent::ProviderAttemptFinished { .. }
-                                | RunEvent::ProviderAccountSelected { .. }
-                                | RunEvent::ProviderSessionObserved { .. }) {
-                                result.and(observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event)))
-                            } else {
-                                result
-                            }
+                            result.and(observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event)))
                         }
                         RecorderMessage::Terminal(receipt) => observe("terminal.json".into(), receipt.ended_at, serde_json::json!(receipt)),
                         RecorderMessage::Drain(acknowledge) => {
@@ -919,18 +911,13 @@ impl TurnProse {
     }
 }
 
-/// Read the last completed provider conclusion without exposing raw event shape.
-pub(crate) fn read_final_answer(dir: &Path) -> std::io::Result<Option<FinalAnswer>> {
-    let file = match File::open(dir.join("events.jsonl")) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
+/// Reduce retained observations; only a successful provider turn supplies a conclusion.
+pub(crate) fn final_answer(events: Vec<serde_json::Value>) -> std::io::Result<Option<FinalAnswer>> {
     let mut turns = HashMap::<String, TurnProse>::new();
     let mut answer = None;
-    for line in BufReader::new(file).lines() {
+    for event in events {
         let envelope: EventEnvelope =
-            serde_json::from_str(&line?).map_err(std::io::Error::other)?;
+            serde_json::from_value(event).map_err(std::io::Error::other)?;
         if envelope.schema_version != SCHEMA_VERSION {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -1927,6 +1914,11 @@ impl CaptureHandle {
         });
     }
 
+    pub(crate) fn final_answer(&self) -> StoreResult<Option<FinalAnswer>> {
+        let capture = self.0.lock().expect("Run capture mutex poisoned");
+        row_store(&capture.dir)?.input_final_answer(&capture.manifest.run_id)
+    }
+
     pub(crate) fn finish(&self, outcome: &str) -> StoreResult<()> {
         self.0
             .lock()
@@ -2639,9 +2631,9 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        read_final_answer, read_provider_clients, read_provider_session, read_run_snapshot,
-        remove_provider_client, write_provider_client, CaptureHandle, RunLaunchRequest,
-        RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
+        read_provider_clients, read_provider_session, read_run_snapshot, remove_provider_client,
+        write_provider_client, CaptureHandle, RunLaunchRequest, RunManifest, RunSpec,
+        SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
@@ -3247,8 +3239,9 @@ mod tests {
         });
         capture.finish("completed").unwrap();
 
+        fs::remove_dir_all(capture.artifact_dir()).unwrap();
         assert_eq!(
-            read_final_answer(&capture.artifact_dir()).unwrap(),
+            capture.final_answer().unwrap(),
             Some(super::FinalAnswer {
                 text: "final report".to_string(),
                 exact: true,
@@ -3277,8 +3270,9 @@ mod tests {
         });
         capture.finish("completed").unwrap();
 
+        fs::remove_dir_all(capture.artifact_dir()).unwrap();
         assert_eq!(
-            read_final_answer(&capture.artifact_dir()).unwrap(),
+            capture.final_answer().unwrap(),
             Some(super::FinalAnswer {
                 text: "working\nfinal report".to_string(),
                 exact: false,

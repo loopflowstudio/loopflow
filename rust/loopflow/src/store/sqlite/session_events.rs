@@ -10,6 +10,28 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 impl SqliteStore {
+    /// Original input order survives importing earlier observations after later ones.
+    pub(crate) fn input_events(&self, input: &RunId) -> StoreResult<Vec<Value>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT e.payload FROM session_events e
+             JOIN agent_session_inputs i ON i.session_id=e.session_id AND i.input_id=?1
+             WHERE e.kind='observed' AND substr(e.receipt_key,1,length(?1)+14)=?1||':events.jsonl:'
+             ORDER BY CAST(substr(e.receipt_key,length(?1)+15) AS INTEGER),e.seq",
+        )?;
+        let rows = query.query_map([input.as_str()], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str::<Value>(&row?)?["evidence"].clone()))
+            .collect()
+    }
+
+    pub(crate) fn input_final_answer(
+        &self,
+        input: &RunId,
+    ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
+        crate::run_record::final_answer(self.input_events(input)?)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
+    }
+
     pub(crate) fn retain_session_observation(
         &self,
         session: &crate::session::AgentSession,
@@ -118,7 +140,8 @@ impl SqliteStore {
         self.read_history(session, after, limit, None)
     }
 
-    pub(super) fn history_for_input(
+    /// Keep usage, provenance and unknown evidence; transcript payloads belong to detail.
+    pub(super) fn summary_for_input(
         &self,
         session: &str,
         input: &RunId,
@@ -144,6 +167,11 @@ impl SqliteStore {
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
              WHERE e.session_id=?1 AND e.seq>?2
              AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':'))
+             AND (?4 IS NULL OR CASE WHEN json_valid(e.payload) THEN
+                 COALESCE(json_extract(e.payload,'$.evidence.schema_version'),0)!=1 OR
+                 COALESCE(json_extract(e.payload,'$.evidence.type'),'') NOT IN
+                     ('activity','handoff','user_input','conversation','text','tool_use','result','provider_output')
+                 ELSE 1 END)
              ORDER BY e.seq LIMIT ?3",
         )?;
         let rows = query.query_map(
@@ -216,6 +244,47 @@ mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    #[test]
+    fn summary_reads_usage_without_hydrating_conversation_text() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.conn.lock().unwrap().execute_batch(
+            "INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+             VALUES('conversation','run_00000000000000000000000000000001','Retained','human',1,'conversation',1,1,'/fixture');
+             INSERT INTO agent_session_inputs(input_id,session_id) VALUES('run_00000000000000000000000000000001','conversation');"
+        ).unwrap();
+        let input = crate::durable::RunId::parse("run_00000000000000000000000000000001").unwrap();
+        let session = store.session("conversation").unwrap().unwrap();
+        let text = "retained transcript ".repeat(4096);
+        let events = [
+            json!({"schema_version":1,"seq":0,"type":"conversation","event":{"type":"text_delta","turn_id":"turn","content":text}}),
+            json!({"schema_version":1,"seq":1,"type":"usage","usage":{"input_tokens":12}}),
+            json!({"unparsed":"partial historical event"}),
+        ];
+        for (seq, evidence) in events.iter().enumerate() {
+            let source = format!("events.jsonl:{seq}");
+            store
+                .retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        input_id: input.clone(),
+                        source: source.clone(),
+                        observed_at: 1,
+                        task_id: None,
+                        wave_id: None,
+                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
+                    },
+                )
+                .unwrap();
+        }
+        let summary = store.summary_for_input(&session.id, &input).unwrap();
+        assert_eq!(summary.len(), 2);
+        assert_eq!(summary[0].payload["evidence"], events[1]);
+        assert_eq!(summary[1].payload["evidence"], events[2]);
+        assert_eq!(store.input_events(&input).unwrap(), events);
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap().len(), 3);
+    }
 
     #[test]
     fn recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts() {

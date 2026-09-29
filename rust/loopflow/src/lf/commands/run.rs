@@ -711,9 +711,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<crate::run_rec
         }
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Run completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(crate::run_record::read_final_answer(
-            &capture.artifact_dir(),
-        )?),
+        (Ok(()), Ok(())) => Ok(capture.final_answer()?),
     }
 }
 

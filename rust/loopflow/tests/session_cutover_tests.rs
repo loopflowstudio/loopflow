@@ -1719,6 +1719,93 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
 }
 
 #[test]
+fn imported_final_and_events_survive_artifact_removal() {
+    use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+    use serde_json::json;
+
+    let fixture = Fixture::new(false);
+    let input = loopflow::durable::RunId::new();
+    let dir = fixture.run_dir(input.as_str());
+    std::fs::create_dir_all(&dir).unwrap();
+    let at = "2026-09-29T00:00:00Z";
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_vec(&json!({
+            "schema_version":1,"run_id":input,"parent_run_id":null,"created_at":at,
+            "harness":"opencode","model":null,"surface":"headless",
+            "cwd":fixture.repo.path(),"repo":fixture.repo.path(),"worktree":fixture.repo.path(),
+            "skill":"implement","subjects":[],"flow":{"kind":"independent"},
+            "launch":null,"context":null,"runtime_path":null,"runtime_digest":null,
+            "host":"fixture","boot_id":null
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let message = |turn: &str, text: &str, phase: &str| ConversationEvent::ItemCompleted {
+        turn_id: turn.into(),
+        item: ConversationItem::Message {
+            id: format!("{turn}-{phase}"),
+            text: text.into(),
+            phase: Some(phase.into()),
+        },
+    };
+    let events: Vec<_> = [
+        message("success", "still working", "commentary"),
+        message("success", "retained conclusion", "final_answer"),
+        ConversationEvent::TurnCompleted {
+            turn_id: "success".into(),
+            status: Lifecycle::Completed,
+        },
+        message("failed", "failed conclusion", "final_answer"),
+        ConversationEvent::TurnCompleted {
+            turn_id: "failed".into(),
+            status: Lifecycle::Failed,
+        },
+        message("unfinished", "unconfirmed conclusion", "final_answer"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(seq, event)| {
+        json!({
+            "schema_version":1,"seq":seq,"observed_at":at,"type":"conversation","event":event
+        })
+    })
+    .collect();
+    std::fs::write(
+        dir.join("events.jsonl"),
+        events
+            .iter()
+            .map(|event| format!("{event}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    let imported = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(imported["failed"], json!([]), "{imported}");
+    let session = fixture.session_row(input.as_str()).0;
+    let again = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(again["unchanged"], 1, "{again}");
+    std::fs::remove_dir_all(&dir).unwrap();
+    for selector in [input.as_str(), &session] {
+        let answer = fixture.run(&["runs", selector, "--final"]);
+        assert!(answer.status.success(), "{answer:?}");
+        assert_eq!(
+            String::from_utf8(answer.stdout).unwrap(),
+            "retained conclusion\n"
+        );
+        let output = fixture.run(&["runs", selector, "--events"]);
+        assert!(output.status.success(), "{output:?}");
+        let retained: Vec<Value> = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(retained, events);
+    }
+    assert!(!dir.exists());
+    assert!(fixture.launches().is_empty());
+}
+
+#[test]
 fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
     use loopflow::durable::RunId;
     use loopflow::session::{AgentSession, SessionKind, TitleSource};

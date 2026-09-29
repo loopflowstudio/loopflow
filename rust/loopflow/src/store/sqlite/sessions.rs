@@ -317,7 +317,7 @@ impl SqliteStore {
             .map(|(session_id, input, caller, started, task, wave, names)| {
                 let input = RunId::parse(&input).map_err(invalid)?;
                 let session = self.session(&session_id)?.ok_or(StoreError::NotFound)?;
-                let history = self.history_for_input(&session_id, &input)?;
+                let history = self.summary_for_input(&session_id, &input)?;
                 let mut snapshot =
                     crate::run_record::conversation_snapshot(&session, &input, &history, names)
                         .map_err(invalid)?;

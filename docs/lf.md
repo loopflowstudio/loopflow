@@ -805,7 +805,7 @@ lf runs --project parser        # one Project's Runs, filtered before the result
 lf runs --parent run_ab12 --json # every direct child Run, uncapped
 lf runs run_ab12                 # inspect one Run by unambiguous prefix
 lf runs run_ab12 --final         # print the last durable provider conclusion
-lf runs run_ab12 --events        # print its event stream verbatim
+lf runs run_ab12 --events        # print its retained event stream
 lf usage --project parser        # direct Run usage for one Project
 lf usage --task INF-123 --json   # direct Run evidence for one Task
 lf session list                  # Sessions, Work paths, actions and unavailable reasons
@@ -921,7 +921,10 @@ typed `work`, never its checkout. Wave/Project filters remain history reads.
 
 The `--parent` drill resolves one exact Run and returns all direct children
 without the seven-day presentation cap. The one-Run `--final` read projects the
-last durable provider conclusion from normalized conversation events. Records
+last durable provider conclusion from normalized conversation events in Session
+history. Final and event reads retain their input order after import and work
+without the old artifact directory. Summary and usage reads exclude conversation
+text before loading payloads. Records
 without a phase receipt are labeled and expose streamed prose from their last
 completed provider turn. It does not parse vendor output or invent a conclusion
 for an unsettled Run.

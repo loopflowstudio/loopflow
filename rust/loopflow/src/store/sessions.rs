@@ -4,6 +4,14 @@ use crate::session::{AgentSession, TitleSource};
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub(crate) async fn input_final_answer(
+        &self,
+        input: &RunId,
+    ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
+        let input = input.clone();
+        run_sqlite(&self.sqlite, move |store| store.input_final_answer(&input)).await
+    }
+
     pub(crate) async fn historical_session_inputs(
         &self,
     ) -> StoreResult<Vec<(AgentSession, crate::session::SessionObservation)>> {

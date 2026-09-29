@@ -246,15 +246,17 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
     let dir = crate::run_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.id))?;
     if events {
-        match std::fs::read_to_string(dir.join("events.jsonl")) {
-            Ok(contents) => print!("{contents}"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(anyhow!("Run events unavailable: {error}")),
+        for event in store.input_events(&input)? {
+            match event.get("unparsed").and_then(serde_json::Value::as_str) {
+                Some(bytes) => println!("{bytes}"),
+                None => println!("{}", serde_json::to_string(&event)?),
+            }
         }
         return Ok(());
     }
     if final_answer {
-        let answer = crate::run_record::read_final_answer(&dir)
+        let answer = store
+            .input_final_answer(&input)
             .map_err(|error| anyhow!("Run final answer unavailable: {error}"))?;
         return match answer {
             Some(answer) => {

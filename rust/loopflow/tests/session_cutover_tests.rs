@@ -29,13 +29,8 @@ impl Fixture {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
-                 printf '%s\\n' \"message=created id=ses_$LF_RUN_ID\" >&2\n\
-                 echo \"$LF_RUN_ID\" >> '{}'\n{}",
-                launched.display(),
-                if waits { "read -r input\n" } else { "" }
-            ),
+            include_str!("support/opencode_server.py")
+                .replace("__WAIT__", if waits { "True" } else { "False" }),
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -3187,23 +3182,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
 /// and records its decision inside a Flow step. A development `lf` resolves
 /// its own Home, so the stand-in names the fixture's Home for the nested call.
 fn saved_flow_stand_in(fixture: &Fixture) {
-    let provider = fixture.home.path().join("bin/opencode");
-    std::fs::write(
-        &provider,
-        format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
-             printf '%s\\n' \"message=created id=ses_$LF_RUN_ID\" >&2\n\
-             echo \"$LF_RUN_ID\" >> '{}'\n\
-             if [ -f \"$LF_CONTROL_HOME/fail-once\" ]; then rm -f \"$LF_CONTROL_HOME/fail-once\"; exit 7; fi\n\
-             if [ -n \"$LF_FLOW_STEP\" ]; then LF_HOME=\"$LF_CONTROL_HOME\" LF_DB_PATH=\"$LF_CONTROL_DB_PATH\" \
-             '{}' flow decide advance 'Proof observed' \
-             >> \"$LF_CONTROL_HOME/decide.log\" 2>&1 || true; fi\n",
-            fixture.launched.display(),
-            env!("CARGO_BIN_EXE_lf")
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(fixture.home.path().join("decide-enabled"), "").unwrap();
     let lf = fixture.repo.path().join(".lf");
     std::fs::create_dir_all(lf.join("skills")).unwrap();
     std::fs::create_dir_all(lf.join("flows")).unwrap();
@@ -3469,6 +3448,31 @@ fn a_taskless_step_records_its_decision_on_the_invocation() {
         "the recorded Advance left the loop: {cursor}"
     );
     assert_eq!(fixture.launches().len(), 2, "work once, decide once");
+    let receipts: (i64, i64, i64) = fixture
+        .db()
+        .query_row(
+            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),
+                (SELECT count(*) FROM session_events WHERE kind='completed'),
+                (SELECT count(*) FROM flow_events WHERE kind='consumed')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        receipts,
+        (2, 2, 2),
+        "each boundary consumes its exact native completion"
+    );
+    assert_eq!(fixture.retired_run_tables(), 0);
+    for input in fixture.launches() {
+        let answer = fixture.run(&["runs", &input, "--final"]);
+        assert!(answer.status.success(), "{answer:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&answer.stdout).trim(),
+            "Fixture completed."
+        );
+    }
+
     assert!(std::fs::read_dir(fixture.home.path().join("flows"))
         .map(|entries| entries.flatten().all(|entry| {
             std::fs::read_dir(entry.path())
@@ -3504,4 +3508,100 @@ fn a_flow_refuses_to_start_without_its_row() {
     );
     assert_eq!(fixture.launches(), Vec::<String>::new());
     assert!(!fixture.home.path().join("flows").exists());
+}
+
+#[test]
+fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    std::fs::write(fixture.home.path().join("disconnect-after-tool"), "").unwrap();
+    let output = fixture.run(&[
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-decide",
+        "-b",
+        "--no-loopflow",
+    ]);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(fixture.home.path().join("tool-effect").exists());
+    let rows: (i64, i64, i64) = fixture
+        .db()
+        .query_row(
+            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),
+                (SELECT count(*) FROM session_events WHERE kind='completed'),
+                (SELECT count(*) FROM flow_events WHERE kind='consumed')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(rows, (1, 0, 0));
+    assert_eq!(
+        fixture.launches().len(),
+        1,
+        "uncertain effect is not silently retried"
+    );
+    let outcome: Option<String> = fixture
+        .db()
+        .query_row(
+            "SELECT outcome FROM execs WHERE caller_session_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(outcome.as_deref(), Some("failed"));
+}
+
+#[test]
+fn opencode_automatic_retry_keeps_conversation_and_rejects_earlier_turn_caller() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    std::fs::write(fixture.home.path().join("transient-once"), "").unwrap();
+    let output = fixture.run(&[
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-decide",
+        "-b",
+        "--no-loopflow",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let old = std::fs::read_to_string(fixture.home.path().join("old-decision.log")).unwrap();
+    assert!(
+        old.contains("selected native turn's original caller"),
+        "{old}"
+    );
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    assert_eq!(fixture.count("agent_session_inputs"), 2);
+    assert_eq!(fixture.retired_run_tables(), 0);
+    let (threads,starts,done,consumed): (i64,i64,i64,i64) = fixture.db().query_row(
+        "SELECT count(DISTINCT provider_thread),sum(kind='started'),sum(kind='completed'),
+           (SELECT count(*) FROM flow_events WHERE kind='consumed') FROM session_events WHERE kind!='observed'", [],
+        |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
+    assert_eq!((threads, starts, done, consumed), (2, 3, 3, 2));
+    let usage = fixture.json(&["usage", "--json"]);
+    assert_eq!(usage.as_array().unwrap().len(), 2);
+    let launches = fixture.launches();
+    assert_eq!(launches.len(), 3);
+    assert_eq!(
+        launches[1], launches[2],
+        "automatic retry retains its admitted input and conversation"
+    );
+    let retried = usage
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == launches[1])
+        .unwrap();
+    assert_eq!(retried["usage"]["input_tokens"], 40);
+    assert_eq!(retried["usage"]["output_tokens"], 10);
+    let answer = fixture.run(&["runs", &fixture.launches()[1], "--final"]);
+    assert_eq!(
+        String::from_utf8_lossy(&answer.stdout).trim(),
+        "Fixture completed."
+    );
 }

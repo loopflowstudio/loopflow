@@ -250,6 +250,13 @@ level stays there. Put `--` before literal arguments that look like flags.
 |------|-------------|
 | `-c, --clipboard` | Include clipboard content in prompt |
 
+Headless OpenCode launches retain the native conversation across automatic
+provider retries. Flow steps use the native request's recorded completion;
+usage includes its separate assistant calls. A failed saved-conversation lookup
+reports the failure with the existing identity intact. A disconnected client
+can leave native completion unknown; inspect retained evidence before retrying
+an operation that may already have taken effect.
+
 ## Run Mode Flags
 
 | Flag | Description |

@@ -1614,7 +1614,7 @@ Publication is a review checkpoint, not code-complete acceptance or shipment.
 
 ## Exec discovery consumer (2026-09-29)
 
-Jack's released Exec query proposal now feeds public `lf exec list/show`, sharing
+The bounded Codex contributor's Exec query proposal, released by Supervisor, now feeds public `lf exec list/show`, sharing
 exact/list decoding over `execs`. It preserves raw command evidence, nullable
 outcomes and causal caller fields. The bounded SQL page precedes command-context
 enrichment; Session/Flow payloads are not decoded. Performed Task/Wave work comes
@@ -1626,7 +1626,7 @@ Review repairs: the proposal searched raw JSON argv, so actual `pr land` text
 could not match; search now joins string-array elements while preserving malformed,
 non-array and missing original evidence. The first public proof exposed a real
 reader dependency on an unrelated unnamed historical Project. Narrow retained-ID
-queries replace that full-catalog lookup. Jack's repository-selector review then
+queries replace that full-catalog lookup. Supervisor's repository-selector review then
 found globally ambiguous Wave names; name resolution now uses the selected repo,
 explicit IDs retain meaning, and `--all` reports genuine ambiguity. The expanded
 public proof uses two repositories with the same Wave name, an unnamed Project,
@@ -1676,8 +1676,99 @@ is claimed by this cut.
 
 Publication observation: `lf pr publish` automatically committed the completed
 Exec proposal as `a866926d0` after the selective implementation checkpoint. Local
-handback had not arrived yet. Jack subsequently verified terminal contribution
+handback had not arrived yet. Supervisor subsequently verified terminal contribution
 and released those exact bytes, then directed preserving history. The proposal
 commit contains no executable patch. This does not authorize auto-staging active
-contributions; future publication must wait for handback. OpenCode proposal is
-now released; the newly assigned Desktop proposal remains excluded while active.
+contributions; future publication must wait for handback. OpenCode, Desktop and partial Session-inventory proposals are now released. The
+active metadata-summary contribution is private-only and holds no publication.
+
+## OpenCode shared native history conversion (verified cut, 2026-09-29)
+
+The bounded contributor and Supervisor source review found the same missing
+native selection in ordinary and managed OpenCode execution. Before conversion,
+main ran actual OpenCode 1.18.33 against a scripted local model with isolated
+HOME/XDG directories and no configured provider account or installed Home.
+`.lf/tmp/opencode-native-proof/result.json` and `repeat-once.json` show a native
+permission's assistant message points to the supplied user request, and the
+fixture tool has not executed before approval. Two sequential requests pass
+with per-session ask and reply once. `repeat-always.json` retains the measured
+counterexample: replying always permits the second tool without another ask.
+`restart-always.json` preserves the conversation after restarting the dedicated
+server and receives permission again; the tested legacy remembered approval
+was server-memory state. This does not establish all external permission
+configuration or shared-server behavior.
+
+The working conversion makes native user messages the request key, groups
+subordinate assistant steps, and reads final outcome/usage from native history.
+SSE is observation delivery; idle is not success. Existing Session generation
+and Flow selection own dispatch and consumption. Both batch and managed launches
+use the same harness, and saved native recovery dispatches by retained provider.
+No new resumable object or navigation reducer is introduced. The first compile
+found old resume-probe assertions expecting identity loss; changing those to
+retain saved identity resolves that compile issue. The candidate binary builds; the focused proof and static results follow below.
+
+Supervisor's `lf runs ID --resume` audit remains in the convergence cut: it
+bypasses the common connect owner via util::resume_session. Route it through
+retained Session ownership/common connect or remove that obsolete public entry
+with its callers/docs; replay remains the separate immutable-input action.
+The Desktop proposal is now released and unapplied. The Session-inventory
+contributor writes only ignored private files and does not block checkpoints.
+
+
+Final proof ledger for this cut (2026-09-29):
+
+- `opencode-native-focused-2.log`: 22 passed, two ignored. The first compile
+  exposed a deleted test import; its failed log is retained. The removed fake-SSE
+  tests copied the obsolete busy-interval reducer and confused client exit with
+  native completion. The public disconnect-after-effect proof replaces that claim.
+- `opencode-flow-retry-proof.log`: four focused mapping/history/public Flow tests
+  passed, including retained final answers and explicit failed/retried review flow.
+  `opencode-disconnect-proof.log` passes: a tool effect survives, the command fails,
+  and native completion/consumption remain absent.
+- `opencode-automatic-retry-proof-3.log`: the public scripted-native-server proof
+  passes in 7.38s. One conversation/input retains failed and successful starts,
+  rejects the earlier caller, consumes exact success once, reports 40 input/10
+  output tokens and retains final prose. The preceding runs retain invalid Flow
+  fixture syntax and a punctuation-only assertion failure; neither was production
+  retry success. The final fixture uses real public child commands, simulated
+  native HTTP/SSE, and no configured provider account.
+- `opencode-owner-consumers.log`: five passed in 16.744s. Existing Codex usage
+  baseline/replacement evidence survives; required Session and Exec admission
+  still refuses before provider effects, and ordinary readers see each launch once.
+- `opencode-adapter-clippy-final.log`: all-target Clippy passed (16.54s), after
+  fixing the retained single-match lint. Formatting, whitespace and bounded
+  architecture checks pass. Docs were synchronized/rendered through website tools.
+
+Actual OpenCode 1.18.33 plus a local scripted model is separate evidence. The
+initial adapter permission event used native `id`, whereas the old mapper expected
+`requestID`; `adapter-permission-red/` preserves that failure. The next actual
+adapter completed its Flow but text used synthetic turn IDs, so final-answer
+recovery failed. Supervisor's actual-event review and `adapter-output-red/`
+preserve that counterexample. The shared mapper now uses native assistant-parent
+correlation for text, deltas, tools and completion; `adapter-output-green/` retains
+both public final answers and completed Flow.
+
+The final actual-binary candidate SHA is
+`726dc849b28e73721e0f6e9a33c002a31f5541db2516d999a0eb936e91801f04`.
+`adapter-result.json` records 8.933s, two Sessions, two native starts/completions,
+four native usage snapshots, completed Flow and both final answers. Its injected
+HTTP failure recovered inside OpenCode without another native start. It proves
+provider-internal recovery only; it is not the Loopflow automatic-retry proof
+above. Actual-provider usage readback, configured credentials, interactive
+reconnect, shared OpenCode engines and full managed recovery remain unproven.
+All probes use isolated HOME/XDG and private stores, never the installed Home.
+
+Measured production change versus `915aa82ff`: +684/-418, net +266 across seven
+Rust files; tests/fixtures/docs/scratch excluded, no rename credit. The first
+count cut at the first cfg(test), incorrectly omitting later production in
+run_record.rs and harness/mod.rs. The preserved `opencode-source-first-cfg-gap.json`
+records that counting mistake. Corrected `opencode-source.json` cuts only at the
+trailing tests module, retains unchanged inline test helpers and records hashes.
+
+The concrete review removed duplicate synthetic lifecycle/usage ownership and
+preserved fail-before-effect admission. Native user-message identity and Session
+history now feed both ordinary OpenCode launch and saved Flow recovery. This does
+not settle Codex's valid native decision retry, final connect/wire/discovery/import
+or Desktop obligations. Released Desktop/partial inventory proposals remain
+unapplied; the private metadata-summary contribution does not block publication.
+Fresh main matches the retained base, so no speculative rebase was applied.

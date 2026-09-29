@@ -20,7 +20,7 @@ binary access to the installed Home are not.
   `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`, implement iteration10.
   Verified worker Exec `ef8e22ec-9e08-4762-b166-5033132405e7`, PID79038,
   Codex80014. Numeric Flow wire and landing helper admission are published;
-  main is integrating Exec discovery and its public reader. Recheck status/ps before treating these as live.
+  main checkpointed Exec discovery and is probing OpenCode native ordering. Recheck status/ps before treating these as live.
 - Supervisor owns this index and isolated read-only inspections; no second
   executable writer or competing builds. Control Session
   `run_9c16dbbe2b04440db8469e9b4964912c` has human title `loopflow`.
@@ -36,13 +36,48 @@ binary access to the installed Home are not.
   main's execs.rs drifted) and the selection/recovery source findings. Verified
   release comment `b8c72d43-428c-4c85-9286-777083e5a79a`; private receipt
   `.lf/tmp/opencode-decision-proposal/supervisor-review.json`.
-- Desktop Session-controls proposal is active via tool25845, Exec
-  `7ea3b81d-d5a7-4ca3-9d17-03e1b876cc52`, PID5172. It owns only
-  `scratch/proposal-desktop-session-controls.md` and private patch directory
-  `.lf/tmp/desktop-session-controls-proposal/`. Explicit headless discovery and
-  permanent bind confirmation; no working source/build/PM/Git changes. Main must
-  await terminal handback before publishing this artifact. Verified assignment
-  `66d68e4d-cc30-4236-9813-5868097a48a3`.
+- Desktop Session-controls contributor tool25845 completed exit0; Exec
+  `7ea3b81d-d5a7-4ca3-9d17-03e1b876cc52`/PID5172 is absent from fresh ps.
+  [Handback](proposal-desktop-session-controls.md) is released to main: artifact
+  SHAcc9cc1550fe1; private patch SHA1dddcf4634ee in
+  `.lf/tmp/desktop-session-controls-proposal/desktop-session-controls.patch`.
+  18files/40hunks, proposal production+258/-35. Supervisor checked all18
+  original/proposed hashes without drift and read-only applicability; no build
+  or behavioral proof. Keep complete inventory separate from visibility and
+  retain the conversation workspace when binding to a differently placed Task.
+  Exact stable IDs stay in transport; normal confirmation should show name and
+  issue/title. Verified release comment `654c1fe3-550b-4d57-87f1-1731f71bba87`;
+  private `supervisor-review.json` retains the review. No contributor remains
+  active from those completed contributions; main owns integration/proofs and may
+  publish coherent verified work.
+- Session inventory contributor tool50386 completed exit0; Exec
+  `61307e9f-02ed-42fb-aa2b-efc4aef09c2e`/PID92660 is absent from fresh ps.
+  [Handback](proposal-session-inventory.md), SHAa9d473b35b0d, is released as a
+  partial proposal. Private patch SHA187a8fe3b816, three files/eight hunks,
+  production+122/-44 (net+78). Supervisor found no source drift and read-only
+  applicability passes; no compilation or behavior proof. It caches full Flow
+  decoding once per referenced Flow and removes graph construction, but still
+  reads captures and Session history. Reuse useful hunks in the accepted typed
+  summary/detail conversion; this is not completed discovery or grounds for a
+  separate broad gate on a temporary cache. The current SQL identity reducer
+  validates nonidentity old envelopes too; narrowing it mechanically changes
+  error behavior. Keep detail/actions strict while implementing passive metadata
+  reads with retained missingness, owner/import consistency, and coordinated
+  Desktop consumers. See private supervisor-review.json and verified release comment
+  `0358b61e-0f2f-4de6-92f7-91f59f195d04`.
+  No contributor remains active; main owns source integration and testing.
+
+
+- A metadata-summary contributor is launched via tool27771, Exec
+  `82595041-9f27-4289-98d9-9bb1e68e930b`, PID11958. It owns ONLY ignored
+  `.lf/tmp/metadata-discovery-proposal/`. Assignment builds on the partial audit
+  and targets typed metadata-only Session/Flow summaries with coherent existing
+  writer/import/DTO ownership. Passive discovery can defer unrelated payload
+  validation to selected detail/actions; exact action/native validation remains.
+  No temporary capture cache counts as completion. No working source/scratch,
+  builds/tests, branch binary/Home/provider experiment, PM/Git mutation or new
+  worker is authorized. No publication hold; main continues recovery and delivery.
+  Verified coordination comment `6bfb7385-94ce-4a42-b516-1b86fab727f0`.
 
 
 
@@ -98,6 +133,27 @@ log `.lf/tmp/cut-i/ci-858444d91-rust.log`. Current earlier cutoff does not clear
 The older isolated materialized matrix (1,925 passes/33 failures/15 skips) and
 per-failure dispositions remain `.lf/tmp/cut-i/supervisor-matrix-dispositions.json`.
 Later focused passes never make those earlier snapshots green.
+
+Local checkpoint **915aa82ff** adds verified Exec discovery; publication remains
+a866; the Desktop contributor has now handed back and its publication hold is released. Main has begun the actual OpenCode
+protocol probe (binary1.18.33). Initial ordering proof now passes in
+`.lf/tmp/opencode-native-proof/result.json`: real native binary SHA139ddeb6a46b,
+scripted local model/private Home; permission.tool.messageID resolves an assistant
+whose parentID equals the submitted input. Shell marker is absent before reply,
+present afterward; retained messages distinguish tool-calls from terminal stop.
+This is native ordering/readback evidence only, not Loopflow adapter/retry/recovery,
+remembered-permission/shared-engine or configured-account acceptance.
+Follow-up actual-binary receipts: `repeat-once.json` passes two requests;
+`repeat-always.json` fails because the second shell marker appears without a
+permission event. `restart-always.json` passes after terminating/restarting only
+its private owned server; `/api/permission/saved` returned an empty list before
+restart. Supervisor inspected the receipts and process sequence. That demonstrates
+this fixture's in-memory approval reset, not a safe shared-engine restart policy
+or universal before-tool admission. Preserve all three outcomes when choosing
+and proving the shared adapter.
+The main-owned handoff misattributed contributor/supervisor proposal/review/release
+actions to Jack; verified comment `666c4261-88a3-4412-873f-65c18f4ae3ab` requests
+attribution correction before publication, without changing authorized scope.
 
 ## Recovery and prompt size
 
@@ -169,6 +225,33 @@ exact request identity and before-tool ordering, followed by one shared adapter.
 No token-only fixture repair or new hook/proxy/interface was selected. This does
 not establish Codex's failed-thread environment behavior for OpenCode.
 
+Native adapter review during implementation found two concrete mismatches.
+`map_permission` expected requestID but actual1.18.33 permission.asked uses id;
+verified comment `f56d40eb-ba02-4b16-94c1-608614fd0099` retains that source/native
+comparison. Main's actual adapter probe then timed out with one start/no completion,
+corrected the field/fixture, and reported a passing Flow probe with two native
+starts/completions. Full probe inspection and retry/recovery proof remain.
+Second: native History emits start/completion under user-message ID while mapped
+text/items still use synthetic busy-interval turn_UUID. `final_answer` joins text
+to success by turn_id, so the new split loses the conclusion. Verified comment
+`d0b00c99-66e9-4568-be76-8c0a7aa9db97` requests native correlation throughout and
+an actual final-answer assertion. Actual candidate5638c140015e retained observations subsequently confirm the split
+for both Sessions: text IDs and successful completion IDs have no overlap. Verified
+follow-up `b6b4915e-7e28-4a5f-98c7-1bda3db080a4`; exact event/result bytes are
+preserved in `.lf/tmp/opencode-native-proof/supervisor-output-mismatch-evidence/`.
+The adapter's current pass checks process exit and final Flow state, not final
+answer, exact consumption or usage totals. Private supervisor receipts live in
+`.lf/tmp/opencode-native-proof/`; no root build/provider execution.
+
+Remaining connect-consumer source finding: public `lf runs ID --resume` still
+calls runs::resume_run → util::resume_session directly (no remote endpoint or
+Session driver claim), bypassing connect_live_codex claim/relay/history recovery.
+Common spawn still checks deletion and publishes clients; no live duplicate-agent
+reproduction is claimed. Verified comment `a1e1fad7-8f42-48af-8731-7fbb4170ec3d`
+keeps this in the accepted one-connect-owner conversion. Route via retained Session
+identity/common connect or deliberately remove the obsolete surface; no new guard.
+Replay remains a separate captured-input operation, with its own preservation.
+
 ## Exec discovery proposal handback
 
 [Exec discovery](proposal-exec-discovery.md) supplied a four-file/7-hunk patch,
@@ -215,23 +298,58 @@ samples follow the first; cache uncontrolled, no provider/installed Home. Whole-
 latency only; startup/SQL/payload separation, plans and Desktop remain unproved.
 Initial seed failed the capture-ID constraint; repaired seed retains constraints.
 
-## Historical NULL-title classification still open
+## OpenCode recovery checks reviewed (2026-09-29)
 
-Supervisor inspected released `v0.12.24`: `children.rs` Task insert/update writes
-`plan.title` as a String, while `0.11.036_delete_sessions.sql` adds a nullable title
-and copies it from the latest old Task Session. The `0.12.20` position migration
-copies Task positions without checking title; the current review migration inserts
-that title into a NOT NULL Session column. Retained failing fixture remains real,
-but a supported released writer producing that exact NULL-title/review combination
-has not been established. Do not invent a title or rewrite an applied draft on this
-source evidence alone. Further released-source inspection narrows the question:0.12.15 drops all old
-work_flow_positions and0.12.16 creates an empty replacement, so pre-0.11.036
-position history cannot directly survive into this input. The0.12.16 controller
-creates its human position from ControlledTask; review serving/open reads Task;
-its Task reader requires a String title and inserts/updates write plan.title.
-Store-level set_flow_position itself checks Work readiness, not Task title.
-A complete intervening-release caller audit remains before ruling the synthetic
-combination out; do not claim an observed real-Home upgrade failure.
+Actual candidate05473216 `adapter-output-green/adapter-result.json` records exit0, completed Flow and
+both public final answers, each “Fixture completed.” (6.394s). Actual OpenCode
+1.18.33 used a scripted local model and private Home; configured-account and
+full recovery acceptance remain unproven. The earlier mismatched-output evidence
+is preserved separately, not overwritten by this pass.
+
+Supervisor read the new source/assertions and logs. `opencode-flow-retry-proof.log`
+passes four focused checks: native output/permission mapping, history reducer,
+public taskless decision and Task Flow failure/retry/review. The public fixture
+uses a simulated OpenCode HTTP server; it asserts two starts/completions/consumed
+boundaries, one allowed decision and rejection of the ordinary work decision,
+plus final answers. `opencode-disconnect-proof.log` passes the tool-effect then
+transport-loss case: one start, no native completion/consumption, one launch and
+failed command. It does not establish real provider process termination.
+
+`opencode-history-proof-2.log` passes the SQL/history reducer check: after input
+and driver replacement, old usage stays with its original input/Exec; duplicate
+completion counts once; decreasing tokens retain the prior maximum plus a gap.
+This is seeded-store/reducer evidence, not live driver reconnection. Clippy's
+first pass failed a single-match style lint; `opencode-adapter-clippy-final.log`
+then passes all targets in16.54s. `opencode-automatic-retry-proof-3.log` passes
+the public simulated-server retry case in7.38s: three starts/completions across
+two Flow Sessions, two consumed successes, same admitted input for retry, earlier
+caller rejected, 40/10 retained usage and final answer. The real OpenCode failure
+probe instead recovered within the provider's own request (two starts total),
+so it does not prove Loopflow automatic retry. Supervisor verified delivery
+direction comment `1692d731-673e-4faa-9f6c-d813cee0fc10`: after the bounded
+native probe and final focused/static checks, publish the coherent repair before
+widening the next cut. Main still matches GitHub main6e718; no rebase needed
+at that observation. The active metadata proposal imposes no publication hold.
+No full-green CI, valid Codex retry, installed Home or final concept review follows.
+
+## Historical NULL-title fixture classification
+
+The retained NULL-title/current-review fixture still proves its SQL rejection;
+it is not an observed installed-Home defect. Source review through v0.12.24 found
+no supported writer producing that combination. 0.12.15 drops old positions and
+0.12.16 recreates an empty table; subsequent first-position writers require a
+Task with a String title. Ready only updates an existing position. Across thirteen
+snapshots, the title-omitting `create_task_work` helper is called only after the
+complete `TASK_INSERT` in the same transaction; it is not an independent writer.
+Task plan writes preserve the String title. Private
+`.lf/tmp/historical-title-review/{title-writer-audit.json,classification.md}`
+retains candidates, transaction snippets, source hashes, interpretation and limits.
+
+Classify as an incomplete synthetic seed with released reachability unproven.
+Keep the original failure and the corrected populated fixture distinct; no runtime
+title fallback or applied-draft rewrite is justified by this evidence. A concrete
+imported counterexample reopens it. No private Home was inspected, no product test
+ran, and broad import/conflict/missingness preservation remains required.
 
 ## Research to reuse
 
@@ -266,6 +384,9 @@ Rust/Swift+15,299/−30,148; Python/shell+48/−62; SQL+1,158/−0. Receipt:
 `.lf/tmp/execution-model/status-counts-a866926d0.json`. Corrected production
 prefixes, no rename detection, tests/docs excluded. Changed bases prevent reading
 successive branch totals as incremental cuts; working patches are excluded.
+
+Local checkpoint915aa82ff has its separate same-method receipt
+`.lf/tmp/execution-model/status-counts-915aa82ff.json`: +17,006/−30,210, net−13,204; do not label it published.
 
 Older scratch:62files/676,767bytes in `.lf/tmp/scratch-consolidation-20260928/scratch/`
 with SHA manifest; eleven LOO291 originals under `.lf/tmp/context-archive-7e2101b41/`.

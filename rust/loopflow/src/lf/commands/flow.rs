@@ -404,18 +404,38 @@ async fn recover_native_flow(
                         "Selected conversation {session_id} has no native connection for recovery"
                     )
                 })?;
-        let connection = crate::harness::codex_connection::CodexConnection {
-            store: store.sqlite.clone(),
-            session_id,
-            thread_id,
-            driver: None,
-        };
-        tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            connection.recover_history(Path::new(&endpoint)),
-        )
-        .await
-        .context("Selected native turn history did not respond")??;
+        let session = store
+            .sqlite
+            .session(&session_id)?
+            .context("Selected Session is missing")?;
+        match session.provider.as_deref() {
+            Some("opencode") => {
+                crate::harness::opencode_history::recover(
+                    &store.sqlite,
+                    &session_id,
+                    &endpoint,
+                    &thread_id,
+                )
+                .await?
+            }
+            Some("codex") => {
+                let connection = crate::harness::codex_connection::CodexConnection {
+                    store: store.sqlite.clone(),
+                    session_id,
+                    thread_id,
+                    driver: None,
+                };
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    connection.recover_history(Path::new(&endpoint)),
+                )
+                .await
+                .context("Selected native turn history did not respond")??;
+            }
+            provider => {
+                anyhow::bail!("Selected Session provider {provider:?} has no native history reader")
+            }
+        }
         if store.sqlite.pending_flow_conversation(id)?.is_some() {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }

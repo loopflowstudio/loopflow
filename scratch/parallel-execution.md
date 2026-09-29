@@ -1015,3 +1015,49 @@ lines, excluding migration/CLI tests and docs. It replaces the skill-name
 classification and manifest-dependent detail projection; table deletion and
 final/events/resume/active conversions remain open. Review preserved operation
 uncertainty and the existing Flow history owner without adding process authority.
+
+### Session-owned final/events reader (2026-09-29)
+
+Publication `6f927ea5f` includes the returned Exec admission research and the
+verified historical classification/detail cut. The next complete consumer boundary
+is public final/events plus ordinary launch and landing repair conclusions.
+Currently the recorder copies usage/provider evidence into Session history but
+leaves conversational text only in JSONL. Move that writer and its conclusion
+readers together. Proof must remove the artifact directory after settlement/import,
+retain completed versus failed/incomplete turn distinctions and exact versus
+streamed conclusions, and preserve once-only landing reporting. File presence or
+a summary-only import does not pass. Native-only recovery, table removal and dense
+query costs remain separate unfinished requirements; this adds no decision writer.
+
+`session-final-red.log` reproduces both exact and streamed conclusions becoming
+absent after artifact removal. The recorder now retains all observed envelopes
+in existing Session history; public final/events, ordinary launch return and
+landing repair conclusions consume that history. The file-backed final reducer
+and landing's artifact lookup are removed. Existing JSONL writes still serve the
+unconverted native/active readers and are not claimed deleted.
+
+`session-final-owner-2.log` passes five behavioral checks: exact conclusion,
+honestly labeled streamed prose, once-only landing output after artifact removal,
+the retained window/usage/partial-evidence regression, and public imported final/
+events with failed and unfinished later turns excluded. Its summary-query fixture
+failed on invalid `run_fixture` setup and reported LEAK. After correcting that
+input ID, `session-summary-fixture.log` passes (0.411s) without a leak report.
+This focused fixture proves transcript exclusion before Rust payload hydration,
+with usage/unknown evidence and complete event detail retained; it is not dense
+latency, paging or native-only recovery proof. The initial implementation check
+`session-final-owner.log` failed compilation on a statement lifetime and unused
+Home variable; no behavioral result follows from it.
+
+Summary selection now excludes known non-summary event kinds in SQL. Native
+Session history remains complete and unknown/schema evidence stays visible.
+Review found the prior all-event summary hydration would load transcripts after
+this writer expansion; the query repair addresses that concrete cost. Existing
+manifest payloads and unlimited inventory remain part of indexed-discovery work.
+This consumer cut versus `6f927ea5f` adds 62/removes 35 production Rust lines,
+excluding test modules, integration fixtures and docs. No lifecycle owner, native
+decision transport or Flow navigation change was introduced.
+
+All-target Clippy passes in `session-final-static.log` (16.16s); formatting and
+whitespace pass. Supervisor independently reviewed the writer/readers and proof
+limits. Hosted `6f927ea5f` retains the known OpenCode decision failure (1834 passes,
+one failure, 15 skips, 134 unrun); it predates this final/events cut.

@@ -354,12 +354,15 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             assert!(failure.contains("sha256"), "{failure}");
             assert!(failure.contains(home.path().to_str().unwrap()), "{failure}");
             assert!(!failure.contains("Local proof"), "prompt leaked: {failure}");
-            let saved: serde_json::Value = serde_json::from_slice(
-                &std::fs::read(sessions.join(format!("{id}.json"))).unwrap(),
-            )
-            .unwrap();
-            assert_eq!(saved["status"], "waiting");
-            assert!(saved["ready_summary"].is_null());
+            let (completed_at, ready_summary): (Option<i64>, Option<String>) = database
+                .query_row(
+                    "SELECT completed_at, ready_summary FROM agent_sessions WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert!(completed_at.is_none());
+            assert!(ready_summary.is_none());
         }
     }
 }

@@ -157,7 +157,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "native"] {
                     return "Session native completed"
                 }
-                #expect(args == ["session", "list", "--json", "--limit", "0"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
@@ -185,7 +185,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "ask"] {
                     return "Ask session completed: Ready for review"
                 }
-                #expect(args == ["session", "list", "--json", "--limit", "0"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
@@ -223,7 +223,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "review"] {
                     return "Review feedback returned"
                 }
-                #expect(args == ["session", "list", "--json", "--limit", "0"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )

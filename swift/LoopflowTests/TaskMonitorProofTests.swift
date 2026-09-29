@@ -276,7 +276,7 @@ struct TaskMonitorProofTests {
             switch args.first {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return records
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("No provider launch is available in this proof")
             }

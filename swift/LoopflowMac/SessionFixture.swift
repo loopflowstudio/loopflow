@@ -25,7 +25,7 @@ private enum SessionFixtureKind: String {
         }
         return """
         {
-          "id": "\(id)", "run_id": "\(id)", "interactive": true,
+          "id": "\(id)", "interactive": true,
           "kind": "\(self == .interactive ? "conversation" : rawValue)",
           "work": \(work),
           "title": "\(rawValue.capitalized) fixture",
@@ -51,8 +51,8 @@ private actor SessionFixtureStore {
     }
 
     func run(_ args: [String]) throws -> String {
-        if args == ["session", "list", "--json", "--interactive", "all", "--limit", "0"] {
-            return unresolved ? "[\(kind.record)]" : "[]"
+        if args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"] {
+            return #"{"entries":\#(unresolved ? "[\(kind.record)]" : "[]"),"next":null}"#
         }
         if args.starts(with: ["session", "open", kind.id]), args.contains("--json") {
             guard unresolved else { throw RegistryQueryError("Session \(kind.id) was not found") }

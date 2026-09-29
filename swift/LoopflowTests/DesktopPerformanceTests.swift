@@ -412,7 +412,7 @@ struct DesktopPerformanceTests {
             switch args.first {
             case "roadmap": return await planning.read()
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return sessionJSON
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }

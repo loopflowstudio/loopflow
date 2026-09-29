@@ -1725,7 +1725,25 @@ fn dispatch(
                 name,
                 args: rest,
                 json,
+                inventory,
             }) => {
+                if inventory.sessions {
+                    return match name.as_str() {
+                        "list" if rest.is_empty() => {
+                            loopflow::lf::commands::flow_inventory::list(inventory, *json)
+                        }
+                        "show" if rest.len() == 1 => {
+                            loopflow::lf::commands::flow_inventory::inspect(&rest[0], *json)
+                        }
+                        _ => anyhow::bail!(
+                            "use lf flow list --sessions [OPTIONS] or lf flow show --sessions ID"
+                        ),
+                    };
+                }
+                anyhow::ensure!(
+                    inventory.is_empty(),
+                    "saved Flow filters require --sessions"
+                );
                 if matches!(name.as_str(), "blocked" | "resume") {
                     return loopflow::lf::commands::flow::control(name, rest, &cli);
                 }

@@ -585,9 +585,11 @@ pub enum Commands {
         /// Message for the flow
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
-        /// JSON output for `lf flow list`
+        /// JSON output for template list or saved FlowSession discovery
         #[arg(long)]
         json: bool,
+        #[command(flatten)]
+        inventory: commands::flow_inventory::FlowInventoryArgs,
     },
     /// Run a skill (skill) by name — the explicit form
     Skill {
@@ -662,6 +664,12 @@ pub enum SessionCommand {
         limit: usize,
         #[arg(long, default_value_t = 0)]
         offset: usize,
+        /// Return a bounded stable-ID page with a continuation cursor
+        #[arg(long, requires = "json", conflicts_with = "offset")]
+        page: bool,
+        /// Previous page's next identity; keep the same filters
+        #[arg(long, requires = "page")]
+        after: Option<String>,
         #[arg(long)]
         task: Option<String>,
         #[arg(long)]

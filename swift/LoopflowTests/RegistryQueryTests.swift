@@ -7,36 +7,28 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
-    @Test("Session inventory is complete across rename, insertion and completion")
-    func sessionsReadCompleteInventory() async throws {
-        let fixture = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: sessionFixtureURL())) as? [String: Any])
-        var rows: [[String: Any]] = (0..<101).map { index in
-            var row = fixture
-            row["id"] = "session-\(index)"
-            row["title"] = "Title \(index)"
-            return row
-        }
-        let first = String(data: try JSONSerialization.data(withJSONObject: rows), encoding: .utf8)!
-        rows.removeFirst()
-        rows[99]["title"] = "AAA renamed"
-        var added = fixture
-        added["id"] = "new-session"
-        rows.insert(added, at: 0)
-        let changed = String(data: try JSONSerialization.data(withJSONObject: rows), encoding: .utf8)!
-        let count = CallCounter()
+    @Test("Session pages return a stable continuation and preserve renamed records")
+    func sessionsReadPages() async throws {
+        let row = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: sessionFixtureURL())) as? [String: Any])
+        var first = row
+        first["id"] = "session-a"
+        var last = row
+        last["id"] = "session-z"
+        last["title"] = "AAA renamed"
+        let firstJSON = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["entries": [first], "next": "session-a"]), as: UTF8.self)
+        let lastJSON = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["entries": [last], "next": NSNull()]), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            // A bounded response would drop the final conversation here.
-            guard args.suffix(2) == ["--limit", "0"] else { return "[]" }
-            await count.increment()
-            return await count.value == 1 ? first : changed
+            args.contains("--after") ? lastJSON : firstJSON
         }
-        let original = try await query.sessions(cwd: "/tmp/repo")
-        let refreshed = try await query.sessions(cwd: "/tmp/repo")
-        #expect(original.count == 101)
-        #expect(Set(refreshed.map(\.id)).count == 101)
-        #expect(refreshed.contains { $0.id == "session-100" && $0.title == "AAA renamed" })
-        #expect(!refreshed.contains { $0.id == "session-0" })
-        #expect(refreshed.contains { $0.id == "new-session" })
+        let page = try await query.sessionPage(cwd: "/tmp/repo")
+        let final = try await query.sessionPage(after: page.next, cwd: "/tmp/repo")
+        #expect(page.entries.map(\.id) == ["session-a"])
+        #expect(page.next == "session-a")
+        #expect(final.entries.map(\.id) == ["session-z"])
+        #expect(final.entries.first?.title == "AAA renamed")
+        #expect(final.next == nil)
     }
 
     @Test("lf wave list decodes and scopes to the repo")
@@ -460,8 +452,8 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["session", "list", "--json", "--limit", "0"]:
-                return sessionsJSON
+            case ["session", "list", "--json", "--page", "--limit", "100"]:
+                return #"{"entries":\#(sessionsJSON),"next":null}"#
             case ["session", "open", session.id, "--json"]:
                 return sessionJSON
             default:
@@ -469,7 +461,7 @@ struct RegistryQueryTests {
             }
         }
 
-        let listed = try await query.sessions(cwd: "/tmp/repo")
+        let listed = try await query.sessionPage(cwd: "/tmp/repo").entries
         let opened = try await query.openSession(id: session.id, cwd: "/tmp/repo")
 
         #expect(listed == sessions)

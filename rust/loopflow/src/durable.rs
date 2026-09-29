@@ -459,6 +459,48 @@ pub struct AbandonReceipt {
     pub abandoned_at: OffsetDateTime,
 }
 
+/// Query values for retained FlowSession discovery; none carries driver authority.
+#[derive(Debug, Clone, Default)]
+pub struct FlowFilter {
+    pub parent_id: Option<String>,
+    pub repo: Option<String>,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub taskless: bool,
+    pub managed: Option<bool>,
+    pub state: Option<crate::session::FlowSummaryState>,
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowInventoryEntry {
+    pub parent_id: Option<String>,
+    #[serde(flatten)]
+    pub summary: crate::session::FlowSummary,
+    pub repo: Option<String>,
+    pub managed: bool,
+    pub ended_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowPage {
+    pub entries: Vec<FlowInventoryEntry>,
+    pub next: Option<String>,
+}
+
+/// One exact saved capture. History and provider outcomes retain their own APIs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowDetail {
+    pub entry: FlowInventoryEntry,
+    pub graph: crate::engine::flow_graph::FlowGraph,
+    pub current: Option<u32>,
+    pub completed: Vec<u32>,
+    pub returns: Vec<crate::engine::flow_graph::FlowReturn>,
+    pub version: u64,
+    pub cwd: std::path::PathBuf,
+    pub failure: Option<TaskFlowBlocker>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{render_steers, Steer, WorkStatus};

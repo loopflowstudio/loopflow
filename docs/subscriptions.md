@@ -130,9 +130,9 @@ printing percentages, reset times and plan. Each window keeps its own observatio
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
 `N% used` and `M% left`. JSON retains dated window observations; consumers must
-check `resets_at` before treating a recorded percentage as current. `lf usage` reports Run
-token/cost usage separately. With `--verify`, status reads forwarded identity
-metadata from the origin broker, without acquiring a remote credential or
+check `resets_at` before treating a recorded percentage as current. `lf usage`
+reports recorded provider token/cost usage separately. With `--verify`, status
+reads forwarded identity metadata from the origin broker, without acquiring a remote credential or
 verifying remote accounts. An unavailable broker leaves local evidence visible.
 
 JSON contains `accounts`, optional `forwarded_accounts_diagnostic`, and optional
@@ -235,8 +235,11 @@ lf runs <run-id> --events
 `provider_account_selected` records the actual account and attempt, including
 headless Task steps before a provider session ID is available. Later attempts
 retain earlier account evidence; a null account means ambient execution. Once
-the provider reports its session ID, the Run's session reference records that
-session with its selected account.
+the provider reports its native identity, continuation must retain that identity
+and selected account/native Home. Requested account and actual selection are
+different evidence. The event command above remains a transitional launch
+interface; [cutover status](architecture-reference.md#cutover-status) records the
+remaining history/account conversion.
 
 Prefer an account while keeping the normal route as fallback:
 

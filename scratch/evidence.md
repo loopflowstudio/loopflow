@@ -6,7 +6,33 @@ Detailed reports, earlier failures and source hashes remain in the
 
 ## Published CI and retained red results
 
-Published `7e2101b41`, base `a2b59ed50`, PR1296. CI **36494751569** failed:
+Current integrated checkpoint is `26a0270af`, based on main `d9632d833` and
+published to PR1296 on 2026-09-28. GitHub and the Task record agree on the head;
+the Task base agrees with Git. Rebased recovery commit `e9597b75e` preserves
+the recovery source and compact scratch from `b352cc691`; the intervening
+diff is the eight files from upstream PR1317. The final checkpoint updates
+the upstream Ask retry assertion to read its retained SQLite-backed public
+Session instead of the retired Ask file. Main reports the focused Session
+launch/retry proof passed; that is not a new recovery-suite execution.
+
+Hosted run **36507832289**, Rust job **109213159143**, now reports **882 passed /
+1 failed / 13 skipped / 1,050 unrun**. `ops::flow::tests::telemetry_flow_persists_the_portfolio_reading`
+prints `product/task-loop-trust: accepted`, then panics at `flow.rs:518` indexing
+an empty portfolio. Raw log: `.lf/tmp/execution-model/recovery-26a027-rust-ci.log`.
+Source observation: the fixture creates a Wave but no PM snapshot; the current
+portfolio reader returns an empty list plus `ChapterUnavailable` when current
+Project resolution fails. Three neighboring metrics tests also omit that snapshot
+and were not reached. This trace is not a local reproduction or an accepted repair.
+Resolve the contract without confusing unknown target planning with no target,
+or erasing retained observations. Main received the exact evidence in Task comment
+`30db73b7-3e6b-4400-87ec-dded72424d47`; docs-first work continues before the repair.
+
+Hosted run 36507832289 is complete and failed. Rust lint, migration, architecture,
+Python, website, smoke, Task installation, Swift and UI compile jobs passed.
+The failing jobs are Rust, scratch-clear (active design notes remain), and the
+aggregate tests-result. No full-green gate, auto-merge or landing is claimed.
+
+Earlier published `7e2101b41`, base `a2b59ed50`: CI **36494751569** failed:
 Rust job **109171585133**, 39 passed / 2 failed / 13 skipped / 1,890 unrun.
 
 - `task_decision_driver_failures_open_one_unblock_and_reassess_feedback`:

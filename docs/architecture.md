@@ -8,11 +8,9 @@ title: Architecture
 Loopflow records commands, preserves agent conversations, and advances captured
 Flows. Exec, AgentSession and FlowSession own those three lifetimes.
 
-**Implementation status:** this is the accepted model for the execution cutover.
-Exec recording and the native transport proof exist; the public AgentSession /
-FlowSession lifecycle and status-based Chapter rotation are still being converted.
-The checked inventory in the reference describes the current source, including
-the Run storage that remains to be removed. Examples below specify the target.
+This guide specifies the accepted model. The reference owns
+[cutover status](architecture-reference.md#cutover-status), the remaining work
+map and the checked current-source inventory.
 
 This guide is for developers changing Loopflow. It starts with the smallest
 complete path, then opens into the six areas that own the system. Command
@@ -154,7 +152,7 @@ user / agent --> lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Chapter x Wave = Project -> Task
+  Skills / Flows /       Wave -> Linear Project -> Task
   goals / memory                  |
           |                       +---------> Task delivery
           |                       |                ^
@@ -240,8 +238,9 @@ Failed or interrupted work remains visible, and stale results cannot advance
 the current boundary. Conversation continuation is separate from Flow retry.
 
 Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
-Bind fills an unassigned conversation's Task once, after confirming the exact
-target; it cannot clear or move an assignment or change Flow membership. Done
+Bind fills an unassigned conversation's Task once. CLI states the permanent
+target and writes; Desktop confirms it. Bind cannot clear or move an assignment
+or change Flow membership. Done
 and landed Tasks remain valid targets. Under the current conservative attribution
 assumption, earlier usage retains its recorded owner; binding affects subsequent
 work, and uncertain mid-turn allocation remains unknown.

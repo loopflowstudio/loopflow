@@ -54,6 +54,9 @@ when both operators are absent. Projects belong to Waves; they have no separate
 operator. Scheduling and connected chat are separate integration work. These
 manual passes neither install jobs nor post replies to a channel.
 
+The [execution contract and cutover status](architecture-reference.md#cutover-status)
+track remaining implementation and acceptance.
+
 ## The planning model
 
 ```bash
@@ -202,6 +205,33 @@ metric can graduate. Later silence becomes Unknown, a current failed source
 read becomes Unavailable, and stale evidence never remains green. Metrics
 inform chapter KR judgment but never check a KR automatically.
 
+### Discord bridge
+
+```yaml
+# wave/product/GOAL.md frontmatter
+chat:
+  provider: discord
+  guild_id: "123456789012345678"
+  channel_id: "234567890123456789"
+```
+
+```bash
+doppler run -- lf discord serve product
+```
+
+Run one foreground bridge for the configured channel. It polls every five
+seconds, turns each nonempty, non-bot message into a bounded Wave-attributed
+conversation, and replies with that conversation's final answer. Mentions are disabled in replies.
+The token is `LF_DISCORD_TOKEN`, injected through Doppler and removed from
+provider child environments. The bot needs View Channel, Read Message History,
+Send Messages and access to message content.
+
+The cursor exists only in memory. Every start skips existing channel history;
+restarting after a failure does not replay missed messages. The bridge uses the
+channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
+There is no local Wave transcript, inbox, listener or automatic service startup.
+Use Sessions for native conversations and `lf runs --wave product` for historical launch inspection.
+
 ### Memory
 
 `MEMORY.md` is durable working context agents curate as Wave work moves —
@@ -214,7 +244,7 @@ $EDITOR wave/shipper/MEMORY.md
 
 The file is the whole memory surface — read and edit it directly, running Wave
 or not. `realign` curates it: merge durable context into the existing
-structure, correct stale entries, and drop transient Run detail. When a task ships,
+structure, correct stale entries, and drop transient execution detail. When a task ships,
 its context folds forward into memory and the remaining Linear tasks — fold,
 don't drop.
 
@@ -311,18 +341,18 @@ Project's Flow supplies the default; `--flow` selects any other template.
 Launch creates an invocation containing the expanded graph and its execution
 state. Source edits and chapter transfers do not change that captured graph.
 Finished and replaced invocations remain history; the Task has at most one
-current root invocation. Completion leaves Task Work open until an explicit
+managed FlowSession. Completion leaves Task Work open until an explicit
 completion or delivery operation settles it.
 
 Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
 KRs and targets. Explicit PR rotation selects the next serial branch while
 preserving the Task's worktree directory.
 
-Runs carry nullable Task/Wave fields; Sessions read those fields through their
-Runs. Launching `lf` in a registered Task checkout binds automatically unless
+AgentSessions and FlowSessions own typed nullable Task/Wave ancestry.
+Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and
-requires confirmation of the exact target; an existing Task cannot change.
+states the permanent target in CLI; Desktop confirms it. An existing Task cannot change.
 See [Sessions](lf.md#sessions)
 for rename, bind, and the distinction between ancestry and Flow membership.
 

@@ -547,13 +547,23 @@ impl RunRecorder {
 
 /// Scan Home-local Run records without opening planning or journal SQLite.
 ///
-/// A corrupt individual record is omitted with a warning so one damaged
+/// A corrupt selected record is omitted with a warning so one damaged
 /// record cannot make unrelated execution history unavailable. Partial JSONL
 /// evidence remains visible through `evidence_gaps` on the owning Run.
 pub fn scan_runs_since(lf_home: &Path, since: i64) -> std::io::Result<Vec<RunSnapshot>> {
     let records = record_dirs(lf_home)?;
     let mut runs = Vec::new();
     for record in records {
+        // Bound event parsing before reading history; all-history callers keep
+        // their single manifest read. Invalid manifests retain the reader's error.
+        if since != 0
+            && read_manifest(&record).is_ok_and(|manifest| {
+                manifest.created_at.unix_timestamp() < since
+                    && validate_manifest_path(&record, &manifest).is_ok()
+            })
+        {
+            continue;
+        }
         match read_run_snapshot(&record) {
             Ok(run) if run.started >= since => runs.push(run),
             Ok(_) => {}
@@ -3238,6 +3248,52 @@ mod tests {
         assert_ne!(usage[1]["usage_stream_id"], usage[2]["usage_stream_id"]);
         assert_eq!(usage[1]["observation_seq"], 2);
         assert_eq!(usage[2]["observation_seq"], 1);
+    }
+
+    #[test]
+    fn scanner_window_keeps_boundary_usage_and_incomplete_evidence() {
+        let home = tempfile::tempdir().unwrap();
+        let since = 1_790_000_000;
+        for started in [since - 1, since, since + 1] {
+            let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+            capture.record_stream_event(&StreamEvent::Usage {
+                input_tokens: Some(12),
+                output_tokens: Some(3),
+                cache_read_tokens: None,
+            });
+            capture.finish("completed").unwrap();
+            let dir = capture.artifact_dir();
+            let mut manifest = super::read_manifest(&dir).unwrap();
+            manifest.created_at = time::OffsetDateTime::from_unix_timestamp(started).unwrap();
+            fs::write(
+                dir.join("manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            if started == since {
+                OpenOptions::new()
+                    .append(true)
+                    .open(dir.join("events.jsonl"))
+                    .unwrap()
+                    .write_all(b"{")
+                    .unwrap();
+            }
+        }
+
+        let all = scan_runs_since(home.path(), 0).unwrap();
+        let selected = scan_runs_since(home.path(), since).unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(selected.len(), 2);
+        assert_eq!(selected[0].started, since + 1);
+        assert_eq!(selected[1].started, since);
+        assert_eq!(selected[1].usage.input_tokens, Some(12));
+        assert_eq!(selected[1].evidence_gaps, 1);
+        assert_eq!(
+            selected,
+            all.into_iter()
+                .filter(|run| run.started >= since)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

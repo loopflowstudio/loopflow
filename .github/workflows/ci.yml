@@ -75,7 +75,8 @@ jobs:
         run: cargo nextest run --all
       - name: Prove checkout refresh through the CLI
         run: |
-          cargo build -p loopflow --bin lf
+          # Integration tests above already build this executable.
+          test -x "$PWD/target/debug/lf"
           LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 
   task-installation:

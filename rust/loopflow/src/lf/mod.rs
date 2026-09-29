@@ -577,6 +577,9 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         lf_args: Vec<String>,
     },
+    /// Execute one captured Flow boundary in its own process.
+    #[command(name = "__flow-step", hide = true)]
+    FlowStep { id: String, version: u64 },
     /// Run a flow by name — the explicit form for names that collide with a
     /// built-in command
     Flow {

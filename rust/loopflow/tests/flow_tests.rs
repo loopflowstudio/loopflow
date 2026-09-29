@@ -39,7 +39,7 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
 }
 
 #[test]
-fn mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec() {
+fn mechanical_flow_boundaries_each_have_their_own_child_exec() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     write_flow(
@@ -65,8 +65,8 @@ fn mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec() {
     ).unwrap();
     assert_eq!(
         counts,
-        (0, 0, 1),
-        "in-process operations create no Run, conversation or synthetic Exec"
+        (0, 0, 3),
+        "the driver and two real step processes create no conversations"
     );
     let history: Vec<(String, i64, String)> = conn
         .prepare("SELECT kind,node,exec_id FROM flow_events ORDER BY seq")
@@ -87,7 +87,18 @@ fn mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec() {
             ("operation_completed", 1)
         ]
     );
-    assert!(history.iter().all(|(_, _, exec)| exec == &history[0].2));
+    assert_eq!(history[0].2, history[1].2);
+    assert_eq!(history[2].2, history[3].2);
+    assert_ne!(history[0].2, history[2].2);
+    let children: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM execs child JOIN execs driver ON driver.id=child.parent_exec_id
+         WHERE child.via_agent=0 AND child.outcome='succeeded' AND driver.parent_exec_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(children, 2);
     assert_eq!(
         conn.query_row("SELECT state FROM flow_sessions", [], |row| row
             .get::<_, String>(0))
@@ -97,7 +108,7 @@ fn mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec() {
 }
 
 #[test]
-fn mechanical_failure_retains_earlier_success_in_the_same_exec() {
+fn mechanical_failure_retains_earlier_step_success() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     write_flow(
@@ -134,11 +145,32 @@ fn mechanical_failure_retains_earlier_success_in_the_same_exec() {
             .collect::<Vec<_>>(),
         vec!["completed", "failed"]
     );
-    assert_eq!(outcomes[0].1, outcomes[1].1);
+    assert_ne!(outcomes[0].1, outcomes[1].1);
     assert_eq!(
-        conn.query_row("SELECT outcome FROM execs", [], |row| row
-            .get::<_, String>(0))
-            .unwrap(),
+        conn.query_row(
+            "SELECT outcome FROM execs WHERE id=?1",
+            [&outcomes[0].1],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "succeeded"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT outcome FROM execs WHERE id=?1",
+            [&outcomes[1].1],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "failed"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT outcome FROM execs WHERE parent_exec_id IS NULL",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
         "failed"
     );
     assert_eq!(
@@ -149,6 +181,279 @@ fn mechanical_failure_retains_earlier_success_in_the_same_exec() {
         )
         .unwrap(),
         0
+    );
+}
+
+#[test]
+fn mechanical_task_step_owns_its_effect_without_taking_the_driver_claim() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let task = support::register_unrun_task(
+        home.path(),
+        repo.path(),
+        "mechanical-task",
+        &repo.head_sha(),
+    );
+    write_flow(repo.path(), "task-op", "- op: rebase --plan\n");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let flow = runtime
+        .block_on(task.store.start_task_flow(
+            &task.task.id,
+            FlowSession {
+                parent_id: None,
+                invocation: QueuedInvocation::load(repo.path(), "task-op").unwrap(),
+                cursor: Default::default(),
+                version: 0,
+                task_id: Some(task.task.id.clone()),
+                wave_id: Some(task.task.wave_id.clone()),
+                cwd: repo.path().to_owned(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                finished: false,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        ))
+        .unwrap();
+    let TaskWorkerClaimOutcome::Claimed(claim) = runtime
+        .block_on(task.store.claim_task_worker(
+            &task.task.id,
+            flow.id(),
+            flow.version,
+            &TaskWorkerOwner {
+                trace_id: TraceId::new(),
+                exec_id: ExecId::new(),
+                pid: std::process::id(),
+                started_at: 1,
+            },
+            time::OffsetDateTime::now_utc(),
+        ))
+        .unwrap()
+    else {
+        panic!("claim not acquired")
+    };
+    assert!(!runtime
+        .block_on(task.store.task_started(&task.task.id))
+        .unwrap());
+    fs::remove_file(repo.path().join(".lf/flows/task-op.yaml")).unwrap();
+    let invoke = |version: u64| {
+        lf_command(
+            repo.path(),
+            home.path(),
+            &["__flow-step", flow.id(), &version.to_string()],
+            None,
+        )
+        .env(
+            loopflow::durable::TASK_WORKER_CLAIM_ENV,
+            serde_json::to_string(&claim).unwrap(),
+        )
+        .output()
+        .unwrap()
+    };
+    assert!(!invoke(flow.version + 1).status.success());
+    assert!(!runtime
+        .block_on(task.store.task_started(&task.task.id))
+        .unwrap());
+    let output = invoke(flow.version);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(runtime
+        .block_on(task.store.task_started(&task.task.id))
+        .unwrap());
+    let current = runtime
+        .block_on(task.store.task_flow(&task.task.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.claim.as_ref(), Some(&claim));
+    assert_eq!(current.cursor, flow.cursor, "the driver owns navigation");
+    assert!(
+        invoke(flow.version).status.success(),
+        "completed effect is retained on replay"
+    );
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (starts, results, conversations): (i64, i64, i64) = conn.query_row(
+        "SELECT (SELECT count(*) FROM flow_events WHERE kind='operation_started'),
+        (SELECT count(*) FROM flow_events WHERE kind='operation_completed'), (SELECT count(*) FROM agent_sessions)",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+    assert_eq!((starts, results, conversations), (1, 1, 0));
+    let effect_exec: String = conn
+        .query_row(
+            "SELECT exec_id FROM flow_events WHERE kind='operation_started'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_ne!(effect_exec, claim.owner.exec_id.as_str());
+    assert_eq!(
+        conn.query_row(
+            "SELECT outcome FROM execs WHERE id=?1",
+            [&effect_exec],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "succeeded"
+    );
+    assert!(conn
+        .execute(
+            "UPDATE tasks SET started_at=started_at+1 WHERE id=?1",
+            [task.task.id.as_str()]
+        )
+        .is_err());
+}
+
+#[test]
+fn mechanical_step_survives_its_driver_and_resume_consumes_it_once() {
+    use std::time::{Duration, Instant};
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let scripts = repo.path().join("scripts");
+    fs::create_dir_all(&scripts).unwrap();
+    fs::write(
+        scripts.join("lifecycle_scorecard.py"),
+        r#"import json
+import pathlib
+import sys
+import time
+repo = pathlib.Path(sys.argv[2])
+with repo.joinpath("effects").open("a") as log:
+    log.write("started\n")
+repo.joinpath("entered").touch()
+deadline = time.monotonic() + 30
+while not repo.joinpath("release").exists():
+    if time.monotonic() > deadline:
+        raise RuntimeError("fixture release timed out")
+    time.sleep(0.02)
+print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
+"#,
+    )
+    .unwrap();
+    write_flow(
+        repo.path(),
+        "survive",
+        "- op: __telemetry-scorecard\n- op: rebase --plan\n",
+    );
+    let mut driver = lf_command(repo.path(), home.path(), &["-b", "flow", "survive"], None)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !repo.path().join("entered").exists() {
+        assert!(
+            driver.try_wait().unwrap().is_none(),
+            "driver exited before the effect"
+        );
+        assert!(Instant::now() < deadline, "effect never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (id, step, parent): (String, String, String) = conn
+        .query_row(
+            "SELECT f.id, e.id, e.parent_exec_id FROM flow_sessions f
+         JOIN flow_events start ON start.seq=f.operation_start JOIN execs e ON e.id=start.exec_id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    driver.kill().unwrap();
+    driver.wait().unwrap();
+    let mut resume = lf_command(repo.path(), home.path(), &["flow", "resume", &id], None)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // Wait until the replacement reached the existing driver lock, then check
+    // that it leaves the live effect selected with no failure or duplicate.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM execs WHERE parent_exec_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if count == 2 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(resume.try_wait().unwrap().is_none());
+    assert_eq!(
+        fs::read_to_string(repo.path().join("effects")).unwrap(),
+        "started\n"
+    );
+    let failure: Option<String> = conn
+        .query_row(
+            "SELECT failure_json FROM flow_sessions WHERE id=?1",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(failure, None);
+    fs::write(repo.path().join("release"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(status) = resume.try_wait().unwrap() {
+            assert!(status.success(), "resume failed: {status}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "resume did not consume the step result"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM flow_events WHERE kind='operation_started'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT state FROM flow_sessions WHERE id=?1",
+            [&id],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "completed"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT parent_exec_id FROM execs WHERE id=?1",
+            [&step],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        parent
+    );
+    assert_eq!(
+        conn.query_row("SELECT outcome FROM execs WHERE id=?1", [&parent], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .unwrap(),
+        None,
+        "driver disappearance cannot manufacture command completion"
+    );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM execs", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        4,
+        "resume consumes the first child's result without executing it again"
     );
 }
 

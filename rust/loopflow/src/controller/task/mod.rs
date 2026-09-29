@@ -814,7 +814,6 @@ mod planning_tests {
         Author, FlowSession, TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
     };
     use crate::engine::agent::AgentConfig;
-    use crate::engine::invocation::StepKind;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::{ExecId, TraceId};
     use crate::ops::human_session::{self, SessionFlowMembership};
@@ -2122,7 +2121,22 @@ mod planning_tests {
                 let worker = async {
                     let launch = launch_rx.recv().await.unwrap();
                     let claim = launch.environment.iter().find(|(key, _)| key == crate::durable::TASK_WORKER_CLAIM_ENV).unwrap();
-                    let claim = serde_json::from_str(&claim.1).unwrap();
+                    let claim: TaskWorkerClaim = serde_json::from_str(&claim.1).unwrap();
+                    let mut process = tokio::process::Command::new("sleep")
+                        .arg("30").kill_on_drop(true).spawn().unwrap();
+                    let owner = TaskWorkerOwner {
+                        trace_id: claim.owner.trace_id.clone(), exec_id: ExecId::new(),
+                        pid: process.id().unwrap(),
+                        started_at: crate::journal::process_started_at(process.id().unwrap()).unwrap().unwrap(),
+                    };
+                    let claim = store.sqlite.handoff_task_worker(&task.id, &claim, &owner).unwrap();
+                    let receipts = guard.ledger.home().join(crate::journal::EXEC_PROCESS_ROOT);
+                    std::fs::create_dir_all(&receipts).unwrap();
+                    std::fs::write(receipts.join(format!("{}.json", owner.pid)), serde_json::to_vec(
+                        &crate::journal::ExecProcessReceipt {
+                            schema_version: 1, trace_id: owner.trace_id.to_string(), exec_id: owner.exec_id.to_string(),
+                            pid: owner.pid, started_at: owner.started_at,
+                        }).unwrap()).unwrap();
                     std::env::set_var(crate::ops::TASK_ACCOUNT_ID_ENV, "fixture-account");
                     let create: crate::harness::CreateHarness = Box::new({
                         let store = store.clone(); let task_id = task.id.clone(); let seen = seen.clone(); let resumed = resumed.clone();
@@ -2134,9 +2148,12 @@ mod planning_tests {
                     let (url, _) = test_server::spawn(vec![json_response(axum::http::StatusCode::OK,
                         json!({"data": {"issue": {"updatedAt": "2026-09-24T00:00:00Z", "title": task.plan.title,
                         "description": task.plan.description, "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}))]).await;
-                    crate::ops::pm::PM_TEST_CONTEXT.scope(crate::ops::pm::PmTestContext {
+                    let error = crate::ops::pm::PM_TEST_CONTEXT.scope(crate::ops::pm::PmTestContext {
                         path: guard.ledger.home().join("loopflow.db"), store: store.clone(), graphql_url: url,
-                    }, super::drive_task(store.clone(), task.id.clone(), claim, create)).await.unwrap_err()
+                    }, super::drive_task(store.clone(), task.id.clone(), claim, create)).await.unwrap_err();
+                    process.kill().await.unwrap();
+                    process.wait().await.unwrap();
+                    error
                 };
                 let (resumed, error) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
                     tokio::join!(resume, worker)
@@ -3037,63 +3054,6 @@ mod planning_tests {
 
         assert_eq!(flow.current().step, interrupted_step);
         assert!(prepared.turn.input.contains("direction after interrupt"));
-    }
-
-    #[tokio::test]
-    async fn one_mechanical_op_advances_one_persisted_boundary_without_a_provider() {
-        let guard = super::TestLfBinGuard::pin();
-        let (store, task, _) =
-            human_task_fixture_at(&guard.ledger.home().join("loopflow.db")).await;
-        let flow_dir = task.worktree.join(".lf/flows");
-        std::fs::create_dir_all(&flow_dir).unwrap();
-        std::fs::write(
-            flow_dir.join("two-ops.yaml"),
-            "- op: rebase --plan\n- op: rebase --plan\n",
-        )
-        .unwrap();
-        let flow = super::start_task_flow(&task, "two-ops").unwrap();
-        assert_eq!(flow.current().kind, StepKind::Op);
-        let flow = store.start_task_flow(&task.id, flow).await.unwrap();
-        let held = claim(&store, &task, &flow, 404).await;
-        assert!(!store.task_started(&task.id).await.unwrap());
-        let released = store
-            .release_flow(flow.id(), flow.version, Some(&held))
-            .await
-            .unwrap();
-        assert!(!store.task_started(&task.id).await.unwrap());
-        let held = claim(&store, &task, &released, 405).await;
-        let create: crate::harness::CreateHarness =
-            Box::new(|_, _, _| panic!("an operation step needs no provider"));
-
-        super::drive_task(store.clone(), task.id.clone(), held, create)
-            .await
-            .unwrap();
-
-        assert!(store.task_flow(&task.id).await.unwrap().is_none());
-        let ended = store.flow(flow.id()).await.unwrap().unwrap();
-        assert!(ended.finished);
-        assert_eq!(ended.cursor.index, 2);
-        assert_eq!(ended.cursor.iteration, 0);
-        store.sqlite.assert_no_historical_runs();
-        assert!(store.task_started(&task.id).await.unwrap());
-        let conn = rusqlite::Connection::open(guard.ledger.home().join("loopflow.db")).unwrap();
-        let results: Vec<(i64, String)> = conn
-            .prepare("SELECT node,outcome FROM flow_events WHERE flow_id=?1 AND kind='operation_completed' ORDER BY seq")
-            .unwrap()
-            .query_map([flow.id()], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(
-            results,
-            vec![(0, "completed".into()), (1, "completed".into())]
-        );
-        assert!(conn
-            .execute(
-                "UPDATE tasks SET started_at=started_at+1 WHERE id=?1",
-                [task.id.as_str()]
-            )
-            .is_err());
     }
 
     #[tokio::test]

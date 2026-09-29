@@ -1130,6 +1130,27 @@ impl SqliteStore {
         ).optional()?)
     }
 
+    /// The process selected for an unfinished mechanical boundary, if recorded.
+    pub(crate) fn pending_flow_operation_exec(
+        &self,
+        id: &str,
+    ) -> StoreResult<Option<crate::id::ExecId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let exec: Option<String> = conn.query_row(
+            "SELECT start.exec_id FROM flow_sessions f JOIN flow_events start ON start.seq=f.operation_start
+             WHERE f.id=?1 AND NOT EXISTS(SELECT 1 FROM flow_events done WHERE done.operation_start=start.seq)",
+            [id], |row| row.get(0),
+        ).optional()?.flatten();
+        exec.map(|id| crate::id::ExecId::parse(&id).map_err(invalid))
+            .transpose()
+    }
+
+    pub(crate) fn flow_operation_completed(&self, id: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(operation_in(&conn, id)?
+            .is_some_and(|(_, outcome)| outcome.as_deref() == Some("completed")))
+    }
+
     /// Select a native turn only for the launch authorized at this exact boundary.
     /// A Session observer cannot select a turn; the launching Flow driver carries
     /// its saved version/claim and the reserved Session identity.

@@ -1721,6 +1721,9 @@ fn dispatch(
                 &account_selection,
                 lf_args,
             ),
+            Some(Commands::FlowStep { id, version }) => in_directory_runtime(args, |_| {
+                loopflow::lf::commands::flow::execute_step(id, *version)
+            }),
             Some(Commands::Flow {
                 name,
                 args: rest,

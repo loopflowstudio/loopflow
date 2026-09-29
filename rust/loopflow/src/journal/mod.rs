@@ -977,6 +977,28 @@ pub(crate) fn task_worker_owner_evidence(
     }
 }
 
+pub(crate) fn exec_process_evidence(store: &SqliteStore, exec: &ExecId) -> ProcessIdentityEvidence {
+    let Ok(receipts) = read_exec_process_receipts_at(&crate::store::lf_home_dir()) else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    if let Some(receipt) = receipts
+        .iter()
+        .find(|receipt| receipt.exec_id == exec.as_str())
+    {
+        return match process_started_at(receipt.pid) {
+            Ok(Some(started)) if (started - receipt.started_at).abs() <= 3 => {
+                ProcessIdentityEvidence::Live
+            }
+            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
+            Err(_) => ProcessIdentityEvidence::Unknown,
+        };
+    }
+    match store.exec(exec) {
+        Ok(Some(record)) if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,
+        _ => ProcessIdentityEvidence::Unknown,
+    }
+}
+
 pub(crate) fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "etime="])

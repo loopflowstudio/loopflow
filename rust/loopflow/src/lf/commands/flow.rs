@@ -322,6 +322,7 @@ pub(crate) async fn prepare_native_retry(
     store: &SharedStore,
     flow: FlowSession,
 ) -> Result<FlowSession> {
+    wait_for_step(store, &flow).await?;
     if store.sqlite.pending_flow_conversation(flow.id())?.is_none() {
         return Ok(flow);
     }
@@ -335,6 +336,29 @@ pub(crate) async fn prepare_native_retry(
         "Flow changed before native retry"
     );
     recover_native_flow(store, flow.id(), flow.claim.as_ref(), true).await
+}
+
+/// Preserve a surviving step's write authority until its own result is recorded.
+pub(crate) async fn wait_for_step(store: &SharedStore, flow: &FlowSession) -> Result<()> {
+    loop {
+        let current = store.flow(flow.id()).await?.context("Flow disappeared")?;
+        anyhow::ensure!(
+            current.version == flow.version && current.claim == flow.claim,
+            "Flow changed while observing its step"
+        );
+        let Some(exec) = store.sqlite.pending_flow_operation_exec(flow.id())? else {
+            return Ok(());
+        };
+        match journal::exec_process_evidence(&store.sqlite, &exec) {
+            journal::ProcessIdentityEvidence::Live => {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            journal::ProcessIdentityEvidence::Dead => return Ok(()),
+            journal::ProcessIdentityEvidence::Unknown => {
+                anyhow::bail!("Flow {} step Exec {exec} has unknown process identity; retain its pending effect", flow.id());
+            }
+        }
+    }
 }
 
 /// Read the selected provider turn before judging the Flow. A surviving engine
@@ -355,6 +379,7 @@ async fn recover_native_flow(
             flow.claim.as_ref() == claim,
             "Flow {id} changed under its driver"
         );
+        wait_for_step(store, &flow).await?;
         let Some(session_id) = store.sqlite.pending_flow_conversation(id)? else {
             break;
         };
@@ -790,39 +815,83 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         Ok(())
     }
 
-    /// Mechanical effects belong to Flow history, including uncertain outcomes.
+    /// The child owns the effect; the driver consumes its Flow history.
     async fn run_op(&self, ops: &crate::engine::ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
         let flow = self.begin().await?;
-        let name = ops.item.display_name();
-        eprintln!("op: {name}");
-        let claim = self.claim();
-        let exec = journal::current_exec_id();
-        let Some(start) = self.store.sqlite.begin_flow_operation(
-            &self.id,
-            flow.version,
-            claim.as_ref(),
-            exec.as_ref(),
-        )?
+        if self.store.sqlite.flow_operation_completed(flow.id())? {
+            return Ok(());
+        }
+        eprintln!("op: {}", ops.item.display_name());
+        execute_child(&flow, self.claim().as_ref()).await
+    }
+}
+
+/// Execute only the captured boundary named by the driver. No definition lookup
+/// or driver lock: the parent owns traversal while this process owns the effect.
+pub fn execute_step(id: &str, version: u64) -> Result<()> {
+    let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<TaskWorkerClaim>(&value))
+        .transpose()?;
+    std::env::remove_var(crate::durable::TASK_WORKER_CLAIM_ENV);
+    block_on_store(|store| async move {
+        let flow = store
+            .flow(id)
+            .await?
+            .context("Flow disappeared before step execution")?;
+        anyhow::ensure!(
+            flow.version == version && flow.claim == claim && !flow.finished,
+            "Flow changed before step execution"
+        );
+        let Some(ConcreteStep::Op(op)) = flow.current_step() else {
+            anyhow::bail!("captured boundary is not a mechanical operation");
+        };
+        let exec = journal::current_exec_id().context("Flow step requires a registered Exec")?;
+        let Some(start) =
+            store
+                .sqlite
+                .begin_flow_operation(id, version, claim.as_ref(), Some(&exec))?
         else {
             return Ok(());
         };
         let cwd = flow.cwd.clone();
-        let item = ops.item.clone();
+        let item = op.item.clone();
         let result = tokio::task::spawn_blocking(move || {
             crate::ops::execute_flow_ops(&cwd, &item, &NullProgress)
         })
         .await
-        .map_err(|error| anyhow!("op: {name} worker failed: {error}"))?;
-        self.store.sqlite.finish_flow_operation(
-            &self.id,
-            flow.version,
+        .context("Flow operation worker failed")?;
+        store.sqlite.finish_flow_operation(
+            id,
+            version,
             claim.as_ref(),
             start,
-            exec.as_ref(),
+            Some(&exec),
             result.is_ok(),
         )?;
-        result.map_err(|error| anyhow!("op: {name} failed: {error}"))
+        result.map_err(anyhow::Error::from)
+    })
+}
+
+async fn execute_child(flow: &FlowSession, claim: Option<&TaskWorkerClaim>) -> Result<()> {
+    let executable = std::env::current_exe().context("locate the executing Flow driver")?;
+    let mut command = tokio::process::Command::new(executable);
+    command
+        .args(["__flow-step", flow.id(), &flow.version.to_string()])
+        .current_dir(&flow.cwd)
+        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
+    if let Some(claim) = claim {
+        command.env(
+            crate::durable::TASK_WORKER_CLAIM_ENV,
+            serde_json::to_string(claim)?,
+        );
     }
+    let status = command
+        .status()
+        .await
+        .context("could not execute captured Flow step")?;
+    anyhow::ensure!(status.success(), "Flow step process exited with {status}");
+    Ok(())
 }
 
 /// The saved Flow's launcher: each step is an `lf <skill>` in the Flow's cwd.

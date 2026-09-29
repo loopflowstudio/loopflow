@@ -1800,20 +1800,26 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
             awaiting_queue,
             merge_race,
         );
-        let codex = codex_app_server_script(
-            if blocked {
-                r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
-            } else {
-                r#"{"status":"published","summary":"Rebased the linked worktree; the same head can now merge."}"#
-            },
-            r#"if [ -n "$LF_TEST_REPAIR_PROOF" ]; then
+        let repair_commands = r#"if [ -n "$LF_TEST_REPAIR_PROOF" ]; then
+  export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
   echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
   if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
   "$LF_TEST_BIN" rebase --manual >"$LF_TEST_REBASE_LOG" 2>&1 || exit 1
   if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
     git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
   fi
-fi"#,
+fi"#;
+        let codex = codex_app_server_script(
+            if blocked {
+                r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
+            } else {
+                r#"{"status":"published","summary":"Rebased the linked worktree; the same head can now merge."}"#
+            },
+            "",
+        )
+        .replace(
+            "read -r turn_start\n",
+            &format!("read -r turn_start\n{repair_commands}\n"),
         );
         let _env = EnvGuard::new(&[
             ("gh", script.as_str()),
@@ -1909,17 +1915,38 @@ fi"#,
                 .unwrap()
                 .collect::<Result<_, _>>()
                 .unwrap();
+            let caller = if flow {
+                let (id, via_agent): (String, bool) = db
+                    .query_row(
+                        "SELECT id,via_agent FROM execs WHERE parent_exec_id=?1",
+                        [&parent.0],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                assert!(!via_agent, "the Flow driver directly executes its step");
+                id
+            } else {
+                parent.0.clone()
+            };
             assert_eq!(
                 owners.as_slice(),
-                std::slice::from_ref(&parent.0),
+                std::slice::from_ref(&caller),
                 "repair uses the actual calling lf process"
             );
             assert_eq!(
                 db.query_row("SELECT count(*) FROM execs", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                2,
-                "only the calling command and actual nested rebase are Execs"
+                if flow { 3 } else { 2 },
+                "only actual lf processes are Execs"
             );
+            let via_agent: bool = db
+                .query_row(
+                    "SELECT via_agent FROM execs WHERE parent_exec_id=?1",
+                    [&caller],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(via_agent, "the repair agent invokes the nested rebase");
             let completions: i64 = db.query_row(
                 "SELECT count(*) FROM run_events WHERE process_id=?1 AND node='run' AND event IN ('completed','errored')",
                 [&parent.0], |row| row.get(0),
@@ -1945,8 +1972,8 @@ fi"#,
                 assert_eq!(
                     operations,
                     [
-                        ("operation_started".into(), parent.0.clone()),
-                        ("operation_completed".into(), parent.0),
+                        ("operation_started".into(), caller.clone()),
+                        ("operation_completed".into(), caller),
                     ]
                 );
             }

@@ -1811,6 +1811,18 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
             ],
         )
         .unwrap();
+    let mechanical = RunId::new();
+    let ambiguous_kind = RunId::new();
+    for (id, provider) in [(&mechanical, Some("loopflow")), (&ambiguous_kind, None)] {
+        fixture
+            .db()
+            .execute(
+                "INSERT INTO runs(id,created_at,published,cwd,skill,provider)
+             VALUES(?1,70,1,?2,'publish',?3)",
+                rusqlite::params![id.as_str(), fixture.repo.path().to_string_lossy(), provider],
+            )
+            .unwrap();
+    }
     let preview = fixture.json(&["session", "import", "--dry-run", "--json"]);
     assert_eq!(preview["failed"], json!([]));
     assert_eq!(preview["run"], 4, "{preview}");
@@ -1828,6 +1840,23 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
         runtime.block_on(store.session(&saved.id)).unwrap(),
         Some(saved.clone())
     );
+    for input in [&mechanical, &ambiguous_kind] {
+        assert!(runtime
+            .block_on(store.session_for_run(input))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            fixture
+                .db()
+                .query_row(
+                    "SELECT count(*) FROM runs WHERE id=?1",
+                    [input.as_str()],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+    }
     let history = fixture.json(&["session", "history", &saved.id, "--json"]);
     assert_eq!(history.as_array().unwrap().len(), 3);
     let partial = history
@@ -1854,11 +1883,23 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
         assert_eq!(row["outcome"], outcome);
         assert_eq!(row["harness"], provider);
         assert_eq!(row["usage"]["input_tokens"], Value::Null);
+        assert_eq!(fixture.json(&["runs", id.as_str(), "--json"]), *row);
+        assert_eq!(fixture.json(&["runs", &id.as_str()[4..16], "--json"]), *row);
         assert!(
             row["evidence_gaps"].as_u64().unwrap() > 0,
             "missing payload remains explicit"
         );
     }
+    assert_eq!(
+        fixture.json(&["runs", &saved.id, "--json"]),
+        *rows
+            .iter()
+            .find(|row| row["id"] == current.as_str())
+            .unwrap()
+    );
+    let ambiguous = fixture.run(&["runs", "run_", "--json"]);
+    assert!(!ambiguous.status.success());
+    assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("ambiguous"));
     let standalone_session = runtime
         .block_on(store.session(standalone.as_str()))
         .unwrap()

@@ -123,29 +123,33 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Published head **325e0e13ec0a9ec85be8208caffa1c89a33abb52** follows a
-conflict-free rebase onto **76c8f8af404b424c454b5dcd945027e97e28a12c**.
-GitHub and Task publication agree; auto-merge is absent. Provider process
-continuity and inherited-history repair are included. `inherited-replacement.log`
-passes two public-history cases; all-target Clippy passes in 16.67s.
+Published head **9887f8c846f7ee21921fd96351bca82fe3665f6e** is based on
+**359c9a6c351da21e46c372afa2096f5c672f3cbd**. Rebase reconciled the CLI docs;
+the focused architecture check passed. Task publication records that head/base.
+Run/RunEnd/ListedRun and obsolete CRUD are deleted; historical SQL, cross-table
+triggers and remaining lifecycle readers still require conversion.
 
-CI **36537161552** finished red: 1,648 Rust passes, one interruption failure,
-15 skips and 319 unrun of 1,968. The owned telemetry driver exits 1 rather than
-130 (`ci-325e0e13e-rust.log`); its fixture discarded the diagnostic. Main now
-captures that output and is reproducing on Linux. The signal hook killing the
-child may let the main command return an error before the handler exits130;
-this is a source hypothesis, not established cause. Both OS exit and Exec outcome,
-plus owned-child settlement, remain required. All other test/lint/install jobs
-passed; scratch-clear and aggregate tests-result failed, merge-proof skipped.
-The run stopped before the retained OpenCode decision failure.
+CI **36539158341**, Rust job **109310164216**, finished with 1,835 passes,
+one failure, 15 skips and 133 unrun tests. The interruption regression passes
+in 1.576s. The remaining failure is the retained OpenCode taskless decision:
+`navigation requires the selected native turn's original caller`. All other
+test/lint/migration/install jobs succeeded; scratch-clear and aggregate failed,
+merge-proof skipped. Log `ci-9887f8c84-rust.log`; verified direction `72107217`.
+This is hosted proof of the interruption repair, not a full green Rust gate.
 
-Local checkpoint **1d86cd4f3** deletes Run/RunEnd/ListedRun and obsolete CRUD.
-Four store proofs retain ancestry, Started, competing binding and uncapped child
-selectors; two CLI proofs retain scoped inventory and import identity. All six
-pass, and all-target Clippy passes in 15.83s. Historical SQL, its cross-table
-triggers and remaining lifecycle readers still need conversion. Neither zero-row
-assertions nor this API deletion proves table removal. Supervisor review and CI
-direction: `eefbfb8d`, `b679d28c`, `d00f81e1`. All remaining-work obligations stay open.
+The earlier OS-exit1/SQL-interrupted130 failure was reproduced with controlled
+Linux ordering. The existing interrupt-hook mutex now holds ordinary return
+behind cleanup and exit130. The regression uses test-only delayed signal delivery;
+no production delay, retry or new owner was added. Local controlled and ordinary
+exit proofs and Clippy pass; exact receipts remain in the main handoff.
+
+Local **4682d662a** imports unmapped SQL agent inputs and retains current selection.
+Source/canonical proofs pass within their recorded scope. Supervisor review then
+found a historical classification defect: `e7f3e22fd` stored operation names in
+`runs.skill` before filling provider `loopflow`; non-null skill does not prove an
+agent conversation. Main is repairing that case, retaining ambiguous rows, then
+converting public detail reads that still require manifests. Verified direction
+`75479e37`. No partial import count or zero-row assertion proves table removal.
 
 Earlier published head **24ea61517cc5cbcfc4cf29452364fe6efcd37123**, base d4b283a87:
 CI **36533494844** finished with failure: 1,829 Rust passes, two failures,

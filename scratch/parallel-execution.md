@@ -964,3 +964,54 @@ Rust lines in the importer/Session store, excluding migration test code, CLI
 tests and docs. Review retained the existing history owner and input links; no
 new process or attempt owner. The Run table still holds unclassified/mechanical
 evidence and remains protected by its historical triggers.
+
+### Mechanical classification and public detail (2026-09-29)
+
+Supervisor source evidence disproved the skill-name predicate at `4682d662a`:
+old Task operations also stored their step name in `skill`. Import now excludes
+`provider=loopflow`; a provider-null standalone input needs a captured Skill/XOR
+node, not a label. Existing Session identity remains separate recorded evidence.
+The expanded CLI case retains a named mechanical row and a provider-null label
+without constructing either AgentSession. The earlier assumption is superseded.
+
+The populated development fixture then found zero Flow history entries for that
+completed named operation (`historical-named-operation-red-2.log`). A forward
+`retain_named_operation_history` draft preserves both entries plus complete SQL
+bytes, exact node/iterations/outcome and current operation selection. Reservation
+time remains payload, observed start/Exec stay unknown. The materialized proof
+passes in `historical-named-operation-canonical.log` (0.599s), retaining original
+Session event references, Started and schema/ledger rollback checks. Prior drafts
+are unchanged. Two preceding compile failures were fixture/module-name errors,
+not behavioral failures (`historical-mechanical-classification.log`,
+`historical-named-operation-red.log`).
+
+Public detail initially failed for an imported SQL-only input missing its manifest
+(`historical-detail-red.log`). Default `lf runs ID` now uses the same retained-input
+projection as usage, adding its exact input predicate before payload hydration.
+Exact Session selectors select current input; full and stripped input prefixes
+retain ambiguity rejection. Text replay availability still checks the selected
+immutable manifest. Final/events, native resume and active readers retain their
+separate conversion obligations. `historical-detail-and-kind.log` passes (7.583s),
+including exact/prefix detail equality, retained SQL data, import replay/conflict
+and no provider launch. This does not establish table removal or dense paging.
+
+Hosted CI on `9887f8c84` passed interruption in 1.576s. Rust stopped on the known
+OpenCode taskless decision failure after 1835 passes and 15 skips; 133 did not run.
+The supervisor retained `ci-9887f8c84-rust.log`. No native decision contract change
+is selected. The active read-only Exec admission contributor owns only its
+unreturned research artifact; executable/build/Git ownership remains with main.
+
+Prepared Ask detail and replaced-input history both pass in
+`historical-detail-callers.log` (3.519s/5.533s). All-target Clippy passes in
+`historical-classification-detail-static.log` (17.14s), and migration verification
+retains all 55 shipped checksums. The canonical operation snapshot is recorded
+in the latest `canonical-unmapped-source.json`; its earlier agent-only snapshot
+is retained by local checkpoint `4682d662a` and the first disposable build path
+in `historical-unmapped-canonical.log`. The receipt filename was reused, so it
+is not an exact-source receipt for both runs. No extra matrix was run.
+
+This follow-up versus `4682d662a` adds 136/removes 17 production Rust/SQL
+lines, excluding migration/CLI tests and docs. It replaces the skill-name
+classification and manifest-dependent detail projection; table deletion and
+final/events/resume/active conversions remain open. Review preserved operation
+uncertainty and the existing Flow history owner without adding process authority.

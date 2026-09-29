@@ -5683,6 +5683,16 @@ mod tests {
             .unwrap(),
             5
         );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM session_events WHERE input_id IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0,
+            "historical native starts cannot borrow the current input during upgrade"
+        );
         let retained_sql: Vec<serde_json::Value> = conn.prepare("SELECT imported_sql FROM agent_session_inputs WHERE imported_sql IS NOT NULL ORDER BY input_id").unwrap()
             .query_map([], |r| r.get::<_,String>(0)).unwrap()
             .map(|row| serde_json::from_str(&row.unwrap()).unwrap()).collect();

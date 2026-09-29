@@ -31,11 +31,11 @@ bind remains prospective as an operating assumption pending Jack's decision.
 
 ## Current evidence
 
-Published checkpoint `3dc30541f`, PR #1296: hosted run `36620826362`
+Published checkpoint `d6dc8c43b`, PR #1296: hosted run `36629797823`
 passes Rust, Swift, UI and all substantive checks. Scratch-clear and its aggregate
 remain red by design. The repaired tail passed 72/72 locally without fail-fast.
 
-The structured-result slice is under final local review. Captured boundaries now
+The structured-result slice is published. Captured boundaries now
 supply native schemas to Codex, Claude and OpenCode. Exact successful native output
 owns settlement; decide/route command writers are deleted. Invalid output retains
 history and gets at most two corrective turns in the same conversation, including
@@ -55,6 +55,14 @@ references, discovery indexing and Started in source and materialized schemas.
 The public correction proof caught and repaired feedback being misread as cursor
 movement; the migration proof caught and repaired a dropped discovery index.
 Claude correlation has a native-message fixture, not a configured Claude proof.
+
+The captured-event cut is implemented locally: sequence-based reservation and
+publication, immutable capture history, retained artifact/legacy selectors and
+migration-only `import_evidence` for unclassified SQL. RunId, the input catalog,
+and SessionRecord.run_id are removed. Rust/Swift wire consumers move together;
+replay resolves Session history before opening artifacts. Final proof/checkpoint
+is recorded in [evidence](evidence.md). The released history reader must now be
+rebased onto these event references; its old input projection is not the target.
 
 Runtime loop children already use the shared driver/settlement transaction:
 retry retains the child, successful return occurs once, later passes are siblings,

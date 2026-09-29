@@ -223,7 +223,7 @@ pub(crate) fn resume_session(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
-    run_id: &crate::durable::RunId,
+    run_id: &String,
     run_dir: &Path,
     provider_session: &crate::run_record::ProviderSessionRef,
 ) -> Result<()> {
@@ -245,7 +245,7 @@ pub(crate) fn resume_session_with_env(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
-    run_id: &crate::durable::RunId,
+    run_id: &String,
     run_dir: &Path,
     provider_session: &crate::run_record::ProviderSessionRef,
     extra_environment: &BTreeMap<String, String>,
@@ -335,7 +335,7 @@ pub(crate) fn require_provider_session_launch(dir: &Path) -> Result<()> {
     let store =
         SqliteStore::open_run_ledger_read_only(&crate::store::observability_database_path()?)?;
     let session = store
-        .session_for_run(&input)?
+        .session_for_artifact(&input)?
         .ok_or_else(|| anyhow!("Input {input} is not recorded on this Home"))?;
     let Some(task_id) = session.task_id else {
         return Ok(());

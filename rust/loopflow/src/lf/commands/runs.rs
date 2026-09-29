@@ -225,7 +225,7 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
     let snapshot = store
         .input_snapshot(selector)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let input = crate::durable::RunId::parse(&snapshot.id)?;
+    let input = crate::run_record::parse_artifact_key(&snapshot.id)?;
     let dir = crate::run_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.id))?;
     if events {
@@ -366,25 +366,33 @@ mod tests {
         let database = home.join("loopflow.db");
         crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let since = 1_790_000_000;
-        let parent = crate::durable::RunId::new();
+        let _parent_env = crate::test_ambient::EnvGuard::clear(&[
+            crate::durable::RUN_ID_ENV,
+            crate::run_record::RUN_DIR_ENV,
+        ]);
+        let spec = || RunSpec {
+            harness: "proof".into(),
+            model: None,
+            surface: "headless".into(),
+            cwd: home.to_owned(),
+            repo: None,
+            worktree: None,
+            skill: None,
+            subjects: Vec::new(),
+            flow: RunFlowMembership::Independent,
+            work: None,
+        };
+        let parent = CaptureHandle::prepare_at(home, spec(), None).unwrap();
         let mut older = None;
         for started in [since - 1, since, since + 1] {
-            let capture = CaptureHandle::begin_at(
-                home,
-                RunSpec {
-                    harness: "proof".into(),
-                    model: None,
-                    surface: "headless".into(),
-                    cwd: home.to_owned(),
-                    repo: None,
-                    worktree: None,
-                    skill: None,
-                    subjects: Vec::new(),
-                    flow: RunFlowMembership::Independent,
-                    work: None,
-                },
-            )
-            .unwrap();
+            if started >= since {
+                std::env::set_var(crate::durable::RUN_ID_ENV, &parent);
+                std::env::set_var(
+                    crate::run_record::RUN_DIR_ENV,
+                    crate::run_record::record_dir(home, &parent).unwrap(),
+                );
+            }
+            let capture = CaptureHandle::begin_at(home, spec()).unwrap();
             capture.record_stream_event(&StreamEvent::Usage {
                 input_tokens: Some(12),
                 output_tokens: Some(3),
@@ -401,21 +409,13 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "UPDATE agent_sessions SET created_at=?2 WHERE input_id=?1",
+                "UPDATE agent_sessions SET created_at=?2 WHERE current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
                 rusqlite::params![input.as_str(), started],
             )
             .unwrap();
-            conn.execute(
-                "UPDATE agent_session_inputs SET caller_input_id=?2 WHERE input_id=?1",
-                rusqlite::params![
-                    input.as_str(),
-                    (started >= since).then_some(parent.as_str())
-                ],
-            )
-            .unwrap();
             if started == since {
-                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                    SELECT id,'observed',?1||':events.jsonl:partial',?2,?3 FROM agent_sessions WHERE input_id=?1",
+                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                    SELECT id,'observed',?1||':events.jsonl:partial',?2,?3,current_capture FROM agent_sessions WHERE current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
                     rusqlite::params![input.as_str(),since,serde_json::json!({"input_id": input,"source":"events.jsonl:partial","evidence":{"unparsed":"{"}}).to_string()]).unwrap();
             }
             if started < since {
@@ -465,7 +465,7 @@ mod tests {
         store.assert_no_historical_runs();
         // An excluded corrupt payload must not make the recent window fail.
         rusqlite::Connection::open(&database).unwrap().execute(
-            "UPDATE session_events SET payload='{' WHERE session_id=(SELECT id FROM agent_sessions WHERE input_id=?1)",
+            "UPDATE session_events SET payload='{' WHERE kind!='captured' AND captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
             [older.unwrap().as_str()],
         ).unwrap();
         assert_eq!(select(since), selected);

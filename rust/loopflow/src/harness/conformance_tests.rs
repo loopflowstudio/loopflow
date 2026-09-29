@@ -349,7 +349,6 @@ fn codex_rpc_error_response_maps_to_error_event() {
 // Status/SSE alone supplies neither a native completion nor measured usage.
 #[test]
 fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
-    use crate::durable::RunId;
     use crate::id::ExecId;
     use crate::store::sqlite::SqliteStore;
 
@@ -364,14 +363,9 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
     )
     .unwrap();
     for measured in [None, Some(0), Some(40)] {
-        let input = RunId::new();
+        let input = crate::run_record::new_artifact_key();
         let session = format!("session-{measured:?}");
-        sql.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd) VALUES(?1,?2,'Fixture','human',1,'conversation',0,1,'/fixture')", rusqlite::params![session, input.as_str()]).unwrap();
-        sql.execute(
-            "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,?2)",
-            rusqlite::params![input.as_str(), session],
-        )
-        .unwrap();
+        store.test_session(&session, &input);
         let driver = store
             .claim_session_driver(&session, None, &exec, false)
             .unwrap();

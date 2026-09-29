@@ -421,13 +421,9 @@ mod tests {
         let target_path = root.path().join("private/copy.db");
         let source = SqliteStore::open_ephemeral(&source_path).unwrap();
         let exec = crate::id::ExecId::new();
+        source.test_session("conversation", "run_00000000000000000000000000000001");
         {
             let conn = Connection::open(&source_path).unwrap();
-            conn.execute_batch("PRAGMA foreign_keys=OFF;
-                INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
-                VALUES('conversation','run_fixture','Retained','human',1,'conversation',1,1,'/fixture');
-                INSERT INTO agent_session_inputs(input_id,session_id)
-                VALUES('run_fixture','conversation');").unwrap();
             conn.execute(
                 "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'trace',1)",
                 [exec.as_str()],

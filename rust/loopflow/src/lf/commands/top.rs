@@ -151,7 +151,7 @@ pub(crate) struct LiveExecProviders {
 #[derive(Debug)]
 pub(crate) struct LiveSessionProcesses {
     pub execs: Vec<LiveExecProviders>,
-    pub clients: Vec<(crate::durable::RunId, LiveProviderProcess)>,
+    pub clients: Vec<(String, LiveProviderProcess)>,
     pub gaps: Vec<String>,
 }
 
@@ -159,7 +159,7 @@ pub(crate) struct LiveSessionProcesses {
 /// without loading the Exec event ledger or provider output.
 pub(crate) fn live_exec_providers(
     snapshot: &ProcessSnapshot,
-    clients: &[(crate::durable::RunId, crate::run_record::ProviderClientRef)],
+    clients: &[(String, crate::run_record::ProviderClientRef)],
 ) -> LiveSessionProcesses {
     let mut native = Vec::new();
     let by_pid: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.pid, p)).collect();

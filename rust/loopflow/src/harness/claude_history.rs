@@ -110,7 +110,7 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::History;
-    use crate::durable::RunId;
+
     use crate::id::ExecId;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
@@ -122,9 +122,7 @@ mod tests {
         let path = dir.path().join("history.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
-            VALUES('conversation','run_00000000000000000000000000000001','proof','human',1,'conversation',0,1,'/fixture');
-            INSERT INTO agent_session_inputs(input_id,session_id) VALUES('run_00000000000000000000000000000001','conversation');").unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
         let exec = ExecId::new();
         conn.execute(
             "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
@@ -147,13 +145,19 @@ mod tests {
         assert!(store
             .session_history("conversation", 0, 0)
             .unwrap()
-            .is_empty());
+            .iter()
+            .all(|event| event.kind == SessionEventKind::Captured));
         history
             .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
             .unwrap();
         let value = json!({"decision":"advance","summary":"native proof"});
         history.record(&json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","structured_output":value}).to_string()).unwrap();
-        let events = store.session_history("conversation", 0, 0).unwrap();
+        let events: Vec<_> = store
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind != SessionEventKind::Captured)
+            .collect();
         assert_eq!(events.len(), 3);
         assert!(events
             .iter()
@@ -161,7 +165,10 @@ mod tests {
         assert_eq!(events[1].kind, SessionEventKind::Output);
         assert_eq!(events[1].payload["value"], value);
         let answer = store
-            .input_final_answer(&RunId::parse("run_00000000000000000000000000000001").unwrap())
+            .input_final_answer(
+                &crate::run_record::parse_artifact_key("run_00000000000000000000000000000001")
+                    .unwrap(),
+            )
             .unwrap()
             .unwrap();
         assert!(answer.exact);

@@ -767,8 +767,8 @@ fn print_task_snapshot(
             pm_writeback,
         );
         println!("  execution: {}", snapshot.execution.reason);
-        if let Some(run) = &snapshot.execution.run_id {
-            println!("  worker Run: {run}");
+        if let Some(run) = &snapshot.execution.captured {
+            println!("  Session event: {run}");
         }
         for run in &snapshot.runs {
             println!(

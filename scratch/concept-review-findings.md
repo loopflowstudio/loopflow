@@ -47,3 +47,12 @@ Session event reference; `SessionRecord.run_id` leaves the wire. Stored `run_…
 selectors keep resolving. `run_events.run_id` remains a separate trace-naming
 change. This finding stays unresolved until main implements it and Jack accepts
 the result.
+
+### Implementation status · captured-event checkpoint
+
+Main implemented the event decision: reservation selects a captured sequence;
+publication/readiness/completion compare it; Rust/Swift Session wire no longer
+contains run_id; RunId and the runtime input catalog are deleted. Original SQL
+and unresolved selectors remain immutable import evidence. Source/canonical and
+consumer proofs are in [evidence](evidence.md). The general history projection
+still needs the following reader cut. Jack's acceptance remains outstanding.

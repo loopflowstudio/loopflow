@@ -822,10 +822,10 @@ fn reserved_session_starts_task_in_status_and_roadmap_without_publication() {
         if assigned {
             connection
                 .execute(
-                    "INSERT INTO agent_sessions(id,input_id,title,title_source,task_id,wave_id,created_at,cwd,input_published)
-                     SELECT ?1,?1,'Reserved work','generated',t.id,p.wave_id,1,t.worktree,0
+                    "INSERT INTO agent_sessions(id,title,title_source,task_id,wave_id,created_at,cwd,input_published)
+                     SELECT ?1,'Reserved work','generated',t.id,p.wave_id,1,t.worktree,0
                      FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?2",
-                    rusqlite::params![loopflow::durable::RunId::new().as_str(), PERSISTED_TASK_ID],
+                    rusqlite::params![uuid::Uuid::new_v4().simple().to_string().as_str(), PERSISTED_TASK_ID],
                 )
                 .unwrap();
         }

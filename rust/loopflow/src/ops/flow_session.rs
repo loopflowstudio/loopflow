@@ -52,38 +52,44 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<O
                 crate::engine::config::parse_agent(flow.model.as_deref().unwrap_or(config.agent()));
             let id = format!("session_{}", uuid::Uuid::new_v4().simple());
             let work = flow.declared_work();
-            let session = human_session::prepare_input(
-                AgentSession {
-                    caller_input_id: None,
-                    id,
-                    input_id: crate::durable::RunId::new(),
-                    input_published: true,
-                    cwd: flow.cwd.clone(),
-                    skill: Some(skill.clone()),
-                    provider: Some(provider),
-                    model,
-                    node: None,
-                    iterations: None,
-                    task_id: flow.task_id.clone(),
-                    wave_id: flow.wave_id.clone(),
-                    flow_session_id: Some(flow.id().to_owned()),
-                    work_source: work.map(|_| WorkSource::Inherited),
-                    bound_at: None,
-                    kind: SessionKind::FlowReview,
-                    interactive: true,
-                    repo: None,
-                    title: skill,
-                    title_source: TitleSource::Generated,
-                    request: None,
-                    ready_summary: None,
-                    completed_at: None,
-                    created_at: crate::store::rows::now_unix(),
-                },
-                RunFlowMembership::Step(RunFlowStep::of(flow)?),
-                None,
-            )?;
+            let session = AgentSession {
+                captured: None,
+                caller_artifact_key: None,
+                id,
+                artifact_key: crate::run_record::new_artifact_key(),
+                input_published: false,
+                cwd: flow.cwd.clone(),
+                skill: Some(skill.clone()),
+                provider: Some(provider),
+                model,
+                node: None,
+                iterations: None,
+                task_id: flow.task_id.clone(),
+                wave_id: flow.wave_id.clone(),
+                flow_session_id: Some(flow.id().to_owned()),
+                work_source: work.map(|_| WorkSource::Inherited),
+                bound_at: None,
+                kind: SessionKind::FlowReview,
+                interactive: true,
+                repo: None,
+                title: skill,
+                title_source: TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: crate::store::rows::now_unix(),
+            };
             store.create_session(session, Some(flow.clone())).await?
         }
+    };
+    let session = if session.input_published {
+        session
+    } else {
+        human_session::publish_prepared_input(
+            store,
+            &session,
+            RunFlowMembership::Step(RunFlowStep::of(flow)?),
+        )?
     };
     Ok(session.completed_at.and(session.ready_summary))
 }
@@ -96,11 +102,11 @@ pub(crate) async fn complete(store: &SharedStore, session: &AgentSession) -> Res
         "Flow is blocked; resolve its failure first"
     );
     store
-        .complete_session(&session.id, &session.input_id)
+        .complete_session(&session.id, session.captured)
         .await?;
     let launch = flow_run::launch_driver(flow.id()).await;
-    if let Err(error) = human_session::stop_run(&session.input_id) {
-        tracing::warn!(run_id = %session.input_id, %error, "review completed but provider cleanup failed");
+    if let Err(error) = human_session::stop_run(&session.artifact_key) {
+        tracing::warn!(run_id = %session.artifact_key, %error, "review completed but provider cleanup failed");
     }
     launch.with_context(|| {
         format!(
@@ -157,7 +163,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{complete, pinned_skill, reserve, review_message};
-    use crate::durable::{FlowSession, RunId};
+    use crate::durable::FlowSession;
     use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor};
     use crate::engine::invocation::QueuedInvocation;
     use crate::engine::{ExecutionCursor, NestedCursor, OccurrencePolicy, Skill};
@@ -241,7 +247,7 @@ mod tests {
             let run = session.clone();
             assert_eq!(
                 store.session_inputs(&id).await.unwrap(),
-                std::slice::from_ref(&run.input_id)
+                std::slice::from_ref(&run.artifact_key)
             );
             assert_eq!(
                 (run.flow_session_id.as_deref(), &run.task_id),
@@ -259,17 +265,17 @@ mod tests {
 
             assert!(complete(&store, &session).await.is_err());
             assert!(store
-                .ready_session(&id, &RunId::new(), "wrong Run")
+                .ready_session(&id, Some(-1), "wrong capture")
                 .await
                 .is_err());
             store
-                .ready_session(&id, &session.input_id, "Use the revised design")
+                .ready_session(&id, session.captured, "Use the revised design")
                 .await
                 .unwrap();
             complete(&store, &session).await.unwrap();
             assert!(complete(&store, &session).await.is_err());
             assert!(store
-                .ready_session(&id, &session.input_id, "late rewrite")
+                .ready_session(&id, session.captured, "late rewrite")
                 .await
                 .is_err());
             let completed = store.flow(flow.id()).await.unwrap().unwrap();

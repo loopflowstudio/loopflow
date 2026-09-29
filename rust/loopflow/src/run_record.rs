@@ -78,6 +78,7 @@ pub(crate) struct RunSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunFlowStep {
     pub task_id: Option<crate::work::task::TaskId>,
+    pub task_pr_id: Option<crate::work::task::TaskPrId>,
     pub boundary_key: String,
     pub invocation_id: String,
     pub flow: String,
@@ -89,9 +90,13 @@ pub struct RunFlowStep {
 }
 
 impl RunFlowStep {
-    pub(crate) fn of(position: &crate::durable::FlowPosition) -> Self {
+    pub(crate) fn of(
+        position: &crate::durable::FlowPosition,
+        task_pr_id: Option<crate::work::task::TaskPrId>,
+    ) -> Self {
         Self {
             task_id: Some(position.task_id.clone()),
+            task_pr_id,
             boundary_key: position.cursor.boundary_key(),
             invocation_id: position.invocation.id.clone(),
             flow: position.invocation.flow.clone(),
@@ -112,6 +117,7 @@ impl RunFlowStep {
         };
         Ok(Self {
             task_id: None,
+            task_pr_id: None,
             boundary_key: run.cursor.boundary_key(),
             invocation_id: run.id.clone(),
             flow: run.flow.clone(),
@@ -424,12 +430,14 @@ impl RunUsage {
 pub struct RunSnapshot {
     pub id: String,
     pub parent_run_id: Option<String>,
+    pub task_pr_id: Option<crate::work::task::TaskPrId>,
     pub repo: Option<String>,
     pub worktree: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
     pub skill: Option<String>,
     pub outcome: Option<String>,
     pub started: i64,
+    pub first_provider_attempt_at: Option<i64>,
     pub ended: Option<i64>,
     pub usage: RunUsage,
     pub evidence_gaps: usize,
@@ -746,12 +754,16 @@ fn project_run(dir: &Path, manifest: RunManifest) -> std::io::Result<RunSnapshot
             None
         }
     };
-    let (usage, event_gaps) = reduce_usage(&dir.join("events.jsonl"))?;
-    evidence_gaps += event_gaps;
+    let evidence = reduce_events(&dir.join("events.jsonl"))?;
+    evidence_gaps += evidence.gaps;
 
     Ok(RunSnapshot {
         id: manifest.run_id.to_string(),
         parent_run_id: manifest.parent_run_id.map(|id| id.to_string()),
+        task_pr_id: match manifest.flow {
+            Some(RunFlowMembership::Step(step)) => step.task_pr_id,
+            _ => None,
+        },
         repo: manifest
             .repo
             .map(|path| path.to_string_lossy().into_owned()),
@@ -762,8 +774,9 @@ fn project_run(dir: &Path, manifest: RunManifest) -> std::io::Result<RunSnapshot
         skill: manifest.skill,
         outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
         started: manifest.created_at.unix_timestamp(),
+        first_provider_attempt_at: evidence.first_provider_attempt_at,
         ended: terminal.map(|receipt| receipt.ended_at.unix_timestamp()),
-        usage,
+        usage: evidence.usage,
         evidence_gaps,
         harness: manifest.harness,
         model: manifest.model,
@@ -1310,17 +1323,29 @@ pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
     Ok(manifest)
 }
 
-fn reduce_usage(path: &Path) -> std::io::Result<(RunUsage, usize)> {
+#[derive(Debug)]
+struct RunEvidence {
+    usage: RunUsage,
+    gaps: usize,
+    first_provider_attempt_at: Option<i64>,
+}
+
+fn reduce_events(path: &Path) -> std::io::Result<RunEvidence> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((RunUsage::empty(), 0));
+            return Ok(RunEvidence {
+                usage: RunUsage::empty(),
+                gaps: 0,
+                first_provider_attempt_at: None,
+            });
         }
         Err(error) => return Err(error),
     };
     let mut streams = BTreeMap::<String, UsageStream>::new();
     let mut gaps = 0;
     let mut envelope_seq = None;
+    let mut first_provider_attempt_at = None;
     let mut reader = BufReader::new(file);
     loop {
         let mut line = Vec::new();
@@ -1352,6 +1377,12 @@ fn reduce_usage(path: &Path) -> std::io::Result<(RunUsage, usize)> {
             gaps += 1;
         }
         envelope_seq = Some(envelope_seq.map_or(envelope.seq, |seen| seen.max(envelope.seq)));
+        if first_provider_attempt_at.is_none()
+            && envelope.schema_version == SCHEMA_VERSION
+            && matches!(&envelope.event, RunEvent::ProviderAttemptStarted { .. })
+        {
+            first_provider_attempt_at = Some(envelope.observed_at.unix_timestamp());
+        }
         let (usage_stream_id, observation_seq, counter_kind, start_known, final_receipt, usage) =
             match envelope.event {
                 RunEvent::Usage {
@@ -1481,7 +1512,11 @@ fn reduce_usage(path: &Path) -> std::io::Result<(RunUsage, usize)> {
         cache_write_tokens,
         cost_usd,
     };
-    Ok((usage, gaps))
+    Ok(RunEvidence {
+        usage,
+        gaps,
+        first_provider_attempt_at,
+    })
 }
 
 fn observe_u64(current: &mut Option<u64>, observed: Option<u64>, gaps: &mut usize) {
@@ -2675,6 +2710,100 @@ mod tests {
     }
 
     #[test]
+    fn prepared_run_projects_its_first_provider_attempt_separately_from_creation() {
+        let home = tempfile::tempdir().unwrap();
+        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
+        let (dir, mut manifest) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        manifest.created_at = time::OffsetDateTime::from_unix_timestamp(1).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let prepared = serde_json::to_value(read_run_snapshot(&dir).unwrap()).unwrap();
+        assert!(prepared["first_provider_attempt_at"].is_null());
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+        let capture =
+            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
+        capture.mark_spawn_requested();
+        capture.fail_and_begin_attempt("claude".to_string(), None, None);
+        capture.finish("completed").unwrap();
+
+        // Fixed recorded times distinguish preparation, first attempt and retry
+        // without making the proof wait for the wall clock to advance.
+        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
+        let mut attempt = 0;
+        let events = events
+            .lines()
+            .map(|line| {
+                let mut envelope: super::EventEnvelope = serde_json::from_str(line).unwrap();
+                if matches!(
+                    envelope.event,
+                    super::RunEvent::ProviderAttemptStarted { .. }
+                ) {
+                    attempt += 1;
+                    envelope.observed_at =
+                        time::OffsetDateTime::from_unix_timestamp(attempt * 10).unwrap();
+                }
+                serde_json::to_string(&envelope).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(attempt, 2);
+        fs::write(dir.join("events.jsonl"), format!("{events}\n")).unwrap();
+
+        let snapshot = serde_json::to_value(read_run_snapshot(&dir).unwrap()).unwrap();
+        assert_eq!(snapshot["started"], 1);
+        assert_eq!(snapshot["first_provider_attempt_at"], 10);
+    }
+
+    #[test]
+    fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
+        for historical in [false, true] {
+            let home = tempfile::tempdir().unwrap();
+            let original = crate::work::task::TaskPrId::new();
+            let mut step = super::RunFlowStep {
+                task_id: Some(crate::work::task::TaskId::new()),
+                task_pr_id: Some(original.clone()),
+                boundary_key: "review".into(),
+                invocation_id: "invocation".into(),
+                flow: "feature".into(),
+                step: "review".into(),
+                node: Some("1".into()),
+                iterations: Some(Vec::new()),
+            };
+            let mut prepared = spec(home.path());
+            prepared.flow = super::RunFlowMembership::Step(step.clone());
+            let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
+            let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+            if historical {
+                let mut manifest: serde_json::Value =
+                    serde_json::from_slice(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+                manifest["flow"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("task_pr_id");
+                fs::write(
+                    dir.join("manifest.json"),
+                    serde_json::to_vec(&manifest).unwrap(),
+                )
+                .unwrap();
+            }
+            step.task_pr_id = Some(crate::work::task::TaskPrId::new());
+            let mut launch = spec(home.path());
+            launch.flow = super::RunFlowMembership::Step(step);
+            let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+            let capture =
+                CaptureHandle::start_prepared(home.path(), &id, launch, &context).unwrap();
+            capture.finish("completed").unwrap();
+
+            let snapshot = read_run_snapshot(&dir).unwrap();
+            assert_eq!(snapshot.task_pr_id, (!historical).then_some(original));
+            assert_eq!(snapshot.first_provider_attempt_at, None);
+        }
+    }
+
+    #[test]
     fn prepared_session_run_is_resolvable_and_consumed_once() {
         let home = tempfile::tempdir().unwrap();
         let parent = crate::durable::RunId::new();
@@ -3383,6 +3512,42 @@ mod tests {
         fs::write(&path, events).unwrap();
 
         let snapshot = read_run_snapshot(&dir).unwrap();
+        assert_eq!(snapshot.evidence_gaps, 1);
+        assert!(snapshot.first_provider_attempt_at.is_some());
+    }
+
+    #[test]
+    fn reader_does_not_invent_an_attempt_from_incomplete_or_unsupported_evidence() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        capture.mark_spawn_requested();
+        capture.finish("completed").unwrap();
+        let dir = capture.artifact_dir();
+        let path = dir.join("events.jsonl");
+        let events = fs::read_to_string(&path).unwrap();
+        let mut attempt = events
+            .lines()
+            .map(|line| serde_json::from_str::<super::EventEnvelope>(line).unwrap())
+            .find(|envelope| {
+                matches!(
+                    envelope.event,
+                    super::RunEvent::ProviderAttemptStarted { .. }
+                )
+            })
+            .unwrap();
+        // An otherwise valid attempt without a final newline is not committed evidence.
+        fs::write(&path, serde_json::to_vec(&attempt).unwrap()).unwrap();
+        let snapshot = read_run_snapshot(&dir).unwrap();
+        assert_eq!(snapshot.first_provider_attempt_at, None);
+        assert_eq!(snapshot.evidence_gaps, 1);
+        attempt.schema_version = 999;
+        fs::write(
+            &path,
+            format!("{}\n", serde_json::to_string(&attempt).unwrap()),
+        )
+        .unwrap();
+        let snapshot = read_run_snapshot(&dir).unwrap();
+        assert_eq!(snapshot.first_provider_attempt_at, None);
         assert_eq!(snapshot.evidence_gaps, 1);
     }
 

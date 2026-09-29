@@ -69,6 +69,8 @@ def _run(repo: Path, **overrides: object) -> dict:
         repo=str(repo),
         started=SINCE + 20,
         ended=SINCE + 80,
+        task_pr_id=None,
+        first_provider_attempt_at=None,
         harness="codex",
         evidence_gaps=0,
         usage=dict(
@@ -114,16 +116,79 @@ def test_run_window_includes_long_runs_and_excludes_foreign_unfinished_and_futur
     path = tmp_path / "runs.json"
     runs = [
         _run(tmp_path, id="long", started=SINCE - 100),
+        _run(tmp_path, id="boundary", started=SINCE - 60, ended=SINCE),
         _run(tmp_path, id="unfinished", ended=None),
         _run(tmp_path, id="old", ended=SINCE - 1),
         _run(tmp_path, id="future", ended=UNTIL + 1),
         _run(tmp_path / "other", id="foreign"),
     ]
     path.write_text(json.dumps(runs))
-    selected = scorecard.load_runs(path, tmp_path, SINCE, UNTIL)
-    assert [run["id"] for run in selected] == ["long"]
-    rows = {row["id"]: row for row in scorecard.usage_rows(_policy(), selected, None)}
-    assert rows["run_elapsed_seconds"]["p50"] == 180
+    selected = scorecard.load_runs(path, tmp_path)
+    assert [run["id"] for run in selected] == ["long", "boundary", "unfinished", "old", "future"]
+    report = scorecard.build_report(
+        _policy(), tmp_path, NOW.replace(microsecond=500000), selected, [], []
+    )
+    rows = {row["id"]: row for row in report["rows"]}
+    assert rows["run_elapsed_seconds"]["eligible"] == 2
+    assert rows["run_elapsed_seconds"]["p50"] == 60
+    assert rows["run_elapsed_seconds"]["p95"] == 180
+
+
+def test_recorded_attempt_joins_exact_pr_across_run_windows(tmp_path: Path) -> None:
+    connection = _connection(tmp_path)
+    _pr(connection, "first", created_at=SINCE - 100)
+    _pr(connection, "second")
+    _pr(connection, "prepared")
+    _pr(connection, "historical")
+    runs = [
+        _run(tmp_path, task_pr_id="first", first_provider_attempt_at=SINCE - 60, ended=SINCE - 1),
+        _run(tmp_path, task_pr_id="first", first_provider_attempt_at=SINCE + 20),
+        _run(tmp_path, task_pr_id="second", first_provider_attempt_at=SINCE + 100, ended=None),
+        _run(tmp_path, task_pr_id="prepared"),
+        _run(tmp_path, first_provider_attempt_at=SINCE + 20),
+    ]
+    report = scorecard.build_report(
+        _policy(),
+        tmp_path,
+        NOW,
+        runs,
+        [],
+        scorecard.load_lifecycle(connection, tmp_path, SINCE, UNTIL),
+    )
+    row = next(row for row in report["rows"] if row["id"] == "recorded_attempt_to_merge_seconds")
+    assert (row["eligible"], row["measured"], row["p50"], row["p95"]) == (4, 2, 200, 360)
+    assert row["verdict"] == "unknown"
+    assert "2 of 4" in row["reason"]
+    assert "lower bound" in row["reason"]
+
+
+def test_recorded_attempt_requires_ordered_boundaries_and_merge_evidence(tmp_path: Path) -> None:
+    connection = _connection(tmp_path)
+    _pr(connection, "before")
+    _pr(connection, "after")
+    _pr(connection, "missing", merged_at=None)
+    _pr(connection, "partial", github_observation='{"result":{"state":"partial"}}')
+    _pr(connection, "untracked", merge_tracking_complete=0)
+    _pr(connection, "usage-gap")
+    runs = [
+        _run(tmp_path, task_pr_id="before", first_provider_attempt_at=SINCE),
+        _run(tmp_path, task_pr_id="after", first_provider_attempt_at=SINCE + 400),
+        *[
+            _run(tmp_path, task_pr_id=pr, first_provider_attempt_at=SINCE + 20)
+            for pr in ("missing", "partial", "untracked", "usage-gap")
+        ],
+    ]
+    runs[-1]["usage"]["gaps"] = 1
+    report = scorecard.build_report(
+        _policy(),
+        tmp_path,
+        NOW,
+        runs,
+        [],
+        scorecard.load_lifecycle(connection, tmp_path, SINCE, UNTIL),
+    )
+    row = next(row for row in report["rows"] if row["id"] == "recorded_attempt_to_merge_seconds")
+    assert (row["eligible"], row["measured"], row["p50"]) == (6, 1, 280)
 
 
 def test_usage_keeps_missing_nonfinal_and_gapped_receipts_unknown(tmp_path: Path) -> None:
@@ -207,11 +272,31 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
     (policy_dir / "budgets.json").write_text(json.dumps(_policy()))
     database = tmp_path / "loopflow.db"
     connection = _connection(tmp_path, str(database))
+    now = int(datetime.now(timezone.utc).timestamp())
+    _pr(
+        connection,
+        "merged",
+        created_at=now - 100,
+        publication_requested_at=now - 40,
+        merge_requested_at=now - 30,
+        merged_at=now - 10,
+    )
     connection.commit()
     connection.close()
     runs = tmp_path / "runs.json"
-    now = int(datetime.now(timezone.utc).timestamp())
-    runs.write_text(json.dumps([_run(tmp_path, started=now - 60, ended=now - 1)]))
+    runs.write_text(
+        json.dumps(
+            [
+                _run(
+                    tmp_path,
+                    started=now - 60,
+                    ended=now - 1,
+                    task_pr_id="merged",
+                    first_provider_attempt_at=now - 50,
+                )
+            ]
+        )
+    )
     assert (
         scorecard.main(
             [
@@ -230,5 +315,8 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
     rows = {row["id"]: row for row in envelope["report"]["rows"]}
     assert rows["run_elapsed_seconds"]["p50"] == 59
     assert rows["run_total_input_tokens"]["p50"] == 100
+    attempt = rows["recorded_attempt_to_merge_seconds"]
+    assert (attempt["eligible"], attempt["measured"], attempt["p50"]) == (1, 1, 40)
+    assert "Observed lower bound" in envelope["text"]
     assert envelope["metric_observations"][0]["kind"] == "unavailable"
     assert "Task-loop intervals" in envelope["metric_observations"][0]["reason"]

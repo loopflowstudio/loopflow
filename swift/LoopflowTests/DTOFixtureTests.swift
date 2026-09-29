@@ -149,6 +149,8 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[1].reference.workspace == nil)
         #expect(detail.runs.items[0].id == "run_00000000000000000000000000000001")
         #expect(detail.runs.items[0].skill == "task/pursue")
+        #expect(detail.runs.items[0].taskPrId == "pr_33333333333333333333333333333333")
+        #expect(detail.runs.items[0].firstProviderAttemptAt == 1784052010)
         #expect(detail.runs.items[0].usage.inputTokens == 12000)
         #expect(detail.runs.items[0].outcome == "completed")
         #expect(detail.tasks.items[0].condition.state == .waiting)

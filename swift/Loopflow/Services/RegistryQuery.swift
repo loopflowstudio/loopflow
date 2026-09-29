@@ -542,12 +542,14 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
 public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
     public let parentRunId: String?
+    public let taskPrId: String?
     public let repo: String?
     public let worktree: String?
     public let subjects: [RunSubjectAttribution]
     public let skill: String?
     public let outcome: String?
     public let started: Int
+    public let firstProviderAttemptAt: Int?
     public let ended: Int?
     public let usage: RunUsageSnapshot
     public let evidenceGaps: Int
@@ -558,7 +560,9 @@ public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, repo, worktree, subjects, skill, outcome, started, ended, usage, harness, model,
             surface
+        case taskPrId = "task_pr_id"
         case parentRunId = "parent_run_id"
+        case firstProviderAttemptAt = "first_provider_attempt_at"
         case evidenceGaps = "evidence_gaps"
     }
 }

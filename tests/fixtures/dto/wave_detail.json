@@ -96,7 +96,9 @@
         "evidence_gaps": 0,
         "harness": "codex",
         "model": "gpt-5",
-        "surface": "headless"
+        "surface": "headless",
+        "first_provider_attempt_at": 1784052010,
+        "task_pr_id": "pr_33333333333333333333333333333333"
       }
     ]
   },

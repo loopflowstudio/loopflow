@@ -227,7 +227,7 @@ pub enum SessionFlowOccurrence {
 impl SessionFlowMembership {
     fn of_position(position: &FlowPosition) -> Self {
         Self::of_step(
-            crate::run_record::RunFlowStep::of(position),
+            crate::run_record::RunFlowStep::of(position, None),
             SessionFlowOccurrence::Current,
         )
     }
@@ -556,10 +556,15 @@ async fn prepare_ask_record(
 
 /// Prepare the Run before a human Flow position is committed or presented.
 /// Autonomous positions have no Session and keep their optional internal link.
-pub(crate) fn prepare_flow_run(task: &Task, position: &mut FlowPosition) -> Result<()> {
+pub(crate) async fn prepare_flow_run(
+    store: &SharedStore,
+    task: &Task,
+    position: &mut FlowPosition,
+) -> Result<()> {
     if !position.is_human() || position.session_run_id.is_some() {
         return Ok(());
     }
+    let task_pr_id = store.active_task_pr(&task.id).await?.map(|pr| pr.id);
     let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
     let agent = crate::ops::task::resolve_task_agent(
         &task.worktree,
@@ -581,7 +586,7 @@ pub(crate) fn prepare_flow_run(task: &Task, position: &mut FlowPosition) -> Resu
                 task.id
             ))],
             flow: crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
-                position,
+                position, task_pr_id,
             )),
         },
         None,
@@ -635,7 +640,7 @@ pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Ta
         return Ok(());
     }
     position.session_run_id = None;
-    prepare_flow_run(&task, &mut position)?;
+    prepare_flow_run(store, &task, &mut position).await?;
     carry_session_name(&id, Some(&previous), position.session_run_id.as_ref())?;
     store.set_flow_position(&task.id, position).await?;
     Ok(())
@@ -697,7 +702,7 @@ async fn prepare_boundary(store: &SharedStore, id: &str) -> Result<()> {
                     home.id
                 );
             }
-            prepare_flow_run(&task, &mut position)?;
+            prepare_flow_run(store, &task, &mut position).await?;
             store.set_flow_position(&task.id, position).await?;
         }
     }
@@ -1308,7 +1313,7 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
                 position.ready_summary = None;
             }
         }
-        prepare_flow_run(&task, &mut position)?;
+        prepare_flow_run(store, &task, &mut position).await?;
         carry_session_name(
             session_id,
             previous.as_ref(),
@@ -3062,7 +3067,7 @@ mod tests {
         };
         assert_eq!(node.as_ref(), Some(expected));
         assert_eq!(iterations, Some(vec![vec![5], vec![2]]));
-        let captured = RunFlowStep::of(&position);
+        let captured = RunFlowStep::of(&position, None);
         assert_eq!(captured.node.as_ref(), Some(expected));
         assert_eq!(captured.iterations, iterations);
 

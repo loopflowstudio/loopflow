@@ -183,6 +183,17 @@ usage` apply the same Wave/Task attribution drill over that projection;
 Work activity, status views, and the Mac app consume it too. There is no
 authoritative Run index to repair.
 
+`RunSnapshot.started` is record creation, which can precede Session launch.
+`first_provider_attempt_at` is the first valid recorded `ProviderAttemptStarted`
+timestamp, retained across retries. It records the attempt request, not successful
+provider execution or material progress. Both usage and this timestamp are reduced
+in one event scan; incomplete or unsupported events cannot supply a start.
+
+Managed Task Flow membership captures optional `task_pr_id` at preparation or
+launch. Prepared membership survives launch even if the Task has since moved to
+another PR. Historical and standalone memberships without that identity remain
+unknown; readers never infer it from the Task's current PR.
+
 Direct-child reads resolve the parent manifest first and scan the Home-local
 records without the recent-history cap. Final-answer reads project normalized
 `ConversationEvent::ItemCompleted` messages, preferring the explicit

@@ -37,6 +37,10 @@ reads: `lf runs --json` and `lf usage --json`. Provider cumulative counters
 remain optional; stream finality and evidence gaps are required, explicit
 evidence.
 
+The Run's optional `task_pr_id` identifies the PR captured by its managed Flow.
+Optional `first_provider_attempt_at` separates the first recorded provider attempt
+from `started` (record creation, including unstarted Session preparation).
+
 `work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
 Run, PR, and Steer facts retain their existing Work, Run, author, and GitHub
 identities. Rust and Swift both round-trip it; The Podium filters this one

@@ -93,8 +93,8 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
     }
     let database = crate::store::database_path_from_env()
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
-    // Include Runs that started before the window but ended inside it. Python
-    // applies the policy window to this existing projection, never raw events.
+    // Earlier and unfinished Runs can contain the first attempt on a PR merged
+    // inside the window. Python windows Run statistics and PR intervals separately.
     let runs = crate::run_record::scan_runs_since(&crate::store::observability_home_dir(), 0)
         .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
     let mut run_input = tempfile::NamedTempFile::new()

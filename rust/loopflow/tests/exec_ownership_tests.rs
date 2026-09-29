@@ -56,6 +56,205 @@ async fn inspection_records_one_completed_exec_without_starting_work() {
     assert_eq!(work, 0, "inspection must not reserve agent or Task work");
 }
 
+#[tokio::test]
+async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
+    use loopflow::exec::{Exec, ExecPage};
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let parent = ExecId::new();
+    let raw = serde_json::to_string(&["lf", "pr", "land", "--strict", "%_ literal"]).unwrap();
+    connection
+        .execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?1,1)",
+            [&parent],
+        )
+        .unwrap();
+    let ids = [ExecId::new(), ExecId::new()];
+    for (index, id) in ids.iter().enumerate() {
+        connection.execute("INSERT INTO execs(id,trace_id,parent_exec_id,via_agent,caller_session_id,command,started_at)
+            VALUES(?1,?1,?2,?3,?4,?5,?6)", rusqlite::params![id,parent,index != 0,
+                if index == 0 { None } else { Some("caller-session") },raw,10-index as i64]).unwrap();
+    }
+    let invoke = |args: &[&str]| {
+        let result = command(home.path(), home.path(), args).output().unwrap();
+        assert!(result.status.success(), "{result:?}");
+        result.stdout
+    };
+    let first: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--parent",
+        parent.as_str(),
+        "--search",
+        "PR LAND --strict %_",
+        "--outcome",
+        "unknown",
+        "--limit",
+        "1",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(first.entries[0].id, ids[0]);
+    assert_eq!(first.entries[0].via_agent, Some(false));
+    assert_eq!(first.entries[0].command.as_ref(), Some(&raw));
+    assert_eq!(first.entries[0].outcome, None);
+    let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
+    let second: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--parent",
+        parent.as_str(),
+        "--search",
+        "PR LAND --strict %_",
+        "--outcome",
+        "unknown",
+        "--limit",
+        "1",
+        "--after",
+        &cursor,
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(second.entries[0].id, ids[1]);
+    assert_eq!(
+        second.entries[0].caller_session_id.as_deref(),
+        Some("caller-session")
+    );
+    assert_eq!(second.next, None);
+    let detail: Exec =
+        serde_json::from_slice(&invoke(&["exec", "show", &ids[1].as_str()[..20], "--json"]))
+            .unwrap();
+    assert_eq!(detail, second.entries[0]);
+    let caller: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--caller",
+        "caller-session",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(caller.entries, vec![detail]);
+    let wave = loopflow::id::WaveId::new();
+    let project = loopflow::durable::ProjectId::new();
+    let task = loopflow::durable::TaskId::new();
+    connection
+        .execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'historical','/missing',1)",
+            [&wave],
+        )
+        .unwrap();
+    connection.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project-proof',1)",
+        rusqlite::params![project.as_str(),wave]).unwrap();
+    connection
+        .execute(
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,work_state,work_terminal_at,created_at)
+        VALUES(?1,?2,'issue-proof','PROOF-1','done',2,1)",
+            rusqlite::params![task.as_str(), project.as_str()],
+        )
+        .unwrap();
+    connection.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+        VALUES('caller-session','run_00000000000000000000000000000001','Historical','human',1,1,'/missing',?1,?2)",
+        rusqlite::params![task.as_str(),wave]).unwrap();
+    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
+        VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
+        rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
+    for args in [
+        vec!["exec", "list", "--all", "--task", "PROOF-1", "--json"],
+        vec!["exec", "list", "--all", "--task", task.as_str(), "--json"],
+        vec!["exec", "list", "--all", "--wave", "historical", "--json"],
+    ] {
+        let page: ExecPage = serde_json::from_slice(&invoke(&args)).unwrap();
+        assert_eq!(
+            page.entries.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
+            vec![&ids[1]]
+        );
+    }
+
+    let repos = [TestRepo::new(), TestRepo::new()];
+    let other_wave = loopflow::id::WaveId::new();
+    let paths = repos
+        .iter()
+        .map(|repo| {
+            loopflow::repository::CanonicalRepo::discover(repo.path())
+                .unwrap()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    connection
+        .execute(
+            "UPDATE waves SET repo=?2 WHERE id=?1",
+            rusqlite::params![wave, paths[0]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'historical',?2,1)",
+            rusqlite::params![other_wave, paths[1]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE execs SET repo=?2 WHERE id=?1",
+            rusqlite::params![ids[1], paths[0]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE execs SET repo=?2 WHERE id=?1",
+            rusqlite::params![ids[0], paths[1]],
+        )
+        .unwrap();
+    connection.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd,wave_id)
+        VALUES('other-session','run_00000000000000000000000000000002','Other','human',1,1,'/missing',?1)", [&other_wave]).unwrap();
+    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,wave_id,observed_at,payload)
+        VALUES('other-session','thread','turn','started','',?1,?2,1,'unreadable history')", rusqlite::params![ids[0],other_wave]).unwrap();
+    for (repo, expected) in repos.iter().zip([&ids[1], &ids[0]]) {
+        let result = command(
+            home.path(),
+            repo.path(),
+            &["exec", "list", "--wave", "historical", "--json"],
+        )
+        .output()
+        .unwrap();
+        assert!(result.status.success(), "{result:?}");
+        let page: ExecPage = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(
+            page.entries.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
+            vec![expected]
+        );
+    }
+    let ambiguous = command(
+        home.path(),
+        repos[0].path(),
+        &["exec", "list", "--all", "--wave", "historical", "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(!ambiguous.status.success());
+    assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
+    let explicit: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--wave",
+        other_wave.as_str(),
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(explicit.entries[0].id, ids[0]);
+    let zero = command(home.path(), home.path(), &["exec", "list", "--limit", "0"])
+        .output()
+        .unwrap();
+    assert_eq!(zero.status.code(), Some(2));
+}
+
 #[test]
 fn parser_returns_exact_status_without_admitting_an_early_store() {
     for (args, code) in [

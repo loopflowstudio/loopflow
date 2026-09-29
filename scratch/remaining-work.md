@@ -147,7 +147,9 @@ commands must not start Tasks. One Exec can perform work for several Sessions.
 
 Session inventory no longer joins Run. Remaining audit gaps: final bounded
 enrichment/pagination and substring-search behavior, Flow inventory decoding
-complete captures, and the complete indexed Exec summary/detail API. Preserve
+complete captures, and the remaining indexed discovery consumers. Exec summary/detail now has a
+bounded public `lf exec list/show` consumer, typed Rust/Swift fixture and focused
+store/public proofs. Preserve
 missing-payload rows. Current conversation history filters Work, caller and date
 in SQL before decoding selected evidence, but that is not the dense-data proof.
 Activity ending within a window and recent-start history are different queries.
@@ -162,7 +164,10 @@ to avoid offset races. Replace that caller together with its paging contract.
 Measure representative dense data (audit suggested 100k Execs/20k Sessions/5k Flows,
 three repos/1k Tasks; not a mandatory product limit). Report fixture scale, source,
 host load, cold/warm list/detail median/p95 and SQL plans; separate startup/schema,
-SQL and payload cost. An empty-list improvement is not this proof.
+SQL and payload cost. The recorded Exec dense probe now covers the suggested
+scale with whole-process timings (p50 314–339ms, p95 320–341ms); uncontrolled OS
+caches and unseparated startup/query cost do not establish cold-cache or final
+Session/Flow/Desktop acceptance. An empty-list improvement is not this proof.
 
 ## 4. Import, binding, Started
 

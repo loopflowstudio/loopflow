@@ -1749,6 +1749,7 @@ fn execute_command(
             task.as_deref(),
             *json,
         ),
+        Some(Commands::Exec { cmd }) => loopflow::lf::commands::exec::run(cmd),
         Some(Commands::Runs {
             active,
             watch,

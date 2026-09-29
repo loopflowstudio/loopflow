@@ -1443,6 +1443,181 @@ fn importing_after_bind_does_not_report_the_task_started_again() {
     );
 }
 
+#[test]
+fn import_retains_replaced_inputs_without_rebinding_their_history() {
+    use loopflow::durable::RunId;
+    use loopflow::session::{AgentSession, SessionKind, TitleSource};
+    use serde_json::json;
+
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "import-members",
+        &fixture.repo.head_sha(),
+    );
+    let prior = RunId::new();
+    let current = RunId::new();
+    let caller = RunId::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let saved = runtime.block_on(async {
+        let first = AgentSession {
+            id: "retained-conversation".into(),
+            input_id: prior.clone(),
+            caller_input_id: Some(caller.clone()),
+            input_published: true,
+            cwd: fixture.repo.path().to_path_buf(),
+            skill: Some("implement".into()),
+            provider: Some("opencode".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
+            kind: SessionKind::Conversation,
+            interactive: false,
+            repo: None,
+            title: "Retained human name".into(),
+            title_source: TitleSource::Human,
+            request: None,
+            ready_summary: Some("Retained feedback".into()),
+            completed_at: None,
+            created_at: 1,
+        };
+        task.store.create_session(first, None).await.unwrap();
+        let mut bound = task
+            .store
+            .bind_session("retained-conversation", &prior, &task.task.id)
+            .await
+            .unwrap();
+        bound.input_id = current.clone();
+        task.store
+            .replace_session_input(&prior, bound)
+            .await
+            .unwrap()
+    });
+    let started = || {
+        fixture
+            .db()
+            .query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.task.id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+    };
+    let original_started = started();
+    for (input, attributed, outcome, usage) in [
+        (
+            &prior,
+            false,
+            "failed",
+            json!({"attempt":1,"account_id":"first","input":21,"output":null}),
+        ),
+        (
+            &current,
+            true,
+            "completed",
+            json!({"attempt":1,"account_id":"second","input":0,"output":0}),
+        ),
+    ] {
+        let dir = fixture.run_dir(input.as_str());
+        std::fs::create_dir_all(&dir).unwrap();
+        let subjects = if attributed {
+            json!([{"selector":"task:INF-123","source":"inherited"}])
+        } else {
+            json!([])
+        };
+        let manifest = json!({
+            "schema_version":1,"run_id":input,"parent_run_id":caller,
+            "created_at":"2026-09-20T20:00:00Z","harness":"opencode","model":null,
+            "surface":"headless","cwd":fixture.repo.path(),"repo":fixture.repo.path(),
+            "worktree":fixture.repo.path(),"skill":"implement","subjects":subjects,
+            "flow":{"kind":"independent"},"launch":null,"context":null,
+            "runtime_path":null,"runtime_digest":null,"host":"fixture","boot_id":null
+        });
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(dir.join("terminal.json"), serde_json::to_vec(&json!({
+            "schema_version":1,"outcome":outcome,"ended_at":"2026-09-20T20:05:00Z","result_ref":null
+        })).unwrap()).unwrap();
+        std::fs::write(dir.join("events.jsonl"), format!("{usage}\n")).unwrap();
+    }
+    for dry in [true, false] {
+        let args = if dry {
+            vec!["session", "import", "--dry-run", "--json"]
+        } else {
+            vec!["session", "import", "--json"]
+        };
+        let report = fixture.json(&args);
+        assert_eq!(report["failed"], json!([]), "{report}");
+        assert_eq!(report["task_review"], 2, "{report}");
+        assert_eq!(report["tasks_started"], json!([]));
+        assert_eq!(fixture.count("session_events"), if dry { 0 } else { 6 });
+        assert_eq!(started(), original_started);
+        assert_eq!(
+            runtime.block_on(task.store.session(&saved.id)).unwrap(),
+            Some(saved.clone())
+        );
+    }
+    let history = fixture.json(&["session", "history", &saved.id, "--json"]);
+    let events = history.as_array().unwrap();
+    for (input, task_id, outcome, tokens) in [
+        (
+            &prior,
+            Value::Null,
+            "failed",
+            json!({"attempt":1,"account_id":"first","input":21,"output":null}),
+        ),
+        (
+            &current,
+            json!(task.task.id),
+            "completed",
+            json!({"attempt":1,"account_id":"second","input":0,"output":0}),
+        ),
+    ] {
+        let member: Vec<_> = events
+            .iter()
+            .filter(|event| event["payload"]["input_id"] == json!(input))
+            .collect();
+        assert_eq!(member.len(), 3);
+        assert!(member.iter().all(|event| event["task_id"] == task_id
+            && event["exec_id"].is_null()
+            && event["provider_turn"].is_null()
+            && event["kind"] == "observed"));
+        assert_eq!(
+            member
+                .iter()
+                .find(|event| event["payload"]["source"] == "terminal.json")
+                .unwrap()["payload"]["evidence"]["outcome"],
+            outcome
+        );
+        assert_eq!(
+            member
+                .iter()
+                .find(|event| event["payload"]["source"] == "events.jsonl:0")
+                .unwrap()["payload"]["evidence"],
+            tokens
+        );
+    }
+    let again = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(again["unchanged"], 2, "{again}");
+    assert_eq!(
+        fixture.json(&["session", "history", &saved.id, "--json"]),
+        history
+    );
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(fixture.count("agent_session_inputs"), 2);
+    assert_eq!(fixture.count("runs"), 0);
+    assert!(fixture.launches().is_empty());
+}
+
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
 fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() {

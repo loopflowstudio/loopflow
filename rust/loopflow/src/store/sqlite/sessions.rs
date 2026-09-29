@@ -555,7 +555,7 @@ fn import_history_in(
 ) -> StoreResult<bool> {
     let mut changed = false;
     for observation in history {
-        let key = format!("{}:{}", session.input_id, observation.source);
+        let key = format!("{}:{}", observation.input_id, observation.source);
         let payload = serde_json::to_string(&observation.payload)?;
         let saved: Option<String> = conn.query_row(
             "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
@@ -564,7 +564,7 @@ fn import_history_in(
             if saved != payload {
                 return Err(invalid(format!(
                     "input {} has conflicting {} evidence",
-                    session.input_id, observation.source
+                    observation.input_id, observation.source
                 )));
             }
             continue;

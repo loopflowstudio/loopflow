@@ -1263,7 +1263,7 @@ fn _launch_with_transient_retries(
             _ => {
                 account_failure = None;
                 let resume_token = _provider_resume_token(&result).or(launch.resume_token.clone());
-                if matches!(harness.as_str(), "claude" | "codex") {
+                if matches!(harness.as_str(), "claude" | "codex" | "opencode") {
                     if let Some(resume_token) = resume_token {
                         attempt_config.resume_token = Some(resume_token);
                         attempt_config.task_prompt = RETRY_PROMPT.to_string();
@@ -1515,7 +1515,7 @@ fn _begin_implicit_capture(
         })
 }
 
-fn _launch_codex_harness_once(
+fn _launch_harness_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
     model: Option<String>,
@@ -1525,12 +1525,12 @@ fn _launch_codex_harness_once(
         let launch = launch.clone();
         let process = process.clone();
         return std::thread::Builder::new()
-            .name("lf-codex-harness".to_string())
-            .spawn(move || _launch_codex_harness_once(&launch, &process, model, retry))
+            .name("lf-native-harness".to_string())
+            .spawn(move || _launch_harness_once(&launch, &process, model, retry))
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .join()
             .map_err(|_| {
-                CoreError::ExecutionFailed("Codex harness thread panicked".to_string())
+                CoreError::ExecutionFailed("Native harness thread panicked".to_string())
             })?;
     }
 
@@ -1538,7 +1538,12 @@ fn _launch_codex_harness_once(
     use crate::harness::ApprovalPolicy;
 
     let capture = process.capture.as_ref().map(|capture| &capture.0);
-    let account_route = match resolve_account_route_blocking(Provider::Codex, launch) {
+    let (provider, _) = parse_agent(launch.agent());
+    let account_route = match if provider == "codex" {
+        resolve_account_route_blocking(Provider::Codex, launch)
+    } else {
+        Ok(None)
+    } {
         Ok(route) => route,
         Err(error) => {
             return Ok(AgentAttempt::AccountUnavailable(
@@ -1549,7 +1554,7 @@ fn _launch_codex_harness_once(
     if retry {
         if let Some(capture) = capture {
             capture.fail_and_begin_attempt(
-                "codex".to_string(),
+                provider.clone(),
                 model,
                 account_route
                     .as_ref()
@@ -1577,7 +1582,7 @@ fn _launch_codex_harness_once(
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (raw_tx, mut raw_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut harness = crate::harness::default_create_harness(
-            "codex",
+            &provider,
             ApprovalPolicy::AutoApprove,
             event_tx,
         )
@@ -1624,7 +1629,7 @@ fn _launch_codex_harness_once(
                     }
                     event = event_rx.recv() => {
                         let Some(event) = event else {
-                            stderr.push_str("codex event stream closed\n");
+                            stderr.push_str(&format!("{provider} event stream closed\n"));
                             exit_code = Some(1);
                             continue;
                         };
@@ -1642,7 +1647,7 @@ fn _launch_codex_harness_once(
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
-                                if matches!(code.as_str(), "codex_disconnected" | "provider_rate_limited") {
+                                if matches!(code.as_str(), "codex_disconnected" | "opencode_disconnected" | "provider_rate_limited") {
                                     exit_code = Some(1);
                                 }
                             }
@@ -1716,8 +1721,8 @@ fn _launch_agent_once(
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
-    if harness == "codex" && process.auto {
-        return _launch_codex_harness_once(launch, process, model, retry);
+    if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
+        return _launch_harness_once(launch, process, model, retry);
     }
     let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {

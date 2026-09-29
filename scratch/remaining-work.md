@@ -121,6 +121,13 @@ conversation bridge must not recreate deleted Wave listeners/residents/lfd.
   native thread and history. Current source prepares both Flow and Task retries
   through shared recovery before claim acquisition. Prove the managed path and
   combined final bytes with Task claim/agent/unblock policy; see evidence.
+- OpenCode headless/managed native history now uses the common harness and
+  existing Session/Flow fences. Public scripted-server checks cover native
+  decision success, earlier-caller rejection on automatic retry, exact consumption,
+  retained usage/final output, and uncertain completion after a tool effect.
+  Actual OpenCode/scripted-model output proof passes within its recorded scope.
+  Interactive reconnect, configured accounts, and complete managed/provider
+  recovery remain required; this does not settle Codex valid native retry.
 - Busy surviving turns must be observed/recovered without accidental extra input.
   Session driver handoff and Flow orchestration claims remain independent.
 - Explicit restart uses exact process identity and exclusive ownership, retains

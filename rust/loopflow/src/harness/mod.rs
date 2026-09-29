@@ -10,6 +10,7 @@ mod common;
 mod conformance_tests;
 mod lf_tag;
 pub mod opencode;
+pub(crate) mod opencode_history;
 mod opencode_mapping;
 pub mod opencode_runtime;
 
